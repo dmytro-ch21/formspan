@@ -30,11 +30,30 @@
  * `perServing` here mirrors the Go `Food.PerServing()` so the editor can preview
  * a portion live. The server recomputes on write and ITS answer is what is
  * stored — this is a preview, never the source of truth.
+ *
+ * # N115 — a meal built from entries you already logged
+ *
+ * "I had a shake so I added milk, protein, berries, ice cream — we should be
+ * able to squash them all in one" (the reported issue, verbatim). A recipe
+ * already IS "a named item made of components, each a frozen copy" — this
+ * ticket turned out to need almost none of the storage a new feature usually
+ * does, only a new way to reach it: {@link itemFromEntry} builds a `RecipeItem`
+ * from an entry already on the day screen instead of from the catalog or a
+ * saved food, and `app/food/combine.tsx` is the screen that selects a handful
+ * of entries, saves them as a one-serving recipe (`yield_servings: 1`, so
+ * "one portion" and "the sum of the parts" are the same number, which is what
+ * makes the combined entry's total directly checkable against its items), logs
+ * ONE new entry for it, and deletes the entries it was built from — replacing
+ * the four rows with one, matching the athlete's own words rather than merely
+ * saving a template for later. {@link entriesFromRecipeItems} is the reverse:
+ * "opened back into its parts", offered on `food/entry/[id]` for a combined
+ * entry logged TODAY (see that screen for why same-day only).
  */
 
 import type { CatalogFood } from './catalogApi';
+import type { NewEntry } from './foodLog';
 import { macrosForGrams } from './foodQuantity';
-import type { Food, Macros, RecipeItem } from './nutrition';
+import type { Entry, Food, Macros, Meal, RecipeItem } from './nutrition';
 
 /** The most ingredients the server will accept in one recipe. */
 export const MAX_ITEMS = 100;
@@ -89,6 +108,13 @@ export function clampName(v: string): string {
   const cp = Array.from(v.trim());
   if (cp.length <= MAX_NAME_RUNES) return v.trim();
   return cp.slice(0, MAX_NAME_RUNES - 1).join('').trimEnd() + '…';
+}
+
+/** The same clamp as {@link clampName}, against `serving_label`'s own limit. */
+export function clampLabel(v: string): string {
+  const cp = Array.from(v.trim());
+  if (cp.length <= MAX_LABEL_RUNES) return v.trim();
+  return cp.slice(0, MAX_LABEL_RUNES - 1).join('').trimEnd() + '…';
 }
 
 /**
@@ -222,6 +248,103 @@ export function itemFromSavedFood(food: Food, quantity: number): RecipeItem {
     cholesterol_mg: food.cholesterol_mg,
     source_food_id: food.id,
   };
+}
+
+/**
+ * An ingredient taken from an entry ALREADY LOGGED — the N115 "combine into a
+ * meal" path: an athlete had a shake, logged milk, protein, berries and ice
+ * cream separately, and wants those four rows squashed into one from now on.
+ *
+ * **`quantity` is always 1 and the macros are the entry's own ABSOLUTE
+ * figures**, copied exactly as logged — never divided and remultiplied. That
+ * is a deliberate departure from {@link itemFromCatalog}'s "quantity 1, weight
+ * in the label" shape: an entry's macros are already the total for whatever
+ * was eaten (`Entry`'s own doc comment — "ABSOLUTE for the quantity logged,
+ * already multiplied by Servings"), so re-deriving a per-serving figure and a
+ * multiplier out of them would introduce a division this data does not need
+ * and a rounding step `rescale`'s own doc comment already spends a paragraph
+ * warning against. Copying the absolute straight across keeps the combined
+ * meal's total EXACTLY equal to the sum of the entries it was built from, to
+ * the same decimal the entries themselves carried — which is what the
+ * ticket's "the arithmetic is visible" criterion is checking.
+ *
+ * `serving_label` becomes a description of what was actually eaten ("1.5 ×
+ * 100 g") rather than the bare per-serving label, because a reader opening the
+ * saved meal later ("Made of…") is asking what went into it, not what one
+ * portion of the original food was — and `quantity` no longer carries that
+ * information once it is fixed at 1.
+ *
+ * `source_food_id` carries straight through, matching {@link itemFromSavedFood}:
+ * it is provenance on the entry already, and staying provenance one level up
+ * costs nothing and buys the parts list a working link back to the original
+ * saved food, if there was one.
+ */
+export function itemFromEntry(entry: Entry): RecipeItem {
+  const label =
+    entry.servings === 1
+      ? entry.serving_label
+      : `${trimNumber(entry.servings)} × ${entry.serving_label}`;
+  return {
+    name: clampName(entry.name),
+    quantity: 1,
+    serving_label: clampLabel(label),
+    kcal: entry.kcal,
+    protein_g: entry.protein_g,
+    carb_g: entry.carb_g,
+    fat_g: entry.fat_g,
+    fibre_g: entry.fibre_g,
+    saturated_fat_g: entry.saturated_fat_g,
+    sugar_g: entry.sugar_g,
+    added_sugar_g: entry.added_sugar_g,
+    sodium_mg: entry.sodium_mg,
+    cholesterol_mg: entry.cholesterol_mg,
+    source_food_id: entry.source_food_id,
+  };
+}
+
+/**
+ * The mirror of {@link itemFromEntry}: what a recipe's items say to LOG, as
+ * separate entries again — "opened back into its parts" (N115's own words).
+ *
+ * One `NewEntry` per item, at that item's own `quantity` of its own
+ * `serving_label`, with `kcal × quantity` etc. as the absolute — the same
+ * arithmetic {@link perServing} already does per-item before dividing by the
+ * yield, stopped one step early because a decomposed entry wants the FULL
+ * contribution of its item, not a per-portion share of it.
+ *
+ * `category` is null and `notes` is empty on every row: a `RecipeItem` never
+ * carried either (see its own doc comment), so there is nothing to restore —
+ * this is a faithful reconstruction of what the item's numbers and name say,
+ * not a claim that every byte of the original entries survives the round trip.
+ * `source_food_id` carries through per item, so a decomposed row that came
+ * from a saved food keeps pointing at it, the same as when it was first logged.
+ */
+export function entriesFromRecipeItems(food: Food, meal: Meal, eatenOn: string): NewEntry[] {
+  return food.items.map((it) => ({
+    eaten_on: eatenOn,
+    meal,
+    name: it.name,
+    servings: it.quantity,
+    serving_label: it.serving_label,
+    kcal: round(it.kcal * it.quantity),
+    protein_g: round(it.protein_g * it.quantity),
+    carb_g: round(it.carb_g * it.quantity),
+    fat_g: round(it.fat_g * it.quantity),
+    fibre_g: it.fibre_g == null ? null : round(it.fibre_g * it.quantity),
+    saturated_fat_g: it.saturated_fat_g == null ? null : round(it.saturated_fat_g * it.quantity),
+    sugar_g: it.sugar_g == null ? null : round(it.sugar_g * it.quantity),
+    added_sugar_g: it.added_sugar_g == null ? null : round(it.added_sugar_g * it.quantity),
+    sodium_mg: it.sodium_mg == null ? null : round(it.sodium_mg * it.quantity),
+    cholesterol_mg: it.cholesterol_mg == null ? null : round(it.cholesterol_mg * it.quantity),
+    source_food_id: it.source_food_id,
+    category: null,
+    notes: '',
+  }));
+}
+
+/** "1.5", "2" — trimmed the way an athlete would say a servings count. */
+function trimNumber(n: number): string {
+  return String(Math.round(n * 100) / 100);
 }
 
 /** What is wrong with a draft, or null when it is ready to save. */

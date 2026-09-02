@@ -153,6 +153,13 @@ export default function FoodScreen() {
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
   const [monthDays, setMonthDays] = useState<Set<string>>(new Set());
 
+  /**
+   * N115 — combine-select mode. At most one `MealCard` is ever mid-selection:
+   * `meal` says which, `selected` is the ids chosen in it so far. `null` is
+   * "nobody is selecting", the ordinary state on every other screen visit.
+   */
+  const [combining, setCombining] = useState<{ meal: Meal; selected: Set<string> } | null>(null);
+
   // N61: this tab is REACHABLE with nutrition off now — see `(tabs)/_layout.tsx`
   // for why hiding it was the worse failure — so the screen has to say what
   // state it is in, the way `bjj/log` already does for its own discipline.
@@ -165,6 +172,23 @@ export default function FoodScreen() {
   const { disabled: foodDisabled, off: foodOff } = foodLogGate(modules, modulesReady);
 
   const on = dayString(addDays(new Date(), dayOffset));
+
+  /**
+   * A selection is scoped to one day's section — stepping to a different day
+   * mid-selection must not carry yesterday's ids into today's combine.
+   *
+   * Cleared at every place `dayOffset` itself changes, rather than in a
+   * `useEffect` keyed on `on`: setting state synchronously inside an effect
+   * is the cascading-render pattern this codebase's own lint rule holds a
+   * line against (`react-hooks/set-state-in-effect`), and every OTHER
+   * per-day reset on this screen is already absent — there is nothing else to
+   * clear, since everything below just re-reads off `on` — so an effect here
+   * would exist for this one case alone.
+   */
+  function setDay(next: number) {
+    setCombining(null);
+    setDayOffset(next);
+  }
 
   /**
    * Re-seeds the stepper on a SECOND `?date=` deep link.
@@ -192,7 +216,7 @@ export default function FoodScreen() {
     useCallback(() => {
       if (params.date && params.date !== appliedDateParam.current) {
         appliedDateParam.current = params.date;
-        setDayOffset(dayOffsetFor(params.date, new Date()));
+        setDay(dayOffsetFor(params.date, new Date()));
       }
     }, [params.date]),
   );
@@ -376,6 +400,30 @@ export default function FoodScreen() {
     );
   }
 
+  // N115 — combine-select. `toggleSelect` is shared across every `MealCard`
+  // (only the one currently `combining` ever calls it, since the others do
+  // not render selectable rows), so it lives here rather than four times over.
+  function toggleSelect(id: string) {
+    setCombining((cur) => {
+      if (!cur) return cur;
+      const next = new Set(cur.selected);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { ...cur, selected: next };
+    });
+  }
+
+  function confirmCombine() {
+    if (!combining || combining.selected.size < 2) return;
+    const { meal, selected } = combining;
+    // Cleared BEFORE navigating, not after: `food/combine` pushes on top of
+    // this (still-mounted) tab screen, so leaving `combining` set would have
+    // the section still rendering checkboxes underneath when the athlete
+    // comes back, over rows the combine screen may just have deleted.
+    setCombining(null);
+    router.push(`/food/combine?date=${on}&meal=${meal}&ids=${[...selected].join(',')}`);
+  }
+
   // BELOW every hook in this component, and that placement is the rule rather
   // than a preference: an early return above one changes hook ORDER between
   // renders, which the typechecker cannot see and which shipped a black screen
@@ -408,8 +456,8 @@ export default function FoodScreen() {
         <RNView style={styles.body}>
           <PeriodSwitcher
             label={isToday ? 'Today' : on}
-            onPrev={() => setDayOffset((d) => d - 1)}
-            onNext={() => setDayOffset((d) => d + 1)}
+            onPrev={() => setDay(dayOffset - 1)}
+            onNext={() => setDay(dayOffset + 1)}
             // N81/#415: this used to jump straight back to today and only when
             // NOT on today — the pill's only job was "undo my navigation".
             // That left the calendar icon promising something it didn't do
@@ -529,6 +577,21 @@ export default function FoodScreen() {
                   onAdd={() => router.push(`/food/add?meal=${slot.meal}&date=${on}`)}
                   onEntryPress={(id) => router.push(`/food/entry/${id}`)}
                   onDelete={(id) => void onDelete(id)}
+                  selecting={combining?.meal === slot.meal}
+                  selectedIds={combining?.meal === slot.meal ? combining.selected : undefined}
+                  onToggleSelect={toggleSelect}
+                  // N115 review (ac-verifier, criterion 6): combining is
+                  // destructive — it deletes the originals — and the combine
+                  // screen's own copy promises same-day reversibility. That
+                  // promise is only true today, so the affordance itself is
+                  // gated the same way `food/entry/[id]`'s Split control
+                  // already is, rather than offered on a past day and then
+                  // contradicted a screen later.
+                  onStartCombine={
+                    isToday ? () => setCombining({ meal: slot.meal, selected: new Set() }) : undefined
+                  }
+                  onCancelCombine={() => setCombining(null)}
+                  onConfirmCombine={confirmCombine}
                   testID={`food-meal-${slot.meal}`}
                 />
               ))}
@@ -566,7 +629,7 @@ export default function FoodScreen() {
                   own Close button landing you on a day you didn't mean. */}
               <Pressable
                 onPress={() => {
-                  setDayOffset(0);
+                  setDay(0);
                   setMonthOpen(false);
                 }}
                 hitSlop={12}
@@ -631,7 +694,7 @@ export default function FoodScreen() {
                         disabled={future}
                         style={[styles.gridCell, isShown && styles.gridCellShown]}
                         onPress={() => {
-                          setDayOffset(offsetFromToday(cell.key));
+                          setDay(offsetFromToday(cell.key));
                           setMonthOpen(false);
                         }}
                         accessibilityRole="button"

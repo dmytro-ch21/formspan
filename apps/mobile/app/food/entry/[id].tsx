@@ -30,6 +30,46 @@
  * servings chip go through the exact same path. When it returns null (a food
  * with no honest gram weight) this screen is unchanged from before N90: a
  * plain servings stepper.
+ *
+ * ## "Made of" and "Split into separate entries" (N115)
+ *
+ * When this entry was logged from a recipe — `source_food_id` names one, and
+ * that includes a meal built by `food/combine.tsx` a minute ago, which is a
+ * recipe like any other — its items are shown read-only under "Made of". That
+ * is `Food`'s own storage doing the work: a recipe already keeps a permanent
+ * record of what it is made from, so viewing it back is not a feature this
+ * screen has to build, only a query it has to make.
+ *
+ * "Split into separate entries" (rebuilding those items as their own logged
+ * rows and removing this one) is offered **only when `eaten_on` is today**.
+ * Not a technical limit — {@link entriesFromRecipeItems} works on any day —
+ * but a considered one: splitting a day OTHER than today changes a log that
+ * was already used to judge a day gone by, the exact thing this module's own
+ * package doc spends a paragraph refusing to let an edit do. Today's log is
+ * still being written, so replacing one row with several is still within the
+ * same "what did I eat today" answer rather than a rewrite of a settled one.
+ * A past day shows why the control is missing rather than just omitting it —
+ * "the copy says plainly that it is not [reversible]" is the ticket's own
+ * fallback for exactly this case.
+ *
+ * **Both are gated on `recipeFood.yield_servings === 1 && entry.servings ===
+ * 1` — found in review, and not a stylistic choice.** A recipe's `items` are
+ * the FULL BATCH, at whatever quantities were entered; a portion of it is
+ * `items summed / yield_servings`, and this entry's own `kcal` is that portion
+ * times however many servings were logged. The two agree — "Made of" sums to
+ * exactly this entry's own total — ONLY when `yield_servings === servings`,
+ * and the simplest, always-true case of that is both equal to 1: a
+ * `food/combine.tsx` meal, never edited since (it fixes `yield_servings: 1`
+ * and logs `servings: 1`, but the servings stepper on THIS screen can still
+ * move an already-logged one away from 1 later). Widening the gate to "any
+ * `yield_servings === servings`" would also be sound and would additionally
+ * cover "logged the whole batch of an ordinary N87 recipe" — narrowed to
+ * exactly-one here because that is the only case this ticket asks for, and a
+ * wider gate is a decision for whoever asks for the wider case, not a default
+ * this ticket should reach for. Get the condition wrong in either direction
+ * and "Made of"/Split would show, or split into, a total that does not match
+ * what this entry itself says was eaten — the identical failure the AC names
+ * ("a total that cannot be checked against its components").
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -39,11 +79,13 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
+import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { editEntry, localEntry, removeEntry } from '@/lib/foodLog';
+import { editEntry, localEntry, localFood, removeEntry, splitEntry } from '@/lib/foodLog';
 import { gramsBasisFromLabel, parseQuantity, servingsForLabelGrams } from '@/lib/foodQuantity';
-import { MEALS, rescale, type Entry, type Meal } from '@/lib/nutrition';
+import { fmtAmount, MEALS, rescale, todayString, type Entry, type Food, type Meal } from '@/lib/nutrition';
+import { entriesFromRecipeItems } from '@/lib/recipe';
 import { request } from '@/lib/sync';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
@@ -75,6 +117,14 @@ export default function EditEntryScreen() {
   const [manual, setManual] = useState(false);
   const [saving, setSaving] = useState(false);
   const [gone, setGone] = useState(false);
+
+  // N115 — the recipe this entry was logged from, if `source_food_id` names
+  // one that is still a recipe with items on this device. Null covers "not
+  // looked up yet", "this entry has no source", "the source is a plain food"
+  // and "the source is gone" alike — none of them render a "Made of" section,
+  // so there is nothing here that needs telling apart.
+  const [recipeFood, setRecipeFood] = useState<Food | null>(null);
+  const [splitting, setSplitting] = useState(false);
 
   const { foodUnit, setFoodUnit } = useUnits();
   // A VIEW of `servings * basis`, in `foodUnit` — servings stays the source of
@@ -119,6 +169,71 @@ export default function EditEntryScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, id]);
+
+  // N115 — a second, separate read rather than folded into the one above: it
+  // depends on `entry.source_food_id`, which is not known until the first
+  // read resolves, and a food with no items (a plain saved food, not a
+  // recipe) is deliberately left as `null` here rather than stored — the
+  // render side only ever asks "do I have a recipe with items", never "what
+  // kind of food was this".
+  useEffect(() => {
+    // Nothing to reset TO here: the state already starts at `null`, and this
+    // screen never sees the same `entry` swap a `source_food_id` in for
+    // another mid-mount — a fresh `id` param is a fresh screen instance. So
+    // the only real work this effect ever does is the fetch below, and it
+    // does it only when there is one to make.
+    if (!userId || !entry?.source_food_id) return;
+    let live = true;
+    localFood(userId, entry.source_food_id)
+      .then((f) => {
+        if (!live) return;
+        // The gate this file's own docstring explains at length: a recipe's
+        // items are the FULL BATCH, and they sum to exactly this entry's own
+        // total only when the recipe makes one serving AND one serving was
+        // logged. Reviewed and found missing before merge — the first version
+        // showed "Made of" for ANY recipe-sourced entry, which overstated an
+        // ordinary multi-portion recipe's contents by its yield factor.
+        setRecipeFood(
+          f && f.kind === 'recipe' && f.items.length > 0
+            && f.yield_servings === 1 && entry.servings === 1
+            ? f
+            : null,
+        );
+      })
+      .catch(() => {
+        // "Made of" is supplementary, not the entry itself — a failed lookup
+        // must not surface as an unhandled rejection. `recipeFood` stays at
+        // its default `null`, the same as "no source food at all".
+        if (live) setRecipeFood(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [userId, entry?.source_food_id, entry?.servings]);
+
+  /**
+   * Rebuild the recipe's items as their own logged entries, and remove this
+   * one — see the docstring for why this is offered only for TODAY.
+   *
+   * `splitEntry` does both writes in ONE transaction — see its own doc
+   * comment in `foodLog.ts` for why a thrown `removeEntry` after the items
+   * were already logged (or a retry after that) is a correctness gap, not
+   * just an inconvenience, once this is more than one item.
+   */
+  const split = useCallback(async () => {
+    if (!userId || !entry || !recipeFood || splitting) return;
+    setSplitting(true);
+    try {
+      await splitEntry(userId, {
+        entries: entriesFromRecipeItems(recipeFood, entry.meal, entry.eaten_on),
+        removeId: entry.id,
+      });
+      request('meal split');
+      router.back();
+    } finally {
+      setSplitting(false);
+    }
+  }, [userId, entry, recipeFood, splitting, router]);
 
   /**
    * Rescale from the entry's own PER-SERVING figures rather than from what is
@@ -464,6 +579,46 @@ export default function EditEntryScreen() {
         />
       </View>
 
+      {recipeFood ? (
+        <View style={styles.field} testID="entry-made-of">
+          <SectionHeader label="Made of" />
+          {recipeFood.items.map((it, i) => (
+            <View key={`${it.name}-${i}`} style={styles.madeOfRow} testID={`entry-made-of-${i}`}>
+              <View style={styles.madeOfMain}>
+                <Text style={styles.madeOfName} numberOfLines={1}>
+                  {it.name}
+                </Text>
+                <Text style={styles.madeOfMacros}>
+                  {fmtAmount(it.protein_g * it.quantity)}P · {fmtAmount(it.carb_g * it.quantity)}C ·{' '}
+                  {fmtAmount(it.fat_g * it.quantity)}F
+                </Text>
+              </View>
+              <Text style={styles.madeOfKcal}>{fmtAmount(it.kcal * it.quantity)} kcal</Text>
+            </View>
+          ))}
+
+          {entry.eaten_on === todayString() ? (
+            <Pressable
+              onPress={() => void split()}
+              disabled={splitting}
+              style={[styles.split, splitting && styles.off]}
+              accessibilityRole="button"
+              accessibilityLabel="Split into separate entries"
+              testID="entry-split"
+            >
+              <Text style={styles.splitText}>
+                {splitting ? 'Splitting…' : 'Split into separate entries'}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.splitNote} testID="entry-split-unavailable">
+              This can’t be split back into separate entries — that would change
+              a past day’s log.
+            </Text>
+          )}
+        </View>
+      ) : null}
+
       {gone ? (
         <Text style={styles.problem}>
           This entry has been deleted, so there is nothing left to correct.
@@ -522,6 +677,33 @@ const styles = StyleSheet.create({
   goneText: { fontSize: 14, color: vola.textMuted },
   problem: { fontSize: 13, color: vola.danger, lineHeight: 18 },
   serving: { fontSize: 12, color: vola.textDim },
+  madeOfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: vola.lineSoft,
+    backgroundColor: vola.surface,
+    marginBottom: 6,
+  },
+  madeOfMain: { flex: 1, gap: 2 },
+  madeOfName: { fontSize: 14, fontWeight: '600' },
+  madeOfMacros: { fontSize: 12, color: vola.textDim },
+  madeOfKcal: { fontSize: 13, color: vola.textMuted },
+  split: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: vola.line,
+    paddingVertical: 11,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  splitText: { fontSize: 13, fontWeight: '700', color: vola.text },
+  splitNote: { fontSize: 12, color: vola.textDim, lineHeight: 17, marginTop: 4 },
   slots: { flexDirection: 'row', gap: 8 },
   slotPill: {
     flex: 1,

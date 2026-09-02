@@ -7,7 +7,7 @@
  */
 
 import type { CatalogFood } from '../catalogApi';
-import type { Food, RecipeItem } from '../nutrition';
+import type { Entry, Food, RecipeItem } from '../nutrition';
 import {
   MAX_BRAND_BYTES,
   MAX_ITEMS,
@@ -16,7 +16,9 @@ import {
   MAX_YIELD,
   clampName,
   draftToFood,
+  entriesFromRecipeItems,
   itemFromCatalog,
+  itemFromEntry,
   itemFromSavedFood,
   perServing,
   problemMessage,
@@ -434,5 +436,163 @@ describe('the server length limits, mirrored so a recipe is never stranded', () 
   it('separates a yield that is too big from one that is missing', () => {
     expect(recipeProblem(draftWith({ yield_servings: 0 }))).toBe('no_yield');
     expect(recipeProblem(draftWith({ yield_servings: MAX_YIELD }))).toBe('yield_too_large');
+  });
+});
+
+/**
+ * N115 — "I had a shake so I added milk, protein, berries, ice cream — we
+ * should be able to squash them all in one." `itemFromEntry` is the ONE
+ * direction of that squash: a `RecipeItem` copied from an entry already
+ * logged. `entriesFromRecipeItems` below is the other direction.
+ */
+function entry(over: Partial<Entry> = {}): Entry {
+  return {
+    id: '22222222-2222-4222-8222-222222222222',
+    eaten_on: '2026-09-01',
+    meal: 'breakfast',
+    name: 'Whole milk',
+    servings: 1,
+    serving_label: '250 ml',
+    kcal: 150,
+    protein_g: 8,
+    carb_g: 12,
+    fat_g: 8,
+    fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+    source_food_id: null,
+    category: null,
+    notes: '',
+    ...over,
+  };
+}
+
+describe('an ingredient taken from an entry already logged (N115)', () => {
+  /**
+   * The load-bearing property: an entry's macros are already the ABSOLUTE
+   * total for what was logged (`Entry`'s own doc comment), so this must copy
+   * them straight across rather than deriving a per-serving figure and
+   * remultiplying — the exact division-then-multiplication `rescale`'s own
+   * doc comment warns compounds rounding. A mutant that divided by
+   * `entry.servings` before storing would still pass every OTHER assertion in
+   * this block (all of them use `servings: 1`, where dividing by 1 is a
+   * no-op) — this is the one vector where it matters.
+   */
+  it('copies the absolute macros unchanged, not a re-derived per-serving figure', () => {
+    const it_ = itemFromEntry(entry({ servings: 2.5, kcal: 375, protein_g: 20 }));
+    expect(it_.kcal).toBe(375);
+    expect(it_.protein_g).toBe(20);
+    expect(it_.quantity).toBe(1);
+  });
+
+  it('keeps the plain serving label when the entry was exactly one serving', () => {
+    expect(itemFromEntry(entry({ servings: 1, serving_label: '250 ml' })).serving_label).toBe(
+      '250 ml',
+    );
+  });
+
+  it('states the quantity actually eaten when it was not one serving', () => {
+    expect(itemFromEntry(entry({ servings: 1.5, serving_label: '100 g' })).serving_label).toBe(
+      '1.5 × 100 g',
+    );
+  });
+
+  it('carries the provenance through, the same as a saved food does', () => {
+    const withSource = entry({ source_food_id: '33333333-3333-4333-8333-333333333333' });
+    expect(itemFromEntry(withSource).source_food_id).toBe(withSource.source_food_id);
+  });
+
+  it('preserves a null N52 macro rather than defaulting it to zero', () => {
+    expect(itemFromEntry(entry({ sodium_mg: null })).sodium_mg).toBeNull();
+  });
+
+  it('clamps a name over the server limit, the same as every other item source', () => {
+    const long = entry({ name: 'x'.repeat(MAX_NAME_RUNES + 1) });
+    expect(Array.from(itemFromEntry(long).name).length).toBeLessThanOrEqual(MAX_NAME_RUNES);
+  });
+
+  /**
+   * The arithmetic AC, pinned directly: build a shake from four entries the
+   * way `combine.tsx` does, and the recipe's one-serving total must equal
+   * exactly what the four entries summed to — "a total that cannot be checked
+   * against its components is the failure this repo keeps naming."
+   */
+  it('sums back to exactly what the entries totalled, at one serving', () => {
+    const milk = entry({ name: 'Milk', kcal: 150, protein_g: 8, carb_g: 12, fat_g: 8 });
+    const protein = entry({ name: 'Protein powder', kcal: 120, protein_g: 24, carb_g: 3, fat_g: 1 });
+    const berries = entry({ name: 'Berries', kcal: 40, protein_g: 1, carb_g: 10, fat_g: 0 });
+    const iceCream = entry({ name: 'Ice cream', kcal: 200, protein_g: 3, carb_g: 24, fat_g: 10 });
+    const items = [milk, protein, berries, iceCream].map(itemFromEntry);
+    const shake = draftToFood({
+      name: 'Shake',
+      brand: '',
+      serving_label: '1 serving',
+      yield_servings: 1,
+      items,
+    });
+    expect(shake.kcal).toBe(150 + 120 + 40 + 200);
+    expect(shake.protein_g).toBe(8 + 24 + 1 + 3);
+    expect(shake.carb_g).toBe(12 + 3 + 10 + 24);
+    expect(shake.fat_g).toBe(8 + 1 + 0 + 10);
+  });
+});
+
+function recipeFood(items: RecipeItem[]): Food {
+  return { ...savedFood, id: 'shake', kind: 'recipe', name: 'Shake', yield_servings: 1, items };
+}
+
+describe('entries rebuilt from a recipe (N115 — "opened back into its parts")', () => {
+  it('makes one entry per item, at the item\'s own quantity and label', () => {
+    const food = recipeFood([item({ name: 'Milk', quantity: 1, serving_label: '250 ml', kcal: 150 })]);
+    const rows = entriesFromRecipeItems(food, 'breakfast', '2026-09-02');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('Milk');
+    expect(rows[0].servings).toBe(1);
+    expect(rows[0].serving_label).toBe('250 ml');
+    expect(rows[0].meal).toBe('breakfast');
+    expect(rows[0].eaten_on).toBe('2026-09-02');
+  });
+
+  /**
+   * The other half of the round trip: an item's contribution is
+   * `kcal × quantity` (its own doc comment), so a decomposed row must carry
+   * that full contribution, not the bare per-label figure. A mutant that
+   * dropped `* it.quantity` would still pass every vector above with
+   * `quantity: 1` — this is the one that catches it.
+   */
+  it('multiplies by quantity, not just by 1', () => {
+    const food = recipeFood([item({ kcal: 100, protein_g: 10, quantity: 3 })]);
+    const [row] = entriesFromRecipeItems(food, 'lunch', '2026-09-02');
+    expect(row.kcal).toBe(300);
+    expect(row.protein_g).toBe(30);
+  });
+
+  it('keeps a null N52 macro null rather than a multiplied zero', () => {
+    const food = recipeFood([item({ sodium_mg: null, quantity: 2 })]);
+    expect(entriesFromRecipeItems(food, 'lunch', '2026-09-02')[0].sodium_mg).toBeNull();
+  });
+
+  it('carries an item\'s provenance to the entry it becomes', () => {
+    const food = recipeFood([item({ source_food_id: '44444444-4444-4444-8444-444444444444' })]);
+    expect(entriesFromRecipeItems(food, 'lunch', '2026-09-02')[0].source_food_id).toBe(
+      '44444444-4444-4444-8444-444444444444',
+    );
+  });
+
+  it('round-trips a combined shake back to its original per-item totals', () => {
+    const milk = entry({ name: 'Milk', kcal: 150, protein_g: 8 });
+    const protein = entry({ name: 'Protein powder', kcal: 120, protein_g: 24 });
+    const items = [milk, protein].map(itemFromEntry);
+    const food = recipeFood(items);
+    const rows = entriesFromRecipeItems(food, 'breakfast', '2026-09-02');
+    expect(rows.map((r) => r.kcal)).toEqual([150, 120]);
+    expect(rows.map((r) => r.protein_g)).toEqual([8, 24]);
+    // And the total is unchanged by the round trip — nothing was invented or
+    // dropped going item -> entry -> item -> entry.
+    const total = rows.reduce((sum, r) => sum + r.kcal, 0);
+    expect(total).toBe(milk.kcal + protein.kcal);
   });
 });

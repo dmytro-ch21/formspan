@@ -645,6 +645,59 @@ export async function removeFood(userId: string, id: string): Promise<void> {
 }
 
 /**
+ * N115 — combine several entries into one saved meal, ATOMICALLY.
+ *
+ * Three writes — save the recipe, log the combined entry, delete the entries
+ * it was built from — wrapped in ONE `withTransaction`, rather than three
+ * sequential `await`s a caller could see fail partway through. Found in
+ * review: the un-transacted version left two bad outcomes reachable — a
+ * thrown `removeEntry` mid-loop stranding the day with BOTH the new combined
+ * row and surviving originals (double-counting it), and a retry after any
+ * partial failure creating a SECOND recipe and a SECOND combined entry before
+ * the first attempt's originals were even gone. A transaction makes "some of
+ * this happened" impossible; the caller either sees every write or none.
+ *
+ * Returns the new food's id, so the caller can set it as the entry's
+ * `source_food_id` — done here rather than by the caller pre-generating one,
+ * so `saveFoodLocally`'s own id generation stays the one place that happens.
+ */
+export async function combineEntries(
+  userId: string,
+  input: { food: FoodDraft; entry: Omit<NewEntry, 'source_food_id'>; removeIds: string[] },
+): Promise<string> {
+  const db = await getDb();
+  let foodId = '';
+  await withTransaction(db, async () => {
+    foodId = await saveFoodLocally(userId, input.food);
+    await logFood(userId, { ...input.entry, source_food_id: foodId });
+    for (const id of input.removeIds) {
+      await removeEntry(userId, id);
+    }
+  });
+  return foodId;
+}
+
+/**
+ * N115 — the reverse of {@link combineEntries}: rebuild a recipe's items as
+ * separate entries and remove the combined one, ATOMICALLY. Same reasoning —
+ * a thrown `removeEntry` after the items are already logged would otherwise
+ * leave the day with the parts AND the whole, and a retry would log the parts
+ * twice.
+ */
+export async function splitEntry(
+  userId: string,
+  input: { entries: NewEntry[]; removeId: string },
+): Promise<void> {
+  const db = await getDb();
+  await withTransaction(db, async () => {
+    for (const ne of input.entries) {
+      await logFood(userId, ne);
+    }
+    await removeEntry(userId, input.removeId);
+  });
+}
+
+/**
  * Remember a food was just used, for the quick-add ranking.
  *
  * Local-only and never pushed: this is the device's reading of its own log. It
