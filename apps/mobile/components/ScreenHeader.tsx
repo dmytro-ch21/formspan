@@ -167,7 +167,10 @@ import { useAccent } from '@/lib/AccentProvider';
  * accessibility size, elevation/a gradient, and accepting 1.23:1 were all
  * considered and rejected). `lineSoft` itself is untouched and still renders
  * everywhere else it always has; this is not that token nudged, it is a
- * narrower one that applies to exactly this boundary and the tab bar's.
+ * narrower one that applies to exactly this boundary, the tab bar's, and (as
+ * of F21/#497, which reused it rather than picking a third value) Library's
+ * own `styles.chrome` border in `app/library.tsx` — see `Colors.ts`'s comment
+ * on the token itself for the full, current list of sites.
  *
  * ## Why always-present rather than appearing on scroll
  *
