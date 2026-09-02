@@ -52566,6 +52566,63 @@ Two scoping questions the ticket asked to be answered explicitly rather than def
 - **The pooled redistribution (§3) is direction-agnostic, not strictly "later slots only".** `ac-verifier` finding: an EARLIER slot left empty (skipped breakfast, checked at dinnertime) also shares in the pool, exactly like a later one would — the ticket's own wording says "later slots", but the settled design shares across whichever slots are still empty, which is the more correct reading of "unspent budget rolls forward" and is stated here rather than left to read as a silent deviation.
 - The four `NEEDS HUMAN EVIDENCE` device checks the ticket itself names (the search fix, the collapse/summary card at real device font sizes, whether the redistributed numbers actually read as "smart" against a real day, and the caffeine banner/auto-add walked with a real logged coffee item) are all still outstanding — see the issue.
 
+## 2026-09-02 — F31 (#804): staging `web`/`admin` deploys broken by a pnpm binary Nixpacks was silently substituting all along
+
+Both `web.vola-fitness-platform` and `admin.vola-fitness-platform` staging
+builds started failing right when F30/#791 merged and added the FIRST-EVER
+`packageExtensionsChecksum` line to `pnpm-lock.yaml` — a legitimate, correct
+fix for a real mobile prebuild bug (`pnpm.packageExtensions` promoting
+`@expo/config-plugins` for `react-native-maps`). The failure itself:
+
+```
+ERR_PNPM_LOCKFILE_CONFIG_MISMATCH  Cannot proceed with the frozen installation.
+The current "packageExtensionsChecksum" configuration doesn't match the value
+found in the lockfile
+```
+
+**Not a bad lockfile.** `pnpm install --frozen-lockfile` against the exact
+committed lockfile succeeded cleanly both natively on macOS (pnpm 11.17.0) and
+in a fresh `node:24-bookworm` Linux container (same version) — ruling out the
+obvious "someone forgot to regenerate the lockfile" explanation before
+touching anything Railway-side.
+
+**Root cause: two different pnpm binaries have been present in every one of
+these builds all along, and a bare `pnpm` picks the wrong one.** Nixpacks'
+own auto-detected build plan provisions its OWN pnpm via Nix (`pnpm-9_x`,
+visible in every build log's "setup" summary) alongside the
+`NIXPACKS_INSTALL_CMD`-installed `pnpm@11.17.0` this repo has relied on since
+the corepack-incompatibility fix (`railway/web.toml`'s existing comment). A
+bare `pnpm` resolves to whichever wins on `PATH` — confirmed live, it's the
+nix-provisioned 9.x, not the explicitly-installed 11.17.0. This was invisible
+for as long as the lockfile carried no `packageExtensionsChecksum` at all:
+with nothing to check, a version mismatch had nothing to disagree about. F30
+gave pnpm something to check, and 9.x's built-in extension rules (which
+differ from 11.x's) compute a different checksum than the one 11.17.0 wrote,
+so every bare `pnpm install --frozen-lockfile` in these builds started
+failing the instant that field existed.
+
+**Confirmed by fixing it in two steps, live.** Pinning
+`NIXPACKS_INSTALL_CMD`'s pnpm invocation to `npx --yes pnpm@11.17.0 install
+--frozen-lockfile` (bypassing PATH resolution entirely) made that install
+stage succeed — the build then failed at the exact same error, in the
+SEPARATE `buildCommand` stage from `railway/web.toml`/`railway/admin.toml`,
+which still invoked a bare `pnpm`. Fixing that stage too (same `npx --yes
+pnpm@11.17.0 ...` treatment) is this entry's actual code change.
+`NIXPACKS_BUILD_CMD` (the env-var equivalent of `buildCommand`) was tried
+first as a possible faster mitigation and did NOT take precedence over
+`railway.toml`'s own `buildCommand` — the toml file is the real source Railway
+builds from, so this needed a real commit, not just a live variable set.
+
+**Open**: NEEDS HUMAN EVIDENCE — confirm both staging deploys are actually
+green after this merges (a live redeploy was watched during triage with the
+`NIXPACKS_INSTALL_CMD` mitigation alone, which is not the same as this PR's
+committed fix). Also open: whether Nixpacks' own auto-detection can be told
+not to provision a second pnpm at all (avoiding the shadow rather than
+routing around it) — not pursued here since `npx --yes pnpm@<pinned>` closes
+the actual failure without needing to understand or influence Nixpacks'
+internal toolchain-selection heuristics.
+
+
 ## Open items / known gaps as of this entry
 
 
