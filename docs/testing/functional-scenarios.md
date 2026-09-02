@@ -13009,9 +13009,13 @@ the seven callers, and only the first draws a rule:
    changed while the app is running leaves stale layout, which looks like a
    rendering bug and is an artefact. This is where the bug was unmistakable: a
    line is ~60pt tall, so a whole line used to vanish at a time.
-7. **Is the rule legible to you?** It is 1.23:1 against the page ground (#496).
-   Judge it at accessibility sizes specifically, where it matters most and where
-   the reader most likely has reduced vision. A "no" here is a real finding.
+7. **Is the rule legible to you?** F20 (#496) replaced the original `lineSoft`
+   colour (1.23:1 against the page ground) with a dedicated `lineBoundary`
+   token at 3.11:1, clearing the WCAG 1.4.11 non-text floor, applied to both
+   this edge and the tab bar's top rule. Judge it at accessibility sizes
+   specifically, where it matters most and where the reader most likely has
+   reduced vision — this is the acceptance criterion's `NEEDS HUMAN EVIDENCE`
+   line, and a "no" here is still a real finding even at 3.11:1.
 8. **A control crossing the boundary.** Scroll `Goals` until the manual form's
    `Use this from <date>` button is half under the header. It must be visibly
    cut by the rule rather than sliced through its middle with the top half
@@ -13027,12 +13031,14 @@ the seven callers, and only the first draws a rule:
 ### Not covered by the suite
 
 12. Whether the rule is **visible**, whether it lands exactly on the scroll
-    view's top edge, and whether 1.23:1 is legible to a low-vision reader. jest
+    view's top edge, and whether `lineBoundary` (3.11:1, was `lineSoft` at
+    1.23:1 before F20/#496) reads as a boundary to a low-vision reader. jest
     runs no Yoga pass and has no pixels — `components/__tests__/screenHeader.test.tsx`
-    pins only the decision (draws / does not). Pixel-sampling a device
-    screenshot at the header's bottom edge is the cheap objective check: on
-    `Goals` at accessibility XXXL the row at 150.0pt is `#1A2230` across 100% of
-    the width, between two rows of `#080B12`.
+    pins only the decision (draws / does not) and the literal colour. Pixel-
+    sampling a device screenshot at the header's bottom edge is the cheap
+    objective check: on `Goals` at accessibility XXXL the row at 150.0pt was
+    `#1A2230` across 100% of the width, between two rows of `#080B12`, before
+    F20 — re-run the same scan expecting `#5A606A` now.
 
 ## N106 — the Goals screen, rebuilt to a design reference (`app/(tabs)/goals.tsx`)
 

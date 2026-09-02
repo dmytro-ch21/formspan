@@ -51895,6 +51895,140 @@ in CI today. **And even a native-build check would need to be a real
 `xcodebuild`, not a proxy like `require.resolve` or `expo prebuild`** — both
 of those passed on the broken state in this investigation.
 
+## 2026-09-02 — F20: the header/tab-bar boundary gets its own token instead of a nudge to `lineSoft` (#496)
+
+#484 fixed content dissolving into an edgeless `ScreenHeader` by drawing a
+hairline at `lineSoft`, matched to the tab bar's own `borderTopColor` so the
+scrolling region reads as one weight of rule at both ends. That review found,
+and filed itself: `lineSoft` on `bg` measures **1.23:1** — under the 3:1 WCAG
+1.4.11 floor for a non-text boundary — and the miss is worst exactly where the
+original bug was worst, since a whole ~60pt line disappearing at a time is the
+accessibility-text-size case. This ticket is the decision #484 deferred.
+
+### The three tensions, and how they were weighed
+
+- **Matching the tab bar is a real invariant**, not decoration — two edges of
+  different weight on the same screen reads as a mistake, and this header was
+  built partly to remove exactly that kind of seam.
+- **No existing line token clears 3:1.** `line` is 1.38:1; getting to 3:1 needs
+  roughly `#5A606A`. That value is fine for one boundary; `lineSoft` is not
+  only this boundary — it renders as a card border in roughly twenty other
+  components (`CurriculaStrip`, `WeekPlanner`, `ui/TechniqueRow`, `ui/Stat`,
+  `SessionCelebration`, and more), none of which is a place content passes
+  under. Raising `lineSoft` itself would have made every one of those a loud
+  divider to fix a problem specific to two call sites.
+- **The palette has already rejected a similar low-contrast case** — `gridRest`
+  at the old `lineSoft` measured 1.14:1 and read as "scattered dots rather than
+  a calendar" (see `Colors.ts`'s note on the consistency grid). That precedent
+  argues against quietly accepting 1.23:1 here on the grounds that it is
+  merely decorative; the codebase has already decided a boundary this weak is
+  a real defect, not a matter of taste.
+
+### The decision
+
+A new token, `vola.lineBoundary` (`#5A606A`, **3.11:1** against `bg`,
+registered in `scripts/validate_palette.mjs`), applied to exactly two places:
+`ScreenHeader`'s `contentScrollsUnder` edge and the tab bar's `borderTopColor`
+in `app/(tabs)/_layout.tsx` — kept equal on purpose, the same invariant #484
+established. `lineSoft` itself is untouched and keeps rendering everywhere
+else it always has.
+
+Four options were costed (see #496's own text):
+
+1. **A stronger `lineSoft` everywhere** — rejected: `lineSoft` is a general
+   card-border token used far beyond this boundary, so "everywhere" would have
+   redesigned two dozen components' borders to fix one.
+2. **A rule that only strengthens past some accessibility text-size
+   threshold** — rejected. This codebase's own precedent for reading
+   `fontScale` (`fabClearance` in `app/(tabs)/index.tsx` and `workouts.tsx`) is
+   a continuous function of scale, not a boolean past an invented cutoff, and
+   no accessibility-size threshold constant exists anywhere in the app to
+   anchor one — inventing one is exactly the "needs a rule about where that
+   threshold sits" cost the ticket flagged as this option's own weakness.
+   Applying the fix at all text sizes also costs nothing extra: the rule was
+   already too weak at default size, just less catastrophically so.
+3. **Elevation or a gradient instead of a line** — rejected as the highest-risk
+   option. Nothing else in this app marks a boundary any way other than a
+   hairline; this would have been a new, unverified idiom introduced for one
+   boundary, with the issue's own text flagging it "may not survive on a flat
+   dark ground".
+4. **Accept 1.23:1 and record why** — rejected on the merits, not the
+   principle: the ticket's own framing (option 4 "is legitimate, if said out
+   loud") is right in general, but here a fix was available at zero cost to
+   the rest of the palette. Declining it would be choosing not to fix
+   something fixable, not making a real tradeoff.
+
+### Reusability for F21 (#497)
+
+F21 — Library's list clipping against an unmarked edge below its search field
+and filter chips — is explicitly a boundary of the same shape: real content
+passing under fixed chrome, with no rule marking it. `lineBoundary` is named
+and documented (in `Colors.ts`, next to `lineSoft`) as the token for exactly
+that case, so F21 reads this value rather than independently picking one.
+
+### What changed, mechanically
+
+- `apps/mobile/constants/Colors.ts` — new `palette.lineBoundary`, documented
+  with the full costing above.
+- `apps/mobile/components/ScreenHeader.tsx` — `scrollEdge.borderBottomColor`
+  moved from `vola.lineSoft` to `vola.lineBoundary`; the top-of-file doc
+  updated from "Known and NOT fixed" to "Resolved by F20".
+- `apps/mobile/app/(tabs)/_layout.tsx` — `bar.borderTopColor` moved the same
+  way, with a comment cross-referencing `ScreenHeader`'s.
+- `scripts/validate_palette.mjs` — `lineBoundary` parsed out of `Colors.ts` and
+  asserted at `>= 3` against `bg`, so a future edit that weakens it fails
+  `pnpm run verify` rather than shipping unmeasured.
+- `apps/mobile/components/__tests__/screenHeader.test.tsx` — the literal-colour
+  assertion updated from `#1A2230` to `#5A606A`; its doc comment keeps the
+  original #484 pixel-sampling record (it was true of the old colour) and
+  notes the scan should now find the new one.
+- `docs/testing/functional-scenarios.md` — the two scenario lines that quoted
+  1.23:1 updated to describe the decision and the new value.
+
+### What review found, beyond the acceptance criteria
+
+`frontend-reviewer` caught two things worth recording:
+
+- **`ScreenHeader`'s own doc comment was stale.** It said the rule-drawing
+  arrangement was `goals` and `phase` — true when W10/#484 wrote it, and
+  quietly wrong since N176/#602 (2026-08-25) added `<ScreenHeader
+  title="Progress" />` to `app/(tabs)/progress.tsx` in the identical
+  arrangement (a sibling directly above its `ScrollView`, default
+  `contentScrollsUnder`). Eight screens mount `ScreenHeader`, not seven; three
+  draw the rule, not two. This PR's own new prose had started repeating the
+  stale count as current fact — exactly the "a comment asserting what the
+  code contradicts" failure mode #484's entry names three other instances
+  of — so it is corrected here rather than carried forward a fourth time, in
+  `ScreenHeader.tsx`, `Colors.ts` and `screenHeader.test.tsx`'s doc comments.
+  `phase` sits outside `(tabs)`, so it draws the rule with no tab bar beneath
+  it to match; `goals` and `progress` are the two screens `lineBoundary`'s
+  "same weight at both ends" claim actually describes.
+- **A third boundary of this exact shape exists, out of this ticket's
+  scope.** `workouts.tsx`'s `scopeRow` — the tab strip #484 already names as
+  owning Plan's scroll boundary in place of the header — draws its own rule
+  in `vola.line`, which measures 1.38:1 against `bg`: also under the 3:1
+  floor, on a real boundary content scrolls under. #496's acceptance criteria
+  name only the header/tab-bar pair, so fixing it here would be scope this
+  ticket was not asked to cover; it is recorded in `lineBoundary`'s own
+  comment in `Colors.ts` rather than silently left, as a candidate for the
+  same token reuse F21 is already earmarked for.
+
+### Open
+
+**NEEDS HUMAN EVIDENCE**, per the acceptance criteria: whatever landed here
+has not yet been looked at on a device at accessibility XXXL by someone
+deciding whether `lineBoundary` actually reads as a boundary — the contrast
+math says it clears 3:1, and the ticket is explicit that this is "the only
+test that matters here". `pnpm run check:palette` passing is necessary and
+not sufficient. The device check should now cover `goals`, `progress` and
+`phase` — not only the first two named when this entry was drafted.
+
+**`workouts`'s `scopeRow` at 1.38:1** is a real, separate finding — not filed
+as its own issue by this PR, since #496 did not ask for it and doing so
+without the user's sign-off on scope would be the coordinator-side version of
+the "dispatch a fourth" failure the ticket-limit rule exists to prevent.
+Worth a ticket of its own.
+
 ## Open items / known gaps as of this entry
 
 

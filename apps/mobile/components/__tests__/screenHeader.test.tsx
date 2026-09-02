@@ -182,28 +182,36 @@ describe('the header itself', () => {
  * identical colour**, with nothing marking where it stopped being drawn —
  * reported from a device as "scrolls on and on until the content disappears".
  *
- * **The predicate is not "is the header fixed?"** Seven callers, three
- * arrangements: the header IS the boundary (`goals`, `phase`); the header
- * scrolls away inside the scroll view (`index`, `food`, `you`); the header is
- * pinned above OTHER fixed chrome that owns the boundary (`workouts`'s scope
- * strip, which already draws its own rule; `library`'s search and chips). Only
- * the first draws. The first version of this fix conflated the first and third
- * and would have put a second seam 40pt above an existing one — review caught
- * it, this suite did not, which is why the third arrangement is named here.
+ * **The predicate is not "is the header fixed?"** Eight callers, three
+ * arrangements: the header IS the boundary (`goals`, `phase`, `progress` —
+ * the last added by N176/#602 after this note was first written, and this
+ * count corrected by F20/#496's review rather than left stale again); the
+ * header scrolls away inside the scroll view (`index`, `food`, `you`); the
+ * header is pinned above OTHER fixed chrome that owns the boundary
+ * (`workouts`'s scope strip, which already draws its own rule; `library`'s
+ * search and chips). Only the first draws. The first version of this fix
+ * conflated the first and third and would have put a second seam 40pt above
+ * an existing one — review caught it, this suite did not, which is why the
+ * third arrangement is named here.
  *
  * **What this test can and cannot prove.** It pins the decision, and either
  * mutation turns one arm red. It cannot prove the rule is VISIBLE, that it
- * lands on the scroll view's top edge, or that 1.23:1 is legible to anyone —
- * jest runs no Yoga pass and has no pixels.
+ * lands on the scroll view's top edge, or that `lineBoundary` reads as a
+ * boundary to anyone — jest runs no Yoga pass and has no pixels.
  *
- * **The device half is answered by sampling pixels, not by looking**, and the
- * numbers are recorded on #484: on `Goals` at accessibility XXXL the device row
- * at exactly 150.0pt is `#1A2230` across 100% of the width, between two rows of
- * `#080B12`; at default text the row at 114.0pt is `#1A2230` across 82%, the
- * rest being the floating settings button that overlays the header; on `Plan`
- * the same scan returns 0%. `docs/testing/functional-scenarios.md` carries that
- * scan as a repeatable check alongside the per-screen script, and #496 tracks
- * whether 1.23:1 is enough for the reader who needs it most.
+ * **The device half was answered by sampling pixels, not by looking**, and
+ * the numbers recorded on #484 are for the ORIGINAL colour, `lineSoft`
+ * (`#1A2230`, 1.23:1 against `bg`): on `Goals` at accessibility XXXL the
+ * device row at exactly 150.0pt was `#1A2230` across 100% of the width,
+ * between two rows of `#080B12`; at default text the row at 114.0pt was
+ * `#1A2230` across 82%, the rest being the floating settings button that
+ * overlays the header; on `Plan` the same scan returned 0%.
+ * `docs/testing/functional-scenarios.md` carries that scan as a repeatable
+ * check alongside the per-screen script. **F20 (#496) replaced the colour**
+ * with `lineBoundary` (`#5A606A`, 3.11:1, WCAG 1.4.11) — the pixel value the
+ * scan should now find is `#5A606A`, and re-running it at accessibility XXXL
+ * is the acceptance criterion's `NEEDS HUMAN EVIDENCE` line: this test proves
+ * the rule still draws, not that the new colour reads as a boundary.
  *
  * BOTH arms are required. With only the first, "always draws" passes while
  * seaming five screens that have no boundary; with only the second, "never
@@ -211,16 +219,18 @@ describe('the header itself', () => {
  */
 describe('the edge at the top of the scrolling region', () => {
   it('draws a rule when content scrolls under the header itself', () => {
-    // `goals` and `phase`: the header's bottom edge IS the scroll view's top.
+    // `goals`, `phase`, `progress`: the header's bottom edge IS the scroll view's top.
     render(<ScreenHeader title="Your target" />);
     expect(screen.getByTestId('screen-header')).toHaveStyle({
       borderBottomWidth: StyleSheet.hairlineWidth,
-      // LITERAL, per this file's convention — `vola.lineSoft`. A token-based
-      // assertion would silently follow a palette change, and at 1.23:1 (#496)
-      // this is precisely the value worth making a human re-confirm. It must
-      // stay equal to the tab bar's `borderTopColor` in `app/(tabs)/_layout.tsx`,
+      // LITERAL, per this file's convention — `vola.lineBoundary`. A
+      // token-based assertion would silently follow a palette change, and
+      // this is precisely the value worth making a human re-confirm. F20
+      // (#496) replaced `lineSoft` (1.23:1 against `bg`) with this dedicated
+      // token (3.11:1) at exactly this edge and the tab bar's — it must stay
+      // equal to the tab bar's `borderTopColor` in `app/(tabs)/_layout.tsx`,
       // which is a route file and cannot be imported here.
-      borderBottomColor: '#1A2230',
+      borderBottomColor: '#5A606A',
     });
   });
 
