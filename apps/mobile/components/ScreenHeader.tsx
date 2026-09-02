@@ -94,20 +94,26 @@ import { useAccent } from '@/lib/AccentProvider';
  *
  * ## The edge belongs to whatever the content actually scrolls under (W10)
  *
- * Seven screens use this header, and the question that decides whether it
+ * Eight screens mount this header, and the question that decides whether it
  * draws a bottom rule is **not** "is the header fixed?" — it is **"is this
  * header's bottom edge the top of the scrolling region?"** Three arrangements
  * exist and only the first says yes:
  *
  *  - **The header IS the boundary** — a sibling directly above the scroller, so
- *    content passes under the header itself. `goals`, `phase`. These draw it.
+ *    content passes under the header itself. `goals`, `phase`, `progress`
+ *    (added by N176/#602, after this note was first written — corrected by
+ *    F20/#496's review rather than left to drift again). These draw it.
+ *    `phase` sits outside `(tabs)`, so unlike `goals`/`progress` it has no tab
+ *    bar beneath it to match; the rule still marks a real boundary there.
  *  - **The header scrolls away** — rendered INSIDE the scroll view as its first
  *    child, so nothing ever passes under it. `index` (Today), `food`, `you`.
  *  - **The header sits above OTHER fixed chrome, which owns the boundary** —
  *    `workouts` has a scope tab strip between the header and its list, and that
- *    strip already draws `borderBottomWidth: hairlineWidth` in `vola.line`;
- *    `library` has a search field and filter chips. In both, content scrolls
- *    under the chrome, not under the header.
+ *    strip already draws `borderBottomWidth: hairlineWidth` in `vola.line`
+ *    (1.38:1 against `bg` — the same shortfall F20 fixed here, left open on
+ *    that strip; see F20's history entry); `library` has a search field and
+ *    filter chips. In both, content scrolls under the chrome, not under the
+ *    header.
  *
  * **An earlier version of this note got that wrong**, and it is worth leaving
  * the correction visible rather than quietly fixing it: it said four screens
@@ -146,18 +152,22 @@ import { useAccent } from '@/lib/AccentProvider';
  * `workouts`, which is why that screen is opted out rather than given a second
  * seam.
  *
- * `lineSoft` matches the tab bar's own `borderTopColor` in
- * `app/(tabs)/_layout.tsx`, so on the two screens that draw it the scrolling
- * region is bounded by the same weight of rule at both ends.
+ * `lineBoundary` matches the tab bar's own `borderTopColor` in
+ * `app/(tabs)/_layout.tsx`, so on `goals` and `progress` — the two screens
+ * that draw this rule AND sit under the tab bar — the scrolling region is
+ * bounded by the same weight of rule at both ends. `phase` draws the same
+ * rule outside the tab layout, where there is no second edge to match.
  *
- * **Known and NOT fixed: `lineSoft` on `vola.bg` is 1.23:1** — under the 3:1
- * non-text floor, and this palette's own commentary records rejecting 1.14:1
- * elsewhere as reading like "scattered dots". No line token here reaches 3:1;
- * that needs roughly `#5A606A`, which is a loud divider rather than a hairline,
- * and choosing it is a decision about the app's visual character. The sharp
- * version: **this fix is weakest exactly where the bug is worst**, since the
- * reader losing a whole 60pt line at a time is the one on accessibility sizes.
- * Tracked as F20 (#496); do not close it by nudging the token here.
+ * **Resolved by F20 (#496): this used to be `lineSoft`, at 1.23:1 against
+ * `vola.bg` — under the 3:1 WCAG 1.4.11 non-text floor, and weakest exactly
+ * where the bug it fixes was worst, since the reader losing a whole 60pt line
+ * at a time is the one on accessibility sizes.** `lineBoundary` is a new,
+ * dedicated token at 3.11:1 — see its comment in `Colors.ts` for the full
+ * costing (a stronger `lineSoft` everywhere, a threshold past some
+ * accessibility size, elevation/a gradient, and accepting 1.23:1 were all
+ * considered and rejected). `lineSoft` itself is untouched and still renders
+ * everywhere else it always has; this is not that token nudged, it is a
+ * narrower one that applies to exactly this boundary and the tab bar's.
  *
  * ## Why always-present rather than appearing on scroll
  *
@@ -330,14 +340,16 @@ export function ScreenHeader({
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: 20, paddingBottom: 10 },
   // The top of the scrolling region, when this header is what content passes
-  // under — see the three arrangements in the W10 note at the top. `lineSoft`
-  // is the tab bar's own `borderTopColor`, so on those screens the scrolling
-  // region is bounded by the same weight of rule at both ends. Full-bleed
+  // under — see the three arrangements in the W10 note at the top.
+  // `lineBoundary` (F20/#496) is the tab bar's own `borderTopColor` too, so on
+  // those screens the scrolling region is bounded by the same weight of rule
+  // at both ends — deliberately NOT `lineSoft`, see the token's own comment in
+  // Colors.ts for why a dedicated token rather than a value nudge. Full-bleed
   // rather than inset by `paddingHorizontal`: it marks the edge of the scroll
   // view, which runs the whole width, not the edge of the text.
   scrollEdge: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: vola.lineSoft,
+    borderBottomColor: vola.lineBoundary,
   },
   wordmark: {
     position: 'absolute',

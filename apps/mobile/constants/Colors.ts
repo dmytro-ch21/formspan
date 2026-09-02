@@ -26,6 +26,75 @@ const palette = {
   line: '#222B3A',
   lineSoft: '#1A2230',
 
+  /**
+   * The one edge in this app that marks content actually passing under or
+   * behind fixed chrome — as opposed to `line`/`lineSoft`, which decorate
+   * card borders and dividers nothing crosses. **Not a general-purpose
+   * "stronger line" — a specific answer to F20 (#496).**
+   *
+   * #484 added a hairline at `lineSoft` under `ScreenHeader`, on whichever
+   * screens have the header as the actual top of the scrolling region
+   * (`goals`, `phase`, and `progress` — see the "edge belongs to whatever
+   * content actually scrolls under" note in `ScreenHeader.tsx`), to stop
+   * content dissolving into an edgeless header, and matched it to the tab
+   * bar's own `borderTopColor` in `app/(tabs)/_layout.tsx` so the scrolling
+   * region reads as bounded by one weight of rule at both ends. That fix
+   * works, and it measures **1.23:1** against `bg` — under the 3:1 WCAG
+   * 1.4.11 floor for a non-text boundary, and weakest exactly where the bug
+   * it fixes was worst: a whole ~60pt line disappearing at a time at
+   * accessibility text sizes. #496 costed four options — a stronger
+   * `lineSoft` everywhere, a stronger rule only past some accessibility
+   * threshold, elevation/a gradient instead of a line, or accepting 1.23:1
+   * and saying so.
+   *
+   * **The decision: a dedicated token, not a nudge to `lineSoft` itself.**
+   * `lineSoft` renders in dozens of other places as a subtle card border —
+   * `CurriculaStrip`, `WeekPlanner`, `ui/TechniqueRow`, `ui/Stat`,
+   * `SessionCelebration` and more — and none of those is a boundary content
+   * passes under; raising `lineSoft` to 3:1 (roughly `#5A606A`) would have
+   * made every one of those a loud divider to fix a problem specific to the
+   * header/tab-bar pair. A threshold-triggered version was considered and
+   * rejected too:
+   * this codebase's own precedent for reading `fontScale` (`fabClearance` in
+   * `app/(tabs)/index.tsx` and `workouts.tsx`) is a continuous function, not
+   * a boolean past some cutoff — and inventing a cutoff is exactly the "needs
+   * a rule about where that threshold sits" cost #496 flagged as this
+   * option's own weakness. Elevation/a gradient was the third option and the
+   * riskiest: nothing in this app currently marks a boundary any way other
+   * than a hairline, so it would have been a new idiom, unverified, for one
+   * boundary. Accepting 1.23:1 was rejected on the merits — a fix was
+   * available at no cost to the rest of the palette, so degrading is not
+   * "accept and record", it is declining a fix that exists.
+   *
+   * So: `lineBoundary` applies to exactly two rules — `ScreenHeader`'s
+   * `contentScrollsUnder` hairline and the tab bar's `borderTopColor` — kept
+   * equal on purpose, the same invariant #484 established. Nothing else
+   * changes; the app's visual character is untouched everywhere `lineSoft`
+   * still renders.
+   *
+   * **A third boundary of this exact shape exists and is deliberately left
+   * alone here.** `workouts.tsx`'s `scopeRow` — the tab strip #484 already
+   * names as owning Plan's scroll boundary in place of the header — draws its
+   * own rule in `line` (1.38:1 against `bg`, also under 3:1). It was found
+   * during F20's review, not by this issue, and #496's acceptance criteria
+   * name only the header/tab-bar pair, so fixing it here would be scope this
+   * ticket was not asked to cover. Recorded rather than silently left, per
+   * this file's own habit of naming what it is not fixing: see F20's entry in
+   * `docs/decisions/history.md` for the pointer to file it separately.
+   *
+   * **3.11:1 against `bg`** (`#5A606A`, the same value #484's own note
+   * estimated), asserted by `scripts/validate_palette.mjs`. It is the
+   * issue's own quoted candidate rather than a fresh search, because the
+   * value was already the honest answer to "what does 3:1 cost" and
+   * re-deriving it would just restate the same number with more steps.
+   *
+   * **Reusable, on purpose, for F21 (#497)** — Library's list clips against
+   * an unmarked edge below its search field and filter chips, a real
+   * boundary of the same shape this one is. F21 must not pick its own
+   * contrast value; it reads this token.
+   */
+  lineBoundary: '#5A606A',
+
   text: '#F3F6FA',
   textMuted: '#949FB3',
   textDim: '#667085',

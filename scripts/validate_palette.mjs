@@ -333,6 +333,7 @@ function loadPalette() {
     P: {
       text: one('text'), textMuted: one('textMuted'), textDim: one('textDim'),
       accent: one('accent'), accentInk: one('accentInk'), accentOn: one('accentOn'),
+      lineBoundary: one('lineBoundary'),
       lime: one('lime'), green: one('green'), info: one('info'),
       warn: one('warn'), danger: one('danger'), gridRest: one('gridRest'),
       tileHold: one('tileHold'), tileAdvance: one('tileAdvance'),
@@ -393,6 +394,23 @@ heading('Text');
 ratio('text on surface', P.text, S.surface, 4.5);
 ratio('textMuted on surface', P.textMuted, S.surface, 4.5);
 ratio('textDim on surface (large/secondary only)', P.textDim, S.surface, 3);
+
+/*
+  F20 (#496): the boundary line ScreenHeader's `contentScrollsUnder` edge and
+  the tab bar's `borderTopColor` share. It replaced `lineSoft` at those two
+  call sites specifically because `lineSoft` measures 1.23:1 against `bg` —
+  under the 3:1 WCAG 1.4.11 non-text floor. `lineSoft` itself is unchecked
+  here on purpose: it is a decorative card border in ~20 other places, not a
+  boundary content passes under, and is outside this ticket's scope.
+*/
+heading('The scroll/tab-bar boundary — F20 (#496)');
+ratio(
+  'lineBoundary on bg',
+  P.lineBoundary,
+  S.bg,
+  3,
+  'ScreenHeader\'s contentScrollsUnder edge and the tab bar\'s borderTopColor both read this token — WCAG 1.4.11.',
+);
 
 /*
   The brand lime, and the boundary around it. Added by N183.

@@ -172,7 +172,12 @@ const styles = StyleSheet.create({
   bar: {
     backgroundColor: vola.bg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: vola.lineSoft,
+    // `lineBoundary`, not `lineSoft` — kept equal to `ScreenHeader`'s own
+    // `contentScrollsUnder` edge on purpose (see that component's top-of-file
+    // doc and `lineBoundary`'s comment in Colors.ts). F20 (#496): the two used
+    // to share `lineSoft` at 1.23:1 against `bg`, under the 3:1 WCAG 1.4.11
+    // floor; both now share this dedicated 3.11:1 token instead.
+    borderTopColor: vola.lineBoundary,
     height: 94,
     paddingTop: 12,
     elevation: 0,
