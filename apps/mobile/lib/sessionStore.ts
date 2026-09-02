@@ -33,6 +33,7 @@ import {
   type Session,
 } from './sessions';
 import { putDetail as pushBjjDetail, type SessionDetail as BjjDetail } from './bjjSession';
+import { putDetail as pushRunningDetail, type SessionDetail as RunningDetail } from './running';
 import { addDays, localDayDelta } from './calendar';
 
 /**
@@ -81,6 +82,11 @@ type Row = {
    * entirely rather than send an empty one.
    */
   bjj_json: string | null;
+  /**
+   * The running track and splits, or NULL for every other sport — the exact
+   * sibling of `bjj_json` (see its own comment for why NULL, not '{}').
+   */
+  running_json: string | null;
   dirty: number;
   /** 1 while this row's name has not reached the server. */
   name_dirty: number;
@@ -106,6 +112,25 @@ function parseBjjDetail(json: string): BjjDetail | null {
     // Tags absent from an older blob must read as "none recorded", not as a
     // crash in the push path.
     return { ...d, tags: d.tags ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parsed running track, or `null` if the blob is unreadable.
+ *
+ * Unreadable is survivable exactly as it is for `parseBjjDetail`: the
+ * session and its timing have already been pushed, so dropping a corrupt
+ * track costs the GPS evidence, not the training record. The push path
+ * therefore skips it rather than failing the whole row.
+ */
+function parseRunningDetail(json: string): RunningDetail | null {
+  try {
+    const d = JSON.parse(json) as RunningDetail;
+    // Absent from an older blob must read as "none recorded", not as a crash
+    // in the push path — same reasoning as bjj's `tags` default above.
+    return { ...d, route_points: d.route_points ?? [], splits: d.splits ?? [] };
   } catch {
     return null;
   }
@@ -437,6 +462,54 @@ export async function saveLocalBjjDetail(
     id,
     userID,
   );
+}
+
+/**
+ * Store the running track locally and mark the session for push.
+ *
+ * The same shape as `saveLocalBjjDetail`, deliberately: written locally
+ * first, pushed by the ordinary outbox, replaced wholesale rather than
+ * merged. Called both DURING a run — as GPS points come in, so a dead zone
+ * or a killed app loses nothing already recorded — and once more at Finish
+ * with the completed splits and totals. Either way the write is the same:
+ * whatever this call is given becomes the row's current state.
+ */
+export async function saveLocalRunningDetail(
+  userID: string,
+  id: string,
+  detail: RunningDetail,
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE local_sessions SET running_json = ?, dirty = 1, updated_at = ?
+     WHERE id = ? AND user_id = ?`,
+    JSON.stringify(detail),
+    new Date().toISOString(),
+    id,
+    userID,
+  );
+}
+
+/**
+ * The locally-held running track for a session, or null if there isn't one.
+ *
+ * Read from SQLite rather than the API so a run reopened offline — the app
+ * killed mid-run and relaunched, say — picks up exactly where its last saved
+ * point left off.
+ */
+export async function readLocalRunningDetail(
+  userID: string,
+  id: string,
+): Promise<RunningDetail | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ running_json: string | null }>(
+    `SELECT running_json FROM local_sessions
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id,
+    userID,
+  );
+  if (!row?.running_json) return null;
+  return parseRunningDetail(row.running_json);
 }
 
 /**
@@ -941,6 +1014,28 @@ async function pushRow(
     if (detail !== null) {
       try {
         await pushBjjDetail(getToken, s.id, detail);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          await db.runAsync(
+            `UPDATE local_sessions SET remote = 0 WHERE id = ? AND user_id = ?`,
+            s.id,
+            userID,
+          );
+        }
+        throw err;
+      }
+    }
+  }
+
+  // The running half, if this is one. Same shape and same reasoning as the
+  // BJJ block immediately above — including a corrupt blob degrading rather
+  // than failing the push, and a 404 forgetting `remote` so the create is
+  // retried rather than the session staying invisible forever.
+  if (row.running_json) {
+    const detail = parseRunningDetail(row.running_json);
+    if (detail !== null) {
+      try {
+        await pushRunningDetail(getToken, s.id, detail);
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           await db.runAsync(

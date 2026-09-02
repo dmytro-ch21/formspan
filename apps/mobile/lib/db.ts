@@ -577,7 +577,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 30;
+const SCHEMA_VERSION = 31;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1178,6 +1178,27 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // degrades to the neutral plate for exactly this reason, so leaving these
     // rows at null is the honest answer rather than a gap to paper over.
     await addColumnIfMissing(db, 'food_entries', 'category', 'TEXT');
+  }
+
+  if (current < 31) {
+    // N460: a run's GPS track and splits get somewhere to live offline.
+    //
+    // Same shape as `bjj_json` (v12) and for the same reason: the running
+    // half of a session is to a run what the BJJ reflection is to a mat
+    // session — the discipline's own detail, pushed after the session
+    // exists server-side, replaced wholesale rather than merged. Storing it
+    // the same way means the existing outbox carries it for free, including
+    // while the run is still in progress: the screen persists the growing
+    // track into this column as points come in (not only at Finish), so a
+    // dead zone or a killed app loses nothing already recorded — the row and
+    // its `running_json` blob are ordinary SQLite state from the moment the
+    // first point lands.
+    //
+    // Nullable, no backfill, same reasoning as `bjj_json`: "this is not a
+    // running session" and "this is a running session with an empty detail"
+    // are different facts, and only the first should skip the detail push
+    // entirely.
+    await addColumnIfMissing(db, 'local_sessions', 'running_json', 'TEXT');
   }
 
   // The day query the card runs on every render of Today.
