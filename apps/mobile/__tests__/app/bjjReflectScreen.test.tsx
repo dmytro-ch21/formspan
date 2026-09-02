@@ -109,9 +109,37 @@ const RELIABLE_TECHNIQUE = {
   setup_from: [],
 };
 
+// N468/#792: two techniques that both match a "knee shield" search, so the
+// "add a second related technique without retyping" scenario has a second
+// result to tap.
+const KNEE_SHIELD_GUARD = {
+  id: 'knee-shield-guard',
+  name: 'Knee Shield Guard',
+  aliases: [],
+  category: 'Guard',
+  position: 'Guard - Bottom',
+  position_detail: '',
+  gi_no_gi: 'Both',
+  typical_belt: '',
+  ibjjf_ruleset_id: '',
+  setup_from: [],
+};
+const KNEE_SHIELD_RECOVERY = {
+  id: 'knee-shield-recovery',
+  name: 'Knee Shield Recovery',
+  aliases: [],
+  category: 'Guard',
+  position: 'Guard - Bottom',
+  position_detail: '',
+  gi_no_gi: 'Both',
+  typical_belt: '',
+  ibjjf_ruleset_id: '',
+  setup_from: [],
+};
+
 jest.mock('@/lib/techniques', () => ({
   ...jest.requireActual('@/lib/techniques'),
-  fetchTechniques: jest.fn(async () => [RELIABLE_TECHNIQUE]),
+  fetchTechniques: jest.fn(async () => [RELIABLE_TECHNIQUE, KNEE_SHIELD_GUARD, KNEE_SHIELD_RECOVERY]),
 }));
 
 jest.mock('@/lib/proficiency', () => ({
@@ -396,4 +424,97 @@ it('shows no learning-state badge on a drilled row whose technique was retired',
   // session just recorded as drilled.
   expect(screen.queryByTestId('bjj-drilled-chip-null-state')).toBeNull();
   expect(screen.queryByText('Seen')).toBeNull();
+});
+
+/**
+ * N468/#792 §1 — the user's own repro: search once, add a technique, and add
+ * a second related one without retyping anything.
+ */
+describe('N468/#792: search does not clear itself on selection', () => {
+  it('adds a second matching technique from the same search, with no retyping', async () => {
+    render(<ReflectScreen />);
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'knee shield');
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-add-knee-shield-guard')).toBeTruthy();
+      expect(screen.getByTestId('bjj-drilled-add-knee-shield-recovery')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-guard'));
+
+    // The query survives the selection — the whole point of this ticket.
+    expect(screen.getByTestId('bjj-drilled-search').props.value).toBe('knee shield');
+
+    // The second technique is STILL offered, with no retyping, and adding it
+    // works too.
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-add-knee-shield-recovery')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-recovery'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-chip-knee-shield-guard')).toBeTruthy();
+      expect(screen.getByTestId('bjj-drilled-chip-knee-shield-recovery')).toBeTruthy();
+    });
+  });
+
+  it('a technique already added does not reappear in the results for the same query', async () => {
+    render(<ReflectScreen />);
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'knee shield');
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-add-knee-shield-guard')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-guard'));
+
+    // It visibly disappears from the results — no retyping happened, so
+    // this is the filter, not a cleared search.
+    await waitFor(() => {
+      expect(screen.queryByTestId('bjj-drilled-add-knee-shield-guard')).toBeNull();
+    });
+    // The other match for the same query is unaffected.
+    expect(screen.getByTestId('bjj-drilled-add-knee-shield-recovery')).toBeTruthy();
+  });
+
+  it('tapping the search input resets the query, ready for new text', async () => {
+    render(<ReflectScreen />);
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+    });
+
+    const search = screen.getByTestId('bjj-drilled-search');
+    fireEvent.changeText(search, 'knee shield');
+    expect(search.props.value).toBe('knee shield');
+
+    fireEvent(search, 'focus');
+    expect(search.props.value).toBe('');
+  });
+
+  it('reads as "already added everything that matches", never as "no match", once every result is already drilled', async () => {
+    render(<ReflectScreen />);
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'armbar');
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-add-armbar-closed-guard')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('bjj-drilled-add-armbar-closed-guard'));
+
+    // "armbar" now matches exactly one technique in this fixture, and it is
+    // already added — a real match, not a lookup miss, so the copy must say
+    // so rather than claiming the library has nothing for "armbar".
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-all-added')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('bjj-drilled-empty')).toBeNull();
+  });
 });
