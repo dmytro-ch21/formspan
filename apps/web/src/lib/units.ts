@@ -187,27 +187,6 @@ export function formatDistance(metres: number | null | undefined, u: UnitSystem)
   return `${trim(round(metres, 0))} m`;
 }
 
-/**
- * Running pace — "5:12 /km", "8:22 /mi".
- *
- * Stored (and computed, in `lib/running.ts`) as seconds per KILOMETRE always,
- * same rule as every other quantity in this file: a stored per-mile pace
- * would make a historical run ambiguous the moment someone changed the
- * setting. Conversion happens here, at the last possible moment.
- *
- * `null`/non-finite/non-positive all render as the same dash a distance or a
- * weight with no value renders — "no pace yet" (the run hasn't moved) and
- * "pace not computable" (zero duration) are both that, not an error.
- */
-export function formatPace(secPerKm: number | null | undefined, u: UnitSystem): string {
-  if (secPerKm == null || !Number.isFinite(secPerKm) || secPerKm <= 0) return '—';
-  const secPerUnit = u === 'imperial' ? secPerKm * (M_PER_MILE / 1000) : secPerKm;
-  const total = Math.round(secPerUnit);
-  const mins = Math.floor(total / 60);
-  const secs = total % 60;
-  return `${mins}:${String(secs).padStart(2, '0')} /${u === 'imperial' ? 'mi' : 'km'}`;
-}
-
 /** The unit a distance *input* takes — one unit, so the field is unambiguous. */
 export function distanceInputUnit(u: UnitSystem): string {
   return u === 'imperial' ? 'yd' : 'm';
