@@ -300,6 +300,15 @@ it('shows a technique the library never matched, distinctly from a named one', a
   // count — never merged into a technique chip it has no id to join.
   expect(screen.getByText('“pool guards” ×2')).toBeTruthy();
   expect(screen.getByText('Said, not matched to the library')).toBeTruthy();
+  // Its count must not ALSO leak into "What happened live"'s category
+  // totals — the labelled tag is category submission/scored, which would
+  // otherwise be exactly what feeds that grid's "Submissions" row. This
+  // screen's `live` filter has to move in step with the wizard's own grid
+  // (`bump()`/`tagCount()` in `app/bjj/reflect/[id].tsx` and
+  // `lib/bjjSession.ts`, which never let a labelled tag reach it either) —
+  // otherwise the same evidence would be counted once here and again above,
+  // with nothing to explain the discrepancy against the wizard.
+  expect(screen.queryByText('What happened live')).toBeNull();
 });
 
 /*

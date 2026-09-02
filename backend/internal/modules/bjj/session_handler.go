@@ -30,6 +30,13 @@ type tagRequest struct {
 	Position    string  `json:"position"`
 	TechniqueID *string `json:"technique_id"`
 	Count       *int    `json:"count"`
+	// Label is the athlete's own words for a technique the catalog never
+	// matched (N119/#508). Without this field the wire format silently
+	// dropped it — `encoding/json` ignores an unknown key rather than
+	// erroring, so a client sending `label` had it discarded here, and the
+	// whole point of this ticket ("never silently dropped") failed one
+	// layer above `Tag.Validate()`, which never got a chance to see it.
+	Label string `json:"label"`
 }
 
 type sessionDetailRequest struct {
@@ -71,6 +78,7 @@ func (req sessionDetailRequest) toDetail(sessionID string) SessionDetail {
 			Position:    t.Position,
 			TechniqueID: t.TechniqueID,
 			Count:       count,
+			Label:       t.Label,
 		})
 	}
 	return d

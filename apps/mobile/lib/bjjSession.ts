@@ -456,6 +456,15 @@ export function tagCount(
         // with a technique, but the API accepts one, so a reflection
         // authored elsewhere and read back would hit it.
         !t.technique_id &&
+        // Labelled rows too (N119/#508), for the same reason and by the
+        // same rule: `bump` never touches a labelled tag (see its own
+        // comment), so this counter — which is exactly the number `bump`
+        // reads and writes — must not include one either. A labelled
+        // phrase's count is shown on its own row in "Said, not matched to
+        // the library"; blending it into this anonymous total would let a
+        // single uncertain phrase quietly inflate a number the athlete
+        // reads as clean, undifferentiated evidence.
+        !t.label &&
         (position === undefined || t.position === position),
     )
     .reduce((n, t) => n + t.count, 0);

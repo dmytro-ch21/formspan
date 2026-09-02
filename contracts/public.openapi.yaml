@@ -1434,6 +1434,7 @@ components:
         label:
           type: string
           default: ""
+          maxLength: 200
           description: >
             N119/#508: what the athlete said when it did NOT resolve to a
             catalog technique — a mangled dictation ("pool guards"), or a

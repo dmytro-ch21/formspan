@@ -286,6 +286,89 @@ it('shows a tag kept unmatched from dictation, and resolves it to a real techniq
   });
 });
 
+/**
+ * N119/#508, the review finding both `ac-verifier` and `frontend-reviewer`
+ * converged on independently: the plain category grid (`bump()` in this
+ * screen, `tagCount()` in `lib/bjjSession.ts`) matched on
+ * `!t.technique_id` alone, which a labelled ("kept unmatched") tag also
+ * satisfies. Tapping the grid's "+" on the same category/event/position
+ * could silently inflate a specific phrase's count; long-pressing "−"
+ * could splice the labelled tag out of `detail.tags` entirely, with no
+ * "Removed" notice anywhere — the exact silent-discard failure this
+ * ticket exists to end, recreated one screen along, on a control that
+ * looks like it only ever touches the anonymous grid.
+ */
+it('never lets the plain grid touch a labelled tag, in either direction', async () => {
+  (readLocalBjjDetail as jest.Mock).mockImplementationOnce(() =>
+    deferred({
+      ...mockDetail,
+      tags: [
+        {
+          category: 'sweep',
+          event: 'scored',
+          position: '',
+          technique_id: null,
+          count: 1,
+          label: 'pool guards',
+        },
+      ],
+    }),
+  );
+
+  render(<ReflectScreen />);
+  await waitFor(() => {
+    expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+  });
+
+  // Step 0 (drilled) -> step 1 (live).
+  fireEvent.press(screen.getByTestId('bjj-reflect-next'));
+
+  await waitFor(() => {
+    expect(screen.getByText('“pool guards”')).toBeTruthy();
+  });
+
+  // The plain grid counter for the same category/event/position excludes
+  // the labelled tag's count — it lives only in the dedicated "Said, not
+  // matched" row above, never blended into this anonymous total.
+  // (Checked via the counter's own accessibility label, "Swept them: N" —
+  // its rendered text also includes the row's static "Swept them" caption,
+  // so a plain text-content match can't tell the value 0 from the label.)
+  expect(screen.getByTestId('bjj-live-sweep-scored').props.accessibilityLabel).toBe(
+    'Swept them: 0',
+  );
+
+  // Tap "+": must create a NEW, separate tag rather than incrementing the
+  // labelled one. Overstating "pool guards" is the miscount half of the bug.
+  fireEvent.press(screen.getByTestId('bjj-live-sweep-scored'));
+  await waitFor(() => {
+    expect(saveLocalBjjDetail).toHaveBeenLastCalledWith(
+      'u1',
+      's1',
+      expect.objectContaining({
+        tags: expect.arrayContaining([
+          expect.objectContaining({ label: 'pool guards', count: 1 }),
+          expect.not.objectContaining({ label: 'pool guards' }),
+        ]),
+      }),
+    );
+  });
+  expect((saveLocalBjjDetail as jest.Mock).mock.calls.at(-1)?.[2].tags).toHaveLength(2);
+  // Still a single occurrence, never "×2".
+  expect(screen.queryByText('“pool guards” ×2')).toBeNull();
+  expect(screen.getByText('“pool guards”')).toBeTruthy();
+
+  // Long-press "−" on the same cell: must delete only the freshly-added
+  // plain tag, never the labelled one — the deletion half of the bug, and
+  // the one N119 itself exists to end.
+  fireEvent(screen.getByTestId('bjj-live-sweep-scored'), 'longPress');
+  await waitFor(() => {
+    expect((saveLocalBjjDetail as jest.Mock).mock.calls.at(-1)?.[2].tags).toEqual([
+      expect.objectContaining({ label: 'pool guards', count: 1 }),
+    ]);
+  });
+  expect(screen.getByText('“pool guards”')).toBeTruthy();
+});
+
 it('shows no learning-state badge on a drilled row whose technique was retired', async () => {
   // `technique_id: null` is a REAL state, not a hypothetical one — migration
   // 000025's `ON DELETE SET NULL` produces exactly this when a technique is

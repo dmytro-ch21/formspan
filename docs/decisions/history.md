@@ -51464,34 +51464,74 @@ work:
   pipeline needs the same authoring-quality bar #445 held — an admin
   reviewer, not an automatic insert — which is genuinely separate
   backend+admin work this ticket does not also take on. Filed as its own
-  ticket rather than silently left out: **N125**. Nothing about the
+  ticket rather than silently left out: **N467 (#786)**. Nothing about the
   free-text design blocks it — `label` is exactly the field a future admin
   review queue would read from.
 
-**What this does NOT change about the coarse category grid.** The grid's
-own +/- counters (`bump()` in the wizard's `LiveStep`, `tagCount()`) still
-treat every technique-less row as one undifferentiated pool per
-category/event/position — unchanged, deliberately. A labelled row can, in
-principle, have its count nudged by an unrelated tap on the plain grid,
-which would blend it with an ordinary count. Accepted rather than guarded
-against: the grid was already lossy about which specific submission before
-labels existed (it never distinguished one armbar from another), so this is
-the same coarseness continuing, not a new kind of it. The dedicated
-"Said, not matched" list is the one place a specific phrase, and the
-ability to match or drop it individually, lives.
+**The coarse category grid: this DOES change, after pre-merge review, and the
+first draft's reasoning here was wrong.** The original text argued that the
+grid's own +/- counters (`bump()` in the wizard's `LiveStep`, `tagCount()`)
+touching a labelled row too was "accepted rather than guarded against" — the
+grid was already lossy about which specific submission before labels
+existed, so blending a count in was framed as the same coarseness
+continuing. Pre-merge review (`ac-verifier` and `frontend-reviewer`,
+independently) found that framing covered only half the actual behaviour:
+tapping "+" on the matching cell did blend counts as described, but
+long-pressing "−" on the same cell — the grid's ordinary way to correct a
+miscount — spliced the labelled tag out of `detail.tags` entirely, with no
+"Removed" notice anywhere. That is not coarseness, it is the ticket's own
+"never silently dropped" criterion failing one screen along, on a control
+that looks like it only ever edits the anonymous grid. Fixed: `bump()`,
+`tagCount()`, and `session/[id].tsx`'s equivalent read-view aggregate
+(`live`) all now exclude a labelled tag (`!t.label`, alongside the existing
+`!t.technique_id`) — the grid can no longer create, inflate, or delete a
+labelled row in either direction, and its count lives only in the dedicated
+"Said, not matched" list, on both the wizard and the read view, kept moving
+together rather than one screen drifting from the other.
+
+**Two more pre-merge findings, both fixed.** (1) `backend-reviewer` and
+`ac-verifier` independently caught that `session_handler.go`'s `tagRequest`
+had no `Label` field, so `encoding/json` silently discarded a `label` key
+at the HTTP boundary — every test that exercised the fix went through
+`repo.PutDetail` or `Tag.Validate()` directly, so nothing caught that the
+one path a real client actually uses dropped the phrase before validation
+ever saw it. This was, verbatim, the bug the ticket exists to fix, moved one
+layer up rather than closed. Fixed by adding `Label` to `tagRequest` and
+copying it in `toDetail`, with a new `session_handler_test.go` that decodes
+real JSON through the handler against a fake repository (mutation-verified:
+reverting the field addition turns the new test red with the exact
+"wire format dropped it" message, not a compile error). (2) `frontend-reviewer`
+found that `dictate.tsx`'s catalog-fetch effect, gated on
+`unresolved.length === 0`, could spin "Match in library" forever: tapping
+"Keep as said" on the LAST unresolved phrase while the catalog fetch was
+still in flight flipped the guard true, the effect's cleanup marked that
+fetch cancelled, and nothing was left to retry it even though the tag just
+kept still needed it. Fixed by widening the gate to "does anything on
+screen still need the catalog" — `unresolved.length > 0 ||` a kept tag's own
+`label` being present — mutation-verified with a test that resolves the
+fetch by hand after Keep is pressed.
 
 **Tests.** Backend: `Tag.Validate()` accepts a label-only tag, rejects one
 carrying both a technique id and a label, bounds the label at 200 runes
 (matching `technique.maxNameLen` — a label stands in for a name). A Postgres
 round-trip test seeds a labelled and an ordinary tag together and asserts
-neither corrupts the other. Mobile: `dictateScreen.test.tsx` covers the
+neither corrupts the other. A new `session_handler_test.go` proves `label`
+actually reaches the repository through a decoded HTTP request, and that the
+both-set case is rejected at 400 through that same path, not only in
+`Tag.Validate()` isolation. Mobile: `dictateScreen.test.tsx` covers the
 "Keep as said" path end to end (phrase survives to `saveLocalBjjDetail`,
-`technique_id` stays falsy) and resolving a kept phrase to a real technique
-before saving; `bjjReflectScreen.test.tsx` covers the wizard's own resolve
-path; `bjjSessionScreen.test.tsx` covers the read view rendering a labelled
-tag distinctly from a named one. `pnpm run typecheck:mobile`, `lint:mobile`
-(50/50 warnings, unchanged), and the full mobile suite (3776 tests) all
-green; backend `bjj` package green against a freshly migrated database.
+`technique_id` stays falsy), resolving a kept phrase to a real technique
+before saving, and the deferred-catalog race described above;
+`bjjReflectScreen.test.tsx` covers the wizard's own resolve path and the
+grid-exclusion fix in both directions (miscount and deletion);
+`bjjSessionScreen.test.tsx` covers the read view rendering a labelled tag
+distinctly from a named one and NOT double-counting it into "What happened
+live"; `bjjFunnel.test.ts` pins `tagCount`'s exclusion directly. Every new
+guard here was mutation-verified — reverted, confirmed red with the expected
+message, restored, confirmed green — not just written and left. `pnpm run
+typecheck:mobile`, `lint:mobile`, and the full mobile and backend suites all
+green after the fixes; backend `bjj` package green against a freshly
+migrated database.
 
 ## Open items / known gaps as of this entry
 

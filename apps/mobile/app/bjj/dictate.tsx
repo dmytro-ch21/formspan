@@ -226,6 +226,26 @@ export default function DictateReflectionScreen() {
   // search below, so a second cause for the old N-parallel-requests bug this
   // comment used to warn about (see history.md) would be easy to reintroduce
   // here by depending on the object instead of the transition into having one.
+  //
+  // N119/#508, reconciled here at rebase: that ticket found a NARROWER bug in
+  // the effect's pre-N120 gate (`unresolved.length === 0`) and fixed it with
+  // `needsCatalog = unresolved.length > 0 || tags.some(t => !!t.label)` —
+  // tapping "Keep as said" on the last unresolved phrase flipped that guard
+  // true, the cleanup below cancelled the in-flight fetch, and the narrowed
+  // condition then blocked a replacement fetch from ever starting, stranding
+  // "Match in library" on a permanent spinner. `detail !== null` does not
+  // reintroduce that bug — it doesn't just widen the same gate, it removes
+  // the mechanism that caused it: unlike `unresolved.length` or a derived
+  // `needsCatalog`, `detail !== null` does not toggle back and forth as tags
+  // are resolved, kept or matched (`detail` is set once a real draft loads
+  // and stays non-null for the rest of the screen's life), so the cleanup
+  // above never re-fires — and therefore never cancels an in-flight fetch —
+  // because of anything the athlete does to a tag. `needsCatalog` is not
+  // used below; it would in fact be a regression paired with `detail !== null`
+  // fully replacing it, since `needsCatalog` alone goes false whenever there
+  // are no unresolved phrases and no labelled tags, well before the athlete
+  // ever touches "Add something you did" — which needs the catalog with
+  // neither of those true. `detail !== null` covers that case too.
   useEffect(() => {
     if (detail === null || catalog !== null || catalogFailed) return;
     let cancelled = false;
@@ -989,7 +1009,12 @@ function TagRow({
     <View style={styles.tagRowWrap}>
       <View style={styles.tagRow}>
         <View style={styles.tagText}>
-          <Text style={styles.tagTitle}>{title}</Text>
+          {/* `styles.tagTitle`'s `textTransform: 'capitalize'` is right for an
+              ordinary row's "scored submission" summary, and wrong for a
+              labelled one — the title there IS the athlete's own quoted
+              phrase, and capitalising it turns "pool guards" into "Pool
+              Guards", a word the athlete never said. */}
+          <Text style={[styles.tagTitle, !!tag.label && styles.tagTitleLabelled]}>{title}</Text>
           {/* The "distinguishable from a matched one" half of N119/#508's
               acceptance criteria — a phrase that never resolved reads
               differently from an ordinary chip, every time it is shown. */}
@@ -1443,6 +1468,9 @@ const styles = StyleSheet.create({
   tagRowWrap: { gap: 8 },
   tagText: { flexShrink: 1 },
   tagTitle: { fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
+  // N119/#508: overrides the capitalisation above for a labelled row, whose
+  // title is the athlete's own quoted words, not a generated summary.
+  tagTitleLabelled: { textTransform: 'none' },
   // N120/#509: the per-tag event/position correction chips. Small on
   // purpose — this is a fix-up control for the rare wrong read, not a
   // primary input, and the count stepper above stays the thing the eye goes

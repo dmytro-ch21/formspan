@@ -513,8 +513,13 @@ export default function BjjSessionScreen() {
   // one — so filtering it here would leave it with no display surface
   // anywhere: saved, synced, and invisible. There is no editor for it to
   // disagree with, so the grid is the honest place for it.
+  // `!t.label` moves this in step with the wizard's own grid (`tagCount` /
+  // `bump` in `lib/bjjSession.ts` and `app/bjj/reflect/[id].tsx`) — a
+  // labelled ("kept unmatched") tag is never part of that anonymous total
+  // there, so it must not silently reappear in this screen's version of
+  // the same total. It has its own section below (`unmatched`) instead.
   const live = (detail?.tags ?? []).filter(
-    (t) => t.event === 'conceded' || (!t.technique_id && t.event === 'scored'),
+    (t) => (t.event === 'conceded' || (!t.technique_id && t.event === 'scored')) && !t.label,
   );
   // N119/#508: every tag the athlete named but the library never matched —
   // across every event a tag can carry, not just the two `live` happens to

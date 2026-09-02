@@ -32,6 +32,7 @@ import {
   type Category,
   type Event,
   type SessionDetail,
+  type Tag,
 } from '@/lib/bjjSession';
 import { readLocalBjjDetail, saveLocalBjjDetail } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
@@ -959,8 +960,21 @@ function LiveStep({
     .map((t, i) => ({ t, i }))
     .filter(({ t }) => !t.technique_id && !!t.label);
 
-  const [matchingIndex, setMatchingIndex] = useState<number | null>(null);
-  const matchQuery = matchingIndex === null ? '' : (detail.tags[matchingIndex]?.label ?? '');
+  // Which unmatched tag has its "Match in library" panel open, tracked by
+  // OBJECT IDENTITY rather than array index. `detail.tags` is a shared
+  // array — the coarse grid's `bump`, a technique un-drilled a step back,
+  // and this list's own "Remove" can all add or splice an entry anywhere
+  // in it, shifting every index after the change. An index cached in state
+  // goes stale the moment that happens, silently reattaching the panel to
+  // whatever tag slides into its old slot. A direct reference to the tag
+  // object never can: an untouched element keeps the same reference across
+  // a `[...tags]`/`.map`/`.filter` (only a replaced element gets a new
+  // object), so comparing a row's own tag to `matchingTag` below (`===`)
+  // always identifies the right row, and naturally stops matching any row
+  // at all once the panel's tag is removed — no reset bookkeeping required
+  // at any mutation site.
+  const [matchingTag, setMatchingTag] = useState<Tag | null>(null);
+  const matchQuery = matchingTag?.label ?? '';
   const matches = useMemo(
     () => (matchQuery ? rankTechniques(library, matchQuery).slice(0, 6) : []),
     [library, matchQuery],
@@ -978,20 +992,42 @@ function LiveStep({
         n === i ? { ...tag, technique_id: picked.id, label: undefined } : tag,
       ),
     });
-    setMatchingIndex(null);
+    setMatchingTag(null);
   }
 
-  function removeUnmatched(i: number) {
+  function removeUnmatched(i: number, tag: Tag) {
     onChange({ ...detail, tags: detail.tags.filter((_, n) => n !== i) });
-    setMatchingIndex((cur) => (cur === i ? null : cur));
+    // Only clear the panel if the row REMOVED is the one it was open on —
+    // an object-identity comparison, so a DIFFERENT row's open panel is
+    // left alone. Not even strictly required: once `detail.tags` no longer
+    // contains `tag`, every `matchingTag === t` comparison in the render
+    // below already stops matching on its own. This just makes that
+    // immediate rather than waiting for whatever re-render happens next.
+    setMatchingTag((cur) => (cur === tag ? null : cur));
   }
 
   function bump(category: Category, event: Event, delta: number) {
     const tags = [...detail.tags];
     // Match on the position too: "swept from half guard" and "swept from
     // guard" are different evidence and must not merge into one counter.
+    //
+    // `!t.label` too, as of N119/#508 — a labelled ("kept unmatched") tag
+    // also has `technique_id: null` and typically `position: ''`, so
+    // without this exclusion the plain grid's "+" could silently inflate a
+    // specific phrase's count instead of recording a new, separate
+    // occurrence, and its long-press "−" could splice the labelled tag out
+    // of existence with no indication at all — the exact silent-discard
+    // failure this ticket exists to end, recreated one screen along. The
+    // dedicated "Said, not matched to the library" list above is the only
+    // place a labelled tag is ever removed, and it does so with an explicit
+    // Remove button, never a blind grid tap.
     const i = tags.findIndex(
-      (t) => t.category === category && t.event === event && t.position === position && !t.technique_id,
+      (t) =>
+        t.category === category &&
+        t.event === event &&
+        t.position === position &&
+        !t.technique_id &&
+        !t.label,
     );
     if (i === -1) {
       if (delta < 0) return;
@@ -1201,20 +1237,20 @@ function LiveStep({
                   “{t.label}”{t.count > 1 ? ` ×${t.count}` : ''}
                 </Text>
                 <Pressable
-                  onPress={() => setMatchingIndex((cur) => (cur === i ? null : i))}
+                  onPress={() => setMatchingTag((cur) => (cur === t ? null : t))}
                   accessibilityRole="button"
                   accessibilityLabel={
-                    matchingIndex === i
+                    matchingTag === t
                       ? `Hide matches for “${t.label}”`
                       : `Match “${t.label}” to a technique`
                   }
                 >
                   <Text style={[styles.footnote, { color: accent.ink, fontWeight: '700' }]}>
-                    {matchingIndex === i ? 'Hide' : 'Match'}
+                    {matchingTag === t ? 'Hide' : 'Match'}
                   </Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => removeUnmatched(i)}
+                  onPress={() => removeUnmatched(i, t)}
                   accessibilityRole="button"
                   accessibilityLabel={`Remove “${t.label}”`}
                 >
@@ -1223,7 +1259,7 @@ function LiveStep({
                   </Text>
                 </Pressable>
               </RNView>
-              {matchingIndex === i && (
+              {matchingTag === t && (
                 <RNView style={styles.unmatchedMatches}>
                   {matches.length === 0 ? (
                     <Text style={styles.footnote}>
