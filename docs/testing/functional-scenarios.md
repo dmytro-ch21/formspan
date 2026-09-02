@@ -13823,9 +13823,10 @@ grow a second copy of any of them.
   actually reads as primary at the top of a real phone screen — including that
   the name now leads the belt card, not the reverse — whether the identity
   card is legible at the largest accessibility text size, or whether
-  `Your own chains` is findable in the Library's header stack (which is ~300pt
-  before the first result on a 4.7" screen — see the open gap in
-  `docs/decisions/history.md`).
+  `Your own chains` is findable behind the Library's "More from your library"
+  affordance. (N469/#794 moved it off the permanently-pinned header this bullet
+  used to describe and behind that one-tap sheet — see the new section below
+  for the scenarios that superseded.)
 
 ## N182 — Plan owns the forward schedule, and Train is retired (`app/(tabs)/workouts.tsx`, `app/(tabs)/train.tsx`)
 
@@ -16783,3 +16784,106 @@ The scenarios below are all mobile.
   the four originals by hand, then log it again the NEXT day as one tap
   from `food/add`'s recents/saved list — the ticket's own acceptance
   criterion, verbatim.
+
+## N469 — Library redesigned search-first: one filter row, one "More from your library" affordance (`apps/mobile/app/library.tsx`)
+
+The Library used to render ~380 lines of fixed header — search, sport chips, a
+separate facet-button row, "Your own chains", "Your class plans", and the
+round map / curricula / belt syllabuses / position glossary — all above and
+outside the `FlatList`, so nothing in the technique/exercise catalog was
+visible without scrolling past all of it first. Sport chips and the position/
+belt/muscle/movement facet buttons merge into one slim, horizontally-scrolling
+filter row (they change what the list shows); "Your own chains", "Your class
+plans", the round map, curricula, belt syllabuses and the position glossary
+move behind a single "More from your library" bottom-sheet affordance (they
+are navigation shortcuts to a different screen, not filters on this one).
+
+### Happy path
+
+- Cold-open the Library on an account with BJJ on. Below the search bar there
+  is exactly one horizontally-scrolling row of chips/buttons (sport, then any
+  facet buttons the current sport supports) and, below that, one compact
+  "More from your library" row. The technique/exercise list starts
+  immediately after — no scrolling required to reach a real result.
+- Scroll the filter row horizontally; sport chips and facet buttons both
+  respond exactly as before (tapping a sport chip re-filters immediately,
+  tapping a facet button opens its existing picker sheet).
+- Tap "More from your library". A bottom sheet rises over the (still visible,
+  dimmed) list, containing — in order — "Your own chains", "Your class
+  plans", then (if the current sport supports positions and the glossary
+  loaded) "How a round goes", "My curricula", the belt syllabus row, and the
+  position glossary cards.
+- From inside the sheet, tap "Your sequences" (or "Your class plans", "How a
+  round goes", "My curricula", a belt syllabus card, or a position card). The
+  sheet closes and navigation proceeds to the target screen, exactly as the
+  old permanent card did.
+- Tap the sheet's `Done`, or tap the dimmed backdrop, or (VoiceOver) the
+  two-finger escape gesture: the sheet closes and the technique/exercise list
+  underneath is exactly where it was — same scroll position, same filter.
+
+### Edge cases & errors
+
+- **Strength-only account (BJJ off or never enabled).** No facet row beyond
+  what strength supports, and "More from your library" does not render at
+  all — there is nothing behind it (no chains, no class plans, no position
+  glossary), so the affordance itself must be absent rather than present and
+  opening to an empty sheet.
+- **BJJ on, but the positions fetch fails.** "More from your library" still
+  renders (chains/class-plans do not depend on the positions fetch) and
+  opening it shows "Your own chains" and "Your class plans" but not "Start
+  with positions" — a failed reference-data fetch must not take the athlete's
+  own chains down with it.
+- **Sport filter persisted on Strength from a previous visit, BJJ enabled.**
+  "More from your library" still renders and still opens to "Your own
+  chains"/"Your class plans" — those two rows are gated on the technique
+  module being enabled, not on the current sport filter (see the N181
+  scenarios above for why).
+- **The discipline that owns techniques is turned off entirely.** The
+  existing "`<sport>` is turned off" explainer stays visible in the fixed
+  header (not behind the sheet) — it explains *why* nothing else is showing,
+  so it is deliberately not itself hidden behind the affordance it is
+  explaining the absence of.
+- **Opening the sheet mid-search, with the keyboard up.** The sheet opens over
+  the dismissed keyboard; closing it returns focus to the list, not to the
+  search box (matches the existing facet-picker sheet's behaviour).
+- **Rapid open/close of the sheet.** No stacked sheets, no doubled navigation
+  on a fast double-tap of a row inside it — each row closes the sheet before
+  navigating.
+
+### Regressions to watch
+
+- **A row inside the sheet reappearing as a permanent card outside it.** The
+  whole point of this ticket was removing three permanently-visible blocks;
+  any of the three coming back to the fixed header (even conditionally) is
+  the regression.
+- **The filter row splitting back into two rows**, or the "More from your
+  library" row growing a second control (a second metric, a second target) —
+  either would blur the row's own distinction between "narrows this list" and
+  "opens somewhere else", which is the property the acceptance criteria is
+  built on.
+- **The three existing testIDs (`library-sequences`, `library-classplans`,
+  `library-roundmap-link`) disappearing rather than relocating.** They are
+  asserted from inside the sheet now; a future change that drops them
+  silently (rather than deliberately replacing them) breaks `#414`'s
+  guarantee that a shared chain stays findable.
+- **Opening the sheet losing the list's scroll position or filter state.**
+  The sheet is a `Modal` outside the `FlatList`'s own tree specifically so
+  this cannot happen structurally; a future refactor that moves the sheet's
+  content inline (an accordion, say) would need to re-earn that guarantee.
+
+### Auth/security
+
+- No new endpoint or auth surface — this is a presentation-only
+  reorganisation of a screen already fetching under the signed-in athlete's
+  own token; every gate (module enabled, sport filter, positions loaded)
+  behaves exactly as it did before the reshuffle.
+
+- **NEEDS HUMAN EVIDENCE** — two device checks the suite cannot answer:
+  1. On a real phone, at a real font size: does cold-opening the Library
+     genuinely show only search + filter row + "More from your library" +
+     real catalog content, with no scrolling required — and is the "More
+     from your library" affordance discoverable without being told where it
+     is?
+  2. Do the filter row and the "More from your library" row read as visually
+     distinct in weight and shape — one narrows the list, the other opens
+     elsewhere — rather than as two rows of the same kind of control?

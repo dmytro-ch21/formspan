@@ -338,6 +338,18 @@ export default function LibraryScreen() {
    * that callback, which is harmless — the modal is already invisible.
    */
   const [shownFacet, setShownFacet] = useState<FacetKey | null>(null);
+  /**
+   * The "More from your library" sheet — N469 (#794).
+   *
+   * Everything that used to be three permanently-stacked cards ("Your own
+   * chains", "Your class plans", the round map / curricula / belt syllabuses
+   * / position glossary) now lives behind this one boolean. None of it
+   * filters the technique list — every row inside is a navigation shortcut
+   * to a different screen — so it is presented as a bottom sheet rather than
+   * folded into the filter row above, which stays reserved for controls that
+   * change what THIS list shows.
+   */
+  const [extrasOpen, setExtrasOpen] = useState(false);
   // The home indicator's real height, not a guess. `ScreenHeader` already
   // reads insets this way; a hardcoded 28 is right on exactly one device.
   const insets = useSafeAreaInsets();
@@ -713,6 +725,21 @@ export default function LibraryScreen() {
   const showTechniques =
     techniqueSport !== undefined && (sport === '' || sport === techniqueSport.key);
 
+  /**
+   * Whether the "More from your library" affordance has anything behind it.
+   *
+   * Both halves mirror the gates the sheet's own content already applies —
+   * `techniqueSport !== undefined` for the chains/class-plans rows,
+   * `usesPosition(sport, modules) && positions.length > 0` for the round map,
+   * curricula, belt syllabuses and position glossary. A strength-only account
+   * (or BJJ genuinely turned off) has nothing behind either half, and a
+   * button that opens an empty sheet is the "state that cannot be
+   * constructed" failure this codebase keeps re-finding — so the row itself
+   * is absent rather than present-and-empty.
+   */
+  const showExtras =
+    techniqueSport !== undefined || (usesPosition(sport, modules) && positions.length > 0);
+
   // Sorted once per source, not once per keystroke. Filtering preserves order,
   // so the filtered halves stay sorted and merge linearly below.
   const sortedExercises = useMemo(
@@ -824,7 +851,26 @@ export default function LibraryScreen() {
           maxLength={100}
           testID="library-search"
         />
-        <View style={styles.chips}>
+        {/*
+          ONE slim, single-row filter control — N469 (#794), replacing what
+          used to be two separate rows (a wrapping sport-chip row, then a
+          horizontally-scrolling facet-button row). Both halves change what
+          THIS list shows, which is the one property that earns a spot in
+          this row at all: the Spotify Library screen and Hevy's exercise
+          library both put every filter that narrows the same list into one
+          thin horizontal strip rather than a stack of sections, and this
+          merges VOLA's own two into that same strip.
+
+          Sport chips select directly; facet buttons (position/belt/muscle/
+          movement) open the picker sheet below. Different interaction, same
+          row, same reason for being visible by default: using either one
+          changes the catalog underneath it.
+        */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
           {sportChips.map((s) => {
             const active = sport === s.key;
             return (
@@ -848,77 +894,64 @@ export default function LibraryScreen() {
               </Pressable>
             );
           })}
-        </View>
+          {FACETS.filter((f) => usesFacet(sport, modules, f.key)).map((f) => {
+            const value = facetValue(f.key);
+            const chosen = f.options.find((o) => o.key === value);
+            const active = value !== '';
+            return (
+              <Pressable
+                key={f.key}
+                onPress={() => {
+                  setShownFacet(f.key);
+                  setOpenFacet(f.key);
+                }}
+                style={[styles.facet, active && styles.facetActive]}
+                hitSlop={8}
+                accessibilityRole="button"
+                // Names the axis AND the value, so a screen reader is not
+                // left with a bare "Mount" that could be anything.
+                accessibilityLabel={
+                  active ? `${f.label}: ${chosen?.label ?? value}. Change` : `Filter by ${f.label}`
+                }
+                testID={`library-facet-${f.key}`}
+              >
+                <Text style={[styles.facetText, active && styles.facetTextActive]}>
+                  {active ? (chosen?.label ?? value) : f.label}
+                </Text>
+                <View style={styles.facetCaret}>
+                  <Icon name="chevron" size={10} color={active ? vola.text : vola.textDim} />
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
-        {/*
-          One row of facet buttons, each opening a picker — not every option
-          pinned to the screen.
-
-          It was two full horizontal scroll rows (position, then belt), both
-          permanently visible, and strength had no filters at all. The history
-          log already recorded the cost: roughly 300pt of header before the
-          first result, on a screen whose entire job is showing results. Adding
-          muscle and movement as two more rows would have made it worse.
-
-          A button that names its axis and shows its current value collapses
-          each row to one control, so the strength axes are added while the
-          header gets shorter. Which buttons appear is driven by the discipline
-          registry, so a control is never shown against a catalog it cannot
-          filter — the same rule the two scroll rows already followed.
-        */}
-        {FACETS.filter((f) => usesFacet(sport, modules, f.key)).length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.facetRow}
+        {/* The one expand affordance for everything that is reading rather
+            than filtering — "Your own chains", "Your class plans", the round
+            map, curricula, belt syllabuses and the position glossary. None of
+            these change what the list above shows; every one of them is a
+            navigation shortcut to a different screen, so they collapse behind
+            a single compact row rather than reappearing as permanent cards.
+            See the sheet below (`extrasOpen`) for why a bottom sheet was
+            picked over an inline accordion or a full second screen. */}
+        {showExtras && (
+          <Pressable
+            onPress={() => setExtrasOpen(true)}
+            style={styles.extrasRow}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="More from your library"
+            accessibilityHint="Your chains, your class plans, and the round map"
+            testID="library-extras-toggle"
           >
-            {FACETS.filter((f) => usesFacet(sport, modules, f.key)).map((f) => {
-              const value = facetValue(f.key);
-              const chosen = f.options.find((o) => o.key === value);
-              const active = value !== '';
-              return (
-                <Pressable
-                  key={f.key}
-                  onPress={() => {
-                    setShownFacet(f.key);
-                    setOpenFacet(f.key);
-                  }}
-                  style={[styles.facet, active && styles.facetActive]}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  // Names the axis AND the value, so a screen reader is not
-                  // left with a bare "Mount" that could be anything.
-                  accessibilityLabel={
-                    active ? `${f.label}: ${chosen?.label ?? value}. Change` : `Filter by ${f.label}`
-                  }
-                  testID={`library-facet-${f.key}`}
-                >
-                  <Text style={[styles.facetText, active && styles.facetTextActive]}>
-                    {active ? (chosen?.label ?? value) : f.label}
-                  </Text>
-                  <View style={styles.facetCaret}>
-                    <Icon name="chevron" size={10} color={active ? vola.text : vola.textDim} />
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+            <Icon name="layers" size={16} color={vola.textMuted} />
+            <Text style={styles.extrasRowText}>More from your library</Text>
+            <View style={styles.facetCaret}>
+              <Icon name="chevron" size={11} color={vola.textDim} />
+            </View>
+          </Pressable>
         )}
 
-        {/* The glossary, and the one row on this screen that is reading rather
-            than filtering.
-
-            Last, and below every chip row, because that is the boundary it
-            marks: everything above narrows the list, this opens a page. It sits
-            near controls that look superficially similar and behave completely
-            differently, so it carries a label and a different shape — without
-            that separation the rows read as one broken control.
-
-            The label is "Start with positions", not "NEW TO BJJ? …". Naming the
-            reader is the problem: it tells anyone who is not new that this row
-            is not for them, when a purple belt looking up Leg Entanglement is exactly
-            who it serves. It also greets a returning athlete as a beginner
-            every time they open the tab. An instruction addresses everyone. */}
         {/* What the block below says when the discipline that owns it is off.
             NOT an empty state for "no positions loaded" — that is a different
             failure with a different cause, and conflating them is how "we
@@ -948,221 +981,17 @@ export default function LibraryScreen() {
                 Turn it on to see the belt roadmaps
               </Text>
               {/* `your own chains` joined this list with N181 (#586), because
-                  the sequences block below is gated on the same toggle — so
-                  turning the discipline off now hides an athlete's OWN captured
-                  chains, not only reference content. An absence with nothing
-                  accounting for it is N61 exactly, and this explainer is the
-                  one place that accounts for the others. */}
+                  the sequences block inside the extras sheet is gated on the
+                  same toggle — so turning the discipline off now hides an
+                  athlete's OWN captured chains, not only reference content.
+                  An absence with nothing accounting for it is N61 exactly,
+                  and this explainer is the one place that accounts for the
+                  others. */}
               <Text style={styles.mapLinkNote}>
                 The position map, your own chains and {techniqueSportOff.label} techniques come
                 back too.
               </Text>
             </Pressable>
-          </View>
-        )}
-
-        {/* The chains this athlete captured — moved here from the You tab by
-            N181 (#586), and moved rather than copied, so there is exactly one
-            entry point to `/sequence` in the app.
-
-            **Why here.** You answers "who am I as an athlete"; a list of
-            technique chains is knowledge, and this screen is where this app
-            keeps knowledge — the round map, the belt syllabuses and the
-            position glossary are already below. It is the athlete-authored
-            shelf of the same library.
-
-            **Three things about the gate, and all three are load-bearing
-            because this row is now the only way in.** (#414 is the ticket for
-            what happens when a destination is reachable only by having just
-            arrived at it.)
-
-            1. It reads `techniqueSport`, so it is gated on the technique
-               MODULE and on this server having a technique catalog at all —
-               the same predicate that gates the fetch. A strength-only account
-               has no use for a chain list that can only be empty.
-            2. It deliberately does NOT read `sport`, unlike the position block
-               below it. The sport chip is PERSISTED (`PREF_LIBRARY_SPORT`), so
-               an athlete whose last visit left the filter on Strength would
-               open this screen with the app's only route to their own chains
-               already gone, and nothing on screen saying why.
-            3. It is its own block rather than a row inside the position
-               glossary, because that block additionally requires
-               `positions.length > 0` — a server read. Putting this inside it
-               would make a failed positions fetch silently take the sequences
-               away too, which is the same unreachability arriving by a
-               different door. */}
-        {techniqueSport !== undefined && (
-          <View style={styles.glossary} testID="library-sequences">
-            <Text style={styles.glossaryLabel} accessibilityRole="header">
-              Your own chains
-            </Text>
-            <Pressable
-              onPress={() => router.push('/sequence')}
-              accessibilityRole="button"
-              // A LABEL PLUS A HINT, where the two links below this one fold
-              // their note into a colon-joined label. The difference is
-              // deliberate and it is not style: an `accessibilityLabel`
-              // REPLACES the concatenation of child text, so a colon-label has
-              // to restate the whole note or silently drop part of it — and the
-              // part this note carries that a short label loses is *and the
-              // ones partners sent you*, which is precisely #414's audience,
-              // the athlete hunting for a chain somebody shared last week.
-              // Splitting them means the note cannot go stale against the
-              // label. This is the pattern `NavRow` on the You tab already
-              // uses, which is the screen an athlete arrives here from.
-              accessibilityLabel="Your sequences"
-              accessibilityHint="Chains you captured, step by step, and the ones partners sent you"
-              testID="library-sequences-link"
-              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
-            >
-              <Text style={styles.mapLinkTitle}>Your sequences</Text>
-              <Text style={styles.mapLinkNote}>
-                Chains you captured, step by step — and the ones partners sent you.
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* N441 (#728): the guided runner's only entry point on the phone.
-            Read-only here too, and honestly so — `classplans/index.tsx`'s own
-            empty state already says a plan is built on web, so this row is
-            "run one", not "build one". Same gate as the sequences block above
-            it and for the same reason: a class plan's technique_drill blocks
-            point at the technique catalog, so an account with that module off
-            has nothing here to run. Placed directly below sequences rather
-            than its own new section — both are "an athlete's own ordered
-            technique lists", and a coach who captured a chain here is exactly
-            who also plans a class. */}
-        {techniqueSport !== undefined && (
-          <View style={styles.glossary} testID="library-classplans">
-            <Text style={styles.glossaryLabel} accessibilityRole="header">
-              Your class plans
-            </Text>
-            <Pressable
-              onPress={() => router.push('/classplans')}
-              accessibilityRole="button"
-              accessibilityLabel="Your class plans"
-              accessibilityHint="Pick one to run, built on the web app"
-              testID="library-classplans-link"
-              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
-            >
-              <Text style={styles.mapLinkTitle}>Your class plans</Text>
-              <Text style={styles.mapLinkNote}>
-                Pick one to run — warmup, drilling, rounds, timed block by block.
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        {usesPosition(sport, modules) && positions.length > 0 && (
-          <View style={styles.glossary}>
-            <Text style={styles.glossaryLabel} accessibilityRole="header">
-              Start with positions
-            </Text>
-            {/* Above the cards, because it is what to read BEFORE any single
-                position: the glossary says what each place is, the map says how
-                they connect and which way is up. Opening "Closed Guard" first
-                gives a beginner a definition with nothing to hang it on. */}
-            <Pressable
-              onPress={() => router.push('/bjj/roundmap')}
-              accessibilityRole="button"
-              accessibilityLabel="How a round goes: every position on one map"
-              testID="library-roundmap-link"
-              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
-            >
-              <Text style={styles.mapLinkTitle}>How a round goes</Text>
-              <Text style={styles.mapLinkNote}>
-                Every position on one map, stacked by what it is worth.
-              </Text>
-            </Pressable>
-            {/* N83: build or correct your OWN curriculum, on the phone —
-                previously a desk-only job (`curriculum-and-gameplan-design.md`
-                put building exclusively on web). Reference material above and
-                below is VOLA's; this is the one row in the block that is
-                about what an athlete makes rather than what they read. */}
-            <Pressable
-              onPress={() => router.push('/curriculum')}
-              style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
-              accessibilityRole="button"
-              testID="library-my-curricula"
-            >
-              <Text style={styles.mapLinkTitle}>My curricula</Text>
-              <Text style={styles.mapLinkNote}>
-                Build or edit your own list — techniques, phases, and what
-                mastering each one takes.
-              </Text>
-            </Pressable>
-            {/* Between the map and the positions on purpose. The map is the
-                shape of a round, a syllabus is what a belt owes you, and a
-                position is one place on it — widest first, narrowest last.
-
-                #277 kept these off the phone entirely on a platform-rule
-                argument that does not survive the comparison: this app already
-                carries the whole 542-technique library, searchable, on this
-                very screen. A curated 73-item belt list is smaller than that.
-                They stay off the PLAN tab's Roadmaps strip, which is the half
-                of that reasoning that holds — Plan is what you are working, and
-                these finish nothing. */}
-            {syllabuses.length > 0 && (
-              <>
-                <Text style={styles.syllabusLabel} accessibilityRole="header">
-                  What each belt should know
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.glossaryRow}
-                >
-                  {syllabuses.map((c) => (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => router.push(`/curriculum/${c.id}`)}
-                      hitSlop={6}
-                      style={({ pressed }) => [
-                        styles.syllabusCard,
-                        pressed && styles.posCardPressed,
-                      ]}
-                      accessibilityRole="button"
-                      // The belt AND the count, because "White" alone does not
-                      // say what tapping it gives you.
-                      accessibilityLabel={`${beltLabel(c)} belt, the whole list, ${c.item_count} entries`}
-                      testID={`library-syllabus-${c.id}`}
-                    >
-                      <Text style={styles.syllabusBelt}>{beltLabel(c)}</Text>
-                      <Text style={styles.syllabusCount}>{c.item_count} entries</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </>
-            )}
-            <Text style={styles.syllabusLabel} accessibilityRole="header">
-              {syllabuses.length > 0 ? 'Or read one position' : 'Read one position'}
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.glossaryRow}
-            >
-              {positions.map((p) => {
-                const [code, accent] = positionBadge(p.id);
-                return (
-                  <Pressable
-                    key={p.id}
-                    onPress={() => router.push(`/position/${p.id}`)}
-                    hitSlop={6}
-                    style={({ pressed }) => [styles.posCard, pressed && styles.posCardPressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Read about ${p.name}`}
-                    testID={`library-glossary-${p.id}`}
-                  >
-                    <LibraryTile code={code} accent={accent} />
-                    <Text style={styles.posCardText} numberOfLines={2}>
-                      {p.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
           </View>
         )}
       </View>
@@ -1370,6 +1199,302 @@ export default function LibraryScreen() {
       </Modal>
       )}
 
+      {/*
+        "More from your library" — the one expand affordance for everything
+        that used to be three permanently-stacked cards: your own chains,
+        your class plans, the round map, curricula, belt syllabuses and the
+        position glossary. N469 (#794).
+
+        **Why a bottom sheet, against the issue's three cited sources.**
+
+        1. General 2026 mobile UX guidance (Apple Maps folding its whole
+           search/suggestion surface into a bottom sheet; Telegram moving
+           search off the main list) is the direct precedent: a secondary
+           surface reachable by one tap, layered over the primary one, rather
+           than permanent on-screen chrome. This file already rejected a
+           full-screen `pageSheet` for the facet picker above for the same
+           reason — "a modal context switch for what is really a dropdown" —
+           and everything in this sheet is even more clearly optional than a
+           filter picker, so the same reasoning applies at least as strongly.
+           A dedicated overlay screen (push a route) was rejected for the same
+           reason: it would cost a back-navigation for content the athlete is
+           meant to glance at and dismiss.
+        2. Spotify's Library pattern keeps *filtering* controls as a thin
+           permanent row and reserves anything heavier for the list itself or
+           a picker — it doesn't offer a direct precedent for "several
+           unrelated navigation shortcuts", because Spotify's personal items
+           (pinned playlists) are folded INTO the one list rather than kept as
+           links to other screens. VOLA's chains/class-plans/round-map are
+           genuinely links elsewhere, so the closest fit is "the thing you tap
+           to see more," which a sheet models more directly than an inline
+           accordion would.
+        3. Hevy folds personal (custom) exercises into the SAME searchable
+           list — which is exactly why the position/belt/muscle facets above
+           stayed a single filter row rather than gaining a "your content"
+           tab. But "Your own chains" and "Your class plans" are not rows of
+           the technique/exercise catalog at all; they open entirely different
+           screens with their own data. Hevy's answer doesn't transfer to
+           content that isn't part of the same list.
+
+        **Why not an inline accordion**, which was the other option this
+        ticket named as defensible: expanding one in place, directly above the
+        list, either pushes the list down (reintroducing the scroll-past-
+        the-header problem this ticket exists to fix, just gated behind a
+        tap) or requires the list itself to make room, which risks exactly
+        the "loses scroll position" failure the acceptance criteria calls
+        out by name. A Modal sheet is laid completely outside the FlatList's
+        own tree, so opening and closing it cannot move or remount the list
+        underneath — the scroll position survives by construction, not by
+        care taken to preserve it.
+      */}
+      <Modal
+        visible={extrasOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setExtrasOpen(false)}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setExtrasOpen(false)}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          testID="library-extras-backdrop"
+        />
+        <View
+          style={styles.sheetWrap}
+          pointerEvents="box-none"
+          accessibilityViewIsModal
+          onAccessibilityEscape={() => setExtrasOpen(false)}
+        >
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 10 }]}>
+            <LinearGradient
+              colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0.9, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+            <View style={styles.grabber} />
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>More from your library</Text>
+              <Pressable
+                onPress={() => setExtrasOpen(false)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                testID="library-extras-close"
+              >
+                <Text style={styles.sheetClose}>Done</Text>
+              </Pressable>
+            </View>
+            {/* `KeyboardAwareScrollView`, not a bare `ScrollView` — this
+                sheet has no `TextInput` of its own, but this file's keyboard-
+                coverage guard (`components/__tests__/keyboardCoverage.test.ts`)
+                is file-scoped, not scroller-scoped: ANY bare vertical scroller
+                anywhere in a file that contains a `TextInput` fails it, since
+                the whole point is that a screen doesn't get to reason about
+                which of its scrollers is "the one near the input". Matching
+                the facet sheet's own container just above keeps the file
+                uniform rather than carving out an exception here. */}
+            <KeyboardAwareScrollView contentContainerStyle={styles.extrasBody}>
+              {/* The chains this athlete captured — moved to the Library by
+                  N181 (#586) and moved rather than copied, so there is exactly
+                  one entry point to `/sequence` in the app; moved AGAIN here,
+                  behind the expand affordance, by N469 (#794).
+
+                  **Three things about the gate, and all three are still
+                  load-bearing because this row is now the only way in.**
+                  (#414 is the ticket for what happens when a destination is
+                  reachable only by having just arrived at it.)
+
+                  1. It reads `techniqueSport`, so it is gated on the technique
+                     MODULE and on this server having a technique catalog at
+                     all — the same predicate that gates the fetch. A
+                     strength-only account has no use for a chain list that
+                     can only be empty.
+                  2. It deliberately does NOT read `sport`, unlike the
+                     position block below it. The sport chip is PERSISTED
+                     (`PREF_LIBRARY_SPORT`), so an athlete whose last visit
+                     left the filter on Strength would open this screen with
+                     the app's only route to their own chains already gone,
+                     and nothing on screen saying why.
+                  3. It is its own block rather than a row inside the position
+                     glossary, because that block additionally requires
+                     `positions.length > 0` — a server read. Putting this
+                     inside it would make a failed positions fetch silently
+                     take the sequences away too. */}
+              {techniqueSport !== undefined && (
+                <View style={styles.glossary} testID="library-sequences">
+                  <Text style={styles.glossaryLabel} accessibilityRole="header">
+                    Your own chains
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      setExtrasOpen(false);
+                      router.push('/sequence');
+                    }}
+                    accessibilityRole="button"
+                    // A LABEL PLUS A HINT — an `accessibilityLabel` REPLACES
+                    // the concatenation of child text, so the hint carries
+                    // *and the ones partners sent you*, precisely #414's
+                    // audience, the athlete hunting for a chain a partner
+                    // shared last week.
+                    accessibilityLabel="Your sequences"
+                    accessibilityHint="Chains you captured, step by step, and the ones partners sent you"
+                    testID="library-sequences-link"
+                    style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+                  >
+                    <Text style={styles.mapLinkTitle}>Your sequences</Text>
+                    <Text style={styles.mapLinkNote}>
+                      Chains you captured, step by step — and the ones partners sent you.
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* N441 (#728): the guided runner's only entry point on the
+                  phone. Read-only here too — `classplans/index.tsx`'s own
+                  empty state already says a plan is built on web, so this row
+                  is "run one", not "build one". Same gate as the sequences
+                  block above and for the same reason. */}
+              {techniqueSport !== undefined && (
+                <View style={styles.glossary} testID="library-classplans">
+                  <Text style={styles.glossaryLabel} accessibilityRole="header">
+                    Your class plans
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      setExtrasOpen(false);
+                      router.push('/classplans');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Your class plans"
+                    accessibilityHint="Pick one to run, built on the web app"
+                    testID="library-classplans-link"
+                    style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+                  >
+                    <Text style={styles.mapLinkTitle}>Your class plans</Text>
+                    <Text style={styles.mapLinkNote}>
+                      Pick one to run — warmup, drilling, rounds, timed block by block.
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {usesPosition(sport, modules) && positions.length > 0 && (
+                <View style={styles.glossary}>
+                  <Text style={styles.glossaryLabel} accessibilityRole="header">
+                    Start with positions
+                  </Text>
+                  {/* Above the cards, because it is what to read BEFORE any
+                      single position: the glossary says what each place is,
+                      the map says how they connect and which way is up. */}
+                  <Pressable
+                    onPress={() => {
+                      setExtrasOpen(false);
+                      router.push('/bjj/roundmap');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="How a round goes: every position on one map"
+                    testID="library-roundmap-link"
+                    style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+                  >
+                    <Text style={styles.mapLinkTitle}>How a round goes</Text>
+                    <Text style={styles.mapLinkNote}>
+                      Every position on one map, stacked by what it is worth.
+                    </Text>
+                  </Pressable>
+                  {/* N83: build or correct your OWN curriculum, on the phone. */}
+                  <Pressable
+                    onPress={() => {
+                      setExtrasOpen(false);
+                      router.push('/curriculum');
+                    }}
+                    style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
+                    accessibilityRole="button"
+                    testID="library-my-curricula"
+                  >
+                    <Text style={styles.mapLinkTitle}>My curricula</Text>
+                    <Text style={styles.mapLinkNote}>
+                      Build or edit your own list — techniques, phases, and what
+                      mastering each one takes.
+                    </Text>
+                  </Pressable>
+                  {/* Between the map and the positions on purpose. The map is
+                      the shape of a round, a syllabus is what a belt owes
+                      you, and a position is one place on it — widest first,
+                      narrowest last. */}
+                  {syllabuses.length > 0 && (
+                    <>
+                      <Text style={styles.syllabusLabel} accessibilityRole="header">
+                        What each belt should know
+                      </Text>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.glossaryRow}
+                      >
+                        {syllabuses.map((c) => (
+                          <Pressable
+                            key={c.id}
+                            onPress={() => {
+                              setExtrasOpen(false);
+                              router.push(`/curriculum/${c.id}`);
+                            }}
+                            hitSlop={6}
+                            style={({ pressed }) => [
+                              styles.syllabusCard,
+                              pressed && styles.posCardPressed,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${beltLabel(c)} belt, the whole list, ${c.item_count} entries`}
+                            testID={`library-syllabus-${c.id}`}
+                          >
+                            <Text style={styles.syllabusBelt}>{beltLabel(c)}</Text>
+                            <Text style={styles.syllabusCount}>{c.item_count} entries</Text>
+                          </Pressable>
+                        ))}
+                      </ScrollView>
+                    </>
+                  )}
+                  <Text style={styles.syllabusLabel} accessibilityRole="header">
+                    {syllabuses.length > 0 ? 'Or read one position' : 'Read one position'}
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.glossaryRow}
+                  >
+                    {positions.map((p) => {
+                      const [code, accent] = positionBadge(p.id);
+                      return (
+                        <Pressable
+                          key={p.id}
+                          onPress={() => {
+                            setExtrasOpen(false);
+                            router.push(`/position/${p.id}`);
+                          }}
+                          hitSlop={6}
+                          style={({ pressed }) => [styles.posCard, pressed && styles.posCardPressed]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Read about ${p.name}`}
+                          testID={`library-glossary-${p.id}`}
+                        >
+                          <LibraryTile code={code} accent={accent} />
+                          <Text style={styles.posCardText} numberOfLines={2}>
+                            {p.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+            </KeyboardAwareScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -1466,7 +1591,11 @@ const styles = StyleSheet.create({
     color: vola.text,
   },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // ONE slim, horizontally-scrolling filter row — N469 (#794) — holding both
+  // the sport chips and the facet buttons that used to be two separate rows
+  // (a wrapping chip row, then a scrolling facet row). Both change what the
+  // list shows, which is the one thing that earns a control a spot here.
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 20 },
   chip: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -1480,10 +1609,7 @@ const styles = StyleSheet.create({
   // Ink set inline: what may be written on the accent is the accent's own.
   chipTextActive: {},
 
-
-  // The facet buttons. One row, horizontally scrollable, replacing the two
-  // full option rows that used to be pinned here.
-  facetRow: { gap: 8, paddingRight: 20 },
+  // The facet buttons, sharing the row above with the sport chips.
   facet: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1504,6 +1630,28 @@ const styles = StyleSheet.create({
   facetText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
   facetTextActive: { color: vola.text },
   facetCaret: { transform: [{ rotate: '90deg' }] },
+
+  // The one expand affordance for everything that reads rather than filters
+  // — deliberately NOT chip-shaped, unlike the row above. A pill next to
+  // other pills would read as one more filter; a bordered rectangular row
+  // with a leading icon reads as "opens something else", which is the
+  // distinction the acceptance criteria asks for between the two rows.
+  extrasRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  extrasRowText: { color: vola.textMuted, fontSize: 13, fontWeight: '600' },
+  // The extras sheet body. Horizontal padding lives here rather than on each
+  // section, because inside the sheet nothing else provides it — the fixed
+  // header's `styles.controls` supplied it before this content moved out.
+  extrasBody: { paddingHorizontal: 20, paddingBottom: 24 },
 
   // Dims the list behind without hiding it — you can still see what you are
   // filtering, which is the point of not taking the whole screen.

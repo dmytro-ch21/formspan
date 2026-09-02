@@ -29,6 +29,13 @@ import { PREF_LIBRARY_SPORT } from '@/lib/prefs';
  * Parts 2 and 3 are the two that a reading of the code passes and a test does
  * not: both render perfectly well on a warm, online, unfiltered screen, which
  * is the only state anybody checks by hand.
+ *
+ * N469 (#794) moved this row (and class plans, and the round map/curricula/
+ * position glossary) behind a "More from your library" bottom sheet — none of
+ * them filter the technique list, so they no longer sit in the fixed header.
+ * Every scenario below now opens that sheet (`library-extras-toggle`) before
+ * looking for the link; the three gates above are unchanged, only reachable
+ * one tap later.
  */
 jest.setTimeout(30_000);
 configure({ asyncUtilTimeout: 10_000 });
@@ -151,10 +158,20 @@ beforeEach(() => {
   mockModules = [BJJ_ON];
 });
 
+/**
+ * Opens the "More from your library" sheet. Every scenario below needs the
+ * sheet open before the sequences link is reachable at all — N469 (#794)
+ * moved it there from the fixed header.
+ */
+async function openExtras() {
+  fireEvent.press(await screen.findByTestId('library-extras-toggle'));
+}
+
 describe('the sequences entry (N181)', () => {
   it('is here, and goes to the chain list', async () => {
     render(<LibraryScreen />);
 
+    await openExtras();
     fireEvent.press(await screen.findByTestId('library-sequences-link'));
     expect(mockPush).toHaveBeenCalledWith('/sequence');
   });
@@ -169,6 +186,7 @@ describe('the sequences entry (N181)', () => {
     // the entry point exists.
     render(<LibraryScreen />);
 
+    await openExtras();
     const link = await screen.findByTestId('library-sequences-link');
     expect(link.props.accessibilityLabel).toBe('Your sequences');
     expect(link.props.accessibilityHint).toContain('partners sent you');
@@ -176,13 +194,14 @@ describe('the sequences entry (N181)', () => {
 
   it('survives a failed positions fetch', async () => {
     // The gate this asserts is the one a reading of the code cannot check: the
-    // position glossary below requires `positions.length > 0`, so putting the
+    // position glossary requires `positions.length > 0`, so putting the
     // sequences row inside it would make a 500 on an unrelated fetch silently
     // remove the app's only route to the athlete's own chains. Rejecting rather
     // than resolving empty, so this is a genuinely failed read.
     mockPositions.mockRejectedValue(new Error('Network request failed'));
     render(<LibraryScreen />);
 
+    await openExtras();
     expect(await screen.findByTestId('library-sequences-link')).toBeTruthy();
     // And the block it must not be inside really is absent here, or the
     // assertion above would be true for the wrong reason.
@@ -192,9 +211,9 @@ describe('the sequences entry (N181)', () => {
   it('survives a persisted sport filter set to another discipline', async () => {
     // The sport chip is remembered across visits, so "Strength" is not an
     // exotic state — it is whatever the athlete last tapped. Gating this block
-    // on `sport` (as the position glossary below it legitimately is) would mean
-    // opening the Library and finding the only route to your own chains already
-    // gone, with nothing on screen saying why.
+    // on `sport` (as the position glossary legitimately is) would mean opening
+    // the Library and finding the only route to your own chains already gone,
+    // with nothing on screen saying why.
     mockModules = [BJJ_ON, STRENGTH_ON];
     mockReadPref.mockImplementation(async (_userId: unknown, key: unknown) =>
       key === PREF_LIBRARY_SPORT ? 'strength' : null,
@@ -211,6 +230,7 @@ describe('the sequences entry (N181)', () => {
         screen.getByTestId('library-filter-strength').props.accessibilityState?.selected,
       ).toBe(true),
     );
+    await openExtras();
     expect(screen.getByTestId('library-sequences-link')).toBeTruthy();
   });
 
@@ -223,6 +243,10 @@ describe('the sequences entry (N181)', () => {
     // Wait for the screen itself before asserting an absence, or this passes
     // against a screen that has not rendered at all.
     await screen.findByTestId('library-screen');
+    // The affordance itself has to be gone, not just empty behind it — a
+    // "More from your library" row that opens to nothing is the "state that
+    // cannot be constructed" failure this codebase keeps re-finding.
+    expect(screen.queryByTestId('library-extras-toggle')).toBeNull();
     expect(screen.queryByTestId('library-sequences-link')).toBeNull();
 
     // And the absence is ACCOUNTED FOR rather than silent. This toggle now
