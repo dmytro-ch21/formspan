@@ -15,3 +15,14 @@ allowBuilds:
   utf-8-validate: false
   sharp: true
   unrs-resolver: true
+packageExtensions:
+  # react-native-maps' Expo config plugin requires() @expo/config-plugins at
+  # prebuild time, but the package only declares it as a devDependency. Under
+  # npm/yarn's flat node_modules this accidentally works via hoisting; under
+  # pnpm's strict node_modules it doesn't, and every native iOS build fails
+  # in the "[CP-User] Generate app.config" phase with "Cannot find module
+  # '@expo/config-plugins/build/plugins/ios-plugins'". Promote it to a real
+  # dependency of react-native-maps so pnpm actually exposes it. See F30.
+  react-native-maps:
+    dependencies:
+      '@expo/config-plugins': '*'
