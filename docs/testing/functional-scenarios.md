@@ -16009,3 +16009,73 @@ to prove that claim never collides with either guard.
   deliberate, recorded mobile-first-only scope decision (see
   `docs/decisions/history.md`'s N123 entry), not an oversight. Scenarios for
   a web read-toggle belong to whatever ticket implements it.
+
+## N459 — mobile native scaffolding for GPS running: map library, when-in-use location permission (`apps/mobile/app.json`, `apps/mobile/package.json`)
+
+This ticket is scaffolding only — `expo-location` and `react-native-maps` are
+added as dependencies and app.json is configured, but no running screen
+exists yet (later tickets in this workstream build the actual UI). The
+scenarios below cover the one piece of user-facing behavior this ticket does
+introduce: the location permission flow, which is otherwise easy to
+mis-scope silently (see the history.md entry on the same date for the
+`createPermissionsPlugin` default-text trap this ticket had to suppress by
+hand).
+
+### Happy path
+
+- First time a screen calls `Location.requestForegroundPermissionsAsync()`,
+  confirm the system prompt shows VOLA's own copy — "VOLA uses your location
+  to track your run's route, distance and pace while you're using the app.
+  Location is only accessed while VOLA is open and on screen — VOLA does not
+  track your location in the background or when the app is closed." — not
+  generic boilerplate ("Allow $(PRODUCT_NAME) to access your location").
+- Confirm the prompt offers exactly **"Allow Once" / "Allow While Using App"
+  / "Don't Allow"** — no "Always Allow" option and no second-step upgrade
+  prompt. If an "Always" option appears, `NSLocationAlwaysAndWhenInUseUsageDescription`
+  or `NSLocationAlwaysUsageDescription` has been reintroduced into the build
+  (see the config-plugin trap in the history entry).
+- Tap **Allow While Using App** (or **Allow Once**): confirm the permission
+  request resolves with `status: "granted"`, `ios.scope: "whenInUse"` and a
+  usable `getCurrentPositionAsync()` fix.
+- Once a real map screen exists (future ticket): confirm a `MapView` renders
+  centered on the granted location, using Apple Maps tiles (no Google Maps
+  attribution/branding, since no `iosGoogleMapsApiKey` is configured).
+
+### Edge cases and errors
+
+- Tap **Don't Allow**: confirm the app degrades to an explained empty/denied
+  state on whatever screen requested it — never a silent hang or a crash —
+  and that re-opening iOS Settings → VOLA → Location and flipping it to
+  "While Using the App" is reflected the next time the app checks
+  permissions (no restart required, matching `expo-location`'s documented
+  foreground-permission behavior).
+- Toggle location services off system-wide (Settings → Privacy → Location
+  Services) and confirm the app's error path names that a location is
+  unavailable, distinct from the permission-denied path.
+- Confirm no motion-activity permission prompt appears anywhere — VOLA does
+  not use `NSMotionUsageDescription` in this ticket's scope, and the
+  app.json plugin config explicitly suppresses expo-location's default text
+  for it.
+
+### Auth/security and scope
+
+- Confirm the app never requests "Always" location access anywhere in the
+  product yet — grep the shipped Info.plist for
+  `NSLocationAlwaysAndWhenInUseUsageDescription`/`NSLocationAlwaysUsageDescription`
+  and confirm neither key is present. This is a deliberate v1 scoping
+  decision (foreground/screen-on tracking only, to reduce App Store review
+  risk); a later ticket that adds background tracking must add these
+  deliberately, not inherit them by omission.
+- Confirm `UIBackgroundModes` in the built Info.plist does not contain
+  `location` — background location must not be silently enabled by a future
+  dependency bump or config-plugin default change.
+
+### Needs a device
+
+- The actual system permission-prompt copy, button set and behavior — a
+  Simulator can drive this (and was used to verify this ticket — see
+  history.md) but the review-facing wording and flow should be re-confirmed
+  on a real device before the running feature ships.
+- Whether the granted permission and a rendered map track survive the app
+  being backgrounded and foregrounded again mid-run, once a real running
+  screen exists to test against.

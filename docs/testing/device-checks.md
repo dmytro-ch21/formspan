@@ -687,6 +687,46 @@ promised there is contrast and two distinguishable extremes, not five telling
 apart. If they read as one grey soup, that is a finding worth having.
 
 
+### D28 — The location permission prompt for GPS running (N459)
+
+**Do:** On a fresh install (or after resetting location permissions for VOLA
+in Settings), trigger the first `expo-location` call once a running screen
+exists, and read the system prompt before tapping anything.
+
+**Should:** The prompt reads "VOLA uses your location to track your run's
+route, distance and pace while you're using the app. Location is only
+accessed while VOLA is open and on screen — VOLA does not track your
+location in the background or when the app is closed." with exactly three
+buttons: **Allow Once**, **Allow While Using App**, **Don't Allow** — no
+"Always Allow" option, and no second-step "Change to Always Allow?" upsell
+appearing later. After granting, a `MapView` centered on the device's real
+position renders with Apple Maps tiles (no Google logo/attribution).
+
+**Failure looks like:** Generic boilerplate copy ("Allow $(PRODUCT_NAME) to
+access your location") instead of VOLA's own text — a sign the app.json
+`expo-location` plugin config regressed and is falling through to the
+library's default string. An "Always Allow" option appearing anywhere is a
+scope regression: v1 is explicitly When-In-Use-only (background/lock-screen
+tracking is a deferred fast-follow, not this ticket), and its reappearance
+means `NSLocationAlwaysAndWhenInUseUsageDescription` or
+`NSLocationAlwaysUsageDescription` got reintroduced — check `app.json`'s
+`expo-location` plugin block still sets both to `false`. A blank/grey map, a
+Google Maps watermark, or a build prompt for a Google Maps API key means the
+`react-native-maps` plugin picked up an `iosGoogleMapsApiKey` it should not
+have (Apple Maps is the deliberate v1 choice — see the N459 history.md
+entry).
+
+**Why no test reaches it:** this is exactly the class this document exists
+for — a native permission dialog's copy, button set and the OS's later
+"upgrade to Always?" behavior are properties of the compiled binary and iOS
+itself, not of any prop the suite can assert on. `expo-location`'s config
+plugin silently fills in generic boilerplate for any permission string left
+unset (rather than omitting it), so a passing typecheck and a green `verify`
+prove nothing about what App Store review — or the athlete — actually sees
+in the dialog.
+
+---
+
 ## What is deliberately not here
 
 - **Anything a fixture test already exercises against real SQLite.** The sync,
