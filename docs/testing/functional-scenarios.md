@@ -16599,3 +16599,56 @@ mutually exclusive at `Validate()`.
   page introduces no new backend surface. A comparison against another
   athlete's session id answers with the same indistinguishable 404 N458's
   own scenarios already cover (no such session / not yours / wrong sport).
+
+## N463 — mobile running trend screen: distance over time (`apps/mobile/app/running/trend.tsx`, `apps/mobile/lib/runningTrend.ts`, `apps/mobile/app/running/[id].tsx`)
+
+### Happy path
+
+- Opening a finished run (fresh off Finish, or reopened later from Training
+  History) shows a "Distance over time" row below the stat row; tapping it
+  opens `/running/trend`.
+- The trend screen defaults to the `3M` window: range chips (`1W 1M 3M 6M
+  1Y All`), a delta line ("↑2.1 km since …" / "↓…" / "→…") with the number
+  of runs behind it, the chart, and a capped "RUNS" entries list below, all
+  scoped to the same window.
+- Tapping a different range chip re-slices the already-fetched history
+  instantly (no re-fetch) and redraws the chart, delta and entries list for
+  the new window.
+- The chart draws one dot per run and no connecting line — matching the
+  per-exercise load trend's own reasoning, runs are not daily so a gap
+  between two of them is not a hole in anything.
+- Two runs on the same calendar day both draw as separate dots.
+- Switching the unit system (metric/imperial) redraws the axis, the delta
+  and every entry in km or mi — never a mix of the two on one screen.
+- Entries list is capped at 200 and says so ("Showing the most recent 200 of
+  N") once the athlete has logged more runs than that.
+
+### Edge cases & errors
+
+- No runs ever logged: the chart's spot is replaced by "Record your runs
+  and the trend appears here" rather than a blank box.
+- Runs logged, but none inside the selected window (e.g. `1W` right after a
+  long layoff): "Nothing in this range — you have N readings further back.
+  Try a wider one," not "you haven't run yet."
+- The fetch fails (offline, 5xx): "Couldn't load your runs. It'll be here
+  when the connection is back" — never conflated with "no runs yet."
+- A session that started tracking but was abandoned before Finish (no
+  `run`-exercise set was ever written) contributes no point and no
+  zero-distance dot.
+- A lift or BJJ session that happens to appear in an unfiltered list
+  contributes nothing — only a session carrying a completed `run`-exercise
+  set with a distance becomes a reading.
+
+### Auth/security
+
+- The screen reads `GET /v1/sessions?sport=running`, the same
+  already-authorized listing endpoint and token every other session history
+  screen uses — no new cross-user surface, and a stranger's sessions are
+  never reachable from this screen (server-side scoping to the caller,
+  unchanged).
+
+### Needs a device
+
+- None beyond N460's own device checks — this screen is read-only over data
+  N460's live tracking screen already writes, and nothing here touches GPS,
+  the camera, or any other sensor.
