@@ -28,6 +28,7 @@ import type { SQLiteBindValue } from 'expo-sqlite';
 import { dayString } from './calendar';
 import { ApiError, isOffline, isPermanentRejection, retryAfterOf } from './apiError';
 import { pairedCaffeineEntryId } from './coffeeCaffeine';
+import { FOOD_CAFFEINE_ID_INFIX, pairedFoodCaffeineEntryId } from './foodCaffeine';
 import { getDb, withTransaction } from './db';
 import type { RenderStyle, Tracker, TrackerEntry, TrackerUnit } from './trackerModel';
 import * as api from './trackersApi';
@@ -612,6 +613,99 @@ export async function logCoffeeTap(
 export async function removeCoffeeTap(userId: string, coffeeEntryId: string): Promise<void> {
   await removeTap(userId, coffeeEntryId);
   await removeTap(userId, pairedCaffeineEntryId(coffeeEntryId));
+}
+
+/**
+ * The caffeine entry a logged FOOD item currently has, if any — N468/#792.
+ *
+ * A `LIKE` lookup on the infix rather than a single derived id, because
+ * (see `foodCaffeine.ts`'s own doc on `pairedFoodCaffeineEntryId`) a food
+ * entry's caffeine entry is superseded, never edited, across the food's own
+ * edits — so "the current one" has to be looked up rather than recomputed.
+ * `deleted_at IS NULL` is load-bearing: a tombstoned row from a PRIOR
+ * revision must not be handed back as "the live one" the next time this
+ * runs, or `syncFoodCaffeineEntry` would compare against an entry that no
+ * longer counts and skip writing a real one.
+ */
+async function findLiveFoodCaffeineEntry(
+  userId: string,
+  foodEntryId: string,
+): Promise<{ id: string; amount: number; logged_on: string } | null> {
+  const db = await getDb();
+  return db.getFirstAsync<{ id: string; amount: number; logged_on: string }>(
+    `SELECT id, amount, logged_on FROM tracker_entries
+      WHERE user_id = ? AND id LIKE ? ESCAPE '\\' AND deleted_at IS NULL
+      LIMIT 1`,
+    userId, `${likeEscape(foodEntryId)}${FOOD_CAFFEINE_ID_INFIX}%`,
+  );
+}
+
+/** Escapes SQLite `LIKE` wildcards in an id before it goes into a pattern —
+ *  a food entry id is a `randomUUID()` and never contains one today, but a
+ *  pattern built from unescaped user-adjacent data is the kind of thing that
+ *  is wrong quietly rather than loudly the one time it is not. */
+function likeEscape(s: string): string {
+  return s.replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * Keep a logged food item's caffeine entry in sync with what the food entry
+ * currently says — N468/#792. Called from `foodLog.ts` on every log and
+ * edit of a food entry, exactly the way `logCoffeeTap` is called from a
+ * coffee tap; the difference is this is driven by the FOOD write, not a UI
+ * gesture, because "any coffee logged at any time of day should
+ * automatically add to the caffeine tracker" is a fact about the food log,
+ * not about which screen happened to write it.
+ *
+ * `caffeineTracker: null` (the athlete has none) or `mg: null` (the food is
+ * not recognised as caffeinated, or was edited to no longer be) both mean
+ * "this food entry should have no caffeine entry" — and if one exists from
+ * an earlier state, it is tombstoned rather than left stranded, which is
+ * the "cannot leave the two disagreeing" half of this ticket: editing a
+ * "Latte" down to a "Decaf Latte" removes the caffeine entry the original
+ * name caused, exactly as removing the food item outright does via
+ * {@link removeFoodCaffeineEntry}.
+ *
+ * A no-op, deliberately, when nothing actually changed (same mg, same day)
+ * — so an edit to a food's serving name or notes that leaves its caffeine
+ * figure untouched does not tombstone-and-recreate the entry for no reason.
+ */
+export async function syncFoodCaffeineEntry(
+  userId: string,
+  foodEntryId: string,
+  caffeineTracker: Tracker | null,
+  mg: number | null,
+  on: string,
+): Promise<void> {
+  const target = caffeineTracker && mg != null ? Math.round(mg) : null;
+  const existing = await findLiveFoodCaffeineEntry(userId, foodEntryId);
+
+  if (existing && existing.amount === target && existing.logged_on === on) return; // already in sync
+
+  if (existing) await removeTap(userId, existing.id);
+
+  if (caffeineTracker && target != null) {
+    const db = await getDb();
+    const id = pairedFoodCaffeineEntryId(foodEntryId, randomUUID());
+    const now = stamp();
+    await db.runAsync(
+      `INSERT INTO tracker_entries
+         (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
+       VALUES (?,?,?,?,?,?,?,1,0)`,
+      id, caffeineTracker.id, userId, on, now, target, now,
+    );
+  }
+}
+
+/**
+ * Undo whatever caffeine entry a food item currently has, if any — called
+ * when the food entry itself is removed. A harmless no-op when the food was
+ * never recognised as caffeinated, or the athlete has no caffeine tracker,
+ * matching `removeCoffeeTap`'s own "both skip cases are free" shape.
+ */
+export async function removeFoodCaffeineEntry(userId: string, foodEntryId: string): Promise<void> {
+  const existing = await findLiveFoodCaffeineEntry(userId, foodEntryId);
+  if (existing) await removeTap(userId, existing.id);
 }
 
 /**

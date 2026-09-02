@@ -32,7 +32,9 @@ import { randomUUID } from 'expo-crypto';
 import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
 import { addDays, dayString } from './calendar';
 import { getDb, withTransaction } from './db';
+import { caffeineMgForFoodEntry } from './foodCaffeine';
 import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from './nutrition';
+import { localTrackers, removeFoodCaffeineEntry, syncFoodCaffeineEntry } from './trackers';
 import * as api from './nutritionApi';
 import { PREF_FOOD_BACKFILL_DONE_AT, PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
 import type { TokenGetter } from './useAuthToken';
@@ -153,6 +155,7 @@ export async function logFood(userId: string, input: NewEntry): Promise<string> 
     input.source_food_id ?? null, input.category ?? null, input.notes ?? '', now, now,
   );
   if (input.source_food_id) await noteFoodUsed(userId, input.source_food_id, input.eaten_on);
+  await syncFoodCaffeine(userId, id, input);
   return id;
 }
 
@@ -172,6 +175,7 @@ export async function editEntry(userId: string, id: string, input: NewEntry): Pr
     input.source_food_id ?? null, input.category ?? null, input.notes ?? '', stamp(), id, userId,
   );
   if (r.changes === 0) throw new Error('That entry no longer exists on this device.');
+  await syncFoodCaffeine(userId, id, input);
 }
 
 /**
@@ -196,14 +200,57 @@ export async function removeEntry(userId: string, id: string): Promise<void> {
   // deleted again. A tombstone costs one row and closes the window.
   if (row.remote === 0 && row.dirty === 0) {
     await db.runAsync(`DELETE FROM food_entries WHERE id = ? AND user_id = ?`, id, userId);
-    return;
+  } else {
+    const now = stamp();
+    await db.runAsync(
+      `UPDATE food_entries SET deleted_at = ?, dirty = 1, updated_at = ?, last_error = NULL
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+      now, now, id, userId,
+    );
   }
-  const now = stamp();
-  await db.runAsync(
-    `UPDATE food_entries SET deleted_at = ?, dirty = 1, updated_at = ?, last_error = NULL
-      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
-    now, now, id, userId,
-  );
+  // Whichever branch removed it, the food no longer exists — any caffeine
+  // entry it caused must go with it, or the caffeine tracker would keep
+  // counting a coffee the food log no longer shows. Best-effort: see
+  // `syncFoodCaffeine`'s own doc comment for why this never fails the
+  // removal itself.
+  await removeFoodCaffeineSafely(userId, id);
+}
+
+/**
+ * The food-to-caffeine link — N468/#792. Computes whether `input` is
+ * recognised as caffeinated (`caffeineMgForFoodEntry`, the name-matching
+ * heuristic documented in `foodCaffeine.ts`) and keeps the athlete's
+ * caffeine tracker, if they have one, in sync with it via
+ * `syncFoodCaffeineEntry` in `trackers.ts`.
+ *
+ * **Best-effort, deliberately.** Logging or editing a food is the core loop
+ * this whole app exists for; a bug in caffeine estimation, or a caffeine
+ * tracker row that fails to write, must never turn into a food entry that
+ * failed to save. The same "an accelerator, not a requirement" posture this
+ * codebase already gives the proficiency and focus fetches elsewhere —
+ * swallowed here rather than surfaced, because there is no error banner on
+ * this screen that would not read as "your food did not save" when it did.
+ */
+async function syncFoodCaffeine(userId: string, foodEntryId: string, input: NewEntry): Promise<void> {
+  try {
+    const view = await localTrackers(userId);
+    if (view.state !== 'ready') return; // never fetched — nothing to sync against yet
+    const caffeineTracker = view.trackers.find((t) => t.preset === 'caffeine') ?? null;
+    const mg = caffeineMgForFoodEntry({ name: input.name, servings: input.servings });
+    await syncFoodCaffeineEntry(userId, foodEntryId, caffeineTracker, mg, input.eaten_on);
+  } catch {
+    // See the doc comment above — this must never be why a food write fails.
+  }
+}
+
+/** `removeFoodCaffeineEntry`, swallowed — see `syncFoodCaffeine`'s own note. */
+async function removeFoodCaffeineSafely(userId: string, foodEntryId: string): Promise<void> {
+  try {
+    await removeFoodCaffeineEntry(userId, foodEntryId);
+  } catch {
+    // Best-effort, matching `syncFoodCaffeine` — the food removal above has
+    // already committed by the time this runs.
+  }
 }
 
 /** One day's entries, tombstones excluded. SQLite only — works offline. */
