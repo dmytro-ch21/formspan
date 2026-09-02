@@ -11251,6 +11251,36 @@ sentence.
   a sentence with no six in it becomes 1. This is N40's error class — an
   invented row is visible to somebody correcting a draft, an invented number
   reads exactly like a correct one.
+- **A definite number the athlete DID say lands in the tag's `count`** (N121
+  /#510). "I hit two armbars from closed guard" produces a tag with
+  `count: 2`, no notice — assert the number specifically, not just that a tag
+  exists. This is the counterpart to the bullet above: the guard exists to
+  catch an invented number, and a test suite that only exercises the reject
+  path would pass against a handler that floors every count to 1 regardless
+  of what was said.
+- **On the confirm screen, a floored count reads as BLANK, not as a confident
+  1** (N121/#510). `Tag.count` on the wire has no null — `ResolveDraft` floors
+  an unverifiable count to 1 rather than to nothing — so the mobile client
+  must distinguish "the server could not verify this" from "the athlete said
+  one" using the draft's own `notices` array (a `not_spoken`,
+  `count_below_one`, or `hedged_count` notice on `tags[i].count`). A test that
+  only checks the saved value is right, without ever rendering the stepper,
+  would pass against a screen where the two states are visually identical —
+  which is the reported bug: the athlete cannot tell a real 1 from "we don't
+  know" and has no reason to check either.
+- **An INDEFINITE quantity the model correctly declines to invent a number
+  for still produces a notice** (N121/#510, caught in review — `ac-verifier`
+  against the first version of this fix). "A couple of sweeps" correctly
+  leaves `count` at 1 with `count_hedged: true` on the wire, which
+  `ResolveDraft` turns into a `hedged_count` notice even though `count` itself
+  is never touched (1 is not `<1`, not `>1`, not over the ceiling — it matches
+  none of the floor guard's own cases). The trap: a test asserting only "the
+  model does not invent a specific number for a hedge" passes against a
+  handler that produces ZERO notices on that path, silently failing the
+  ticket's own "stays null and the confirm screen asks" criterion on exactly
+  the common, well-behaved case. Assert the notice exists and that the
+  confirm screen's stepper renders it as uncertain, not just that `count`
+  stayed at a low number.
 - **The quota is checked BEFORE the model is called.** At the cap the response
   is 429 and the upstream is never reached; a test that only checks the status
   passes against a handler that spent the money first. Count the calls.
@@ -11307,6 +11337,52 @@ sentence.
   all of the request; prompt caching is a prefix match, so an order that wanders
   between calls re-bills the whole thing and the feature costs roughly ten times
   what it should. Nothing functional fails — only the bill moves.
+- **A count reported "empty" by an athlete is a regression class of its own**
+  (N121/#510). The reported failure was a definite number ("two armbars")
+  spoken and not captured — distinct from #371's already-correct behaviour of
+  leaving an INDEFINITE quantity ("a couple of sweeps") uncounted. A
+  functional test for this should use a real recorded dictation from
+  `evals/bjj-dictation/pending/` or a promoted `recorded` case in
+  `cases.json`, not an authored sentence — an authored one already proved the
+  format works when N37 first measured this route; it is real speech,
+  specifically a run-on sentence stating several counted outcomes back to
+  back with no punctuation, that has actually broken this.
+
+### The count-uncertainty UI, specifically (`apps/mobile/app/bjj/dictate.tsx`, N121/#510)
+
+- **Blank and a genuine 1 render distinguishably.** Two tags on the same
+  confirm screen, one whose count carries a `not_spoken` notice and one that
+  does not — the flagged one shows the blank glyph with a "how many? we
+  weren't sure" hint, the other shows an ordinary "1" with neither.
+- **Tapping "+" or "−" on a blank count confirms it**, and it stops rendering
+  as blank from that point on — even though the underlying value may not have
+  changed (pressing "−" on a blank floored-to-1 count confirms at 1, not at
+  0). A test that only checks the saved count is right would miss a stepper
+  stuck showing the blank glyph forever after the athlete already answered it.
+- **"−" on a blank count confirms at the floor rather than deleting the tag.**
+  A blind decrement on an unconfirmed count must not read as "remove this" —
+  that would silently drop a real event the model already extracted evidence
+  for. Only a SECOND press, once the count is a confirmed real number, removes
+  it, matching the ordinary (non-blank) stepper's existing behaviour.
+- **The notice text does not say "blank" for a tag count.** `rounds`
+  genuinely goes to `null` on a `not_spoken` notice and "is blank" is correct
+  there; a tag's `count` is floored to 1, not nulled, so the same copy would
+  contradict the "1" the athlete can see on screen below it. Assert the two
+  render different sentences for the same `not_spoken` reason code.
+- **A `hedged_count` notice reaches the SAME blank stepper as `not_spoken`
+  and `count_below_one`** — this is the well-behaved model path, not a
+  misbehaving one, and it is the path #510's own report was mostly about
+  ("probably three or four submissions", an indefinite quantity, not a
+  dropped definite one). Give the confirm screen a tag whose only notice is
+  `hedged_count` and assert the stepper reads blank with the hint, exactly
+  as it would for a caught mistake — a test that only exercises
+  `not_spoken`/`count_below_one` would miss a regression that broke this
+  path specifically while leaving the other two intact.
+- **The `hedged_count` message does not accuse the model of an error.**
+  Unlike `not_spoken` ("we couldn't match a number") and `count_below_one`
+  ("came back as X"), nothing was wrong here — the athlete gave a range, not
+  a number, and the model correctly declined to invent one. Assert the copy
+  reads as reporting a range rather than correcting a mistake.
 ## The label macros (N52 — `food_catalog`, barcode scans, saved foods, entries)
 
 Saturated fat, total sugars, added sugars, sodium and cholesterol, across five

@@ -65,6 +65,7 @@ export type NoticeReason =
   | 'not_spoken'
   | 'unknown_value'
   | 'count_below_one'
+  | 'hedged_count'
   | 'too_many_tags';
 
 /**
@@ -477,6 +478,50 @@ export function tagOf(d: DraftTag): Tag {
   };
 }
 
+/** Does a notice's `field` name a tag's `count`, e.g. "tags[2].count"? */
+function isTagCountField(field: string): boolean {
+  return /^tags\[\d+\]\.count$/.test(field);
+}
+
+/**
+ * Which of a draft's tags carry a count the athlete should double-check.
+ *
+ * `Tag.count` has no null to floor an unverifiable number TO — `ResolveDraft`
+ * floors it to 1 instead (N121/#510), so a tag the athlete gave no number for
+ * and a tag they said was genuinely "one" arrive identical on the wire. This
+ * is the one place that tells them apart, by reading the notices the server
+ * already sends rather than inventing a second signal: index `i` is `true`
+ * when `tags[i].count` carries a `not_spoken`, `count_below_one`, or
+ * `hedged_count` notice.
+ *
+ * `hedged_count` is the important one to include, not an afterthought: it is
+ * what fires on the COMMON, well-behaved path — the model correctly reading
+ * "a couple of sweeps" as a hedge and leaving `count` at 1 on purpose. That
+ * produces no `not_spoken`/`count_below_one` notice at all (1 is a perfectly
+ * ordinary count), so without `hedged_count` a compliant hedge and a
+ * genuinely-stated "one" would still be indistinguishable — the model doing
+ * exactly what the prompt now asks would still read as a silent, confident 1.
+ * `not_spoken`/`count_below_one` only cover the model MISBEHAVING (inventing
+ * or malforming a number); `hedged_count` covers it behaving correctly on an
+ * indefinite quantity, which is the more common case and the one this
+ * ticket's "stays null and the confirm screen asks" criterion is about.
+ *
+ * Order-dependent on `draft.tags` — the caller's `detail.tags` starts as
+ * exactly this array (`draftToDetail` maps 1:1) and must keep any array built
+ * from this result in step with it through every edit, not just at mount.
+ */
+export function uncertainCountFlags(draft: Draft): boolean[] {
+  const flags = draft.tags.map(() => false);
+  for (const n of draft.notices) {
+    if (!isTagCountField(n.field)) continue;
+    if (n.reason !== 'not_spoken' && n.reason !== 'count_below_one' && n.reason !== 'hedged_count') continue;
+    const m = /^tags\[(\d+)\]\.count$/.exec(n.field);
+    const i = m ? Number(m[1]) : -1;
+    if (i >= 0 && i < flags.length) flags[i] = true;
+  }
+  return flags;
+}
+
 /**
  * A human sentence for a notice.
  *
@@ -486,13 +531,25 @@ export function tagOf(d: DraftTag): Tag {
 export function describeNotice(n: Notice): string {
   switch (n.reason) {
     case 'not_spoken':
-      return `We couldn’t find “${n.was}” in what you said, so ${fieldLabel(n.field)} is blank.`;
+      // A tag's count is never actually left blank — `ResolveDraft` floors it
+      // to 1, because `count` has no null to floor to — so saying "is blank"
+      // here would describe a state the field is not in. The stepper itself
+      // shows the blank state now (see `uncertainCountFlags`); this text
+      // describes what really happened instead.
+      return isTagCountField(n.field)
+        ? `We heard a number but couldn’t match “${n.was}” to what you said, so this count is set to 1 — check it.`
+        : `We couldn’t find “${n.was}” in what you said, so ${fieldLabel(n.field)} is blank.`;
     case 'unknown_technique':
       return `“${n.was}” isn’t a technique we know, so it’s waiting for you to pick one.`;
     case 'unknown_value':
       return `“${n.was}” isn’t something we can record for ${fieldLabel(n.field)}.`;
     case 'count_below_one':
       return `${capitalise(fieldLabel(n.field))} came back as “${n.was}”, so we set it to 1.`;
+    case 'hedged_count':
+      // Distinct from both cases above on purpose: nothing was rejected or
+      // malformed here — the athlete said something like "a couple" or "a
+      // few", and that is not a number to guess a value from.
+      return `You said a range, not a number, so this count is left at 1 — set the real one.`;
     case 'too_many_tags':
       return `That was a lot — we kept the first ${n.was} and dropped the rest.`;
     default:

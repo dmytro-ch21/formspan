@@ -73,6 +73,7 @@ import {
   draftErrorMessage,
   draftReflection,
   draftToDetail,
+  uncertainCountFlags,
   type Draft,
   type DraftQuota,
   type UnresolvedPhrase,
@@ -130,6 +131,16 @@ export default function DictateReflectionScreen() {
   // worse than no notice.
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [unresolved, setUnresolved] = useState<UnresolvedPhrase[]>([]);
+  // Parallel to `detail.tags`, index for index — NOT part of `detail` itself,
+  // because `Tag` is the shared domain type the manual wizard also writes and
+  // this is purely a "did the athlete confirm this number" flag for the
+  // dictation screen. Kept in step with `detail.tags` by every operation that
+  // resizes it: `setTagCount` clears an index, `dropTag` splices one out,
+  // `resolvePhrase` appends `false` for the freshly-picked tag. See N121/#510:
+  // a count the server could not verify (floored to 1 rather than left null,
+  // because `Tag.count` has no null to floor TO) used to render identically to
+  // a count the athlete actually said was 1 — this is what tells them apart.
+  const [countUncertain, setCountUncertain] = useState<boolean[]>([]);
 
   // The technique library, fetched ONCE for the whole screen rather than once
   // per unresolved phrase. `fetchTechniques` caches, but only after the first
@@ -179,6 +190,7 @@ export default function DictateReflectionScreen() {
       setQuota(res.quota);
       setDetail(draftToDetail(res.draft, DEFAULT_KIND));
       setUnresolved(res.draft.unresolved);
+      setCountUncertain(uncertainCountFlags(res.draft));
     } catch (err) {
       // NEVER `err.message`. The server's prose is written for an API consumer
       // and one sentence of it told an athlete they had spoken badly about a
@@ -239,10 +251,14 @@ export default function DictateReflectionScreen() {
     setDetail((d) =>
       d ? { ...d, tags: d.tags.map((t, n) => (n === i ? { ...t, count } : t)) } : d,
     );
+    // The athlete just chose a number with their thumb, so whatever the model
+    // guessed no longer matters — this is now confirmed the ordinary way.
+    setCountUncertain((flags) => flags.map((f, n) => (n === i ? false : f)));
   }
 
   function dropTag(i: number) {
     setDetail((d) => (d ? { ...d, tags: d.tags.filter((_, n) => n !== i) } : d));
+    setCountUncertain((flags) => flags.filter((_, n) => n !== i));
   }
 
   /** Resolving a phrase adds the tag it was always going to be. */
@@ -265,6 +281,9 @@ export default function DictateReflectionScreen() {
         : d,
     );
     setUnresolved((list) => list.filter((x) => x !== p));
+    // Appended, not floored — the athlete just picked this technique
+    // themselves, so its count is exactly as confirmed as if they had typed it.
+    setCountUncertain((flags) => [...flags, false]);
   }, []);
 
   const dismissPhrase = useCallback((p: UnresolvedPhrase) => {
@@ -491,6 +510,7 @@ export default function DictateReflectionScreen() {
                   <TagRow
                     key={i}
                     tag={t}
+                    countUncertain={countUncertain[i] ?? false}
                     onCount={(c) => setTagCount(i, c)}
                     onRemove={() => dropTag(i)}
                   />
@@ -641,10 +661,18 @@ function Stepper({
 
 function TagRow({
   tag,
+  countUncertain,
   onCount,
   onRemove,
 }: {
   tag: Tag;
+  /**
+   * True when the server floored this count to 1 rather than confirming it —
+   * "the athlete never said" and "the athlete said one" are different answers
+   * (N121/#510), so this renders as blank rather than as a normal 1 until the
+   * athlete's own thumb sets a number.
+   */
+  countUncertain: boolean;
   onCount: (c: number) => void;
   onRemove: () => void;
 }) {
@@ -655,24 +683,50 @@ function TagRow({
     <View style={styles.tagRow}>
       <View style={styles.tagText}>
         <Text style={styles.tagTitle}>{title}</Text>
+        {countUncertain && <Text style={styles.rowHint}>How many? We weren’t sure.</Text>}
       </View>
       <View style={styles.stepper}>
         <Pressable
-          onPress={() => (tag.count <= 1 ? onRemove() : onCount(tag.count - 1))}
+          onPress={() => {
+            // Blank confirms downward first — a "−" here means "it happened,
+            // but not more than that", which is the floor already on record.
+            // Only a second press, once the number is a real one, removes it.
+            if (countUncertain) {
+              onCount(tag.count);
+              return;
+            }
+            if (tag.count <= 1) onRemove();
+            else onCount(tag.count - 1);
+          }}
           style={styles.stepButton}
           accessibilityRole="button"
-          accessibilityLabel={tag.count <= 1 ? `Remove ${title}` : `One fewer ${title}`}
+          accessibilityLabel={
+            countUncertain ? `Confirm ${title} at ${tag.count}` : tag.count <= 1 ? `Remove ${title}` : `One fewer ${title}`
+          }
         >
           <Text style={styles.stepGlyph}>−</Text>
         </Pressable>
-        <Text style={styles.stepValue} accessibilityLabel={`${tag.count} ${title}`}>
-          {tag.count}
+        <Text
+          style={[styles.stepValue, countUncertain && styles.stepBlank]}
+          accessibilityLabel={countUncertain ? `${title}: how many? not set` : `${tag.count} ${title}`}
+        >
+          {countUncertain ? '—' : tag.count}
         </Text>
         <Pressable
-          onPress={() => onCount(tag.count + 1)}
+          onPress={() => {
+            // Same reasoning as "−": the count is already floored to 1
+            // underneath a blank stepper, invisibly. Incrementing THAT (to 2)
+            // is not what an athlete tapping "+" once from "—" is asking for
+            // — matches the session-level `Stepper`'s own null-count
+            // semantics, where "+" from blank also lands on 1, not 2.
+            onCount(countUncertain ? tag.count : tag.count + 1);
+          }}
           style={styles.stepButton}
           accessibilityRole="button"
-          accessibilityLabel={`One more ${title}`}
+          // Both step buttons confirm the same floor on a first press from
+          // blank — worded differently from "−"'s so the two remain
+          // individually addressable to a screen reader (and to a test).
+          accessibilityLabel={countUncertain ? `Set ${title} to ${tag.count}` : `One more ${title}`}
         >
           <Text style={styles.stepGlyph}>+</Text>
         </Pressable>

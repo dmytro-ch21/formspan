@@ -220,6 +220,109 @@ func TestACountTheAthleteDidSaySurvives(t *testing.T) {
 	}
 }
 
+// N121 (#510): the athlete reported that counts spoken aloud were coming back
+// empty. Investigation against the two REAL recorded dictations in
+// evals/bjj-dictation/pending/ (rec-01, rec-02 — not authored, per #371's
+// corpus rule) found the guard below is not the mechanism: it already fires
+// correctly on this class of sentence, a hedge sitting beside definite counts
+// for other categories. The actual bug is upstream, in the model call itself
+// (fixed in reflect_rules.txt), which non-deterministically defaulted `count`
+// to 1 even when a definite number was spoken. This test pins the half of
+// that story that belongs in Go: once the model DOES emit the count the
+// athlete said, the validation layer here must not floor it back down.
+//
+// The dictation below is an ORIGINAL sentence, not the real recording's
+// words — `evals/bjj-dictation/record.py`'s own convention is that an
+// athlete's raw recorded speech enters git only when deliberately promoted
+// (and redacted if needed), and a unit test pinning a validation guard is
+// not that decision to make in passing. This function's assertions only ever
+// check that the digit "five" is findable in the text twice, for two
+// different tags, alongside an unrelated hedge — the exact prose carrying
+// that shape does not need to be anyone's real words.
+func TestACountFromTheRealRecordedCorpusSurvives(t *testing.T) {
+	// The hedged "a handful" correctly stays at whatever the model proposes;
+	// "five passes" and "five submissions" are definite and must survive
+	// untouched.
+	const dictation = "Solid no-gi session, lots of live rounds throughout. Couldn't tell you " +
+		"exactly how many sweeps I pulled off — maybe a handful — but I know " +
+		"for a fact it was five passes and five submissions by the end."
+
+	for _, tc := range []struct {
+		name     string
+		category Category
+		count    int
+	}{
+		{"passes", CategoryPass, 5},
+		{"submissions", CategorySubmission, 5},
+	} {
+		raw := Draft{Tags: []DraftTag{{Category: tc.category, Event: EventScored, Count: tc.count}}}
+		got := ResolveDraft(raw, fixtureCatalog(), dictation)
+		if got.Tags[0].Count != tc.count {
+			t.Errorf("%s: count = %d, want %d kept — the athlete said %q in this exact sentence",
+				tc.name, got.Tags[0].Count, tc.count, "five")
+		}
+		if len(got.Notices) != 0 {
+			t.Errorf("%s: notices = %+v, want none — a spoken count is not a notice-worthy floor", tc.name, got.Notices)
+		}
+	}
+}
+
+// The other half of N121/#510 — found by `ac-verifier` reviewing the first
+// version of this fix, not by the original investigation.
+//
+// A model that follows the new prompt rule for a hedge leaves `count` at 1,
+// which matches NONE of the switch's existing cases (1 is not <1, not >1, not
+// >max) — so on its own it produced zero notices, and a compliant hedge was
+// indistinguishable on the wire from an athlete who genuinely said "one".
+// That silently failed the ticket's own AC2/AC3 ("stays null and the confirm
+// screen asks") on exactly the path the new prompt paragraph was designed to
+// produce — the fix and the bug shared a blind spot. `CountHedged` closes it:
+// the model's own report of a hedge becomes a notice regardless of what
+// `count` ends up being.
+func TestAHedgedCountIsNeverInventedAndAlwaysAsked(t *testing.T) {
+	raw := Draft{Tags: []DraftTag{{
+		Category: CategorySweep, Event: EventScored, Count: 1, CountHedged: true,
+	}}}
+
+	got := ResolveDraft(raw, fixtureCatalog(), "maybe a couple of sweeps, hard to say")
+
+	if got.Tags[0].Count != 1 {
+		t.Errorf("count = %d, want 1 — a hedge is never invented into a specific number", got.Tags[0].Count)
+	}
+	if len(got.Notices) != 1 || got.Notices[0].Reason != NoticeHedgedCount || got.Notices[0].Field != "tags[0].count" {
+		t.Fatalf("notices = %+v, want exactly one %s on tags[0].count", got.Notices, NoticeHedgedCount)
+	}
+	// The flag is consumed, not echoed — a client reading a raw draft a second
+	// time (or the confirmed session round-tripping through Tag) must never
+	// see `count_hedged: true` on anything ResolveDraft has already processed.
+	if got.Tags[0].CountHedged {
+		t.Error("CountHedged survived onto the resolved tag; it must be cleared after producing its notice")
+	}
+}
+
+// A tag can be malformed AND hedged in a way the prompt never intends (a
+// model bug on top of a model bug) — the floor for a bad count must still
+// apply.  the hedge notice is additional information about a number that was
+// never invented in the first place, not a substitute for the ordinary floor.
+func TestAHedgedCountBelowOneIsStillFlooredAndBothNoticesFire(t *testing.T) {
+	raw := Draft{Tags: []DraftTag{{
+		Category: CategorySweep, Event: EventScored, Count: 0, CountHedged: true,
+	}}}
+
+	got := ResolveDraft(raw, fixtureCatalog(), "a couple of sweeps, not sure exactly")
+
+	if got.Tags[0].Count != 1 {
+		t.Errorf("count = %d, want 1 — a malformed count still floors regardless of the hedge flag", got.Tags[0].Count)
+	}
+	if len(got.Notices) != 2 {
+		t.Fatalf("notices = %+v, want two — the floor AND the hedge are both real, independent facts", got.Notices)
+	}
+	reasons := map[string]bool{got.Notices[0].Reason: true, got.Notices[1].Reason: true}
+	if !reasons[NoticeCountBelowOne] || !reasons[NoticeHedgedCount] {
+		t.Errorf("notices = %+v, want one %s and one %s", got.Notices, NoticeCountBelowOne, NoticeHedgedCount)
+	}
+}
+
 // The forms people actually say. Each of these was a false DROP before it was
 // added — a correct number the guard could not find, which costs the athlete a
 // blank field. That is the cheap failure by design, but it is still a failure,

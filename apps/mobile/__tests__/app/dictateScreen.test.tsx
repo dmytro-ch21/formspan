@@ -192,6 +192,145 @@ it('shows what the server changed, in words rather than reason codes', async () 
   expect(screen.queryByText(/not_spoken/)).toBeNull();
 });
 
+/**
+ * N121/#510: "I mention the submissions I completed, takedowns, sweeps — but
+ * they never get counted in the log."
+ *
+ * Two different tags below: one whose count the server floored to 1 (never
+ * confirmed — must read as blank, not as a normal "1"), and one the athlete
+ * genuinely said was "one" (a real 1 — must read as an ordinary count).
+ * Collapsing those two into the same stepper display is the bug the ticket
+ * describes: a spoken count that silently reads exactly like "none said".
+ */
+describe('a tag count the server could not verify', () => {
+  it('reads as blank rather than as a confident 1, distinct from a real 1', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [
+          { category: 'submission', event: 'scored', position: '', technique_id: null, count: 1 }, // floored — the athlete said "five"
+          { category: 'sweep', event: 'scored', position: '', technique_id: null, count: 1 }, // genuinely said "one sweep"
+        ],
+        notices: [{ field: 'tags[0].count', was: '5', reason: 'not_spoken' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak('five submissions, one sweep');
+
+    await waitFor(() => {
+      expect(screen.getByText('scored submission')).toBeTruthy();
+    });
+    // The uncertain tag shows the blank glyph and says so beside it — not "1".
+    expect(screen.getByLabelText('scored submission: how many? not set')).toBeTruthy();
+    expect(screen.getByText(/we weren.t sure/i)).toBeTruthy();
+    // The confirmed tag still reads as an ordinary, un-flagged "1".
+    expect(screen.getByLabelText('1 scored sweep')).toBeTruthy();
+
+    // And the notice text itself no longer claims the field is blank — it is
+    // showing "1" on screen right now, so saying "blank" would contradict
+    // what the athlete can see.
+    expect(screen.getByTestId('dictate-notices')).toBeTruthy();
+    expect(screen.queryByText(/is blank/i)).toBeNull();
+  });
+
+  it('stops reading as blank the moment the athlete sets a real number', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'pass', event: 'scored', position: '', technique_id: null, count: 1 }],
+        notices: [{ field: 'tags[0].count', was: '5', reason: 'not_spoken' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak('five passes');
+    await waitFor(() => {
+      expect(screen.getByLabelText('scored pass: how many? not set')).toBeTruthy();
+    });
+
+    // "+" on a blank count confirms at the hidden floor first — same reasoning
+    // as "−": the underlying value is already 1, and jumping straight to 2
+    // would silently double-count for an athlete who tapped once meaning "yes,
+    // one". Matches the session-level `Stepper`'s own null-count semantics.
+    fireEvent.press(screen.getByLabelText('Set scored pass to 1'));
+    expect(screen.queryByLabelText('scored pass: how many? not set')).toBeNull();
+    expect(screen.getByLabelText('1 scored pass')).toBeTruthy();
+
+    // Now an ordinary, un-flagged stepper — a second "+" behaves normally.
+    fireEvent.press(screen.getByLabelText('One more scored pass'));
+    expect(screen.getByLabelText('2 scored pass')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    expect((saveLocalBjjDetail as jest.Mock).mock.calls[0][2].tags[0].count).toBe(2);
+  });
+
+  it('confirms at the floor on "−" rather than deleting a tag nobody asked to remove', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'takedown', event: 'scored', position: '', technique_id: null, count: 1 }],
+        notices: [{ field: 'tags[0].count', was: '3', reason: 'not_spoken' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak('a few takedowns');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Confirm scored takedown at 1')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText('Confirm scored takedown at 1'));
+
+    // Confirmed at 1, not removed — a blind "−" on an uncertain count must not
+    // read as "delete this", which would silently drop a real event.
+    expect(screen.getByLabelText('1 scored takedown')).toBeTruthy();
+  });
+
+  /**
+   * N121/#510 — the gap `ac-verifier` found in this ticket's first review
+   * pass. Every other test in this `describe` block sets up the model
+   * MISBEHAVING (inventing a number, or returning something malformed) and
+   * getting caught by `not_spoken`/`count_below_one`. This one is the common,
+   * well-behaved path: the model correctly reads "a couple of sweeps" as a
+   * hedge and does exactly what the prompt asks — leaves `count` at 1, sets
+   * nothing else wrong. Before `hedged_count` existed, that produced ZERO
+   * notices (1 is an ordinary count) and this exact tag rendered as a
+   * confident, un-flagged "1" — the ticket's "stays null and the confirm
+   * screen asks" criterion silently unmet on the path that matters most.
+   */
+  it('asks about a hedge the model correctly declined to invent a number for', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [{ category: 'sweep', event: 'scored', position: '', technique_id: null, count: 1 }],
+        notices: [{ field: 'tags[0].count', was: '1', reason: 'hedged_count' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak('a couple of sweeps, hard to say exactly');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('scored sweep: how many? not set')).toBeTruthy();
+    });
+    // The stepper reads blank, same as any other uncertain count — this is
+    // not a second UI, it is the same mechanism reached a new way.
+    expect(screen.getByText(/how many\? we weren.t sure/i)).toBeTruthy();
+    // The real message renders (not just "neither wrong message showed" —
+    // that would also pass if `describeNotice` silently fell through to its
+    // unknown-reason default), and it does not accuse the model of a
+    // mistake — it made none; the athlete gave a range, not a number.
+    expect(screen.getByTestId('dictate-notices')).toBeTruthy();
+    expect(screen.getByText(/you said a range/i)).toBeTruthy();
+    expect(screen.queryByText(/couldn.t match/i)).toBeNull();
+    expect(screen.queryByText(/came back as/i)).toBeNull();
+  });
+});
+
 it('lets a miscounted round be corrected before anything is saved', async () => {
   // N40's finding: this model class states a miscount flatly. "Rolled five"
   // coming back as six is the error that survives review, so correcting it has

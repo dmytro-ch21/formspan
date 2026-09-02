@@ -72,6 +72,22 @@ One tag per technique-and-outcome, with `count` for repeats.
 An INTENTION is not an event: "want to start working on half guard next week"
 produces no tags at all. A hypothetical is not an event either.
 
+COUNT IS THE NUMBER THEY SAID, NOT A DEFAULT OF ONE.
+If the athlete states a specific number for a category or technique — a digit
+or a number word like "two", "five", "a dozen" — that number IS the tag's
+`count`. Do not fall back to 1 when a number was actually said; only use 1 when
+none was (the tag is still evidence it happened at least once). A sentence
+that lists several outcomes back to back, each with its own number —
+"three sweeps, five passes, five submissions" — assigns each number to the
+noun next to it: read every number in the list, in order, one per tag, not
+just the first one. A HEDGE is different from a stated number — "a couple",
+"a few", "maybe three or four" — and does not get invented into one value:
+still emit the tag, leave `count` at 1, and set `count_hedged` to true so the
+athlete is asked rather than shown a number that looks decided. `count_hedged`
+is false in every other case, including when NO number was said at all —
+that is not a hedge, it is simply nothing to report, and marking it true there
+would ask about a count the athlete never tried to give.
+
 TECHNIQUES ARE RESOLVED AGAINST THE CATALOG, OR NOT AT ALL.
 Use `technique_id` only when the athlete's words identify one catalog entry.
 "armbar from closed guard" is `armbar-closed-guard`. Bare "armbar" is NOT — it
@@ -117,13 +133,17 @@ def draft_schema(families: list[str]) -> dict:
     tag = {
         "type": "object",
         "additionalProperties": False,
-        "required": ["category", "event", "position", "technique_id", "count"],
+        "required": ["category", "event", "position", "technique_id", "count", "count_hedged"],
         "properties": {
             "category": {"type": "string", "enum": CATEGORIES},
             "event": {"type": "string", "enum": EVENTS},
             "position": {"type": "string", "enum": [""] + families},
             "technique_id": {"type": ["string", "null"]},
             "count": {"type": "integer"},
+            # True only for an indefinite quantity ("a couple", "maybe three
+            # or four"), never for a plain unstated count — that is just
+            # false, not a hedge. Mirrors DraftTag.CountHedged in reflect.go.
+            "count_hedged": {"type": "boolean"},
         },
     }
     unresolved = {
