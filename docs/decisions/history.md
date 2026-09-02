@@ -51023,25 +51023,67 @@ real assertion failures (not a compile error); deleting `downsampleRoute`'s
 (including the `summariseSession` route test, which reads the downsampled
 result rather than calling the helper directly). Both restored and
 re-confirmed green by re-running, not by reading the diff. Full mobile suite
-(240 files, 3814 tests) green; `check-unit-literals.py` flagged one hardcoded
-`/km` in a first draft of the pace fallback, fixed by routing the fallback
-through `lib/units.ts`'s own `formatPace`/`formatDistance` instead of a
-second hand-rolled copy — which the check exists specifically to push toward.
+(240 files, 3816 tests after the review-round fixes below) green;
+`check-unit-literals.py` flagged one hardcoded `/km` in a first draft of the
+pace fallback, fixed by routing the fallback through `lib/units.ts`'s own
+`formatPace`/`formatDistance` instead of a second hand-rolled copy — which
+the check exists specifically to push toward.
 
-**Left open, matching the ticket's own scope boundary:** `SessionShare.tsx`
-(the exported PNG card) is untouched, as asked — its `statsFor(summary,
-formatTonnage)` call already picks up running's new stat tiles for free
-(the ceiling-of-four slice in `sessionCard.ts` needed no change either), but
-without `formatDistance`/`formatPace` threaded through it renders the
-default metric fallback rather than the athlete's own unit system; wiring
-that through is small and left for whichever ticket first builds a real
-running session screen to call this from. No backend changes — `longest_time`
-and `furthest_distance` were already registered record kinds. `NEEDS HUMAN
-EVIDENCE`, not claimed here: nobody has seen the map thumbnail, the tile
-strip or the PR badge render on a device or Simulator against a real
-finished running session — no such session exists in this branch to produce
-one from, since #771 (the live-tracking screen) is a separate, concurrent
-ticket this one does not depend on.
+**Two real findings from the pre-merge review round, both fixed before the
+PR opened.** `frontend-reviewer` caught that `SessionShare.tsx` — the
+exported PNG card, deliberately left untouched in the first draft on the
+theory that "reuse Share as-is" meant "don't add its formatter props" — would
+otherwise let the modal and the share preview disagree about a run's own
+units: the modal shows the athlete's own unit system once a caller supplies
+`formatDistance`/`formatPace`, and without the same two threaded into
+`useSessionShare` the exported card would silently fall back to plain
+metric for the same run. Fixed by threading `formatDistance`/`formatPace`
+through `useSessionShare`'s options into its own `statsFor` call, and by
+`SessionCelebration.tsx` forwarding its own two props into the hook it
+already calls — three call sites, no behavioural change for strength/BJJ,
+which never pass either. Separately, `summariseSession`'s running branch used
+`runningDetail?.duration_seconds ?? timestampDuration` for its Duration
+figure — `??` only falls through on `null`/`undefined`, so a genuine
+`duration_seconds: 0` (an imported entry with a broken clock, say) rendered
+as a confident zero-length run instead of falling back to the timestamps,
+exactly the "confident zero" this file's own header names as the failure
+mode the objective/subjective split exists to avoid. Fixed to check
+`> 0` before trusting the detail's figure, and `statsFor`'s Duration tile now
+omits itself at a genuine zero too, matching every other tile's rule.
+Both fixes are mutation-verified the same way as the rest of this entry:
+reverted by hand, confirmed red as real test failures, restored, confirmed
+green by re-running. The reviewer's remaining notes (elevation gain always in
+metres rather than feet/yards for imperial, and Android's `pointerEvents`
+semantics differing from iOS's) are recorded as deliberate, not silently
+skipped: elevation reuses no unit-switching formatter on purpose — culturally
+"342 m" reads correctly and "374 yd" for a climb does not — and Android is
+not a build this repo produces today (per `docs/device-deployment` — iOS
+only), so that gap is deferred with everything else Android already is
+throughout this codebase, not new to this ticket. Two further, cheap fixes
+were folded in on the same pass: the route thumbnail is now hidden from the
+accessibility tree (`accessibilityElementsHidden`,
+`importantForAccessibility="no-hide-descendants"`) rather than left
+unlabelled, since every fact it carries is already stated in words by the
+stat tiles beside it; and the drawn route is downsampled a second time at
+render (a no-op for `summariseSession`'s own output, which is already
+capped, but a real floor against any other caller that hands the card a
+full, un-thinned track).
+
+No backend changes — `longest_time` and `furthest_distance` were already
+registered record kinds. `NEEDS HUMAN EVIDENCE`, not claimed here: nobody has
+seen the map thumbnail, the tile strip or the PR badge render on a device or
+Simulator against a real finished running session — no such session exists
+in this branch to produce one from, since #771 (the live-tracking screen) is
+a separate, concurrent ticket this one does not depend on. **And note the
+scope split this leaves for #771 explicitly**: this PR ships the tile/PR/
+share logic per #772 — nothing in this branch actually calls `setCelebrating`
+(or equivalent) for a finished running session, because there is no running
+session screen to call it from yet. `closes #772` closes the ticket as
+written, not "an athlete can now see this on their phone" — that trigger
+point is #771's to wire up, and #771 is also who supplies the real
+`formatDistance`/`formatPace` values (from wherever the athlete's unit system
+lives on that screen) rather than leaving both props unset and getting the
+metric-only default this ticket's own tests exercise.
 
 ## Open items / known gaps as of this entry
 

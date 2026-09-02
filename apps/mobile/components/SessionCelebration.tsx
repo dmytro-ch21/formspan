@@ -12,6 +12,7 @@ import {
   badgeFor,
   celebratesRecord,
   celebratesStreak,
+  downsampleRoute,
   feltFor,
   regionForRoute,
   statsFor,
@@ -193,19 +194,37 @@ export function SessionCelebration({
   const badge = badgeFor(summary, accomplishment);
   const stats = statsFor(summary, formatTonnage, formatDistance, formatPace);
   const felt = feltFor(summary);
+  // `summariseSession` already downsamples before this ever arrives — this
+  // second pass is a no-op there (a route at or under the cap returns
+  // unchanged) and a defensive floor for any OTHER caller that builds a
+  // `SessionSummary` by hand with a full, un-thinned track: rendering a
+  // `Polyline` with thousands of raw coordinates is real jank this card
+  // should never be able to cause, whichever way its points arrived.
+  const routePoints =
+    summary.sport === 'running' && summary.routePoints
+      ? downsampleRoute(summary.routePoints)
+      : undefined;
   // Null whenever there is nothing a map can meaningfully draw — no track,
   // or too short a one — so the thumbnail block below can gate on one value
   // rather than re-deriving "is this route drawable" itself.
-  const routeRegion =
-    summary.sport === 'running' && summary.routePoints
-      ? regionForRoute(summary.routePoints)
-      : null;
+  const routeRegion = routePoints ? regionForRoute(routePoints) : null;
 
   // The capture, the server's decorating numbers and the error copy all live
   // in `useSessionShare` now, because the same three are needed by every
   // screen that reads a finished session back. See that file for why the card
   // it mounts has to sit at the screen root.
-  const share = useSessionShare({ sessionID, summary, formatTonnage, formatWeight, streak });
+  const share = useSessionShare({
+    sessionID,
+    summary,
+    formatTonnage,
+    formatWeight,
+    // Threaded straight through so the exported card and this modal never
+    // disagree about a run's units — see `useSessionShare`'s own doc on why
+    // it needs these too.
+    formatDistance,
+    formatPace,
+    streak,
+  });
 
   useEffect(() => {
     // The haptic is the part that lands even face-down in a bag; the sound
@@ -386,9 +405,20 @@ export function SessionCelebration({
             frame it, so a manual entry or an import with no track (both real,
             per `running.RoutePoints`'s own doc) shows no thumbnail at all
             rather than a blank grey rectangle.
+
+            Hidden from the accessibility tree entirely, not merely unlabelled:
+            it is decorative — every fact it carries (distance, elevation
+            gain) is already stated in words by the stat tiles below, in the
+            order a screen reader reads them — so an unlabelled "map" landing
+            between the subtitle and the badge would be noise, not a gap.
           */}
           {routeRegion && (
-            <RNView style={styles.routeThumb} testID="celebration-route-thumb">
+            <RNView
+              style={styles.routeThumb}
+              testID="celebration-route-thumb"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
               <MapView
                 style={StyleSheet.absoluteFill}
                 initialRegion={routeRegion}
@@ -402,7 +432,7 @@ export function SessionCelebration({
                 pointerEvents="none"
               >
                 <Polyline
-                  coordinates={(summary.routePoints ?? []).map((p) => ({
+                  coordinates={(routePoints ?? []).map((p) => ({
                     latitude: p.lat,
                     longitude: p.lng,
                   }))}

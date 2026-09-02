@@ -520,7 +520,14 @@ function runningStats(
   if (summary.distanceM != null && summary.distanceM > 0) {
     stats.push({ label: 'Distance', value: distanceFmt(summary.distanceM) });
   }
-  stats.push({ label: 'Duration', value: formatDuration(summary.durationSeconds) });
+  // Omitted at zero too, same as every other tile here — a genuinely
+  // zero-length run (both the running detail and the start/end timestamps
+  // agree on nothing) has no duration to celebrate either. Reachable only
+  // defensively: `worthCelebrating` already keeps a truly empty run from
+  // opening this card at all.
+  if (summary.durationSeconds > 0) {
+    stats.push({ label: 'Duration', value: formatDuration(summary.durationSeconds) });
+  }
   if (summary.avgPaceSecPerKm != null && summary.avgPaceSecPerKm > 0) {
     stats.push({ label: 'Avg Pace', value: paceFmt(summary.avgPaceSecPerKm) });
   }
@@ -629,14 +636,25 @@ export function summariseSession(
   const exerciseIDs = [...new Set(logged.map((x) => x.exercise_id))];
 
   if (session.sport === 'running') {
+    const timestampDuration = Math.max(0, (ended - started) / 1000);
     return {
       title: session.name,
       sport: 'running',
-      // Prefers the running module's own duration when there is one — it can
-      // exclude paused time a plain start/end timestamp diff cannot, per
-      // `running.SessionDetail.DurationSeconds`'s own doc — and falls back to
-      // the timestamps otherwise, e.g. before the detail has synced.
-      durationSeconds: runningDetail?.duration_seconds ?? Math.max(0, (ended - started) / 1000),
+      // Prefers the running module's own duration when there is a REAL one —
+      // it can exclude paused time a plain start/end timestamp diff cannot,
+      // per `running.SessionDetail.DurationSeconds`'s own doc — and falls
+      // back to the timestamps otherwise, e.g. before the detail has synced.
+      //
+      // Deliberately NOT `runningDetail?.duration_seconds ?? timestampDuration`
+      // — `??` only falls through on null/undefined, so a genuine
+      // `duration_seconds: 0` (an imported entry with a broken clock, say)
+      // would render as a confident zero-length run instead of falling back
+      // to the timestamps, which is exactly the "confident zero" this file's
+      // own header exists to prevent (see `feltFor`'s doc on null vs zero).
+      durationSeconds:
+        runningDetail?.duration_seconds && runningDetail.duration_seconds > 0
+          ? runningDetail.duration_seconds
+          : timestampDuration,
       // Counts whatever `session_sets` row the running module's own doc says
       // a client usually writes (a "run" exercise, for the generic PR
       // pipeline) — 0 or 1 in practice today, computed the same

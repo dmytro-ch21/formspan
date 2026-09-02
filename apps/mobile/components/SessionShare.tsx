@@ -109,6 +109,16 @@ export function useSessionShare(opts: {
    */
   formatWeight: (kg: number) => string;
   /**
+   * Running only. Same reason `formatTonnage` is injected: without this, a
+   * running session's exported card falls back to `statsFor`'s plain-metric
+   * default regardless of the athlete's own unit system — correct, but not
+   * what the athlete set. Optional because the two non-running callers
+   * (BJJ/strength screens) have nothing to pass.
+   */
+  formatDistance?: (metres: number) => string;
+  /** Same reason as `formatDistance`. */
+  formatPace?: (secPerKm: number) => string;
+  /**
    * `carried` means this session is what kept the streak alive.
    *
    * Passed only by the celebration, and that asymmetry is deliberate: a
@@ -125,7 +135,16 @@ export function useSessionShare(opts: {
    */
   date?: Date;
 }): SessionShare {
-  const { sessionID, summary, formatTonnage, formatWeight, streak = null, date } = opts;
+  const {
+    sessionID,
+    summary,
+    formatTonnage,
+    formatWeight,
+    formatDistance,
+    formatPace,
+    streak = null,
+    date,
+  } = opts;
   const getToken = useAuthToken();
 
   const cardRef = useRef<RNView>(null);
@@ -183,7 +202,7 @@ export function useSessionShare(opts: {
           ...cardFromSummary({
             id: sessionID,
             summary,
-            stats: statsFor(summary, formatTonnage),
+            stats: statsFor(summary, formatTonnage, formatDistance, formatPace),
             streak,
             numbers: forThisSession,
             prBadge: prBadgeFor(summary.records, formatWeight),

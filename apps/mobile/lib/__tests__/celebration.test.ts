@@ -463,6 +463,22 @@ describe('the objective tiles', () => {
       );
       expect(stats.map((s) => s.label)).toEqual(['Duration']);
     });
+
+    it('omits Duration too on a genuinely zero-length run, same as every other tile', () => {
+      // Defensive: `worthCelebrating` already keeps a truly empty run from
+      // reaching this card, but the tile itself should not print "0m" if it
+      // ever did.
+      const stats = statsFor(
+        run({
+          distanceM: undefined,
+          avgPaceSecPerKm: undefined,
+          elevationGainM: undefined,
+          durationSeconds: 0,
+        }),
+        kg,
+      );
+      expect(stats).toEqual([]);
+    });
   });
 });
 
@@ -642,6 +658,15 @@ describe('building a running summary from a finished session (N461/#772)', () =>
     // A running session read back before its detail has synced — a real,
     // offline-first state, not an error.
     expect(summariseSession(runSession, noVolume, true, undefined).durationSeconds).toBe(1920);
+  });
+
+  it('falls back to the timestamp diff on a genuine zero, not a confident zero-length run', () => {
+    // `duration_seconds: 0` is a real, if unusual, wire value (an imported
+    // entry with a broken clock, say) — `??` alone treats it as present and
+    // would render a zero-length run instead of falling back, exactly the
+    // "confident zero" `feltFor`'s own doc warns this file exists to avoid.
+    const s = summariseSession(runSession, noVolume, true, { ...detail, duration_seconds: 0 });
+    expect(s.durationSeconds).toBe(1920);
   });
 
   it('leaves distance/pace/elevation undefined with no running detail', () => {
