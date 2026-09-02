@@ -23,9 +23,12 @@
  * the identical tension the counter-proposal above already answered once —
  * that this app should build them, matching the reference. Each `MealCard`
  * now states what that slot itself cost (populated) or what is still
- * available for it (empty), via `mealAvailable`/`bySlot` in `lib/nutrition.ts`
- * — see that file's own reversal note for the allocation algorithm and why it
- * was chosen. This is not a call this file gets to re-litigate a third time.
+ * available for it (empty), via `mealAvailableForDay`/`bySlot` in
+ * `lib/nutrition.ts` — see that file's own reversal note for the allocation
+ * algorithm and why it was chosen (N468/#792 reworked the algorithm itself —
+ * weighted, pooled-remainder redistribution rather than an even split — but
+ * did not reopen this per-meal-budgets-exist decision). This is not a call
+ * this file gets to re-litigate a third time.
  *
  * ## Training is stated, not spent
  *
@@ -39,7 +42,7 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
@@ -65,13 +68,14 @@ import { cacheTargets, localEntries, localLoggedDays, localTargetView, removeEnt
 import {
   bySlot,
   eatenFrom,
-  mealAvailable,
+  mealAvailableForDay,
   viewTarget,
   type EatenView,
   type Entry,
   type Meal,
   type TargetView,
 } from '@/lib/nutrition';
+import { FoodSummaryCard } from '@/components/food/FoodSummaryCard';
 import { useModules } from '@/lib/ModulesProvider';
 import { foodLogGate } from '@/lib/modules';
 import { listTargets, targetOn } from '@/lib/nutritionApi';
@@ -327,6 +331,11 @@ export default function FoodScreen() {
   // inside a false sentence, on 100% of non-today views. Found in review, of
   // the original the same way.
   const mealTarget = isToday ? viewTarget(view) : null;
+  // The whole day's carryover-aware "available" figures, computed ONCE per
+  // render rather than per card — N468/#792's `mealAvailableForDay` needs the
+  // whole day in order (carryover is sequential), which is exactly what
+  // `slots` already is. `null` with no target, matching `mealTarget` above.
+  const availableBySlot = useMemo(() => mealAvailableForDay(slots, mealTarget), [slots, mealTarget]);
 
   const todayKey = dayString(new Date());
   // Weekday abbreviations for the grid's head row, read off any Monday-first
@@ -565,14 +574,25 @@ export default function FoodScreen() {
             </Text>
           ) : (
             <RNView style={styles.cards}>
+              {/* Above the meal list — the day's item count, total calories
+                  and macro totals consumed so far, distinct from the
+                  remaining-focused block above (`RemainingBlock` states what
+                  is LEFT; this states what has been EATEN, plus how many
+                  entries that came from — N28's honesty rule). */}
+              <FoodSummaryCard eaten={eaten} testID="food-summary" />
               {slots.map((slot) => (
                 <MealCard
-                  key={slot.meal}
+                  // Keyed on the day too, not just the slot — same reason
+                  // `TrackerList` keys its cards on `${t.id}-${on}`: a day
+                  // switch remounts the card, so its own collapse state
+                  // resets to that day's default instead of carrying over a
+                  // manual toggle made on a different day.
+                  key={`${slot.meal}-${on}`}
                   meal={slot.meal}
                   label={MEAL_LABELS[slot.meal]}
                   entries={slot.entries}
                   totals={slot.totals}
-                  available={mealAvailable(slot.totals, mealTarget)}
+                  available={availableBySlot?.get(slot.meal) ?? null}
                   addColor={accent.ink}
                   onAdd={() => router.push(`/food/add?meal=${slot.meal}&date=${on}`)}
                   onEntryPress={(id) => router.push(`/food/entry/${id}`)}

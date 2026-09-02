@@ -10,7 +10,7 @@
  * first version of it was in `food.tsx` and its 'tests' asserted on
  * hand-written literals instead, so deleting the function left them all
  * green." `totals` comes from {@link bySlot}; `available` from
- * {@link mealAvailable} — both in `lib/nutrition.ts`, both tested there. This
+ * `mealAvailableForDay` — both in `lib/nutrition.ts`, both tested there. This
  * file owns layout and nothing else.
  *
  * ## Populated vs. empty is a DIFFERENT SENTENCE, not the same one at zero
@@ -55,9 +55,39 @@
  * unmounting it — unmounting would drop its open/closed animation state on
  * every mode change, which is the same "component instance outlives what it is
  * showing" trap `closeOn` already exists to avoid one level up.
+ *
+ * ## Collapsible — N468/#792
+ *
+ * **Default is EXPANDED, always, regardless of whether the slot has anything
+ * logged.** The tempting default — collapse an empty slot, since there is
+ * nothing in it yet — was rejected: the populated-vs-available sentence this
+ * component exists to draw (see the section above) is exactly the kind of
+ * fact N113 fought to make unconditionally visible, and hiding it behind a
+ * default nobody chose would reintroduce "absence reads as an answer" one
+ * level up, wearing a collapse instead of a zero. So every section opens the
+ * same way every time, and an athlete who wants to declutter collapses it
+ * themselves — a state this component owns locally (`useState`, not a prop),
+ * which is also why `food.tsx` keys each card on the DAY as well as the
+ * slot: switching days remounts the card, so yesterday's manual collapse
+ * does not carry over as today's default.
+ *
+ * Collapsing hides the macro/available line and the logged rows — the two
+ * things that actually cost vertical space. The header (which already states
+ * the slot's own total once it has entries) and the "Add Food" button both
+ * stay visible either way: collapsing is for re-reading a section that is
+ * already logged, not for making the one thing an athlete does most (adding
+ * food) cost an extra tap first.
+ *
+ * **Collapsing and combine-select compose, not collide.** The Combine link is
+ * only offered while a section is expanded — starting a selection on rows you
+ * cannot see makes no sense — and once `selecting` is true this component
+ * forces itself open (`effectiveExpanded = selecting || expanded`) and the
+ * header's own toggle stops responding, so a section mid-selection cannot be
+ * collapsed out from under it by a stray tap on its own header.
  */
 
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
@@ -70,7 +100,13 @@ import { macroColor } from '@/lib/macroModel';
 import { fmtAmount, type Entry, type Macros, type Meal } from '@/lib/nutrition';
 import { useUnits } from '@/lib/useUnits';
 
-function macroLine(protein: number, carb: number, fat: number): { key: string; colour: string; text: string }[] {
+/**
+ * The three-macro-dot line — shared with {@link FoodSummaryCard}, which
+ * states the SAME three macros for the whole day rather than one slot. Kept
+ * as one function so the two never drift into different wording or colours
+ * for the same three macros on the same screen.
+ */
+export function macroLine(protein: number, carb: number, fat: number): { key: string; colour: string; text: string }[] {
   return [
     { key: 'protein', colour: macroColor('protein'), text: `${fmtAmount(protein)}g protein` },
     { key: 'carbs', colour: macroColor('carbs'), text: `${fmtAmount(carb)}g carbs` },
@@ -130,16 +166,51 @@ export function MealCard({
   const { foodUnit } = useUnits();
   const accent = useAccent();
   const selectedCount = selectedIds?.size ?? 0;
+  // Local, not derived from props — see the doc comment above for why the
+  // default is unconditionally expanded, and why `food.tsx` keys this card on
+  // the day so a manual collapse does not survive a day switch.
+  const [expanded, setExpanded] = useState(true);
+  // Selecting forces the section open — collapsing away rows the athlete is
+  // mid-selection on is confusing, and the Combine link itself is only ever
+  // offered while expanded (below), so this mainly guards the header's own
+  // toggle from closing a section combine-select is already using.
+  const effectiveExpanded = selecting || expanded;
 
   return (
     <RNView style={styles.card} testID={testID}>
       <RNView style={styles.headerRow}>
-        <Text style={styles.header} testID={testID ? `${testID}-header` : undefined}>
-          {hasEntries ? `${label} · ${fmtAmount(totals.kcal)} kcal` : label}
-        </Text>
+        <Pressable
+          style={styles.headerToggle}
+          onPress={() => {
+            if (!selecting) setExpanded((e) => !e);
+          }}
+          accessibilityRole="button"
+          // The STATE is carried by `accessibilityState` alone, below — not
+          // duplicated in the label too. **frontend-reviewer, N468 review**:
+          // a label reading "Breakfast, expanded" next to
+          // `accessibilityState={{ expanded }}` had VoiceOver announcing the
+          // same fact twice on one control (this app's own `TrackerCard`
+          // states the identical rule for its glyph's `checked` state — "the
+          // LABEL is what carries the state" was true there because iOS
+          // ignores `checked` on a plain button role; a toggle role like this
+          // one, which iOS DOES read `expanded` from, is the one case where
+          // the state prop is the single source and the label must not repeat
+          // it).
+          accessibilityLabel={label}
+          accessibilityHint="Toggles whether this meal's items are shown"
+          accessibilityState={{ expanded: effectiveExpanded }}
+          testID={testID ? `${testID}-toggle` : undefined}
+        >
+          <Text style={styles.header} testID={testID ? `${testID}-header` : undefined}>
+            {hasEntries ? `${label} · ${fmtAmount(totals.kcal)} kcal` : label}
+          </Text>
+          <Icon name={effectiveExpanded ? 'chevron-down' : 'chevron'} size={13} color={vola.textDim} />
+        </Pressable>
         {/* Two or more rows only — combining one thing with nothing is not a
-            meal, it is the entry that is already there. */}
-        {!selecting && entries.length >= 2 && onStartCombine ? (
+            meal, it is the entry that is already there. Offered only while
+            expanded: starting a selection on rows the section is currently
+            hiding makes no sense. */}
+        {effectiveExpanded && !selecting && entries.length >= 2 && onStartCombine ? (
           <Pressable
             onPress={onStartCombine}
             accessibilityRole="button"
@@ -151,83 +222,87 @@ export function MealCard({
         ) : null}
       </RNView>
 
-      {hasEntries ? (
-        <RNView style={styles.macroRow} testID={testID ? `${testID}-macros` : undefined}>
-          {macroLine(totals.protein_g, totals.carb_g, totals.fat_g).map((m) => (
-            <RNView key={m.key} style={styles.macroCell}>
-              <RNView style={[styles.dot, { backgroundColor: m.colour }]} />
-              <Text style={styles.macroText}>{m.text}</Text>
-            </RNView>
-          ))}
-        </RNView>
-      ) : (
-        available && (
-          <RNView testID={testID ? `${testID}-available` : undefined}>
-            <Text style={styles.availableKcal}>{fmtAmount(available.kcal)} kcal now available</Text>
-            <RNView style={styles.macroRow}>
-              {macroLine(available.protein_g, available.carb_g, available.fat_g).map((m) => (
+      {effectiveExpanded && (
+        <>
+          {hasEntries ? (
+            <RNView style={styles.macroRow} testID={testID ? `${testID}-macros` : undefined}>
+              {macroLine(totals.protein_g, totals.carb_g, totals.fat_g).map((m) => (
                 <RNView key={m.key} style={styles.macroCell}>
                   <RNView style={[styles.dot, { backgroundColor: m.colour }]} />
                   <Text style={styles.macroText}>{m.text}</Text>
                 </RNView>
               ))}
             </RNView>
-          </RNView>
-        )
-      )}
-
-      {entries.map((e) => {
-        const isSelected = selecting && !!selectedIds?.has(e.id);
-        return (
-          <SwipeToDelete
-            key={e.id}
-            onDelete={() => onDelete(e.id)}
-            accessibilityLabel={e.name}
-            enabled={!selecting}
-            closeOn={entries.length}
-            testID={`food-entry-${e.id}`}
-          >
-            <Pressable
-              style={styles.row}
-              onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
-              // Selecting: a checkbox, not a button — `{ checked }` is what
-              // announces "toggleable, currently on/off" rather than the
-              // generic "button, selected" a `selected` state on a button
-              // role reads as. Found in review.
-              accessibilityRole={selecting ? 'checkbox' : 'button'}
-              accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
-              accessibilityState={selecting ? { checked: isSelected } : undefined}
-              testID={selecting ? `food-entry-${e.id}-select` : undefined}
-            >
-              {selecting ? (
-                <RNView
-                  style={[
-                    styles.checkbox,
-                    isSelected && { backgroundColor: addColor, borderColor: addColor },
-                  ]}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no"
-                >
-                  {isSelected ? (
-                    <Text style={[styles.checkboxTick, { color: accent.on }]}>✓</Text>
-                  ) : null}
+          ) : (
+            available && (
+              <RNView testID={testID ? `${testID}-available` : undefined}>
+                <Text style={styles.availableKcal}>{fmtAmount(available.kcal)} kcal now available</Text>
+                <RNView style={styles.macroRow}>
+                  {macroLine(available.protein_g, available.carb_g, available.fat_g).map((m) => (
+                    <RNView key={m.key} style={styles.macroCell}>
+                      <RNView style={[styles.dot, { backgroundColor: m.colour }]} />
+                      <Text style={styles.macroText}>{m.text}</Text>
+                    </RNView>
+                  ))}
                 </RNView>
-              ) : (
-                <Text style={styles.glyph} accessibilityElementsHidden importantForAccessibility="no">
-                  {glyphFor(e.category)}
-                </Text>
-              )}
-              <RNView style={styles.rowMain}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {e.name}
-                </Text>
-                <Text style={styles.rowServing}>{loggedAmountLabel(e.servings, e.serving_label, foodUnit)}</Text>
               </RNView>
-              <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
-            </Pressable>
-          </SwipeToDelete>
-        );
-      })}
+            )
+          )}
+
+          {entries.map((e) => {
+            const isSelected = selecting && !!selectedIds?.has(e.id);
+            return (
+              <SwipeToDelete
+                key={e.id}
+                onDelete={() => onDelete(e.id)}
+                accessibilityLabel={e.name}
+                enabled={!selecting}
+                closeOn={entries.length}
+                testID={`food-entry-${e.id}`}
+              >
+                <Pressable
+                  style={styles.row}
+                  onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
+                  // Selecting: a checkbox, not a button — `{ checked }` is what
+                  // announces "toggleable, currently on/off" rather than the
+                  // generic "button, selected" a `selected` state on a button
+                  // role reads as. Found in review.
+                  accessibilityRole={selecting ? 'checkbox' : 'button'}
+                  accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
+                  accessibilityState={selecting ? { checked: isSelected } : undefined}
+                  testID={selecting ? `food-entry-${e.id}-select` : undefined}
+                >
+                  {selecting ? (
+                    <RNView
+                      style={[
+                        styles.checkbox,
+                        isSelected && { backgroundColor: addColor, borderColor: addColor },
+                      ]}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no"
+                    >
+                      {isSelected ? (
+                        <Text style={[styles.checkboxTick, { color: accent.on }]}>✓</Text>
+                      ) : null}
+                    </RNView>
+                  ) : (
+                    <Text style={styles.glyph} accessibilityElementsHidden importantForAccessibility="no">
+                      {glyphFor(e.category)}
+                    </Text>
+                  )}
+                  <RNView style={styles.rowMain}>
+                    <Text style={styles.rowName} numberOfLines={1}>
+                      {e.name}
+                    </Text>
+                    <Text style={styles.rowServing}>{loggedAmountLabel(e.servings, e.serving_label, foodUnit)}</Text>
+                  </RNView>
+                  <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
+                </Pressable>
+              </SwipeToDelete>
+            );
+          })}
+        </>
+      )}
 
       {selecting ? (
         <RNView style={styles.combineBar} testID={testID ? `${testID}-combine-bar` : undefined}>
@@ -289,6 +364,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  headerToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   header: { fontSize: 15, fontWeight: '700' },
   combineLink: { fontSize: 13, fontWeight: '600' },
   availableKcal: { fontSize: 13, fontWeight: '600', color: vola.textMuted, marginTop: -4 },
