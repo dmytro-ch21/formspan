@@ -51258,6 +51258,97 @@ scripted/mocked track, which N459's own entry already notes as the boundary
 of what a Simulator run can prove.
 
 
+## 2026-09-01 — N120 (#509): an audio log now fills the whole session, and Save stops handing off to the wizard
+
+The report, verbatim: *"When we do an audio log we get thrown to enter the
+techniques and go through the 3-part process, which is confusing. Once we do
+the verbal log and go through techniques I added, it should be enough. If we
+log by audio this should fill everything and we should be done."* Depends on
+N121/#510 above, which is what made the counts in a dictated draft trustworthy
+in the first place — fixing the hand-off without that fix landed first would
+have produced a one-screen confirm with empty fields, which the ticket itself
+warned is worse than what shipped.
+
+**This reverses a deliberate decision, not an oversight.** `apps/mobile/app/
+bjj/dictate.tsx`'s `save()` used to `router.replace` into the ordinary
+three-step reflection wizard (`/bjj/reflect/[id]`) on purpose, with its own
+doc comment explaining why: *"so what was dictated is corrected with the same
+controls as anything typed. There is no separate 'review a dictated session'
+surface, deliberately."* That reasoning held for the wizard the athlete
+reaches from the ordinary three-tap-floor manual log — a session that arrives
+with almost nothing captured, so asking the wizard's three questions is the
+first time anything gets asked at all. It did not hold for dictation, which
+had already gathered the rounds, the gi, what was drilled and what happened
+live, out loud. Routing into a form that asks for all of it again, a second
+time, through three tap-through steps, is the literal bug reported. Same
+shape N445 recorded reversing N184's Finish-button decision: the old
+reasoning was sound for the case it was written for and wrong for a case that
+arrived later.
+
+**What changed, on the confirm screen itself.** An audit against every field
+`SessionDetail`/the wizard's three steps can capture found two real gaps
+between what dictation extracts and what the old confirm screen let the
+athlete touch:
+
+- **No way to add a technique the model missed entirely.** The screen only
+  ever produced a tag from the draft's own `tags` array or from resolving an
+  ambiguous phrase (`PickOne`) — there was no search. A new "Add something you
+  did" section, styled on the wizard's own `DrilledStep` search-and-add, fixes
+  this: search-first, adds as `drilled` (the wizard's own default for a
+  technique picked by name), guarded against adding the identical technique
+  twice as `drilled` — but not against the same technique already recorded
+  under a different event, which is a different fact and not a duplicate.
+- **No way to correct a tag's event** (drilled vs. attempted vs. scored vs.
+  conceded vs. defended) once extracted — only its count. A small chip row
+  under each tag now edits this independently of the count, using the exact
+  vocabulary the tag's own title already displays rather than inventing new
+  copy for the row.
+
+**Note and body-note were already on screen, but conditionally — gated on
+`!!draft.note`/`!!draft.body_note`.** That was fine when Save handed off to a
+wizard whose own note step is unconditional; once this screen replaces the
+wizard rather than feeding it, the gate became the exact failure #371 and
+N121/#510 both warn about: an athlete who drilled in total silence about
+their body, say, had no way to add a note at all. Both fields are now always
+present, with a placeholder — "Nothing said about this — add anything worth
+remembering" / "Nothing said — add anything that hurt" — rather than a value,
+so an untouched field still reads as "we heard nothing" and not as "there is
+nothing to say" or, worse, as data quietly dropped.
+
+**The routing change itself.** `save()` now lands on the session's own read
+view (`/bjj/session/[id]`) instead of the wizard — the same destination a
+manually-logged session reaches when the athlete goes on to add detail, via
+that screen's existing "Add detail"/"Edit detail" button. The wizard is not
+removed and stays reachable from there, unconditionally, for a dictated
+session exactly as for a typed one — it is just never entered automatically
+any more. Draft-then-confirm is unchanged throughout: nothing is written
+until Save is an explicit tap, matching the guard the ticket's own acceptance
+criteria named as not up for relaxing (dictation still never logs a session
+directly — this model class states a miscount flatly, which is exactly what
+the count stepper and the new event chips exist to catch before it is
+written).
+
+**Tests**: `apps/mobile/__tests__/app/dictateScreen.test.tsx` gained a
+`jest.mock('expo-router', ...)` override (the file previously relied on the
+global mock in `jest.setup.js`, which hands back a fresh `jest.fn()` per
+`useRouter()` call and cannot be asserted against) and six new cases: the
+post-Save destination is `/bjj/session/[id]` and explicitly not `/bjj/
+reflect/[id]`; arriving at the confirm screen with a draft does not itself
+navigate anywhere (draft-then-confirm is a Save tap, not an arrival); the
+note/body fields are blank-with-a-placeholder and editable on a draft that
+said nothing; a technique the draft never named can be added by hand and
+reaches `saveLocalBjjDetail` as `drilled`; adding the same technique twice as
+`drilled` is a no-op; and a tag's event is correctable independent of its
+count. The routing assertion was mutation-verified directly — reverted to
+`/bjj/reflect/[id]`, confirmed the test failed for exactly that reason
+(a `toEqual` mismatch naming both pathnames), restored, confirmed green again
+by re-running rather than by reading the diff.
+
+**Open**: NEEDS HUMAN EVIDENCE — dictating a full session on a device and
+reaching a logged session without typing anything that was spoken. Nothing in
+this change is reachable by a test that cannot hear speech; see N60's own
+recorded gap (33 authored eval cases, 0 recorded) two entries up.
+
 ## Open items / known gaps as of this entry
 
 

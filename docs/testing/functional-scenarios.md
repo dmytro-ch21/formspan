@@ -11086,10 +11086,22 @@ What follows is only what differs.
   runtime, which is exactly how the broken mobile version survived a green
   suite.
 
-## Dictating a BJJ session (N60 — `apps/mobile`, `/bjj/dictate`)
+## Dictating a BJJ session (N60, revised by N120/#509 — `apps/mobile`, `/bjj/dictate`)
 
 The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
 `/bjj/log`, above the manual form and as an alternative to it.
+
+**N120/#509 reversed the confirm screen's own destination.** Save used to
+`router.replace` into the ordinary three-step reflection wizard so a dictated
+session was "corrected with the same controls as anything typed" — the
+reported bug was exactly that hand-off, since the athlete had already said
+everything the wizard would go on to ask for. The confirm screen is now the
+whole flow: it carries the wizard's own editing surfaces directly (adding a
+technique the model missed, correcting a tag's event), and Save lands on the
+session's own read view (`/bjj/session/[id]`) rather than the wizard. The
+wizard itself is unchanged and still reachable from there ("Add detail"/"Edit
+detail"), exactly as it is for a session logged by hand — it is just never
+entered automatically for a dictated one any more.
 
 ### Happy path
 
@@ -11097,12 +11109,17 @@ The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
   is still there and still works with no signal.
 - Dictating "hour of gi, five rounds, swept him twice from half guard" and
   tapping **Read it** returns a draft with the kind, gi, rounds and the tags
-  filled in, all editable.
-- **Save it** writes the session locally and opens the ordinary reflection
-  wizard on it — there is no separate "review a dictated session" surface.
+  filled in, all editable, on ONE screen — no step navigation.
+- **Save it** writes the session locally and opens the session's own read view
+  (`/bjj/session/[id]`), not the reflection wizard. The saved session reads as
+  finished: rounds, gi, tags, note and body note all present exactly as
+  confirmed.
 - The saved session is indistinguishable from a typed one. No marker records
   that a model was involved, deliberately: what happened is what the athlete
   says happened, whoever typed it first.
+- From the session's read view, **Add detail / Edit detail** still opens the
+  reflection wizard — the same optional, post-hoc enrichment a manually-logged
+  session gets, reachable but never forced.
 
 ### Edge cases & errors
 
@@ -11111,17 +11128,35 @@ The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
   the single most important behaviour on the screen.
 - Picking an option adds exactly one tag, taking the **category and event from
   what the athlete said** rather than from the technique chosen.
-- **Skipping** an unresolved phrase leaves it out entirely; it can be added by
-  hand in the wizard.
+- **Skipping** an unresolved phrase leaves it out entirely; it can still be
+  searched for and added under **"Add something you did"**, further down this
+  same screen.
+- **A technique the dictation never named at all** can be added by hand under
+  "Add something you did" — a search identical in shape to the wizard's own
+  drilled-step picker. It lands as a `drilled` tag; adding the same technique a
+  second time as `drilled` is a no-op ("already added"), but the same
+  technique already recorded under a different event (say, `scored`) is not a
+  duplicate and can still be added as `drilled` too.
+- **A tag's event (drilled/attempted/scored/conceded/defended) is correctable**
+  via a small chip row under each tag, independent of its count — changing the
+  event leaves the count untouched.
 - **A count the words did not contain stays blank**, not zero, with the reason
   shown ("we couldn't find that in what you said").
 - Decrementing a count to zero **removes the tag** rather than storing a zero.
+- **The note and body-note fields are always present and always editable**,
+  even when the dictation said nothing on either — each shows an honest
+  placeholder ("Nothing said about this — add anything worth remembering" /
+  "Nothing said — add anything that hurt") rather than being hidden. Hidden
+  would read as "there is nothing to add"; a blank field with that placeholder
+  reads as "we heard nothing", which is the true state and the one the
+  athlete can act on.
 - **An empty draft** (`empty: true`) shows "nothing was picked up from that" and
   **offers no Save button**.
 - A refusal (422), an outage (503) and an exhausted quota (429) each surface
   their own message; the quota one says how many are left when it is close.
-- A failed technique-catalog fetch leaves the picker empty and the phrase
-  unresolved, rather than breaking the screen.
+- A failed technique-catalog fetch leaves the picker empty, the phrase
+  unresolved and "Add something you did" showing "couldn't load the library"
+  rather than breaking the screen.
 - Over 2000 characters is refused client-side by `maxLength`, matching the
   server's `MaxDictationRunes`.
 
@@ -11150,6 +11185,17 @@ The mobile surface for N33's `POST /v1/bjj/reflect/draft`. Reached from
 - The eval corpus is **33 authored / 0 recorded**, so no test anywhere in this
   feature — backend or mobile — has met real keyboard transcription. A green
   suite is not evidence that dictation works on speech.
+- **N120/#509: Save must never `router.replace` into `/bjj/reflect/[id]`
+  again.** That hand-off is the exact bug this ticket reports; a regression
+  here reads as an innocuous refactor (the two routes are structurally
+  similar) rather than as the reported failure re-appearing. Assert the
+  destination pathname directly, and assert it is NOT the wizard's route —
+  a test that only checks "navigation happened" cannot tell the fix from the
+  bug it fixes.
+- **N120/#509: hiding the note/body-note fields when the draft's own value is
+  empty is the same failure as before, moved to a different field.** They
+  must render — with a placeholder, not a value — regardless of what the
+  draft contains.
 
 ### Retrying a failed draft (N118)
 
