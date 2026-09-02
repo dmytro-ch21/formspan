@@ -117,6 +117,55 @@ func TestPutAndGetDetail(t *testing.T) {
 	_ = tech
 }
 
+// N119/#508: the free-text label on an unresolved tag must round-trip
+// exactly, technique_id null throughout — a mutation-relevant guard, since
+// the failure this ticket exists to fix is exactly a phrase getting lost
+// somewhere between the athlete saying it and the row that is supposed to
+// hold it.
+func TestPutAndGetDetailPreservesAnUnmatchedTagLabel(t *testing.T) {
+	repo, pool := newSessionTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bjj-label", "user_bjj_label"
+	seedSession(t, pool, id, user)
+
+	in := SessionDetail{
+		SessionID: id,
+		Kind:      KindRolling,
+		Tags: []Tag{
+			// The exact shape "Keep as said" produces: category/event from
+			// the phrase, no technique, the phrase itself preserved.
+			{Category: CategorySubmission, Event: EventScored, Count: 1, Label: "pool guards"},
+			// An ordinary matched tag alongside it, so the test also proves
+			// the two shapes coexist without one corrupting the other.
+			{Category: CategorySweep, Event: EventScored, Count: 1},
+		},
+	}
+
+	if _, err := repo.PutDetail(ctx, user, in); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	got, err := repo.GetDetail(ctx, user, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Tags) != 2 {
+		t.Fatalf("got %d tags, want 2", len(got.Tags))
+	}
+	if got.Tags[0].Label != "pool guards" {
+		t.Fatalf("label = %q, want %q — a mangled dictation must survive the round trip verbatim", got.Tags[0].Label, "pool guards")
+	}
+	if got.Tags[0].TechniqueID != nil {
+		t.Fatalf("an unmatched tag must not have grown a technique id: %+v", got.Tags[0])
+	}
+	// The ordinary tag must not have picked up a label from its neighbour —
+	// insertion is per-row, but a copy/paste of the wrong variable in the
+	// batch would show up exactly this way.
+	if got.Tags[1].Label != "" {
+		t.Fatalf("an ordinary matched tag must not carry a label, got %q", got.Tags[1].Label)
+	}
+}
+
 // The reason PutDetail replaces rather than merges: the client re-sends the
 // desired state, so a retry after a half-failed push has to converge instead
 // of stacking a second copy of every chip.

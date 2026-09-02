@@ -516,13 +516,22 @@ export default function BjjSessionScreen() {
   const live = (detail?.tags ?? []).filter(
     (t) => t.event === 'conceded' || (!t.technique_id && t.event === 'scored'),
   );
+  // N119/#508: every tag the athlete named but the library never matched —
+  // across every event a tag can carry, not just the two `live` happens to
+  // cover above, because "kept as said" (`apps/mobile/app/bjj/dictate.tsx`)
+  // can produce any of them. Without a section of its own, a kept-but-
+  // unmatched `attempted`/`defended` tag would be saved, synced, and
+  // invisible on this screen — the exact defect this ticket exists to fix,
+  // recreated one screen along, the same way N31's comment above describes
+  // for a technique tried live but never drilled.
+  const unmatched = (detail?.tags ?? []).filter((t) => !t.technique_id && !!t.label);
   const summary = detail
     ? [kindLabel, detail.gi === null ? null : detail.gi ? 'Gi' : 'No-gi', detail.academy || null]
         .filter(Boolean)
         .join(' · ')
     : '';
   const hasAnyDetail =
-    drilled.length + live.length + techniqueRows.length > 0 ||
+    drilled.length + live.length + techniqueRows.length + unmatched.length > 0 ||
     !!detail?.note ||
     !!detail?.body_note ||
     !!detail?.academy ||
@@ -683,6 +692,26 @@ export default function BjjSessionScreen() {
                 </RNView>
               );
             })}
+          </RNView>
+        </Section>
+      )}
+
+      {/* N119/#508: something the athlete named that the library never
+          matched. Distinguishable on purpose — quoted, and labelled "not
+          matched" — from `techniqueRows` above, whose chips name a real
+          catalog entry. Read-only here; "Edit detail" below is where the
+          athlete corrects it, either by matching it to a real technique now
+          that one exists, or leaving it exactly as said. */}
+      {unmatched.length > 0 && (
+        <Section title="Said, not matched to the library">
+          <RNView style={styles.chips}>
+            {unmatched.map((t, i) => (
+              <RNView key={i} style={styles.chip} testID="bjj-session-unmatched-chip">
+                <Text style={styles.chipText}>
+                  “{t.label}”{t.count > 1 ? ` ×${t.count}` : ''}
+                </Text>
+              </RNView>
+            ))}
           </RNView>
         </Section>
       )}

@@ -152,6 +152,99 @@ it('offers a choice for an unresolved phrase and adds NO tag for it', async () =
   expect(detail.tags).toEqual([]);
 });
 
+/**
+ * N119/#508: "when some techniques are logged and not found in library it is
+ * not creating a new item, but it should."
+ *
+ * Before this existed, "Skip this one" was the ONLY way an unresolved phrase
+ * left the screen short of a real match — and it discarded the phrase with
+ * no trace. These pin the third path: the phrase itself must survive into
+ * the saved session, distinguishably from a matched tag, and it must never
+ * touch the shared technique catalog (a mangled dictation must never become
+ * a permanent, shared entry — the "pool guards" guarantee).
+ */
+describe('a technique the library does not know', () => {
+  it('is kept, not dropped, when the athlete says to keep it as said', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [],
+        unresolved: [{ phrase: 'pool guards', category: 'sweep', event: 'scored' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak('swept twice from pool guards');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Keep “pool guards” as said, not matched to the library')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+
+    // The unresolved prompt is gone — it has been answered, the same as a
+    // real pick would have closed it.
+    expect(screen.queryByText(/which one\?/i)).toBeNull();
+
+    // And it renders in "What happened", distinguishably from a matched tag:
+    // the phrase itself, quoted, plus the "not matched" hint. This is the
+    // "athlete can see it was not recognised" half of the acceptance
+    // criteria.
+    expect(screen.getByText('“pool guards”')).toBeTruthy();
+    expect(screen.getByText('Not matched to the library')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags).toHaveLength(1);
+    // Never a technique id — that is the whole guarantee. Nothing on this
+    // path ever writes to the technique catalog; the phrase lives on the
+    // SESSION's own tag, never anywhere a mangled "pool guards" could
+    // become a permanent, shared library entry.
+    expect(detail.tags[0].technique_id).toBeFalsy();
+    expect(detail.tags[0].label).toBe('pool guards');
+    expect(detail.tags[0].category).toBe('sweep');
+    expect(detail.tags[0].event).toBe('scored');
+  });
+
+  it('lets the athlete resolve a kept phrase to a real technique before saving', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [],
+        unresolved: [{ phrase: 'armbar', category: 'submission', event: 'scored' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Keep “armbar” as said, not matched to the library')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Keep “armbar” as said, not matched to the library'));
+
+    // Correcting it is not a one-way door: the same screen that offered
+    // "Keep as said" lets the athlete change their mind and match it after
+    // all, without having to redo the dictation.
+    fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
+    await waitFor(() => {
+      expect(screen.getByText('Armbar from Mount')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByText('Armbar from Mount'));
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags).toHaveLength(1);
+    expect(detail.tags[0].technique_id).toBe('armbar-from-mount');
+    // The label is cleared once resolved — a resolved tag carrying a stale
+    // phrase is exactly the confusion this field exists to prevent.
+    expect(detail.tags[0].label).toBeFalsy();
+  });
+});
+
 it('adds the technique the athlete picked, and only that one', async () => {
   mockResponse = {
     draft: {

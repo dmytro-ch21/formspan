@@ -1,0 +1,28 @@
+-- N119/#508: a technique the library does not know must be recorded, not
+-- dropped.
+--
+-- `bjj_session_tags.technique_id` was already nullable (000025) for a
+-- different reason — "swept from half guard" with no technique named at all,
+-- category and position known and nothing more said. That row has never had
+-- anywhere to put the ATHLETE'S OWN WORDS when a technique WAS named but did
+-- not resolve to exactly one catalog entry — the dictation screen's picker
+-- offered a match or discarded the phrase outright ("Skip this one" —
+-- `dismissPhrase` in apps/mobile/app/bjj/dictate.tsx kept no trace). So a
+-- technique the library does not know was silently dropped: the athlete said
+-- what they did, and the log did not record it.
+--
+-- `label` is that missing place. Free text, on the session's own tag row —
+-- never on `techniques`, which stays admin-authored-only per #445. This is
+-- deliberately the leanest of the three options the ticket costs (an
+-- athlete-owned technique row; a pending state the console promotes; free
+-- text on the tag): the other two need new schema AND new admin-console
+-- authoring/review surface to hold the #445 quality bar, which is real
+-- backend+admin work this ticket does not also take on. See the N119 history
+-- entry for the full reasoning and what is deferred.
+--
+-- A mangled dictation ("pool guards" for "pull guard") can therefore never
+-- become a permanent catalog entry through this path, structurally: nothing
+-- here writes to `techniques`, ever. That is what makes this the safe
+-- default rather than a corner cut.
+ALTER TABLE bjj_session_tags
+    ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';

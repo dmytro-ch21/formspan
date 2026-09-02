@@ -187,6 +187,23 @@ type Tag struct {
 	// Count, because reflection is recalled in counts. Three armbars is one
 	// tag with count 3, not three tags.
 	Count int `json:"count"`
+	// Label is what the athlete said when it did NOT resolve to a catalog
+	// technique — "pool guards" from a mangled dictation, "that weird knee
+	// thing from open mat" typed by hand. N119/#508: before this field
+	// existed, a phrase like this had nowhere to go. The dictation picker
+	// offered a catalog match or discarded the phrase outright, so a
+	// technique the library did not know was silently dropped — the athlete
+	// said what they did, and the log did not record it.
+	//
+	// Empty is the ordinary case (TechniqueID resolved, or nothing was
+	// named at all — the category-grid fast path this field did not touch).
+	// NEVER written to `techniques`, on any path — that table stays
+	// admin-authored-only per #445, and this is what keeps a mangled
+	// dictation ("pool guards") from ever becoming a permanent, shared
+	// catalog entry: there is no code anywhere that copies a Label into the
+	// catalog. See the N119 history entry for the decision and what a
+	// promotion path to the catalog would still need.
+	Label string `json:"label,omitempty"`
 }
 
 // Validate reports whether this is a tag the system can store and later read
@@ -194,6 +211,12 @@ type Tag struct {
 // maxTagCount bounds one tag's repetitions. Generous — nobody hits 1000
 // armbars in a session — so it constrains only nonsense.
 const maxTagCount = 1000
+
+// maxTagLabelLen bounds a free-text label. Matches the technique catalog's
+// own name bound (`technique.maxNameLen`) — a label is standing in for a
+// technique name, so the same ceiling is the honest one, not a new number
+// invented for this field alone.
+const maxTagLabelLen = 200
 
 func (t Tag) Validate() error {
 	if !t.Category.Valid() || !t.Event.Valid() {
@@ -212,6 +235,20 @@ func (t Tag) Validate() error {
 	// untagged event, and storing it would produce a row that joins to
 	// nothing. Untagged is expressed by omitting the field.
 	if t.TechniqueID != nil && *t.TechniqueID == "" {
+		return ErrInvalidInput
+	}
+	if len([]rune(t.Label)) > maxTagLabelLen {
+		return ErrInvalidInput
+	}
+	// A resolved tag carrying a leftover label is a client bug, not a fact
+	// worth storing: once TechniqueID names the real technique, the phrase
+	// that failed to match it is stale, and keeping both would let a session
+	// read view show "pool guards" beside a tag that is actually Pull Guard —
+	// the exact confusion the label exists to prevent, reintroduced by half
+	// an edit. `dictate.tsx`'s "Match in library" and the wizard's resolve
+	// action both clear Label in the same edit that sets TechniqueID; this
+	// is what makes that a contract rather than a convention.
+	if t.TechniqueID != nil && t.Label != "" {
 		return ErrInvalidInput
 	}
 	return nil

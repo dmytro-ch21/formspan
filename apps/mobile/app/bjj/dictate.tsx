@@ -85,6 +85,16 @@
  * about. `TagRow` restricts the choices for such a tag to the two the read
  * view can show, and flags one that already arrived stranded rather than
  * letting it pass silently.
+ *
+ * **One exception to that restriction: a tag kept as unmatched (N119/#508,
+ * reconciled here at rebase).** `keepUnmatched` below also writes
+ * `technique_id: null`, which on its own would make `TagRow` treat it as
+ * the same narrow case above — but a labelled tag isn't stranded the same
+ * way. `session/[id].tsx` gives every labelled tag its own display surface,
+ * "Said, not matched to the library", regardless of `event` — the read-view
+ * gap this restriction exists to prevent simply doesn't apply to it. So the
+ * restriction only bites a tag with no `technique_id` AND no `label`; see
+ * `untaggedLimited` in `TagRow`.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -432,6 +442,66 @@ export default function DictateReflectionScreen() {
     setUnresolved((list) => list.filter((x) => x !== p));
   }, []);
 
+  /**
+   * N119/#508: the third path, alongside picking a real match and skipping
+   * outright — keep the phrase, unmatched.
+   *
+   * `dismissPhrase` above discards a phrase with no trace kept; before this
+   * existed, that was the ONLY way an unresolved phrase left the screen
+   * short of a real match, which is what silently dropped a technique the
+   * library did not know. This is the fix: a real Tag, `technique_id: null`,
+   * carrying the phrase as `label` — never written anywhere near the
+   * technique catalog (see `Tag.label`'s doc comment), so a mangled
+   * dictation can never become a permanent, shared entry through this path.
+   */
+  const keepUnmatched = useCallback((p: UnresolvedPhrase) => {
+    setDetail((d) =>
+      d
+        ? {
+            ...d,
+            tags: [
+              ...d.tags,
+              {
+                category: p.category,
+                event: p.event,
+                position: '',
+                technique_id: null,
+                count: 1,
+                label: p.phrase,
+              } as Tag,
+            ],
+          }
+        : d,
+    );
+    setUnresolved((list) => list.filter((x) => x !== p));
+    // The athlete just chose this deliberately — as confirmed as picking a
+    // real match — so its count is an ordinary one, not an uncertain one.
+    setCountUncertain((flags) => [...flags, false]);
+  }, []);
+
+  /**
+   * Resolve a tag kept as unmatched to a real technique, after the fact.
+   *
+   * This is the "correct it" half of N119/#508 — the picker at dictation
+   * time is not the only chance. Mirrors `resolvePhrase` above in what it
+   * does NOT change: category, event, position and count all stay exactly
+   * as the athlete already confirmed them. Only `technique_id` is set and
+   * `label` cleared — the server rejects a tag carrying both (a resolved tag
+   * with a leftover label is stale data, not a fact worth keeping).
+   */
+  const matchTag = useCallback((i: number, t: TechniqueSummary) => {
+    setDetail((d) =>
+      d
+        ? {
+            ...d,
+            tags: d.tags.map((tag, n) =>
+              n === i ? { ...tag, technique_id: t.id, label: undefined } : tag,
+            ),
+          }
+        : d,
+    );
+  }, []);
+
   // N434/#721: names the day this backfills in the header, the one place
   // guaranteed visible on every state this screen renders — the draft view,
   // the empty-draft view and the error view all sit under the same Stack
@@ -638,6 +708,7 @@ export default function DictateReflectionScreen() {
                   catalog={catalog}
                   failed={catalogFailed}
                   onPick={(t) => resolvePhrase(p, t)}
+                  onKeep={() => keepUnmatched(p)}
                   onSkip={() => dismissPhrase(p)}
                 />
               ))}
@@ -658,6 +729,9 @@ export default function DictateReflectionScreen() {
                     onRemove={() => dropTag(i)}
                     onEvent={(e) => setTagEvent(i, e)}
                     onPosition={(p) => setTagPosition(i, p)}
+                    onMatch={(tech) => matchTag(i, tech)}
+                    catalog={catalog}
+                    catalogFailed={catalogFailed}
                   />
                 ))}
               </View>
@@ -829,6 +903,9 @@ function TagRow({
   onRemove,
   onEvent,
   onPosition,
+  onMatch,
+  catalog,
+  catalogFailed,
 }: {
   tag: Tag;
   /** Position in `detail.tags` — only used to keep the event/position chips'
@@ -849,11 +926,34 @@ function TagRow({
   onEvent: (e: Event) => void;
   /** N120/#509: where it happened, correctable — see `setTagPosition`. */
   onPosition: (p: string) => void;
+  /**
+   * N119/#508: resolve a tag kept as unmatched to a real technique. Only
+   * ever called when `tag.label` is set — see the "Match in library"
+   * control below.
+   */
+  onMatch: (t: TechniqueSummary) => void;
+  /** null while the library is still loading; unused unless `tag.label` is set. */
+  catalog: TechniqueSummary[] | null;
+  catalogFailed: boolean;
 }) {
+  // Whether the inline "Match in library" search is open. Only ever true for
+  // a labelled tag — collapsed by default so an ordinary confirm screen with
+  // no unmatched techniques looks exactly as it did before this existed.
+  const [matching, setMatching] = useState(false);
   const accent = useAccent();
+
+  const matches = useMemo(
+    () => (tag.label && catalog ? rankTechniques(catalog, tag.label).slice(0, 6) : []),
+    [catalog, tag.label],
+  );
+
   // Named, because with three tags "One fewer" × 3 is three indistinguishable
-  // buttons to anyone using a screen reader.
-  const title = `${tag.event} ${tag.category}${tag.position ? ` · ${tag.position}` : ''}`;
+  // buttons to anyone using a screen reader. A labelled tag's title is the
+  // athlete's own phrase, quoted — that IS the identity of this row, the
+  // same way a resolved tag's identity is its event and category.
+  const title = tag.label
+    ? `“${tag.label}”`
+    : `${tag.event} ${tag.category}${tag.position ? ` · ${tag.position}` : ''}`;
   // N120/#509, found in review: a tag with no `technique_id` is exactly what
   // the wizard's own category grid (`bump()` in `reflect/[id].tsx`) writes,
   // and that grid only ever writes `scored`/`conceded` — `attempted` and
@@ -868,20 +968,32 @@ function TagRow({
   // it would save, sync, and then render nowhere. The dictation model is not
   // bound by any of this and can hand back exactly that combination.
   //
-  // So the event chips below only ever OFFER what an untagged tag can
-  // actually be shown as. This cannot make an already-untagged tag MORE
-  // invisible — restricting the choice, never the display of the value
-  // already on it — and the hint below names the fix instead of letting the
-  // gap pass silently, which the count-uncertain hint above does for the
-  // same reason.
-  const untaggedLimited = !tag.technique_id;
+  // A labelled (kept-unmatched, N119/#508) tag is the one exception, even
+  // though its `technique_id` is null too: `session/[id].tsx` gives every
+  // labelled tag a display surface of its own regardless of event — "Said,
+  // not matched to the library" renders it whatever `event` says, precisely
+  // so a kept phrase is never the invisible-data problem this restriction
+  // exists to prevent (see that screen's own `unmatched` comment). So the
+  // restriction below only bites a tag that is both untagged AND unlabelled
+  // — the one shape with genuinely nowhere else on the read view to show up.
+  //
+  // The event chips below only ever OFFER what such a tag can actually be
+  // shown as. This cannot make an already-untagged tag MORE invisible —
+  // restricting the choice, never the display of the value already on it —
+  // and the hint below names the fix instead of letting the gap pass
+  // silently, which the count-uncertain hint above does for the same reason.
+  const untaggedLimited = !tag.technique_id && !tag.label;
   const eventChoices = untaggedLimited ? UNTAGGED_EVENT_OPTIONS : EVENT_OPTIONS;
   const strandedEvent = untaggedLimited && !UNTAGGED_EVENT_OPTIONS.some((o) => o.key === tag.event);
   return (
-    <View style={styles.tagBlock}>
+    <View style={styles.tagRowWrap}>
       <View style={styles.tagRow}>
         <View style={styles.tagText}>
           <Text style={styles.tagTitle}>{title}</Text>
+          {/* The "distinguishable from a matched one" half of N119/#508's
+              acceptance criteria — a phrase that never resolved reads
+              differently from an ordinary chip, every time it is shown. */}
+          {!!tag.label && <Text style={styles.rowHint}>Not matched to the library</Text>}
           {countUncertain && <Text style={styles.rowHint}>How many? We weren’t sure.</Text>}
           {strandedEvent && (
             <Text style={styles.rowHint}>
@@ -962,7 +1074,10 @@ function TagRow({
           above is — a blank position ('') is "the athlete didn't say", not a
           missing tenth family, so it gets its own chip ("Not saying") rather
           than defaulting to one of the nine. Same vocabulary and blank
-          handling as the wizard's own "From where?" pills. */}
+          handling as the wizard's own "From where?" pills. Offered for a
+          labelled tag too — nothing about a kept-unmatched phrase makes
+          where it happened any less worth recording, and `matchTag` carries
+          it forward unchanged if the phrase is matched to a technique later. */}
       <View style={styles.eventChips}>
         {(['', ...POSITIONS] as const).map((p) => {
           const active = tag.position === p;
@@ -981,6 +1096,50 @@ function TagRow({
           );
         })}
       </View>
+      {/* N119/#508's "correct it" half. Only a labelled tag ever shows this —
+          an ordinary matched or category-grid row renders exactly as before. */}
+      {!!tag.label && (
+        <>
+          <Pressable
+            onPress={() => setMatching((m) => !m)}
+            style={styles.secondary}
+            accessibilityRole="button"
+            accessibilityLabel={
+              matching ? `Hide matches for “${tag.label}”` : `Match “${tag.label}” to a technique`
+            }
+          >
+            <Text style={[styles.secondaryLabel, { color: accent.ink }]}>
+              {matching ? 'Hide matches' : 'Match in library'}
+            </Text>
+          </Pressable>
+          {matching && (
+            <View style={styles.matchList}>
+              {catalogFailed ? (
+                <Text style={styles.muted}>Couldn’t load the library just now. Try again shortly.</Text>
+              ) : catalog === null ? (
+                <ActivityIndicator accessibilityLabel="Loading the technique library" />
+              ) : matches.length === 0 ? (
+                <Text style={styles.muted}>Nothing in the library matches that yet.</Text>
+              ) : (
+                matches.map((t) => (
+                  <Pressable
+                    key={t.id}
+                    onPress={() => {
+                      onMatch(t);
+                      setMatching(false);
+                    }}
+                    style={styles.pickOption}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t.name}, for “${tag.label}”`}
+                  >
+                    <Text style={styles.pickOptionLabel}>{t.name}</Text>
+                  </Pressable>
+                ))
+              )}
+            </View>
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -1100,6 +1259,7 @@ function PickOne({
   catalog,
   failed,
   onPick,
+  onKeep,
   onSkip,
 }: {
   phrase: UnresolvedPhrase;
@@ -1107,6 +1267,11 @@ function PickOne({
   catalog: TechniqueSummary[] | null;
   failed: boolean;
   onPick: (t: TechniqueSummary) => void;
+  /**
+   * N119/#508: keep the phrase as said, unmatched, rather than picking a
+   * catalog entry or discarding it. The third path — see `keepUnmatched`.
+   */
+  onKeep: () => void;
   onSkip: () => void;
 }) {
   const accent = useAccent();
@@ -1134,7 +1299,11 @@ function PickOne({
   if (failed) {
     body = (
       <Text style={styles.muted}>
-        Couldn’t load the library just now. Skip this one — nothing else on this screen needs it.
+        {/* N119/#508: "nothing else on this screen needs it" stopped being
+            true once N120/#509 added "Add something you did" below, which
+            searches this same catalog — so a failed load leaves the athlete
+            with one honest option here, not a false reassurance. */}
+        Couldn’t load the library just now. You can keep it as said below.
       </Text>
     );
   } else if (catalog === null) {
@@ -1143,11 +1312,13 @@ function PickOne({
     // N120/#509: "the next screen" used to mean the wizard this screen no
     // longer routes into. "Add something you did" below is the same library
     // search, on this same screen — the honest replacement, not a rewrite of
-    // the old sentence to say nothing.
+    // the old sentence to say nothing. N119/#508 adds the other real option
+    // once the library loaded but genuinely has nothing close: keep the
+    // phrase as said, rather than only ever being told to search again.
     body = (
       <Text style={styles.muted}>
-        Nothing in the library matches that. Skip this one — you can search for it under “Add
-        something you did” below.
+        Nothing in the library matches that. You can keep it as said below, or search for it under
+        “Add something you did”.
       </Text>
     );
   } else {
@@ -1174,6 +1345,19 @@ function PickOne({
         You said <Text style={styles.pickPhrase}>“{phrase.phrase}”</Text> — which one?
       </Text>
       {body}
+      {/* N119/#508's third path. Never pre-selected, never automatic — the
+          athlete taps this exactly the way they would tap a real match, and
+          it costs the same one tap "Skip this one" always did. */}
+      <Pressable
+        onPress={onKeep}
+        style={styles.secondary}
+        accessibilityRole="button"
+        accessibilityLabel={`Keep “${phrase.phrase}” as said, not matched to the library`}
+      >
+        <Text style={[styles.secondaryLabel, { color: accent.ink }]}>
+          Keep as “{phrase.phrase}”
+        </Text>
+      </Pressable>
       <Pressable
         onPress={onSkip}
         style={styles.secondary}
@@ -1250,13 +1434,19 @@ const styles = StyleSheet.create({
   stepGlyph: { fontSize: 20, fontWeight: '800' },
   stepValue: { fontSize: 17, fontWeight: '800', minWidth: 34, textAlign: 'center' },
   stepBlank: { color: vola.textDim },
-  tagBlock: { gap: 8 },
   tagRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  // Wraps every `TagRow`, matched or not — a labelled row needs somewhere to
+  // stack the "Match in library" control and its results below the ordinary
+  // row, and giving every row the same wrapper (rather than branching the
+  // structure per tag) is what keeps an ordinary tag's own layout untouched.
+  // N120/#509's per-tag event/position chip rows live in this same wrapper.
+  tagRowWrap: { gap: 8 },
   tagText: { flexShrink: 1 },
   tagTitle: { fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
-  // N120/#509: the per-tag event correction. Small on purpose — this is a
-  // fix-up control for the rare wrong read, not a primary input, and the
-  // count stepper above stays the thing the eye goes to first.
+  // N120/#509: the per-tag event/position correction chips. Small on
+  // purpose — this is a fix-up control for the rare wrong read, not a
+  // primary input, and the count stepper above stays the thing the eye goes
+  // to first. Reused for the position row right below the event row.
   eventChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   eventChip: {
     borderWidth: 1,
@@ -1266,6 +1456,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   eventChipLabel: { fontSize: 11, fontWeight: '600' },
+  // Inline search results under a labelled `TagRow`'s "Match in library" —
+  // same shape as `PickOne`'s own option list, just without a card of its
+  // own, since it is already inside one.
+  matchList: { gap: 8 },
   pickPrompt: { fontSize: 15, lineHeight: 22 },
   pickPhrase: { fontWeight: '800' },
   pickOption: {

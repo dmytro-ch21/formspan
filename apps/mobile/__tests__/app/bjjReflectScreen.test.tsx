@@ -221,6 +221,71 @@ it('shows Reliable on a technique the funnel already has three live hits for', a
   );
 });
 
+/**
+ * N119/#508: the wizard is the "correct it" surface for a tag dictation kept
+ * unmatched — `dictate.tsx`'s own header says there is "no separate 'review
+ * a dictated session' surface, deliberately", so this IS where a phrase gets
+ * a second chance at a real match once one exists.
+ */
+it('shows a tag kept unmatched from dictation, and resolves it to a real technique', async () => {
+  (readLocalBjjDetail as jest.Mock).mockImplementationOnce(() =>
+    deferred({
+      ...mockDetail,
+      tags: [
+        {
+          category: 'submission',
+          event: 'scored',
+          position: '',
+          technique_id: null,
+          count: 1,
+          label: 'armbar',
+        },
+      ],
+    }),
+  );
+
+  render(<ReflectScreen />);
+  await waitFor(() => {
+    expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+  });
+
+  // Step 0 (drilled) -> step 1 (live), where this list lives.
+  fireEvent.press(screen.getByTestId('bjj-reflect-next'));
+
+  await waitFor(() => {
+    expect(screen.getByText('Said, not matched to the library')).toBeTruthy();
+  });
+  // The phrase itself is visible — the "athlete can see it was not
+  // recognised" half of the acceptance criteria.
+  expect(screen.getByText('“armbar”')).toBeTruthy();
+
+  fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
+  await waitFor(() => {
+    expect(screen.getByLabelText('Armbar from Closed Guard, for “armbar”')).toBeTruthy();
+  });
+  fireEvent.press(screen.getByLabelText('Armbar from Closed Guard, for “armbar”'));
+
+  // Resolved: the section is gone, and what got persisted carries the real
+  // technique id with no leftover label.
+  await waitFor(() => {
+    expect(screen.queryByText('Said, not matched to the library')).toBeNull();
+  });
+  await waitFor(() => {
+    expect(saveLocalBjjDetail).toHaveBeenCalledWith(
+      'u1',
+      's1',
+      expect.objectContaining({
+        tags: [
+          expect.objectContaining({
+            technique_id: 'armbar-closed-guard',
+            label: undefined,
+          }),
+        ],
+      }),
+    );
+  });
+});
+
 it('shows no learning-state badge on a drilled row whose technique was retired', async () => {
   // `technique_id: null` is a REAL state, not a hypothetical one — migration
   // 000025's `ON DELETE SET NULL` produces exactly this when a technique is

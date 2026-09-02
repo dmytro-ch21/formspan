@@ -336,6 +336,20 @@ export type Tag = {
   position: string;
   technique_id?: string | null;
   count: number;
+  /**
+   * What the athlete said when it did NOT resolve to a catalog technique —
+   * "pool guards" from a mangled dictation, or a phrase typed by hand the
+   * library has no entry for (N119/#508).
+   *
+   * Absent/undefined is the ordinary case: `technique_id` resolved, or
+   * nothing was named at all (the category-grid fast path never sets this).
+   * Mutually exclusive with `technique_id` — the server rejects a tag
+   * carrying both, because a resolved tag with a leftover label is stale
+   * data. NEVER sent anywhere near the technique catalog: this is a property
+   * of the SESSION's own tag row, and the whole reason a mangled dictation
+   * can never become a permanent, shared catalog entry through this path.
+   */
+  label?: string;
 };
 
 export type SessionDetail = {
