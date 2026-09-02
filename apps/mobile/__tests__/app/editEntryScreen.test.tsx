@@ -22,14 +22,17 @@ configure({ asyncUtilTimeout: 10_000 });
 const mockLocalEntry = jest.fn();
 const mockEditEntry = jest.fn();
 const mockLocalFood = jest.fn();
-const mockLogFood = jest.fn();
 const mockRemoveEntry = jest.fn();
+// `splitEntry` is the ATOMIC helper (`foodLog.ts`) that logs the decomposed
+// items and removes the combined entry as one transaction — mocked as a
+// single call, matching `combineScreen.test.tsx`'s own convention.
+const mockSplitEntry = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
   localEntry: (...a: unknown[]) => mockLocalEntry(...a),
   editEntry: (...a: unknown[]) => mockEditEntry(...a),
   localFood: (...a: unknown[]) => mockLocalFood(...a),
-  logFood: (...a: unknown[]) => mockLogFood(...a),
   removeEntry: (...a: unknown[]) => mockRemoveEntry(...a),
+  splitEntry: (...a: unknown[]) => mockSplitEntry(...a),
 }));
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 
@@ -87,8 +90,8 @@ beforeEach(() => {
   // Default: no source food, matching `entry()`'s own `source_food_id: null`
   // — most tests here never touch N115 at all.
   mockLocalFood.mockReset().mockResolvedValue(null);
-  mockLogFood.mockReset().mockResolvedValue('generated-uuid');
   mockRemoveEntry.mockReset().mockResolvedValue(undefined);
+  mockSplitEntry.mockReset().mockResolvedValue(undefined);
 });
 
 it('rescales the five hidden N52 macros exactly as it rescales the visible four', async () => {
@@ -187,6 +190,31 @@ describe('"Made of" and splitting a combined meal back into its parts (N115)', (
     expect(screen.queryByTestId('entry-made-of')).toBeNull();
   });
 
+  /**
+   * The blocking correctness gap frontend-review found before merge: a
+   * recipe's `items` are the FULL BATCH, and they sum to this entry's own
+   * total only when `yield_servings === entry.servings`. An ordinary N87
+   * multi-portion recipe (`yield_servings: 4`) logged at ONE serving would
+   * otherwise show "Made of" rows summing to 4× this entry's own kcal — the
+   * exact "total that cannot be checked against its components" the ticket
+   * names. Every OTHER vector in this describe block uses `yield_servings: 1`
+   * and `servings: 1`, so nothing here would have caught the bug without
+   * this pair.
+   */
+  it('shows nothing for a multi-portion recipe logged at fewer than its full yield', async () => {
+    mockLocalFood.mockResolvedValue(recipeFood({ yield_servings: 4 }));
+    await open(entry({ eaten_on: TODAY, servings: 1, source_food_id: 'shake-food' }));
+    await waitFor(() => expect(mockLocalFood).toHaveBeenCalled());
+    expect(screen.queryByTestId('entry-made-of')).toBeNull();
+  });
+
+  it('shows nothing once a combined (yield-1) entry\'s own servings have been edited away from 1', async () => {
+    mockLocalFood.mockResolvedValue(recipeFood({ yield_servings: 1 }));
+    await open(entry({ eaten_on: TODAY, servings: 2, source_food_id: 'shake-food' }));
+    await waitFor(() => expect(mockLocalFood).toHaveBeenCalled());
+    expect(screen.queryByTestId('entry-made-of')).toBeNull();
+  });
+
   it('shows nothing extra when the source is a plain food, not a recipe', async () => {
     mockLocalFood.mockResolvedValue({ ...recipeFood(), kind: 'food', items: [], yield_servings: null });
     await open(entry({ source_food_id: 'plain-food' }));
@@ -214,7 +242,7 @@ describe('"Made of" and splitting a combined meal back into its parts (N115)', (
     expect(screen.queryByTestId('entry-split')).toBeNull();
   });
 
-  it('splitting logs one entry per item and removes the combined one', async () => {
+  it('asks splitEntry for one entry per item and removal of the combined one', async () => {
     mockLocalFood.mockResolvedValue(recipeFood());
     await open(entry({ id: 'combined-1', eaten_on: TODAY, meal: 'breakfast', source_food_id: 'shake-food' }));
     await waitFor(() => expect(screen.getByTestId('entry-split')).toBeTruthy());
@@ -223,16 +251,20 @@ describe('"Made of" and splitting a combined meal back into its parts (N115)', (
       fireEvent.press(screen.getByTestId('entry-split'));
     });
 
-    await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(2));
-    const logged = mockLogFood.mock.calls.map((c) => c[1] as Record<string, unknown>);
-    expect(logged.map((r) => r.name)).toEqual(['Milk', 'Protein powder']);
-    expect(logged.every((r) => r.meal === 'breakfast')).toBe(true);
-    expect(logged.every((r) => r.eaten_on === TODAY)).toBe(true);
+    await waitFor(() => expect(mockSplitEntry).toHaveBeenCalledTimes(1));
+    const [userIdArg, input] = mockSplitEntry.mock.calls[0] as [
+      string,
+      { entries: Record<string, unknown>[]; removeId: string },
+    ];
+    expect(userIdArg).toBe('u1');
+    expect(input.entries).toHaveLength(2);
+    expect(input.entries.map((r) => r.name)).toEqual(['Milk', 'Protein powder']);
+    expect(input.entries.every((r) => r.meal === 'breakfast')).toBe(true);
+    expect(input.entries.every((r) => r.eaten_on === TODAY)).toBe(true);
     // The sum of what was relogged equals the combined entry's own total —
     // the same "checkable against its components" property the combine
     // screen pins on the way in.
-    expect(logged.reduce((sum, r) => sum + (r.kcal as number), 0)).toBe(150 + 120);
-
-    expect(mockRemoveEntry).toHaveBeenCalledWith('u1', 'combined-1');
+    expect(input.entries.reduce((sum, r) => sum + (r.kcal as number), 0)).toBe(150 + 120);
+    expect(input.removeId).toBe('combined-1');
   });
 });

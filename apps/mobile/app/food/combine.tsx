@@ -51,8 +51,8 @@ import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { localEntries, logFood, removeEntry, saveFoodLocally } from '@/lib/foodLog';
-import { fmtAmount, type Entry, type Meal } from '@/lib/nutrition';
+import { combineEntries, localEntries } from '@/lib/foodLog';
+import { fmtAmount, MEALS, type Entry, type Meal } from '@/lib/nutrition';
 import {
   draftToFood,
   itemFromEntry,
@@ -81,6 +81,12 @@ export default function CombineScreen() {
   const { date, meal, ids } = useLocalSearchParams<{ date: string; meal: string; ids: string }>();
 
   const idSet = useMemo(() => new Set((ids ?? '').split(',').filter(Boolean)), [ids]);
+  // The only caller of this route is `food.tsx`, which always sends a real
+  // slot — but a route param is still an external input, and an unvalidated
+  // one written straight to `logFood` would 400 permanently on push (see
+  // `add.tsx`'s identical guard). Checked once, up front, rather than
+  // trusted through to `combine()`.
+  const mealValid = MEALS.includes(meal as Meal);
 
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   const [name, setName] = useState('');
@@ -88,7 +94,11 @@ export default function CombineScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!userId || !date) return;
+    // `mealValid` is checked here too, not just at the render branch below —
+    // an invalid `meal` must never start the async fetch, or a slow one
+    // resolving afterward could still call `setLoad({ status: 'ready' })`
+    // over a screen that has already refused to proceed.
+    if (!userId || !date || !mealValid) return;
     let live = true;
     void localEntries(userId, date).then((rows) => {
       if (!live) return;
@@ -98,11 +108,10 @@ export default function CombineScreen() {
     return () => {
       live = false;
     };
-    // `idSet` intentionally excluded: it is derived from `ids`, which is a
-    // fixed route param for the life of this screen — recomputing off a new
-    // Set identity every render would refire this load forever.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, date]);
+    // `idSet` IS in the deps, not excluded: it is `useMemo(() => ..., [ids])`
+    // (below), so its identity only changes when the route param itself does
+    // — a fixed value for the life of this screen. No disable comment needed.
+  }, [userId, date, idSet, mealValid]);
 
   // A stable empty array rather than a fresh `[]` literal for the "not
   // ready" branch — a new array every render would make `items` below
@@ -115,40 +124,45 @@ export default function CombineScreen() {
     [name, servingLabel, items],
   );
   const problem = load.status === 'ready' ? recipeProblem(draft) : null;
+  // One serving of a one-serving recipe IS the sum of its items — computed
+  // once here rather than separately in the render and in `combine()`, so
+  // the number shown and the number saved can never be two calls that could
+  // drift apart.
+  const preview = useMemo(() => draftToFood(draft), [draft]);
 
   const combine = async () => {
     if (!userId || !date || !meal || load.status !== 'ready' || problem || saving) return;
     setSaving(true);
     try {
-      const food = draftToFood(draft);
-      const foodId = await saveFoodLocally(userId, food);
-      await logFood(userId, {
-        eaten_on: date,
-        meal: meal as Meal,
-        name: food.name,
-        servings: 1,
-        serving_label: food.serving_label,
-        kcal: food.kcal,
-        protein_g: food.protein_g,
-        carb_g: food.carb_g,
-        fat_g: food.fat_g,
-        fibre_g: food.fibre_g,
-        saturated_fat_g: food.saturated_fat_g,
-        sugar_g: food.sugar_g,
-        added_sugar_g: food.added_sugar_g,
-        sodium_mg: food.sodium_mg,
-        cholesterol_mg: food.cholesterol_mg,
-        source_food_id: foodId,
-        category: null,
-        notes: '',
+      const food = preview;
+      // `combineEntries` is the ATOMIC version of "save the food, log one
+      // entry, delete the originals" — see its own doc comment in
+      // `foodLog.ts` for why three separate awaits here was a correctness
+      // gap (a mid-loop failure or a retry after one could double-count the
+      // day), found in review.
+      await combineEntries(userId, {
+        food,
+        entry: {
+          eaten_on: date,
+          meal: meal as Meal,
+          name: food.name,
+          servings: 1,
+          serving_label: food.serving_label,
+          kcal: food.kcal,
+          protein_g: food.protein_g,
+          carb_g: food.carb_g,
+          fat_g: food.fat_g,
+          fibre_g: food.fibre_g,
+          saturated_fat_g: food.saturated_fat_g,
+          sugar_g: food.sugar_g,
+          added_sugar_g: food.added_sugar_g,
+          sodium_mg: food.sodium_mg,
+          cholesterol_mg: food.cholesterol_mg,
+          category: null,
+          notes: '',
+        },
+        removeIds: load.entries.map((e) => e.id),
       });
-      // The replace half of "combine": the four rows this meal was built
-      // from are gone the moment the one row representing them exists.
-      // Sequential, not `Promise.all` — these are SQLite writes on the one
-      // connection `getDb()` hands out, and there is no benefit to racing them.
-      for (const e of load.entries) {
-        await removeEntry(userId, e.id);
-      }
       request('meal combined');
       router.back();
     } finally {
@@ -156,23 +170,31 @@ export default function CombineScreen() {
     }
   };
 
+  // `!mealValid` checked BEFORE `load.status === 'loading'`, and folded into
+  // the SAME branch as "too few resolved" — both are "this screen cannot
+  // honestly proceed". `mealValid` is derived straight from route params
+  // with no async step, so it is knowable on the very first render; ordered
+  // first here for that reason, rather than set via a `setLoad` call from
+  // the effect above, which would be a synchronous setState with nothing to
+  // actually wait for — the cascading-render pattern this codebase's own
+  // lint rule holds a line against (`react-hooks/set-state-in-effect`).
+  if (!mealValid || load.status === 'too_few') {
+    return (
+      <View style={styles.centre}>
+        <Stack.Screen options={{ title: 'Combine into a meal' }} />
+        <Text style={styles.note} testID="combine-too-few">
+          Some of what you selected is no longer here — go back and select again.
+        </Text>
+      </View>
+    );
+  }
+
   if (load.status === 'loading') {
     return (
       <View style={styles.centre}>
         <Stack.Screen options={{ title: 'Combine into a meal' }} />
         <Text style={styles.note} testID="combine-loading">
           Loading…
-        </Text>
-      </View>
-    );
-  }
-
-  if (load.status === 'too_few') {
-    return (
-      <View style={styles.centre}>
-        <Stack.Screen options={{ title: 'Combine into a meal' }} />
-        <Text style={styles.note} testID="combine-too-few">
-          Some of what you selected is no longer here — go back and select again.
         </Text>
       </View>
     );
@@ -219,18 +241,31 @@ export default function CombineScreen() {
       <SectionHeader label="Made of" />
       {items.map((it, i) => (
         <View key={`${it.name}-${i}`} style={styles.itemRow} testID={`combine-item-${i}`}>
-          <Text style={styles.itemName} numberOfLines={2}>
-            {it.name}
-          </Text>
+          <View style={styles.itemMain}>
+            <Text style={styles.itemName} numberOfLines={2}>
+              {it.name}
+            </Text>
+            <Text style={styles.itemMacros}>
+              {fmtAmount(it.protein_g * it.quantity)}P · {fmtAmount(it.carb_g * it.quantity)}C ·{' '}
+              {fmtAmount(it.fat_g * it.quantity)}F
+            </Text>
+          </View>
           <Text style={styles.itemKcal}>{fmtAmount(it.kcal * it.quantity)} kcal</Text>
         </View>
       ))}
 
       {/* The arithmetic, visible: every row above sums to this one — the
-          failure this ticket names by name is a total nobody can check. */}
+          failure this ticket names by name is a total nobody can check. Every
+          macro the label carries, not just calories — the AC says "macros",
+          plural. */}
       <View style={styles.totalRow} testID="combine-total">
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalKcal}>{fmtAmount(draftToFood(draft).kcal)} kcal</Text>
+        <View style={styles.itemMain}>
+          <Text style={styles.totalLabel}>Total</Text>
+          <Text style={styles.itemMacros}>
+            {fmtAmount(preview.protein_g)}P · {fmtAmount(preview.carb_g)}C · {fmtAmount(preview.fat_g)}F
+          </Text>
+        </View>
+        <Text style={styles.totalKcal}>{fmtAmount(preview.kcal)} kcal</Text>
       </View>
 
       {problem ? (
@@ -285,7 +320,9 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
     marginBottom: 8,
   },
-  itemName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  itemMain: { flex: 1, gap: 2 },
+  itemName: { fontSize: 14, fontWeight: '600' },
+  itemMacros: { fontSize: 12, color: vola.textDim },
   itemKcal: { fontSize: 13, color: vola.textMuted },
   totalRow: {
     flexDirection: 'row',

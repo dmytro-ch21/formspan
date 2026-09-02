@@ -52127,20 +52127,36 @@ today AND a reusable "shake" for next time.
 
 **Reversible on the day it happened — the AC's own phrase, taken literally.**
 `food/entry/[id].tsx` (the entry-detail screen) now shows a "Made of" list for
-any entry logged from a recipe (reusing the recipe's own stored items — no new
-storage), and, only when `entry.eaten_on === todayString()`, a "Split into
-separate entries" button that rebuilds the parts via `entriesFromRecipeItems`
-and removes the combined row. Deliberately NOT a technical limit —
-`entriesFromRecipeItems` works on any day — but a considered one: splitting a
-day OTHER than today changes a log already used to judge that day gone by,
-which is the exact thing this module's package doc spends a paragraph
-refusing to let an edit do. A past day shows the plain refusal text instead of
-the control ("This can't be split back into separate entries — that would
-change a past day's log."), satisfying the AC's fallback clause directly.
-Decomposing reads the recipe's CURRENT items rather than a separate frozen
-snapshot on the entry — a small, documented drift risk if the recipe were
-edited in the few minutes between combining and splitting, accepted rather
-than doubling storage for a same-day-only affordance.
+a recipe-sourced entry, and, only when `entry.eaten_on === todayString()`, a
+"Split into separate entries" button that rebuilds the parts via
+`entriesFromRecipeItems` and removes the combined row. Deliberately NOT a
+technical limit — `entriesFromRecipeItems` works on any day — but a
+considered one: splitting a day OTHER than today changes a log already used
+to judge that day gone by, which is the exact thing this module's package doc
+spends a paragraph refusing to let an edit do. A past day shows the plain
+refusal text instead of the control ("This can't be split back into separate
+entries — that would change a past day's log."), satisfying the AC's fallback
+clause directly. Decomposing reads the recipe's CURRENT items rather than a
+separate frozen snapshot on the entry — see "Two accepted limitations" below.
+
+**Both "Made of" and "Split" are additionally gated on
+`recipeFood.yield_servings === 1 && entry.servings === 1` — a blocking
+correctness gap `frontend-reviewer` found before merge, not present in the
+first pass.** A recipe's `items` are the FULL BATCH; a portion of it is
+`items summed / yield_servings`, and this entry's own `kcal` is that portion
+times however many servings were logged. The two agree exactly ONLY when
+`yield_servings === servings` — the first version gated on nothing but
+"is this a recipe with items", so an ORDINARY multi-portion N87 recipe
+(`yield_servings: 4`) logged at one serving showed "Made of" rows summing to
+4× the entry's own total, and Split would have replaced one correct row with
+rows overstating the day by the same factor. Narrowed to exactly `=== 1` on
+both sides rather than the more general `yield_servings === servings`,
+because `=== 1` is the only case this ticket actually asks for (a
+`food/combine.tsx` meal) and is always true for one UNLESS the athlete later
+moves a combined entry's own servings stepper away from 1 — which the gate
+also now correctly refuses. Two mutation-verified test vectors pin this in
+`editEntryScreen.test.tsx` (`yield_servings: 4`, and `servings: 2` on an
+otherwise-eligible combined entry).
 
 **Re-logging a combined meal re-derives nothing**, for free: `food/add.tsx`'s
 save-food search and quick-add already read `localFoods` (which does not
@@ -52148,27 +52164,97 @@ filter by `kind`) and log via `scale(food, servings)` — pure arithmetic, no
 LLM, no external call. A "shake" saved via combine is indistinguishable from
 any other saved recipe by the time it reaches that path.
 
+**Two more review findings, both fixed, both from the same read: combining is
+destructive, and the copy has to be true when it is offered, not just when it
+is used.**
+
+- **`ac-verifier` (criterion 6, blocking): "Combine" was reachable on ANY day
+  the athlete had stepped back to, not only today.** `food.tsx` gates the
+  ±1-day arrows and the month grid to any day, future excepted — nothing
+  stopped an athlete combining, and thereby DELETING, four entries logged
+  last week. The combine screen's own intro copy ("you can split it back into
+  them again any time today") would then have been false for that entry from
+  the moment it was created, and `food/entry/[id]`'s own Split control would
+  have refused it a screen later — the exact "the copy says plainly that it
+  is not" contradiction the AC exists to prevent, just arriving a few taps
+  after the promise instead of alongside it. Fixed by gating the "Combine"
+  affordance itself on `isToday`, the same variable `food.tsx` already
+  computes and the same day-gating shape `food/entry/[id]`'s Split control
+  already uses — not by rewriting the copy to hedge, which would have made
+  the common (today) case read defensively for no reason. Pinned in a new
+  `__tests__/app/foodCombineGate.test.tsx`, mutation-verified (reverting the
+  gate turns the "past day" test red as an assertion failure, not a crash).
+- **`frontend-reviewer` (suggestion, folded in): the three-step combine
+  (save recipe, log entry, delete originals) and the N-step split (log items,
+  delete combined) were sequential `await`s with no transaction.** A thrown
+  `removeEntry` partway through — or a retry after any partial failure —
+  could double-count a day: the combined row AND surviving originals, or the
+  decomposed items logged twice. `foodLog.ts` gained `combineEntries` and
+  `splitEntry`, both wrapping their writes in the existing `withTransaction`
+  queue (`db.ts`) that three other multi-write paths already use, so a
+  failure partway through is atomic — every write lands or none does. The
+  screens now call these instead of `saveFoodLocally`/`logFood`/`removeEntry`
+  directly, and the screen tests were rewritten to assert on the one call
+  into the transactional helper rather than the three underlying writes.
+- Smaller findings folded in from the same review: the combine screen's item
+  rows and total now show protein/carb/fat alongside kcal (the AC says
+  "macros," plural — only kcal was visible in the first pass), matching a
+  matching addition to the entry screen's "Made of" list; the route's `meal`
+  param is validated against `MEALS` before use (an unvalidated one would
+  400-and-strand on push, same failure class `add.tsx` already guards
+  against); the select-mode row's accessibility role changed from
+  `button`/`selected` to `checkbox`/`checked`, which is what the control
+  actually is; the Cancel button gained a `hitSlop`.
+
 **Testing.** `lib/__tests__/recipe.test.ts` pins `itemFromEntry` (absolute
 copy, not a re-derivation; provenance carried through; a real four-item shake
 summing to exactly 510 kcal) and `entriesFromRecipeItems` (per-item
 `kcal × quantity`, a full item-entry-item round trip preserving the total).
 `MealCard.test.tsx` covers the combine-select affordance end to end (offered
 only at 2+ entries, confirm disabled under 2 selected, cancel/confirm
-wiring). Two new screen tests —
-`__tests__/app/combineScreen.test.tsx` and additions to
-`__tests__/app/editEntryScreen.test.tsx` — pin the wiring: exactly one entry
-logged and exactly N removed on combine, and the same-day/past-day split
-behaviour including the exact copy shown for each. `pnpm run verify` green
-(mobile, web, admin, backend); mobile lint sits at exactly 50/50 warnings
-against the repo's ratchet ceiling after two `react-hooks/set-state-in-effect`
-warnings this branch would otherwise have added were designed out instead
-(`food.tsx`'s day-navigation now clears an in-progress selection at every
-`setDayOffset` call site rather than in a separate effect keyed on the day).
+wiring, checkbox role/state). `__tests__/app/combineScreen.test.tsx`,
+`__tests__/app/foodCombineGate.test.tsx` (new) and additions to
+`__tests__/app/editEntryScreen.test.tsx` pin the wiring: exactly one
+`combineEntries`/`splitEntry` call with the right arguments, "Combine" absent
+once the day switcher has moved off today, and the yield/servings gate on
+"Made of"/Split — the latter two mutation-verified directly (reverting each
+fix turns its own test red as an assertion failure, restoring brings it back
+green). `pnpm run verify` green (mobile, web, admin, backend); mobile lint
+sits at exactly 50/50 warnings against the repo's ratchet ceiling — three
+`react-hooks/set-state-in-effect` warnings this branch would otherwise have
+added were designed out instead: `food.tsx`'s day-navigation clears an
+in-progress selection at every day-changing call site rather than in an
+effect keyed on the day, and `combine.tsx`'s "invalid meal param" refusal is
+checked at RENDER time (it is knowable on the very first render, with no
+async step) rather than pushed into `setLoad` from inside the load effect.
 
 **#503 (N114)'s "saved foods" screens, `food/saved/index.tsx` and
 `food/saved/[id].tsx`, needed no changes** — a combined meal is stored,
 listed, edited and deleted exactly like any other saved food, which is the
 whole point of building this on N114 rather than beside it.
+
+**Two accepted, documented limitations — raised by `ac-verifier`, deliberately
+NOT fixed here, judged smaller than the storage they would each cost:**
+
+- **"Made of" and Split read the recipe's CURRENT items, not a snapshot from
+  when the entry was logged.** Editing a saved meal's ingredients afterward
+  (via `food/recipe/[id].tsx`, the same screen every recipe uses) changes
+  what "Made of" shows for entries logged from it BEFORE the edit — the
+  entry's own stored macros stay correctly frozen (nothing about the "a log
+  owns its numbers" rule is violated), but the ingredient LIST view can go
+  stale, and a same-day Split would then rebuild the EDITED version rather
+  than what was originally eaten. Fixing this means storing a frozen items
+  snapshot per entry rather than following `source_food_id`, which is real
+  added storage for a view-only screen most athletes will not open between
+  combining and editing the same meal in the same session.
+- **Deleting a saved meal (`removeFood`, already existing N114 behaviour)
+  silently drops "Made of" from every past entry logged from it.** Nothing
+  crashes and no macro changes — `localFood` simply returns null once the
+  food is tombstoned, and `recipeFood` degrades to "no source food", the same
+  as an entry that never had one — but the athlete deleting it is not told
+  that past breakdowns disappear. Fixing this well means either counting
+  references before allowing the delete or keeping a tombstoned food's items
+  readable, and both are scope beyond what this ticket asked for.
 
 **Left open, deliberately:** #505 (N116, sharing a saved item to a friend)
 depends on this and was not started here. `NEEDS HUMAN EVIDENCE` per the

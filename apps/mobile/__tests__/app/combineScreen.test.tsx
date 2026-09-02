@@ -17,14 +17,14 @@ jest.setTimeout(30_000);
 configure({ asyncUtilTimeout: 10_000 });
 
 const mockLocalEntries = jest.fn();
-const mockLogFood = jest.fn();
-const mockRemoveEntry = jest.fn();
-const mockSaveFoodLocally = jest.fn();
+// `combineEntries` is the ATOMIC helper (`foodLog.ts`) that does the save +
+// log + delete-originals as one transaction — mocked as a single call so this
+// file pins what the SCREEN asks for, and `foodLog`'s own test coverage (were
+// it added) would pin the transaction itself.
+const mockCombineEntries = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
   localEntries: (...a: unknown[]) => mockLocalEntries(...a),
-  logFood: (...a: unknown[]) => mockLogFood(...a),
-  removeEntry: (...a: unknown[]) => mockRemoveEntry(...a),
-  saveFoodLocally: (...a: unknown[]) => mockSaveFoodLocally(...a),
+  combineEntries: (...a: unknown[]) => mockCombineEntries(...a),
 }));
 
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
@@ -85,9 +85,7 @@ async function open(ids = 'e1,e2,e3,e4', rows = [MILK, PROTEIN, BERRIES, ICE_CRE
 
 beforeEach(() => {
   mockLocalEntries.mockReset();
-  mockLogFood.mockReset().mockResolvedValue('new-entry-id');
-  mockRemoveEntry.mockReset().mockResolvedValue(undefined);
-  mockSaveFoodLocally.mockReset().mockResolvedValue('new-food-id');
+  mockCombineEntries.mockReset().mockResolvedValue('new-food-id');
   mockBack.mockReset();
 });
 
@@ -123,35 +121,43 @@ describe('saving', () => {
     });
   }
 
-  it('saves a one-serving recipe built from the four entries', async () => {
+  it('asks combineEntries to save a one-serving recipe built from the four entries', async () => {
     await save();
-    await waitFor(() => expect(mockSaveFoodLocally).toHaveBeenCalledTimes(1));
-    const [, food] = mockSaveFoodLocally.mock.calls[0] as [string, Record<string, unknown>];
-    expect(food.kind).toBe('recipe');
-    expect(food.yield_servings).toBe(1);
-    expect(food.name).toBe('Protein shake');
-    expect((food.items as unknown[]).length).toBe(4);
+    await waitFor(() => expect(mockCombineEntries).toHaveBeenCalledTimes(1));
+    const [, input] = mockCombineEntries.mock.calls[0] as [
+      string,
+      { food: Record<string, unknown>; entry: Record<string, unknown>; removeIds: string[] },
+    ];
+    expect(input.food.kind).toBe('recipe');
+    expect(input.food.yield_servings).toBe(1);
+    expect(input.food.name).toBe('Protein shake');
+    expect((input.food.items as unknown[]).length).toBe(4);
     // One serving of a one-serving recipe IS the sum of its parts — the
     // arithmetic this screen shows has to be the same number that gets saved.
-    expect(food.kcal).toBe(510);
+    expect(input.food.kcal).toBe(510);
   });
 
-  it('logs exactly ONE new entry, pointing at the saved recipe', async () => {
+  it('asks for exactly ONE new entry, at the right day and slot', async () => {
     await save();
-    await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
-    const [, logged] = mockLogFood.mock.calls[0] as [string, Record<string, unknown>];
-    expect(logged.eaten_on).toBe('2026-09-01');
-    expect(logged.meal).toBe('breakfast');
-    expect(logged.servings).toBe(1);
-    expect(logged.kcal).toBe(510);
-    expect(logged.source_food_id).toBe('new-food-id');
+    await waitFor(() => expect(mockCombineEntries).toHaveBeenCalledTimes(1));
+    const [, input] = mockCombineEntries.mock.calls[0] as [
+      string,
+      { entry: Record<string, unknown> },
+    ];
+    expect(input.entry.eaten_on).toBe('2026-09-01');
+    expect(input.entry.meal).toBe('breakfast');
+    expect(input.entry.servings).toBe(1);
+    expect(input.entry.kcal).toBe(510);
+    // Not sent here — `combineEntries` sets it once the recipe it just saved
+    // has an id, which this screen cannot know in advance.
+    expect(input.entry.source_food_id).toBeUndefined();
   });
 
-  it('removes every entry it was built from — the replace half of "combine"', async () => {
+  it('asks to remove every entry it was built from — the replace half of "combine"', async () => {
     await save();
-    await waitFor(() => expect(mockRemoveEntry).toHaveBeenCalledTimes(4));
-    const removedIds = mockRemoveEntry.mock.calls.map((c) => c[1]);
-    expect(removedIds.sort()).toEqual(['e1', 'e2', 'e3', 'e4']);
+    await waitFor(() => expect(mockCombineEntries).toHaveBeenCalledTimes(1));
+    const [, input] = mockCombineEntries.mock.calls[0] as [string, { removeIds: string[] }];
+    expect(input.removeIds.slice().sort()).toEqual(['e1', 'e2', 'e3', 'e4']);
   });
 
   it('navigates back once combined', async () => {

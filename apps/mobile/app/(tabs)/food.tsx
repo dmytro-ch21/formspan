@@ -580,7 +580,16 @@ export default function FoodScreen() {
                   selecting={combining?.meal === slot.meal}
                   selectedIds={combining?.meal === slot.meal ? combining.selected : undefined}
                   onToggleSelect={toggleSelect}
-                  onStartCombine={() => setCombining({ meal: slot.meal, selected: new Set() })}
+                  // N115 review (ac-verifier, criterion 6): combining is
+                  // destructive — it deletes the originals — and the combine
+                  // screen's own copy promises same-day reversibility. That
+                  // promise is only true today, so the affordance itself is
+                  // gated the same way `food/entry/[id]`'s Split control
+                  // already is, rather than offered on a past day and then
+                  // contradicted a screen later.
+                  onStartCombine={
+                    isToday ? () => setCombining({ meal: slot.meal, selected: new Set() }) : undefined
+                  }
                   onCancelCombine={() => setCombining(null)}
                   onConfirmCombine={confirmCombine}
                   testID={`food-meal-${slot.meal}`}

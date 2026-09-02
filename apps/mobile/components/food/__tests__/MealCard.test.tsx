@@ -158,17 +158,18 @@ describe('combine-select mode (N115)', () => {
     expect(onEntryPress).not.toHaveBeenCalled();
   });
 
-  it('marks a selected row as selected for assistive tech', () => {
+  it('marks a selected row as a checked checkbox for assistive tech', () => {
     renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       selecting: true,
       selectedIds: new Set(['a']),
     });
+    expect(screen.getByTestId('food-entry-a-select').props.accessibilityRole).toBe('checkbox');
     expect(screen.getByTestId('food-entry-a-select').props.accessibilityState).toEqual({
-      selected: true,
+      checked: true,
     });
     expect(screen.getByTestId('food-entry-b-select').props.accessibilityState).toEqual({
-      selected: false,
+      checked: false,
     });
   });
 

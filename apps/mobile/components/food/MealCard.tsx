@@ -190,9 +190,13 @@ export function MealCard({
             <Pressable
               style={styles.row}
               onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
-              accessibilityRole="button"
+              // Selecting: a checkbox, not a button — `{ checked }` is what
+              // announces "toggleable, currently on/off" rather than the
+              // generic "button, selected" a `selected` state on a button
+              // role reads as. Found in review.
+              accessibilityRole={selecting ? 'checkbox' : 'button'}
               accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
-              accessibilityState={selecting ? { selected: isSelected } : undefined}
+              accessibilityState={selecting ? { checked: isSelected } : undefined}
               testID={selecting ? `food-entry-${e.id}-select` : undefined}
             >
               {selecting ? (
@@ -230,6 +234,7 @@ export function MealCard({
           <Pressable
             onPress={onCancelCombine}
             style={styles.combineCancel}
+            hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="Cancel combining"
             testID={testID ? `${testID}-combine-cancel` : undefined}

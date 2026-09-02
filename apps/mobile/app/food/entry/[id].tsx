@@ -51,6 +51,25 @@
  * A past day shows why the control is missing rather than just omitting it —
  * "the copy says plainly that it is not [reversible]" is the ticket's own
  * fallback for exactly this case.
+ *
+ * **Both are gated on `recipeFood.yield_servings === 1 && entry.servings ===
+ * 1` — found in review, and not a stylistic choice.** A recipe's `items` are
+ * the FULL BATCH, at whatever quantities were entered; a portion of it is
+ * `items summed / yield_servings`, and this entry's own `kcal` is that portion
+ * times however many servings were logged. The two agree — "Made of" sums to
+ * exactly this entry's own total — ONLY when `yield_servings === servings`,
+ * and the simplest, always-true case of that is both equal to 1: a
+ * `food/combine.tsx` meal, never edited since (it fixes `yield_servings: 1`
+ * and logs `servings: 1`, but the servings stepper on THIS screen can still
+ * move an already-logged one away from 1 later). Widening the gate to "any
+ * `yield_servings === servings`" would also be sound and would additionally
+ * cover "logged the whole batch of an ordinary N87 recipe" — narrowed to
+ * exactly-one here because that is the only case this ticket asks for, and a
+ * wider gate is a decision for whoever asks for the wider case, not a default
+ * this ticket should reach for. Get the condition wrong in either direction
+ * and "Made of"/Split would show, or split into, a total that does not match
+ * what this entry itself says was eaten — the identical failure the AC names
+ * ("a total that cannot be checked against its components").
  */
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -63,7 +82,7 @@ import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { editEntry, localEntry, localFood, logFood, removeEntry } from '@/lib/foodLog';
+import { editEntry, localEntry, localFood, removeEntry, splitEntry } from '@/lib/foodLog';
 import { gramsBasisFromLabel, parseQuantity, servingsForLabelGrams } from '@/lib/foodQuantity';
 import { fmtAmount, MEALS, rescale, todayString, type Entry, type Food, type Meal } from '@/lib/nutrition';
 import { entriesFromRecipeItems } from '@/lib/recipe';
@@ -165,27 +184,50 @@ export default function EditEntryScreen() {
     // does it only when there is one to make.
     if (!userId || !entry?.source_food_id) return;
     let live = true;
-    localFood(userId, entry.source_food_id).then((f) => {
-      if (!live) return;
-      setRecipeFood(f && f.kind === 'recipe' && f.items.length > 0 ? f : null);
-    });
+    localFood(userId, entry.source_food_id)
+      .then((f) => {
+        if (!live) return;
+        // The gate this file's own docstring explains at length: a recipe's
+        // items are the FULL BATCH, and they sum to exactly this entry's own
+        // total only when the recipe makes one serving AND one serving was
+        // logged. Reviewed and found missing before merge — the first version
+        // showed "Made of" for ANY recipe-sourced entry, which overstated an
+        // ordinary multi-portion recipe's contents by its yield factor.
+        setRecipeFood(
+          f && f.kind === 'recipe' && f.items.length > 0
+            && f.yield_servings === 1 && entry.servings === 1
+            ? f
+            : null,
+        );
+      })
+      .catch(() => {
+        // "Made of" is supplementary, not the entry itself — a failed lookup
+        // must not surface as an unhandled rejection. `recipeFood` stays at
+        // its default `null`, the same as "no source food at all".
+        if (live) setRecipeFood(null);
+      });
     return () => {
       live = false;
     };
-  }, [userId, entry?.source_food_id]);
+  }, [userId, entry?.source_food_id, entry?.servings]);
 
   /**
    * Rebuild the recipe's items as their own logged entries, and remove this
    * one — see the docstring for why this is offered only for TODAY.
+   *
+   * `splitEntry` does both writes in ONE transaction — see its own doc
+   * comment in `foodLog.ts` for why a thrown `removeEntry` after the items
+   * were already logged (or a retry after that) is a correctness gap, not
+   * just an inconvenience, once this is more than one item.
    */
   const split = useCallback(async () => {
     if (!userId || !entry || !recipeFood || splitting) return;
     setSplitting(true);
     try {
-      for (const ne of entriesFromRecipeItems(recipeFood, entry.meal, entry.eaten_on)) {
-        await logFood(userId, ne);
-      }
-      await removeEntry(userId, entry.id);
+      await splitEntry(userId, {
+        entries: entriesFromRecipeItems(recipeFood, entry.meal, entry.eaten_on),
+        removeId: entry.id,
+      });
       request('meal split');
       router.back();
     } finally {
@@ -542,9 +584,15 @@ export default function EditEntryScreen() {
           <SectionHeader label="Made of" />
           {recipeFood.items.map((it, i) => (
             <View key={`${it.name}-${i}`} style={styles.madeOfRow} testID={`entry-made-of-${i}`}>
-              <Text style={styles.madeOfName} numberOfLines={1}>
-                {it.name}
-              </Text>
+              <View style={styles.madeOfMain}>
+                <Text style={styles.madeOfName} numberOfLines={1}>
+                  {it.name}
+                </Text>
+                <Text style={styles.madeOfMacros}>
+                  {fmtAmount(it.protein_g * it.quantity)}P · {fmtAmount(it.carb_g * it.quantity)}C ·{' '}
+                  {fmtAmount(it.fat_g * it.quantity)}F
+                </Text>
+              </View>
               <Text style={styles.madeOfKcal}>{fmtAmount(it.kcal * it.quantity)} kcal</Text>
             </View>
           ))}
@@ -642,7 +690,9 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
     marginBottom: 6,
   },
-  madeOfName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  madeOfMain: { flex: 1, gap: 2 },
+  madeOfName: { fontSize: 14, fontWeight: '600' },
+  madeOfMacros: { fontSize: 12, color: vola.textDim },
   madeOfKcal: { fontSize: 13, color: vola.textMuted },
   split: {
     borderRadius: 10,
