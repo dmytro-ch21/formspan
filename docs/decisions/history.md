@@ -52414,6 +52414,127 @@ all are pre-existing entries.
     in the same tick — confirm on a device that the pushed screen appears
     cleanly rather than visibly overlapping the sheet's own slide-out.
 
+## 2026-09-02 — F21: the boundary beneath Library's search field and filter chips (#497)
+
+Found during W10's own review (#484): W10's mechanism — `View` from `Themed`
+paints no background, so a screen's `vola.bg` shows through on both sides of a
+scroll view's top edge, clipping a row mid-glyph against an identical colour —
+exists on `library.tsx` too, at a different boundary. `ScreenHeader`'s
+`contentScrollsUnder` rule only draws when the header's own bottom edge is the
+top of the scrolling region, and Library opts out of it (`contentScrollsUnder=
+{false}`) because content there scrolls under the screen's own fixed chrome —
+the search `TextInput`, the sport chips, the facet row, and the reference
+blocks (glossary, sequences, class plans) — not under the header. Putting a
+rule under the header would have marked a boundary nothing crosses while
+leaving the real one exactly as unmarked as before, so #484 filed this
+separately rather than fixing it in the wrong place.
+
+Less severe than Goals was, and worth recording why: Library's rows carry
+their own separators, so a half-cut row still reads as a row rather than as
+text dissolving into nothing. That softens the bug; it does not remove it —
+and at accessibility text sizes, where a line is ~60pt, the softening buys
+much less.
+
+### The fix
+
+One rule, drawn on a new `styles.chrome` wrap — the same mechanism
+`ScreenHeader`'s `scrollEdge` uses (`borderBottomWidth:
+StyleSheet.hairlineWidth`, `borderBottomColor`), full-bleed for the same
+reason: the border draws at the outer edge of the box regardless of the
+padding inside it, so it marks the edge of the scroll view rather than the
+edge of the text.
+
+**The colour is `vola.lineBoundary`, unchanged from what F20 (#496) shipped —
+not a new value, not a third one.** F20 named and documented that token
+specifically so this ticket would read it rather than independently pick a
+contrast value; doing anything else here would have been the exact drift F20's
+own history entry and `Colors.ts` comment warned against. `styles.chrome`
+carries a `paddingBottom` of 10 — matching `ScreenHeader`'s own `wrap`, the
+established precedent for the gap between fixed chrome and the rule drawn
+under it.
+
+The `ScreenHeader` call site's own comment (already `contentScrollsUnder=
+{false}`, since #484) is updated to say where the boundary now actually lives,
+rather than continuing to describe it as unmarked — leaving stale prose next
+to a call site is exactly the kind of comment-contradicts-code drift #484's
+own entry names three instances of.
+
+### One rule, not two — and not one that moves when an error banner shows
+
+The acceptance criteria are explicit that a rule under the header *and* under
+the controls would be the stacked-seams pattern `ScreenHeader` exists to have
+removed. `library.tsx` was already opted out of the header's own rule before
+this ticket touched it, and nothing in this change flips that flag — verified
+directly: `apps/mobile/__tests__/app/libraryControlsBoundary.test.tsx` renders
+the real `LibraryScreen` and asserts both that `styles.chrome` draws the rule
+and that `screen-header` carries none.
+
+**The rule does not sit on `styles.controls` alone — `frontend-reviewer`
+caught why during pre-merge review.** `error` and `techniquesFailed` render as
+siblings of the scroll view, between `styles.controls` and the
+`KeyboardAwareFlatList`/`ActivityIndicator`, never inside the scroll view
+itself. A first pass that put the border directly on `styles.controls` drew
+the rule correctly in the common case and left it sitting **above** an error
+banner whenever one showed — with the scroll view's real top edge, now below
+the error text, exactly as unmarked as before this ticket: the identical bug,
+one banner lower, and precisely the kind of state a quick look at the happy
+path does not surface. The fix is `styles.chrome`, a wrap around
+`styles.controls` **and** both error `Text`s, carrying the border itself; the
+rule now sits immediately above whichever is genuinely first in the scroll
+view, in every state, rather than assuming that's always `styles.controls`.
+
+### Tests
+
+`libraryControlsBoundary.test.tsx`, mirroring `screenHeader.test.tsx`'s own
+convention of asserting the LITERAL hex (`#5A606A`) rather than re-exporting
+the token — a fresh, independently-picked colour sharing the token's variable
+name would otherwise pass. Four cases: the wrap draws the rule; the inner
+`styles.controls` block does not (proving the wrap owns it, not the block);
+`ScreenHeader` draws none; and — added after the review finding above — the
+error banner renders as a *descendant* of the bordered wrap, so the rule stays
+below it rather than above it when one is showing.
+
+Mutation-verified twice. First pass: swapping the colour to `vola.lineSoft`
+turned the rule-presence assertion red as a real test failure, restore
+confirmed green again. Second pass, reproducing the review-flagged
+regression directly: moving the border back onto `styles.controls` (the
+pre-fix shape, `chrome` keeping only its padding) turned three of the four
+assertions red as real test failures — the rule-on-wrap check, the
+rule-not-on-controls check, and the error-banner check all failed for the
+right reason simultaneously — and restoring, then re-running, confirmed green
+again.
+
+What this suite cannot prove — jest runs no Yoga pass and has no pixels — is
+that the rule is actually visible, lands on the scroll view's real top edge,
+or reads as a boundary at accessibility text sizes. That is this ticket's
+`NEEDS HUMAN EVIDENCE` line, the same as #484's and #496's.
+
+### What changed, mechanically
+
+- `apps/mobile/app/library.tsx` — new `styles.chrome` (`borderBottomWidth`/
+  `borderBottomColor` in `vola.lineBoundary`, `paddingBottom: 10`) wraps
+  `styles.controls` (unchanged) and the two error `Text`s; the wrap gets
+  `testID="library-chrome"`; the `ScreenHeader` call site's comment updated.
+- `apps/mobile/constants/Colors.ts` and `apps/mobile/components/
+  ScreenHeader.tsx` — the `lineBoundary` doc comments' site counts corrected
+  from "exactly two" to "exactly three", naming Library's `styles.chrome` as
+  the third; `Colors.ts`'s "third boundary… deliberately left alone" note
+  (`workouts.tsx`'s `scopeRow`) renumbered to fourth, since Library's own
+  boundary is no longer in that "left alone" set. Caught by
+  `frontend-reviewer`: leaving those counts at "two" after this ticket landed
+  would have been the exact comment-contradicts-code drift #484's own entry
+  already names three instances of.
+- `apps/mobile/__tests__/app/libraryControlsBoundary.test.tsx` — new, per
+  above.
+
+### Open
+
+**NEEDS HUMAN EVIDENCE**: seen on a device, at default AND accessibility text
+sizes, with the text size set *before* launching the app — changing it while
+running leaves stale layout that reads as a rendering bug rather than as the
+artefact it actually is (the same trap #484's own entry names for exactly
+this reason).
+
 ## Open items / known gaps as of this entry
 
 

@@ -840,14 +840,26 @@ export default function LibraryScreen() {
 
   return (
     <View style={styles.container} testID="library-screen">
-      {/* No bottom rule: the search field and filter chips below sit between
-          the header and the list, so nothing scrolls under the header. The real
-          clip edge is beneath those controls and is still unmarked — W10's
-          mechanism at a different boundary, filed separately rather than fixed
-          by putting the rule in the wrong place. Raised in review. */}
+      {/* No bottom rule here: the search field and filter chips below sit
+          between the header and the list, so nothing scrolls under the
+          header — `styles.chrome` below is the fixed chrome that owns the
+          real boundary, and it draws the rule itself (F21/#497). Two rules
+          would be the stacked-seams pattern ScreenHeader exists to have
+          removed, so this stays `false`. */}
       <ScreenHeader title="Library" contentScrollsUnder={false} />
 
-      <View style={styles.controls}>
+      {/* `styles.chrome` wraps the controls block AND the two error banners
+          below, not `styles.controls` alone — an error is fixed chrome too
+          (it renders as a sibling of the scroll view, never inside it), so
+          when one is showing, the actual top of the scrolling region sits
+          below it, not below the search/chips. A rule that only ever sat
+          under `controls` would leave exactly that state bg-on-bg again:
+          the mechanism this ticket exists to fix, reappearing the moment an
+          athlete is offline. Wrapping both in one bordered box means the
+          rule always sits immediately above whatever is genuinely first in
+          the scroll view, in every state. */}
+      <View style={styles.chrome} testID="library-chrome">
+      <View style={styles.controls} testID="library-controls">
         <TextInput
           style={styles.search}
           placeholder={showTechniques ? 'Search exercises and techniques' : 'Search exercises'}
@@ -1028,6 +1040,7 @@ export default function LibraryScreen() {
           BJJ techniques couldn&apos;t load. Pull down to try again.
         </Text>
       )}
+      </View>{/* /styles.chrome */}
 
       {loading && !everLoaded && rows.length === 0 ? (
         <ActivityIndicator style={styles.loader} testID="library-loading" />
@@ -1609,6 +1622,27 @@ function TechniqueRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  // F21 (#497): the boundary the ScreenHeader call site above opts out of —
+  // content scrolls under THIS chrome, not under the header, so this is where
+  // W10's mechanism actually needed marking. Wraps `styles.controls` AND the
+  // two error banners (see the render-side comment), so the rule always sits
+  // immediately above whatever is genuinely first in the scroll view, error
+  // state or not — a rule pinned to `controls` alone would leave the exact
+  // bug this ticket fixes reappearing the moment either error banner shows.
+  // Full-bleed rather than inset by `paddingHorizontal`, same reasoning as
+  // `ScreenHeader`'s `scrollEdge`: the border draws at the outer edge of the
+  // box regardless of the padding inside it, so it marks the edge of the
+  // scroll view rather than the edge of the text. `lineBoundary` is the exact
+  // same token `ScreenHeader` and the tab bar draw with — F20 (#496) named
+  // and documented it precisely so this ticket would read it rather than
+  // pick a third value. `paddingBottom` matches `ScreenHeader`'s own `wrap`
+  // (10), the established precedent for the gap between fixed chrome and the
+  // rule it draws under itself.
+  chrome: {
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.lineBoundary,
+  },
   controls: { paddingHorizontal: 20, gap: 12 },
 
   search: {

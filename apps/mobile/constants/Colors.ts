@@ -66,21 +66,24 @@ const palette = {
    * available at no cost to the rest of the palette, so degrading is not
    * "accept and record", it is declining a fix that exists.
    *
-   * So: `lineBoundary` applies to exactly two rules — `ScreenHeader`'s
-   * `contentScrollsUnder` hairline and the tab bar's `borderTopColor` — kept
-   * equal on purpose, the same invariant #484 established. Nothing else
-   * changes; the app's visual character is untouched everywhere `lineSoft`
-   * still renders.
+   * So: `lineBoundary` applies to exactly three rules — `ScreenHeader`'s
+   * `contentScrollsUnder` hairline, the tab bar's `borderTopColor`, and (as of
+   * F21/#497) Library's own `styles.chrome` border in `app/library.tsx` — kept
+   * equal on purpose, the same invariant #484 established for the first two
+   * and F21 extended to the third. Nothing else changes; the app's visual
+   * character is untouched everywhere `lineSoft` still renders.
    *
-   * **A third boundary of this exact shape exists and is deliberately left
+   * **A fourth boundary of this exact shape exists and is deliberately left
    * alone here.** `workouts.tsx`'s `scopeRow` — the tab strip #484 already
    * names as owning Plan's scroll boundary in place of the header — draws its
    * own rule in `line` (1.38:1 against `bg`, also under 3:1). It was found
-   * during F20's review, not by this issue, and #496's acceptance criteria
-   * name only the header/tab-bar pair, so fixing it here would be scope this
-   * ticket was not asked to cover. Recorded rather than silently left, per
-   * this file's own habit of naming what it is not fixing: see F20's entry in
-   * `docs/decisions/history.md` for the pointer to file it separately.
+   * during F20's review, not by that issue, and #496's acceptance criteria
+   * named only the header/tab-bar pair, so fixing it there was scope that
+   * ticket was not asked to cover — and F21, which was asked to cover a
+   * specific boundary of its own (Library's), did not extend to this one
+   * either. Recorded rather than silently left, per this file's own habit of
+   * naming what it is not fixing: see F20's entry in `docs/decisions/
+   * history.md` for the pointer to file it separately.
    *
    * **3.11:1 against `bg`** (`#5A606A`, the same value #484's own note
    * estimated), asserted by `scripts/validate_palette.mjs`. It is the
@@ -88,10 +91,10 @@ const palette = {
    * value was already the honest answer to "what does 3:1 cost" and
    * re-deriving it would just restate the same number with more steps.
    *
-   * **Reusable, on purpose, for F21 (#497)** — Library's list clips against
-   * an unmarked edge below its search field and filter chips, a real
-   * boundary of the same shape this one is. F21 must not pick its own
-   * contrast value; it reads this token.
+   * **Reused, on purpose, by F21 (#497)** — Library's list used to clip
+   * against an unmarked edge below its search field and filter chips, a real
+   * boundary of the same shape this one is. F21 read this token rather than
+   * picking its own contrast value; see `app/library.tsx`'s `styles.chrome`.
    */
   lineBoundary: '#5A606A',
 

@@ -12996,7 +12996,7 @@ the seven callers, and only the first draws a rule:
 | `Goals`, `Phase` | header sits directly on the scroller | **yes** |
 | `Today`, `Food`, `You` | header is inside the scroll view and scrolls away | no |
 | `Plan` | scope tab strip below owns the boundary and draws its own rule | no |
-| `Library` | search field and chips below sit between header and list | no |
+| `Library` | search field and chips below sit between header and list — the fixed chrome block draws its own rule instead (F21/#497) | no |
 
 ### Happy path
 
@@ -13007,9 +13007,12 @@ the seven callers, and only the first draws a rule:
 3. **`Plan`.** Exactly **one** rule in the fixed chrome — the scope strip's.
    A second hairline ~40pt above it, under the header, is the regression this
    scenario exists to catch.
-4. **`Library`.** No rule under the header. Note the clip edge **below** the
-   search and chips is still unmarked — tracked separately; do not "fix" it by
-   putting a rule under the header, which marks a boundary nothing crosses.
+4. **`Library`.** No rule under the header — content does not scroll under it,
+   so nothing should draw there. **The clip edge below the search field and
+   filter chips is F21 (#497)'s own scenario, below**; it is a real boundary of
+   this exact shape and was left unmarked here deliberately, since putting a
+   rule under the header would have marked a boundary nothing crosses while
+   leaving the real one exactly as unmarked as before.
 5. **The rule matches the tab bar's.** On the screens that draw it, the edge
    under the header and the edge along the top of the tab bar are the same
    weight and colour.
@@ -13051,6 +13054,71 @@ the seven callers, and only the first draws a rule:
     objective check: on `Goals` at accessibility XXXL the row at 150.0pt was
     `#1A2230` across 100% of the width, between two rows of `#080B12`, before
     F20 — re-run the same scan expecting `#5A606A` now.
+
+## F21 — the edge beneath Library's search field and filter chips (`apps/mobile/app/library.tsx`)
+
+The same W10 mechanism, at the boundary the section above deliberately left
+unmarked: `library.tsx` opts out of `ScreenHeader`'s own rule because content
+scrolls under the screen's own fixed chrome (the search field, sport chips,
+facet row, the glossary/sequences/class-plan reference blocks, and — the
+review finding below — the two error banners), not under the header. A new
+`styles.chrome` wrap — around `styles.controls` **and** both error `Text`s,
+not `styles.controls` alone — draws the rule itself, in `vola.lineBoundary`,
+the exact same token W10/F20 draw, not a new value.
+
+Less severe than Goals was: Library's rows carry their own separators, so a
+half-cut row reads as a row rather than as text dissolving. That softens the
+bug; it does not remove it, and softens it least at accessibility text sizes.
+
+### Happy path
+
+1. Scroll `Library`'s list. Content must meet a visible full-width rule at the
+   bottom of the search/chips block and pass under it — never dissolve into
+   the background the way it did before this ticket.
+2. **Exactly one rule** in Library's fixed chrome — `styles.chrome`'s. A
+   second hairline under `ScreenHeader` itself is the stacked-seams regression
+   this scenario exists to catch (`ScreenHeader` stays `contentScrollsUnder=
+   {false}` here).
+3. **The rule matches the one on `Goals`/`Progress` and the tab bar's** — same
+   weight, same colour, since all three draw `vola.lineBoundary`.
+
+### Edge cases
+
+4. **Accessibility text sizes**, set **before launching the app** — the same
+   trap named in the W10 scenario above applies here identically. This is
+   where Library's row separators matter least: at ~60pt a line, confirm the
+   rule still reads as a boundary rather than as one more separator.
+5. **The facet sheet open, then dismissed.** The rule stays fixed under the
+   chrome block regardless of the modal's state.
+6. **No filters set vs. every filter set** (sport + position/belt or
+   muscle/movement + a search query). The controls block's height varies with
+   which facet rows are gated in; the rule must sit at its bottom in every
+   case, not at a height computed for one configuration.
+7. **Smallest supported device.** iPhone SE — same reasoning as the W10
+   scenario's device-size check.
+8. **The exercise catalog fails to load (offline, or a 500), so `library-error`
+   shows** — found by `frontend-reviewer` in pre-merge review, not by the
+   original report. `error` and `techniquesFailed` render as siblings of the
+   scroll view, between the controls block and the list, so on a first pass
+   that put the rule directly on `styles.controls`, the boundary sat ABOVE the
+   error banner while the scroll view's real top edge — below the banner —
+   went back to being unmarked: the identical bug, one row lower, and the kind
+   of state a happy-path pass does not surface. Confirm the rule sits below
+   the error text (or the "BJJ techniques couldn't load" banner), not above
+   it, in this state — `styles.chrome` wraps both banners specifically so this
+   holds.
+
+### Not covered by the suite
+
+9. Whether the rule is visible, lands on the scroll view's real top edge, or
+   reads as a boundary to a low-vision reader — jest has no Yoga pass and no
+   pixels. `apps/mobile/__tests__/app/libraryControlsBoundary.test.tsx` pins
+   the decision (the wrap draws the rule, the inner controls block and the
+   header do not) and, per scenario 8 above, that the error banner renders as
+   a descendant of the bordered wrap — but not the literal pixels. Pixel-
+   sampling a device screenshot at the chrome block's bottom edge, the same
+   method #484/#496 used, is the objective device check and this ticket's own
+   `NEEDS HUMAN EVIDENCE` line.
 
 ## N106 — the Goals screen, rebuilt to a design reference (`app/(tabs)/goals.tsx`)
 
