@@ -16532,3 +16532,70 @@ mutually exclusive at `Validate()`.
   542-row catalog (not a mocked draft) and confirm the phrase survives to a
   saved, synced session, distinguishable on both the confirm screen and the
   session read view from a session logged with a real technique match.
+
+## N464 — web running analytics: route map, elevation profile, pace zones, comparison (`apps/web/src/app/dashboard/running/`)
+
+### Happy path
+
+- Open Running from the sidebar nav (visible only when the `running` module
+  is enabled — see `DashboardNav.tsx`) — a list of the athlete's runs, most
+  recent first, each row showing distance, duration and pace read straight
+  off the `run` session-set (`runSetFrom`), with a period control
+  (`4 weeks` / `3 months` / `Year`) matching History's own.
+- Click into one run — full route map (drag to pan, scroll/buttons to zoom
+  1×–8×, a "Full screen" toggle that genuinely fills the browser viewport
+  via the Fullscreen API), summary stats (distance, duration, avg pace,
+  elevation gain), a pace-zone bar + table beneath it, and a splits table.
+- A run with `elevation_m` on at least some of its route points shows an
+  elevation-over-distance chart between the map and the pace zones; a run
+  with none (indoors, an older phone, HealthKit import with no altitude)
+  shows no elevation section at all rather than a flat or empty chart.
+- "Export splits (CSV)" on a run with splits downloads
+  `<name>-splits.csv` — header row plus one row per split
+  (`distance_m,duration_seconds,pace_sec_per_km`), raw numbers.
+- From the list, check two runs' checkboxes and click "Compare selected" —
+  navigates to `/dashboard/running/compare?a=<id>&b=<id>` with both runs'
+  stats side by side, a signed delta per metric (B minus A), and each run's
+  own route map beneath its column.
+- The pace-zone bar's five zones are computed relative to THIS run's own
+  average pace (`paceZoneBreakdown`) — a negative-split run (second half
+  faster) shows real time in both a "Tempo/Fast" zone and a "Recovery/Easy"
+  one, not everything landing in "Steady".
+
+### Edge cases & errors
+
+- A run logged with no running detail at all (a summary-only manual entry,
+  or a session PUT that never landed) shows the summary stats it has from
+  `session_sets` and an explicit "no route, elevation or split detail was
+  recorded" message — not a blank page, not an error, since `getRunningDetail`
+  treats 404 as this run's real state (`isNotFound`), matching how
+  `ProgressSection` on the Records page treats an absent history.
+- A run with route points but no splits (or vice versa): the map/elevation
+  render from what exists, and the pace-zone section shows its own "No
+  splits recorded" message rather than crashing on an empty array.
+- Selecting a third run to compare while two are already checked swaps out
+  the OLDEST selection rather than refusing the click or silently comparing
+  three.
+- Visiting `/dashboard/running/compare` with no `a`/`b` query params (or
+  only one) shows a "Pick two runs to compare" empty state with a link back
+  to the list, not a crash on an undefined id.
+- Visiting `/dashboard/running/compare` with an id that belongs to another
+  athlete, or doesn't exist: `getSession` surfaces the same 404 every other
+  session-detail fetch does, rendered as this page's error state with a
+  retry — no partial comparison rendered with one side missing.
+- A run whose track is a single GPS point (started and immediately finished,
+  or a permission drop after one fix): the route map centres that one point
+  rather than dividing by zero on an empty bounding box.
+- Nav item "Running" does not appear when the `running` module is disabled
+  in Settings, and the page itself still functions if navigated to directly
+  by URL while disabled (no client-side authorization decision is made here
+  — the backend's own 404-for-wrong-sport is what actually protects the
+  data, same as every other module-gated screen in this app).
+
+### Auth/security
+
+- `GET /v1/running/sessions/{sessionID}` is the same N458 endpoint every
+  other client reads, under the signed-in athlete's own Clerk token — this
+  page introduces no new backend surface. A comparison against another
+  athlete's session id answers with the same indistinguishable 404 N458's
+  own scenarios already cover (no such session / not yours / wrong sport).

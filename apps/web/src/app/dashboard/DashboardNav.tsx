@@ -64,6 +64,16 @@ const navItems: {
   { href: "/dashboard/workouts", label: "Workouts" },
   { href: "/dashboard/sessions", label: "History" },
   {
+    href: "/dashboard/running",
+    label: "Running",
+    // A direct key check, not a capability predicate — unlike Records or
+    // Library below, there is no generic "has a route/elevation/pace
+    // surface" capability to gate on. This page is inherently running-only
+    // (route map, elevation profile, pace zones), so the check this codebase
+    // avoids everywhere else is the only honest option here.
+    needs: (m) => m.some((x) => x.enabled && x.key === "running"),
+  },
+  {
     href: "/dashboard/records",
     label: "Records",
     needs: (m) =>

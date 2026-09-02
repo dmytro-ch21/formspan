@@ -51533,6 +51533,110 @@ typecheck:mobile`, `lint:mobile`, and the full mobile and backend suites all
 green after the fixes; backend `bjj` package green against a freshly
 migrated database.
 
+### 2026-09-02 — N464: web running analytics — route map, elevation profile, pace zones, comparison (#775)
+
+The desk-depth running surface, alongside `dashboard/records` and
+`dashboard/sessions`: `apps/web/src/app/dashboard/running/` — a list of runs
+(`page.tsx`), one run's full detail (`[id]/page.tsx`) and a two-run
+comparison (`compare/page.tsx`). No backend change — N458 already shipped
+`GET/PUT /v1/running/sessions/{sessionID}` and this reads it.
+
+**The map-library decision, and why it needed its own call rather than
+following N459's mobile choice.** `apps/mobile`'s live-tracking screen uses
+`react-native-maps` — a native module, unusable in a browser, so it does not
+transfer to `apps/web` at all. `apps/web` had no existing map-rendering
+pattern to extend (checked before writing anything: no Leaflet, no Mapbox GL,
+no `<canvas>`-based renderer anywhere in the app). The real choice was
+between a tile-based JS map library (Leaflet or Mapbox GL JS — real streets
+under the line, at the cost of a tile provider, an API key to provision and
+keep out of git, and a new heavy runtime dependency) and a hand-rolled SVG
+polyline renderer, the pattern this codebase already uses for every other
+chart it draws (`LoadHistoryChart.tsx`, `VolumeTrend.tsx`,
+`apps/mobile/components/TrendChart.tsx` — inline SVG, no library, no API
+key). Chose the SVG renderer: a route is the same shape of problem as a
+weight-over-time chart — points in, a line out — and this repo's stated
+preference is owning its own rendering over a dependency for something this
+simple. `lib/runningAnalysis.ts`'s `projectRoute` does the actual work: an
+equirectangular projection with a `cos(latitude)` correction so a route isn't
+stretched east-west away from the equator, fit to the track's own bounding
+box and centred. `RouteMap.tsx` wraps that in pan (pointer drag), zoom
+(wheel + buttons, 1×–8×) and a real full-screen toggle via the Fullscreen
+API (`element.requestFullscreen()`), which is what satisfies the "renders
+full-screen with zoom" acceptance criterion. **The honest cost, stated
+rather than hidden**: there is no basemap, no streets, nothing to orient the
+route's shape against a real place — this draws the run's SHAPE, not a map
+of the neighbourhood. Judged worth it for what this ticket asks; a future
+ticket that specifically wants street context under the line is a new
+decision, not scope this one quietly grew into.
+
+**Pace zones are a new, explainable rule, not a physiological one — because
+there is nothing physiological stored to classify against.**
+`running.SessionDetail` carries a track and splits, nothing about heart rate
+or a runner's threshold pace, and this page is read-only analytics, not a
+place to collect one. So `paceZoneBreakdown` (`lib/runningAnalysis.ts`)
+classifies each split against **the run's own average pace**, computed from
+the same splits it's breaking down (not the stored
+`avg_pace_sec_per_km`, so the breakdown can't disagree with itself if that
+field came from a coarser client-side number). Five bands — Recovery / Easy
+/ Steady / Tempo / Fast — as a percentage of that average pace (steady is
+within 5%, widening from there in both directions). Deterministic,
+documented in the code and on the page itself ("Zones are relative to this
+run's own average pace…"), in the spirit of this codebase's evidence-based-
+rules-before-AI stance. It is a reasonable heuristic, explicitly not a claim
+about training-zone physiology, and the doc comment says so.
+
+**Comparison** (`compare/page.tsx`) reads `?a=<id>&b=<id>` — set by
+"Compare selected" on the list page, a two-at-a-time checkbox picker rather
+than a route param pair, so the URL is shareable/bookmarkable the way every
+other filtered view in this app already is. `compareRuns` is a pure `b − a`
+diff over distance/duration/pace/elevation gain, unit-tested directly. Pace
+is the one metric where the diff's sign inverts for "which run is better" —
+fewer seconds per km is faster — and the page states that explicitly rather
+than colouring it the same as the other three.
+
+**CSV export** (N464's stated nice-to-have) shipped: a button on the detail
+page downloads a run's splits as `distance_m,duration_seconds,pace_sec_per_km`
+via `splitsToCSV` and a `Blob`/object-URL anchor click — raw numbers, not
+unit-formatted strings, since a spreadsheet is where those get converted.
+
+**Data-fetching follows the stated convention exactly** (AC): the list page
+uses `listSessionsPage`/`PERIODS`/`periodRange`/`localZone` from
+`lib/history.ts`, identical to `dashboard/sessions/page.tsx`; the one
+running-specific addition is `runSetFrom` (`lib/runningApi.ts`), reading a
+run's distance/duration off the `session_sets` row the generic
+personal-record pipeline already relies on (see `internal/modules/running`'s
+package doc), so the list shows every run's headline numbers without an N+1
+`GET /v1/running/sessions/{id}` per row — the full detail is fetched only
+once a specific run (or two, for comparison) is opened. Wire types and the
+detail fetch live in their own `lib/runningApi.ts`, mirroring
+`lib/nutritionApi.ts`'s split from the ballooning `lib/api.ts`, and mirror
+`apps/mobile/lib/running.ts`'s wire types field for field so the two apps
+read the same contract without drifting from each other.
+
+**Testing**: `lib/runningAnalysis.ts` is pure logic (no React, no network) —
+pace-zone classification and boundaries, the zone breakdown's aggregation,
+run comparison, the elevation-gap-preserving profile builder, and the route
+projection's box-fitting — covered directly in
+`lib/__tests__/runningAnalysis.test.ts`, mutation-verified (flipped a zone
+boundary from `<=` to `<`, watched two tests fail as test failures rather
+than a compile error, restored, re-ran green). Nav gating in
+`DashboardNav.tsx` uses a direct `key === "running"` check rather than a
+capability predicate — unlike Records or Library, there is no generic
+"has route/pace analytics" capability to gate on, so the check this codebase
+avoids everywhere else is the only honest option for a page this specific to
+one discipline.
+
+**Open**: NEEDS HUMAN EVIDENCE — nothing here has been driven against a real
+running session with a real GPS track in a browser (pan/zoom/fullscreen feel,
+whether the pace-zone bands read as sensible on an actual mixed-pace run,
+whether the elevation profile's scale is legible on real elevation noise).
+Also open: whether an athlete reads the pace-zone definition as intuitive
+without the explanatory line under the table — it is new vocabulary this app
+has not used before, and if it lands wrong the fix is the band widths in
+`PACE_ZONES`, not the mechanism. CSV export covers splits only, not the raw
+route track — exporting the GPS points themselves was judged out of scope
+for a "nice-to-have."
+
 ## Open items / known gaps as of this entry
 
 
