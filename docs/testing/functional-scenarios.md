@@ -16878,7 +16878,7 @@ are navigation shortcuts to a different screen, not filters on this one).
   own token; every gate (module enabled, sport filter, positions loaded)
   behaves exactly as it did before the reshuffle.
 
-- **NEEDS HUMAN EVIDENCE** — two device checks the suite cannot answer:
+- **NEEDS HUMAN EVIDENCE** — three device checks the suite cannot answer:
   1. On a real phone, at a real font size: does cold-opening the Library
      genuinely show only search + filter row + "More from your library" +
      real catalog content, with no scrolling required — and is the "More
@@ -16887,3 +16887,8 @@ are navigation shortcuts to a different screen, not filters on this one).
   2. Do the filter row and the "More from your library" row read as visually
      distinct in weight and shape — one narrows the list, the other opens
      elsewhere — rather than as two rows of the same kind of control?
+  3. Every row inside the sheet fires `setOpenExtras(false)` and `router.push`
+     in the same tick — a combination with no precedent elsewhere in this
+     file (the facet-picker sheet this one is modeled on never navigates).
+     Does the pushed screen appear cleanly, or does the sheet's own
+     slide-out animation visibly overlap it?

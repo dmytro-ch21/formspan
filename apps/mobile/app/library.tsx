@@ -349,7 +349,19 @@ export default function LibraryScreen() {
    * folded into the filter row above, which stays reserved for controls that
    * change what THIS list shows.
    */
-  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [openExtras, setOpenExtras] = useState(false);
+  /**
+   * What the sheet is DRAWING, which outlives what is open — the exact
+   * `shownFacet`/`openFacet` split above, for the identical reason: a
+   * `Modal`'s children are rebuilt by the parent on every render (every
+   * keystroke in the search box) whether or not `visible` is true, so an
+   * ungated sheet would reconstruct the positions/syllabuses maps and
+   * seven `Pressable`s on each keystroke while invisible. Gating the whole
+   * subtree on `shownExtras` avoids that; `onDismiss` clears it only once
+   * the sheet has genuinely left the screen, so closing doesn't empty its
+   * content mid-slide the way rendering straight off `openExtras` would.
+   */
+  const [shownExtras, setShownExtras] = useState(false);
   // The home indicator's real height, not a guess. `ScreenHeader` already
   // reads insets this way; a hardcoded 28 is right on exactly one device.
   const insets = useSafeAreaInsets();
@@ -932,11 +944,14 @@ export default function LibraryScreen() {
             these change what the list above shows; every one of them is a
             navigation shortcut to a different screen, so they collapse behind
             a single compact row rather than reappearing as permanent cards.
-            See the sheet below (`extrasOpen`) for why a bottom sheet was
+            See the sheet below (`openExtras`/`shownExtras`) for why a bottom sheet was
             picked over an inline accordion or a full second screen. */}
         {showExtras && (
           <Pressable
-            onPress={() => setExtrasOpen(true)}
+            onPress={() => {
+              setShownExtras(true);
+              setOpenExtras(true);
+            }}
             style={styles.extrasRow}
             hitSlop={6}
             accessibilityRole="button"
@@ -1246,16 +1261,31 @@ export default function LibraryScreen() {
         own tree, so opening and closing it cannot move or remount the list
         underneath — the scroll position survives by construction, not by
         care taken to preserve it.
+
+        **Gated the same way as the facet sheet above, and for the identical
+        reason.** `Modal`'s children are constructed by the PARENT on every
+        render — here, on every keystroke in the search box — whether or not
+        `visible` is true, so an ungated `<Modal visible={openExtras}>` would
+        rebuild `positions.map`, `syllabuses.map`, seven `Pressable`s and a
+        `LinearGradient` on every keystroke while invisible. Wrapping the
+        whole subtree in `shownExtras` (set the moment the affordance is
+        tapped, cleared only by `onDismiss` — i.e. once the sheet has
+        genuinely finished leaving the screen) is what the facet sheet above
+        already does, and review caught this sheet skipping it.
       */}
+      {shownExtras && (
       <Modal
-        visible={extrasOpen}
+        visible={openExtras}
         animationType="slide"
         transparent
-        onRequestClose={() => setExtrasOpen(false)}
+        onRequestClose={() => setOpenExtras(false)}
+        // iOS-only, matching the facet sheet: fires once the dismissal
+        // animation has actually finished, not the instant `openExtras` flips.
+        onDismiss={() => setShownExtras(false)}
       >
         <Pressable
           style={styles.backdrop}
-          onPress={() => setExtrasOpen(false)}
+          onPress={() => setOpenExtras(false)}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           testID="library-extras-backdrop"
@@ -1264,7 +1294,7 @@ export default function LibraryScreen() {
           style={styles.sheetWrap}
           pointerEvents="box-none"
           accessibilityViewIsModal
-          onAccessibilityEscape={() => setExtrasOpen(false)}
+          onAccessibilityEscape={() => setOpenExtras(false)}
         >
           <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 10 }]}>
             <LinearGradient
@@ -1278,7 +1308,7 @@ export default function LibraryScreen() {
             <View style={styles.sheetHead}>
               <Text style={styles.sheetTitle}>More from your library</Text>
               <Pressable
-                onPress={() => setExtrasOpen(false)}
+                onPress={() => setOpenExtras(false)}
                 hitSlop={12}
                 accessibilityRole="button"
                 accessibilityLabel="Close"
@@ -1330,7 +1360,7 @@ export default function LibraryScreen() {
                   </Text>
                   <Pressable
                     onPress={() => {
-                      setExtrasOpen(false);
+                      setOpenExtras(false);
                       router.push('/sequence');
                     }}
                     accessibilityRole="button"
@@ -1364,7 +1394,7 @@ export default function LibraryScreen() {
                   </Text>
                   <Pressable
                     onPress={() => {
-                      setExtrasOpen(false);
+                      setOpenExtras(false);
                       router.push('/classplans');
                     }}
                     accessibilityRole="button"
@@ -1391,7 +1421,7 @@ export default function LibraryScreen() {
                       the map says how they connect and which way is up. */}
                   <Pressable
                     onPress={() => {
-                      setExtrasOpen(false);
+                      setOpenExtras(false);
                       router.push('/bjj/roundmap');
                     }}
                     accessibilityRole="button"
@@ -1407,7 +1437,7 @@ export default function LibraryScreen() {
                   {/* N83: build or correct your OWN curriculum, on the phone. */}
                   <Pressable
                     onPress={() => {
-                      setExtrasOpen(false);
+                      setOpenExtras(false);
                       router.push('/curriculum');
                     }}
                     style={({ pressed }) => [styles.mapLink, pressed && styles.posCardPressed]}
@@ -1438,7 +1468,7 @@ export default function LibraryScreen() {
                           <Pressable
                             key={c.id}
                             onPress={() => {
-                              setExtrasOpen(false);
+                              setOpenExtras(false);
                               router.push(`/curriculum/${c.id}`);
                             }}
                             hitSlop={6}
@@ -1471,7 +1501,7 @@ export default function LibraryScreen() {
                         <Pressable
                           key={p.id}
                           onPress={() => {
-                            setExtrasOpen(false);
+                            setOpenExtras(false);
                             router.push(`/position/${p.id}`);
                           }}
                           hitSlop={6}
@@ -1494,6 +1524,7 @@ export default function LibraryScreen() {
           </View>
         </View>
       </Modal>
+      )}
 
     </View>
   );

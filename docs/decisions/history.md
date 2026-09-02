@@ -52350,6 +52350,47 @@ that opens the sheet), and the toggle's `onPress` neutered (caught the same
 way) — each confirmed to fail before the fix was restored.
 `libraryErrorMessages.test.tsx` needed no changes (untouched surface).
 
+**Two review rounds found real gaps in the first draft, both fixed before
+ready-for-review:**
+
+- **`frontend-reviewer`**: the extras `Modal` was mounted unconditionally
+  (`<Modal visible={openExtras}>`), unlike the facet-picker sheet directly
+  above it in the same file, which the file's own comment explains is gated
+  on a `shown*` boolean specifically because a `Modal`'s children are rebuilt
+  by the parent on every render — every keystroke in the search box — whether
+  or not `visible` is true. The extras sheet skipped that gate, so
+  `positions.map`, `syllabuses.map`, seven `Pressable`s and a `LinearGradient`
+  were being reconstructed on every keystroke while invisible. Fixed by
+  splitting `extrasOpen` into `openExtras`/`shownExtras` (identical shape to
+  `openFacet`/`shownFacet`), with an `onDismiss` clearing `shownExtras` only
+  once the sheet has actually finished leaving the screen. The reviewer also
+  flagged that nothing tested *closing* the sheet — a mutation deleting any of
+  the seven `setOpenExtras(false)` calls, or the Done/backdrop handlers, would
+  have passed the suite as written. Two tests added (`Done` → link gone;
+  pressing a link → link gone, on the way to its own screen) and both
+  mutation-tested (Done's handler neutered, one link's close call deleted) —
+  each caught, confirmed by re-running after reverting.
+- **`ac-verifier`**: acceptance criterion 5 asks that the three testIDs
+  "still exist **and are asserted**" — only `library-sequences-link` was.
+  `library-classplans-link` and `library-roundmap-link` existed and were
+  reachable but nothing under `apps/mobile` pressed either one (true before
+  N469 too — not a regression, but the ticket's own words now demand it).
+  Two tests added, each mutation-tested by swapping the target route and
+  confirming the assertion catches it. The round-map test needed one thing
+  the sequences/class-plans tests didn't: `library-roundmap-link` lives
+  inside "Start with positions", gated on `usesPosition(sport, modules)` —
+  which reads `moduleFor(modules, sport)` and therefore never matches
+  `sport === ''` ("All"). Selecting the BJJ filter chip first is required to
+  reach it, exactly as it was pre-N469; this is a pre-existing gate, not
+  something this ticket introduced.
+
+Both reviewers agreed `apps/mobile/CLAUDE.md` — the file this ticket's own
+brief cited for design-token discipline — does not exist and never has (only
+the root `CLAUDE.md` does); the tokens used (`vola.textMuted`, `vola.textDim`,
+`vola.lineSoft`, the `layers` icon) were checked against
+`apps/mobile/constants/Colors.ts` and `components/ui/Icon.tsx` instead, and
+all are pre-existing entries.
+
 ### Open questions this leaves
 
 - **The "discipline turned off" explainer (`library-techniques-off`) stays
@@ -52359,14 +52400,19 @@ way) — each confirmed to fail before the fix was restored.
   hiding it behind a tap risked an athlete never discovering why BJJ content
   vanished (the exact N61 failure this same explainer exists to prevent). Not
   explicitly ruled on by the issue; flagged rather than assumed.
-- **NEEDS HUMAN EVIDENCE**, both from the issue's own list, unresolved by
-  anything a suite can check:
+- **NEEDS HUMAN EVIDENCE**, unresolved by anything a suite can check (the
+  first two from the issue's own list, the third added after
+  `frontend-reviewer` pointed out this sheet does something its facet-picker
+  template never does — navigate):
   - On a real phone, at a real font size: confirm first paint genuinely shows
     only search + filter row + "More from your library" + the list, and that
     the expand affordance is discoverable without being told where it is.
   - Confirm the filter row and the "More from your library" row read as
     visually distinct in weight/shape — one narrows the list, the other opens
     elsewhere — not as two rows of the same kind of control.
+  - Every row inside the sheet fires `setOpenExtras(false)` and `router.push`
+    in the same tick — confirm on a device that the pushed screen appears
+    cleanly rather than visibly overlapping the sheet's own slide-out.
 
 ## Open items / known gaps as of this entry
 

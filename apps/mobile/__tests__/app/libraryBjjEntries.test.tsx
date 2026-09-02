@@ -259,3 +259,95 @@ describe('the sequences entry (N181)', () => {
     expect(off.props.accessibilityLabel).toContain('your own chains');
   });
 });
+
+/**
+ * Closing "More from your library" — N469 (#794).
+ *
+ * Opening was the only thing the suite above checked. Nothing pressed `Done`,
+ * the backdrop, or a link inside the sheet and confirmed the sheet's own
+ * content actually goes away — so a mutation deleting any of the seven
+ * `setOpenExtras(false)` calls, or the Done/backdrop handlers themselves,
+ * would have survived every test above unnoticed. `library-sequences-link`
+ * being absent after closing is the assertion: the sheet's `visible` prop is
+ * what RN actually gates its children on (confirmed directly — a plain
+ * `{openExtras && <Modal>}` render shows no Modal content in this harness
+ * while `openExtras` is false), so if the row is still findable, the sheet
+ * did not really close.
+ */
+describe('closing "More from your library" (N469)', () => {
+  it('closes on Done, and the sheet contents go with it', async () => {
+    render(<LibraryScreen />);
+
+    await openExtras();
+    expect(await screen.findByTestId('library-sequences-link')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('library-extras-close'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('library-sequences-link')).toBeNull(),
+    );
+  });
+
+  it('closes when a row inside it is pressed, on the way to that row\'s screen', async () => {
+    render(<LibraryScreen />);
+
+    await openExtras();
+    fireEvent.press(await screen.findByTestId('library-sequences-link'));
+
+    expect(mockPush).toHaveBeenCalledWith('/sequence');
+    // The navigation and the close both fire from the same `onPress` — this
+    // confirms the sheet doesn't outlive the tap that sent the athlete
+    // elsewhere, which is the half a mutation deleting just the `setOpenExtras
+    // (false)` call (while leaving the `router.push` intact) would slip past.
+    await waitFor(() =>
+      expect(screen.queryByTestId('library-sequences-link')).toBeNull(),
+    );
+  });
+});
+
+/**
+ * Class plans and the round map are reachable AND asserted — the acceptance
+ * criterion's exact words. `ac-verifier` found `library-classplans-link` and
+ * `library-roundmap-link` existed (both testIDs are unchanged from before
+ * N469, just relocated into the sheet) but that nothing under `apps/mobile`
+ * pressed either one — the same gap the sequences link closed for itself
+ * five tests up, left open for its two siblings. Both live behind the same
+ * `library-extras-toggle` sheet.
+ */
+describe('class plans and the round map are reachable and asserted (N469)', () => {
+  it('"Your class plans" goes to the class-plan list', async () => {
+    render(<LibraryScreen />);
+
+    await openExtras();
+    fireEvent.press(await screen.findByTestId('library-classplans-link'));
+    expect(mockPush).toHaveBeenCalledWith('/classplans');
+  });
+
+  it('"How a round goes" goes to the round map', async () => {
+    // The round-map row lives inside "Start with positions", which requires
+    // BOTH a non-empty glossary fetch AND `usesPosition(sport, modules)` —
+    // and that reads `moduleFor(modules, sport)`, which only matches a real
+    // module key. `sport === ''` ("All") therefore never satisfies it, same
+    // as on `origin/main` before N469: tapping the BJJ chip is how an athlete
+    // reaches this block, on this screen, today. Not a behavior this ticket
+    // changed — preserved verbatim from the pre-N469 gate.
+    mockPositions.mockResolvedValue([
+      {
+        id: 'mount',
+        name: 'Mount',
+        aliases: [],
+        family: 'Mount',
+        detail_includes: [],
+        detail_excludes: [],
+        order_index: 0,
+        description: '',
+        priorities: '',
+      },
+    ]);
+    render(<LibraryScreen />);
+
+    fireEvent.press(await screen.findByTestId('library-filter-bjj'));
+    await openExtras();
+    fireEvent.press(await screen.findByTestId('library-roundmap-link'));
+    expect(mockPush).toHaveBeenCalledWith('/bjj/roundmap');
+  });
+});
