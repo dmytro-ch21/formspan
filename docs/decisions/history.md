@@ -52029,6 +52029,45 @@ without the user's sign-off on scope would be the coordinator-side version of
 the "dispatch a fourth" failure the ticket-limit rule exists to prevent.
 Worth a ticket of its own.
 
+### 2026-09-02 — N471: `checkin/[date].tsx`'s `load()` gets a "latest call wins" guard (#800)
+
+Fixed the out-of-order-response race `frontend-reviewer` flagged as a
+[suggestion] on #519 (N125) and deliberately left out of that PR to stay in
+scope. `load()` had no sequence guard: `useUnits()`'s `units` starts at
+`'metric'` and corrects a frame later once the real preference loads
+(`UnitsProvider`), and because `units` sits in `load`'s `useCallback` deps,
+that correction changes `load`'s identity and — through the `useFocusEffect`
+wrapping it — fires a second `load()` while the first is still in flight, on
+a cold launch or deep link straight onto this route. If the two network
+responses then resolve out of order, the older call running last used to
+overwrite state a newer call had already set correctly — at minimum a
+mis-displayed number, and once N125's discard-on-unit-flip logic lands, a
+draft thrown away that was never actually stale.
+
+Fixed with the same `useRef(0)` sequence-counter pattern already used
+elsewhere in this app (`food.tsx`'s `monthSeq`, `WeekPlanner.tsx`'s
+`readSeq`/`monthSeq`): bumped at the top of `load()`, captured into a local
+`mySeq`, and checked before every subsequent `setState` — after the
+`Promise.all` resolves, in the `catch`, and in the `finally`'s
+`setLoading(false)`. A call whose sequence number no longer matches the ref
+is stale and bails without touching state.
+
+**Testing**: `checkinLoadRace.test.tsx` mocks `useUnits` with a hook that
+carries real React state and flips once — the same mechanism
+`UnitsProvider` uses in production — so the two `load()` calls are produced
+by the screen itself rather than invoked directly. `listCheckins` returns
+two independently-resolvable promises; the test resolves the newer call
+first and the stale one last, and asserts the stale response never reaches
+the screen. Mutation-verified: reverting the `loadSeqRef` guard turns the
+test red (`165.3` expected, `70` received — the stale call's weight
+clobbering the newer one's), confirming the guard is load-bearing rather
+than redundant.
+
+**Open**: no device check exercises this — the race needs a cold start onto
+this exact route plus a specific network interleaving, neither of which a
+simulator run reliably reproduces. The regression test is the only thing
+pinning it.
+
 ## Open items / known gaps as of this entry
 
 

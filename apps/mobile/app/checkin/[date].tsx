@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -86,12 +86,22 @@ export default function CheckinScreen() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
 
+  // Bumped on every call and captured by each. `units` starting at 'metric'
+  // and correcting a frame later (`UnitsProvider`) changes `load`'s deps and
+  // fires a second call while the first is still in flight on a cold launch
+  // straight onto this route (via `useFocusEffect` below) — without this, an
+  // older response that resolves last can clobber state a newer response
+  // already set, discarding a draft that was never actually stale.
+  const loadSeqRef = useRef(0);
+
   /**
    * `load` rebuilds the form from the server, so it must only run when there is
    * nothing unsaved to lose. `fill` says whether to touch the draft at all.
    */
   const load = useCallback(async (fill = true) => {
     if (!date) return;
+    loadSeqRef.current += 1;
+    const mySeq = loadSeqRef.current;
     try {
       const [list, p] = await Promise.all([
         listCheckins(getToken, { from: date, to: date }),
@@ -99,6 +109,9 @@ export default function CheckinScreen() {
         // A failure here costs the estimates, not the screen.
         getProfile(getToken).catch(() => null),
       ]);
+      // A newer call was fired after this one — its result is what should be
+      // on screen, not this stale response. Bail before touching any state.
+      if (mySeq !== loadSeqRef.current) return;
       const today = list[0] ?? null;
       setCheckin(today);
       setProfile(p);
@@ -119,9 +132,10 @@ export default function CheckinScreen() {
       }
       setError(null);
     } catch (err) {
+      if (mySeq !== loadSeqRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (mySeq === loadSeqRef.current) setLoading(false);
     }
   }, [date, getToken, units]);
 
