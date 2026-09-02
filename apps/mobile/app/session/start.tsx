@@ -17,6 +17,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
 import { cachedExercises, cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
+import { sessionHref } from '@/lib/startSession';
 import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
 
 /**
@@ -169,7 +170,13 @@ export default function StartSessionScreen() {
       requestSync('session-started');
       // replace, not push: finishing a session and pressing back should not
       // land on the chooser that created it.
-      router.replace(`/session/${session.id}`);
+      //
+      // `sessionHref`, not a hardcoded `/session/${id}` — that hardcoding is
+      // exactly the N460 bug: it sent every sport, running included, to the
+      // strength-shaped live set logger, which has no notion of a GPS track.
+      // `sessionHref` is the one place this branch is decided, so a running
+      // session and a strength session diverge here and only here.
+      router.replace(sessionHref({ id: session.id, sport }, modules));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStarting(false);

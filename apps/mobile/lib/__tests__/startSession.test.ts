@@ -34,6 +34,11 @@ function mod(over: Partial<Module> & { key: string }): Module {
 
 const strength = mod({ key: 'strength', capabilities: { catalog: 'exercises' } as Module['capabilities'] });
 const bjj = mod({ key: 'bjj', capabilities: { catalog: 'techniques' } as Module['capabilities'] });
+// Same catalog as strength — running's `session_sets` rows target seeded
+// `exercises`, not a technique — which is exactly why `sessionHref` cannot
+// tell it apart from strength via `logsAfterwards` and needs its own branch.
+// See `running` = mod(...) below for N460's coverage.
+const running = mod({ key: 'running', capabilities: { catalog: 'exercises' } as Module['capabilities'] });
 
 describe('startSessionHref', () => {
   it('starts a session for a discipline that is logged as it happens', () => {
@@ -79,6 +84,19 @@ describe('startSessionHref', () => {
   it('treats an unknown discipline as one that logs live', () => {
     expect(startSessionHref({ sport: 'rowing', workoutId: null }, [strength])).toBe(
       '/session/start?sport=rowing',
+    );
+  });
+
+  // N460/#771: running still starts from the ordinary chooser — a runner may
+  // have an interval template — because the BRANCH that differs for running
+  // is where finishing that choice goes, not where starting it does. See
+  // `sessionHref` below for that half.
+  it('starts running from the ordinary chooser too, template and all', () => {
+    expect(startSessionHref({ sport: 'running', workoutId: null }, [strength, running])).toBe(
+      '/session/start?sport=running',
+    );
+    expect(startSessionHref({ sport: 'running', workoutId: 'w9' }, [running])).toBe(
+      '/session/start?sport=running&workout=w9',
     );
   });
 
@@ -167,6 +185,30 @@ describe('sessionHref', () => {
   it('carries the id as a route parameter', () => {
     expect(sessionHref({ id: 'abc-123', sport: 'strength' }, [strength])).toMatchObject({
       params: { id: 'abc-123' },
+    });
+  });
+
+  /**
+   * N460/#771 — the bug this whole file exists to catch, reached by a THIRD
+   * sport for the first time. `logsAfterwards` cannot see running (its
+   * catalog is `exercises`, identical to strength's), so this pins the direct
+   * `sport === 'running'` branch by name rather than trusting the catalog
+   * check to cover it by accident.
+   */
+  it('opens a running session in the live GPS tracker, not the set logger', () => {
+    expect(sessionHref({ id: 's5', sport: 'running' }, [strength, bjj, running])).toEqual({
+      pathname: '/running/[id]',
+      params: { id: 's5' },
+    });
+  });
+
+  // Same failure mode as the "reads the catalog kind" test above, mirrored:
+  // running must not be diverted to the BJJ branch just because a technique
+  // discipline is present in the same registry.
+  it('does not confuse running for a technique-shaped discipline', () => {
+    expect(sessionHref({ id: 's6', sport: 'running' }, [bjj, running])).toEqual({
+      pathname: '/running/[id]',
+      params: { id: 's6' },
     });
   });
 });

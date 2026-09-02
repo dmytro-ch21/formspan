@@ -26,11 +26,17 @@ const row = (over: Partial<BlockedRow>): BlockedRow => ({
 });
 
 it('sends a strength session to the session screen', () => {
-  expect(destinationOf(row({ sport: 'strength' }))).toBe('/session/s1');
+  expect(destinationOf(row({ sport: 'strength' }))).toEqual({
+    pathname: '/session/[id]',
+    params: { id: 's1' },
+  });
 });
 
 it('sends a BJJ class to the BJJ screen, not the strength one', () => {
-  expect(destinationOf(row({ sport: 'bjj', id: 'c9' }))).toBe('/bjj/session/c9');
+  expect(destinationOf(row({ sport: 'bjj', id: 'c9' }))).toEqual({
+    pathname: '/bjj/session/[id]',
+    params: { id: 'c9' },
+  });
 });
 
 it('sends a plan to the workout screen', () => {
@@ -39,9 +45,23 @@ it('sends a plan to the workout screen', () => {
   expect(destinationOf(row({ kind: 'workout', id: 'w4', sport: '' }))).toBe('/workout/w4');
 });
 
-it('treats an unrecognised sport as a strength session', () => {
-  // Every non-BJJ sport lives on the session screen today. Stated as a decision
-  // rather than left to a reader of the ternary: a sport this build has never
-  // heard of still opens somewhere, which beats a dead row.
-  expect(destinationOf(row({ sport: 'running' }))).toBe('/session/s1');
+// N460/#771: this used to say "treats an unrecognised sport as a strength
+// session" and asserted `/session/s1` — which was true only because nothing
+// routed a running row anywhere specific yet, and is the exact bug the ticket
+// fixes. Running is now a recognised sport with its own destination.
+it('sends a running session to the live GPS tracker, not the strength session screen', () => {
+  expect(destinationOf(row({ sport: 'running' }))).toEqual({
+    pathname: '/running/[id]',
+    params: { id: 's1' },
+  });
+});
+
+it('still treats a genuinely unrecognised sport as a strength session', () => {
+  // A sport this build has never heard of still opens somewhere, which beats
+  // a dead row — `sessionHref`'s fallthrough branch, exercised here through
+  // `destinationOf` rather than only through `sessionHref` directly.
+  expect(destinationOf(row({ sport: 'rowing' }))).toEqual({
+    pathname: '/session/[id]',
+    params: { id: 's1' },
+  });
 });

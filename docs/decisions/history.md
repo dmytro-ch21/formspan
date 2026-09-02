@@ -51085,6 +51085,179 @@ point is #771's to wire up, and #771 is also who supplies the real
 lives on that screen) rather than leaving both props unset and getting the
 metric-only default this ticket's own tests exercise.
 
+## 2026-09-01 — N460 (#771): live GPS run tracking screen — start, map, live
+stats, pause/finish
+
+The third and final ticket of the running workstream that opened with N458
+(backend module, #769/merged `897966aa`) and N459 (native scaffolding,
+#770/merged `104f4c7c`). This is the screen an athlete actually taps: choosing
+Running on `session/start.tsx` now launches `app/running/[id].tsx` instead of
+the strength-shaped live set logger, which is the exact bug the ticket
+describes — `Sport` has included `'running'` since before this workstream
+started, and until now nothing routed that choice anywhere sport-specific.
+
+**Where the routing decision lives, and why it is a direct sport check.**
+`lib/startSession.ts`'s `sessionHref` already had one branch
+(`logsAfterwards`, keyed on the module registry's `catalog` kind, for BJJ) and
+this ticket needed a second. Running cannot reuse that lever: its catalog is
+`exercises`, the same as strength — a run logs a `session_sets` row against
+the seeded `run`/`treadmill-*` entries so the generic PR pipeline sees it,
+exactly as `internal/modules/running/running.go`'s package doc describes — so
+nothing in the server-driven registry distinguishes "started and logged into"
+from "started and live-GPS-tracked". Added a plain `s.sport === 'running'`
+branch instead, with a comment pointing at the identical reasoning
+`running.go`'s own `sportKey` constant already states for the backend side:
+"this is a storage-level invariant... the dependency would otherwise run
+backwards." One live-tracked discipline does not justify inventing a registry
+capability for it; a second one would. `startSessionHref` (the OTHER half —
+which template screen to open before a session exists) is unchanged: running
+still starts from the ordinary `/session/start` chooser, because a runner may
+legitimately have an interval template to start from, and only what
+*finishing that choice* does differs.
+
+**Offline buffering reuses `bjj_json`'s exact mechanism, not a new one.**
+`local_sessions` gained a `running_json` column (schema v31,
+`addColumnIfMissing`, nullable, no backfill — the same shape and the same
+reasoning `bjj_json` (v13) already documents: "is this column null?" decides
+whether a session needs a detail PUT at all, so defaulting it to `'{}'` would
+make every strength or BJJ session attempt one). The live screen calls
+`saveLocalRunningDetail` — a plain SQLite `UPDATE ... SET running_json = ?,
+dirty = 1` — every time an accepted GPS point arrives, not only at Finish, so
+a killed app or a dead radio loses at most the points recorded since the last
+write, never the ones already on disk. `pushRow` in `sessionStore.ts` grew a
+running-detail block that is byte-for-byte the same shape as the existing
+`bjj_json` block: a corrupt blob degrades rather than failing the whole push,
+and a `404` forgets `remote` so the create retries. Nothing new was invented
+in the sync path — the ticket's "GPS points buffer locally and survive a
+simulated network drop" criterion is satisfied by being the same mechanism
+every other offline write in this app already relies on, exercised for a new
+column.
+
+**Two clocks, deliberately not one.** `lib/running.ts`'s
+`trackDurationSeconds(points)` is documented as WALL-CLOCK SPAN, not active
+time — it cannot tell a pause from a dead GPS patch, because both are simply
+a gap between two points. So the live screen keeps its own active-time
+accumulator (`elapsedMsRef`, ticking only between a Resume and the next
+Pause/Finish, computed from `Date.now()` deltas at each transition) for the
+`duration_seconds` it actually sends to the server, and reserves
+`trackDurationSeconds` for a track known to have no pauses — the shape a
+fixture test exercises, and a manual/imported track with no live pausing at
+all. Being wall-clock-delta-based rather than a ticking `setInterval` also
+makes the on-screen clock correct across the app being backgrounded: a
+suspended JS timer catches up the instant the app resumes, since the
+arithmetic only ever asks what `Date.now()` is right now. `splitsFromTrack`
+carries the same caveat at the scale of one split (documented, not solved):
+a split whose boundary happens to fall inside the segment spanning a pause
+has its `duration_seconds` inflated by the pause length — narrow (it requires
+pausing within the last stretch of a kilometre) and left as a known gap
+rather than corrected.
+
+**Splits are computed by linear interpolation, not by rounding to the
+nearest sample.** A GPS fix lands wherever the phone's sample interval
+happens to put it — essentially never exactly on a kilometre — so
+`splitsFromTrack` interpolates the crossing time between the two points that
+straddle each boundary, on both distance and time, rather than reporting
+whichever point was closest (which would be off by however long the sample
+interval is, every single split). Handles a sparse track crossing two or
+more boundaries inside one segment by looping until it runs out of
+boundaries to cross, and a track that lands a boundary exactly on a sample
+point without double-counting or skipping it — both exercised in the jest
+fixtures below.
+
+**A wildly inaccurate fix is dropped, not appended.** GPS updates carrying
+`accuracy` beyond `MIN_ACCURACY_M` (50m — a bad multipath reflection
+indoors, a cold-start estimate) are discarded before they ever reach
+`pointsRef`. Distance is a sum of segments, so one bad segment's length does
+not un-happen once a good fix arrives — the only point to reject it is
+before it is recorded, not after.
+
+**Testing.** `apps/mobile/lib/__tests__/running.test.ts` — pure-logic
+coverage of `haversineMeters`, `trackDistanceMeters` (including an
+out-and-back that must NOT collapse to net displacement),
+`trackDurationSeconds`, `averagePaceSecPerKm` (zero/negative-distance and
+negative-duration guards), `elevationGainMeters` (gain-only, and a missing
+elevation reading contributing no delta on either side), and
+`splitsFromTrack` (one boundary crossed mid-segment, multiple full km
+splits with one boundary landing exactly on a sample point, two boundaries
+inside one sparse segment, and nothing short of one full split) — 19 tests,
+all against fixture tracks walked along a single meridian so the expected
+distances are checkable from the exact closed form
+(`R · Δlat_radians`, independent of `haversineMeters`'s own implementation)
+rather than merely eyeballed as plausible.
+`apps/mobile/lib/__tests__/schema.test.ts` extended with the v31 migration
+fixture pair (a fresh install has `running_json`; a device already stamped
+30 gains it; re-running the migration is not an error) mirroring the
+existing `bjj_json`/v13 tests exactly, plus every existing
+`user_version: 30` assertion in that file bumped to 31. Full `test:mobile`
+green (241 suites, 3794 tests) — three suites that failed on one run under
+the whole-repo parallel run (`bjjSessionScreen`, `sessionHistoryScreen`,
+`goalsScreen` — all `act()`-timing flakiness on unrelated screens, none of
+them touching running code) passed cleanly in isolation, confirming
+pre-existing flakiness rather than a regression from this change.
+
+**`lib/units.ts` gained `formatPace`** (seconds-per-km stored, converted to
+seconds-per-mile for imperial display at render time — the same
+last-possible-moment conversion rule every other quantity in that file
+follows) and `apps/web/src/lib/units.ts` was regenerated via
+`python3 scripts/sync-units.py --write` per that file's own generation
+contract; `check:units` and `check:unit-literals` both pass.
+
+**`frontend-reviewer` found two real bugs on the first pass, both fixed before
+this landed.** (1) `persistProgress` wrote `duration_seconds` only from
+`pause()`/`finish()`, never from the per-point save during live tracking — so
+a killed-and-relaunched run restored its GPS track (the criterion this ticket
+cares about) but reset its clock to 0 or to whatever the last pause recorded,
+directly contradicting this entry's own "resumes from the wall clock" claim
+above. Fixed by computing `duration_seconds` from the active-time accumulator
+on EVERY save, with a `trackDurationSeconds` fallback on load for a row saved
+before the fix. (2) Two more `/session/${id}` hardcodes survived outside
+`session/start.tsx` — `app/workout/[id].tsx` (starting a workout template,
+which running can have, since its catalog is `exercises`) and `app/sync.tsx`'s
+repair-screen `destinationOf` — both now route through `sessionHref` like
+every other site. `ac-verifier`'s pass additionally asked for the "survives a
+simulated network drop" criterion to be a real test rather than
+`NEEDS HUMAN EVIDENCE`: `runningPush.test.ts` now exercises it directly
+against a real migrated SQLite fixture (`migratedFixture()`, the same pattern
+`planSync.test.ts` uses) — save a track, reject the PUT with a
+`Network request failed`-shaped error, assert the row is untouched and still
+`dirty`, then let the retry succeed and assert the PUT body carries the exact
+buffered track. Also fixed in this pass: `splitsFromTrack` floored a
+degenerate zero-duration split at 0, which `running.Split.valid()` rejects
+server-side — one GPS glitch (two points landing on the same timestamp) would
+have made the ENTIRE wholesale PUT a permanent 400, discarding every other
+split's real data with it; floored at 1 instead, with a test pinning it. Two
+more `sessionHref` cases (`startSession.test.ts`) pin the running branch by
+name rather than leaving it covered only by inference from the screen working.
+A GPS-watch subscription leak on a fast double pause/resume (the `await
+Location.watchPositionAsync(...)` racing an unmount or a second call) and an
+unhandled-rejection path in `finish()` were fixed too, and the map's polyline
+coordinates are now memoized separately from the once-a-second clock re-render
+that used to rebuild them for nothing. Fixing `destinationOf`'s routing also
+meant updating `__tests__/app/syncDestination.test.ts`, which pre-dates this
+ticket and pinned the OLD, buggy behaviour by name — one of its four cases was
+literally titled "treats an unrecognised sport as a strength session" and
+asserted a running row opened `/session/s1`. Retitled to say what it now
+actually checks, plus a fifth case for a genuinely unknown sport, so the
+fallthrough behaviour that test used to (mis)cover is still pinned.
+
+**Deliberately NOT built, per the ticket's explicit scope:** pace-normalized
+personal records (fastest 5k/10k — L12/#778) and any background/Always
+location permission — N459's scoping decision stands untouched; this screen
+uses only the foreground `expo-location` watch N459 already configured.
+
+**Left open, `NEEDS HUMAN EVIDENCE`:** the ticket's acceptance criterion for
+a real outdoor run, start to finish, including a genuine dead-signal moment,
+is unticked. Verified in this session: full typecheck, lint (at the existing
+50-warning ratchet ceiling, two new warnings introduced and fixed in the same
+diff so the count is unchanged), the full mobile test suite, and the pure
+distance/pace/split logic against fixture tracks. Not verified, and not
+verifiable from this environment: a live GPS watch against a moving phone, a
+real permission prompt, the map actually rendering Apple Maps tiles on
+device, or a real radio dropping out mid-run — Simulator GPS is a
+scripted/mocked track, which N459's own entry already notes as the boundary
+of what a Simulator run can prove.
+
+
 ## Open items / known gaps as of this entry
 
 

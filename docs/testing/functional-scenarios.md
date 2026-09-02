@@ -16292,3 +16292,100 @@ finished-running-session fixture, the same scope the ticket's own tests take.
   data the existing `/v1/records` and running-detail endpoints already
   authorize per-session; N458's auth/security scenarios (owner-only PUT/GET,
   404 on another caller's session) already cover the data this reads.
+
+## N460 — live GPS run tracking screen (`app/session/start.tsx`'s running
+branch, `app/running/[id].tsx`)
+
+The mobile screen N458/N459 scaffolded for: choosing Running on the start
+screen now launches a dedicated live-tracking flow (map, live distance/
+duration/pace, a splits ticker, pause/resume/finish) instead of the
+strength-shaped set logger, and GPS points buffer locally through the same
+`local_sessions.running_json`/outbox mechanism `bjj_json` already uses, per
+`vola-offline-sync`. Finish writes a session (`sport: "running"`) plus a
+`running_session_detail` PUT against N458's endpoints, and a `session_sets`
+row against the seeded `run` exercise so the generic PR pipeline sees the
+run. Deliberately out of scope: pace-normalized PRs (L12/#778) and any
+background/Always location permission (N459's explicit scoping decision,
+unchanged here).
+
+### Happy path
+
+- From the Train tab (or Today), choose Running on `session/start.tsx` and
+  start an empty session — routes to `/running/{id}`, not
+  `/session/{id}` (the exact bug this ticket fixes: every sport used to fall
+  through to the strength screen).
+- Grant location access on first launch of the screen — the map appears
+  centred near the athlete's position, distance/duration/pace read `0m`,
+  `0:00`, `—` before the first GPS fix, and the route polyline begins
+  drawing as fixes arrive.
+- Distance, duration and pace update live as the route grows; a splits
+  ticker gains one row each time a whole kilometre (`DEFAULT_SPLIT_METERS`)
+  is crossed, with the pace/time for that split specifically, not the
+  running average.
+- Pause: the map stops extending its polyline, the clock stops advancing,
+  and the control swaps to Resume. Resume: a new GPS watch starts and the
+  clock resumes from where it stopped — the paused interval is not counted
+  as elapsed time (see `lib/running.ts`'s `trackDurationSeconds` doc for why
+  this cannot be derived from the track alone).
+- Hold-to-finish (mirroring the strength screen's delete/finish gesture, not
+  a plain tap — a run ends with sweaty hands, mid-stride): finishing writes
+  `ended_at`, a `running_session_detail` PUT with the full route, splits,
+  distance, duration, average pace and elevation gain, and a
+  `session_sets` row for the `run` exercise; the screen then shows a
+  finished summary (distance/time/pace) and a way back to Today.
+- Reopening the app on an in-progress run (not force-quit, just backgrounded
+  and returned to) shows the same live state — no lost points, no restarted
+  clock.
+
+### Edge cases & errors
+
+- GPS signal loss mid-run (no fix for `>15s` while tracking): a "Weak GPS
+  signal — still recording" banner appears, the clock and any distance
+  already recorded are untouched, and tracking resumes silently the moment
+  fixes return — no error, no lost points, nothing for the athlete to
+  dismiss.
+- A wildly inaccurate fix (`accuracy` beyond the screen's threshold) is
+  dropped rather than appended — confirms one bad multipath reading does
+  not spike the distance total or draw a stray line across the map.
+- The app is backgrounded mid-run and returns minutes later: the elapsed
+  clock reads the correct wall-clock-derived total on return (not merely
+  the time since the last render), because it is computed from `Date.now()`
+  deltas rather than a ticking timer that would itself have been
+  suspended.
+- The app is FORCE-QUIT mid-run and relaunched: the screen reopens on the
+  same session, restores every GPS point already written to
+  `running_json`, and resumes tracking — proving the buffer, not merely the
+  screen's in-memory state, is what survives.
+- A full network drop for the whole run: every point still lands in
+  `running_json` locally (this never touches the network); on finish, the
+  session and its detail sit `dirty = 1` in the outbox and push
+  automatically the moment connectivity returns, with no user action and no
+  lost track.
+- Permission denied (or "Ask Next Time" then declined): the screen shows a
+  clear explanation and an Open Settings action rather than a blank map or
+  a crash; no GPS watch starts, and nothing is silently recorded.
+- A run of essentially zero distance (GPS never got a fix, or the athlete
+  finishes instantly): pace renders as `—` rather than a divide-by-zero or
+  an infinite figure, and Finish still succeeds — a null pace is a valid,
+  real fact about a run with no distance, not a bug to route around.
+- Finish while offline, then the app is killed before the next foreground
+  sync: on relaunch, the session and its running detail are still `dirty`
+  and still push automatically — the same outbox guarantee every other
+  session type already has, exercised here for a run specifically.
+
+### Auth/security
+
+- The running detail PUT reuses N458's endpoint and its ownership checks
+  unchanged from this screen — a session created by `POST /v1/sessions`
+  under the signed-in athlete's own token, so nothing here introduces a new
+  cross-user surface. See N458's own scenarios above for the endpoint-level
+  cases (another caller's session id, no auth header, wrong-sport session).
+
+### Needs a device
+
+- A real outdoor run, start to finish, including at least one genuine
+  dead-signal moment (a tunnel, a parking garage, a stretch of trees) — the
+  ticket's own `NEEDS HUMAN EVIDENCE` acceptance criterion. Simulator GPS is
+  a scripted/mocked track and cannot exercise a real device's radio
+  dropping out mid-recording, backgrounding under real OS memory pressure,
+  or the permission prompt's real-world wording and button layout.

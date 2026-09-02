@@ -31,6 +31,16 @@ import { logsAfterwards, type Module } from './modules';
  * anything. Declaring the return as `Href` puts the check back where the
  * literals are written, which is the only place it can be made. See N32 and the
  * `typecheck:mobile` step that regenerates those types.
+ *
+ * ## Running is NOT a third branch here (N460)
+ *
+ * A run still starts from `/session/start` — the ordinary template-or-empty
+ * chooser, unchanged, because running's catalog is `exercises` (same as
+ * strength; see `lib/modules.ts`'s registry) and a runner may genuinely have
+ * an interval template to start from. What differs for running is where
+ * beginning the chosen template goes once a session exists, which is a
+ * property of the CREATED session, not of the pick — so that branch lives in
+ * `sessionHref` below, not here.
  */
 export function startSessionHref(
   pick: { sport: string; workoutId: string | null },
@@ -89,9 +99,31 @@ export function startSessionHref(
  * routes reject a bare `string`, and going through the generated pathname
  * literals means a renamed route breaks the build instead of the tap — the same
  * argument the `Href` return type above makes, arrived at from the other side.
+ *
+ * ## The running branch is keyed on the sport string, not a module capability
+ * (N460)
+ *
+ * Every other branch here reads `logsAfterwards`, itself keyed on the
+ * catalog KIND so a future technique-shaped discipline gets the right flow
+ * without this file learning its name. Running cannot use that lever: its
+ * catalog is `exercises` (same as strength — a runner logs against the seeded
+ * `run`/`treadmill-*` entries so the generic PR pipeline sees it), so nothing
+ * in the module registry distinguishes "started and logged into" from
+ * "started and live-GPS-tracked". A live-tracking screen is a UI-flow fact
+ * about the ONE discipline that has a phone GPS along for the ride today, not
+ * a capability a server-driven registry has any vocabulary for yet — the same
+ * call `internal/modules/running/running.go`'s `sportKey` constant makes for
+ * the identical reason: "this is a storage-level invariant... the dependency
+ * would otherwise run backwards." If a second live-tracked discipline ever
+ * arrives, that is the moment to grow the registry a real capability and fold
+ * this back into one predicate; one sport does not justify inventing it now.
  */
 export function sessionHref(s: { id: string; sport: string }, modules: Module[]): Href {
-  return logsAfterwards(s.sport, modules)
-    ? ({ pathname: '/bjj/session/[id]', params: { id: s.id } } as const)
-    : ({ pathname: '/session/[id]', params: { id: s.id } } as const);
+  if (logsAfterwards(s.sport, modules)) {
+    return { pathname: '/bjj/session/[id]', params: { id: s.id } } as const;
+  }
+  if (s.sport === 'running') {
+    return { pathname: '/running/[id]', params: { id: s.id } } as const;
+  }
+  return { pathname: '/session/[id]', params: { id: s.id } } as const;
 }
