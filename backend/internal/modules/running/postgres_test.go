@@ -350,3 +350,93 @@ func TestUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel(t *testing.T) {
 		t.Fatalf("owner's row was modified: distance_m=%v", distanceM)
 	}
 }
+
+// N465: healthkit_uuid round-trips through PutDetail/GetDetail like every
+// other field, and re-saving the SAME session (an outbox retry, or the
+// import flow re-syncing after a partial push) with the SAME uuid must
+// converge rather than tripping the unique index — the ordinary upsert case,
+// not the collision this file tests separately below.
+func TestPutAndGetDetailWithHealthKitUUID(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-running-hk", "user_running_hk"
+	seedSession(t, pool, id, user)
+
+	uuid := "6D0D0F5F-8B4A-4E2D-9B1A-3C7E9F1A2B3C"
+	in := SessionDetail{
+		SessionID:     id,
+		Source:        SourceHealthKit,
+		DistanceM:     ptr(5000.0),
+		HealthKitUUID: ptr(uuid),
+	}
+
+	if _, err := repo.PutDetail(ctx, user, in); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	// Retry with the identical uuid, same session — must converge, not
+	// refuse, since this is exactly what a re-sent outbox row looks like.
+	saved, err := repo.PutDetail(ctx, user, in)
+	if err != nil {
+		t.Fatalf("retry put: %v", err)
+	}
+	if saved.HealthKitUUID == nil || *saved.HealthKitUUID != uuid {
+		t.Fatalf("put returned healthkit_uuid=%v, want %q", saved.HealthKitUUID, uuid)
+	}
+
+	got, err := repo.GetDetail(ctx, user, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.HealthKitUUID == nil || *got.HealthKitUUID != uuid {
+		t.Fatalf("get returned healthkit_uuid=%v, want %q", got.HealthKitUUID, uuid)
+	}
+}
+
+// The per-user unique index is the backstop against a SECOND session
+// claiming a HealthKit workout a first session already holds — the scenario
+// the mobile app's own local ledger cannot prevent (a reinstall, or a second
+// device). Exercised at the repository level, unlike
+// TestUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel above, because
+// this constraint IS reachable through the ordinary PutDetail call: nothing
+// about ownership or ON CONFLICT(session_id) intercepts it first.
+func TestHealthKitUUIDIsUniquePerUser(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const firstID, secondID, user = "ses-running-hk-dup-1", "ses-running-hk-dup-2", "user_running_hk_dup"
+	seedSession(t, pool, firstID, user)
+	seedSession(t, pool, secondID, user)
+
+	uuid := "AAAAAAAA-1111-2222-3333-444444444444"
+	if _, err := repo.PutDetail(ctx, user, SessionDetail{
+		SessionID: firstID, Source: SourceHealthKit, HealthKitUUID: ptr(uuid),
+	}); err != nil {
+		t.Fatalf("first put: %v", err)
+	}
+
+	_, err := repo.PutDetail(ctx, user, SessionDetail{
+		SessionID: secondID, Source: SourceHealthKit, HealthKitUUID: ptr(uuid),
+	})
+	if !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("second session claiming the same healthkit_uuid gave %v, want ErrAlreadyExists", err)
+	}
+
+	// The second session's detail row must not have been left half-written —
+	// GetDetail on it should still answer ErrNotFound, the same "no detail
+	// yet" state as before the refused write, since the whole statement rolls
+	// back inside PutDetail's own transaction.
+	if _, err := repo.GetDetail(ctx, user, secondID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second session's detail after a refused write: %v, want ErrNotFound", err)
+	}
+
+	// A DIFFERENT user importing the identical HealthKit uuid (two athletes
+	// on the same shared library workout is not realistic, but the index is
+	// scoped per-user rather than global, and this is what proves that scope
+	// rather than assuming it) must succeed.
+	const otherUser, otherSession = "user_running_hk_dup_other", "ses-running-hk-dup-other"
+	seedSession(t, pool, otherSession, otherUser)
+	if _, err := repo.PutDetail(ctx, otherUser, SessionDetail{
+		SessionID: otherSession, Source: SourceHealthKit, HealthKitUUID: ptr(uuid),
+	}); err != nil {
+		t.Fatalf("a different user's identical healthkit_uuid was refused: %v", err)
+	}
+}

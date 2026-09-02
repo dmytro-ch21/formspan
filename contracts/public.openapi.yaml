@@ -1770,6 +1770,18 @@ components:
             Where the track and numbers came from. `manual` has no track at
             all — hand-entered distance and duration for a run the phone
             wasn't along for.
+        healthkit_uuid:
+          type: string
+          nullable: true
+          description: >
+            The `HKWorkout.uuid` a HealthKit-imported run came from (N465).
+            Null for every source other than `healthkit`. Carries a unique
+            index per user — re-sending the same UUID under a DIFFERENT
+            session_id than the one that already holds it is refused with
+            `already_exists`, which is the backstop against a re-imported
+            duplicate on a reinstalled app or a second device; the ordinary
+            same-device repeat import never reaches this endpoint at all,
+            since the mobile app checks its own local ledger first.
         created_at: { type: string, format: date-time, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 
@@ -8771,6 +8783,13 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >
+            healthkit_uuid is already attached to a different session for
+            this user (N465) — see RunningSessionDetail.healthkit_uuid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     get:
       summary: Read a running session's detail
       operationId: getRunningSessionDetail

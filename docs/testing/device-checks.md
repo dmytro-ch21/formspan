@@ -725,6 +725,55 @@ unset (rather than omitting it), so a passing typecheck and a green `verify`
 prove nothing about what App Store review — or the athlete — actually sees
 in the dialog.
 
+### D29 — The HealthKit import permission prompt and a real imported run (N465)
+
+**Do:** On a device with at least one running workout in the Health app
+(recorded on an Apple Watch, or logged by hand), open Settings → Integrations
+and turn on "Import runs from Apple Health". Read the system Health-access
+sheet before tapping anything, then grant access and wait for the next
+foreground pass (or background/foreground the app once to force one).
+
+**Should:** The row's own hint text (visible before the system prompt fires)
+and the system sheet both describe the same thing — reading workouts to
+import them, never writing anything to Health. The Health access sheet lists
+exactly the categories this feature reads (Workouts and, if the workout
+carries one, its route) with no unrelated categories pre-checked. After
+granting, the run appears in Training History as a new running session
+within one foreground pass, opens in `app/running/[id].tsx` showing the
+"Imported from Apple Health" badge, and — the ticket's own
+`NEEDS HUMAN EVIDENCE` criterion — appears **exactly once**: background and
+foreground the app again with no new HealthKit data and confirm no second
+copy appears.
+
+**Failure looks like:** A system sheet listing write/"Update Health Records"
+access anywhere — a sign `NSHealthUpdateUsageDescription: false` regressed in
+`app.json`'s plugin config and the app is declaring capability it should not
+have (see this ticket's history.md entry on `@kingstinct/react-native-healthkit`'s
+plugin defaulting that string to a generic prompt when not explicitly
+disabled). A duplicated session on the second foreground pass means the local
+ledger (`healthkit_imports`) or the dedup filter regressed — check
+`apps/mobile/lib/__tests__/healthkitSync.test.ts`'s "re-running import does
+not duplicate" case still passes first, since that is the same guard with the
+device removed. A run that never appears at all despite a granted prompt is
+most likely HealthKit reporting an activity type other than Running (only
+`WorkoutActivityType.running` is queried) rather than a bug in the import
+path — check what the Health app itself calls the workout's type before
+assuming the feature is broken.
+
+**Why no test reaches it:** the same reason as D28, plus one more layer —
+this is a THIRD-PARTY native module's (`@kingstinct/react-native-healthkit`)
+own permission sheet, not even one Apple's first-party `expo-location`
+renders, so its exact wording and category list are entirely outside this
+repo's control and entirely unverifiable without a real device holding real
+Health data. `lib/healthkit.ts`'s pure mapping and `lib/healthkitSync.ts`'s
+dedup/orchestration logic are unit tested against a real SQLite fixture
+(`apps/mobile/lib/__tests__/healthkit.test.ts`,
+`apps/mobile/lib/__tests__/healthkitSync.test.ts`) — what no test can reach is
+everything upstream of `queryRunningWorkouts`' native call: the prompt
+itself, whether HealthKit actually hands back a workout's route, and whether
+a real Apple Watch run round-trips through the whole pipeline into something
+an athlete recognizes as the run they did.
+
 ---
 
 ## What is deliberately not here

@@ -10,6 +10,7 @@ import { AccentProvider, useAccent } from '@/lib/AccentProvider';
 import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
+import { setHealthKitSyncIdentity, startHealthKitImportOrchestrator } from '@/lib/healthkitSync';
 import { seedIfNeeded } from '@/lib/seed';
 import { syncSessions } from '@/lib/sessionStore';
 
@@ -165,6 +166,15 @@ function RootLayoutNav() {
   useEffect(() => {
     setSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
   }, [isSignedIn, userId, getToken]);
+
+  // N465: the same "own AppState listener, own identity" shape as the sync
+  // orchestrator above, and deliberately a SEPARATE one — see
+  // lib/healthkitSync.ts's doc comment for why a HealthKit import pass does
+  // not share the outbox's retry/backoff machinery.
+  useEffect(() => startHealthKitImportOrchestrator(), []);
+  useEffect(() => {
+    setHealthKitSyncIdentity(isSignedIn ? (userId ?? null) : null);
+  }, [isSignedIn, userId]);
 
   // Catch what nobody catches: unhandled JS errors and unhandled promise
   // rejections. Installed once for the process, at the root, because an error

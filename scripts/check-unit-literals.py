@@ -228,6 +228,15 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "'kg',",
         "Same NOT_A_NATURAL_UNIT denylist as the 'ml' entry above, same reason.",
     ),
+    (
+        "apps/mobile/lib/healthkit.ts",
+        "km",
+        "case 'km':",
+        "A storage unit TAG HealthKit itself reports on a Quantity ('m'/'km'/'mi'), "
+        "branched on to convert a native SDK value to metres before it ever reaches "
+        "running.SessionDetail — never rendered copy. `lib/units.ts`'s formatters take "
+        "over from there, same relationship the 'ml' entry above has to fluidUnit().",
+    ),
 ]
 
 

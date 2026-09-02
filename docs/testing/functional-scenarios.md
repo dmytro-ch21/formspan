@@ -17139,3 +17139,80 @@ are navigation shortcuts to a different screen, not filters on this one).
      file (the facet-picker sheet this one is modeled on never navigates).
      Does the pushed screen appear cleanly, or does the sheet's own
      slide-out animation visibly overlap it?
+
+## N465 — import runs from Apple HealthKit (`apps/mobile/lib/healthkit.ts`, `apps/mobile/lib/healthkitSync.ts`, `apps/mobile/app/settings.tsx`, `PUT /v1/running/sessions/{sessionID}`)
+
+### Happy path
+
+- Settings → Integrations → "Import runs from Apple Health": off by default
+  on a fresh install. Turning it on triggers the system HealthKit
+  authorization prompt, preceded by the rationale text already visible on
+  the row (not only inside the system sheet).
+- With a real Apple Watch run recorded in Health, turn the toggle on: within
+  one foreground pass the run appears in Training History as a new running
+  session, with the same duration/distance/pace shape a phone-GPS run shows.
+- Open the imported run from Training History (`sessionHref` routes any
+  `sport: 'running'` session to `app/running/[id].tsx`): the finished-run
+  summary shows an "Imported from Apple Health" badge that a phone-GPS run
+  never shows.
+- Background the app, record a second run on the watch, sync it to Health,
+  then foreground VOLA: the second run is imported without re-fetching or
+  duplicating the first (`lib/healthkitSync.ts`'s foreground orchestrator).
+- Kill and relaunch the app with the toggle already on: the launch-triggered
+  pass imports anything recorded since the last successful pass, with no
+  athlete action required.
+- Import a HealthKit workout that has route data (recorded live on the
+  watch): the route renders on the map the same way a phone-GPS track does,
+  and splits are derived from it.
+- Import a HealthKit workout with no route (logged by hand in the Health
+  app, or watch route access denied): the session still imports with
+  distance/duration/pace, no track, and no crash on the map view.
+
+### Edge cases & errors
+
+- Turn the toggle on, then deny the system HealthKit permission prompt: the
+  toggle stays visibly on (it is a device setting, not a permission grant)
+  but no runs import — verify this does not read as a bug on repeated
+  foreground passes (HealthKit never tells an app that access was denied,
+  only that nothing came back).
+- A device/simulator with no HealthKit support at all (or a build missing
+  the native module — see `lib/healthkit.ts`'s blast-shield doc comment):
+  the Settings row shows disabled with "Not available on this device"
+  rather than crashing the Settings screen.
+- **Re-running import does not duplicate**: with the toggle on and one run
+  already imported, force another foreground pass (background/foreground
+  the app) with no new HealthKit data — Training History still shows
+  exactly one session for that run. Covered at the pure/dedup-logic level
+  by `apps/mobile/lib/__tests__/healthkitSync.test.ts`; the device version
+  of this is the ticket's own `NEEDS HUMAN EVIDENCE` criterion.
+- Reinstall the app (or import the same watch run on a second device signed
+  into the same account) after a run has already been imported once: the
+  backend's per-user unique index on `healthkit_uuid`
+  (`running_session_detail`, migration 000087) refuses the duplicate PUT
+  with `409 already_exists` rather than creating a second session server-side.
+- Turn the toggle off after runs have already been imported: those sessions
+  remain in Training History exactly as logged — turning the setting off
+  must never delete or hide data already brought in.
+- A HealthKit workout whose activity type is NOT running (e.g. cycling,
+  walking): never appears as an import candidate — only
+  `WorkoutActivityType.running` is queried.
+- Two HealthKit workouts with an identical uuid queried twice in one pass
+  (a defensive case, not expected from HealthKit itself): the local ledger's
+  primary key on `(user_id, healthkit_uuid)` makes the second insert a
+  no-op rather than an error.
+
+### Auth/security
+
+- HealthKit access is READ-ONLY — the plugin config
+  (`apps/mobile/app.json`) explicitly sets `NSHealthUpdateUsageDescription:
+  false`, so the app never declares (and the settings toggle never
+  requests) write access to Health data.
+- The `PUT /v1/running/sessions/{sessionID}` endpoint N458 already built is
+  reused unchanged for an imported run — ownership and sport checks apply
+  identically to a HealthKit-sourced detail as to a phone-GPS or manual one,
+  since the endpoint has no separate code path per source.
+- `healthkit_uuid`'s uniqueness is scoped per user
+  (`running_session_detail_healthkit_uuid_per_user`), not global — confirm
+  two different athletes importing what happens to be an identical uuid
+  (not realistic given Apple mints these, but worth a negative test) both
+  succeed independently rather than one refusing the other.

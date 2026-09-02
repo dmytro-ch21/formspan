@@ -34,6 +34,14 @@ var (
 	// ErrInvalidInput covers both a value the domain rejects (Validate) and a
 	// constraint Postgres rejects on our behalf (translatePgError).
 	ErrInvalidInput = errors.New("running: invalid input")
+	// ErrAlreadyExists means this HealthKit UUID is already attached to a
+	// DIFFERENT session for this user — the per-user unique index on
+	// healthkit_uuid firing. PutDetail is an upsert on session_id, so this
+	// can never mean "the same session was saved twice"; it means two
+	// different sessions are claiming the same HealthKit workout, which the
+	// import flow's own local ledger is supposed to prevent before it ever
+	// reaches here (see HealthKitUUID's doc comment).
+	ErrAlreadyExists = errors.New("running: already exists")
 )
 
 // sportKey is the `sessions.sport` value this module owns.
@@ -175,6 +183,18 @@ type SessionDetail struct {
 
 	Source Source `json:"source"`
 
+	// HealthKitUUID is the `HKWorkout.uuid` a HealthKit-imported run came
+	// from — nil for every other source. This is the dedup key: N465's
+	// import flow checks its own local ledger before ever reaching here, but
+	// a reinstalled or second device has no local ledger to check, so this
+	// column carries a per-user unique index (see the migration) as the
+	// backstop that makes a repeat import of the same watch-recorded run
+	// impossible rather than merely unlikely. Stored as given, not required
+	// to be non-nil for SourceHealthKit — this module stores what it is told
+	// (see ElevationGainM's note above), and enforcing that pairing is the
+	// client's job, not a storage-level invariant.
+	HealthKitUUID *string `json:"healthkit_uuid"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -194,6 +214,9 @@ func (d SessionDetail) Validate() error {
 		return ErrInvalidInput
 	}
 	if d.AvgPaceSecPerKm != nil && *d.AvgPaceSecPerKm < 0 {
+		return ErrInvalidInput
+	}
+	if d.HealthKitUUID != nil && *d.HealthKitUUID == "" {
 		return ErrInvalidInput
 	}
 	if len(d.RoutePoints) > MaxRoutePoints {

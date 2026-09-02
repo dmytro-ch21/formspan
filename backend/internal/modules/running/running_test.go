@@ -116,6 +116,19 @@ func TestSessionDetailValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "healthkit import with a uuid",
+			detail: SessionDetail{
+				Source:        SourceHealthKit,
+				DistanceM:     ptr(5000.0),
+				HealthKitUUID: ptr("6D0D0F5F-8B4A-4E2D-9B1A-3C7E9F1A2B3C"),
+			},
+		},
+		{
+			name:    "empty healthkit uuid",
+			detail:  SessionDetail{Source: SourceManual, HealthKitUUID: ptr("")},
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range cases {

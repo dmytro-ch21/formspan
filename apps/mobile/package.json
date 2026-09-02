@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@clerk/clerk-expo": "^2.19.31",
+    "@kingstinct/react-native-healthkit": "^14.1.0",
     "expo": "~57.0.11",
     "expo-audio": "~57.0.3",
     "expo-auth-session": "~57.0.6",
@@ -33,6 +34,7 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.2",
     "react-native-maps": "1.27.2",
+    "react-native-nitro-modules": "^0.37.1",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",

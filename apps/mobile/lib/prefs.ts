@@ -396,3 +396,28 @@ export async function adoptLegacyOwedFlags(userID: string): Promise<void> {
  * iOS does not restart the JS bundle when you change text size and come back.
  */
 export const PREF_GOALS_COLLAPSED = 'goals_collapsed';
+
+/**
+ * `'1'` while importing runs from Apple HealthKit is turned on (N465).
+ * Absent (or any other value) means off, which is the default — nothing is
+ * read from Health until the athlete opts in from Settings.
+ *
+ * Device-local and never `owed`, same reasoning as {@link PREF_SOUNDS}:
+ * whether THIS PHONE is allowed to read from Apple Health is a property of
+ * the phone (only one of an athlete's devices is the one with a watch paired
+ * to it), not a fact about the athlete the account should carry to a second
+ * device.
+ */
+export const PREF_HEALTHKIT_IMPORT = 'healthkit_import_enabled';
+
+/**
+ * ISO timestamp of the last run this device successfully imported from
+ * HealthKit, or absent if it never has.
+ *
+ * Same shape as {@link PREF_SEEDED_AT} and for the same reason: "when" bounds
+ * the next query window (nothing before this timestamp needs asking about
+ * again) in a way a boolean cannot. Local-only, never pushed — this is a
+ * fact about this device's own import history, not something the account
+ * holds.
+ */
+export const PREF_HEALTHKIT_LAST_IMPORT_AT = 'healthkit_last_import_at';
