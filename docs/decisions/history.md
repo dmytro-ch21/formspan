@@ -51771,10 +51771,43 @@ report: extend `SessionCelebration` for running") is concurrently touching
 tab's running gap + RecordsCard/Training History support") is concurrently
 touching running's presence on the Progress tab and in `RecordsCard`. This
 branch adds one `Pressable` row to the `finished` branch and touches nothing
-in `RecordsCard`, the Progress tab, or `lib/units.ts`, to keep the diff as
-small and as orthogonal to both as the entry point allowed — but a merge
-conflict on `app/running/[id].tsx`'s `finished` return is plausible and is
-for the coordinating session to reconcile at merge time.
+in `RecordsCard` or the Progress tab, to keep the diff as small and as
+orthogonal to both as the entry point allowed — but a merge conflict on
+`app/running/[id].tsx`'s `finished` return is plausible and is for the
+coordinating session to reconcile at merge time. (The two additive
+`lib/units.ts` exports mentioned above ARE a shared-file touch, but a purely
+additive one — new function names, nothing existing renamed or changed —
+which is a low-collision shape even if a sibling branch also happens to
+touch that file.)
+
+**Caught by the pre-merge review gate, fixed before the PR opened:**
+
+- `ac-verifier` against #774's criteria: the entries list's "capped, and the
+  cap is stated" criterion was `NOT MET` as first written. The screen
+  compared `rows.length > MAX_ENTRIES` to decide whether to show the notice
+  — but `rows` is a subset of `points`, which the fetch itself already caps
+  at 200, so `rows.length` could never exceed a 200-entry display cap and
+  the branch was dead code. A runner with 250 logged runs saw a silently
+  trimmed list with no notice at all — exactly the "quietly stops" failure
+  the screen's own comment claimed to avoid. Fixed by reading
+  `listSessionsPage`'s own `page.total` (the server's real count, not the
+  length of an already-capped page) and comparing THAT against the cap.
+- `frontend-reviewer`: `runPointsFromSessions`'s doc comment, its test file's
+  own header, and the functional-scenarios entry above all said "a
+  *completed* `run`-exercise set", but the filter never actually checked
+  `set.completed`. Not a live bug today — `finish()` in
+  `app/running/[id].tsx` is the only writer and always sets `completed:
+  true` — but `emptySet` defaults to `false`, so a future provisional write
+  carrying a distance would have charted as a real run. Fixed by adding the
+  check the doc comment already claimed, with two new tests (an
+  uncompleted set alone, and one completed set beside one that isn't).
+  Two lower-severity suggestions from the same review — stale `points` still
+  rendering in the entries list after a later failed refetch, and the
+  server-only data source meaning a just-finished, not-yet-synced run is
+  briefly absent from its own trend screen — are recorded as judgment calls:
+  the first is fixed here (`points={failed ? [] : points ?? []}`); the second
+  matches `app/records/[exerciseId]/trend.tsx`'s identical, already-accepted
+  behaviour and is left as-is rather than fixed under this ticket.
 
 **Open**: NEEDS HUMAN EVIDENCE — nothing here reads a sensor or renders
 anything device-specific beyond what N460's own chart machinery

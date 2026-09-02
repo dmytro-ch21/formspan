@@ -84,7 +84,9 @@ export function runPointsFromSessions(sessions: Session[]): RunSessionPoint[] {
   return sessions
     .map((s) => {
       const distance_m = s.sets
-        .filter((set) => set.exercise_id === RUN_EXERCISE_ID && set.distance_m != null)
+        .filter(
+          (set) => set.exercise_id === RUN_EXERCISE_ID && set.completed && set.distance_m != null,
+        )
         .reduce((sum, set) => sum + (set.distance_m as number), 0);
       return { session_id: s.id, started_at: s.started_at, distance_m };
     })

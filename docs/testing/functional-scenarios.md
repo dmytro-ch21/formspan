@@ -16620,8 +16620,11 @@ mutually exclusive at `Validate()`.
 - Two runs on the same calendar day both draw as separate dots.
 - Switching the unit system (metric/imperial) redraws the axis, the delta
   and every entry in km or mi — never a mix of the two on one screen.
-- Entries list is capped at 200 and says so ("Showing the most recent 200 of
-  N") once the athlete has logged more runs than that.
+- Entries list is capped at 200 sessions and says so ("Only your most recent
+  200 runs are considered here — you have N logged in total") once the
+  athlete has logged more runs than that — driven by the server's own count
+  (`page.total`), never by the length of the already-capped page itself,
+  which can never exceed the cap and so could never trigger the notice.
 
 ### Edge cases & errors
 

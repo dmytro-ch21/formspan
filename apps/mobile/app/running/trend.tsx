@@ -27,14 +27,17 @@ import { useUnits } from '@/lib/useUnits';
  */
 
 /** The widest page the generic session list will hand back in one request —
- *  matches `session.maxLimit` on the backend. `All` reaches only this far
- *  back; a runner with more history than that sees the oldest trimmed, same
- *  as `lib/records.ts`'s `maxLoadHistoryPoints` trims per-exercise load. */
+ *  matches `session.maxLimit` on the backend, and doubles as the entries
+ *  list's own cap: nothing past the {@link total}-th session was ever
+ *  fetched, so a per-window display cap on top of it would be a second,
+ *  smaller number pretending to be the reason anything was cut. `All`
+ *  reaches only this far back; a runner with more history than that sees
+ *  the oldest sessions trimmed, same as `lib/records.ts`'s
+ *  `maxLoadHistoryPoints` trims per-exercise load. */
 const MAX_SESSIONS = 200;
 /** Smallest y-axis span, in metres. Stops an unusually consistent stretch of
  *  identical-distance runs dividing by zero. */
 const MIN_SPAN_M = 500;
-const MAX_ENTRIES = 200;
 
 export default function RunningDistanceTrendScreen() {
   const getToken = useAuthToken();
@@ -44,6 +47,13 @@ export default function RunningDistanceTrendScreen() {
   const [range, setRange] = useState<TrendRangeKey>('3M');
   const [loading, setLoading] = useState(true);
   const [points, setPoints] = useState<RunSessionPoint[] | null>(null);
+  // The server's real count of `sport=running` sessions — NOT `points.length`,
+  // which is capped at `MAX_SESSIONS` by the fetch itself and so can never
+  // exceed it. Comparing `points.length` against `MAX_SESSIONS` was the first
+  // version of this screen's cap notice, and it was dead code: a subset of an
+  // already-capped fetch cannot be longer than the cap. `total` is the one
+  // number that actually knows whether anything was left out.
+  const [total, setTotal] = useState(0);
   const [failed, setFailed] = useState(false);
 
   useFocusEffect(
@@ -54,6 +64,7 @@ export default function RunningDistanceTrendScreen() {
         .then((page) => {
           if (!live) return;
           setPoints(runPointsFromSessions(page.sessions));
+          setTotal(page.total);
           setFailed(false);
         })
         .catch(() => {
@@ -139,7 +150,14 @@ export default function RunningDistanceTrendScreen() {
               daily, so a gap between two real ones means nothing on its own.
             </Text>
 
-            <Entries points={points ?? []} from={series.from} to={series.to} format={fmt} unit={unit} />
+            <Entries
+              points={failed ? [] : points ?? []}
+              total={total}
+              from={series.from}
+              to={series.to}
+              format={fmt}
+              unit={unit}
+            />
           </>
         )}
       </ScrollView>
@@ -151,18 +169,26 @@ export default function RunningDistanceTrendScreen() {
  * The runs behind the chart — scoped to the window on screen, matching
  * `app/records/[exerciseId]/trend.tsx`'s own `Entries`: "the entries behind
  * THIS chart" is both the honest reading and what stops years of runs being
- * re-sorted on every range tap. Capped at {@link MAX_ENTRIES}, and the cap is
- * STATED rather than silent — a list that quietly stops reads as "that is
- * all of them".
+ * re-sorted on every range tap.
+ *
+ * **The cap is stated off `total` (the server's real count), never off
+ * `rows.length` or `points.length`.** Both of those are already bounded by
+ * `MAX_SESSIONS` — the fetch itself never returns more — so comparing either
+ * one against that same number can never be true and the notice would be
+ * dead code. `total` is the one figure that still knows what got left out,
+ * so a runner with more than `MAX_SESSIONS` logged sees an honest "showing
+ * the most recent N of your M" rather than a list that quietly stops.
  */
 function Entries({
   points,
+  total,
   from,
   to,
   format,
   unit,
 }: {
   points: RunSessionPoint[];
+  total: number;
   from: string;
   to: string;
   format: (m: number) => string;
@@ -180,7 +206,7 @@ function Entries({
   return (
     <View style={styles.entries}>
       <Text style={styles.entriesHead}>RUNS</Text>
-      {rows.slice(0, MAX_ENTRIES).map((p) => (
+      {rows.map((p) => (
         <RNView key={p.session_id} style={styles.entry} testID={`running-trend-entry-${p.session_id}`}>
           <Text style={styles.entryDate}>{longDate(p.started_at)}</Text>
           <Text style={styles.entryValue}>
@@ -188,9 +214,10 @@ function Entries({
           </Text>
         </RNView>
       ))}
-      {rows.length > MAX_ENTRIES ? (
+      {total > MAX_SESSIONS ? (
         <Text style={styles.entriesMore}>
-          Showing the most recent {MAX_ENTRIES} of {rows.length}.
+          Only your most recent {MAX_SESSIONS} runs are considered here — you have {total} logged in
+          total.
         </Text>
       ) : null}
     </View>

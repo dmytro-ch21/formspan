@@ -84,6 +84,20 @@ describe('runPointsFromSessions', () => {
     const points = runPointsFromSessions([s]);
     expect(points).toEqual([{ session_id: 'r5', started_at: '2026-08-01T10:00:00Z', distance_m: 3500 }]);
   });
+
+  test('an uncompleted run set (still tracking, or planned but never performed) is not counted', () => {
+    const s = runSession('r6', '2026-08-01T10:00:00Z', 4000);
+    s.sets[0].completed = false;
+    const points = runPointsFromSessions([s]);
+    expect(points).toEqual([]);
+  });
+
+  test('one completed set and one uncompleted set in the same session count only the completed one', () => {
+    const s = runSession('r7', '2026-08-01T10:00:00Z', 5000);
+    s.sets.push({ ...emptySet(RUN_EXERCISE_ID, 1), distance_m: 9000, completed: false });
+    const points = runPointsFromSessions([s]);
+    expect(points).toEqual([{ session_id: 'r7', started_at: '2026-08-01T10:00:00Z', distance_m: 5000 }]);
+  });
 });
 
 describe('buildDistanceTrend', () => {
