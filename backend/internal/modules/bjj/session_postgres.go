@@ -175,10 +175,10 @@ func (r *PostgresRepository) PutDetail(
 			// correlated lookup per row.
 			batch.Queue(`
 				INSERT INTO bjj_session_tags
-					(session_id, user_id, category, event, position, technique_id, count)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+					(session_id, user_id, category, event, position, technique_id, count, label)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 				d.SessionID, userID, string(t.Category), string(t.Event),
-				t.Position, t.TechniqueID, t.Count)
+				t.Position, t.TechniqueID, t.Count, t.Label)
 		}
 		results := tx.SendBatch(ctx, batch)
 		for i := range d.Tags {
@@ -254,7 +254,7 @@ func (r *PostgresRepository) listTags(
 	ctx context.Context, q querier, userID, sessionID string,
 ) ([]Tag, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id, category, event, position, technique_id, count
+		SELECT id, category, event, position, technique_id, count, label
 		FROM bjj_session_tags
 		WHERE session_id = $1 AND user_id = $2
 		-- Stable order so a re-read renders the chips in the same sequence the
@@ -275,7 +275,7 @@ func (r *PostgresRepository) listTags(
 			event    string
 		)
 		if err := rows.Scan(&t.ID, &category, &event, &t.Position,
-			&t.TechniqueID, &t.Count); err != nil {
+			&t.TechniqueID, &t.Count, &t.Label); err != nil {
 			return nil, err
 		}
 		t.Category = Category(category)

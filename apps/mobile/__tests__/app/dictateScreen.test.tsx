@@ -5,6 +5,7 @@ import DictateReflectionScreen from '../../app/bjj/dictate';
 import { ApiError } from '@/lib/apiError';
 import { draftReflection, type Draft, type DraftResponse } from '@/lib/reflectApi';
 import { saveLocalBjjDetail } from '@/lib/sessionStore';
+import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 
 /**
  * The dictation screen's one rule: **never guess for the athlete** (N60).
@@ -150,6 +151,164 @@ it('offers a choice for an unresolved phrase and adds NO tag for it', async () =
   });
   const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
   expect(detail.tags).toEqual([]);
+});
+
+/**
+ * N119/#508: "when some techniques are logged and not found in library it is
+ * not creating a new item, but it should."
+ *
+ * Before this existed, "Skip this one" was the ONLY way an unresolved phrase
+ * left the screen short of a real match — and it discarded the phrase with
+ * no trace. These pin the third path: the phrase itself must survive into
+ * the saved session, distinguishably from a matched tag, and it must never
+ * touch the shared technique catalog (a mangled dictation must never become
+ * a permanent, shared entry — the "pool guards" guarantee).
+ */
+describe('a technique the library does not know', () => {
+  it('is kept, not dropped, when the athlete says to keep it as said', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [],
+        unresolved: [{ phrase: 'pool guards', category: 'sweep', event: 'scored' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak('swept twice from pool guards');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Keep “pool guards” as said, not matched to the library')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+
+    // The unresolved prompt is gone — it has been answered, the same as a
+    // real pick would have closed it.
+    expect(screen.queryByText(/which one\?/i)).toBeNull();
+
+    // And it renders in "What happened", distinguishably from a matched tag:
+    // the phrase itself, quoted, plus the "not matched" hint. This is the
+    // "athlete can see it was not recognised" half of the acceptance
+    // criteria.
+    expect(screen.getByText('“pool guards”')).toBeTruthy();
+    expect(screen.getByText('Not matched to the library')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags).toHaveLength(1);
+    // Never a technique id — that is the whole guarantee. Nothing on this
+    // path ever writes to the technique catalog; the phrase lives on the
+    // SESSION's own tag, never anywhere a mangled "pool guards" could
+    // become a permanent, shared library entry.
+    expect(detail.tags[0].technique_id).toBeFalsy();
+    expect(detail.tags[0].label).toBe('pool guards');
+    expect(detail.tags[0].category).toBe('sweep');
+    expect(detail.tags[0].event).toBe('scored');
+  });
+
+  it('lets the athlete resolve a kept phrase to a real technique before saving', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [],
+        unresolved: [{ phrase: 'armbar', category: 'submission', event: 'scored' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    await speak();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Keep “armbar” as said, not matched to the library')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Keep “armbar” as said, not matched to the library'));
+
+    // Correcting it is not a one-way door: the same screen that offered
+    // "Keep as said" lets the athlete change their mind and match it after
+    // all, without having to redo the dictation.
+    fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
+    await waitFor(() => {
+      expect(screen.getByText('Armbar from Mount')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByText('Armbar from Mount'));
+
+    fireEvent.press(screen.getByLabelText('Save this session'));
+    await waitFor(() => {
+      expect(saveLocalBjjDetail).toHaveBeenCalled();
+    });
+    const detail = (saveLocalBjjDetail as jest.Mock).mock.calls[0][2];
+    expect(detail.tags).toHaveLength(1);
+    expect(detail.tags[0].technique_id).toBe('armbar-from-mount');
+    // The label is cleared once resolved — a resolved tag carrying a stale
+    // phrase is exactly the confusion this field exists to prevent.
+    expect(detail.tags[0].label).toBeFalsy();
+  });
+
+  /**
+   * Regression for the race a reviewer caught: the catalog-fetch effect used
+   * to be gated on `unresolved.length`, so keeping the LAST unresolved
+   * phrase while the fetch was still in flight cancelled it — and nothing
+   * ever retried, because the guard now read "nothing needs it" even though
+   * a labelled tag's own "Match in library" control still did. `catalog`
+   * would then stay `null` forever and this control would spin with no way
+   * out. The fix widens the gate to "does anything on screen still need the
+   * catalog", which includes a kept-but-unmatched tag.
+   */
+  it('still loads the catalog for "Match in library" when the last phrase is kept before the fetch resolves', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [],
+        unresolved: [{ phrase: 'pool guards', category: 'sweep', event: 'scored' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+
+    // Controlled by hand rather than the shared `deferred` helper's fixed
+    // timer — the race depends on the fetch still being unresolved at the
+    // exact moment "Keep as said" is pressed.
+    let resolveCatalog!: (list: TechniqueSummary[]) => void;
+    (fetchTechniques as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise<TechniqueSummary[]>((resolve) => {
+          resolveCatalog = resolve;
+        }),
+    );
+
+    await speak('swept twice from pool guards');
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText('Keep “pool guards” as said, not matched to the library'),
+      ).toBeTruthy();
+    });
+
+    // This is the last unresolved phrase, so `unresolved.length` drops to 0
+    // right here — the moment that used to cancel the in-flight fetch.
+    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+
+    // Only now does the fetch resolve. Under the bug, nothing would still be
+    // listening for it.
+    resolveCatalog([
+      {
+        id: 'pull-guard',
+        name: 'Pull Guard',
+        aliases: ['pool guards'],
+        category: 'Sweep',
+        position: 'Standing',
+        position_detail: '',
+        gi_no_gi: 'Both',
+        typical_belt: '',
+        ibjjf_ruleset_id: '',
+        setup_from: [],
+      },
+    ]);
+
+    fireEvent.press(screen.getByLabelText('Match “pool guards” to a technique'));
+    await waitFor(() => {
+      expect(screen.getByText('Pull Guard')).toBeTruthy();
+    });
+  });
 });
 
 it('adds the technique the athlete picked, and only that one', async () => {
@@ -795,6 +954,45 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     for (const key of ['drilled', 'attempted', 'scored', 'conceded', 'defended']) {
       expect(screen.getByTestId(`dictate-tag-0-event-${key}`)).toBeTruthy();
     }
+    expect(screen.queryByText(/no technique named/i)).toBeNull();
+  });
+
+  /**
+   * N119/#508 × N120/#509, reconciled at rebase: a tag kept as unmatched
+   * also carries `technique_id: null`, the same shape the restriction above
+   * exists to narrow — but it is NOT the same case. `session/[id].tsx` gives
+   * every labelled tag its own display surface ("Said, not matched to the
+   * library") regardless of `event`, so the read-view gap the restriction
+   * guards against never applies to it. If this test ever fails because the
+   * restriction widened to catch labelled tags too, that is a regression,
+   * not a fix — see `TagRow`'s `untaggedLimited` comment.
+   */
+  it('leaves all five event choices open for a tag kept as unmatched, unlike a plain untagged one', async () => {
+    mockResponse = {
+      draft: {
+        ...baseDraft,
+        tags: [],
+        // `drilled` specifically — the one event a plain untagged tag can
+        // never carry into "What happened live" or "Techniques", so this
+        // pins that a labelled tag is not held to that same restriction.
+        unresolved: [{ phrase: 'pool guards', category: 'sweep', event: 'drilled' }],
+      },
+      quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
+    };
+    await speak('drilled from pool guards');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Keep “pool guards” as said, not matched to the library')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+
+    await waitFor(() => {
+      expect(screen.getByText('“pool guards”')).toBeTruthy();
+    });
+    for (const key of ['drilled', 'attempted', 'scored', 'conceded', 'defended']) {
+      expect(screen.getByTestId(`dictate-tag-0-event-${key}`)).toBeTruthy();
+    }
+    // No "stranded" flag either — a labelled tag is never stranded by event.
     expect(screen.queryByText(/no technique named/i)).toBeNull();
   });
 });

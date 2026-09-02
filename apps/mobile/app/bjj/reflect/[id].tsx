@@ -32,6 +32,7 @@ import {
   type Category,
   type Event,
   type SessionDetail,
+  type Tag,
 } from '@/lib/bjjSession';
 import { readLocalBjjDetail, saveLocalBjjDetail } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
@@ -870,6 +871,7 @@ function LiveStep({
   /** The cross-session funnel, keyed by technique id — see `ReflectScreen`. */
   proficiency: ReadonlyMap<string, Proficiency>;
 }) {
+  const accent = useAccent();
   const [position, setPosition] = useState('');
   const [focus, setFocus] = useState<Focus[]>([]);
   /*
@@ -885,10 +887,20 @@ function LiveStep({
     about the library would be noise on the fastest screen in the flow.
   */
   const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
+  // The full catalog, alongside `names` above — needed for N119/#508's
+  // "Match in library" action on a tag kept unmatched (see `unmatched`
+  // below), which ranks against the whole library the same way the
+  // dictation screen's picker does. Same fetch as `names` is built from
+  // (`fetchTechniques` is module-cached, so this is not a second request),
+  // kept separate because `names` is what most of this file already reads.
+  const [library, setLibrary] = useState<TechniqueSummary[]>([]);
   useEffect(() => {
     const c = new AbortController();
     fetchTechniques(getToken, c.signal)
-      .then((all) => setNames(new Map(all.map((t) => [t.id, t.name]))))
+      .then((all) => {
+        setNames(new Map(all.map((t) => [t.id, t.name])));
+        setLibrary(all);
+      })
       .catch(() => {});
     return () => c.abort();
   }, [getToken]);
@@ -929,12 +941,93 @@ function LiveStep({
     )
     .reduce((n, t) => n + t.count, 0);
 
+  /**
+   * N119/#508: tags kept unmatched from dictation — `technique_id` null,
+   * `label` the athlete's own phrase. The "correct it" half of this ticket:
+   * `dictate.tsx` is not the only chance to resolve one, because that
+   * screen's own header says there is "no separate 'review a dictated
+   * session' surface, deliberately" — this wizard IS that surface.
+   *
+   * Distinct from `elsewhere`/the coarse counters above on purpose: those
+   * stay a pure aggregate — a plain +/- tap can land on the same
+   * category/event/position as one of these and simply add to its count,
+   * which is accepted rather than guarded against, because the grid was
+   * already lossy about which specific submission before labels existed.
+   * This list is the one place a SPECIFIC phrase, and the ability to match
+   * or drop it, is visible.
+   */
+  const unmatched = detail.tags
+    .map((t, i) => ({ t, i }))
+    .filter(({ t }) => !t.technique_id && !!t.label);
+
+  // Which unmatched tag has its "Match in library" panel open, tracked by
+  // OBJECT IDENTITY rather than array index. `detail.tags` is a shared
+  // array — the coarse grid's `bump`, a technique un-drilled a step back,
+  // and this list's own "Remove" can all add or splice an entry anywhere
+  // in it, shifting every index after the change. An index cached in state
+  // goes stale the moment that happens, silently reattaching the panel to
+  // whatever tag slides into its old slot. A direct reference to the tag
+  // object never can: an untouched element keeps the same reference across
+  // a `[...tags]`/`.map`/`.filter` (only a replaced element gets a new
+  // object), so comparing a row's own tag to `matchingTag` below (`===`)
+  // always identifies the right row, and naturally stops matching any row
+  // at all once the panel's tag is removed — no reset bookkeeping required
+  // at any mutation site.
+  const [matchingTag, setMatchingTag] = useState<Tag | null>(null);
+  const matchQuery = matchingTag?.label ?? '';
+  const matches = useMemo(
+    () => (matchQuery ? rankTechniques(library, matchQuery).slice(0, 6) : []),
+    [library, matchQuery],
+  );
+
+  /**
+   * Mirrors `resolvePhrase` in `dictate.tsx`: category, event and count all
+   * stay exactly as already confirmed. Only `technique_id` is set and
+   * `label` cleared — the server rejects a tag carrying both.
+   */
+  function resolveUnmatched(i: number, picked: TechniqueSummary) {
+    onChange({
+      ...detail,
+      tags: detail.tags.map((tag, n) =>
+        n === i ? { ...tag, technique_id: picked.id, label: undefined } : tag,
+      ),
+    });
+    setMatchingTag(null);
+  }
+
+  function removeUnmatched(i: number, tag: Tag) {
+    onChange({ ...detail, tags: detail.tags.filter((_, n) => n !== i) });
+    // Only clear the panel if the row REMOVED is the one it was open on —
+    // an object-identity comparison, so a DIFFERENT row's open panel is
+    // left alone. Not even strictly required: once `detail.tags` no longer
+    // contains `tag`, every `matchingTag === t` comparison in the render
+    // below already stops matching on its own. This just makes that
+    // immediate rather than waiting for whatever re-render happens next.
+    setMatchingTag((cur) => (cur === tag ? null : cur));
+  }
+
   function bump(category: Category, event: Event, delta: number) {
     const tags = [...detail.tags];
     // Match on the position too: "swept from half guard" and "swept from
     // guard" are different evidence and must not merge into one counter.
+    //
+    // `!t.label` too, as of N119/#508 — a labelled ("kept unmatched") tag
+    // also has `technique_id: null` and typically `position: ''`, so
+    // without this exclusion the plain grid's "+" could silently inflate a
+    // specific phrase's count instead of recording a new, separate
+    // occurrence, and its long-press "−" could splice the labelled tag out
+    // of existence with no indication at all — the exact silent-discard
+    // failure this ticket exists to end, recreated one screen along. The
+    // dedicated "Said, not matched to the library" list above is the only
+    // place a labelled tag is ever removed, and it does so with an explicit
+    // Remove button, never a blind grid tap.
     const i = tags.findIndex(
-      (t) => t.category === category && t.event === event && t.position === position && !t.technique_id,
+      (t) =>
+        t.category === category &&
+        t.event === event &&
+        t.position === position &&
+        !t.technique_id &&
+        !t.label,
     );
     if (i === -1) {
       if (delta < 0) return;
@@ -1128,6 +1221,73 @@ function LiveStep({
         Tap to add, press and hold to take one back. The right-hand column is the half most people
         never record — and the half that tells you what to work on.
       </Text>
+
+      {/* N119/#508. Only present when dictation kept something the library
+          never matched — an ordinary session with no unresolved phrase
+          renders exactly as before this existed. */}
+      {unmatched.length > 0 && (
+        <>
+          <Text style={styles.label} accessibilityRole="header">
+            Said, not matched to the library
+          </Text>
+          {unmatched.map(({ t, i }) => (
+            <RNView key={i} style={styles.unmatchedRow}>
+              <RNView style={styles.unmatchedHead}>
+                <Text style={[styles.gridLabel, styles.unmatchedLabel]} numberOfLines={2}>
+                  “{t.label}”{t.count > 1 ? ` ×${t.count}` : ''}
+                </Text>
+                <Pressable
+                  onPress={() => setMatchingTag((cur) => (cur === t ? null : t))}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    matchingTag === t
+                      ? `Hide matches for “${t.label}”`
+                      : `Match “${t.label}” to a technique`
+                  }
+                >
+                  <Text style={[styles.footnote, { color: accent.ink, fontWeight: '700' }]}>
+                    {matchingTag === t ? 'Hide' : 'Match'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => removeUnmatched(i, t)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove “${t.label}”`}
+                >
+                  <Text style={[styles.footnote, { color: vola.textDim, fontWeight: '700' }]}>
+                    Remove
+                  </Text>
+                </Pressable>
+              </RNView>
+              {matchingTag === t && (
+                <RNView style={styles.unmatchedMatches}>
+                  {matches.length === 0 ? (
+                    <Text style={styles.footnote}>
+                      Nothing in the library matches that yet.
+                    </Text>
+                  ) : (
+                    matches.map((m) => (
+                      <Pressable
+                        key={m.id}
+                        onPress={() => resolveUnmatched(i, m)}
+                        style={styles.pill}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${m.name}, for “${t.label}”`}
+                      >
+                        <Text style={styles.pillText}>{m.name}</Text>
+                      </Pressable>
+                    ))
+                  )}
+                </RNView>
+              )}
+            </RNView>
+          ))}
+          <Text style={styles.footnote}>
+            Said during dictation, no catalog entry pinned it down. Match it here if the library
+            has grown since, or leave it — it still counts as evidence above.
+          </Text>
+        </>
+      )}
     </RNView>
   );
 }
@@ -1361,6 +1521,12 @@ const styles = StyleSheet.create({
   gridRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8 },
   gridLabelCol: { flex: 1.1, gap: 4 },
   gridLabel: { fontSize: 14, fontWeight: '600' },
+
+  // N119/#508's "Said, not matched to the library" list.
+  unmatchedRow: { marginTop: 10, gap: 8 },
+  unmatchedHead: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  unmatchedLabel: { flex: 1, flexShrink: 1 },
+  unmatchedMatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   counter: {
     flex: 1,

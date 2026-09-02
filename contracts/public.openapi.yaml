@@ -1431,6 +1431,23 @@ components:
           description: >
             Reflection is recalled in counts. Three armbars is one tag with
             count 3, not three tags.
+        label:
+          type: string
+          default: ""
+          maxLength: 200
+          description: >
+            N119/#508: what the athlete said when it did NOT resolve to a
+            catalog technique — a mangled dictation ("pool guards"), or a
+            phrase typed by hand that the library has no entry for. Empty is
+            the ordinary case (`technique_id` resolved, or nothing was named
+            at all). Mutually exclusive with `technique_id`: a tag carrying
+            both is rejected as invalid input, since a resolved tag with a
+            leftover label is stale data, not a fact worth keeping.
+
+            NEVER written to the technique catalog on any path — that stays
+            admin-authored-only (see the `techniques` endpoints), so a
+            mangled dictation can never become a permanent, shared catalog
+            entry through this field.
 
     BjjReflectionDraft:
       type: object

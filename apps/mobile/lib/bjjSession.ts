@@ -336,6 +336,20 @@ export type Tag = {
   position: string;
   technique_id?: string | null;
   count: number;
+  /**
+   * What the athlete said when it did NOT resolve to a catalog technique —
+   * "pool guards" from a mangled dictation, or a phrase typed by hand the
+   * library has no entry for (N119/#508).
+   *
+   * Absent/undefined is the ordinary case: `technique_id` resolved, or
+   * nothing was named at all (the category-grid fast path never sets this).
+   * Mutually exclusive with `technique_id` — the server rejects a tag
+   * carrying both, because a resolved tag with a leftover label is stale
+   * data. NEVER sent anywhere near the technique catalog: this is a property
+   * of the SESSION's own tag row, and the whole reason a mangled dictation
+   * can never become a permanent, shared catalog entry through this path.
+   */
+  label?: string;
 };
 
 export type SessionDetail = {
@@ -442,6 +456,15 @@ export function tagCount(
         // with a technique, but the API accepts one, so a reflection
         // authored elsewhere and read back would hit it.
         !t.technique_id &&
+        // Labelled rows too (N119/#508), for the same reason and by the
+        // same rule: `bump` never touches a labelled tag (see its own
+        // comment), so this counter — which is exactly the number `bump`
+        // reads and writes — must not include one either. A labelled
+        // phrase's count is shown on its own row in "Said, not matched to
+        // the library"; blending it into this anonymous total would let a
+        // single uncertain phrase quietly inflate a number the athlete
+        // reads as clean, undifferentiated evidence.
+        !t.label &&
         (position === undefined || t.position === position),
     )
     .reduce((n, t) => n + t.count, 0);

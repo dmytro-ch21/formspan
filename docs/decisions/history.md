@@ -51392,6 +51392,147 @@ reaching a logged session without typing anything that was spoken. Nothing in
 this change is reachable by a test that cannot hear speech; see N60's own
 recorded gap (33 authored eval cases, 0 recorded) two entries up.
 
+## 2026-09-01 — N119 (#508): a technique the library does not know is recorded, not dropped
+
+The report: *"When some techniques are logged and not found in library it is
+not creating a new item, but it should."* Traced to
+`apps/mobile/app/bjj/dictate.tsx`: when a dictated phrase does not pick out
+exactly one catalog entry, it goes into `unresolved: UnresolvedPhrase[]` and
+the "Which one did you mean?" picker offers a real match or "Skip this
+one" — and skip called `dismissPhrase`, which discarded the phrase with **no
+trace kept**. Pick a match or lose the evidence were the only two outcomes.
+No path existed for a technique the library genuinely does not have.
+
+**The tension #445 put on this ticket, and how it resolves.** #445 authored
+12 catalog entries deliberately, against an unmoderated write path that would
+turn duplicates and mangled dictation into permanent reference content —
+today's evidence: *pull guard* → "pool guards", *half guard* → "have guard",
+*mount* → "full amount" (#371/N71). So "insert whatever the athlete said into
+`techniques`" was never on the table.
+
+**Investigation: how far did the existing `technique_id: null` path already
+reach?** `Tag.technique_id` has been nullable since the first BJJ migration
+(000025, `ON DELETE SET NULL`) and `reflect.go`'s own doc comment already
+describes a tag with a null id as one where "position/category are yours" —
+a real, load-bearing state (the category grid's untagged rows). The
+temptation was to assume this already carried a free-text label and the fix
+was purely wiring the UI to it. **It did not.** `bjj.Tag` (backend) and its
+mobile mirror had no field anywhere to hold what the athlete actually said —
+`technique_id: null` meant "nothing more was said" everywhere it was used,
+never "something was said and it didn't match." So the free-text-on-the-tag
+option was the right one, but it needed a real (small) schema addition, not
+just new wiring — worth recording precisely because it is the kind of gap an
+investigation can talk itself past by pattern-matching "nullable field
+exists" to "the data already fits."
+
+**Decision: free text on the session's own tag, never on the catalog.**
+Of the ticket's three options — an athlete-owned technique row, a pending
+state the admin console promotes, or free text on the tag — this is the
+leanest that satisfies every acceptance criterion without new admin-console
+work:
+
+- **Never silently dropped**: migration `000086_bjj_session_tag_label` adds
+  `bjj_session_tags.label TEXT NOT NULL DEFAULT ''`. `Tag.Label` (Go) /
+  `Tag.label` (TS), populated only when `technique_id` is null and the
+  athlete named something the catalog doesn't have.
+- **Cannot become a permanent catalog entry** ("survives 'pool guards'"):
+  structurally, not by convention — nothing anywhere copies a `Label` into
+  `techniques`. `techniques` stays admin-authored-only, `/content` its only
+  write surface, exactly as #445 left it. This needed no gating logic to be
+  true; it is true because no code path exists that would make it false.
+  `Tag.Validate()` also rejects a tag carrying BOTH `technique_id` and a
+  non-empty `label` — a resolved tag with a leftover label is stale
+  provenance, not a fact worth storing, and letting it through would let a
+  session read view show "pool guards" beside a tag that is actually Pull
+  Guard. Mutation-verified: removing that guard turned
+  `TestTagCannotCarryBothATechniqueAndAStaleLabel` red as a real test
+  failure, not a compile error.
+- **Distinguishable and correctable**: `dictate.tsx`'s picker gets a third
+  path, "Keep as [phrase]" (`keepUnmatched`), alongside "pick a match" and
+  "Skip this one" (still a real discard, for a genuine misspeak). A kept tag
+  renders in the confirm screen's "What happened" list with the phrase
+  quoted and a "Not matched to the library" hint, and — new — a "Match in
+  library" control right on that row so changing your mind costs one tap,
+  not a redo of the dictation. The same resolve action exists in the
+  reflection wizard's live step ("Said, not matched to the library") and as
+  a read-only, clearly-labelled chip on the session read view, since
+  `dictate.tsx`'s own header states there is "no separate 'review a
+  dictated session' surface, deliberately" — the ordinary wizard IS where a
+  dictated session gets corrected, so the correction path for THIS kind of
+  tag had to live there too, not only at dictation time.
+- **Promotion to the catalog: explicitly deferred.** A real promotion
+  pipeline needs the same authoring-quality bar #445 held — an admin
+  reviewer, not an automatic insert — which is genuinely separate
+  backend+admin work this ticket does not also take on. Filed as its own
+  ticket rather than silently left out: **N467 (#786)**. Nothing about the
+  free-text design blocks it — `label` is exactly the field a future admin
+  review queue would read from.
+
+**The coarse category grid: this DOES change, after pre-merge review, and the
+first draft's reasoning here was wrong.** The original text argued that the
+grid's own +/- counters (`bump()` in the wizard's `LiveStep`, `tagCount()`)
+touching a labelled row too was "accepted rather than guarded against" — the
+grid was already lossy about which specific submission before labels
+existed, so blending a count in was framed as the same coarseness
+continuing. Pre-merge review (`ac-verifier` and `frontend-reviewer`,
+independently) found that framing covered only half the actual behaviour:
+tapping "+" on the matching cell did blend counts as described, but
+long-pressing "−" on the same cell — the grid's ordinary way to correct a
+miscount — spliced the labelled tag out of `detail.tags` entirely, with no
+"Removed" notice anywhere. That is not coarseness, it is the ticket's own
+"never silently dropped" criterion failing one screen along, on a control
+that looks like it only ever edits the anonymous grid. Fixed: `bump()`,
+`tagCount()`, and `session/[id].tsx`'s equivalent read-view aggregate
+(`live`) all now exclude a labelled tag (`!t.label`, alongside the existing
+`!t.technique_id`) — the grid can no longer create, inflate, or delete a
+labelled row in either direction, and its count lives only in the dedicated
+"Said, not matched" list, on both the wizard and the read view, kept moving
+together rather than one screen drifting from the other.
+
+**Two more pre-merge findings, both fixed.** (1) `backend-reviewer` and
+`ac-verifier` independently caught that `session_handler.go`'s `tagRequest`
+had no `Label` field, so `encoding/json` silently discarded a `label` key
+at the HTTP boundary — every test that exercised the fix went through
+`repo.PutDetail` or `Tag.Validate()` directly, so nothing caught that the
+one path a real client actually uses dropped the phrase before validation
+ever saw it. This was, verbatim, the bug the ticket exists to fix, moved one
+layer up rather than closed. Fixed by adding `Label` to `tagRequest` and
+copying it in `toDetail`, with a new `session_handler_test.go` that decodes
+real JSON through the handler against a fake repository (mutation-verified:
+reverting the field addition turns the new test red with the exact
+"wire format dropped it" message, not a compile error). (2) `frontend-reviewer`
+found that `dictate.tsx`'s catalog-fetch effect, gated on
+`unresolved.length === 0`, could spin "Match in library" forever: tapping
+"Keep as said" on the LAST unresolved phrase while the catalog fetch was
+still in flight flipped the guard true, the effect's cleanup marked that
+fetch cancelled, and nothing was left to retry it even though the tag just
+kept still needed it. Fixed by widening the gate to "does anything on
+screen still need the catalog" — `unresolved.length > 0 ||` a kept tag's own
+`label` being present — mutation-verified with a test that resolves the
+fetch by hand after Keep is pressed.
+
+**Tests.** Backend: `Tag.Validate()` accepts a label-only tag, rejects one
+carrying both a technique id and a label, bounds the label at 200 runes
+(matching `technique.maxNameLen` — a label stands in for a name). A Postgres
+round-trip test seeds a labelled and an ordinary tag together and asserts
+neither corrupts the other. A new `session_handler_test.go` proves `label`
+actually reaches the repository through a decoded HTTP request, and that the
+both-set case is rejected at 400 through that same path, not only in
+`Tag.Validate()` isolation. Mobile: `dictateScreen.test.tsx` covers the
+"Keep as said" path end to end (phrase survives to `saveLocalBjjDetail`,
+`technique_id` stays falsy), resolving a kept phrase to a real technique
+before saving, and the deferred-catalog race described above;
+`bjjReflectScreen.test.tsx` covers the wizard's own resolve path and the
+grid-exclusion fix in both directions (miscount and deletion);
+`bjjSessionScreen.test.tsx` covers the read view rendering a labelled tag
+distinctly from a named one and NOT double-counting it into "What happened
+live"; `bjjFunnel.test.ts` pins `tagCount`'s exclusion directly. Every new
+guard here was mutation-verified — reverted, confirmed red with the expected
+message, restored, confirmed green — not just written and left. `pnpm run
+typecheck:mobile`, `lint:mobile`, and the full mobile and backend suites all
+green after the fixes; backend `bjj` package green against a freshly
+migrated database.
+
 ## Open items / known gaps as of this entry
 
 

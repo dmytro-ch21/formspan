@@ -202,6 +202,27 @@ describe('the live grid and the funnel partition the tag list', () => {
     expect(tagCount(tags, 'submission', 'scored', 'Guard')).toBe(2);
     expect(techniqueOutcomeCount(tags, 'armbar-from-guard', 'scored')).toBe(1);
   });
+
+  // N119/#508: a labelled ("kept unmatched") tag is excluded the same way a
+  // technique-tagged one is, and for the same reason — `bump()` in
+  // `app/bjj/reflect/[id].tsx` never touches a labelled row (it would
+  // otherwise silently inflate or delete a specific phrase's evidence via
+  // an anonymous grid tap), so this counter, which is exactly the number
+  // `bump()` reads and writes, must not include one either.
+  it('tagCount also ignores a labelled row — the grid never touches one', () => {
+    const tags: Tag[] = [
+      { category: 'submission', event: 'scored', position: 'Guard', count: 2 },
+      {
+        category: 'submission',
+        event: 'scored',
+        position: 'Guard',
+        technique_id: null,
+        count: 5,
+        label: 'pool guards',
+      },
+    ];
+    expect(tagCount(tags, 'submission', 'scored', 'Guard')).toBe(2);
+  });
 });
 
 describe('removeDrilledTechnique', () => {

@@ -174,6 +174,48 @@ func TestTagCountIsBoundedAtBothEnds(t *testing.T) {
 	}
 }
 
+// N119/#508: a tag naming something the library does not know must be
+// storable, not refused — that is the whole point of `Label`. This is the
+// guard that keeps it from becoming a second, silent way to lose the same
+// evidence: a label alone (no technique_id) is exactly the shape the
+// dictation screen's "Keep as said" produces, and it must validate.
+func TestTagWithOnlyALabelIsValid(t *testing.T) {
+	tag := Tag{Category: CategorySubmission, Event: EventScored, Count: 1, Label: "pool guards"}
+	if err := tag.Validate(); err != nil {
+		t.Fatalf("a label-only tag must validate, got %v", err)
+	}
+}
+
+// The mirror of the test above, and the guard that stops a resolved tag from
+// carrying stale provenance: once TechniqueID names the real technique, a
+// leftover Label would read as "the athlete said X" beside a tag that is
+// actually Y — confusion reintroduced by half an edit, which is exactly the
+// class of bug CLAUDE.md's `exercise.updateWithin` history warns about (a
+// column added without the guard that keeps it from silently drifting).
+func TestTagCannotCarryBothATechniqueAndAStaleLabel(t *testing.T) {
+	id := "armbar-from-guard"
+	tag := Tag{Category: CategorySubmission, Event: EventScored, Count: 1,
+		TechniqueID: &id, Label: "pool guards"}
+	if err := tag.Validate(); err == nil {
+		t.Fatal("a resolved tag with a leftover label must be rejected, not silently stored")
+	}
+}
+
+func TestTagLabelIsBounded(t *testing.T) {
+	base := Tag{Category: CategorySubmission, Event: EventScored, Count: 1}
+	within := base
+	within.Label = strings.Repeat("a", maxTagLabelLen)
+	if err := within.Validate(); err != nil {
+		t.Fatalf("a label at the bound must validate, got %v", err)
+	}
+
+	tooLong := base
+	tooLong.Label = strings.Repeat("a", maxTagLabelLen+1)
+	if err := tooLong.Validate(); err == nil {
+		t.Fatal("a label past the bound must be rejected")
+	}
+}
+
 // The live vocabulary is a 2x2 of who initiated an exchange and whether it
 // landed. `defended` was the missing cell for a long time, which meant a
 // defensive success was the one outcome nothing could record — and the gap was

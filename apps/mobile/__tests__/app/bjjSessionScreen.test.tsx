@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 
 import BjjSessionScreen from '../../app/bjj/session/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
-import { readLocalSession, type LocalSession } from '@/lib/sessionStore';
+import { readLocalBjjDetail, readLocalSession, type LocalSession } from '@/lib/sessionStore';
 import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
 import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
 import { playSound } from '@/lib/sounds';
@@ -260,6 +260,55 @@ it('shows the session it loaded, not an empty shell', async () => {
   // The technique row comes from the hoisted useMemo specifically. If that memo
   // were dropped rather than moved, this is what would go missing.
   expect(screen.getByText('Knee Cut Pass')).toBeTruthy();
+});
+
+/**
+ * N119/#508: a technique kept unmatched from dictation must still be
+ * visible on the read view — "the athlete can see it was not recognised" —
+ * even though it never joins `techniqueRows` above (no catalog id to join
+ * on). Without a section of its own it would be saved, synced, and
+ * invisible here, which is the same defect this ticket exists to fix,
+ * recreated on the one screen an athlete reads a session back from.
+ */
+it('shows a technique the library never matched, distinctly from a named one', async () => {
+  (readLocalBjjDetail as jest.Mock).mockImplementationOnce(() =>
+    deferred({
+      ...mockDetail,
+      tags: [
+        ...mockDetail.tags,
+        {
+          category: 'submission',
+          event: 'scored',
+          position: '',
+          technique_id: null,
+          count: 2,
+          label: 'pool guards',
+        },
+      ],
+    }),
+  );
+
+  render(<BjjSessionScreen />);
+
+  await waitFor(() => {
+    expect(screen.getByText('Gi class')).toBeTruthy();
+  });
+
+  // The matched technique still renders where it always did.
+  expect(screen.getByText('Knee Cut Pass')).toBeTruthy();
+  // And the unmatched one renders separately, quoted and with its own
+  // count — never merged into a technique chip it has no id to join.
+  expect(screen.getByText('“pool guards” ×2')).toBeTruthy();
+  expect(screen.getByText('Said, not matched to the library')).toBeTruthy();
+  // Its count must not ALSO leak into "What happened live"'s category
+  // totals — the labelled tag is category submission/scored, which would
+  // otherwise be exactly what feeds that grid's "Submissions" row. This
+  // screen's `live` filter has to move in step with the wizard's own grid
+  // (`bump()`/`tagCount()` in `app/bjj/reflect/[id].tsx` and
+  // `lib/bjjSession.ts`, which never let a labelled tag reach it either) —
+  // otherwise the same evidence would be counted once here and again above,
+  // with nothing to explain the discrepancy against the wizard.
+  expect(screen.queryByText('What happened live')).toBeNull();
 });
 
 /*

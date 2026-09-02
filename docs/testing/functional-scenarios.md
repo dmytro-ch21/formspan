@@ -16455,3 +16455,80 @@ unchanged here).
   a scripted/mocked track and cannot exercise a real device's radio
   dropping out mid-recording, backgrounding under real OS memory pressure,
   or the permission prompt's real-world wording and button layout.
+
+## N119 — a technique the library does not know is recorded, not dropped (`PUT /v1/bjj/sessions/{sessionID}`, `apps/mobile/app/bjj/dictate.tsx`, `apps/mobile/app/bjj/reflect/[id].tsx`, `apps/mobile/app/bjj/session/[id].tsx`)
+
+`Tag.label` — free text on a `technique_id: null` tag, populated when a
+dictated or hand-resolved phrase names something the catalog does not have.
+Never written to `techniques`; `technique_id` and a non-empty `label` are
+mutually exclusive at `Validate()`.
+
+### Happy path — API
+
+- `PUT` a session detail with a tag carrying `label: "pool guards"` and no
+  `technique_id` — `200`, and `GET` echoes the same label back, verbatim,
+  on a tag whose `technique_id` is still `null`.
+- A tag carrying both `technique_id` and `count`/`category`/`event`/
+  `position` and NO label — unaffected, round-trips exactly as before this
+  ticket touched the module.
+
+### Edge cases and errors — API
+
+- A tag with both `technique_id` set AND a non-empty `label` — `400
+  invalid_input`. This is the guard that stops a resolved tag from carrying
+  stale provenance.
+- A `label` past 200 runes (`maxTagLabelLen`, matching `technique.maxNameLen`)
+  — `400 invalid_input`.
+- A `label` on a tag whose `technique_id` is null but whose `category`/
+  `event` are otherwise ordinary — accepted; this is the shape "Keep as
+  said" produces and must not be treated as malformed input.
+
+### Happy path — mobile
+
+- Dictate a session naming a technique the catalog does not have (mock the
+  draft's `unresolved` array to include the phrase). The picker offers
+  "Keep as \"<phrase>\"" alongside a real match (if any) and "Skip this
+  one". Tapping "Keep as..." closes the prompt, adds a chip to "What
+  happened" reading the phrase in quotes with a "Not matched to the
+  library" hint, and — on Save — the phrase reaches `saveLocalBjjDetail` as
+  `label`, with `technique_id` falsy.
+- From that same confirm-screen chip, "Match in library" opens an inline
+  search; picking a real technique clears `label` and sets `technique_id`,
+  before the session is ever saved.
+- After saving, opening the reflection wizard's live step shows a "Said,
+  not matched to the library" list for any tag still carrying a label.
+  "Match" resolves it to a real technique (same clear-label/set-id
+  behaviour); "Remove" drops the tag entirely.
+- The session read view (`app/bjj/session/[id].tsx`) shows a "Said, not
+  matched to the library" section for any such tag, distinct from the
+  "Techniques" section that lists resolved ones by name.
+
+### Edge cases and errors — mobile
+
+- "Skip this one" is unaffected: the phrase is discarded with no tag and no
+  trace, exactly as before this ticket.
+- The technique library fails to load while a labelled tag's "Match in
+  library" is open — same "couldn't load the library" wording the
+  dictation picker already uses, not a raw error.
+- Nothing in the library matches a kept phrase — "Nothing in the library
+  matches that yet.", not an empty list with no explanation.
+- A session with ONLY a labelled, unmatched tag (no drilled techniques, no
+  category-grid rows) still shows as having detail on the read view — this
+  is the regression the ticket's own "never silently dropped" criterion
+  would otherwise permit one screen along.
+
+### The "pool guards" guarantee (why no test can accidentally miss this)
+
+- Nothing in `backend/internal/modules/bjj` or `apps/admin`'s `/content`
+  reads `bjj_session_tags.label` and writes it to `techniques`, and no
+  route exists that would let a client attempt it — a mangled dictation
+  cannot become a shared catalog entry through any code path this ticket
+  adds, which is a property to re-check (grep for `.label` writes reaching
+  `technique`/`techniques`) rather than a scenario to script.
+
+### Needs a device
+
+- Dictate a real session naming a technique genuinely absent from the
+  542-row catalog (not a mocked draft) and confirm the phrase survives to a
+  saved, synced session, distinguishable on both the confirm screen and the
+  session read view from a session logged with a real technique match.
