@@ -50896,9 +50896,16 @@ detail screen rather than the numbers the record pipeline reads. Same
 relationship bjj's `session_rpe` has to `session_sets.rpe` on a strength
 session: one fact, two homes, serving two different screens.
 
-**Migration `000084`** (`running_session_detail`), claimed at rebase time
-against `origin/main`'s tip per the numbering rule — re-verified there was
-no higher migration immediately before pushing.
+**Migration `000085`** (`running_session_detail`), claimed at rebase time
+against `origin/main`'s tip per the numbering rule. First claimed as `000084`
+and pushed at that number — then N123/#783 merged its own `000084`
+(`curriculum_item_reads`) to `main` in the gap between that push and this one,
+invisible in any diff (a three-dot diff uses the merge base, which predates
+the other branch — exactly the collision this section's own numbering rule
+describes). Caught by CI's `Backend (Go)` job refusing to start
+(`duplicate migration file`), not by review or by `verify` locally, since
+neither ran against the post-N123 `origin/main`. Renumbered to `000085` and
+re-verified against the new tip before pushing again.
 
 **Testing.** `postgres_test.go` (gated on `TEST_DATABASE_URL`, `main_test.go`
 taking the `testdb` advisory lock) run against a real migrated Postgres:
