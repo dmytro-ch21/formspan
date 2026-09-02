@@ -1654,6 +1654,97 @@ components:
         created_at: { type: string, format: date-time, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 
+    RunningRoutePoint:
+      type: object
+      required: [lat, lng, recorded_at]
+      description: One recorded point along a run's GPS track.
+      properties:
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lng: { type: number, format: double, minimum: -180, maximum: 180 }
+        elevation_m:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            Null when the device did not report one — common indoors, on an
+            older phone, or on a thinned-out imported track. Not defaulted to
+            0, which would assert sea level for a run that simply didn't say.
+        recorded_at: { type: string, format: date-time }
+
+    RunningSplit:
+      type: object
+      required: [distance_m, duration_seconds]
+      description: >
+        One distance-based split — "this kilometre took 5:12" — rather than a
+        time-based one, matching how every running app and every runner
+        already thinks about a split.
+      properties:
+        distance_m: { type: number, format: double, minimum: 0, exclusiveMinimum: true }
+        duration_seconds: { type: integer, minimum: 0, exclusiveMinimum: true }
+
+    RunningSessionDetail:
+      type: object
+      required: [session_id, source]
+      description: >
+        The running half of a session. The session itself is an ordinary
+        `sessions` row created through POST /v1/sessions — this carries only
+        what a run has and a lift or a mat session do not: the GPS track,
+        splits, elevation and pace. Mirrors BjjSessionDetail's relationship to
+        a BJJ session exactly.
+
+
+        `distance_m` and `duration_seconds` here are the run's own numbers for
+        this module's detail screen; they are not what the personal-record
+        pipeline reads for `longest_time`/`furthest_distance` — that reads the
+        session's own `session_sets` row, same as any other exercise. The two
+        are populated from the same client-side numbers and are not
+        reconciled against each other.
+      properties:
+        session_id: { type: string, readOnly: true }
+        route_points:
+          type: array
+          items: { $ref: "#/components/schemas/RunningRoutePoint" }
+          description: >
+            The GPS track, in recording order. Empty for a manual entry or an
+            imported summary with no track — a real run, not an error.
+        splits:
+          type: array
+          items: { $ref: "#/components/schemas/RunningSplit" }
+        elevation_gain_m:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+          description: Total climb in metres. Null for a manual entry or a flat route.
+        avg_pace_sec_per_km:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+          description: >
+            Seconds per kilometre, averaged over the whole run. Not recomputed
+            server-side from distance/duration — a client with a real track
+            may have a better number (excluding paused time), and this module
+            must not silently override it with a coarser one.
+        distance_m:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+        duration_seconds:
+          type: integer
+          nullable: true
+          minimum: 0
+        source:
+          type: string
+          enum: [phone_gps, healthkit, manual]
+          description: >
+            Where the track and numbers came from. `manual` has no track at
+            all — hand-entered distance and duration for a run the phone
+            wasn't along for.
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
     Error:
       type: object
       required: [error]
@@ -8595,6 +8686,82 @@ paths:
                 required: [detail]
                 properties:
                   detail: { $ref: "#/components/schemas/BjjSessionDetail" }
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /running/sessions/{sessionID}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      summary: Store the detail for a running session
+      description: >
+        Upserts the running detail for a session the caller has already
+        created through POST /v1/sessions, replacing the route and splits
+        wholesale. Mirrors PUT /v1/bjj/sessions/{sessionID} exactly, for the
+        same reason: the client holds the desired state (the track and
+        splits it recorded) and re-sends it, so a retry after a failed push
+        converges instead of duplicating.
+
+
+        Ownership is checked explicitly against the session before anything
+        is written. Three cases answer identically with 404 and are
+        deliberately indistinguishable: no such session, a session belonging
+        to somebody else, and a session that is not a running session.
+        Telling them apart would confirm which session ids are real.
+      operationId: putRunningSessionDetail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunningSessionDetail" }
+      responses:
+        "200":
+          description: The stored detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail: { $ref: "#/components/schemas/RunningSessionDetail" }
+        "400":
+          description: >
+            Unknown source; a negative distance_m, duration_seconds,
+            elevation_gain_m or avg_pace_sec_per_km; a route point with a
+            latitude or longitude out of range; or a split with a
+            non-positive distance_m or duration_seconds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      summary: Read a running session's detail
+      operationId: getRunningSessionDetail
+      description: >
+        404 when the session has no running detail — which includes a
+        session of another sport, and a running session logged with no
+        detail yet.
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The stored detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail: { $ref: "#/components/schemas/RunningSessionDetail" }
           headers:
             ETag:
               $ref: "#/components/headers/ETag"
