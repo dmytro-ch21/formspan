@@ -517,4 +517,25 @@ describe('N468/#792: search does not clear itself on selection', () => {
     });
     expect(screen.queryByTestId('bjj-drilled-empty')).toBeNull();
   });
+
+  /**
+   * ac-verifier, N468 review: the gate change that made the case above
+   * possible (`rawMatches.length === 0` rather than `results.length === 0`
+   * for the "no match" copy) is trivially equivalent for a GENUINE miss,
+   * but nothing pinned that positive path directly — only the negative
+   * assertion inside the "already added" test above did. This is that pin.
+   */
+  it('still reads as "no match" — never "already added" — for a query nothing in the library matches', async () => {
+    render(<ReflectScreen />);
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
+    });
+
+    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'zzznonexistenttechniquezzz');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-drilled-empty')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('bjj-drilled-all-added')).toBeNull();
+  });
 });
