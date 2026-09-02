@@ -1604,6 +1604,59 @@ export function countsAsSet(set: Pick<LoggedSet, 'completed' | 'set_type'>): boo
 }
 
 /**
+ * Metres of distance-measured work in a set of sets.
+ *
+ * A finished run (`app/running/[id].tsx`'s `finish()`) writes exactly one
+ * `session_sets` row against the seeded `run` exercise — `distance_m` and
+ * `seconds` set, everything strength-shaped left null — so a running
+ * session's distance already lives on the same `LoggedSet[]` every other
+ * total in this file reads. This sums it with the identical gate
+ * `contributesVolume` already uses for tonnage: a warm-up doesn't count and
+ * neither does an uncompleted set, for the same reason a warm-up doesn't
+ * contribute kilograms.
+ *
+ * Not running-only: a strength exercise measured in distance (a sled push, a
+ * farmer's carry) sets `distance_m` too, and there is nothing sport-specific
+ * about a sum. `leadMeasure` is what decides whether a given sport's total is
+ * worth leading with.
+ */
+export function sessionDistanceMeters(
+  sets: Pick<LoggedSet, 'completed' | 'set_type' | 'distance_m'>[],
+): number {
+  let m = 0;
+  for (const s of sets) {
+    if (contributesVolume(s) && s.distance_m != null) m += s.distance_m;
+  }
+  return m;
+}
+
+/**
+ * Active seconds behind a distance-measured session — the SAME set(s)
+ * {@link sessionDistanceMeters} reads, summed on their OWN `seconds` field
+ * rather than the session's wall-clock `ended_at - started_at`.
+ *
+ * The distinction is not cosmetic. `app/running/[id].tsx`'s `finish()`
+ * deliberately writes `elapsedMsRef` here — active time, pauses excluded on
+ * purpose, per that file's own doc — while a session's timestamps span the
+ * WHOLE outing, pause included. Pacing a run's distance over the wall-clock
+ * span therefore UNDERSTATES the pace the moment a run is paused even once:
+ * the same run would read a faster pace on the live tracking screen (which
+ * uses this same active-time figure) than in training history (which used
+ * to recompute wall-clock duration instead) — two numbers for one session,
+ * for no reason a set ever changed. Gated identically to the distance sum
+ * so the two can never disagree about which sets they're describing.
+ */
+export function sessionActiveSeconds(
+  sets: Pick<LoggedSet, 'completed' | 'set_type' | 'distance_m' | 'seconds'>[],
+): number {
+  let s = 0;
+  for (const set of sets) {
+    if (contributesVolume(set) && set.distance_m != null && set.seconds != null) s += set.seconds;
+  }
+  return s;
+}
+
+/**
  * The server's `Summarise`, computed locally so a session in progress has
  * numbers before it has been saved.
  *

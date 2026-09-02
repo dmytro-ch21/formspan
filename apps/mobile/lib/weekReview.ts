@@ -2,7 +2,7 @@ import { addDays, dayString, startOfWeek } from './calendar';
 import { matchPlans } from './adherence';
 import type { PlannedSession } from './plan';
 import type { Session } from './sessions';
-import { totalWeightKg, contributesVolume } from './sessions';
+import { totalWeightKg, contributesVolume, sessionDistanceMeters } from './sessions';
 
 /**
  * The week, summed up — what actually happened, against what was meant to.
@@ -29,6 +29,9 @@ export type SportTotals = {
   /** Finished sessions only — see {@link accumulate}. */
   seconds: number;
   volumeKg: number;
+  /** Metres — see {@link sessionDistanceMeters}. Structurally zero for a
+   *  sport that never measures distance, same as `volumeKg` for BJJ. */
+  distanceM: number;
   days: number;
 };
 
@@ -101,17 +104,32 @@ function accumulate(sessions: Session[]): { totals: WeekTotals; bySport: SportTo
         if (total != null) sessionVolume += total * set.reps;
       }
     }
+    // Same gate as tonnage, and the same reason: a warm-up or an uncompleted
+    // set shouldn't inflate a week's running total any more than it inflates
+    // a week's lifted one. See `sessionDistanceMeters`'s own doc for why this
+    // reads distance off the ordinary `LoggedSet[]` rather than a separate
+    // running-only source.
+    const sessionDistance = sessionDistanceMeters(s.sets);
     seconds += sessionSeconds;
     volumeKg += sessionVolume;
 
     let bucket = perSport.get(s.sport);
     if (!bucket) {
-      bucket = { sport: s.sport, sessions: 0, seconds: 0, volumeKg: 0, days: 0, dayKeys: new Set() };
+      bucket = {
+        sport: s.sport,
+        sessions: 0,
+        seconds: 0,
+        volumeKg: 0,
+        distanceM: 0,
+        days: 0,
+        dayKeys: new Set(),
+      };
       perSport.set(s.sport, bucket);
     }
     bucket.sessions++;
     bucket.seconds += sessionSeconds;
     bucket.volumeKg += sessionVolume;
+    bucket.distanceM += sessionDistance;
     bucket.dayKeys.add(day);
   }
 
@@ -235,12 +253,24 @@ export function deltaPct(current: number, previous: number | null | undefined): 
  * classes is the fabricated-zero trap `describeSession` documents. Time is the
  * measure that sport actually produces.
  *
+ * **Distance ranks second, before the time fallback — this is the fix N462
+ * exists for.** A running-only week has no tonnage either, and used to fall
+ * all the way through to time for exactly the reason BJJ does: `volumeKg` is
+ * structurally zero for a sport with no weight sets. But a run's own measure
+ * is distance, not time — "32m" beside three runs answers a worse question
+ * than "18.4km" does, the same fabricated-relevance gap `describeSession`
+ * documents for a zeroed tonnage. Checked after volume and before time, so a
+ * sport that happens to log both (a hybrid strength session with a
+ * distance-measured carry) still leads with the tonnage it actually produced.
+ *
  * Decided from the DATA rather than a sport allowlist: a session with working
  * sets has a tonnage worth reading whatever it is filed under, and a sport
  * added later gets sensible behaviour without touching this.
  */
-export function leadMeasure(t: SportTotals): 'volume' | 'time' {
-  return t.volumeKg > 0 ? 'volume' : 'time';
+export function leadMeasure(t: SportTotals): 'volume' | 'distance' | 'time' {
+  if (t.volumeKg > 0) return 'volume';
+  if (t.distanceM > 0) return 'distance';
+  return 'time';
 }
 
 /**

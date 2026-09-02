@@ -15,8 +15,15 @@ import { matchPlans, pendingPlans } from '@/lib/adherence';
 import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
-import { formatVolume, type UnitSystem } from '@/lib/units';
-import { contributesVolume, countsAsSet, totalWeightKg } from '@/lib/sessions';
+import { averagePaceSecPerKm } from '@/lib/running';
+import { formatDistance, formatPace, formatVolume, type UnitSystem } from '@/lib/units';
+import {
+  contributesVolume,
+  countsAsSet,
+  sessionActiveSeconds,
+  sessionDistanceMeters,
+  totalWeightKg,
+} from '@/lib/sessions';
 
 /**
  * The training calendar: a week you can open, and a month behind it.
@@ -683,14 +690,48 @@ function DayRow({
         <>
           {sessions.map((s) => {
             const secs = durationSeconds(s);
-            const kg = sessionVolume(s);
-            const n = workingSets(s);
+            // A running session's own local `session_sets` row (written by
+            // `app/running/[id].tsx`'s `finish()`) carries distance and
+            // duration against the seeded `run` exercise, not sets or
+            // tonnage — so a run's row reads distance + pace instead of the
+            // "0 sets" / "0kg" strength-shaped line, the same fabricated-zero
+            // trap the guards below already avoid for BJJ (N462).
+            const isRunning = s.sport === 'running';
+            const distanceM = isRunning ? sessionDistanceMeters(s.sets) : 0;
+            // Pace is NOT derived from `secs` above. `secs` is wall-clock
+            // (`ended_at - started_at`), which includes any pause — the
+            // live tracking screen deliberately excludes paused time from
+            // what it writes to this same set's `seconds` field
+            // (`elapsedMsRef`, `app/running/[id].tsx`), so pacing off `secs`
+            // would understate the pace of any run that was ever paused,
+            // disagreeing with the number the athlete saw mid-run. Reading
+            // `sessionActiveSeconds` off the identical gate as the distance
+            // sum keeps the two numbers describing the same set(s).
+            const activeSeconds = isRunning ? sessionActiveSeconds(s.sets) : 0;
+            const paceSecPerKm =
+              isRunning && distanceM > 0 && activeSeconds > 0
+                ? averagePaceSecPerKm(distanceM, activeSeconds)
+                : null;
+            const kg = isRunning ? 0 : sessionVolume(s);
+            const n = isRunning ? 0 : workingSets(s);
             // Each measure appears only when it exists — a "0 sets" chip on a
             // mat session reads as abandoned rather than as a class.
             const meta = [
               secs != null ? formatDuration(secs) : null,
-              n > 0 ? `${n} ${n === 1 ? 'set' : 'sets'}` : null,
-              kg > 0 ? formatVolume(kg, units) : null,
+              isRunning
+                ? distanceM > 0
+                  ? formatDistance(distanceM, units)
+                  : null
+                : n > 0
+                  ? `${n} ${n === 1 ? 'set' : 'sets'}`
+                  : null,
+              isRunning
+                ? paceSecPerKm != null
+                  ? formatPace(paceSecPerKm, units)
+                  : null
+                : kg > 0
+                  ? formatVolume(kg, units)
+                  : null,
               // The plan that this session met is no longer drawn as its own
               // row, so the intention would otherwise disappear entirely. It
               // goes last: what was done outranks what was meant.

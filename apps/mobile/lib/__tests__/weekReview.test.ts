@@ -38,6 +38,11 @@ function set(weightKg: number | null, reps: number | null): LoggedSet {
   };
 }
 
+/** A `run` exercise's own set shape — distance and duration, no weight or reps. */
+function runSet(distanceM: number, seconds: number): LoggedSet {
+  return { ...set(null, null), exercise_id: 'run', distance_m: distanceM, seconds };
+}
+
 function session(
   day: string,
   sport: string,
@@ -265,6 +270,27 @@ describe('reviewWeek — the per-sport split', () => {
     expect(r.bySport[1].volumeKg).toBe(500);
   });
 
+  it('sums a running week’s distance off the same local sets, and leads with it', () => {
+    // The local `session_sets` row `app/running/[id].tsx` writes on finish —
+    // distance and duration against the `run` exercise, no weight or reps —
+    // is the ONLY place a running session's distance lives on this list, so
+    // this is the fixture that proves `sessionDistanceMeters` actually reads
+    // it rather than a shape nothing produces.
+    const r = reviewWeek(
+      [
+        session('2026-08-10', 'running', { minutes: 30, sets: [runSet(5000, 1800)] }),
+        session('2026-08-12', 'running', { minutes: 20, sets: [runSet(3000, 1200)] }),
+      ],
+      [],
+      NOW,
+    );
+    expect(r.bySport).toHaveLength(1);
+    expect(r.bySport[0].sport).toBe('running');
+    expect(r.bySport[0].volumeKg).toBe(0);
+    expect(r.bySport[0].distanceM).toBe(8000);
+    expect(leadMeasure(r.bySport[0])).toBe('distance');
+  });
+
   it('breaks a tie on sport name so the card cannot reshuffle itself', () => {
     // Logged strength-first; must still come back alphabetically, or two
     // renders of an unchanged week disagree about the order.
@@ -325,18 +351,86 @@ describe('deltaPct', () => {
 });
 
 describe('leadMeasure', () => {
-  it('leads with time when the sport produced no tonnage', () => {
+  // REGRESSION PIN (N462): this is the exact case that used to be the only
+  // one — BJJ produces no tonnage and no distance, so it still falls all the
+  // way through to time. Kept unchanged on purpose, alongside the new
+  // running case below, so a future edit to the distance branch cannot
+  // silently reorder BJJ's own fallback.
+  it('leads with time when the sport produced no tonnage and no distance', () => {
     // BJJ cannot hold a set, so "0 kg" beside three hard classes is a
     // fabricated zero.
-    expect(leadMeasure({ sport: 'bjj', sessions: 3, seconds: 5400, volumeKg: 0, days: 3 })).toBe(
-      'time',
-    );
+    expect(
+      leadMeasure({ sport: 'bjj', sessions: 3, seconds: 5400, volumeKg: 0, distanceM: 0, days: 3 }),
+    ).toBe('time');
   });
 
+  // REGRESSION PIN (N462): strength leads with volume exactly as it always
+  // has. `distanceM: 0` here — this pins the ORIGINAL two-way behaviour
+  // (no distance in the picture at all), not the three-way ordering; see
+  // the next test for that.
   it('leads with volume as soon as there is any', () => {
     expect(
-      leadMeasure({ sport: 'strength', sessions: 1, seconds: 3600, volumeKg: 500, days: 1 }),
+      leadMeasure({
+        sport: 'strength',
+        sessions: 1,
+        seconds: 3600,
+        volumeKg: 500,
+        distanceM: 0,
+        days: 1,
+      }),
     ).toBe('volume');
+  });
+
+  // REGRESSION PIN (N462): the distance branch sits AFTER volume, never
+  // ahead of it — a hybrid session that logs BOTH (a sled push alongside
+  // weighted sets) still reads its tonnage. Unlike the test above, this one
+  // actually exercises the ordering: `ac-verifier` mutated the branch order
+  // and found every existing test stayed green because none had both
+  // volumeKg > 0 and distanceM > 0 at once. This is that case.
+  it('leads with volume over distance when a session logged both', () => {
+    expect(
+      leadMeasure({
+        sport: 'strength',
+        sessions: 1,
+        seconds: 3600,
+        volumeKg: 500,
+        distanceM: 40,
+        days: 1,
+      }),
+    ).toBe('volume');
+  });
+
+  it('leads with distance for a running week with no tonnage — the filed gap', () => {
+    // A running-only week has no weight sets either, so before N462 this fell
+    // through to 'time' for the same reason BJJ does — but distance is the
+    // measure a run actually produces.
+    expect(
+      leadMeasure({
+        sport: 'running',
+        sessions: 2,
+        seconds: 3600,
+        volumeKg: 0,
+        distanceM: 8000,
+        days: 2,
+      }),
+    ).toBe('distance');
+  });
+
+  it('still leads with time for a running sport with no recorded distance', () => {
+    // A manual run entry with no GPS distance is not a confident "0m" —
+    // `sessionDistanceMeters` returns 0, and the fallback to time is the
+    // honest answer, same as it always was for a sport that produced
+    // nothing measurable.
+    expect(
+      leadMeasure({
+        sport: 'running',
+        sessions: 1,
+        seconds: 1800,
+        volumeKg: 0,
+        distanceM: 0,
+        days: 1,
+      }),
+    ).toBe('time');
   });
 });
 

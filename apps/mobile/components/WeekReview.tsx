@@ -8,7 +8,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { formatDuration } from '@/lib/history';
 import { labelFor, type Module } from '@/lib/modules';
-import { formatVolume, type UnitSystem } from '@/lib/units';
+import { formatDistance, formatVolume, type UnitSystem } from '@/lib/units';
 import {
   deltaPct,
   leadMeasure,
@@ -178,14 +178,26 @@ export function WeekReview({
             // rendered "1× · 0m" — a fabricated zero, on a row whose own
             // comments condemn exactly that. It reaches the spoken label too,
             // which is why the dash is computed here rather than at render.
+            //
+            // Three branches, not two — `leadMeasure` now has a `'distance'`
+            // verdict for a running week (N462), and it needs the same
+            // `unitsReady` guard the volume branch already has: `formatDistance`
+            // reads the athlete's unit system exactly like `formatVolume` does,
+            // so drawing it before that is known shows kilometres to someone
+            // set to miles for one render.
+            const lead = leadMeasure(s);
             const measure =
-              leadMeasure(s) === 'volume'
+              lead === 'volume'
                 ? unitsReady
                   ? formatVolume(s.volumeKg, units)
                   : '—'
-                : s.seconds > 0
-                  ? formatDuration(s.seconds)
-                  : '—';
+                : lead === 'distance'
+                  ? unitsReady
+                    ? formatDistance(s.distanceM, units)
+                    : '—'
+                  : s.seconds > 0
+                    ? formatDuration(s.seconds)
+                    : '—';
             return (
               <RNView
                 key={s.sport}
