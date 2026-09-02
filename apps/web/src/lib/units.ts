@@ -201,6 +201,26 @@ export function fromDisplayDistance(v: number, u: UnitSystem): number {
 }
 
 /**
+ * A running pace — "5:12/km", "8:23/mi".
+ *
+ * Storage is always seconds per KILOMETRE, matching `running.SessionDetail`'s
+ * `avg_pace_sec_per_km` on the wire; imperial converts to seconds per mile
+ * before formatting, the same "convert at the last possible moment on the way
+ * out" rule this whole file follows. Minutes are not zero-padded and seconds
+ * are, matching how a running app's own pace clock reads — "5:04", not
+ * "05:04": the minutes side has no fixed width for a run slow enough to take
+ * over an hour per unit.
+ */
+export function formatPace(secPerKm: number | null | undefined, u: UnitSystem): string {
+  if (secPerKm == null || secPerKm <= 0) return '—';
+  const secPerUnit = u === 'imperial' ? secPerKm * (M_PER_MILE / 1000) : secPerKm;
+  const total = Math.round(secPerUnit);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}/${u === 'imperial' ? 'mi' : 'km'}`;
+}
+
+/**
  * Body length — height, and the girth sites that share its arithmetic.
  *
  * Stored in **centimetres**, always, same rule as everything above:

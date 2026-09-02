@@ -16220,3 +16220,75 @@ ticket). No client surface exists yet — these scenarios are API-level.
   `ON CONFLICT DO UPDATE`) — still `404`, and the original owner's detail is
   left byte-for-byte unmodified. This is the path a foreign-key-only
   implementation would silently miss.
+
+## N461 — post-run report: `SessionCelebration` extended for running (`apps/mobile/lib/celebration.ts`, `apps/mobile/components/SessionCelebration.tsx`, `apps/mobile/lib/units.ts`)
+
+Extends the finish-a-session celebration modal — previously strength and BJJ
+only — to a third sport. `CelebrationSport` gains `'running'`; `statsFor`
+gains a running branch (Distance, Duration, Avg Pace, Elevation Gain,
+replacing Sets/Volume); `summariseSession` gains an optional fourth
+`RunningSessionDetail` argument; the card gains a small, non-interactive
+route-map thumbnail (`react-native-maps`, the library N459 already
+established, `scrollEnabled`/`zoomEnabled`/`rotateEnabled`/`pitchEnabled` all
+off); PR detection and the Share button are unchanged — both already go
+through the sport-agnostic `/v1/records`/`recordsFromSession`/`prBadgeFor`
+path. No dedicated running session screen exists yet (that is #771); these
+scenarios cover the celebration/summary logic against a constructed
+finished-running-session fixture, the same scope the ticket's own tests take.
+
+### Happy path
+
+- Finishing a run with a full `running.SessionDetail` (distance, duration,
+  average pace, elevation gain, a route) shows the celebration modal with
+  Distance, Duration, Avg Pace and Elevation Gain tiles, in that order — never
+  Sets or Volume, and never the shared "Time" label strength/BJJ use (running
+  gets its own Duration tile in that position).
+- The card's subtitle reads `"<duration> run"` — e.g. "27m run" — not a
+  sets/exercises sentence and not a rounds sentence.
+- A route with two or more points renders a small static map thumbnail
+  framing the whole route, drawn as a polyline in the app's accent colour.
+  The map is not pannable, zoomable or rotatable — a picture of the route, not
+  a screen to navigate on.
+- A run that also set a new `furthest_distance` or `longest_time` personal
+  record shows the record in the modal's record list with the same gold-medal
+  treatment BJJ/strength records get, and plays the same PR chime — both
+  paths are sport-agnostic and needed no running-specific code.
+- The existing Share button produces the same preview → share-sheet flow as
+  strength/BJJ, with a Distance/Duration/Avg Pace/Elevation Gain stat strip on
+  the exported card (capped at four tiles, same ceiling every sport shares).
+- A run with distance and duration but an unresolved average pace (still
+  computing, or a source that didn't report one) shows Distance, Duration and
+  Elevation Gain, and omits the Avg Pace tile rather than showing a bogus
+  "0:00/km".
+
+### Edge cases & errors
+
+- A manual, time-only entry with no distance recorded (`distanceM`
+  undefined) — the celebration still shows (a run is "worth celebrating" on
+  duration alone, not only on distance), the Distance tile is omitted rather
+  than printed as "0 m", and the subtitle and Duration tile still work off
+  the timestamps.
+- A flat run with no elevation data — the Elevation Gain tile is omitted, not
+  shown as "0 m".
+- An empty or single-point route — no map thumbnail renders at all, rather
+  than a blank grey rectangle or a lone dot.
+- A route with a very long track (thousands of GPS points) is thinned to a
+  few dozen before it reaches the summary, and the thinned shape still ends
+  on the run's true last point — the finish line is never approximated away.
+- A running session read back before its detail has finished syncing (no
+  `RunningSessionDetail` yet) — the summary falls back to the session's own
+  start/end timestamps for duration, and distance/pace/elevation are simply
+  absent, not zero.
+- Offline: no personal-record section and no PR chime, matching the existing
+  strength/BJJ behaviour — records need the network, and silence is the
+  honest answer, not a guessed medal.
+- An athlete on imperial units sees Distance and Avg Pace in miles/minutes-
+  per-mile; Elevation Gain and Duration are unit-system independent (metres
+  and wall-clock time respectively) and read the same either way.
+
+### Auth/security
+
+- No new endpoint or write path — this ticket is presentation logic over
+  data the existing `/v1/records` and running-detail endpoints already
+  authorize per-session; N458's auth/security scenarios (owner-only PUT/GET,
+  404 on another caller's session) already cover the data this reads.

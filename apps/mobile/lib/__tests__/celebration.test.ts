@@ -1,15 +1,18 @@
 import {
   badgeFor,
   celebratesStreak,
+  downsampleRoute,
   feltFor,
   formatDuration,
   prBadgeFor,
   prEvidence,
   recordsFromSession,
+  regionForRoute,
   statsFor,
   subtitleFor,
   summariseSession,
   topRecord,
+  type RunningSessionDetail,
   type SessionRecord,
   type SessionSummary,
   worthCelebrating,
@@ -277,6 +280,40 @@ describe('whether to show a card at all', () => {
     // the card for an entire sport.
     expect(worthCelebrating({ sets: 0, rounds: 5 })).toBe(true);
   });
+
+  describe('running', () => {
+    it('skips a run with neither distance nor duration', () => {
+      // A run has neither sets nor rounds — a sets-only check would silently
+      // suppress the card for the WHOLE sport, the exact failure `rounds` was
+      // added to fix for BJJ.
+      expect(
+        worthCelebrating({ sets: 0, sport: 'running', distanceM: 0, durationSeconds: 0 }),
+      ).toBe(false);
+    });
+
+    it('celebrates a run with distance but no sets', () => {
+      expect(
+        worthCelebrating({ sets: 0, sport: 'running', distanceM: 5000, durationSeconds: 0 }),
+      ).toBe(true);
+    });
+
+    it('celebrates a treadmill run tracked by time alone, with no distance', () => {
+      // A manual/imported entry can legitimately have no distance — see
+      // `distanceM`'s own doc — so duration alone must still be enough.
+      expect(
+        worthCelebrating({ sets: 0, sport: 'running', distanceM: undefined, durationSeconds: 1200 }),
+      ).toBe(true);
+    });
+
+    it('does not let a stray distanceM celebrate a NON-running sport', () => {
+      // Gated explicitly on `sport`, not folded into one big OR — a strength
+      // summary should never carry `distanceM` in practice, but if it did,
+      // this pins that it still falls through to the sets/rounds check.
+      expect(
+        worthCelebrating({ sets: 0, sport: 'strength', distanceM: 5000, durationSeconds: 1200 }),
+      ).toBe(false);
+    });
+  });
 });
 
 describe('the objective tiles', () => {
@@ -337,6 +374,112 @@ describe('the objective tiles', () => {
     const stats = statsFor(summary({ hardestRpe: 9 }), kg);
     expect(stats.map((s) => s.label)).not.toContain('Hardest set');
   });
+
+  describe('the running strip (N461/#772)', () => {
+    const run = (over: Partial<SessionSummary> = {}): SessionSummary =>
+      summary({
+        sport: 'running',
+        sets: 0,
+        rounds: undefined,
+        distanceM: 5000,
+        durationSeconds: 1620,
+        avgPaceSecPerKm: 324,
+        elevationGainM: 42,
+        ...over,
+      });
+
+    it('never offers Sets or Volume — a run has neither', () => {
+      const stats = statsFor(run(), kg);
+      expect(stats.map((s) => s.label)).not.toContain('Sets');
+      expect(stats.map((s) => s.label)).not.toContain('Volume');
+    });
+
+    it('shows Distance, Duration, Avg Pace and Elevation Gain, in that order', () => {
+      expect(statsFor(run(), kg).map((s) => s.label)).toEqual([
+        'Distance',
+        'Duration',
+        'Avg Pace',
+        'Elevation Gain',
+      ]);
+    });
+
+    it('does NOT lead with the shared "Time" label — it gets its own Duration tile', () => {
+      // A mutation that fell through to the strength/BJJ leading tile would
+      // print "Time" here instead, restoring the exact duplicate-duration
+      // crowding N447 already removed Reps for.
+      expect(statsFor(run(), kg).map((s) => s.label)).not.toContain('Time');
+    });
+
+    it('uses the injected distance formatter, not a hardcoded unit', () => {
+      const miles = (m: number) => `${(m / 1609.344).toFixed(2)} mi`;
+      const stat = statsFor(run(), kg, miles).find((s) => s.label === 'Distance');
+      expect(stat?.value).toBe('3.11 mi');
+    });
+
+    it("falls back to lib/units.ts's own metric formatter with no distance formatter injected", () => {
+      // Not a hand-rolled "5000 m" — the real `formatDistance('metric')`,
+      // which switches to kilometres at 1000m. Reusing it, rather than a
+      // second copy of the rule, is the point of the fallback.
+      expect(statsFor(run(), kg).find((s) => s.label === 'Distance')?.value).toBe('5 km');
+    });
+
+    it('uses the injected pace formatter, not a hardcoded unit', () => {
+      const perMile = (s: number) => `${(s / 60).toFixed(1)} min/mi`;
+      const stat = statsFor(run(), kg, undefined, perMile).find((s) => s.label === 'Avg Pace');
+      expect(stat?.value).toBe('5.4 min/mi');
+    });
+
+    it('falls back to minutes:seconds per kilometre with no pace formatter injected', () => {
+      // 324s = 5:24/km.
+      expect(statsFor(run(), kg).find((s) => s.label === 'Avg Pace')?.value).toBe('5:24/km');
+    });
+
+    it('renders elevation gain in metres', () => {
+      expect(statsFor(run(), kg).find((s) => s.label === 'Elevation Gain')?.value).toBe('42 m');
+    });
+
+    it('omits Distance rather than printing zero — a manual, time-only entry', () => {
+      const stats = statsFor(run({ distanceM: undefined }), kg);
+      expect(stats.map((s) => s.label)).not.toContain('Distance');
+      // Duration still shows: a treadmill session tracked by time alone is
+      // still worth a card, and `worthCelebrating` already agrees (see above).
+      expect(stats.map((s) => s.label)).toContain('Duration');
+    });
+
+    it('omits Avg Pace rather than printing zero when it was never computed', () => {
+      const stats = statsFor(run({ avgPaceSecPerKm: undefined }), kg);
+      expect(stats.map((s) => s.label)).not.toContain('Avg Pace');
+    });
+
+    it('omits Elevation Gain rather than printing zero on a flat run with no track', () => {
+      const stats = statsFor(run({ elevationGainM: undefined }), kg);
+      expect(stats.map((s) => s.label)).not.toContain('Elevation Gain');
+    });
+
+    it('always shows Duration, even with nothing else measured', () => {
+      const stats = statsFor(
+        run({ distanceM: undefined, avgPaceSecPerKm: undefined, elevationGainM: undefined }),
+        kg,
+      );
+      expect(stats.map((s) => s.label)).toEqual(['Duration']);
+    });
+
+    it('omits Duration too on a genuinely zero-length run, same as every other tile', () => {
+      // Defensive: `worthCelebrating` already keeps a truly empty run from
+      // reaching this card, but the tile itself should not print "0m" if it
+      // ever did.
+      const stats = statsFor(
+        run({
+          distanceM: undefined,
+          avgPaceSecPerKm: undefined,
+          elevationGainM: undefined,
+          durationSeconds: 0,
+        }),
+        kg,
+      );
+      expect(stats).toEqual([]);
+    });
+  });
 });
 
 describe('the subjective one', () => {
@@ -382,6 +525,10 @@ describe('the subtitle', () => {
 
   it('speaks BJJ in rounds, not sets', () => {
     expect(subtitleFor(summary({ sport: 'bjj', rounds: 6 }))).toBe('6 rounds logged');
+  });
+
+  it('speaks running in duration, not sets or exercises', () => {
+    expect(subtitleFor(summary({ sport: 'running', durationSeconds: 1620 }))).toBe('27m run');
   });
 });
 
@@ -448,6 +595,185 @@ describe('building the summary from a finished session', () => {
       sets: [...session.sets, { exercise_id: 'incline-bench', completed: true, reps: 5, set_type: 'working' as const, weight_kg: 40, load_factor: null }],
     };
     expect(summariseSession(swapped, vol, true).tonnageUnknown).toBe(true);
+  });
+});
+
+describe('building a running summary from a finished session (N461/#772)', () => {
+  // A running session, exactly as `running.SessionDetail`'s own doc says one
+  // is usually built: an ordinary `sessions` row plus (in practice) one
+  // `session_sets` row against a "run" exercise, so the generic PR pipeline
+  // has something to key its longest_time/furthest_distance lookup on.
+  const runSession = {
+    name: 'Morning Run',
+    sport: 'running',
+    started_at: '2026-08-30T07:00:00Z',
+    ended_at: '2026-08-30T07:32:00Z',
+    sets: [
+      { exercise_id: 'run', completed: true, reps: null, set_type: 'working' as const, weight_kg: null },
+    ],
+  };
+  const noVolume = { working_sets: 0, total_reps: 0, tonnage_kg: 0, hardest_rpe: 0 };
+  const detail: RunningSessionDetail = {
+    distance_m: 5230,
+    duration_seconds: 1860,
+    avg_pace_sec_per_km: 356,
+    elevation_gain_m: 61,
+    route_points: [
+      { lat: 40.7128, lng: -74.006 },
+      { lat: 40.713, lng: -74.0058 },
+      { lat: 40.7135, lng: -74.005 },
+    ],
+  };
+
+  it('tags the summary running, not strength', () => {
+    // The strength/BJJ fallback used to be a two-way ternary
+    // (`sport === 'bjj' ? 'bjj' : 'strength'`) — a mutation that deleted the
+    // running branch entirely would still compile and would mislabel every
+    // run as strength.
+    expect(summariseSession(runSession, noVolume, true, detail).sport).toBe('running');
+  });
+
+  it('carries no sets, reps or tonnage — a run has none of those', () => {
+    const s = summariseSession(runSession, noVolume, true, detail);
+    expect(s.sets).toBe(0);
+    expect(s.reps).toBe(0);
+    expect(s.tonnageKg).toBe(0);
+  });
+
+  it('takes distance, pace and elevation from the running detail', () => {
+    const s = summariseSession(runSession, noVolume, true, detail);
+    expect(s.distanceM).toBe(5230);
+    expect(s.avgPaceSecPerKm).toBe(356);
+    expect(s.elevationGainM).toBe(61);
+  });
+
+  it("prefers the running module's own duration over the timestamp diff", () => {
+    // The timestamps here span exactly 1920s (32m); the detail's own
+    // 1860s (31m) should win — it can exclude paused time a plain diff
+    // cannot, per `running.SessionDetail.DurationSeconds`'s own doc.
+    expect(summariseSession(runSession, noVolume, true, detail).durationSeconds).toBe(1860);
+  });
+
+  it('falls back to the timestamp diff when there is no running detail yet', () => {
+    // A running session read back before its detail has synced — a real,
+    // offline-first state, not an error.
+    expect(summariseSession(runSession, noVolume, true, undefined).durationSeconds).toBe(1920);
+  });
+
+  it('falls back to the timestamp diff on a genuine zero, not a confident zero-length run', () => {
+    // `duration_seconds: 0` is a real, if unusual, wire value (an imported
+    // entry with a broken clock, say) — `??` alone treats it as present and
+    // would render a zero-length run instead of falling back, exactly the
+    // "confident zero" `feltFor`'s own doc warns this file exists to avoid.
+    const s = summariseSession(runSession, noVolume, true, { ...detail, duration_seconds: 0 });
+    expect(s.durationSeconds).toBe(1920);
+  });
+
+  it('leaves distance/pace/elevation undefined with no running detail', () => {
+    const s = summariseSession(runSession, noVolume, true, undefined);
+    expect(s.distanceM).toBeUndefined();
+    expect(s.avgPaceSecPerKm).toBeUndefined();
+    expect(s.elevationGainM).toBeUndefined();
+  });
+
+  it('reports no session-level effort — running tracks none today', () => {
+    expect(summariseSession(runSession, noVolume, true, detail).hardestRpe).toBeNull();
+  });
+
+  it('asks the records endpoint about the run exercise, the same generic way strength does', () => {
+    // Unchanged machinery: PR detection goes through the same
+    // `recordExerciseIDs` → `/v1/records` → `recordsFromSession` path
+    // BJJ/strength already use — this is what wires it up for running.
+    expect(summariseSession(runSession, noVolume, true, detail).recordExerciseIDs).toEqual(['run']);
+  });
+
+  it('starts with no records — they arrive later, or not at all, same as every other sport', () => {
+    expect(summariseSession(runSession, noVolume, true, detail).records).toEqual([]);
+  });
+
+  it('downsamples a long route before it reaches the summary', () => {
+    const longTrack = Array.from({ length: 200 }, (_, i) => ({ lat: 40 + i * 0.0001, lng: -74 }));
+    const s = summariseSession(runSession, noVolume, true, { ...detail, route_points: longTrack });
+    expect(s.routePoints?.length).toBeLessThanOrEqual(61);
+    // And still ends on the true finish line.
+    expect(s.routePoints?.at(-1)).toEqual(longTrack.at(-1));
+  });
+
+  it('carries an empty route rather than throwing for a manual entry with no track', () => {
+    const s = summariseSession(runSession, noVolume, true, { ...detail, route_points: [] });
+    expect(s.routePoints).toEqual([]);
+  });
+});
+
+describe('the route thumbnail (N461/#772)', () => {
+  describe('downsampleRoute', () => {
+    it('returns the route untouched when it is already small', () => {
+      const points = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }];
+      expect(downsampleRoute(points, 60)).toEqual(points);
+    });
+
+    it('thins a long route down to the cap', () => {
+      const points = Array.from({ length: 1000 }, (_, i) => ({ lat: i, lng: i }));
+      expect(downsampleRoute(points, 60).length).toBeLessThanOrEqual(61);
+    });
+
+    it('always keeps the true last point, not wherever the stride lands', () => {
+      // A mutation that dropped this guard would pass for most lengths — it
+      // only shows up when the stride does not land exactly on the last
+      // index, which 1000 points at a cap of 60 reliably triggers.
+      const points = Array.from({ length: 1000 }, (_, i) => ({ lat: i, lng: i }));
+      const out = downsampleRoute(points, 60);
+      expect(out.at(-1)).toEqual(points.at(-1));
+    });
+
+    it('spreads the kept points across the WHOLE run, not just the start', () => {
+      // A naive `slice(0, max)` would pass "thins a long route" above too —
+      // this is the test that actually distinguishes striding from slicing.
+      const points = Array.from({ length: 1000 }, (_, i) => ({ lat: i, lng: i }));
+      const out = downsampleRoute(points, 60);
+      expect(out[out.length - 2].lat).toBeGreaterThan(500);
+    });
+  });
+
+  describe('regionForRoute', () => {
+    it('is null for an empty route — nothing to draw', () => {
+      expect(regionForRoute([])).toBeNull();
+    });
+
+    it('is null for a single point — nothing to connect it to', () => {
+      expect(regionForRoute([{ lat: 40.71, lng: -74.0 }])).toBeNull();
+    });
+
+    it('centres on the midpoint of the route’s bounding box', () => {
+      const region = regionForRoute([
+        { lat: 40.0, lng: -74.0 },
+        { lat: 41.0, lng: -73.0 },
+      ]);
+      expect(region?.latitude).toBeCloseTo(40.5);
+      expect(region?.longitude).toBeCloseTo(-73.5);
+    });
+
+    it('frames the route with margin, not a tight crop', () => {
+      // A margin-free region would set latitudeDelta to exactly the span
+      // (1.0 here); a mutation that dropped the margin multiplier would pass
+      // an assertion of `toBe(1.0)` but fail this one.
+      const region = regionForRoute([
+        { lat: 40.0, lng: -74.0 },
+        { lat: 41.0, lng: -73.0 },
+      ]);
+      expect(region?.latitudeDelta).toBeGreaterThan(1.0);
+    });
+
+    it('floors the zoom for a short out-and-back near one point', () => {
+      // Two points a few metres apart should not zoom in past what a
+      // postage-stamp map can usefully show.
+      const region = regionForRoute([
+        { lat: 40.71280, lng: -74.00600 },
+        { lat: 40.71281, lng: -74.00601 },
+      ]);
+      expect(region?.latitudeDelta).toBeGreaterThanOrEqual(0.004);
+      expect(region?.longitudeDelta).toBeGreaterThanOrEqual(0.004);
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import type { ExerciseRecords, PersonalRecord } from './records';
 import { hasUnresolvedLoad, type SetType } from './sessions';
+import { formatDistance as formatDistanceMetric, formatPace as formatPaceMetric } from './units';
 
 /**
  * What a finished session gets to say about itself.
@@ -20,7 +21,7 @@ import { hasUnresolvedLoad, type SetType } from './sessions';
  * confident "0" for an athlete who simply never opted in.
  */
 
-export type CelebrationSport = 'strength' | 'bjj';
+export type CelebrationSport = 'strength' | 'bjj' | 'running';
 
 export type SessionSummary = {
   title: string;
@@ -51,6 +52,35 @@ export type SessionSummary = {
   /** BJJ only. */
   rounds?: number;
   matMinutes?: number;
+  /**
+   * Metres. Running only, and left undefined (never a zero) for a manual
+   * entry with no distance recorded — the same "omit rather than show a
+   * failure to record something" rule `tonnageKg` follows for a bodyweight
+   * strength session.
+   */
+  distanceM?: number;
+  /**
+   * Seconds per kilometre, averaged over the whole run. Running only, and
+   * always stored per-KILOMETRE regardless of the athlete's own unit system —
+   * matching `running.SessionDetail.AvgPaceSecPerKm` on the wire, and the same
+   * store-in-one-unit / convert-on-the-way-out rule `lib/units.ts` already
+   * follows for weight and distance. `statsFor`'s `formatPace` argument is
+   * what converts this to seconds-per-mile for an imperial athlete; nothing
+   * here does that conversion.
+   */
+  avgPaceSecPerKm?: number;
+  /** Metres of total climb over the run. Running only. */
+  elevationGainM?: number;
+  /**
+   * The GPS track, already thinned to `ROUTE_THUMBNAIL_POINTS` by
+   * `downsampleRoute` — see that function's own doc for why a postage-stamp
+   * map never needs the full recorded track. Running only, and empty for a
+   * manual entry or an imported summary with no track at all (a real run, not
+   * an error — `running.RoutePoints`'s own doc covers both). The card omits
+   * the thumbnail entirely when this is empty rather than drawing a blank
+   * frame.
+   */
+  routePoints?: { lat: number; lng: number }[];
   /**
    * The hardest effort recorded, or null when effort tracking is off.
    *
@@ -313,8 +343,88 @@ export function prBadgeFor(
   return `${top.exerciseName} · ${evidence} PR`;
 }
 
-export function worthCelebrating(summary: Pick<SessionSummary, 'sets' | 'rounds'>): boolean {
+export function worthCelebrating(
+  summary: Pick<SessionSummary, 'sets' | 'rounds' | 'distanceM'> &
+    Partial<Pick<SessionSummary, 'sport' | 'durationSeconds'>>,
+): boolean {
+  // A run has neither sets nor rounds — a sets-only check would silently
+  // suppress the card for the whole sport, exactly the failure `rounds` was
+  // added here to fix for BJJ. Gated explicitly on `sport` rather than folded
+  // into one big OR, so a stray `distanceM` on some future sport's summary
+  // can't accidentally mark it celebration-worthy.
+  if (summary.sport === 'running') {
+    return (summary.distanceM ?? 0) > 0 || (summary.durationSeconds ?? 0) > 0;
+  }
   return summary.sets > 0 || (summary.rounds ?? 0) > 0;
+}
+
+/** Enough points to draw a recognisable shape on a postage-stamp map; cheap
+ *  to keep in a `SessionSummary` and cheap to render on an old phone. */
+export const ROUTE_THUMBNAIL_POINTS = 60;
+
+/**
+ * Thins a route down to a size a thumbnail can draw cheaply.
+ *
+ * A real track can carry up to `running.MaxRoutePoints` (20,000) points; a
+ * card meant to be read in three seconds does not need more than a few dozen
+ * to read as the run's shape. Strides evenly across the whole array rather
+ * than slicing the front of it, so the kept points spread across the WHOLE
+ * run — a naive `slice(0, max)` on a marathon's track would draw only its
+ * opening kilometre.
+ */
+export function downsampleRoute(
+  points: { lat: number; lng: number }[],
+  max: number = ROUTE_THUMBNAIL_POINTS,
+): { lat: number; lng: number }[] {
+  if (points.length <= max) return points;
+  const stride = points.length / max;
+  const out: { lat: number; lng: number }[] = [];
+  for (let i = 0; i < max; i++) {
+    out.push(points[Math.floor(i * stride)]);
+  }
+  // Always end on the true finish line, wherever striding happened to land —
+  // a run's last point is the one place a thumbnail should never guess at.
+  const last = points[points.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+
+/**
+ * The map region that frames a route, with headroom so the track never
+ * touches the thumbnail's own edge.
+ *
+ * Null for anything a map cannot meaningfully draw — no points, or a single
+ * point with nothing to connect it to (a GPS fix taken then immediately
+ * stopped). The card omits the thumbnail entirely in that case rather than
+ * showing a lone dot on a slab of ocean.
+ */
+export function regionForRoute(
+  points: { lat: number; lng: number }[],
+): { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number } | null {
+  if (points.length < 2) return null;
+  let minLat = points[0].lat;
+  let maxLat = points[0].lat;
+  let minLng = points[0].lng;
+  let maxLng = points[0].lng;
+  for (const p of points) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  const latSpan = maxLat - minLat;
+  const lngSpan = maxLng - minLng;
+  // A margin so the track never touches the frame's edge, and a floor so a
+  // short out-and-back near one point doesn't zoom in past what a
+  // postage-stamp map can usefully show (roughly 400m at the equator).
+  const MARGIN = 1.4;
+  const MIN_DELTA = 0.004;
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max(latSpan * MARGIN, MIN_DELTA),
+    longitudeDelta: Math.max(lngSpan * MARGIN, MIN_DELTA),
+  };
 }
 
 export type Stat = { label: string; value: string };
@@ -339,7 +449,18 @@ export function formatDuration(seconds: number): string {
 export function statsFor(
   summary: SessionSummary,
   formatTonnage: (kg: number) => string,
+  /** Injected for the same reason `formatTonnage` is — a run's distance is
+   *  unit-system-dependent and this file must not know which one is active. */
+  formatDistance?: (metres: number) => string,
+  /** Same reason. Converts `avgPaceSecPerKm` to the athlete's own pace unit
+   *  (seconds per mile for imperial); defaults to per-kilometre, matching
+   *  storage, so a caller with no unit system handy still gets a real number. */
+  formatPace?: (secPerKm: number) => string,
 ): Stat[] {
+  if (summary.sport === 'running') {
+    return runningStats(summary, formatDistance, formatPace);
+  }
+
   const stats: Stat[] = [{ label: 'Time', value: formatDuration(summary.durationSeconds) }];
 
   if (summary.sport === 'bjj') {
@@ -372,6 +493,51 @@ export function statsFor(
 }
 
 /**
+ * The running strip: Distance, Duration, Avg Pace, Elevation Gain — replacing
+ * Sets/Volume, which a run has neither of.
+ *
+ * A SEPARATE leading tile from strength/BJJ's shared "Time", not a reuse of
+ * it: running already gets its own Duration tile in the same position, and
+ * showing the identical number twice under two labels is exactly the
+ * crowding N447/#745 removed the Reps tile for.
+ *
+ * Each tile is omitted, never shown as a zero, when its number is missing —
+ * the same rule `statsFor`'s Volume tile follows for a bodyweight session.
+ * `formatDistance`/`formatPace` default to `lib/units.ts`'s own metric
+ * formatters — not a hand-rolled duplicate — so a caller with no unit system
+ * handy (a test, or a screen not yet updated for running) still gets a
+ * readable card in the storage unit, rather than a second, driftable copy of
+ * the formatting rule.
+ */
+function runningStats(
+  summary: SessionSummary,
+  formatDistance?: (metres: number) => string,
+  formatPace?: (secPerKm: number) => string,
+): Stat[] {
+  const distanceFmt = formatDistance ?? ((m: number) => formatDistanceMetric(m, 'metric'));
+  const paceFmt = formatPace ?? ((s: number) => formatPaceMetric(s, 'metric'));
+  const stats: Stat[] = [];
+  if (summary.distanceM != null && summary.distanceM > 0) {
+    stats.push({ label: 'Distance', value: distanceFmt(summary.distanceM) });
+  }
+  // Omitted at zero too, same as every other tile here — a genuinely
+  // zero-length run (both the running detail and the start/end timestamps
+  // agree on nothing) has no duration to celebrate either. Reachable only
+  // defensively: `worthCelebrating` already keeps a truly empty run from
+  // opening this card at all.
+  if (summary.durationSeconds > 0) {
+    stats.push({ label: 'Duration', value: formatDuration(summary.durationSeconds) });
+  }
+  if (summary.avgPaceSecPerKm != null && summary.avgPaceSecPerKm > 0) {
+    stats.push({ label: 'Avg Pace', value: paceFmt(summary.avgPaceSecPerKm) });
+  }
+  if (summary.elevationGainM != null && summary.elevationGainM > 0) {
+    stats.push({ label: 'Elevation Gain', value: `${Math.round(summary.elevationGainM)} m` });
+  }
+  return stats;
+}
+
+/**
  * The one subjective number, kept apart from the measurements.
  *
  * Null when effort tracking is off, which is a real and common state rather
@@ -398,6 +564,12 @@ export function subtitleFor(summary: SessionSummary): string {
   if (summary.sport === 'bjj') {
     return summary.rounds ? `${summary.rounds} rounds logged` : 'Session logged';
   }
+  if (summary.sport === 'running') {
+    // Duration only, deliberately: this line has no unit system to draw on
+    // (unlike the Distance tile below it, which is injected one), and
+    // `formatDuration` needs none — seconds are seconds in either system.
+    return `${formatDuration(summary.durationSeconds)} run`;
+  }
   const e = summary.exercises;
   return `${summary.sets} ${summary.sets === 1 ? 'set' : 'sets'} across ${e} ${
     e === 1 ? 'exercise' : 'exercises'
@@ -414,6 +586,24 @@ export function subtitleFor(summary: SessionSummary): string {
  * absent for someone who simply had a light day, and would show nothing at all
  * for someone who opted out — the same output for two different facts.
  */
+/**
+ * The running half of a finished session, as `summariseSession`'s fourth
+ * argument wants it.
+ *
+ * Matches the fields of `running.SessionDetail` this card can actually use —
+ * splits and per-point elevation/timestamps are not read here, the same way
+ * this function never reads a strength session's per-set RIR. `route_points`
+ * takes only `lat`/`lng`: the thumbnail draws a shape, not a pace-over-time
+ * chart, so nothing else about a point matters to it.
+ */
+export type RunningSessionDetail = {
+  distance_m: number | null;
+  duration_seconds: number | null;
+  avg_pace_sec_per_km: number | null;
+  elevation_gain_m: number | null;
+  route_points: { lat: number; lng: number }[];
+};
+
 export function summariseSession(
   session: {
     name: string;
@@ -431,11 +621,60 @@ export function summariseSession(
   },
   volume: { working_sets: number; total_reps: number; tonnage_kg: number; hardest_rpe: number },
   effortTracked: boolean,
+  /**
+   * The running module's own detail — passed only for a running session, and
+   * ignored otherwise. Optional/nullable rather than required: a caller
+   * building a strength summary (every caller today) has none to give, and a
+   * running session read back before its detail synced legitimately has none
+   * yet either.
+   */
+  runningDetail?: RunningSessionDetail | null,
 ): SessionSummary {
   const started = new Date(session.started_at).getTime();
   const ended = session.ended_at ? new Date(session.ended_at).getTime() : Date.now();
   const logged = session.sets.filter((x) => x.completed);
   const exerciseIDs = [...new Set(logged.map((x) => x.exercise_id))];
+
+  if (session.sport === 'running') {
+    const timestampDuration = Math.max(0, (ended - started) / 1000);
+    return {
+      title: session.name,
+      sport: 'running',
+      // Prefers the running module's own duration when there is a REAL one —
+      // it can exclude paused time a plain start/end timestamp diff cannot,
+      // per `running.SessionDetail.DurationSeconds`'s own doc — and falls
+      // back to the timestamps otherwise, e.g. before the detail has synced.
+      //
+      // Deliberately NOT `runningDetail?.duration_seconds ?? timestampDuration`
+      // — `??` only falls through on null/undefined, so a genuine
+      // `duration_seconds: 0` (an imported entry with a broken clock, say)
+      // would render as a confident zero-length run instead of falling back
+      // to the timestamps, which is exactly the "confident zero" this file's
+      // own header exists to prevent (see `feltFor`'s doc on null vs zero).
+      durationSeconds:
+        runningDetail?.duration_seconds && runningDetail.duration_seconds > 0
+          ? runningDetail.duration_seconds
+          : timestampDuration,
+      // Counts whatever `session_sets` row the running module's own doc says
+      // a client usually writes (a "run" exercise, for the generic PR
+      // pipeline) — 0 or 1 in practice today, computed the same
+      // sport-agnostic way the strength branch below counts its exercises.
+      exercises: exerciseIDs.length,
+      sets: 0,
+      reps: 0,
+      tonnageKg: 0,
+      distanceM: runningDetail?.distance_m ?? undefined,
+      avgPaceSecPerKm: runningDetail?.avg_pace_sec_per_km ?? undefined,
+      elevationGainM: runningDetail?.elevation_gain_m ?? undefined,
+      routePoints: downsampleRoute(runningDetail?.route_points ?? []),
+      // Running carries no session-level RPE today — see `bjjSummaryFor` for
+      // the mat's equivalent, which reads a real field this sport has none of.
+      hardestRpe: null,
+      records: [],
+      recordExerciseIDs: exerciseIDs,
+    };
+  }
+
   /*
     `working_sets`, not the count of logged rows.
 
