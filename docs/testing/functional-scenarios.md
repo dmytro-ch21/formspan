@@ -16655,3 +16655,47 @@ mutually exclusive at `Validate()`.
 - None beyond N460's own device checks — this screen is read-only over data
   N460's live tracking screen already writes, and nothing here touches GPS,
   the camera, or any other sensor.
+
+## N462 — Progress tab's running gap: `leadMeasure` distance-first, RecordsCard and Training History (`apps/mobile/lib/weekReview.ts`, `apps/mobile/components/WeekReview.tsx`, `apps/mobile/components/RecordsCard.tsx`, `apps/mobile/components/TrainingCalendar.tsx`)
+
+### Happy path
+
+- Log two runs in the current week (a real GPS run via `app/running/[id].tsx`,
+  or an entry with a manually-entered distance) and no strength/BJJ
+  sessions. Open Progress: the week card's per-sport running row reads a
+  distance ("8 km", not a duration), and the running week's stat tile leads
+  with distance rather than time.
+- The same week alongside a strength session with real tonnage: the
+  strength row still leads with volume, unaffected by the running row next
+  to it.
+- Open the Training History / training calendar week list. A finished
+  running session's row reads "<duration> · <distance> · <pace>" (e.g.
+  "30m · 5 km · 6:00/km"), not a "0 sets" or tonnage line.
+- Switch unit system (imperial): the running row's distance and pace switch
+  units together with the volume tile beside it, without a flash of the
+  wrong unit before the switch settles.
+- Set a running personal record (`furthest_distance` or `longest_time`, via
+  N458's records pipeline) and open the Progress tab's Records card: the
+  running PR renders with the correct label ("Furthest", "Longest") and
+  correctly formatted value, in the same list as strength PRs.
+
+### Edge cases & errors
+
+- A running session with no recorded distance (a manual entry, or a GPS
+  session that failed to record any points): the week's running row and the
+  training-history entry fall back to duration only — no "0 km" or "0:00/km"
+  fabricated zero.
+- A week with running sessions on multiple days: the per-sport distance is
+  the sum across all of them, not just the latest.
+- A hybrid strength session that includes a distance-measured exercise
+  (e.g. a sled push) alongside weighted sets: the sport's row still leads
+  with volume, since `leadMeasure` checks tonnage before distance.
+- A running record with no reps/weight on its evidence (the normal case —
+  running records carry neither): the Records card row shows no stray
+  "null × null" on its second line.
+
+### Auth/security
+
+- No new endpoint or auth surface — this is client-side formatting/display
+  logic over data N458's `/v1/records` and the existing local session store
+  already deliver under the signed-in athlete's own session.

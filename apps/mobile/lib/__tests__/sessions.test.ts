@@ -1,4 +1,12 @@
-import { fillForward, repairSet, reorderGroups, type LoggedSet, type Measure } from '../sessions';
+import {
+  fillForward,
+  repairSet,
+  reorderGroups,
+  sessionActiveSeconds,
+  sessionDistanceMeters,
+  type LoggedSet,
+  type Measure,
+} from '../sessions';
 
 /**
  * The pure set transforms behind in-session editing.
@@ -25,6 +33,83 @@ const set = (exercise: string, over: Partial<LoggedSet> = {}): LoggedSet => ({
 });
 
 const REPS_AND_WEIGHT: Measure[] = ['reps', 'weight'];
+
+describe('sessionDistanceMeters', () => {
+  it('sums distance across completed sets', () => {
+    const sets = [
+      set('run', { completed: true, distance_m: 5000 }),
+      set('run', { completed: true, distance_m: 3000 }),
+    ];
+    expect(sessionDistanceMeters(sets)).toBe(8000);
+  });
+
+  it('excludes an uncompleted set — the same gate tonnage uses', () => {
+    const sets = [
+      set('run', { completed: true, distance_m: 5000 }),
+      set('run', { completed: false, distance_m: 3000 }),
+    ];
+    expect(sessionDistanceMeters(sets)).toBe(5000);
+  });
+
+  it('excludes a warm-up, same as `contributesVolume` for tonnage', () => {
+    const sets = [
+      set('sled-push', { completed: true, set_type: 'warmup', distance_m: 20 }),
+      set('sled-push', { completed: true, distance_m: 40 }),
+    ];
+    expect(sessionDistanceMeters(sets)).toBe(40);
+  });
+
+  it('ignores sets with no distance recorded rather than treating null as zero-and-summed', () => {
+    const sets = [set('bench-press', { completed: true, reps: 5, weight_kg: 100 })];
+    expect(sessionDistanceMeters(sets)).toBe(0);
+  });
+
+  it('returns 0 for an empty set list', () => {
+    expect(sessionDistanceMeters([])).toBe(0);
+  });
+});
+
+describe('sessionActiveSeconds', () => {
+  // The whole reason this function exists rather than reusing a session's
+  // wall-clock `ended_at - started_at`: a paused run's active time is
+  // SHORTER than its wall-clock span, and pacing off the wrong one
+  // understates the pace — a real self-contradiction between the live
+  // tracking screen (active time) and training history (used to be
+  // wall-clock) for the SAME session. This pins the active-time reading
+  // directly, independent of any session timestamps.
+  it('sums the sets’ own seconds field, not a wall-clock span', () => {
+    const sets = [set('run', { completed: true, distance_m: 5000, seconds: 1800 })];
+    expect(sessionActiveSeconds(sets)).toBe(1800);
+  });
+
+  it('sums across multiple distance-carrying sets', () => {
+    const sets = [
+      set('run', { completed: true, distance_m: 5000, seconds: 1800 }),
+      set('run', { completed: true, distance_m: 3000, seconds: 1200 }),
+    ];
+    expect(sessionActiveSeconds(sets)).toBe(3000);
+  });
+
+  it('excludes a set with no distance — its seconds describe something else', () => {
+    const sets = [
+      set('run', { completed: true, distance_m: 5000, seconds: 1800 }),
+      set('plank', { completed: true, distance_m: null, seconds: 60 }),
+    ];
+    expect(sessionActiveSeconds(sets)).toBe(1800);
+  });
+
+  it('excludes an uncompleted or warm-up set, same gate as the distance sum', () => {
+    const sets = [
+      set('run', { completed: false, distance_m: 5000, seconds: 1800 }),
+      set('run', { completed: true, set_type: 'warmup', distance_m: 1000, seconds: 300 }),
+    ];
+    expect(sessionActiveSeconds(sets)).toBe(0);
+  });
+
+  it('returns 0 for an empty set list', () => {
+    expect(sessionActiveSeconds([])).toBe(0);
+  });
+});
 
 describe('fillForward', () => {
   it('fills the planned sets below with what was entered', () => {

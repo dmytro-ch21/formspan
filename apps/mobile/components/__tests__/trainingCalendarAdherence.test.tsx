@@ -19,6 +19,7 @@ jest.mock('@/lib/sessionStore', () => ({ listLocalSessions: jest.fn(async () => 
 const MODULES = [
   { id: 'strength', label: 'Strength', enabled: true },
   { id: 'bjj', label: 'BJJ', enabled: true },
+  { id: 'running', label: 'Running', enabled: true },
 ] as never;
 
 const NOW = new Date('2026-08-05T12:00:00');
@@ -34,6 +35,55 @@ function session(day: string, sport: string, name: string): Session {
     ended_at: new Date(`${day}T19:00:00`).toISOString(),
     notes: '',
     sets: [],
+    created_at: '',
+    updated_at: '',
+  };
+}
+
+/**
+ * A finished run, shaped exactly like `app/running/[id].tsx`'s `finish()`
+ * writes it: one `session_sets` row against the `run` exercise, distance and
+ * duration set, no weight or reps — the only place a running session's
+ * distance lives on the local list this component reads.
+ *
+ * `activeSeconds` is what the set's own `seconds` field carries (paused time
+ * excluded — `elapsedMsRef` in `app/running/[id].tsx`). `wallClockSeconds`
+ * defaults to the same value, matching every existing caller; pass a LARGER
+ * one to build a paused-run fixture, where the session's `ended_at` span is
+ * longer than the time the athlete was actually moving.
+ */
+function runSession(
+  day: string,
+  name: string,
+  distanceM: number,
+  activeSeconds: number,
+  wallClockSeconds: number = activeSeconds,
+): Session {
+  const started = new Date(`${day}T07:00:00`);
+  return {
+    id: `s-${day}-running`,
+    user_id: 'u1',
+    workout_id: null,
+    sport: 'running',
+    name,
+    started_at: started.toISOString(),
+    ended_at: new Date(started.getTime() + wallClockSeconds * 1000).toISOString(),
+    notes: '',
+    sets: [
+      {
+        exercise_id: 'run',
+        position: 0,
+        set_type: 'working',
+        reps: null,
+        weight_kg: null,
+        seconds: activeSeconds,
+        distance_m: distanceM,
+        rir: null,
+        rpe: null,
+        notes: '',
+        completed: true,
+      },
+    ],
     created_at: '',
     updated_at: '',
   };
@@ -93,5 +143,44 @@ describe('the week list', () => {
     // this day was intended. Two comments in the component require it.
     show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
     expect(screen.getByLabelText(/Wednesday.*trained.*planned/)).toBeTruthy();
+  });
+});
+
+/**
+ * N462 — the wiring `lib/__tests__/sessions.test.ts`'s pure
+ * `sessionDistanceMeters` tests structurally cannot reach: that a running
+ * entry's ROW actually reads distance + pace off it, rather than the
+ * sets/tonnage line every other sport gets. Same shape as the file header's
+ * own example — the pure rule can be entirely correct while nothing wires it
+ * to the screen.
+ */
+describe('a running entry', () => {
+  it('shows distance and pace, not a sets/tonnage line', () => {
+    // 5km in 1800s (30 minutes) is a 6:00/km pace.
+    show([runSession('2026-08-05', 'Morning Run', 5000, 1800)], []);
+    expect(screen.getByText('Morning Run')).toBeTruthy();
+    expect(screen.getByText('30m · 5 km · 6:00/km')).toBeTruthy();
+    expect(screen.queryByText(/set/)).toBeNull();
+    expect(screen.queryByText(/kg/)).toBeNull();
+  });
+
+  it('omits distance and pace for a manual run with no recorded distance', () => {
+    // No GPS distance is not a confident "0m" — the meta line falls back to
+    // duration alone, same fabricated-zero rule every other guard here follows.
+    show([runSession('2026-08-05', 'Treadmill', 0, 1800)], []);
+    expect(screen.getByText('30m')).toBeTruthy();
+  });
+
+  it('paces off ACTIVE time, not the wall-clock span a pause stretches', () => {
+    // 5km in 1500s (25 minutes) of active time is a 5:00/km pace. The
+    // session's wall-clock span is 1800s (30 minutes) — five minutes longer,
+    // because the run was paused — and the duration chip correctly still
+    // reads the full 30m. Before this fix, pace was computed off THAT
+    // wall-clock span too, so this identical session would have read
+    // 6:00/km here while the live tracking screen (which uses active time
+    // throughout) showed 5:00/km for the same run.
+    show([runSession('2026-08-05', 'Paused Run', 5000, 1500, 1800)], []);
+    expect(screen.getByText('30m · 5 km · 5:00/km')).toBeTruthy();
+    expect(screen.queryByText(/6:00\/km/)).toBeNull();
   });
 });

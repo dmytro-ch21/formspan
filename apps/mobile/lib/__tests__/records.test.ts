@@ -4,7 +4,13 @@
  * `apps/web/src/lib/api.ts`'s `fetchLoadHistory`, which this mirrors.
  */
 
-import { fetchLoadHistory } from '../records';
+import {
+  describeEvidence,
+  fetchLoadHistory,
+  formatRecord,
+  RECORD_LABEL,
+  type PersonalRecord,
+} from '../records';
 
 const mockFetch = jest.fn();
 jest.mock('../authedFetch', () => ({
@@ -57,5 +63,62 @@ describe('fetchLoadHistory', () => {
     respond(history);
     const r = await fetchLoadHistory(token, 'back-squat', { tz: 'UTC' });
     expect(r.points).toHaveLength(1);
+  });
+});
+
+/**
+ * N462 — `RecordsCard` was already generic (`RECORD_LABEL[kind]` +
+ * `formatRecord(record, units)`, no strength-only branch anywhere in that
+ * component), so a `run` exercise's `furthest_distance`/`longest_time`
+ * records were never blocked from rendering — nothing there needed to
+ * change. What had no coverage was `formatRecord` and `describeEvidence`
+ * actually producing the right thing for those two kinds, which is what
+ * this pins.
+ */
+function runRecord(over: Partial<PersonalRecord>): PersonalRecord {
+  return {
+    kind: 'furthest_distance',
+    value: 0,
+    reps: null,
+    weight_kg: null,
+    seconds: null,
+    distance_m: null,
+    rir: null,
+    rpe: null,
+    achieved_at: '2026-08-01T10:00:00Z',
+    session_id: 's1',
+    is_recent: false,
+    ...over,
+  };
+}
+
+describe('formatRecord — running record kinds', () => {
+  it('formats furthest_distance by reusing formatDistance, not a bespoke number', () => {
+    const r = runRecord({ kind: 'furthest_distance', value: 5000, distance_m: 5000 });
+    expect(formatRecord(r, 'metric')).toBe('5 km');
+    expect(formatRecord(r, 'imperial')).toBe('3.11 mi');
+  });
+
+  it('formats longest_time under a minute in seconds', () => {
+    const r = runRecord({ kind: 'longest_time', value: 45, seconds: 45 });
+    expect(formatRecord(r, 'metric')).toBe('45s');
+  });
+
+  it('formats longest_time over a minute as minutes and seconds', () => {
+    const r = runRecord({ kind: 'longest_time', value: 1932, seconds: 1932 });
+    expect(formatRecord(r, 'metric')).toBe('32m 12s');
+  });
+
+  it('has a label for both running kinds', () => {
+    expect(RECORD_LABEL.furthest_distance).toBe('Furthest');
+    expect(RECORD_LABEL.longest_time).toBe('Longest');
+  });
+
+  it('reports no measured evidence for a running record — it carries no reps or weight', () => {
+    // `describeEvidence` only reads reps/weight_kg; a running record has
+    // neither, so the row's second line is correctly empty rather than
+    // showing a stray "null × null".
+    const r = runRecord({ kind: 'furthest_distance', value: 5000, distance_m: 5000 });
+    expect(describeEvidence(r, 'metric')).toEqual({ measured: '', reported: '' });
   });
 });
