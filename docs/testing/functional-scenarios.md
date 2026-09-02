@@ -16781,6 +16781,12 @@ mutually exclusive at `Validate()`.
   running records carry neither): the Records card row shows no stray
   "null × null" on its second line.
 
+### Auth/security
+
+- No new endpoint or auth surface — this is client-side formatting/display
+  logic over data N458's `/v1/records` and the existing local session store
+  already deliver under the signed-in athlete's own session.
+
 ## N468 §1 — technique search survives a selection (`apps/mobile/app/bjj/reflect/[id].tsx`)
 
 ### Happy path
@@ -16918,12 +16924,6 @@ mutually exclusive at `Validate()`.
   client-side, over the athlete's own already-scoped food log and tracker
   reads/writes. The existing tracker-entry scoping (an athlete cannot
   remove another athlete's entry) is unchanged by this ticket.
-
-### Auth/security
-
-- No new endpoint or auth surface — this is client-side formatting/display
-  logic over data N458's `/v1/records` and the existing local session store
-  already deliver under the signed-in athlete's own session.
 
 ## N115 — combining logged entries into one named meal (`apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/food/MealCard.tsx`, `apps/mobile/app/food/combine.tsx`, `apps/mobile/app/food/entry/[id].tsx`, `apps/mobile/lib/recipe.ts`)
 
