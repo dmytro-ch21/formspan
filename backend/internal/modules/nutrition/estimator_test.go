@@ -84,6 +84,88 @@ func TestAGoodResponseIsStampedWithTheProviderModelAndSource(t *testing.T) {
 	}
 }
 
+// TestMealNameRoundTripsThroughTheResponse is N472's own guard: the whole
+// point of adding the field is that a client can read it back and offer it as
+// a suggested name for a compiled meal, so a JSON response that states one
+// must actually reach the caller with it intact.
+//
+// Uses `twoItemRaw` (defined below), not `goodRaw` — a single-item response
+// is forced empty by TestASingleItemMealNameIsForcedEmpty's own rule, so a
+// round-trip test on ONE item would be asserting a name that the estimator
+// is required to strip, for a reason that has nothing to do with round-
+// tripping.
+func TestMealNameRoundTripsThroughTheResponse(t *testing.T) {
+	raw := strings.Replace(twoItemRaw, `"note":""`, `"note":"","meal_name":"Bacon and eggs"`, 1)
+	e := &estimator{c: &fakeCompleter{raw: raw, model: "m"}}
+	out, _, err := e.Estimate(context.Background(), EstimateInput{Description: "bacon and eggs"})
+	if err != nil {
+		t.Fatalf("estimate: %v", err)
+	}
+	if out.MealName != "Bacon and eggs" {
+		t.Fatalf("meal_name = %q, want %q", out.MealName, "Bacon and eggs")
+	}
+}
+
+// TestAnEmptyMealNameIsNotAnError pins the "nothing coherent" case the prompt
+// names — a genuinely absent meal_name is not a defect the way an absent item
+// name is.
+func TestAnEmptyMealNameIsNotAnError(t *testing.T) {
+	e := &estimator{c: &fakeCompleter{raw: goodRaw, model: "m"}}
+	out, _, err := e.Estimate(context.Background(), EstimateInput{Description: "two eggs"})
+	if err != nil {
+		t.Fatalf("estimate: %v", err)
+	}
+	if out.MealName != "" {
+		t.Fatalf("meal_name = %q, want empty", out.MealName)
+	}
+}
+
+// TestASingleItemMealNameIsForcedEmpty is the structural half of the promise
+// — NOT trusting the prompt's own request for an empty single-item name (it
+// is a request, not a guarantee), by feeding a raw response that names one
+// anyway and asserting the estimator strips it. Without this, a client
+// discriminating on "meal_name non-empty ⇒ worth offering to compile" would
+// be trusting model compliance for a one-item draft that has nothing to
+// compile.
+func TestASingleItemMealNameIsForcedEmpty(t *testing.T) {
+	raw := strings.Replace(goodRaw, `"note":""`, `"note":"","meal_name":"Scrambled eggs"`, 1)
+	e := &estimator{c: &fakeCompleter{raw: raw, model: "m"}}
+	out, _, err := e.Estimate(context.Background(), EstimateInput{Description: "scrambled eggs"})
+	if err != nil {
+		t.Fatalf("estimate: %v", err)
+	}
+	if out.MealName != "" {
+		t.Fatalf("meal_name = %q, want forced empty for a single-item draft even though the model supplied one", out.MealName)
+	}
+}
+
+// twoItemRaw is goodRaw's single item, twice — used wherever a test needs to
+// be past the single-item normalization (TestASingleItemMealNameIsForcedEmpty
+// above) to observe something else about meal_name.
+const twoItemRaw = `{"items":[` +
+	`{"name":"Scrambled eggs","serving_label":"1 medium egg","servings":2,` +
+	`"kcal":180,"protein_g":12,"carb_g":1,"fat_g":14,"fibre_g":null,` +
+	`"portion_confidence":"high","assumption":"assumed a medium egg"},` +
+	`{"name":"Bacon","serving_label":"1 slice","servings":2,` +
+	`"kcal":90,"protein_g":6,"carb_g":0,"fat_g":7,"fibre_g":0,` +
+	`"portion_confidence":"high","assumption":""}` +
+	`],"note":""}`
+
+// TestMealNameIsTrimmed guards the same defensive trim ValidateEstimate
+// already applies to item names (whitespace-only reads as empty there too) —
+// a model returning " " should not read to a client as a real name.
+func TestMealNameIsTrimmed(t *testing.T) {
+	raw := strings.Replace(twoItemRaw, `"note":""`, `"note":"","meal_name":"  Bacon and eggs  "`, 1)
+	e := &estimator{c: &fakeCompleter{raw: raw, model: "m"}}
+	out, _, err := e.Estimate(context.Background(), EstimateInput{Description: "bacon and eggs"})
+	if err != nil {
+		t.Fatalf("estimate: %v", err)
+	}
+	if out.MealName != "Bacon and eggs" {
+		t.Fatalf("meal_name = %q, want trimmed %q", out.MealName, "Bacon and eggs")
+	}
+}
+
 func TestAnInvalidInputNeverReachesAProvider(t *testing.T) {
 	// The provider is where money is spent, so validation happens above it.
 	f := &fakeCompleter{raw: goodRaw, model: "m"}

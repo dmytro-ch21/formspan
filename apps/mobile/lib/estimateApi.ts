@@ -74,6 +74,19 @@ export type MealEstimate = {
   items: EstimatedItem[];
   /** What the model could not see. Empty is normal, not an error. */
   note: string;
+  /**
+   * A short, recognisable name for the meal AS A WHOLE — "Chipotle chicken
+   * bowl", not a concatenation of item names (N472) — offered so the screen
+   * can let the athlete combine every drafted row into one logged entry
+   * under a name that reads as what they actually ate. A SUGGESTION: render
+   * it editable, the same as every other AI-authored value on this screen,
+   * never as a final answer.
+   *
+   * Empty when there is only one item, when the reuse path answered from
+   * storage (`match` set below — always exactly one item), or when the
+   * model found nothing coherent to name.
+   */
+  meal_name: string;
   model: string;
   source: 'text' | 'photo';
   /**

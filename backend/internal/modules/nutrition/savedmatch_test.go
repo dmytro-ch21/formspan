@@ -166,6 +166,13 @@ func TestADraftFromASavedFoodSaysItWasNotGenerated(t *testing.T) {
 	if got.Model != "" {
 		t.Errorf("no model produced this, so naming one is a false provenance claim: %q", got.Model)
 	}
+	// N472: this path is always exactly one item, which already has its own
+	// name — a future edit setting MealName here would break the mobile
+	// client's "is there anything to compile" discriminator with nothing
+	// else in this suite catching it.
+	if got.MealName != "" {
+		t.Errorf("a reused draft is always one item — meal_name should stay empty, got %q", got.MealName)
+	}
 	if len(got.Items) != 1 {
 		t.Fatalf("want one item, got %d", len(got.Items))
 	}

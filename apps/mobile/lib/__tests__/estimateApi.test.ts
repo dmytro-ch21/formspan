@@ -42,7 +42,7 @@ function ok(body: unknown) {
 }
 
 const draft = {
-  estimate: { items: [], note: '', model: 'claude-opus-5', source: 'text' },
+  estimate: { items: [], note: '', meal_name: '', model: 'claude-opus-5', source: 'text' },
   quota: { used: 1, limit: 25, remaining: 24, resets_at: null },
 };
 

@@ -230,6 +230,17 @@ func TestTheSchemaMeetsWhatStructuredOutputsRequire(t *testing.T) {
 	}
 }
 
+// TestTheSchemaAsksForAMealName is N472's own guard on the schema shape
+// itself — `assertClosed` above already enforces "every property is in
+// required", but says nothing about which properties EXIST, so a schema
+// that silently dropped meal_name would still pass every other schema test.
+func TestTheSchemaAsksForAMealName(t *testing.T) {
+	props := EstimateSchema()["properties"].(map[string]any)
+	if _, ok := props["meal_name"]; !ok {
+		t.Fatal("schema has no meal_name property")
+	}
+}
+
 func assertClosed(t *testing.T, label string, schema map[string]any) {
 	t.Helper()
 	if schema["additionalProperties"] != false {

@@ -75,7 +75,7 @@ const RESET_ISO = '2026-08-27T15:40:00.000Z';
 
 function response(remaining: number, over: Record<string, unknown> = {}) {
   return {
-    estimate: { items: [item()], note: '', model: 'test-model', source: 'text' },
+    estimate: { items: [item()], note: '', meal_name: '', model: 'test-model', source: 'text' },
     quota: { used: 25 - remaining, limit: 25, remaining, resets_at: RESET_ISO, ...over },
   };
 }

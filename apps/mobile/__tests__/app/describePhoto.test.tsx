@@ -103,6 +103,7 @@ const draft = {
       },
     ],
     note: '',
+    meal_name: '',
     model: 'test',
     source: 'photo',
   },

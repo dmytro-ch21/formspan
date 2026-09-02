@@ -73,7 +73,7 @@ function item(over: Record<string, unknown> = {}) {
 
 function generated(items: unknown[] = [item()]) {
   return {
-    estimate: { items, note: '', model: 'test-model', source: 'text' },
+    estimate: { items, note: '', meal_name: '', model: 'test-model', source: 'text' },
     quota: { used: 1, limit: 25, remaining: 24, resets_at: null },
   };
 }
@@ -83,6 +83,7 @@ function reused(over: Record<string, unknown> = {}) {
     estimate: {
       items: [item({ servings: 1, kcal: 310, protein_g: 28, assumption: '', portion_confidence: 'high' })],
       note: '',
+      meal_name: '',
       model: '',
       source: 'text',
       match: {

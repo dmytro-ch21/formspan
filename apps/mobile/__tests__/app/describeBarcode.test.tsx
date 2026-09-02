@@ -100,7 +100,7 @@ function item(over: Record<string, unknown> = {}) {
 
 function estimate(items: unknown[]) {
   return {
-    estimate: { items, note: '', model: 'test', source: 'text' },
+    estimate: { items, note: '', meal_name: '', model: 'test', source: 'text' },
     quota: { used: 1, limit: 10, remaining: 9, resets_at: null },
   };
 }

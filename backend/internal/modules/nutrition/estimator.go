@@ -117,6 +117,16 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, C
 	}
 	out.Model = model
 	out.Source = in.Source()
+	// Trimmed, and forced empty for a single-item draft, rather than trusting
+	// the prompt's request alone (N472/#810 review) — the prompt asks for
+	// empty in exactly this case, but a client discriminating on "is this
+	// meal_name non-empty" deserves a structural guarantee, not a model's
+	// compliance. A single item already has its own name; a second one beside
+	// it would be a needless duplicate at best and a stray leftover at worst.
+	out.MealName = strings.TrimSpace(out.MealName)
+	if len(out.Items) == 1 {
+		out.MealName = ""
+	}
 
 	if err := ValidateEstimate(out); err != nil {
 		return Estimate{}, meta, err

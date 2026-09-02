@@ -26,9 +26,10 @@
  */
 
 import { useAuth } from '@clerk/clerk-expo';
+import { randomUUID } from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
@@ -52,7 +53,15 @@ import {
 } from '@/lib/estimateApi';
 import { logFood, saveFoodLocally } from '@/lib/foodLog';
 import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
-import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/nutrition';
+import {
+  fmtAmount,
+  MEALS,
+  slotForClock,
+  sumMacros,
+  todayString,
+  type Macros,
+  type Meal,
+} from '@/lib/nutrition';
 import { request as requestSync } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -127,12 +136,51 @@ export default function DescribeMealScreen() {
    */
   const [replacing, setReplacing] = useState<string | null>(null);
 
+  /**
+   * N472: log every drafted row as ONE combined entry instead of one each.
+   *
+   * Only meaningful with more than one row — the option is hidden below
+   * `rows.length <= 1`, and the ONE canonical place that matters is read
+   * back through `compiling` (declared after `rows`), never this flag alone,
+   * so a row removed down to a lone survivor cannot leave `compileMeal`
+   * stuck true with no UI left to turn it off.
+   */
+  const [compileMeal, setCompileMeal] = useState(false);
+  /**
+   * The compiled meal's name — seeded from the model's own `meal_name`
+   * (`estimate.meal_name`) and always editable, the same as every other
+   * AI-authored value on this screen. Held apart from `estimate` so editing
+   * it does not disturb the assumption/note text the original carries.
+   */
+  const [mealName, setMealName] = useState('');
+  /**
+   * The id `logCompiled` will save the combined food under, minted lazily on
+   * the first attempt and REUSED by a retry — never a fresh `randomUUID()`
+   * per tap.
+   *
+   * Without this, a retry after `logFood` fails (the food having already
+   * saved fine) mints a second "Chipotle chicken bowl" under a new id: the
+   * upsert in `saveFoodLocally` keys on `id`, so two different ids are two
+   * different rows, not one corrected one. Reused across retries by holding
+   * the SAME id and letting the second attempt's save overwrite the first
+   * rather than duplicate it — the identical trick `replacing` above already
+   * plays for a regenerate's saved food. Cleared on every fresh draft
+   * (`receive`, below) so an unrelated later compile does not overwrite it.
+   */
+  const compiledFoodId = useRef<string | null>(null);
+
   const receive = useCallback(
     (res: { estimate: MealEstimate; quota: EstimateQuota }, replaces?: string | null) => {
       setEstimate(res.estimate);
       setRows(res.estimate.items.map(toDraft));
       setSingleFood(res.estimate.items.length === 1);
       setQuota(res.quota);
+      // A fresh draft starts uncompiled — carrying the PREVIOUS draft's choice
+      // forward would silently combine a description the athlete never asked
+      // to combine, the moment "estimate it again" or a new description lands.
+      setCompileMeal(false);
+      setMealName(res.estimate.meal_name || '');
+      compiledFoodId.current = null;
       // A regenerate carries the id it is replacing; anything else clears it,
       // so an unrelated description later cannot overwrite somebody's food.
       // Only meaningful for a ONE-item answer: a regenerate that comes back as
@@ -465,6 +513,92 @@ export default function DescribeMealScreen() {
     }
   }, [userId, rows, locked, date, meal, router, params.barcode, singleFood, estimate, replacing]);
 
+  /**
+   * The live totals across whatever rows are CURRENTLY drafted (N472) — not
+   * the original estimate, which would ignore edits and removals. Recomputed
+   * off `rows` via `fromDraft`, which is the same parse the log path uses, so
+   * the footer and what actually gets logged can never disagree about what a
+   * partially-typed field means. `useMemo`d on `rows` so `logCompiled` below
+   * has one stable value to close over rather than a fresh object every
+   * render.
+   */
+  const totals = useMemo(() => sumMacros(rows.map(fromDraft)), [rows]);
+
+  /**
+   * Whether "compile into one meal" is BOTH chosen and actually offered.
+   *
+   * The single source of truth for every place that needs the answer,
+   * rather than `compileMeal` alone — a row removed down to a lone survivor
+   * hides the toggle's UI (`rows.length > 1` below) but does not itself
+   * reset the flag, and reading `compileMeal` directly at the Log button
+   * would then silently try to "compile" a list of one, or leave a stale
+   * true sitting behind UI that no longer offers a way to turn it off.
+   */
+  const compiling = compileMeal && rows.length > 1;
+
+  /**
+   * Log every drafted row as ONE combined entry (N472) — summed macros,
+   * logged as `1 meal` rather than carrying any one row's own serving count,
+   * since a compiled meal is one whole thing eaten, not N components any
+   * more.
+   *
+   * Deliberately NOT `logAll` with a different loop body. `logAll`'s
+   * per-row save-then-log sequence exists so EACH ingredient gets its own
+   * reusable saved food (N114) — describe "two eggs" again next week and it
+   * is a match, not a fresh guess. Compiling asks a different question: is
+   * THIS WHOLE PLATE, as named right now, worth remembering as one thing?
+   * It saves and logs once, under the combined name, and — because that
+   * save also goes through the ordinary `foods` table — a later description
+   * that normalises to the same compiled name gets N114's reuse too, the
+   * same as any other saved food. What it does NOT do is let compiling
+   * retroactively change what each ORIGINAL ingredient reuses to; "brown
+   * rice" on its own still matches whatever "brown rice" was saved as
+   * before, never today's compiled total.
+   */
+  const logCompiled = useCallback(async () => {
+    if (!userId || rows.length <= 1 || locked) return;
+    const name = mealName.trim() || defaultMealName(rows);
+    setSaving(true);
+    setError(null);
+    try {
+      const combined: EstimatedItem = {
+        name,
+        serving_label: '1 meal',
+        servings: 1,
+        portion_confidence: 'high',
+        // Not a judgement about any one component — the athlete already saw
+        // and could correct each row's own assumption before compiling.
+        assumption: '',
+        ...totals,
+      };
+      // Reuse the SAME id across a retry, minted once — see compiledFoodId's
+      // own doc comment for why: without this, a save that succeeds followed
+      // by a log that fails would mint a SECOND food under the same name on
+      // the next tap, since saveFoodLocally's upsert keys on id, not name.
+      compiledFoodId.current ??= randomUUID();
+      const savedId = await saveFoodLocally(userId, {
+        ...savedFoodFrom(combined),
+        id: compiledFoodId.current,
+      });
+      await logFood(userId, {
+        eaten_on: date,
+        meal,
+        ...itemToEntry(combined),
+        source_food_id: savedId,
+      });
+      setRows([]);
+      requestSync('meal estimated');
+      router.back();
+    } catch (err) {
+      // The rows are still on screen either way (nothing was dropped, unlike
+      // `logAll`'s land-as-you-go loop) — a retry re-sends the same combined
+      // total rather than a partial one.
+      setError(`${messageFor(err)} Nothing was logged.`);
+    } finally {
+      setSaving(false);
+    }
+  }, [userId, rows, locked, mealName, totals, date, meal, router]);
+
   const updateRow = (key: string, patch: Partial<DraftRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
@@ -738,11 +872,70 @@ export default function DescribeMealScreen() {
             </View>
           ))}
 
+          {/* The totals footer (N472): live across CURRENT rows, not the
+              original estimate — an edited or removed row is reflected
+              immediately, the same numbers `logAll`/`logCompiled` would
+              actually log. Shown whenever there is more than one row; a
+              single row already states its own totals in the fields above
+              it, and repeating them here would be the same number twice. */}
+          {rows.length > 1 ? (
+            <View
+              style={styles.totals}
+              testID="describe-totals"
+              // A single label rather than reading "Total" then a string of
+              // "middle dot" separators — VoiceOver otherwise reads the
+              // visual punctuation, not the figures it separates.
+              accessible
+              accessibilityLabel={`Total: ${fmtAmount(Math.round(totals.kcal))} calories, ${fmtAmount(Math.round(totals.protein_g))} grams protein, ${fmtAmount(Math.round(totals.carb_g))} grams carb, ${fmtAmount(Math.round(totals.fat_g))} grams fat`}
+            >
+              <Text style={styles.totalsLabel}>Total</Text>
+              <Text style={styles.totalsText}>
+                {fmtAmount(Math.round(totals.kcal))} kcal · {fmtAmount(Math.round(totals.protein_g))}g
+                protein · {fmtAmount(Math.round(totals.carb_g))}g carb · {fmtAmount(Math.round(totals.fat_g))}g
+                fat
+              </Text>
+            </View>
+          ) : null}
+
+          {/* "Combine into one meal" (N472). Hidden for a single row — there
+              is nothing to combine — and unrelated to the reused-food branch
+              above, which is always exactly one row by construction.
+              `locked`, not `saving` alone — matches every quota-spending and
+              save-owning control elsewhere on this screen, and the same
+              in-flight regenerate that would silently discard this tick via
+              `receive` should not be tickable in the first place. */}
+          {rows.length > 1 ? (
+            <>
+              <Pressable
+                onPress={() => setCompileMeal((c) => !c)}
+                style={styles.compileRow}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: compileMeal, disabled: locked }}
+                accessibilityLabel="Combine into one meal"
+                disabled={locked}
+                testID="describe-compile-toggle"
+              >
+                <View style={[styles.checkbox, compileMeal && { backgroundColor: accent.accent, borderColor: accent.accent }]}>
+                  {compileMeal ? <Text style={[styles.checkboxMark, { color: accent.on }]}>✓</Text> : null}
+                </View>
+                <Text style={styles.compileLabel}>
+                  Combine into one meal — log all {rows.length} as a single entry
+                </Text>
+              </Pressable>
+
+              {/* The name is a SUGGESTION, editable exactly like every other
+                  AI-authored value on this screen (see the file's own doc
+                  comment) — never presented as a final answer the athlete
+                  did not choose. */}
+              {compiling ? <MealNameField value={mealName} onChange={setMealName} placeholder={defaultMealName(rows)} editable={!saving} /> : null}
+            </>
+          ) : null}
+
           <Pressable
-            onPress={() => void logAll()}
+            onPress={() => void (compiling ? logCompiled() : logAll())}
             style={[styles.primary, { backgroundColor: accent.accent }, locked && styles.off]}
             accessibilityRole="button"
-            accessibilityLabel={`Log ${rows.length} items`}
+            accessibilityLabel={compiling ? `Log ${mealName.trim() || defaultMealName(rows)}` : `Log ${rows.length} items`}
             // `locked`, matching `logAll`'s own guard — and on BOTH props, so
             // VoiceOver never announces an enabled button that ignores taps.
             disabled={locked}
@@ -750,7 +943,11 @@ export default function DescribeMealScreen() {
             testID="describe-log"
           >
             <Text style={[styles.primaryText, { color: accent.on }]}>
-              {saving ? 'Logging…' : `Log ${rows.length === 1 ? 'it' : `all ${rows.length}`}`}
+              {saving
+                ? 'Logging…'
+                : compiling
+                  ? `Log “${mealName.trim() || defaultMealName(rows)}”`
+                  : `Log ${rows.length === 1 ? 'it' : `all ${rows.length}`}`}
             </Text>
           </Pressable>
         </>
@@ -813,6 +1010,48 @@ function Field({
         // native inset adjustment covers the keyboard appearing; this is the
         // case it does not, and the case `useEnsureVisible` exists for.
         onFocus={() => ensureVisible(inputRef.current)}
+      />
+    </View>
+  );
+}
+
+/**
+ * The compiled meal's editable name field (N472).
+ *
+ * Not `Field` above — that component is decimal-only (`keyboardType`,
+ * `inputMode`, `selectTextOnFocus` are all tuned for a number an athlete is
+ * correcting) and this is free text. Deliberately still shares `Field`'s
+ * `useEnsureVisible` treatment, though: this field sits at the very bottom of
+ * the scroll, directly above Log, which is exactly where the keyboard is
+ * most likely to already be covering it when the athlete taps in.
+ */
+function MealNameField({
+  value,
+  onChange,
+  placeholder,
+  editable,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  editable: boolean;
+}) {
+  const ensureVisible = useEnsureVisible();
+  const inputRef = useRef<TextInput>(null);
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>Meal name</Text>
+      <TextInput
+        style={[styles.fieldInput, !editable && styles.fieldInputOff]}
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={vola.textDim}
+        accessibilityLabel="Meal name"
+        editable={editable}
+        ref={inputRef}
+        onFocus={() => ensureVisible(inputRef.current)}
+        testID="describe-meal-name"
       />
     </View>
   );
@@ -890,6 +1129,24 @@ function fromDraft(row: DraftRow): EstimatedItem {
     kcal: parseOr(row.kcalText, row.kcal),
     protein_g: parseOr(row.proteinText, row.protein_g),
   };
+}
+
+/**
+ * A fallback name for a compiled meal (N472), for the rare case
+ * `estimate.meal_name` came back empty — the prompt asks for this only when
+ * there is "nothing coherent to name", so it is not the common path, but an
+ * empty Log button is not an acceptable answer to it either.
+ *
+ * Joins the first two row names rather than inventing a dish name this file
+ * has no business guessing at — "Pollo Asado, Brown rice + 6 more" is an
+ * honest description of what is about to be logged, which is the same bar
+ * `assumption` text on each row is already held to.
+ */
+function defaultMealName(rows: DraftRow[]): string {
+  const names = rows.map((r) => r.name.trim()).filter(Boolean);
+  if (names.length === 0) return 'Meal';
+  if (names.length <= 2) return names.join(', ');
+  return `${names.slice(0, 2).join(', ')} + ${names.length - 2} more`;
 }
 
 /**
@@ -1034,6 +1291,28 @@ const styles = StyleSheet.create({
   // 3.96:1 on `bg` — below AA's 4.5:1. `bjj/dictate.tsx`'s quota line already
   // uses the muted token for the same reason. Raised in review.
   quota: { fontSize: 11, color: vola.textMuted },
+  totals: {
+    borderWidth: 1,
+    borderColor: vola.lineSoft,
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: vola.surface,
+    gap: 2,
+  },
+  totalsLabel: { fontSize: 11, color: vola.textDim, fontWeight: '600' },
+  totalsText: { fontSize: 14, fontWeight: '700', color: vola.text },
+  compileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: vola.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxMark: { fontSize: 13, fontWeight: '700' },
+  compileLabel: { fontSize: 13, color: vola.text, flex: 1, lineHeight: 18 },
   primary: {
     minHeight: 46,
     borderRadius: 12,
