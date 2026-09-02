@@ -7,7 +7,11 @@ builder = "NIXPACKS"
 # `NIXPACKS_INSTALL_CMD` is required on this service too, for the corepack
 # incompatibility; the root package.json's `engines.node` handles the Node
 # version.
-buildCommand = "pnpm install --frozen-lockfile && pnpm run build:admin"
+#
+# F31/#804: same `npx --yes pnpm@11.17.0 ...` reasoning as railway/web.toml —
+# see that file's comment for the full detail on why a bare `pnpm` here gets
+# shadowed by Nixpacks' own nix-provisioned pnpm-9_x.
+buildCommand = "npx --yes pnpm@11.17.0 install --frozen-lockfile && npx --yes pnpm@11.17.0 run build:admin"
 
 [deploy]
 startCommand = "pnpm --filter admin start"

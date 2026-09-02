@@ -11,7 +11,7 @@ builder = "NIXPACKS"
 #
 # Nixpacks' install phase is not settable here, so the service needs:
 #
-#     NIXPACKS_INSTALL_CMD="npm install -g pnpm@11.17.0 && pnpm install --frozen-lockfile"
+#     NIXPACKS_INSTALL_CMD="npm install -g pnpm@11.17.0 && npx --yes pnpm@11.17.0 install --frozen-lockfile"
 #
 # which skips corepack and installs the exact version `packageManager` pins.
 #
@@ -19,7 +19,20 @@ builder = "NIXPACKS"
 # package.json's `engines` field — without it Nixpacks picks Node 18, and pnpm 11.17 requires >=22.13. That
 # was the first suspect here and was NOT the cause: the same failure occurs
 # on Node 22. Both pins are needed, for different reasons.
-buildCommand = "pnpm install --frozen-lockfile && pnpm run build:web"
+#
+# F31/#804: every pnpm invocation below is `npx --yes pnpm@11.17.0 ...`, not a
+# bare `pnpm ...` — Nixpacks' own auto-detected build plan ALSO provisions its
+# own pnpm via Nix (`pnpm-9_x`, visible in every build log's "setup" summary),
+# and a bare `pnpm` resolves to whichever of the two wins on PATH. Confirmed
+# live: it's the nix-provisioned 9.x, not the 11.17.0 this file explicitly
+# installs — invisible until `pnpm-lock.yaml` gained its first
+# `packageExtensionsChecksum` (F30/#791), which 9.x and 11.x compute
+# differently, at which point every bare `pnpm install --frozen-lockfile`
+# here started failing with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH. `npx --yes
+# pnpm@<version>` resolves and runs that exact version directly, bypassing
+# PATH entirely, so it can't be shadowed regardless of what Nixpacks'
+# autodetection provisions alongside it.
+buildCommand = "npx --yes pnpm@11.17.0 install --frozen-lockfile && npx --yes pnpm@11.17.0 run build:web"
 
 [deploy]
 startCommand = "pnpm --filter web start"
