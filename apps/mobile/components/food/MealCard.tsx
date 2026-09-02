@@ -40,6 +40,21 @@
  * `MacroDonut`) — reused here rather than `macroColors` directly, because
  * `macroColor()` is the monochrome-aware wrapper and reaching past it is what
  * breaks that accessibility mode for whichever screen does it.
+ *
+ * ## Combine-select mode (N115)
+ *
+ * "Combine" appears in the header once a section has two or more rows — tapping
+ * it turns every row in THIS card into a checkbox, via `selecting`. Scoped to
+ * one card on purpose: the ticket's own words are "select entries IN A SECTION",
+ * and a shake is milk + protein + berries + ice cream from ONE sitting, never a
+ * breakfast item merged with a dinner one. `food.tsx` owns which meal is
+ * currently selecting (there is only ever one) and passes it down; this
+ * component owns nothing about *why* a row is selectable, only how it looks
+ * once it is. `enabled={!selecting}` on `SwipeToDelete` is what stops a swipe
+ * gesture fighting a tap-to-select gesture on the same row, rather than
+ * unmounting it — unmounting would drop its open/closed animation state on
+ * every mode change, which is the same "component instance outlives what it is
+ * showing" trap `closeOn` already exists to avoid one level up.
  */
 
 import { Pressable, StyleSheet, View as RNView } from 'react-native';
@@ -48,6 +63,7 @@ import { Text } from '@/components/Themed';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { useAccent } from '@/lib/AccentProvider';
 import { glyphFor } from '@/lib/foodGlyph';
 import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { macroColor } from '@/lib/macroModel';
@@ -72,6 +88,12 @@ export function MealCard({
   onAdd,
   onEntryPress,
   onDelete,
+  selecting = false,
+  selectedIds,
+  onToggleSelect,
+  onStartCombine,
+  onCancelCombine,
+  onConfirmCombine,
   testID,
 }: {
   meal: Meal;
@@ -89,16 +111,45 @@ export function MealCard({
   onAdd: () => void;
   onEntryPress: (id: string) => void;
   onDelete: (id: string) => void;
+  /**
+   * N115 — whether THIS card is the one currently combining. `food.tsx` keeps
+   * one `{ meal, selected }` slot for the whole day, so at most one card is
+   * ever `selecting` at a time. The five combine props default to
+   * undefined/no-op-shaped so every existing caller (and every test written
+   * before N115) keeps compiling and rendering exactly as before.
+   */
+  selecting?: boolean;
+  selectedIds?: ReadonlySet<string>;
+  onToggleSelect?: (id: string) => void;
+  onStartCombine?: () => void;
+  onCancelCombine?: () => void;
+  onConfirmCombine?: () => void;
   testID?: string;
 }) {
   const hasEntries = entries.length > 0;
   const { foodUnit } = useUnits();
+  const accent = useAccent();
+  const selectedCount = selectedIds?.size ?? 0;
 
   return (
     <RNView style={styles.card} testID={testID}>
-      <Text style={styles.header} testID={testID ? `${testID}-header` : undefined}>
-        {hasEntries ? `${label} · ${fmtAmount(totals.kcal)} kcal` : label}
-      </Text>
+      <RNView style={styles.headerRow}>
+        <Text style={styles.header} testID={testID ? `${testID}-header` : undefined}>
+          {hasEntries ? `${label} · ${fmtAmount(totals.kcal)} kcal` : label}
+        </Text>
+        {/* Two or more rows only — combining one thing with nothing is not a
+            meal, it is the entry that is already there. */}
+        {!selecting && entries.length >= 2 && onStartCombine ? (
+          <Pressable
+            onPress={onStartCombine}
+            accessibilityRole="button"
+            accessibilityLabel={`Combine entries in ${label}`}
+            testID={testID ? `${testID}-combine-start` : undefined}
+          >
+            <Text style={[styles.combineLink, { color: addColor }]}>Combine</Text>
+          </Pressable>
+        ) : null}
+      </RNView>
 
       {hasEntries ? (
         <RNView style={styles.macroRow} testID={testID ? `${testID}-macros` : undefined}>
@@ -125,44 +176,100 @@ export function MealCard({
         )
       )}
 
-      {entries.map((e) => (
-        <SwipeToDelete
-          key={e.id}
-          onDelete={() => onDelete(e.id)}
-          accessibilityLabel={e.name}
-          closeOn={entries.length}
-          testID={`food-entry-${e.id}`}
-        >
-          <Pressable
-            style={styles.row}
-            onPress={() => onEntryPress(e.id)}
-            accessibilityRole="button"
-            accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
+      {entries.map((e) => {
+        const isSelected = selecting && !!selectedIds?.has(e.id);
+        return (
+          <SwipeToDelete
+            key={e.id}
+            onDelete={() => onDelete(e.id)}
+            accessibilityLabel={e.name}
+            enabled={!selecting}
+            closeOn={entries.length}
+            testID={`food-entry-${e.id}`}
           >
-            <Text style={styles.glyph} accessibilityElementsHidden importantForAccessibility="no">
-              {glyphFor(e.category)}
-            </Text>
-            <RNView style={styles.rowMain}>
-              <Text style={styles.rowName} numberOfLines={1}>
-                {e.name}
-              </Text>
-              <Text style={styles.rowServing}>{loggedAmountLabel(e.servings, e.serving_label, foodUnit)}</Text>
-            </RNView>
-            <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
-          </Pressable>
-        </SwipeToDelete>
-      ))}
+            <Pressable
+              style={styles.row}
+              onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
+              accessibilityRole="button"
+              accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
+              accessibilityState={selecting ? { selected: isSelected } : undefined}
+              testID={selecting ? `food-entry-${e.id}-select` : undefined}
+            >
+              {selecting ? (
+                <RNView
+                  style={[
+                    styles.checkbox,
+                    isSelected && { backgroundColor: addColor, borderColor: addColor },
+                  ]}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
+                >
+                  {isSelected ? (
+                    <Text style={[styles.checkboxTick, { color: accent.on }]}>✓</Text>
+                  ) : null}
+                </RNView>
+              ) : (
+                <Text style={styles.glyph} accessibilityElementsHidden importantForAccessibility="no">
+                  {glyphFor(e.category)}
+                </Text>
+              )}
+              <RNView style={styles.rowMain}>
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {e.name}
+                </Text>
+                <Text style={styles.rowServing}>{loggedAmountLabel(e.servings, e.serving_label, foodUnit)}</Text>
+              </RNView>
+              <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
+            </Pressable>
+          </SwipeToDelete>
+        );
+      })}
 
-      <Pressable
-        style={styles.add}
-        onPress={onAdd}
-        accessibilityRole="button"
-        accessibilityLabel={`Add food to ${label}`}
-        testID={`food-add-${meal}`}
-      >
-        <Icon name="plus" size={13} color={addColor} />
-        <Text style={[styles.addText, { color: addColor }]}>Add Food</Text>
-      </Pressable>
+      {selecting ? (
+        <RNView style={styles.combineBar} testID={testID ? `${testID}-combine-bar` : undefined}>
+          <Pressable
+            onPress={onCancelCombine}
+            style={styles.combineCancel}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel combining"
+            testID={testID ? `${testID}-combine-cancel` : undefined}
+          >
+            <Text style={styles.combineCancelText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            onPress={onConfirmCombine}
+            disabled={selectedCount < 2}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: selectedCount < 2 }}
+            accessibilityLabel={
+              selectedCount < 2
+                ? 'Combine into a meal — select at least two entries first'
+                : `Combine ${selectedCount} entries into a meal`
+            }
+            style={[
+              styles.combineConfirm,
+              { backgroundColor: addColor },
+              selectedCount < 2 && styles.combineConfirmOff,
+            ]}
+            testID={testID ? `${testID}-combine-confirm` : undefined}
+          >
+            <Text style={[styles.combineConfirmText, { color: accent.on }]}>
+              {selectedCount < 2 ? 'Combine into a meal' : `Combine ${selectedCount} into a meal`}
+            </Text>
+          </Pressable>
+        </RNView>
+      ) : (
+        <Pressable
+          style={styles.add}
+          onPress={onAdd}
+          accessibilityRole="button"
+          accessibilityLabel={`Add food to ${label}`}
+          testID={`food-add-${meal}`}
+        >
+          <Icon name="plus" size={13} color={addColor} />
+          <Text style={[styles.addText, { color: addColor }]}>Add Food</Text>
+        </Pressable>
+      )}
     </RNView>
   );
 }
@@ -176,7 +283,9 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   header: { fontSize: 15, fontWeight: '700' },
+  combineLink: { fontSize: 13, fontWeight: '600' },
   availableKcal: { fontSize: 13, fontWeight: '600', color: vola.textMuted, marginTop: -4 },
   macroRow: { flexDirection: 'row', gap: 14, marginTop: -2 },
   macroCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
@@ -198,6 +307,17 @@ const styles = StyleSheet.create({
   rowServing: { fontSize: 12, color: vola.textDim },
   rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
 
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: vola.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxTick: { fontSize: 12, fontWeight: '700' },
+
   add: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -206,4 +326,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   addText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+
+  combineBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2 },
+  combineCancel: { paddingVertical: 10, paddingHorizontal: 4 },
+  combineCancelText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+  combineConfirm: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  combineConfirmOff: { opacity: 0.4 },
+  combineConfirmText: { fontSize: 13, fontWeight: '700' },
 });

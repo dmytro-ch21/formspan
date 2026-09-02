@@ -16717,3 +16717,69 @@ mutually exclusive at `Validate()`.
 - No new endpoint or auth surface — this is client-side formatting/display
   logic over data N458's `/v1/records` and the existing local session store
   already deliver under the signed-in athlete's own session.
+
+## N115 — combining logged entries into one named meal (`apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/food/MealCard.tsx`, `apps/mobile/app/food/combine.tsx`, `apps/mobile/app/food/entry/[id].tsx`, `apps/mobile/lib/recipe.ts`)
+
+No new backend surface — this builds entirely on N114's existing `Food`/
+`RecipeItem` storage and the already-generic `SaveFood`/`SaveEntry` endpoints.
+The scenarios below are all mobile.
+
+### Happy path
+
+- A meal section with 2+ logged entries shows a "Combine" link in its
+  header; a section with 0 or 1 entries does not.
+- Tapping "Combine" turns that section's rows into checkboxes; a "Cancel"
+  and a "Combine into a meal" control appear, the latter disabled until 2+
+  rows are checked.
+- Selecting 2+ rows and confirming opens the combine screen, pre-loaded
+  with those entries as itemised rows and a visible total that equals their
+  sum (check it by hand against the rows shown).
+- Naming the meal and saving: the day screen, on return, shows ONE new row
+  in that section (same meal slot, same day) whose kcal equals the combined
+  total, and the original entries are gone from the list.
+- The new meal is a normal saved food afterward — reachable from
+  `food/saved`, searchable and offered as a quick-add from `food/add` for
+  that same meal slot, loggable at "1 serving" with the identical total
+  (`scale`'s pure arithmetic — no re-derivation, no network call to
+  produce the numbers).
+- Opening the combined entry (`food/entry/[id]`) shows a "Made of" list
+  naming the original items and their individual kcal contributions.
+- On the SAME calendar day the combine happened, that entry detail screen
+  also shows "Split into separate entries"; tapping it replaces the one
+  combined row with one row per original item (same meal, same day,
+  correct per-item kcal) and the combined row is gone.
+
+### Edge cases and errors
+
+- Selecting only 1 entry in a section: the "Combine into a meal" control is
+  disabled and cannot be confirmed with fewer than 2 selected.
+- Selecting entries, then cancelling: the section returns to its normal
+  (non-checkbox) state with nothing changed.
+- Stepping to a different day (prev/next arrows, "Today", or a month-grid
+  tap) while mid-selection silently exits selection mode rather than
+  carrying a stale selection onto the new day.
+- Leaving the name blank on the combine screen: Save is disabled with a
+  reason shown ("Give the recipe a name.").
+- Between selecting entries and reaching the combine screen, one of the
+  selected rows is deleted elsewhere (another tab/device): if fewer than 2
+  of the original selection still resolve, the screen says plainly that
+  what was selected is no longer here rather than combining a partial set.
+- Opening a combined entry's detail screen on a day OTHER than today: no
+  "Split into separate entries" control is offered, and the screen instead
+  states plainly that it can't be split back because that would change a
+  past day's log.
+- An entry whose `source_food_id` names a PLAIN saved food (not a recipe):
+  no "Made of" section is shown at all.
+- Editing the saved meal's recipe afterward (via `food/recipe/[id]`, same
+  screen every other recipe uses) does not change the macros of any entry
+  already logged from it — the recipe editor's own "meals already logged
+  from this recipe keep the numbers they were logged with" copy applies
+  unchanged, since a combined meal is stored as an ordinary recipe.
+
+### Needs a device
+
+- Build a shake from four real logged entries (milk, protein, berries, ice
+  cream) end to end on a phone, confirm the combined row's total against
+  the four originals by hand, then log it again the NEXT day as one tap
+  from `food/add`'s recents/saved list — the ticket's own acceptance
+  criterion, verbatim.

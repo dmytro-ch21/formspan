@@ -52068,6 +52068,113 @@ this exact route plus a specific network interleaving, neither of which a
 simulator run reliably reproduces. The regression test is the only thing
 pinning it.
 
+## 2026-09-02 — N115 (#504): combining logged entries into one named meal
+
+The report, from a device: *"I had a shake so I added milk, protein, berries,
+ice cream — we should be able to squash them all in one if we want to."* Four
+rows for one sitting, re-typed every time the shake happens again.
+
+**Investigation first, per the ticket's own instruction, and it paid off.**
+N114's `Food` type (`kind: 'food' | 'recipe'`) already IS "a named item made of
+components, each a frozen copy" — a recipe's `items: RecipeItem[]` are copied
+at add time and never re-derived, exactly the shape this ticket needs, and
+`apps/mobile/app/food/recipe/[id].tsx` already carries the "editing a recipe
+does not rewrite meals already logged from it" copy the AC asks for. So this
+landed almost entirely as a UI feature over existing storage — no migration,
+no new backend endpoint, no new OpenAPI entry. The only new backend-adjacent
+surface is that `SaveFood`/`SaveEntry` (already generic) now get called from a
+new mobile screen; nothing about their contract changed.
+
+**What was actually missing: turning entries you already logged into a
+recipe's items, and back.** `lib/recipe.ts` gained two pure functions:
+
+- `itemFromEntry(entry)` — an entry's ABSOLUTE macros (`kcal`, not a re-derived
+  per-serving figure) copied straight into a `RecipeItem` at `quantity: 1`,
+  serving_label describing what was actually eaten ("1.5 × 100 g"). Copying
+  the absolute rather than deriving-then-remultiplying was deliberate: it is
+  the one route through this file with ZERO rounding steps, and it is what
+  makes the combined meal's total EXACTLY equal to the sum of the entries it
+  came from — the AC's own words, "a total that cannot be checked against its
+  components is the failure this repo keeps naming."
+- `entriesFromRecipeItems(food, meal, eatenOn)` — the mirror: one `NewEntry`
+  per item, at `kcal × quantity`, `category: null` and `notes: ''` since a
+  `RecipeItem` never carried either (a faithful reconstruction of the
+  numbers and names, not a claim that every byte of the original rows
+  survives the round trip).
+
+**The UI: select-mode scoped to one section, not a picker screen.**
+`MealCard.tsx` grew a "Combine" link (2+ entries in that slot) that turns its
+own rows into checkboxes — `enabled={!selecting}` on the existing
+`SwipeToDelete` rather than unmounting it, so the swipe gesture and the
+tap-to-select gesture never fight over the same row without losing the row's
+animation state on every mode flip. Selection is scoped to ONE `MealCard`
+(`food.tsx` keeps a single `{ meal, selected }` slot, never a cross-section
+one) because the ticket's own wording is "select entries IN a section" — a
+shake is milk-protein-berries-ice-cream from one sitting, never a breakfast
+item merged with a dinner one.
+
+**Replace, not template — read from the athlete's own words.** "We should be
+able to squash them all in one" reads as replacing today's four rows, not
+merely saving a reusable recipe alongside them untouched. `food/combine.tsx`
+therefore does three things on Save: (1) saves a new recipe,
+`yield_servings: 1` fixed — this is not "makes 4 portions" like the recipe
+editor, it is "this is what I ate as one unit", so there is no yield to ask
+about and "one serving" and "the sum of the parts" are the same number; (2)
+logs ONE new entry for it; (3) deletes the entries it was built from. The
+saved recipe survives as an ordinary saved food afterward (visible from
+`food/saved`, re-loggable, editable) — the athlete gets both a decluttered
+today AND a reusable "shake" for next time.
+
+**Reversible on the day it happened — the AC's own phrase, taken literally.**
+`food/entry/[id].tsx` (the entry-detail screen) now shows a "Made of" list for
+any entry logged from a recipe (reusing the recipe's own stored items — no new
+storage), and, only when `entry.eaten_on === todayString()`, a "Split into
+separate entries" button that rebuilds the parts via `entriesFromRecipeItems`
+and removes the combined row. Deliberately NOT a technical limit —
+`entriesFromRecipeItems` works on any day — but a considered one: splitting a
+day OTHER than today changes a log already used to judge that day gone by,
+which is the exact thing this module's package doc spends a paragraph
+refusing to let an edit do. A past day shows the plain refusal text instead of
+the control ("This can't be split back into separate entries — that would
+change a past day's log."), satisfying the AC's fallback clause directly.
+Decomposing reads the recipe's CURRENT items rather than a separate frozen
+snapshot on the entry — a small, documented drift risk if the recipe were
+edited in the few minutes between combining and splitting, accepted rather
+than doubling storage for a same-day-only affordance.
+
+**Re-logging a combined meal re-derives nothing**, for free: `food/add.tsx`'s
+save-food search and quick-add already read `localFoods` (which does not
+filter by `kind`) and log via `scale(food, servings)` — pure arithmetic, no
+LLM, no external call. A "shake" saved via combine is indistinguishable from
+any other saved recipe by the time it reaches that path.
+
+**Testing.** `lib/__tests__/recipe.test.ts` pins `itemFromEntry` (absolute
+copy, not a re-derivation; provenance carried through; a real four-item shake
+summing to exactly 510 kcal) and `entriesFromRecipeItems` (per-item
+`kcal × quantity`, a full item-entry-item round trip preserving the total).
+`MealCard.test.tsx` covers the combine-select affordance end to end (offered
+only at 2+ entries, confirm disabled under 2 selected, cancel/confirm
+wiring). Two new screen tests —
+`__tests__/app/combineScreen.test.tsx` and additions to
+`__tests__/app/editEntryScreen.test.tsx` — pin the wiring: exactly one entry
+logged and exactly N removed on combine, and the same-day/past-day split
+behaviour including the exact copy shown for each. `pnpm run verify` green
+(mobile, web, admin, backend); mobile lint sits at exactly 50/50 warnings
+against the repo's ratchet ceiling after two `react-hooks/set-state-in-effect`
+warnings this branch would otherwise have added were designed out instead
+(`food.tsx`'s day-navigation now clears an in-progress selection at every
+`setDayOffset` call site rather than in a separate effect keyed on the day).
+
+**#503 (N114)'s "saved foods" screens, `food/saved/index.tsx` and
+`food/saved/[id].tsx`, needed no changes** — a combined meal is stored,
+listed, edited and deleted exactly like any other saved food, which is the
+whole point of building this on N114 rather than beside it.
+
+**Left open, deliberately:** #505 (N116, sharing a saved item to a friend)
+depends on this and was not started here. `NEEDS HUMAN EVIDENCE` per the
+ticket's own AC: build a shake from four entries on a device, log it again the
+next day as one — not something a simulator run substitutes for.
+
 ## Open items / known gaps as of this entry
 
 
