@@ -1066,6 +1066,18 @@ Domain: logging a session with no connectivity. **Test this by actually stopping
 - **The derived estimates must not move when a field is merely touched.** Waist-to-height and the Navy body-fat figure take centimetres. Open an imperial check-in that already has girths, retype the waist value that is already shown, and confirm neither number changes — the body did not. A reader that took the draft straight would swing waist-to-height from 0.47 to 0.18 on that keystroke, and both readings render as "under the 0.5 guide", so the words agree and only the number betrays it.
 - The **stale-allowlist guard** in `check-unit-literals.py` is what retires the exception: leave the `[date].tsx` entry in `ALLOW` after converting the screen and the check goes red, naming it. Verified by putting the entry back.
 
+**`load()`'s "latest call wins" guard (N471, #800).** `useUnits()`'s `units`
+starting at `'metric'` and correcting a frame later fires a second `load()`
+(via the changed `useCallback` identity feeding `useFocusEffect`) while the
+first is still in flight on a cold launch straight onto this route. Covered
+by `checkinLoadRace.test.tsx`: two overlapping `load()` calls with
+independently-resolvable promises, resolved out of order (the newer call's
+response first, the older/stale one last), asserting the stale response never
+overwrites the newer one's state. Mutation-verified — reverting the
+`loadSeqRef` guard turns this test red. Not currently reachable by any device
+check: it needs a cold start plus a specific network interleaving, so the
+regression test is the only thing pinning it.
+
 **Progress photo (`addPhoto`, same screen).**
 - Pick a photo from the library; confirm it appears and the check-in's other
   drafted-but-unsaved fields (weight, notes) survive the refresh — `addPhoto`
