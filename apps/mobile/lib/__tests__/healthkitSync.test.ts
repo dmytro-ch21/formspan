@@ -47,6 +47,11 @@ jest.mock('expo-crypto', () => ({ randomUUID: () => `uuid-${++mockUuidSeq}` }));
 
 let mockSupported = true;
 let mockWorkouts: HealthKitRunningWorkout[] = [];
+/** Set to a uuid to simulate a mid-import failure on that ONE workout —
+ *  the mapping is the last write-adjacent call before the transaction's
+ *  final insert, so throwing here proves the whole transaction, not just
+ *  one statement in it, rolls back. */
+let mockThrowMappingFor: string | null = null;
 const mockRequestAuth = jest.fn().mockResolvedValue(true);
 jest.mock('../healthkit', () => {
   const real = jest.requireActual('../healthkit');
@@ -55,6 +60,12 @@ jest.mock('../healthkit', () => {
     isHealthKitSupported: () => mockSupported,
     requestHealthKitReadAuthorization: () => mockRequestAuth(),
     queryRunningWorkouts: () => Promise.resolve(mockWorkouts),
+    mapWorkoutToRunningDetail: (workout: HealthKitRunningWorkout, sessionID: string) => {
+      if (workout.uuid === mockThrowMappingFor) {
+        throw new Error('simulated failure mid-import');
+      }
+      return real.mapWorkoutToRunningDetail(workout, sessionID);
+    },
   };
 });
 
@@ -79,6 +90,7 @@ beforeEach(async () => {
   mockFixture = await migratedFixture();
   mockSupported = true;
   mockWorkouts = [];
+  mockThrowMappingFor = null;
   mockRequestAuth.mockClear();
   mockRequestSync.mockClear();
 });
@@ -164,6 +176,39 @@ describe('importHealthKitRuns', () => {
     expect(result.imported).toBe(1);
     expect(await listLocalSessions(USER)).toHaveLength(2);
     expect(await importedHealthKitUUIDs(USER)).toEqual(new Set(['hk-a', 'hk-b']));
+  });
+
+  it('a mid-workout failure leaves NEITHER a session NOR a ledger entry — the whole write is one transaction', async () => {
+    // frontend-reviewer's finding: without a transaction, a failure between
+    // startLocalSession and recordHealthKitImport leaves a session on disk
+    // with no ledger row, which the NEXT pass reads as "never imported" and
+    // creates a SECOND session for the same workout — compounding the exact
+    // duplication this whole feature exists to prevent.
+    await writeHealthKitImportEnabled(USER, true);
+    mockWorkouts = [workout({ uuid: 'hk-fails' })];
+    mockThrowMappingFor = 'hk-fails';
+
+    await expect(importHealthKitRuns(USER)).rejects.toThrow('simulated failure mid-import');
+
+    expect(await listLocalSessions(USER)).toEqual([]);
+    expect(await importedHealthKitUUIDs(USER)).toEqual(new Set());
+  });
+
+  it('one workout failing does not lose an EARLIER workout already committed in this same pass', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    mockWorkouts = [
+      workout({ uuid: 'hk-good', startDate: '2026-09-01T07:00:00.000Z' }),
+      workout({ uuid: 'hk-fails', startDate: '2026-09-02T07:00:00.000Z' }),
+    ];
+    mockThrowMappingFor = 'hk-fails';
+
+    // Oldest first (hk-good, then hk-fails) — hk-good's transaction commits
+    // before hk-fails's throws, so it must survive even though the pass as
+    // a whole rejects.
+    await expect(importHealthKitRuns(USER)).rejects.toThrow('simulated failure mid-import');
+
+    expect(await listLocalSessions(USER)).toHaveLength(1);
+    expect(await importedHealthKitUUIDs(USER)).toEqual(new Set(['hk-good']));
   });
 
   it('scopes the ledger per user, so two athletes importing the same watch-recorded run both succeed locally', async () => {

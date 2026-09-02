@@ -1,6 +1,9 @@
 package running
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSourceValid(t *testing.T) {
 	for _, s := range Sources() {
@@ -127,6 +130,21 @@ func TestSessionDetailValidate(t *testing.T) {
 		{
 			name:    "empty healthkit uuid",
 			detail:  SessionDetail{Source: SourceManual, HealthKitUUID: ptr("")},
+			wantErr: true,
+		},
+		{
+			name: "healthkit uuid at the length ceiling",
+			detail: SessionDetail{
+				Source:        SourceHealthKit,
+				HealthKitUUID: ptr(strings.Repeat("a", maxHealthKitUUIDLength)),
+			},
+		},
+		{
+			name: "healthkit uuid over the length ceiling",
+			detail: SessionDetail{
+				Source:        SourceHealthKit,
+				HealthKitUUID: ptr(strings.Repeat("a", maxHealthKitUUIDLength+1)),
+			},
 			wantErr: true,
 		},
 	}

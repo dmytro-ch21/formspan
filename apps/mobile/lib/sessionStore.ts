@@ -762,6 +762,68 @@ export async function pushSession(
 }
 
 /**
+ * A HealthKit import whose UUID already belongs to a DIFFERENT session on
+ * the server (N465) — the outcome of `running.ErrAlreadyExists` (migration
+ * 000087's per-user unique index) reaching the client as a 409 on the
+ * running-detail PUT.
+ *
+ * By the time this fires, `pushRow`'s create and sets-push have ALREADY
+ * succeeded for this session — so the account now holds a real, but
+ * detail-less, "Run" session that duplicates one it already has under a
+ * different id. Leaving it would be exactly the failure this ticket's own
+ * acceptance criterion ("re-running import does not duplicate previously
+ * imported runs") exists to prevent, just moved from the detail row (which
+ * the unique index already refuses) to the generic session around it. So
+ * this device's attempt is made to disappear entirely: the real copy
+ * already exists server-side and reaches this device through the ordinary
+ * session pull, the same way any session created on another device does.
+ *
+ * Deleted server-side FIRST, then the local row is dropped OUTRIGHT — a
+ * hard delete, not a tombstone. There is nothing to reconcile: this local
+ * row never held anything the account doesn't already have under a
+ * different id, unlike an ordinary athlete-initiated delete (see
+ * `deleteLocalSession`'s doc comment), which has to survive being offline.
+ *
+ * The `healthkit_imports` ledger row for this uuid is deliberately left
+ * untouched, still pointing at this now-deleted session id — its only job
+ * is "has this device already dealt with this uuid", and leaving it is what
+ * stops the next import pass from fetching the same workout and hitting
+ * this exact 409 again, forever.
+ */
+async function abandonDuplicateHealthKitImport(
+  db: SQLite.SQLiteDatabase,
+  getToken: TokenGetter,
+  sessionID: string,
+  userID: string,
+): Promise<void> {
+  try {
+    await deleteSession(getToken, sessionID);
+  } catch (err) {
+    // A 404 here is fine — the session may already be gone (deleted on
+    // another device, or this is itself a retry of this same cleanup).
+    // Anything else is a TRANSIENT failure to reach the server: mark this
+    // row a tombstone rather than hard-deleting it, so the ordinary
+    // delete-outbox path (the `row.deleted_at` branch at the top of
+    // `pushRow`) retries the server delete on the next sync instead of
+    // leaving an orphan session server-side with no local trace left to
+    // notice it.
+    if (!(err instanceof ApiError && err.status === 404)) {
+      const now = new Date().toISOString();
+      await db.runAsync(
+        `UPDATE local_sessions SET deleted_at = ?, dirty = 1, updated_at = ?, last_error = NULL
+         WHERE id = ? AND user_id = ?`,
+        now,
+        now,
+        sessionID,
+        userID,
+      );
+      return;
+    }
+  }
+  await db.runAsync(`DELETE FROM local_sessions WHERE id = ? AND user_id = ?`, sessionID, userID);
+}
+
+/**
  * Pushes one row's state to the server and clears its dirty flag.
  *
  * Shared by `pushSession` and `syncSessions` rather than written twice: the
@@ -1043,6 +1105,25 @@ async function pushRow(
             s.id,
             userID,
           );
+          throw err;
+        }
+        // N465: a HealthKit import whose UUID already belongs to a
+        // DIFFERENT session server-side — running.ErrAlreadyExists
+        // (migration 000087's per-user unique index) reaching the client as
+        // a 409. This is the reinstall/second-device case the local ledger
+        // (`healthkit_imports`) cannot catch on its own: THIS device has
+        // never seen the uuid before, so it created a brand-new session,
+        // pushed it (the create above and the sets push before this block
+        // both already succeeded), and only NOW discovers the account
+        // already has this run under a different session id.
+        //
+        // Gated on `detail.source === 'healthkit'` even though this
+        // endpoint has no other 409 source today: a future one added here
+        // without updating this branch must not silently delete an
+        // unrelated session.
+        if (err instanceof ApiError && err.status === 409 && detail.source === 'healthkit') {
+          await abandonDuplicateHealthKitImport(db, getToken, s.id, userID);
+          return;
         }
         throw err;
       }

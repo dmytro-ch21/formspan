@@ -7,16 +7,24 @@
  * comment on why the native surface is kept this thin, and the ticket's
  * NEEDS HUMAN EVIDENCE criterion).
  *
- * No mocking of `@kingstinct/react-native-healthkit` is needed here: it is
- * not installed in this test environment, so `lib/healthkit.ts`'s own
- * `require()` throws and is caught by its blast shield exactly as it would
- * on a build missing the native half — which is itself a small proof the
- * shield works, not just an artifact of the test setup.
+ * No mocking of `@kingstinct/react-native-healthkit` is needed here — it IS
+ * installed (a real dependency, in `node_modules`), but the package is built
+ * on `react-native-nitro-modules`, whose native binding is registered only
+ * inside a real React Native runtime. Requiring it under Jest throws
+ * "Failed to get NitroModules: The native ... Turbo/Native-Module could not
+ * be found" (verified directly: `require('@kingstinct/react-native-healthkit')`
+ * under this suite), which `lib/healthkit.ts`'s `load()` catches — the SAME
+ * blast shield, and the SAME failure shape, a build with a genuinely
+ * mismatched native half hits on a real device. This is a property of every
+ * Jest run on every machine, not a gap in this environment's install, which
+ * is itself a small proof the shield's `try`/`catch` actually does its job
+ * rather than merely existing.
  */
 
 import {
   filterNewWorkouts,
   mapWorkoutToRunningDetail,
+  metersFromQuantity,
   type HealthKitRunningWorkout,
 } from '../healthkit';
 
@@ -31,6 +39,39 @@ function workout(overrides: Partial<HealthKitRunningWorkout> = {}): HealthKitRun
     ...overrides,
   };
 }
+
+describe('metersFromQuantity', () => {
+  it("reads the REAL unit string this package's WorkoutProxy.totalDistance reports", () => {
+    // Pinned against `@kingstinct/react-native-healthkit@14.1.0`'s own
+    // installed Swift source (`ios/WorkoutProxy.swift`'s `totalDistance`
+    // getter: `Quantity(unit: "meters", quantity: ...)`) — NOT against a
+    // guess. `'m'` was the original (wrong) assumption this function
+    // shipped with; every downstream test used the already-converted
+    // `HealthKitRunningWorkout` shape and stayed green while this exact bug
+    // silently zeroed every imported run's distance. This is the test that
+    // would have caught it.
+    expect(metersFromQuantity({ unit: 'meters', quantity: 5000 })).toBe(5000);
+  });
+
+  it('still accepts a bare "m", defensively', () => {
+    expect(metersFromQuantity({ unit: 'm', quantity: 5000 })).toBe(5000);
+  });
+
+  it('converts km and mi, defensively — not exercised by the real package today', () => {
+    expect(metersFromQuantity({ unit: 'km', quantity: 5 })).toBe(5000);
+    expect(metersFromQuantity({ unit: 'mi', quantity: 1 })).toBeCloseTo(1609.344, 3);
+  });
+
+  it('returns null for an unrecognised unit rather than guessing', () => {
+    expect(metersFromQuantity({ unit: 'furlongs', quantity: 1 })).toBeNull();
+  });
+
+  it('returns null for undefined or a non-finite quantity', () => {
+    expect(metersFromQuantity(undefined)).toBeNull();
+    expect(metersFromQuantity({ unit: 'meters', quantity: NaN })).toBeNull();
+    expect(metersFromQuantity({ unit: 'meters', quantity: Infinity })).toBeNull();
+  });
+});
 
 describe('filterNewWorkouts', () => {
   it('drops workouts whose uuid is already imported', () => {

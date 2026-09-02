@@ -409,15 +409,3 @@ export const PREF_GOALS_COLLAPSED = 'goals_collapsed';
  * device.
  */
 export const PREF_HEALTHKIT_IMPORT = 'healthkit_import_enabled';
-
-/**
- * ISO timestamp of the last run this device successfully imported from
- * HealthKit, or absent if it never has.
- *
- * Same shape as {@link PREF_SEEDED_AT} and for the same reason: "when" bounds
- * the next query window (nothing before this timestamp needs asking about
- * again) in a way a boolean cannot. Local-only, never pushed — this is a
- * fact about this device's own import history, not something the account
- * holds.
- */
-export const PREF_HEALTHKIT_LAST_IMPORT_AT = 'healthkit_last_import_at';

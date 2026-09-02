@@ -54,7 +54,18 @@ const RUNNING_ACTIVITY_TYPE = 37;
  *  this runs at most a few times a day (foreground/launch, see
  *  `lib/healthkitSync.ts`) and a runner's lifetime workout count is nowhere
  *  near this even after years on a watch; the real bound on cost is the
- *  dedup filter below, not this number. */
+ *  dedup filter below, not this number.
+ *
+ *  Deliberately NOT a `since`/date-range query narrowing this further —
+ *  `WorkoutQueryOptions.filter` (`FilterForWorkouts`) was not verified to
+ *  carry a start-date predicate against this package's actual v14.1.0
+ *  shipped types, and guessing at one is exactly the mistake that shipped
+ *  `metersFromQuantity`'s unit bug (an assumption about a native shape,
+ *  never checked against the real source, that a fully green test suite
+ *  could not catch because the tests started from the same assumption).
+ *  `queryRunningWorkouts`'s `alreadyImported` parameter already skips the
+ *  expensive per-workout route fetch for anything previously imported,
+ *  which is the actual cost this would be trying to save. */
 const QUERY_LIMIT = 200;
 
 /** A single point along an imported route, before it becomes a `RoutePoint`.
@@ -161,9 +172,31 @@ export type HealthKitRunningWorkout = {
   route: RoutePoint[];
 };
 
-function metersFromQuantity(q: NativeQuantity | undefined): number | null {
-  if (!q) return null;
+/**
+ * Convert a HealthKit `Quantity` to metres, or `null` when the unit is not
+ * one this function knows how to convert.
+ *
+ * **`'meters'` is the primary case, not `'m'`.** `@kingstinct/react-native-healthkit`
+ * (v14.1.0) always reports `totalDistance` in the string `HKUnit.meter().unitString`
+ * produces — verified directly against the installed package's own Swift
+ * source, `ios/WorkoutProxy.swift`'s `totalDistance` getter: `Quantity(unit:
+ * "meters", quantity: hkTotalDistance.doubleValue(for: HKUnit.meter()))`. The
+ * value is ALWAYS already in metres regardless of the sample's original
+ * unit — HealthKit converts before this ever reaches JS — so `'km'`/`'mi'`
+ * below are defensive only, kept in case a future SDK version reports
+ * differently, and are not exercised by the real package today.
+ *
+ * Exported so a test can pin the real unit string against this function
+ * directly, rather than only against the already-converted
+ * `HealthKitRunningWorkout` shape `queryRunningWorkouts` produces — a stub
+ * built from an assumption about the unit string cannot catch a wrong
+ * assumption about the unit string, which is exactly how a distance-always-
+ * null bug shipped with a fully green suite the first time this was written.
+ */
+export function metersFromQuantity(q: NativeQuantity | undefined): number | null {
+  if (!q || !Number.isFinite(q.quantity)) return null;
   switch (q.unit) {
+    case 'meters':
     case 'm':
       return q.quantity;
     case 'km':
@@ -189,9 +222,21 @@ function metersFromQuantity(q: NativeQuantity | undefined): number | null {
  * access — both read as "nothing to import" to the caller, which is the
  * correct behaviour for a feature that is opt-in and silently does nothing
  * when its permission is missing rather than erroring the whole sync pass.
+ *
+ * `alreadyImported` skips the per-workout `getWorkoutRoutes()` call for
+ * anything this device has already brought in — that call is a SECOND
+ * native round trip per workout, and fetching it for a workout about to be
+ * thrown away by `filterNewWorkouts` anyway is real, avoidable cost on every
+ * foreground return for an athlete with years of watch history. Optional and
+ * defaulting to empty rather than required, so a caller that genuinely wants
+ * every route (there is none today, but a future one might) is not forced
+ * to invent an empty ledger to ask for it.
  */
-export async function queryRunningWorkouts(): Promise<HealthKitRunningWorkout[]> {
+export async function queryRunningWorkouts(
+  alreadyImported: ReadonlySet<string> | readonly string[] = [],
+): Promise<HealthKitRunningWorkout[]> {
   if (!hk) return [];
+  const seen = alreadyImported instanceof Set ? alreadyImported : new Set(alreadyImported);
   let workouts: readonly NativeWorkout[];
   try {
     workouts = await hk.queryWorkoutSamples({
@@ -208,6 +253,7 @@ export async function queryRunningWorkouts(): Promise<HealthKitRunningWorkout[]>
 
   const out: HealthKitRunningWorkout[] = [];
   for (const w of workouts) {
+    if (seen.has(w.uuid)) continue;
     let route: RoutePoint[] = [];
     try {
       const routes = await w.getWorkoutRoutes();

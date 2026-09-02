@@ -1778,10 +1778,14 @@ components:
             Null for every source other than `healthkit`. Carries a unique
             index per user — re-sending the same UUID under a DIFFERENT
             session_id than the one that already holds it is refused with
-            `already_exists`, which is the backstop against a re-imported
-            duplicate on a reinstalled app or a second device; the ordinary
-            same-device repeat import never reaches this endpoint at all,
-            since the mobile app checks its own local ledger first.
+            `already_exists`. This refuses the duplicate DETAIL row only; it
+            is the backstop for a reinstalled app or a second device (the
+            ordinary same-device repeat import never reaches this endpoint
+            at all, since the mobile app checks its own local ledger
+            first) — the client that receives this error deletes the
+            session it just created rather than leaving an orphaned,
+            detail-less duplicate behind, which is what makes "no duplicate
+            run" hold end to end rather than just at this one row.
         created_at: { type: string, format: date-time, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 

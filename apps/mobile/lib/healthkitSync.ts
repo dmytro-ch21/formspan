@@ -1,6 +1,6 @@
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { getDb } from './db';
+import { getDb, withTransaction } from './db';
 import {
   filterNewWorkouts,
   isHealthKitSupported,
@@ -8,12 +8,7 @@ import {
   queryRunningWorkouts,
   requestHealthKitReadAuthorization,
 } from './healthkit';
-import {
-  PREF_HEALTHKIT_IMPORT,
-  PREF_HEALTHKIT_LAST_IMPORT_AT,
-  readPref,
-  writePref,
-} from './prefs';
+import { PREF_HEALTHKIT_IMPORT, readPref, writePref } from './prefs';
 import { RUN_EXERCISE_ID } from './running';
 import { emptySet } from './sessions';
 import { saveLocalRunningDetail, saveLocalSets, startLocalSession } from './sessionStore';
@@ -124,10 +119,20 @@ export async function importHealthKitRuns(userID: string): Promise<{ imported: n
   // own doc comment for why this never re-prompts once answered.
   await requestHealthKitReadAuthorization();
 
-  const [workouts, already] = await Promise.all([
-    queryRunningWorkouts(),
-    importedHealthKitUUIDs(userID),
-  ]);
+  // The ledger is read BEFORE the HealthKit query and passed straight into
+  // it, so `queryRunningWorkouts` can skip the per-workout route fetch
+  // entirely for anything already imported — the route call is the
+  // expensive half (a second native round trip per workout), and an
+  // athlete with years of watch history re-paying it every foreground
+  // return for runs already sitting in Training History is real,
+  // avoidable cost.
+  const already = await importedHealthKitUUIDs(userID);
+  const workouts = await queryRunningWorkouts(already);
+  // Filtered again here even though `queryRunningWorkouts` already skipped
+  // fetching routes for these — belt and braces against a native query ever
+  // returning something already in the ledger, and it is what keeps
+  // `filterNewWorkouts` itself exercised by the real pipeline rather than
+  // only by its own unit test.
   const fresh = filterNewWorkouts(workouts, already);
   if (fresh.length === 0) return { imported: 0 };
 
@@ -137,38 +142,47 @@ export async function importHealthKitRuns(userID: string): Promise<{ imported: n
   // been handled" — the next pass simply picks up where this one stopped.
   const ordered = [...fresh].sort((a, b) => a.startDate.localeCompare(b.startDate));
 
+  const db = await getDb();
   let imported = 0;
   for (const workout of ordered) {
-    // ended_at supplied at creation, not via a separate finishLocalSession
-    // call: this is a reflection log of something already over, the same
-    // shape startLocalSession's own doc comment describes, not a live
-    // session that finishes later.
-    const session = await startLocalSession(userID, {
-      sport: 'running',
-      name: 'Run',
-      started_at: workout.startDate,
-      ended_at: workout.endDate,
+    // All four writes for one workout, atomically. Without this, a failure
+    // between them (saveLocalRunningDetail throwing after startLocalSession
+    // succeeds, say) leaves a session on disk with no ledger entry — which
+    // reads to the NEXT import pass as "never imported" and creates a
+    // SECOND session for the identical workout, compounding the exact
+    // duplication this feature exists to prevent rather than merely failing
+    // to prevent it once.
+    await withTransaction(db, async () => {
+      // ended_at supplied at creation, not via a separate finishLocalSession
+      // call: this is a reflection log of something already over, the same
+      // shape startLocalSession's own doc comment describes, not a live
+      // session that finishes later.
+      const session = await startLocalSession(userID, {
+        sport: 'running',
+        name: 'Run',
+        started_at: workout.startDate,
+        ended_at: workout.endDate,
+      });
+      await saveLocalRunningDetail(userID, session.id, mapWorkoutToRunningDetail(workout, session.id));
+      // A session_sets row against the seeded `run` exercise, so the
+      // generic personal-record pipeline sees this run — the exact reason
+      // app/running/[id].tsx's Finish handler writes the same row for a
+      // phone-GPS run. Mirrored here rather than reused because that
+      // handler is UI code (state, error handling for a live screen) and
+      // this is a background pass with none of that.
+      await saveLocalSets(userID, session.id, [
+        {
+          ...emptySet(RUN_EXERCISE_ID, 0),
+          distance_m: workout.distanceMeters,
+          seconds: workout.durationSeconds || null,
+          completed: true,
+        },
+      ]);
+      await recordHealthKitImport(userID, workout.uuid, session.id);
     });
-    await saveLocalRunningDetail(userID, session.id, mapWorkoutToRunningDetail(workout, session.id));
-    // A session_sets row against the seeded `run` exercise, so the generic
-    // personal-record pipeline sees this run — the exact reason
-    // app/running/[id].tsx's Finish handler writes the same row for a
-    // phone-GPS run. Mirrored here rather than reused because that handler
-    // is UI code (state, error handling for a live screen) and this is a
-    // background pass with none of that.
-    await saveLocalSets(userID, session.id, [
-      {
-        ...emptySet(RUN_EXERCISE_ID, 0),
-        distance_m: workout.distanceMeters,
-        seconds: workout.durationSeconds || null,
-        completed: true,
-      },
-    ]);
-    await recordHealthKitImport(userID, workout.uuid, session.id);
     imported++;
   }
 
-  await writePref(userID, PREF_HEALTHKIT_LAST_IMPORT_AT, new Date().toISOString());
   requestSync('healthkit-import');
   return { imported };
 }
@@ -187,6 +201,28 @@ let running = false;
 export function setHealthKitSyncIdentity(userID: string | null): void {
   currentUserID = userID;
   if (userID) runImportPass('sign-in');
+}
+
+/**
+ * Trigger an import pass right now, respecting the SAME `running` mutex the
+ * foreground/launch orchestrator uses.
+ *
+ * This is the only sanctioned way to kick off an out-of-band pass — the
+ * Settings toggle calls this, never `importHealthKitRuns` directly. Calling
+ * the raw function bypasses the mutex: flipping the toggle on at the exact
+ * moment a foreground-triggered pass is already mid-flight would run TWO
+ * concurrent passes, and two passes racing to import the same new workout
+ * both pass the SAME "not yet in the ledger" check before either has
+ * written its own row, creating two local sessions for one workout — the
+ * bug this feature's own dedup exists to prevent, reintroduced by the
+ * trigger meant to make it happen sooner.
+ */
+export function triggerHealthKitImportNow(userID: string): void {
+  // Keeps the module's own identity in step with whoever is calling this —
+  // there is no reason a caller that already knows the current athlete's id
+  // should have to trust a second, independently-tracked copy of it.
+  currentUserID = userID;
+  runImportPass('settings-toggle');
 }
 
 function runImportPass(reason: string): void {

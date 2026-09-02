@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,11 +43,17 @@ func translatePgError(err error) error {
 	case "23503": // foreign_key_violation
 		return ErrNotFound
 	case "23505": // unique_violation
-		// Unambiguous: the ON CONFLICT(session_id) clause in PutDetail's
-		// INSERT already absorbs every session_id collision, so the only
-		// unique constraint left to fire here is the per-user
-		// healthkit_uuid index — see ErrAlreadyExists's doc comment.
-		return ErrAlreadyExists
+		// Scoped by constraint name rather than assumed from the SQL shape,
+		// same discipline profile.translatePgError's own 23505 branch
+		// takes: PutDetail's ON CONFLICT(session_id) clause already absorbs
+		// every session_id collision on the INSERT path, so in practice
+		// this is unreachable for anything but the healthkit_uuid index —
+		// but "in practice" is an argument, and the constraint name check
+		// is what makes the guarantee structural rather than argued.
+		if strings.Contains(pgErr.ConstraintName, "healthkit_uuid") {
+			return ErrAlreadyExists
+		}
+		return fmt.Errorf("%w: a value conflicts with an existing row", ErrInvalidInput)
 	case "23514": // check_violation
 		return fmt.Errorf("%w: a value is out of range", ErrInvalidInput)
 	case "22003": // numeric_value_out_of_range

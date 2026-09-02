@@ -18,9 +18,19 @@
 -- this index at all. What this catches is a reinstalled app or a second
 -- device with no local ledger of its own: PutDetail's upsert is keyed on
 -- session_id, so without this index a second device re-importing the same
--- watch-recorded run would create a SECOND session for it rather than being
--- refused. See running.ErrAlreadyExists's doc comment for how the 23505 this
--- fires is translated and surfaced.
+-- watch-recorded run would attach a SECOND detail row to it.
+--
+-- This index refuses that detail row, no more — it says nothing about the
+-- generic `sessions` row a client creates BEFORE reaching this endpoint,
+-- which by the time this fires already exists server-side. What makes the
+-- end-to-end guarantee "no duplicate RUN in history" hold is the mobile
+-- client's own handling of the 409 this produces: it deletes the session it
+-- just created rather than leaving it an orphaned, detail-less duplicate —
+-- see running.ErrAlreadyExists's doc comment and
+-- apps/mobile/lib/sessionStore.ts's abandonDuplicateHealthKitImport.
+
+SET lock_timeout = '3s';
+
 ALTER TABLE running_session_detail ADD COLUMN healthkit_uuid TEXT;
 
 CREATE UNIQUE INDEX running_session_detail_healthkit_uuid_per_user

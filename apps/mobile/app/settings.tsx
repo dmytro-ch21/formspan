@@ -12,8 +12,8 @@ import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { isHealthKitSupported } from '@/lib/healthkit';
 import {
-  importHealthKitRuns,
   readHealthKitImportEnabled,
+  triggerHealthKitImportNow,
   writeHealthKitImportEnabled,
 } from '@/lib/healthkitSync';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
@@ -273,14 +273,30 @@ export default function SettingsScreen() {
           onChange={(on) => {
             setHealthKitImport(on);
             if (!userId) return;
-            // Optimistic, reverted on failure — same posture the sharing
-            // switch below takes with its own server-backed state; this one
-            // is device-local, so the only failure is a SQLite write.
-            writeHealthKitImportEnabled(userId, on).catch(() => setHealthKitImport(!on));
-            // Turning it ON asks HealthKit for permission and runs the first
-            // import pass immediately, rather than making the athlete wait
-            // for the next app foreground to see anything appear.
-            if (on) void importHealthKitRuns(userId);
+            void (async () => {
+              try {
+                // Optimistic, reverted on failure — same posture the sharing
+                // switch below takes with its own server-backed state; this
+                // one is device-local, so the only failure is a SQLite
+                // write. AWAITED before triggering the import pass below:
+                // `readHealthKitImportEnabled` inside that pass reads this
+                // exact preference back, and firing the pass before the
+                // write lands races the two — the pass could read the OLD
+                // value and silently import nothing on the very toggle that
+                // was meant to turn it on.
+                await writeHealthKitImportEnabled(userId, on);
+              } catch {
+                setHealthKitImport(!on);
+                return;
+              }
+              // Turning it ON asks HealthKit for permission and runs the
+              // first import pass immediately, rather than making the
+              // athlete wait for the next app foreground to see anything
+              // appear. Goes through the mutex-guarded trigger, never the
+              // raw `importHealthKitRuns`, so this can never race a pass
+              // already in flight from sign-in or a foreground return.
+              if (on) triggerHealthKitImportNow(userId);
+            })();
           }}
           testID="settings-healthkit-import"
         />

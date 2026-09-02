@@ -428,6 +428,21 @@ func TestHealthKitUUIDIsUniquePerUser(t *testing.T) {
 		t.Fatalf("second session's detail after a refused write: %v, want ErrNotFound", err)
 	}
 
+	// And the FIRST session's row — the one that legitimately owns this
+	// uuid — must be completely unchanged by the refused write. The refused
+	// INSERT never touches this row at all, but that is exactly the kind of
+	// fact worth asserting rather than assuming: a future rewrite of this
+	// statement into something that DOES touch existing rows on conflict
+	// (an ON CONFLICT clause keyed on healthkit_uuid, say) would silently
+	// reintroduce a cross-session overwrite with no test noticing.
+	original, err := repo.GetDetail(ctx, user, firstID)
+	if err != nil {
+		t.Fatalf("original session's detail after a refused write on a different session: %v", err)
+	}
+	if original.HealthKitUUID == nil || *original.HealthKitUUID != uuid {
+		t.Fatalf("original session's healthkit_uuid = %v, want %q — the refused write altered it", original.HealthKitUUID, uuid)
+	}
+
 	// A DIFFERENT user importing the identical HealthKit uuid (two athletes
 	// on the same shared library workout is not realistic, but the index is
 	// scoped per-user rather than global, and this is what proves that scope
