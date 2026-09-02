@@ -52261,6 +52261,159 @@ depends on this and was not started here. `NEEDS HUMAN EVIDENCE` per the
 ticket's own AC: build a shake from four entries on a device, log it again the
 next day as one — not something a simulator run substitutes for.
 
+## 2026-09-02 — N469 (#794): Library's pinned header, redesigned search-first — one filter row, one expand affordance
+
+**Closes the exact gap the 2026-08-21-ish entry above recorded and deferred**:
+*"The Library header is ~300pt before the first result, and the glossary is
+~40% of it… The fix is the pattern the position screen already uses — move
+the glossary block into the list's `ListHeaderComponent`… Not done here
+because it is a structural change to a screen this branch could not verify on
+a device."* The user has now confirmed the defect directly, from a device, and
+asked for something stronger than "scrollable instead of pinned": *"things
+like your own chains your class plans, your sequences, how round goes and so
+onn are additions and should better be designed to expand something and see
+this not in the way they are now and blocking whole view"* — and — *"at first
+we should see only search bar and all the screen the list of techniques."*
+
+**The distinction the fix is built around**: not everything in the old ~380
+line fixed header was the same kind of thing. Sport chips and the position/
+belt/muscle/movement facet buttons (`FACETS`) genuinely change what the
+technique/exercise list shows — they stay visible, always, as one control.
+"Your own chains", "Your class plans", the round map, "My curricula", the belt
+syllabuses and the position glossary cards are navigation shortcuts to a
+*different* screen; using none of them changes a single row of this list. Those
+collapse behind one expand affordance instead of three permanent cards.
+
+**What changed, concretely** (`apps/mobile/app/library.tsx`):
+
+- The sport-chip row (a wrapping row) and the facet-button row (a separate
+  horizontal `ScrollView`) merge into ONE horizontally-scrolling row
+  (`styles.filterRow`) — the Spotify Library / Hevy exercise-library pattern
+  the issue cites: one thin strip of everything that narrows the same list,
+  rather than a stack of sections. Sport chips still select directly; facet
+  buttons still open the existing bottom-sheet picker. Same testIDs
+  (`library-filter-*`, `library-facet-*`).
+- "Your own chains" (`library-sequences`), "Your class plans"
+  (`library-classplans`), and the "Start with positions" block (round map —
+  `library-roundmap-link` — plus "My curricula", the belt syllabuses and the
+  position glossary cards) are removed from the fixed header entirely and
+  rendered instead inside a new bottom-sheet Modal, opened by one compact row
+  — `library-extras-toggle`, "More from your library" — that only renders when
+  there is something behind it (`showExtras`, mirroring the same two gates the
+  content itself already used: the technique module enabled, or BJJ's position
+  facet with a loaded glossary). All three existing testIDs are unchanged and
+  still asserted, just reachable one tap later.
+- First paint, cold-open, on any account with content in either bucket: search
+  bar, one slim filter row, one compact "More from your library" row, then the
+  technique/exercise list — no permanently-stacked cards, no scrolling past
+  reference content to reach a real result.
+
+**Why a bottom sheet** (the issue asked this be justified against its three
+cited sources rather than picked silently — full reasoning is in the sheet's
+own comment in the file):
+
+1. General 2026 mobile UX guidance (Apple Maps folding its whole search/
+   suggestion surface into a sheet, Telegram moving search off the main list)
+   is the direct precedent for "primary surface visible, secondary tucked
+   behind one tap, layered rather than permanent chrome." This file already
+   rejected a full-screen `pageSheet` for the *existing* facet picker on
+   exactly this reasoning ("a modal context switch for what is really a
+   dropdown"); everything in the new sheet is more clearly optional than a
+   filter picker, so the same call applies at least as strongly. A pushed
+   route (a second screen) was rejected for the same reason in the other
+   direction — it costs a back-navigation for content meant to be glanced at
+   and dismissed.
+2. Spotify's Library screen keeps *filtering* controls thin and permanent and
+   folds personal content (pinned playlists) directly into the one list —
+   which is the model already followed for chips/facets above, and explicitly
+   does NOT model "several unrelated links to other screens", which is what
+   chains/class-plans/round-map actually are.
+3. Hevy folds custom exercises into the SAME searchable list — again a
+   precedent for the filter row, not for content that isn't part of the list
+   at all. Neither source argues for an inline accordion over a sheet.
+
+An inline accordion (the ticket's other named-defensible option) was
+considered and rejected: expanding it in place either pushes the list down
+(bringing back the "scroll past everything" problem behind a tap) or requires
+the list to make room, which risks the exact "loses scroll position"
+failure the acceptance criteria calls out. A Modal sheet sits entirely outside
+the `FlatList`'s own tree, so opening/closing it cannot move or remount the
+list underneath — the scroll position survives by construction.
+
+**Tests**: `__tests__/app/libraryBjjEntries.test.tsx` (all five cases) updated
+to press `library-extras-toggle` before reaching `library-sequences-link`,
+plus a new assertion that the toggle itself — not just its contents — is
+absent when nothing qualifies (BJJ off, strength-only). Mutation-tested three
+ways: `showExtras` forced `true` (caught by the "is absent…" case, which
+expects the toggle gone), `showExtras` forced `false` (caught by every case
+that opens the sheet), and the toggle's `onPress` neutered (caught the same
+way) — each confirmed to fail before the fix was restored.
+`libraryErrorMessages.test.tsx` needed no changes (untouched surface).
+
+**Two review rounds found real gaps in the first draft, both fixed before
+ready-for-review:**
+
+- **`frontend-reviewer`**: the extras `Modal` was mounted unconditionally
+  (`<Modal visible={openExtras}>`), unlike the facet-picker sheet directly
+  above it in the same file, which the file's own comment explains is gated
+  on a `shown*` boolean specifically because a `Modal`'s children are rebuilt
+  by the parent on every render — every keystroke in the search box — whether
+  or not `visible` is true. The extras sheet skipped that gate, so
+  `positions.map`, `syllabuses.map`, seven `Pressable`s and a `LinearGradient`
+  were being reconstructed on every keystroke while invisible. Fixed by
+  splitting `extrasOpen` into `openExtras`/`shownExtras` (identical shape to
+  `openFacet`/`shownFacet`), with an `onDismiss` clearing `shownExtras` only
+  once the sheet has actually finished leaving the screen. The reviewer also
+  flagged that nothing tested *closing* the sheet — a mutation deleting any of
+  the seven `setOpenExtras(false)` calls, or the Done/backdrop handlers, would
+  have passed the suite as written. Two tests added (`Done` → link gone;
+  pressing a link → link gone, on the way to its own screen) and both
+  mutation-tested (Done's handler neutered, one link's close call deleted) —
+  each caught, confirmed by re-running after reverting.
+- **`ac-verifier`**: acceptance criterion 5 asks that the three testIDs
+  "still exist **and are asserted**" — only `library-sequences-link` was.
+  `library-classplans-link` and `library-roundmap-link` existed and were
+  reachable but nothing under `apps/mobile` pressed either one (true before
+  N469 too — not a regression, but the ticket's own words now demand it).
+  Two tests added, each mutation-tested by swapping the target route and
+  confirming the assertion catches it. The round-map test needed one thing
+  the sequences/class-plans tests didn't: `library-roundmap-link` lives
+  inside "Start with positions", gated on `usesPosition(sport, modules)` —
+  which reads `moduleFor(modules, sport)` and therefore never matches
+  `sport === ''` ("All"). Selecting the BJJ filter chip first is required to
+  reach it, exactly as it was pre-N469; this is a pre-existing gate, not
+  something this ticket introduced.
+
+Both reviewers agreed `apps/mobile/CLAUDE.md` — the file this ticket's own
+brief cited for design-token discipline — does not exist and never has (only
+the root `CLAUDE.md` does); the tokens used (`vola.textMuted`, `vola.textDim`,
+`vola.lineSoft`, the `layers` icon) were checked against
+`apps/mobile/constants/Colors.ts` and `components/ui/Icon.tsx` instead, and
+all are pre-existing entries.
+
+### Open questions this leaves
+
+- **The "discipline turned off" explainer (`library-techniques-off`) stays
+  visible in the fixed header, not behind the expand affordance**, on the
+  same footing as the error/technique-error banners it sits beside — it
+  explains an active state affecting what the athlete sees right now, and
+  hiding it behind a tap risked an athlete never discovering why BJJ content
+  vanished (the exact N61 failure this same explainer exists to prevent). Not
+  explicitly ruled on by the issue; flagged rather than assumed.
+- **NEEDS HUMAN EVIDENCE**, unresolved by anything a suite can check (the
+  first two from the issue's own list, the third added after
+  `frontend-reviewer` pointed out this sheet does something its facet-picker
+  template never does — navigate):
+  - On a real phone, at a real font size: confirm first paint genuinely shows
+    only search + filter row + "More from your library" + the list, and that
+    the expand affordance is discoverable without being told where it is.
+  - Confirm the filter row and the "More from your library" row read as
+    visually distinct in weight/shape — one narrows the list, the other opens
+    elsewhere — not as two rows of the same kind of control.
+  - Every row inside the sheet fires `setOpenExtras(false)` and `router.push`
+    in the same tick — confirm on a device that the pushed screen appears
+    cleanly rather than visibly overlapping the sheet's own slide-out.
+
 ## Open items / known gaps as of this entry
 
 
@@ -52271,7 +52424,7 @@ next day as one — not something a simulator run substitutes for.
 - **The belt hero came off the plan card** when it became `UP NEXT`. `usesBelt` still governs it wherever it returns; it is simply not drawn in the tighter row. Not a decision anybody asked for — a consequence of the reshape, recorded so it is not rediscovered as a bug.
 - **CLOSED by the entry above (#454): every Postgres-backed test package now takes one database-scoped advisory lock in `TestMain`.** This bullet used to say twelve packages were still exposed and that the fix would "serialise concurrent suites at every package, which is a real wall-clock cost". Both halves were right; the cost is **+17%** of wall clock across four concurrent suites, measured, and it buys nine packages' worth of spurious red. **What survives as a gap:** four of the packages that issue listed — `health`, `profile`, `friend` and `theme`, reported at 1–5 failures in 24 — are fixed by construction rather than by a measurement that could tell "fixed" from "got lucky" at those rates. And `-p 1` is now partly redundant, since the shared lock would serialise packages inside one invocation too; removing it is a separate change and nobody has measured it.
 - **`cmd/seed`'s remaining residue is `positions` (11 rows) and `ibjjf_rulesets` (25).** The exercise catalog and the technique library are both cleaned up by their own packages now (entries above), but these two survive every run. `positions` is a deliberate omission — nothing borrows position ids the way packages borrowed catalog and library ids. `ibjjf_rulesets` is different and worth knowing before touching: it is not merely unremoved, it is **load-bearing**. `techniques.ibjjf_ruleset_id` is a RESTRICT foreign key, and the three `UpsertAll(SeedData())` tests in `technique` never seed rulesets — they pass only because `TestPostgresRepository_SeedAndFilter` runs earlier in source order and leaves its rulesets behind. Deleting them, which is the obvious next tightening, fails those three tests on the foreign key. Whoever does it has to make those tests seed their own rulesets first.
-- **The Library header is ~300pt before the first result, and the glossary is ~40% of it.** Search + sport chips + position chips + belt chips (#87) + the glossary row all sit outside the `FlatList` in `styles.controls`, so they are permanently pinned; on a 4.7" screen that leaves roughly two catalog rows visible. The fix is the pattern the position screen already uses — move the glossary block into the list's `ListHeaderComponent` so it scrolls away. Not done here because it is a structural change to a screen this branch could not verify on a device, and two of this branch's three worst defects were runtime-only.
+- **CLOSED by N469 (#794, entry above, 2026-09-02).** This used to say the Library header was ~300pt before the first result, with the glossary ~40% of it, and named "move the glossary block into `ListHeaderComponent`" as the fix. The user confirmed the defect directly from a device and asked for more than a scrollable header: the filter chips/facets merged into one slim row, and everything else ("Your own chains", "Your class plans", the round map, curricula, syllabuses, the position glossary) moved behind a single "More from your library" bottom-sheet affordance rather than staying permanently visible in any form. Two of the two NEEDS HUMAN EVIDENCE checks from that ticket remain open (real-device first paint, and the two rows reading as visually distinct in weight) — see the entry above.
 - **Two position taxonomies now sit on one Library screen.** The filter chips are nine coarse families; the glossary is eleven curated entries. Since the guard split they disagree in a visible way: a beginner can read the Closed Guard card, learn the distinction, and then find no chip that filters to those 37 techniques. Adding North-South, and later Leg Entanglement, closed the cheap half each time (a position the glossary advertised that no chip could reach) — but doing it twice by hand is the evidence that hand-maintenance is the actual bug: the vocabulary is copied across four client files and one backend map, and the taxonomy PR updated one of the four until review caught it. Keying the chips on the glossary's ids, or a shared constant with a test asserting it matches positions.json, is the real answer and is design work, not a patch.
 
 
