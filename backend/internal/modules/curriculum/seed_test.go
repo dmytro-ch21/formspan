@@ -312,89 +312,69 @@ func TestEveryNonSyllabusCurriculumStillHasMilestones(t *testing.T) {
 	}
 }
 
-// N110 (#480): the belt/syllabus PAIRING, asserted rather than assumed.
+// N110 (#480), completed by F28 (#720): the belt/syllabus PAIRING — every
+// belt has exactly one syllabus and vice versa — AND, now that the content
+// is reconciled, the phase-title/order parity N110 originally asked for.
 //
 // A belt's roadmap (`<belt>-belt-basics`, track "belt") and its reference
 // syllabus (`<belt>-belt-syllabus`, track "syllabus") are meant to be one
 // spine at two depths — the syllabus is what exists, the roadmap is the
 // worked subset an athlete is measured on — and they share a Belt value.
-// Nothing in the suite asserted that pairing before this test: a belt could
-// lose its syllabus, or a syllabus its belt, and every other guard in this
-// file would stay green, because each of them iterates ONE track at a time.
+// Before N110 landed, nothing in the suite asserted the pairing at all: a
+// belt could lose its syllabus, or a syllabus its belt, and every other
+// guard in this file would stay green, because each of them iterates ONE
+// track at a time.
 //
-// # Why this test does not also compare phase titles and order
+// # Why the phase-title/order half took a second ticket
 //
 // N110 was filed on the claim that "a belt's roadmap and its syllabus share
 // their phase titles and their order, and differ only in depth and in
-// whether items carry criteria" — and asked for a test asserting exactly
-// that, slice-by-slice, so a future reorder or retitle on one side and not
-// the other would go red.
+// whether items carry criteria." PR #719 measured that claim against the
+// embedded content (per this repo's "verify that a check can fail" rule)
+// and found it false on every one of the four pairs: white and purple
+// matched in phase COUNT (11/11, 10/10) but not in title TEXT — the roadmap
+// carries docs/design/bjj-belt-curriculum.md's Title Case milestone names
+// verbatim (TestEveryBeltRoadmapMatchesTheSuppliedDocument in
+// document_test.go enforces that) while the syllabus predated that document
+// (N20/#277) and read in its own sentence-case narrative voice; blue and
+// brown additionally disagreed on phase COUNT (10 vs 9, 10 vs 7), so no
+// title normalisation alone could have closed the gap. #719 shipped the
+// weaker pairing-only guard below rather than commit a permanently-red
+// literal test, and filed F28 (#720) to do the content reconciliation this
+// stronger assertion needed to be buildable at all.
 //
-// That claim was checked against the embedded content while writing this
-// test (not asserted — measured, per this repo's own "verify that a check
-// can fail" rule), by writing the literal comparison the ticket describes
-// and running it against unmutated `main`. It fails, on every one of the
-// four pairs, with no mutation involved:
-//
-//   - White and purple match phase-for-phase in COUNT (11/11, 10/10) but not
-//     in TITLE TEXT. The roadmap carries docs/design/bjj-belt-curriculum.md's
-//     Title Case milestone names verbatim — TestEveryBeltRoadmapMatchesThe-
-//     SuppliedDocument in document_test.go enforces exactly that — while the
-//     syllabus predates that document (N20/#277) and reads in its own
-//     sentence-case narrative voice: roadmap "Turtle" / syllabus "Turtle,
-//     from both sides"; roadmap "Submission Defense" / syllabus "Know when
-//     you are in trouble". Lower-casing both sides before comparing does not
-//     rescue this — 5 of white belt's 11 phases differ in actual wording,
-//     not just case ("Sweep From Bottom" vs "Sweep from the bottom").
-//   - Blue and brown additionally disagree on PHASE COUNT — blue is 10
-//     roadmap phases vs 9 syllabus phases, brown is 10 vs 7 — so no title
-//     normalisation could pass them; there are not the same number of slots
-//     to line up.
-//
-// So the "cheap half" this ticket asked for turned out not to be cheap: the
-// stronger invariant it wanted to guard does not currently hold, on content
-// that shipped independently across two PRs (N20/#277 authored the
-// syllabuses; N97/#445 re-authored the roadmaps against the design document
-// without reconciling the syllabuses to match). Shipping the literal test
-// would mean committing it permanently red — not demonstrating a mutation,
-// just restating a pre-existing defect on every run — which breaks `verify`
-// and CI for everyone, not only for a future editor who introduces new
-// drift. And fixing the content to make it true is exactly the kind of
-// editorial call this ticket explicitly declines to make on its own
-// authority: retitling the syllabus is a "which is the source?" decision,
-// and blue/brown's count mismatch cannot be closed by a title edit at all —
-// items would have to move between phases, touching the per-belt notes
-// authored on them.
-//
-// So this test asserts the invariant that IS true today and stays true
-// under exactly the drift N110 was worried about (deleting or renaming a
-// counterpart, or forgetting one when a fifth belt is added): every belt
-// has exactly one syllabus and every syllabus has exactly one belt. The
-// stronger phase-title/order guard belongs in a follow-up once the content
-// itself is reconciled — see the 2026-08-28 history entry for the recorded
-// ruling.
+// F28 did that reconciliation directly in curricula.json: white and purple's
+// syllabus phase titles were rewritten to the roadmap's Title Case wording
+// (purple also needed its phases REORDERED — its content was not
+// positionally aligned with the roadmap the way white's was, despite the
+// matching count — and one pair of phases merged); blue and brown's syllabus
+// phase counts were brought in line with their roadmaps by moving existing
+// items between phases and, where a roadmap milestone had no syllabus
+// content at all, adding a phase for it (backfilled from the roadmap's own
+// items/concepts, never invented). See the 2026-08-28 and F28 history
+// entries for the full per-belt mapping and reasoning.
 func TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart(t *testing.T) {
 	data, err := SeedData()
 	if err != nil {
 		t.Fatalf("parse seed: %v", err)
 	}
 
-	roadmaps := map[string]string{}   // belt -> curriculum id
-	syllabuses := map[string]string{} // belt -> curriculum id
+	roadmaps := map[string]SeedCurriculum{}   // belt -> curriculum
+	syllabuses := map[string]SeedCurriculum{} // belt -> curriculum
 	for _, c := range data {
 		switch c.Track {
 		case "belt":
 			if prev, dup := roadmaps[c.Belt]; dup {
-				t.Errorf("two curricula on the belt track share belt %q: %s and %s", c.Belt, prev, c.ID)
+				t.Errorf("two curricula on the belt track share belt %q: %s and %s", c.Belt, prev.ID, c.ID)
 				continue
 			}
-			roadmaps[c.Belt] = c.ID
+			roadmaps[c.Belt] = c
 		case "syllabus":
 			if prev, dup := syllabuses[c.Belt]; dup {
-				t.Errorf("two curricula on the syllabus track share belt %q: %s and %s", c.Belt, prev, c.ID)
+				t.Errorf("two curricula on the syllabus track share belt %q: %s and %s", c.Belt, prev.ID, c.ID)
 				continue
 			}
-			syllabuses[c.Belt] = c.ID
+			syllabuses[c.Belt] = c
 		}
 	}
 
@@ -428,16 +408,44 @@ func TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart(t *testing.T) {
 	}
 
 	checked := 0
-	for belt, id := range roadmaps {
-		if _, ok := syllabuses[belt]; !ok {
-			t.Errorf("%s (belt %q) has no syllabus counterpart", id, belt)
+	for belt, roadmap := range roadmaps {
+		syllabus, ok := syllabuses[belt]
+		if !ok {
+			t.Errorf("%s (belt %q) has no syllabus counterpart", roadmap.ID, belt)
 			continue
 		}
 		checked++
+
+		// The stronger invariant N110 asked for: same phase titles, same
+		// order. Compared by index rather than by set, so a REORDER (not
+		// just a rename or a drop) is caught too — the purple belt
+		// reconciliation needed exactly that distinction, since its old
+		// syllabus phases existed but were not positionally aligned with
+		// the roadmap.
+		rt := make([]string, len(roadmap.Phases))
+		for i, p := range roadmap.Phases {
+			rt[i] = p.Title
+		}
+		st := make([]string, len(syllabus.Phases))
+		for i, p := range syllabus.Phases {
+			st[i] = p.Title
+		}
+		if len(rt) != len(st) {
+			t.Errorf("%s has %d phases, its syllabus counterpart %s has %d\n  roadmap:  %v\n  syllabus: %v",
+				roadmap.ID, len(rt), syllabus.ID, len(st), rt, st)
+			continue
+		}
+		for i := range rt {
+			if rt[i] != st[i] {
+				t.Errorf("%s phase %d is %q, %s phase %d is %q — roadmap and syllabus must carry "+
+					"identical phase titles in identical order",
+					roadmap.ID, i, rt[i], syllabus.ID, i, st[i])
+			}
+		}
 	}
-	for belt, id := range syllabuses {
+	for belt, syllabus := range syllabuses {
 		if _, ok := roadmaps[belt]; !ok {
-			t.Errorf("%s (belt %q) has no belt-track counterpart", id, belt)
+			t.Errorf("%s (belt %q) has no belt-track counterpart", syllabus.ID, belt)
 		}
 	}
 	if checked == 0 {

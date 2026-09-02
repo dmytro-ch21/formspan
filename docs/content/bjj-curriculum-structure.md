@@ -42,13 +42,24 @@ rules* below for what changed and why). It now runs the same one, taken from
 authoritative. Same spine, two depths: the syllabus is *what exists*, the
 roadmap is *the worked subset you are measured on*.
 
-**That convergence has a cost, and it is filed rather than solved.** One
-ordering now lives in two places with nothing forcing them to agree, which is
-how two copies drift. `TestEveryBeltRoadmapMatchesTheSuppliedDocument` pins the
-roadmap to the document; nothing yet pins the syllabus to either. **N100
-(issue #480)** carries the cheap fix — a content test asserting the two tracks
-carry identical phase titles in identical order — and the question of whether
-one should be derived from the other.
+**That convergence used to have a cost that was filed rather than solved, and
+F28 (issue #720, completing N110/#480) closed it.** One ordering used to live
+in two places with nothing forcing them to agree — measured directly on PR
+#719, which found the syllabus did **not**, in fact, share the roadmap's
+phase titles or order for any of the four belts, despite the claim above:
+white and purple matched in phase count but not title text, and blue and
+brown did not even match in phase count (10 v 9, 10 v 7). F28 reconciled the
+syllabus content itself — retitling, reordering, and for purple, blue and
+brown, moving items between phases or adding a phase entirely where the
+syllabus had no counterpart for a roadmap milestone — so the claim above is
+now actually true rather than aspirational.
+`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart` in
+`backend/internal/modules/curriculum/seed_test.go` now asserts identical
+phase titles in identical order, not just pairing, so a future edit to one
+side without the other goes red. The full per-belt reconciliation mapping is
+recorded in the F28 history.md entry. The question of whether one should be
+*derived* from the other is still open — reconciling by hand is what closed
+this gap, not a generator.
 
 ## The canonical sections
 
@@ -66,15 +77,15 @@ table fixes is which domains exist and which belt owns what depth of each.
 | 1 | **The map** — how a round goes | The route and the loop | — | — | — |
 | | *(0 and 1 are no longer roadmap PHASES — see below)* | | | | |
 | 2 | **Standing** | Stance, grips, two takedowns, a sprawl | Chains, not singles | A standing game with an intent | A takedown system, specialised |
-| 3 | **Guard: keeping it** | Four points of contact, recover | The retention ladder | Retention against intent | Elite retention, every family |
-| 4 | **Guard: attacking** | Closed and half guard, two sweeps | Two guards that answer each other | One guard, all the way down | One primary guard, no leaks |
+| 3 | **Guard: keeping it** | Four points of contact, recover | The retention ladder | Advanced guard retention | Elite retention, every family |
+| 4 | **Guard: attacking** | Closed and half guard, two sweeps | Two guards that answer each other | An A-game guard, six ways | One primary guard, no leaks |
 | 5 | **Passing** | Headquarters, one pass | One pressure, one movement | The reaction map | A passing philosophy |
-| 6 | **Pins** | Side control and mount, held | Pins that go somewhere | Dilemmas between them | Pinning that forces reactions |
-| 7 | **The back** | Take it, hold it, finish it | (inside submission chains) | The back takes underneath | The back system |
-| 8 | **Turtle and the front headlock** | A door, not a home | The front headlock arrives | The front headlock system | Scrambles, owned |
+| 6 | **Pins** | Side control and mount, held | Connecting the pins | Dilemmas between them | Pins that force a reaction |
+| 7 | **The back** | Take it, hold it, finish it | (inside submission chains) | Guard connections that end there | The back system |
+| 8 | **Turtle and the front headlock** | A door, not a home | The front headlock arrives | Kimura and front headlock, merged | (folded into pinning and defensive layers) |
 | 9 | **Submissions** | The handful that work | Chains | Systems | Families, finished |
 | 10 | **Legs** | (defence only — know when to tap) | Responsibly: position, then the ankle | Entanglements as positions | The full family, where the rules allow |
-| 11 | **Escapes and defence** | Escape the bad places | Escape chains | (folded into retention) | Defensive layers |
+| 11 | **Escapes and defence** | Getting out of the bad places | Escape chains | (folded into retention) | Defensive layers |
 | 12 | **The standard** | What the record should show | " | " | " |
 | | *(12 is no longer a roadmap PHASE — see below)* | | | | |
 
