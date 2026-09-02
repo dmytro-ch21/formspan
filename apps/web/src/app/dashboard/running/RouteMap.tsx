@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { projectRoute } from "@/lib/runningAnalysis";
 import type { RunRoutePoint } from "@/lib/runningApi";
@@ -39,6 +39,7 @@ const MAX_SCALE = 8;
 
 export function RouteMap({ points }: { points: RunRoutePoint[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fullscreen, setFullscreen] = useState(false);
@@ -50,7 +51,11 @@ export function RouteMap({ points }: { points: RunRoutePoint[] }) {
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
 
-  const projected = projectRoute(points, VIEW_W, VIEW_H, 40);
+  // Memoized: `points` can be up to `running.MaxRoutePoints` (20,000), and
+  // without this, every `setPan` during a drag — one per pointermove, easily
+  // 100+/s — re-ran the full projection (four array scans, a bounding-box
+  // `Math.min/max(...spread)`) for a route that had not itself changed.
+  const projected = useMemo(() => projectRoute(points, VIEW_W, VIEW_H, 40), [points]);
 
   const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
@@ -63,21 +68,43 @@ export function RouteMap({ points }: { points: RunRoutePoint[] }) {
     setPan({ x: 0, y: 0 });
   }, []);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+  // Attached via a real DOM listener with `{ passive: false }`, NOT the
+  // `onWheel` prop. React has attached wheel listeners as PASSIVE by default
+  // since v17 (this app is on React 19), and `preventDefault()` inside a
+  // passive listener is a silent no-op — the `onWheel` prop's
+  // `e.preventDefault()` would look like it worked (no console warning, no
+  // error) while the page scrolled under the cursor the whole time the map
+  // "zoomed". Only a non-passive listener can actually stop that scroll.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
   }, [zoomBy]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    (e.target as Element).setPointerCapture(e.pointerId);
+    e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
     setDragging(true);
   }, [pan]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragRef.current) return;
-    const dx = e.clientX - dragRef.current.x;
-    const dy = e.clientY - dragRef.current.y;
+    // `pan` is applied to the `<g>` inside a `viewBox="0 0 ${VIEW_W} …"` SVG
+    // that is itself rendered at whatever CSS width the container gives it
+    // (`w-full`) — so one CLIENT pixel of pointer movement is NOT one
+    // viewBox unit except when the rendered width happens to equal
+    // `VIEW_W`. Scaling by that ratio is what keeps the route tracking the
+    // cursor 1:1 at every container width — the compare page's half-width
+    // column is roughly 2× off without it.
+    const renderedWidth = viewportRef.current?.clientWidth || VIEW_W;
+    const toViewBox = VIEW_W / renderedWidth;
+    const dx = (e.clientX - dragRef.current.x) * toViewBox;
+    const dy = (e.clientY - dragRef.current.y) * toViewBox;
     setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
   }, []);
 
@@ -86,17 +113,31 @@ export function RouteMap({ points }: { points: RunRoutePoint[] }) {
     setDragging(false);
   }, []);
 
+  // The one true source of "are we fullscreen" is `document.fullscreenElement`
+  // — this listener is what keeps `fullscreen` state honest against it. Without
+  // it, leaving fullscreen the ordinary way (Esc, the browser's own exit
+  // control) never fires `toggleFullscreen` below, so the state stays `true`
+  // forever: the map keeps its viewport-filling layout inside the normal page
+  // flow (broken), and the button — believing it's still fullscreen — tries to
+  // EXIT on the next click instead of entering again.
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
   const toggleFullscreen = useCallback(async () => {
     const el = containerRef.current;
     if (!el) return;
     try {
       if (!document.fullscreenElement) {
         await el.requestFullscreen();
-        setFullscreen(true);
       } else {
         await document.exitFullscreen();
-        setFullscreen(false);
       }
+      // `fullscreen` state itself is NOT set here — the `fullscreenchange`
+      // listener above is the single writer, so this and Esc/the browser's
+      // own exit button go through the same path and can't disagree.
     } catch {
       // Fullscreen can be refused (no user gesture in an odd embed context,
       // a browser without the API) — the map still works, just at the
@@ -148,13 +189,14 @@ export function RouteMap({ points }: { points: RunRoutePoint[] }) {
       </div>
 
       <div
+        ref={viewportRef}
         className={`touch-none select-none ${fullscreen ? "flex-1" : ""}`}
         style={{ cursor: dragging ? "grabbing" : "grab" }}
-        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         <svg
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}

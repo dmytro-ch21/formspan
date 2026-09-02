@@ -44,6 +44,10 @@ function CompareContent() {
   const [runB, setRunB] = useState<RunData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Bumped by "Try again" to re-run the effect below without either id
+  // having changed — `idA`/`idB` alone can't be a retry trigger, since a
+  // retry on the same URL asks for the same two ids.
+  const [retryNonce, setRetryNonce] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -72,7 +76,7 @@ function CompareContent() {
         if (!c.signal.aborted) setLoading(false);
       });
     return () => c.abort();
-  }, [getToken, idA, idB]);
+  }, [getToken, idA, idB, retryNonce]);
 
   if (!idA || !idB) {
     return (
@@ -107,7 +111,14 @@ function CompareContent() {
         role="alert"
         className="rounded-card border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
       >
-        {error ?? "Couldn't load one of these runs."}
+        {error ?? "Couldn't load one of these runs."}{" "}
+        <button
+          type="button"
+          onClick={() => setRetryNonce((n) => n + 1)}
+          className="underline"
+        >
+          Try again
+        </button>
       </p>
     );
   }

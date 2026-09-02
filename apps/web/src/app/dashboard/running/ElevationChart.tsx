@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo } from "react";
+
 import { elevationProfile, hasElevationData } from "@/lib/runningAnalysis";
 import { formatDistance, type UnitSystem } from "@/lib/units";
 import type { RunRoutePoint } from "@/lib/runningApi";
@@ -12,48 +14,103 @@ import type { RunRoutePoint } from "@/lib/runningApi";
  * happened. Only rendered when `hasElevationData` says there is something to
  * show — see `[id]/page.tsx`, which is also what makes this component safe to
  * assume a non-empty profile once mounted.
+ *
+ * **Elevation is always metres, on both unit systems** — matching
+ * `apps/mobile/lib/celebration.ts`'s `'${Math.round(elevationGainM)} m'` (no
+ * imperial conversion at all). Nobody reads elevation gain in yards or miles,
+ * which is what `formatDistance` would render it as on `units: 'imperial'`;
+ * running it through that function was the earlier bug here. Distance ALONG
+ * the route (the x-axis) is a genuine distance and still goes through
+ * `formatDistance` correctly.
  */
 
 const W = 720;
 const H = 200;
 const PAD = { top: 12, right: 12, bottom: 24, left: 48 };
 
+/**
+ * At most this many markers, however long the profile is. A full
+ * `MaxRoutePoints` (20,000) track would otherwise put one `<circle>` +
+ * `<title>` per point in the DOM — unreadable as hover targets at that
+ * density anyway, and a real rendering cost for no benefit. Buckets by
+ * position in the array (not distance) and keeps EACH bucket's highest and
+ * lowest point, not just its first — a downsample that dropped a peak or a
+ * dip between two kept points would draw a smoother climb/descent than the
+ * run actually had.
+ */
+const MAX_MARKERS = 300;
+
+function downsample<T extends { elevationM: number }>(profile: T[], max: number): T[] {
+  if (profile.length <= max) return profile;
+  const bucketSize = Math.ceil(profile.length / (max / 2));
+  const out: T[] = [];
+  for (let i = 0; i < profile.length; i += bucketSize) {
+    const bucket = profile.slice(i, i + bucketSize);
+    let lo = bucket[0];
+    let hi = bucket[0];
+    for (const p of bucket) {
+      if (p.elevationM < lo.elevationM) lo = p;
+      if (p.elevationM > hi.elevationM) hi = p;
+    }
+    // Keep both, in the order they occurred, so the line doesn't zigzag
+    // backwards in distance.
+    if (lo === hi) out.push(lo);
+    else if (bucket.indexOf(lo) < bucket.indexOf(hi)) out.push(lo, hi);
+    else out.push(hi, lo);
+  }
+  return out;
+}
+
 export function ElevationChart({
   points,
   units,
+  /**
+   * The run's own STORED gain, when there is one — preferred over
+   * recomputing from the (possibly downsampled) profile, so this chart's
+   * aria-label can never disagree with the summary `Stat` above it on the
+   * same page for the same run.
+   */
+  elevationGainM,
 }: {
   points: RunRoutePoint[];
   units: UnitSystem;
+  elevationGainM?: number | null;
 }) {
-  if (!hasElevationData(points)) return null;
-  const profile = elevationProfile(points);
-  if (profile.length < 2) return null;
+  const fullProfile = useMemo(() => elevationProfile(points), [points]);
+  const markers = useMemo(() => downsample(fullProfile, MAX_MARKERS), [fullProfile]);
 
-  const elevations = profile.map((p) => p.elevationM);
+  if (!hasElevationData(points) || fullProfile.length < 2) return null;
+
+  const elevations = fullProfile.map((p) => p.elevationM);
   const lo = Math.min(...elevations);
   const hi = Math.max(...elevations);
   const span = hi - lo || Math.max(hi * 0.1, 1);
   const yMin = lo - span * 0.1;
   const yMax = hi + span * 0.1;
 
-  const maxDist = profile[profile.length - 1].distanceM || 1;
+  const maxDist = fullProfile[fullProfile.length - 1].distanceM || 1;
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
   const x = (d: number) => PAD.left + (d / maxDist) * innerW;
   const y = (e: number) => PAD.top + innerH - ((e - yMin) / (yMax - yMin)) * innerH;
 
-  const linePoints = profile.map((p) => `${x(p.distanceM)},${y(p.elevationM)}`).join(" ");
+  // The LINE is drawn from the full-resolution profile — only the markers
+  // (and their hover targets) are downsampled — so the polyline's shape
+  // never loses a peak the way the marker set alone would.
+  const linePoints = fullProfile.map((p) => `${x(p.distanceM)},${y(p.elevationM)}`).join(" ");
   // A filled area under the line reads as "ground", the way every elevation
   // profile in a running app draws it — a bare line reads as an abstract
   // trend line instead.
   const areaPoints = `${x(0)},${y(yMin)} ${linePoints} ${x(maxDist)},${y(yMin)}`;
 
   const ticks = [yMax, yMin + (yMax - yMin) * 0.5, yMin];
-  const gainM = elevations.reduce((sum, e, i) => {
+  // Only computed as a fallback — see the prop doc above.
+  const computedGainM = elevations.reduce((sum, e, i) => {
     if (i === 0) return sum;
     const d = e - elevations[i - 1];
     return d > 0 ? sum + d : sum;
   }, 0);
+  const gainM = elevationGainM ?? computedGainM;
 
   return (
     <figure className="m-0">
@@ -95,7 +152,7 @@ export function ElevationChart({
           strokeLinecap="round"
         />
 
-        {profile.map((p, i) => (
+        {markers.map((p, i) => (
           <circle
             key={i}
             cx={x(p.distanceM)}

@@ -51626,16 +51626,74 @@ capability predicate — unlike Records or Library, there is no generic
 avoids everywhere else is the only honest option for a page this specific to
 one discipline.
 
+**Two real bugs in `RouteMap.tsx`, both caught by `frontend-reviewer` before
+the PR opened, neither one this session's tests could have caught (both are
+browser-runtime behaviour, and this codebase's web tests are deliberately
+pure-logic-only, `node` environment, no jsdom).** (1) `onWheel`'s
+`e.preventDefault()` was a silent no-op — React has attached `wheel` as a
+PASSIVE listener since v17 (confirmed against the installed
+`react-dom@19.2.4` source), so "scroll to zoom" zoomed AND scrolled the page
+underneath the cursor on every tick, with no error or warning anywhere. Fixed
+by attaching the handler as a real `addEventListener('wheel', …, { passive:
+false })` in a `useEffect` instead of the `onWheel` prop. (2) `fullscreen`
+state was written only by the toggle button's own click handler, never
+synced to `document.fullscreenElement` — pressing Esc (the normal way anyone
+leaves fullscreen) left the state stuck `true`: the map kept its
+viewport-filling layout inside the normal page flow, and the button, still
+believing it was fullscreen, tried to `exitFullscreen()` on the next click
+instead of re-entering. Fixed with a `fullscreenchange` listener as the
+single writer of that state, so the button, Esc and the browser's own exit
+control all agree. `ac-verifier` correctly could not settle either from a
+diff — both are exactly what issue #775's `NEEDS HUMAN EVIDENCE` marker on
+the fullscreen/zoom criterion is for, added to the issue body once the fixes
+landed, matching how N460 and N461 marked their own device-only criteria.
+
+Also fixed from the same review pass: the "Elevation" section heading used
+to gate on `route_points.length > 0` while `ElevationChart` itself gates on
+`hasElevationData` (plus a 2-point floor) — a track with points but no
+altitude on any of them showed a heading over nothing, the opposite of what
+this entry's own functional-scenarios.md addition claims. Both gates now
+read the same condition. Elevation gain was also running through
+`formatDistance`, which converts to yards/miles on `units: 'imperial'` — not
+a unit anyone reads elevation in, and inconsistent with
+`apps/mobile/lib/celebration.ts`'s post-run summary, which always renders it
+in plain metres; the web page now matches that convention on both unit
+systems. `ElevationChart` also downsamples its marker circles (a full
+`MaxRoutePoints` track was ~20,000 `<circle>`+`<title>` pairs, unreadable as
+hover targets at that density regardless) while still drawing the polyline
+from the full-resolution profile, so no peak or dip is lost to the
+downsample — only the hover markers are thinned. `RouteMap`'s pointer-drag
+pan is now scaled by the SVG's actual rendered width vs. its `960`-unit
+viewBox (it was 1:1 in client pixels, which only tracked the cursor
+correctly when the map happened to render at exactly 960px — off by roughly
+2× in the compare page's half-width column), `projectRoute` is memoized on
+`points` rather than recomputed on every `pointermove` during a drag, and a
+cancelled touch (`onPointerCancel`) now releases the drag the same way
+`onPointerUp`/`onPointerLeave` already did.
+
+**Mobile-first reachability, raised by the same review**: this ticket's four
+surfaces (route map, elevation, pace zones, comparison) are new to web only.
+`apps/mobile/app/running/[id].tsx` already shows a run's own route, distance,
+duration and pace — so the SINGLE-run route view is not phone-impossible,
+only richer on web (elevation profile, pace zones). Comparison is the one
+surface CLAUDE.md names explicitly as allowed to be web-only ("side-by-side
+comparison … can be *better* on web — they may not be *only* on web" reads
+as the general rule, and the mobile-first section's own examples group
+"side-by-side comparison" with "bulk authoring" as things web may do
+better). No phone-impossible gap is being introduced here; a future ticket
+wanting a phone-reachable version of the pace-zone breakdown specifically
+would be new scope, not a gap this PR silently created.
+
 **Open**: NEEDS HUMAN EVIDENCE — nothing here has been driven against a real
-running session with a real GPS track in a browser (pan/zoom/fullscreen feel,
-whether the pace-zone bands read as sensible on an actual mixed-pace run,
-whether the elevation profile's scale is legible on real elevation noise).
-Also open: whether an athlete reads the pace-zone definition as intuitive
-without the explanatory line under the table — it is new vocabulary this app
-has not used before, and if it lands wrong the fix is the band widths in
-`PACE_ZONES`, not the mechanism. CSV export covers splits only, not the raw
-route track — exporting the GPS points themselves was judged out of scope
-for a "nice-to-have."
+running session with a real GPS track in a browser (pan/zoom/fullscreen feel
+— now fixed in code, but unmeasured; whether the pace-zone bands read as
+sensible on an actual mixed-pace run; whether the elevation profile's scale
+is legible on real elevation noise). Also open: whether an athlete reads the
+pace-zone definition as intuitive without the explanatory line under the
+table — it is new vocabulary this app has not used before, and if it lands
+wrong the fix is the band widths in `PACE_ZONES`, not the mechanism. CSV
+export covers splits only, not the raw route track — exporting the GPS
+points themselves was judged out of scope for a "nice-to-have."
 
 ## Open items / known gaps as of this entry
 

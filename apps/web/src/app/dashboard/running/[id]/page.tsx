@@ -6,7 +6,7 @@ import { useAuth } from "@clerk/nextjs";
 
 import { getSession, isNotFound, type Session } from "@/lib/api";
 import { getRunningDetail, runSetFrom, type RunningDetail } from "@/lib/runningApi";
-import { splitPaceSecPerKm, splitsToCSV } from "@/lib/runningAnalysis";
+import { elevationProfile, hasElevationData, splitPaceSecPerKm, splitsToCSV } from "@/lib/runningAnalysis";
 import { formatDistance, formatPace, type UnitSystem } from "@/lib/units";
 import { formatDuration } from "@/lib/history";
 import { useUnits } from "@/lib/useUnits";
@@ -149,11 +149,11 @@ export default function RunDetailPage({
         <Stat label="Avg pace" value={formatPace(avgPaceSecPerKm, units)} />
         <Stat
           label="Elevation gain"
-          value={
-            detail?.elevation_gain_m != null
-              ? formatDistance(detail.elevation_gain_m, units)
-              : "—"
-          }
+          // Always metres, on both unit systems — see ElevationChart.tsx's
+          // doc comment. `formatDistance` was wrong here: on `imperial` it
+          // renders a distance-sized number of METRES as yards or miles,
+          // which is not a unit anyone reads elevation gain in.
+          value={detail?.elevation_gain_m != null ? `${Math.round(detail.elevation_gain_m)}m` : "—"}
         />
       </dl>
 
@@ -170,10 +170,21 @@ export default function RunDetailPage({
               <RouteMap points={detail.route_points} />
             </section>
 
-            {detail.route_points.length > 0 && (
+            {hasElevationData(detail.route_points) &&
+              elevationProfile(detail.route_points).length >= 2 && (
+              // Gated on the SAME condition `ElevationChart` itself checks
+              // before returning null — this used to gate on
+              // `route_points.length > 0` instead, which let a track with
+              // points but no altitude on any of them (indoors, an older
+              // phone), or with only one elevation-carrying point, render an
+              // "Elevation" heading over nothing.
               <section aria-label="Elevation profile" className="flex flex-col gap-2">
                 <h2 className="eyebrow">Elevation</h2>
-                <ElevationChart points={detail.route_points} units={units} />
+                <ElevationChart
+                  points={detail.route_points}
+                  units={units}
+                  elevationGainM={detail.elevation_gain_m}
+                />
               </section>
             )}
 
