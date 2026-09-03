@@ -423,3 +423,19 @@ export const PREF_HEALTHKIT_IMPORT = 'healthkit_import_enabled';
  * phone's own sync progress, not something a second device should inherit.
  */
 export const PREF_VO2MAX_LAST_SYNCED_AT = 'biometric_vo2max_last_synced_at';
+
+/**
+ * The Android equivalent of {@link PREF_HEALTHKIT_IMPORT} (N478) — `'1'`
+ * while heart-rate/VO2max reading from Health Connect is turned on. Same
+ * default-off, device-local, never-`owed` reasoning: whether THIS PHONE may
+ * read from Health Connect is a property of the phone (only one of an
+ * athlete's devices is paired to the watch), not a fact the account should
+ * carry to a second device.
+ *
+ * A second key rather than reusing {@link PREF_HEALTHKIT_IMPORT} across
+ * platforms — they gate two different native modules with two different
+ * permission scopes (workouts/routes vs. heart rate/VO2max) and turning one
+ * on must never silently turn on the other on whichever platform an athlete
+ * happens to be running.
+ */
+export const PREF_HEALTH_CONNECT_IMPORT = 'health_connect_import_enabled';

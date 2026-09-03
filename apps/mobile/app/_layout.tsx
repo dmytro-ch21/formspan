@@ -12,6 +12,10 @@ import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
 import { setHealthKitSyncIdentity, startHealthKitImportOrchestrator } from '@/lib/healthkitSync';
 import { setBiometricSyncIdentity, startBiometricSyncOrchestrator } from '@/lib/biometricSync';
+import {
+  setHealthConnectSyncIdentity,
+  startHealthConnectSyncOrchestrator,
+} from '@/lib/healthConnectSync';
 import { seedIfNeeded } from '@/lib/seed';
 import { syncSessions } from '@/lib/sessionStore';
 
@@ -185,6 +189,16 @@ function RootLayoutNav() {
   useEffect(() => startBiometricSyncOrchestrator(), []);
   useEffect(() => {
     setBiometricSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
+  }, [isSignedIn, userId, getToken]);
+
+  // N478: the Android equivalent of the pair above, and a separate
+  // orchestrator of its own for the same reason — see
+  // lib/healthConnectSync.ts's doc comment. Unlike the HealthKit pass this
+  // one needs a token (it pushes straight to the biometric API rather than
+  // only writing local SQLite), so its identity carries `getToken` too.
+  useEffect(() => startHealthConnectSyncOrchestrator(), []);
+  useEffect(() => {
+    setHealthConnectSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
   }, [isSignedIn, userId, getToken]);
 
   // Catch what nobody catches: unhandled JS errors and unhandled promise

@@ -210,6 +210,25 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "Same native-unit-string tag as the 'ml' entry immediately above, same line, "
         "same reason.",
     ),
+    (
+        "apps/mobile/lib/healthConnectSync.ts",
+        "ml",
+        "unit: 'ml/kg/min',",
+        "N478: the WIRE unit tag on a VO2max sample sent to POST /v1/biometric/samples "
+        "(biometric.Sample.Unit — free text describing the physical unit of the raw "
+        "value, never a database enum and never rendered copy; see biometric.go's own "
+        "comment on Unit). 'mL O2 per kg per minute' is VO2max's standard unit and is "
+        "not a display string this app formats through lib/units.ts — nothing shows it "
+        "to the athlete, same as this file's own 'bpm' heart-rate unit tag beside it "
+        "(not caught by this checker's UNITS regex at all, so it needed no entry here).",
+    ),
+    (
+        "apps/mobile/lib/healthConnectSync.ts",
+        "kg",
+        "unit: 'ml/kg/min',",
+        "Same wire-unit-tag reasoning as the 'ml' entry directly above — one literal, "
+        "two tokens the regex matches inside it.",
+    ),
 ]
 
 

@@ -1876,12 +1876,19 @@ components:
             hrv_sdnn and hrv_rmssd are deliberately separate values rather
             than one `hrv` type with a unit column — Apple's SDNN and
             everyone else's rMSSD must never be compared (design doc §5.4).
-            vo2_max (N477/#822) is read, never computed from a session
-            window — design doc §3 — and is shown as a profile-level trend
-            rather than joined to any one session.
+            vo2_max (N477/#822 iOS, N478/#823 Android) is a device-written
+            daily-ish estimate, read but never computed by this API and
+            never fed into a session's own metrics (design doc §3) — it is
+            read and stored as a profile-level trend only, not joined to
+            any one session.
         source:
           type: string
-          enum: [apple_watch, oura, whoop, garmin, manual]
+          enum: [apple_watch, oura, whoop, garmin, manual, android_wearable]
+          description: >
+            android_wearable (N478) is a Health Connect sample whose writing
+            app isn't one of the named vendors above — Samsung Health chief
+            among them, since Health Connect exposes no stable per-vendor
+            identifier this API could otherwise match against.
         source_platform:
           type: string
           enum: [healthkit, health_connect, manual]

@@ -54319,6 +54319,191 @@ confirmed green again).
   behavior on `source` (it is informational, reserved for a future
   per-`(metric_type, source)` trend split per design doc §6.3). Revisit if
   that changes.
+## 2026-09-03 — N478 (#823): Android Health Connect heart rate + VO2max reading, window-joined to sessions
+
+The Android side of the biometric integration, feeding N476's just-merged
+`biometric` module. #822/N477 (the iOS/HealthKit side) had **not** merged
+when this started — `git log origin/main` showed the issue still open and
+unassigned to a PR — so this is a standalone build, not a port of existing
+code. Kept in two clearly separate halves anyway, per the ticket's own
+instruction, so a later N477/N478 consolidation is a reuse, not a rewrite:
+
+- **`lib/biometricEnrichment.ts` — platform-agnostic, pure, zero imports of
+  either health store.** The §2 window join (`heartRateSamplesInWindow`),
+  the Health Connect 30-day history-wall check
+  (`isWithinHealthConnectHistoryWall`), the `220 − age` HRmax estimate
+  (`estimateHRMaxBPM` — exactly the gap N476's own history entry flagged as
+  unbuilt), and the retry-ledger decision (`needsEnrichmentAttempt`/
+  `selectEnrichmentCandidates`). Whichever ticket eventually builds N477
+  should be able to import this file unchanged.
+- **`lib/healthConnect.ts` — the Android-only native boundary**, mirroring
+  `lib/healthkit.ts`'s shape and its blast-shield reasoning exactly: guarded
+  `require`, a thin call surface (`queryHeartRateSamples`,
+  `queryVo2MaxReadings`, `requestHealthConnectReadAuthorization`), and
+  nothing else in the app allowed to touch the native module directly.
+- **`lib/healthConnectSync.ts` — the orchestrator**, mirroring
+  `lib/healthkitSync.ts`'s settings-toggle/mutex/foreground-trigger shape.
+  Genuinely different in one respect the doc comment calls out: a HealthKit
+  pass only ever writes local SQLite and lets the ordinary outbox push
+  later, but this pass has no local biometric table to enqueue from — it
+  pushes samples and computed metrics straight to `/v1/biometric/*`
+  (design doc §6.4's "pull-then-push"), so it needs a `TokenGetter` and
+  genuinely fails offline rather than "succeeding locally."
+- **`lib/biometricApi.ts`** — the platform-agnostic wire client for
+  `PutSamples`/`ComputeSessionMetrics`, field-for-field matching
+  `biometric.go`/the OpenAPI contract, so N477 can reuse it too.
+
+**Library choice: `react-native-health-connect` v4.1.3.** Verified against
+this app's actual Expo SDK (57.0.11) and RN (0.86.2) before committing —
+the same spike discipline N459 used for the map library. It ships a real
+config plugin (`app.plugin.js`, `expo-module.config.json` declaring an
+`android-expo` native module) built against `@expo/config-plugins@~57.0.6`,
+matching this project exactly, and its README documents Expo installation
+as first-class (v4 folded the formerly-separate `expo-health-connect`
+package in). Confirmed with a REAL `expo prebuild --platform android
+--no-install` (same method N475 used, no Android SDK in this sandbox
+either): the plugin resolved cleanly, and the generated
+`AndroidManifest.xml` carries both `android.permission.health.READ_HEART_RATE`
+and `android.permission.health.READ_VO2_MAX` (declared via `app.json`'s
+`android.permissions`, a plain Expo mechanism unrelated to the package's own
+plugin) plus the package's own rationale intent-filter and
+`ViewPermissionUsageActivity` alias. Also required (and added, matching the
+package's own documented install steps) `expo-build-properties` pinning
+Android `compileSdkVersion`/`targetSdkVersion` to 36 and `minSdkVersion` to
+26 — this repo's own `android/gradle.properties` after prebuild confirms the
+override actually took.
+
+**Verified directly, not assumed: this package throws from MODULE SCOPE on
+an unlinked native half**, exactly the `apps/mobile` "declared-but-not-
+installed native dependency" hazard (N91/#432) `lib/healthkit.ts` already
+guards against. Read its own `src/NativeHealthConnect.ts`:
+`TurboModuleRegistry.getEnforcing<Spec>('HealthConnect')` at the top level,
+inside the same `Platform.select` that runs the moment the module is
+evaluated — `getEnforcing` throws immediately if nothing is registered.
+`lib/healthConnect.ts`'s `load()` checks `Platform.OS !== 'android'` before
+ever calling `require`, for exactly this reason.
+
+**Two backend additions this ticket needed and N476 didn't anticipate**,
+both one-line changes to the vocabulary N476's own doc comments call
+explicitly extensible:
+
+- **`biometric.MetricVo2Max` (`"vo2_max"`)** — N476 shipped `heart_rate`,
+  `active_energy`, `resting_heart_rate`, both HRV variants, `sleep_duration`
+  and `body_mass`, but never VO2max, even though the design doc's own §3
+  table lists it as a Tier 1 read. Added to `metricTypes` and the OpenAPI
+  enum; no migration needed (`MetricType` has deliberately no database
+  `CHECK` constraint — app-level `Valid()` only).
+- **`biometric.SourceAndroidWearable` (`"android_wearable"`)** — N476's
+  `Source` enum (`apple_watch`/`oura`/`whoop`/`garmin`/`manual`) was written
+  with HealthKit's `HKSource` in mind. Health Connect's `Metadata.dataOrigin`
+  is a bare Android package name with no equivalent stable vendor
+  identifier, and Samsung Health — extremely common on Android — matches
+  none of the five existing values. Mapping it to `garmin` or `manual` would
+  be a fabrication exactly the kind the `hr_source` honesty discipline
+  exists to rule out one level up; this is the honest "some Android app
+  wrote this" value instead. `lib/healthConnect.ts`'s `sourceFromDataOrigin`
+  matches a small known-package list (Garmin Connect, Whoop, Oura) and falls
+  back to this for everything else.
+
+**The retry ledger (`health_connect_enrichment`, `local_sessions`'
+`SCHEMA_VERSION` 33→34) is a local device table, and it is a RETRY ledger,
+not a dedup one** — the opposite shape from N465's `healthkit_imports`.
+`healthkit_imports` exists to stop importing the same workout twice, so it
+grows forever. This one exists to stop asking Health Connect (and the
+biometric API) about the same finished session on every foreground return
+forever — a real ongoing cost with no upside once a session either has real
+evidence (`hr_source: 'window'`, terminal, never retried) or is old enough
+that it never will (`hr_source: 'none'` past `RETRY_WINDOW_DAYS` = 3 days
+since the session ended). One row per `(user_id, session_id)`, overwritten
+per attempt.
+
+**Idempotency comes from the sample id, not from a client-side ledger of
+individual readings.** `heartRateSampleID`/`vo2MaxSampleID` derive a
+deterministic id from the Health Connect record's own `metadata.id` (plus
+the sample's own timestamp for a multi-sample `HeartRateRecord`), so
+re-uploading the same window's data — which this pass does deliberately for
+VO2max, on every pass, rather than tracking an incremental anchor — converges
+on the backend's `ON CONFLICT DO NOTHING` rather than duplicating. No
+Health Connect anchor-token table was built (§6.2's sketch mentions one):
+this ticket's scope is a per-session window read, not full incremental
+history sync, so there is nothing to anchor.
+
+**What the mobile side always claims, and what actually gets stored, are
+different — deliberately.** This app never claims `hr_source: 'workout'`
+(no anchor refinement is built — the same true statement N476's own "open
+questions" already made, now restated from the other side: still nobody
+producing it). It always claims `'window'` when calling `ComputeMetrics`
+with a real HRmax, **even when zero samples were found** — the backend is
+authoritative on the result and downgrades to `'none'` itself, so a session
+with no wearable gets a real, once-computed, honest `'none'` row rather than
+one that silently never exists.
+
+**What happens with no `date_of_birth` on file**: raw samples still upload
+(real data, worth having regardless of whether metrics can be derived from
+it yet), but `ComputeSessionMetrics` is never called — there is no HRmax to
+send — and the ledger is left as `'none'` rather than `'window'`, so the
+session stays inside the retry window in case the athlete fills in their
+profile within the next few days. Past that window it stops being retried,
+same as a genuine no-wearable session; a session enriched before the
+athlete's date of birth was on file does not automatically get retroactively
+recomputed once it is, which is a real if narrow gap (below).
+
+**Testing.** `lib/__tests__/biometricEnrichment.test.ts` (pure, no device,
+no mock of either health store) and `lib/__tests__/healthConnect.test.ts`
+(the vendor classifier, the sample-id derivation, and the module-scope
+platform guard — confirmed directly that `Platform.OS` is `'ios'` under
+`jest-expo`, and that this app's own `Platform.OS !== 'android'` check, not
+the package's own defensive behaviour, is what keeps this file inert under
+the suite). `lib/__tests__/healthConnectSync.test.ts` runs the orchestrator
+against a real migrated SQLite fixture (the same `migratedFixture()`
+pattern `healthkitSync.test.ts` uses), with `../healthConnect`/
+`../biometricApi`/`../profile` replaced by controllable fakes — covers the
+settings toggle, the full enrichment pass, the zero-samples/`'none'` path,
+the no-HRmax path, a per-session failure not losing an earlier session's
+success in the same pass, VO2max importing independent of any session, and
+per-user scoping. Three load-bearing guards were mutation-tested directly
+(the history-wall check, the window-clip filter, the no-HRmax skip) —
+mutated, confirmed a real test failure (not a compile error), restored,
+confirmed green again by re-running.
+
+**What was verified in this sandboxed environment, and what could not
+be.** Verified: the config-plugin resolution and manifest permissions via a
+real `expo prebuild` (no Android SDK here, matching N475); every pure/logic
+test above, real and mutation-tested; backend build and the existing
+`biometric` test suite still green after the `MetricVo2Max`/
+`SourceAndroidWearable` additions; the full mobile jest suite (4,179 tests,
+260 suites) green after this change, including `schema.test.ts`'s
+migration-branch assertions updated for `SCHEMA_VERSION` 34. **Not
+verified, and could not be**: no real Android device or emulator exists in
+this environment, so the ticket's own `NEEDS HUMAN EVIDENCE` criterion — a
+real session on a real device with Health Connect data showing real
+HR-derived load/zones after sync — is unmet and left for the user, along
+with the actual runtime behaviour of `react-native-health-connect`'s native
+half (the permission dialog, the Kotlin autolinking, `readRecords`'s real
+JSON shape) beyond what its own TypeScript source and a static prebuild can
+confirm.
+
+**Open questions this leaves:**
+- A session enriched to `'none'` before the athlete's `date_of_birth` was on
+  file is not automatically retried once it is — only the ordinary
+  `RETRY_WINDOW_DAYS` clock governs it, so a profile edited after that
+  window closes leaves the session permanently unenriched unless something
+  re-triggers it by hand.
+- No anchor-based incremental sync exists for Health Connect (or for
+  HealthKit) — every pass re-reads whatever window it needs from scratch.
+  Fine at this feature's scale (per-session windows, a fixed 30-day VO2max
+  lookback); would need revisiting if a future ticket wants full historical
+  backfill.
+- `sourceFromDataOrigin`'s known-package list is three vendors; every other
+  Android health app (Samsung Health chief among them) reports as the new
+  generic `android_wearable` value rather than a real name. Growing the list
+  is cheap; nobody has audited which vendors' package names are worth
+  adding first.
+- `#822`/N477 (iOS HealthKit heart rate + VO2max) is still unbuilt as of
+  this entry — when it lands, it should reuse `biometricEnrichment.ts`/
+  `biometricApi.ts` unchanged and add only an iOS-specific `lib/healthkit.ts`
+  extension analogous to `lib/healthConnect.ts` here.
+
 
 ## Open items / known gaps as of this entry
 

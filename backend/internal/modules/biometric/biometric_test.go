@@ -149,11 +149,34 @@ func TestMetricTypes_EveryValueValidatesItself(t *testing.T) {
 	}
 }
 
+// N478 originally added a second VO2max metric-type test here
+// (TestMetricVo2Max_Valid, against a same-named-but-differently-cased
+// MetricVo2Max constant this ticket had independently added) — dropped on
+// rebase once N477/#822 merged first with its own MetricVO2Max and an
+// equivalent, stronger test (TestMetricType_VO2Max_WireValueAndAcceptance
+// above), so this would otherwise have been redundant coverage of the same
+// value under two different Go names.
+
 func TestSources_EveryValueValidatesItself(t *testing.T) {
 	for _, s := range Sources() {
 		if !s.Valid() {
 			t.Errorf("%q from Sources() is not Valid()", s)
 		}
+	}
+}
+
+// TestSourceAndroidWearable_Valid is named explicitly (the loop above already
+// covers this value) because N478 added it specifically for a Health Connect
+// writer app this package cannot identify by name — Samsung Health chief
+// among them — and a reviewer flagged that a value added for a stated reason
+// deserves a test that names it, not only generic coverage that would pass
+// just as well if the constant's own string were mistyped.
+func TestSourceAndroidWearable_Valid(t *testing.T) {
+	if !SourceAndroidWearable.Valid() {
+		t.Error("SourceAndroidWearable.Valid() = false, want true")
+	}
+	if SourceAndroidWearable != "android_wearable" {
+		t.Errorf("SourceAndroidWearable = %q, want %q", SourceAndroidWearable, "android_wearable")
 	}
 }
 
