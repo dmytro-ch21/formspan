@@ -17318,3 +17318,76 @@ are navigation shortcuts to a different screen, not filters on this one).
   two different athletes importing what happens to be an identical uuid
   (not realistic given Apple mints these, but worth a negative test) both
   succeed independently rather than one refusing the other.
+
+## L13 — spoken split cues during a live-tracked run (`apps/mobile/lib/runningVoice.ts`, `apps/mobile/app/running/[id].tsx`, `apps/mobile/app/settings.tsx`)
+
+L13/#779's scoping spike: of the three stretch ideas on the ticket
+(route-replay animation, weather tagging, voice cues), this is the one
+built — see the history entry for why. Reuses `lib/voice.ts` unchanged (the
+same `announce()` and preference gate the guided-workout timer already
+uses), so there is no new toggle: the existing "Spoken cues" setting is what
+turns this on or off.
+
+### Happy path
+
+- Start a run and cross a whole kilometre (`DEFAULT_SPLIT_METERS`): the
+  moment the splits ticker gains its first row, the phone speaks "Kilometer
+  1, " followed by that split's time in words (e.g. "5 minutes 12 seconds")
+  — the same number the ticker shows, spoken rather than read.
+- Cross a second, third, … kilometre: each announces once, immediately after
+  it completes, never batched and never repeated.
+- Pause and Resume mid-kilometre: no split completes while paused (no GPS
+  points are recorded), so nothing is announced on Resume; the next
+  announcement still fires exactly once when the (only) newly-completed
+  split's boundary is actually crossed.
+- With Spoken cues OFF and Sounds ON: the ticker still updates and the
+  timer's ordinary rest/session chimes still play, but no split is spoken —
+  confirms this reused the existing gate rather than adding a parallel one.
+- With Sounds OFF (which the voice preference is layered on top of, per
+  `lib/voice.ts`'s `voiceEnabled()`): no split is spoken even if Spoken cues
+  reads on individually.
+- Settings → the "Spoken cues" row's hint now names a tracked run
+  alongside the guided workout, so the toggle's description is not wrong
+  once this ships.
+
+### Edge cases & errors
+
+- Force-quit and relaunch mid-run with one or more splits already on the
+  track: reopening the screen must NOT replay every already-completed split
+  in one burst — only a split crossed AFTER the screen resumes tracking is
+  announced. (This is the baseline/re-baseline behaviour
+  `newSplitIndices`/`announcedSplitsRef` exist for; see
+  `lib/__tests__/runningVoice.test.ts` for the pure-logic half of it.)
+- A run that never crosses a full kilometre (finishes short): no
+  announcement ever fires, and Finish behaves exactly as it did before this
+  ticket — this feature adds nothing to the finished-run report.
+- TTS busy or unavailable on the device (mirrors the guided workout's own
+  documented failure mode): a missed announcement must never stop or delay
+  GPS recording, the splits ticker, or Finish — voice is decoration over a
+  feature that keeps working without it.
+- A device whose only installed voice is a non-English one: falls back to
+  `pickVoice`'s existing "no match, let the system choose" behaviour — no
+  crash, an announcement in whatever voice the system provides.
+
+### Auth/security
+
+- None — no new endpoint, no new preference, no new data leaves the device.
+  The only state this reads is the already-existing `PREF_VOICE`/
+  `PREF_SOUNDS` preferences and the run's own local GPS track.
+
+### Needs a device
+
+- A real outdoor run crossing at least two kilometre splits, confirming the
+  announcement is audible over typical running noise (wind, road, earbuds)
+  and does not talk over or get talked over by the last-three-seconds tick
+  style cues the guided workout uses elsewhere in the app — this app has no
+  fixture for what a phone actually sounds like in a runner's pocket or
+  earbuds.
+
+### Deferred, not built (recorded here so the scoping spike is checkable)
+
+- **Route-replay animation** and **weather tagging** were evaluated and
+  deliberately not built in this pass — see `docs/decisions/history.md`'s
+  L13 entry for the full reasoning. Neither has scenarios here because
+  neither exists yet; if either is picked up later, it gets its own N-numbered
+  section rather than reusing this one.

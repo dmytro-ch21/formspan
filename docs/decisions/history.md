@@ -53192,6 +53192,101 @@ All mutation-verified again after the fixes (retitling a phase, confirming a
 real assertion failure naming the mismatched index and titles, reverting,
 confirming green by re-running); the full package suite stays green.
 
+## L13 — scoping spike: spoken split cues, and why the other two wait (#779)
+
+L13/#779 named three stretch ideas for the live-tracking and post-run report
+screens — route-replay animation, weather tagging, voice cues — and asked for
+one to be picked and built for real rather than three half-versions. Picked:
+**voice cues, specifically a spoken announcement each time a kilometre split
+completes during a live run.**
+
+**What tipped it, and it wasn't the ticket's own framing.** The ticket
+describes voice cues as needing "actual text-to-speech, a different
+technology entirely" from the sound system's short synthesised tones. That
+was true when it was written and stopped being true on 2026-08-08: the
+guided-workout timer (the session that added interval running,
+`lib/voice.ts`) already built exactly this — `expo-speech`, a preference gate
+layered on top of the Sounds toggle (`PREF_VOICE`, `voiceEnabled()`), a voice
+picker, an `announce()` function for arbitrary text, and `initVoice()` already
+wired into the root layout. None of that had to be invented; the running
+screen only had to call it. That also directly satisfies the ticket's second
+acceptance criterion — "respect the athlete's existing notification/sound
+preferences rather than adding a new always-on toggle" — for free, because
+`announce()` already refuses to speak when either preference is off. Building
+this was three files: `lib/runningVoice.ts` (the pure "what to say and which
+splits are new" logic, unit-tested), a ~25-line effect in
+`app/running/[id].tsx` wiring `splits` growth to `announce()`, and one
+corrected sentence in Settings — the "Spoken cues" hint used to say "Only
+during a guided run", which this ticket would otherwise have made wrong on
+screen.
+
+The pure logic lives in `runningVoice.ts` rather than `running.ts` (which
+already holds the GPS/split calculation `splitsFromTrack` and friends) to keep
+"what does the track say" and "what does the track sound like" separate, the
+same separation `lib/voice.ts` already draws from `lib/sounds.ts`.
+`spokenDuration` spells out "5 minutes 12 seconds" rather than reusing
+`formatElapsed`'s "5:12" — a bare "5:12" is what a synthesiser actually reads
+as "five twelve", ambiguous with a pace figure the athlete might also be
+hearing a moment later. `newSplitIndices` is the one part worth its own pure
+function despite being three lines: it is the difference between "announce
+each split once, exactly when it completes" and "replay every split at once
+the moment a force-quit-and-relaunched run resumes tracking" — an off-by-one
+here is invisible from a running screen for a full kilometre and only shows up
+as a burst of five announcements the next time somebody kills the app
+mid-run. The screen's own effect resets its baseline to `null` on every
+non-tracking status and only starts counting new splits on the SECOND run of
+the effect after tracking (re)starts, so a resumed run's already-completed
+splits are counted into the baseline rather than spoken.
+
+**Deferred, and why — not a shrug, a cost read against value:**
+
+- **Weather tagging.** The ticket's own text names the real shape of this:
+  phones have no weather sensor, so "tag a run with the weather" means an
+  external API call — a new dependency, an API key, a cost/rate-limit
+  surface, and (per the "verify a stub can fail" discipline this repo holds
+  every external contract to) a live call against a real provider before
+  shipping it, not a stub built from an assumption about what it returns.
+  Checked: there is no existing pattern in this repo for a client-facing
+  third-party weather API — `internal/platform/llm` is the nearest analog and
+  it exists specifically because an LLM provider needed exactly that
+  ceremony (key management, sentinel errors, a provider abstraction). Weather
+  tagging would need the same weight of infrastructure for one field on a
+  post-run report. Worth doing eventually; not worth prototyping ahead of the
+  other two when one of them turned out to already exist in the codebase.
+- **Route-replay animation.** Genuinely the most visually delightful of the
+  three, and genuinely buildable — `react-native-reanimated@4.5.1` is already
+  a dependency, and `SessionCelebration`'s existing static route thumbnail
+  (N461) is exactly where an animated draw-on would live. It loses to voice
+  cues on cost only: it is real new animation-timing work (easing, a
+  draw-progress driver keyed to the polyline's point count, a decision about
+  whether it plays automatically or on tap) against a feature this ticket
+  could otherwise get by wiring two already-built, already-tested modules
+  together. Not evidence it is the wrong pick long-term — it remains the best
+  candidate for whichever running-stretch idea gets picked up next, and
+  nothing here forecloses it.
+
+### What was NOT touched
+
+- No new preference, no new dependency, no backend change — this is a pure
+  client-side reuse of infrastructure `internal/modules/running` and
+  `lib/voice.ts` already ship. `contracts/public.openapi.yaml` is unaffected.
+- `DEFAULT_SPLIT_METERS` (always metric, matching the live screen's existing
+  "Km 1, Km 2…" ticker regardless of the athlete's unit preference) is
+  untouched — making splits unit-aware is a larger, separate change and this
+  ticket's announcement deliberately matches whatever the screen already
+  shows rather than diverging from it.
+
+### Open items this leaves
+
+- **NEEDS HUMAN EVIDENCE**: a real outdoor run crossing at least two
+  kilometre splits, confirming the announcement is actually audible over
+  running noise (wind, road, earbuds) and does not collide with any other
+  cue — no test here can reach what a phone sounds like in a pocket or a
+  pair of earbuds mid-run.
+- Weather tagging and route-replay remain unbuilt, deliberately, per the
+  reasoning above — either is a candidate for its own future ticket rather
+  than a reopening of #779.
+
 ## Open items / known gaps as of this entry
 
 
