@@ -25,6 +25,8 @@ import {
   filterNewWorkouts,
   mapWorkoutToRunningDetail,
   metersFromQuantity,
+  queryHeartRateSamples,
+  queryVO2MaxSamples,
   type HealthKitRunningWorkout,
 } from '../healthkit';
 
@@ -161,5 +163,22 @@ describe('mapWorkoutToRunningDetail', () => {
     const detail = mapWorkoutToRunningDetail(workout({ route }), 'ses-1');
     expect(detail.elevation_gain_m).toBeNull();
     expect(detail.splits).toEqual([]);
+  });
+});
+
+/**
+ * N477/#822 — `queryHeartRateSamples`/`queryVO2MaxSamples` are the ONLY
+ * native call surface this feature adds, matching the file's existing
+ * `queryRunningWorkouts`. Under Jest `hk` is null for the reason this
+ * file's own doc comment gives, so both resolve to `[]` — the same "no
+ * module linked" outcome a real Android build or a native-mismatch Release
+ * build hits, and the one this suite CAN exercise without a device.
+ */
+describe('queryHeartRateSamples / queryVO2MaxSamples', () => {
+  it('resolve to an empty array when no HealthKit module is linked', async () => {
+    await expect(
+      queryHeartRateSamples(new Date('2026-09-01T07:00:00Z'), new Date('2026-09-01T07:30:00Z')),
+    ).resolves.toEqual([]);
+    await expect(queryVO2MaxSamples(new Date('2026-06-01T00:00:00Z'))).resolves.toEqual([]);
   });
 });

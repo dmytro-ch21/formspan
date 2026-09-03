@@ -409,3 +409,17 @@ export const PREF_GOALS_COLLAPSED = 'goals_collapsed';
  * device.
  */
 export const PREF_HEALTHKIT_IMPORT = 'healthkit_import_enabled';
+
+/**
+ * The RFC3339 `measured_at` of the newest VO₂max sample this device has
+ * already offered to the `biometric` module, or absent if none ever has —
+ * N477/#822. `lib/biometricSync.ts`'s high-water mark: a value that reads
+ * from a HealthKit query's own `startDate` filter rather than a ledger
+ * table, because VO₂max is a profile-level trend rather than a per-session
+ * fact (design doc §3) and has no session id to key a ledger row on.
+ *
+ * Device-local and never `owed`, same reasoning as {@link PREF_HEALTHKIT_IMPORT}
+ * — which devices have already offered which readings is a fact about this
+ * phone's own sync progress, not something a second device should inherit.
+ */
+export const PREF_VO2MAX_LAST_SYNCED_AT = 'biometric_vo2max_last_synced_at';

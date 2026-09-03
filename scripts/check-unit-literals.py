@@ -193,6 +193,23 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "running.SessionDetail — never rendered copy. `lib/units.ts`'s formatters take "
         "over from there, same relationship the 'ml' entry above has to fluidUnit().",
     ),
+    (
+        "apps/mobile/lib/healthkit.ts",
+        "ml",
+        "unit: 'ml/(kg*min)',",
+        "N477/#822: HealthKit's OWN native unit string for HKQuantityTypeIdentifierVO2Max "
+        "(verified against the installed package's QuantityUnitByIdentifierMap), requested "
+        "explicitly from the native query and stored verbatim in biometric_samples.unit — "
+        "a storage unit TAG, never rendered copy. `app/vo2max/trend.tsx` writes its own "
+        "'mL/kg/min' display string separately.",
+    ),
+    (
+        "apps/mobile/lib/healthkit.ts",
+        "kg",
+        "unit: 'ml/(kg*min)',",
+        "Same native-unit-string tag as the 'ml' entry immediately above, same line, "
+        "same reason.",
+    ),
 ]
 
 

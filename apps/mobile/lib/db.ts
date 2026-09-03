@@ -579,6 +579,31 @@ const CREATE_HEALTHKIT_IMPORTS = `
 `;
 
 /**
+ * N477/#822: the same-device ledger of sessions already offered to the
+ * `biometric` module's heart-rate window read — the exact shape and
+ * argument as `CREATE_HEALTHKIT_IMPORTS` above, one layer up. That table
+ * answers "have I imported this HealthKit workout"; this one answers "have
+ * I already read this SESSION's heart-rate window", which is a different
+ * question with a different key (`session_id`, not a HealthKit uuid — a
+ * session that never touched HealthKit at all, a strength or BJJ session
+ * logged entirely by hand, still needs its window read exactly once).
+ *
+ * No `dirty`/`remote` — never pushed, and never removed once written: a
+ * session whose window was checked and found empty (`hr_source: 'none'`)
+ * must not be re-checked every foreground pass forever, so "checked" is
+ * recorded regardless of whether anything was found. `lib/biometricSync.ts`
+ * is the only reader/writer.
+ */
+const CREATE_BIOMETRIC_HR_SYNCED = `
+  CREATE TABLE IF NOT EXISTS biometric_hr_synced (
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, session_id)
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -607,7 +632,7 @@ const CREATE_HEALTHKIT_IMPORTS = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 33;
+const SCHEMA_VERSION = 34;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -624,7 +649,8 @@ type LocalTable =
   | 'barcode_cache'
   | 'daily_trackers'
   | 'tracker_entries'
-  | 'healthkit_imports';
+  | 'healthkit_imports'
+  | 'biometric_hr_synced';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -706,6 +732,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_DAILY_TRACKERS);
   await db.execAsync(CREATE_TRACKER_ENTRIES);
   await db.execAsync(CREATE_HEALTHKIT_IMPORTS);
+  await db.execAsync(CREATE_BIOMETRIC_HR_SYNCED);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -1250,6 +1277,11 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // value here, unlike `category`/`bjj_json` above where NULL is the
     // honest answer for a fact nothing before this version ever asked.
     await addColumnIfMissing(db, 'local_sessions', 'intent', "TEXT NOT NULL DEFAULT 'normal'");
+  }
+
+  if (current < 34) {
+    // N477/#822: see CREATE_BIOMETRIC_HR_SYNCED's own doc comment.
+    await db.execAsync(CREATE_BIOMETRIC_HR_SYNCED);
   }
 
   // The day query the card runs on every render of Today.
