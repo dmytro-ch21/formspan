@@ -23,6 +23,7 @@ function session(day: string, sport: string, hour = 18): Session {
     workout_id: null,
     sport,
     name: '',
+    intent: 'normal',
     // Local wall-clock, so `dayString` puts it on `day` under the suite's TZ.
     started_at: new Date(`${day}T${String(hour).padStart(2, '0')}:00:00`).toISOString(),
     ended_at: null,

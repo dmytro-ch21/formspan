@@ -580,14 +580,18 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type createRequest struct {
-	ID        string     `json:"id"`
-	WorkoutID *string    `json:"workout_id"`
-	Sport     string     `json:"sport"`
-	Name      string     `json:"name"`
-	StartedAt *time.Time `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at"`
-	Notes     string     `json:"notes"`
-	Sets      []Set      `json:"sets"`
+	ID        string  `json:"id"`
+	WorkoutID *string `json:"workout_id"`
+	Sport     string  `json:"sport"`
+	Name      string  `json:"name"`
+	// Intent: empty/absent means IntentNormal — see NewSession's own doc
+	// comment. Omitting it is the common case and must keep meaning exactly
+	// what it always did.
+	Intent    SessionIntent `json:"intent"`
+	StartedAt *time.Time    `json:"started_at"`
+	EndedAt   *time.Time    `json:"ended_at"`
+	Notes     string        `json:"notes"`
+	Sets      []Set         `json:"sets"`
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -635,6 +639,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		WorkoutID: req.WorkoutID,
 		Sport:     req.Sport,
 		Name:      req.Name,
+		Intent:    req.Intent,
 		StartedAt: *req.StartedAt,
 		EndedAt:   req.EndedAt,
 		Notes:     req.Notes,
@@ -739,6 +744,41 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s, err := h.repo.Rename(r.Context(), claims.UserID, r.PathValue("sessionID"), name)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
+}
+
+type setIntentRequest struct {
+	Intent SessionIntent `json:"intent"`
+}
+
+// SetIntent is PATCH, same reasoning as Rename (N474): the body carries the
+// one field being corrected, and editing intent must not require resending
+// every set.
+//
+// Reachable both before a session starts (the "Normal · Light · Deload"
+// picker at session start is just this call made early) and afterward — an
+// athlete who only realises partway through, or scrolling history days
+// later, that a session wasn't a normal one gets the same correction path
+// Rename already gives a mistyped name.
+func (h *Handler) SetIntent(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	var req setIntentRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
+		return
+	}
+	if !req.Intent.Valid() {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"intent must be one of: normal, light, deload")
+		return
+	}
+
+	s, err := h.repo.SetIntent(r.Context(), claims.UserID, r.PathValue("sessionID"), req.Intent)
 	if err != nil {
 		writeErr(w, r, err)
 		return

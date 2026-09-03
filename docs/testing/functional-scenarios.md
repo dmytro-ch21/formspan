@@ -17524,3 +17524,78 @@ noise filtering (arm swing vs. actual footfall) this codebase has no
 precedent for, and real-device validation no CI suite can provide. See the
 2026-09-02 history.md entry for the full reasoning. No scenarios listed here
 because nothing shipped; revisit this section if the feature is ever built.
+
+## N474 — session intent (Normal/Light/Deload) so an autoregulated session doesn't crater the strength baseline (`PATCH /v1/sessions/{sessionID}/intent`, `POST /v1/sessions`, `apps/mobile/app/session/start.tsx`, `apps/mobile/app/workout/[id].tsx`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/app/session/history.tsx`, `apps/web/src/app/dashboard/sessions/[id]/ProgressionCard.tsx`)
+
+### Happy path
+
+- Start a strength session with no other choice made: the Normal/Light/
+  Deload picker on `app/session/start.tsx` defaults to Normal, and the
+  created session's `intent` is `normal` whether or not the picker is
+  touched.
+- Plan → a strength template's own detail screen → "Start session" (the
+  template's own button, NOT the `/session/start` chooser): the identical
+  picker appears above the Start button, defaults to Normal, and the choice
+  reaches the created session — a second, independent entry point into a
+  strength session, and the picker has to be reachable from both.
+- Log a normal session on an exercise (e.g. bench 250kg×3), finish it, then
+  start a NEW strength session, pick **Light**, and log deliberately lighter
+  reps on the same exercise (e.g. 185kg×12). Open that exercise's suggestion
+  card afterward: the target weight/reps are still computed off the 250×3
+  session, not the light one, and the reason text names that a light session
+  was skipped (e.g. "…(A light or deload session was skipped when finding
+  this.)").
+- Same shape with **Deload** instead of Light.
+- The light/deload session itself still counts fully: its sets appear in
+  weekly volume, exercise history, and the session's own duration/calories
+  exactly as a normal session's would — open Training History and confirm
+  the entry looks like any other logged session in every respect except the
+  tag described below.
+- Training History (`app/session/history.tsx`) shows a small "LIGHT" or
+  "DELOAD" tag next to the sport label on a past non-normal strength
+  session; a normal session (and every BJJ/running session, which never
+  surface the picker) carries no tag.
+- On web, the same suggestion card (`ProgressionCard.tsx`) shows the
+  identical reason text and, for an exercise with no normal session in the
+  lookback window, the "No baseline" phase label rather than "First time".
+- Every exercise in an athlete's lookback window for a given exercise is
+  light/deload only (never a normal session): the suggestion returns the
+  new `no_recent_normal_session` code — distinct copy from "First time" on
+  both mobile and web — rather than a fabricated normal-looking number.
+- Three consecutive sessions at an unchanged weight, where one of the three
+  is tagged deload: the automatic stall/deload detector does NOT fire on
+  that streak (a deload is already an acknowledged step back, not evidence
+  one is needed) — confirm by checking a fourth, genuinely stalled normal
+  session is what actually triggers `deload`.
+
+### Edge cases & errors
+
+- Start a BJJ or running session: no intent picker appears at all (gated to
+  `sport === 'strength'`), and the created session's `intent` is `normal`
+  regardless.
+- Offline: pick Light or Deload, start the session with no signal, log sets,
+  and let the outbox sync later — the pushed session's `intent` matches what
+  was chosen locally; confirm by reading the session back after sync rather
+  than trusting the picker's own state.
+- `PATCH /v1/sessions/{sessionID}/intent` with an unrecognized value (not
+  `normal`/`light`/`deload`): `400 invalid_input`, and the session's stored
+  intent is unchanged.
+- A pre-migration session (created before this ticket, no `intent` value
+  ever written): reads as `normal` everywhere — the suggestion evidence
+  search, the stall counter, and the history-row tag all treat it exactly
+  like an explicit `normal` session, not as a gap in the data.
+- A device on an old app build encounters `no_recent_normal_session` from a
+  server it predates: neither mobile's nor web's phase map should throw —
+  each has an unknown-code fallback (nameless label, muted colour) rather
+  than a hard crash.
+
+### Auth/security
+
+- `PATCH /v1/sessions/{sessionID}/intent` is ownership-scoped like every
+  other session mutation: athlete A's token against athlete B's session id
+  returns `404 not_found`, not `403`, and does not change B's session (mirror
+  of the existing rename/reschedule IDOR coverage).
+- Intent is never used to gate or filter which sessions an athlete can read
+  back — a light/deload session is exactly as visible via `GET /v1/sessions`
+  and `GET /v1/sessions/{id}` as a normal one; only the progression engine's
+  internal evidence search treats it differently.

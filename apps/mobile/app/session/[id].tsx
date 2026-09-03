@@ -2317,6 +2317,10 @@ const PROGRESSION_PHASE: Record<SuggestionCode, { label: string; color: string }
   repeat_stale: { label: 'RESTART', color: vola.textMuted },
   repeat_unknown_effort: { label: 'LOG EFFORT', color: vola.textMuted },
   no_history: { label: 'FIRST TIME', color: vola.textMuted },
+  // N474: there IS recent history for this exercise, it was just all
+  // light/deload — distinct label from FIRST TIME on purpose, since "never
+  // done it" and "nothing normal-intent to build from" read differently.
+  no_recent_normal_session: { label: 'NO BASELINE', color: vola.textMuted },
   not_applicable: { label: '', color: vola.textMuted },
   // N473/#812, behind new_recommendation_engine — see SuggestionCode's own
   // doc comment (lib/sessions.ts) for why neither carries a target_*.

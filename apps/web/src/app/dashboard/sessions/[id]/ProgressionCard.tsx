@@ -61,6 +61,14 @@ const PHASE: Record<SuggestionCode, Phase> = {
     pip: "bg-text-muted",
   },
   no_history: { label: "First time", dot: "bg-text-muted", pip: "bg-text-muted" },
+  // N474: there IS history for this exercise, just none of it `normal`
+  // intent — distinct copy from `no_history` on purpose, since "no baseline
+  // yet" and "never done it" call for different next actions.
+  no_recent_normal_session: {
+    label: "No baseline",
+    dot: "bg-text-muted",
+    pip: "bg-text-muted",
+  },
   not_applicable: { label: "—", dot: "bg-text-muted", pip: "bg-text-muted" },
   // N473/#812, behind new_recommendation_engine — see SuggestionCode's own
   // doc comment (lib/api.ts) for why neither carries a target_*.

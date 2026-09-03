@@ -59,6 +59,7 @@ function session(
     workout_id: null,
     sport,
     name: '',
+    intent: 'normal',
     started_at: started.toISOString(),
     ended_at:
       minutes === null ? null : new Date(started.getTime() + minutes * 60_000).toISOString(),

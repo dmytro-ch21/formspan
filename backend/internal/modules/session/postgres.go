@@ -56,6 +56,8 @@ func translatePgError(err error) error {
 			return fmt.Errorf("%w: RIR must be between 0 and 20", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "set_type"):
 			return fmt.Errorf("%w: unknown set type", ErrInvalidInput)
+		case strings.Contains(pgErr.ConstraintName, "intent"):
+			return fmt.Errorf("%w: unknown session intent", ErrInvalidInput)
 		case strings.Contains(pgErr.ConstraintName, "grip"):
 			// This substring match now decides more than a message. It picks the
 			// wire code `invalid_grip`, which is the phone's signal that it may
@@ -80,14 +82,14 @@ func translatePgError(err error) error {
 }
 
 const sessionColumns = `
-	id, user_id, workout_id, sport, name, started_at, ended_at, notes,
+	id, user_id, workout_id, sport, name, intent, started_at, ended_at, notes,
 	created_at, updated_at`
 
 type scannable interface{ Scan(dest ...any) error }
 
 func scanSession(row scannable) (*Session, error) {
 	var s Session
-	err := row.Scan(&s.ID, &s.UserID, &s.WorkoutID, &s.Sport, &s.Name,
+	err := row.Scan(&s.ID, &s.UserID, &s.WorkoutID, &s.Sport, &s.Name, &s.Intent,
 		&s.StartedAt, &s.EndedAt, &s.Notes, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -523,7 +525,7 @@ func (r *PostgresRepository) RecentEfforts(
 	}
 	rows, err := r.pool.Query(ctx, `
 		WITH ranked AS (
-			SELECT ss.exercise_id, ss.session_id, s.started_at, ss.position,
+			SELECT ss.exercise_id, ss.session_id, s.started_at, s.intent, ss.position,
 			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
 			       DENSE_RANK() OVER (
 			           PARTITION BY ss.exercise_id
@@ -558,7 +560,7 @@ func (r *PostgresRepository) RecentEfforts(
 		-- joining per set row made that lookup ~95% of the query's buffer
 		-- traffic for values that never vary.
 		SELECT ex.id, e.movement_pattern, e.load_type,
-		       r.session_id, r.started_at, r.position, r.set_type,
+		       r.session_id, r.started_at, r.intent, r.position, r.set_type,
 		       r.reps, r.weight_kg, r.rir, r.rpe, r.assisted_reps
 		FROM unnest($2::text[]) AS ex(id)
 		JOIN exercises e ON e.id = ex.id
@@ -578,12 +580,13 @@ func (r *PostgresRepository) RecentEfforts(
 			// LEFT JOIN produces so the catalog fields still arrive.
 			sessionID *string
 			startedAt *time.Time
+			intent    *SessionIntent
 			position  *int
 			setType   *SetType
 			s         Set
 		)
 		if err := rows.Scan(&exerciseID, &pattern, &loadType,
-			&sessionID, &startedAt, &position, &setType,
+			&sessionID, &startedAt, &intent, &position, &setType,
 			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE, &s.AssistedReps); err != nil {
 			return nil, fmt.Errorf("session: scan recent effort: %w", err)
 		}
@@ -614,7 +617,14 @@ func (r *PostgresRepository) RecentEfforts(
 			in.Recent = append(in.Recent, SessionEffort{
 				SessionID:   *sessionID,
 				PerformedAt: *startedAt,
-				Sets:        []Set{s},
+				// Every row in `ranked` came from a real sessions row, so
+				// intent is never actually NULL here — the pointer is only
+				// to match the LEFT JOIN's nullable column type; every
+				// session written since IntentNormal existed (including
+				// every one written before this column did, via its own
+				// DEFAULT) carries a real value.
+				Intent: *intent,
+				Sets:   []Set{s},
 			})
 		}
 		out[exerciseID] = in
@@ -658,7 +668,7 @@ func (r *PostgresRepository) RecentEffortsV2(
 	}
 	rows, err := r.pool.Query(ctx, `
 		WITH ranked AS (
-			SELECT ss.exercise_id, ss.session_id, s.started_at, ss.position,
+			SELECT ss.exercise_id, ss.session_id, s.started_at, s.intent, ss.position,
 			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
 			       DENSE_RANK() OVER (
 			           PARTITION BY ss.exercise_id
@@ -679,7 +689,7 @@ func (r *PostgresRepository) RecentEffortsV2(
 			  AND s.ended_at IS NOT NULL
 		)
 		SELECT ex.id, e.movement_pattern, e.load_type,
-		       r.session_id, r.started_at, r.position, r.set_type,
+		       r.session_id, r.started_at, r.intent, r.position, r.set_type,
 		       r.reps, r.weight_kg, r.rir, r.rpe, r.assisted_reps
 		FROM unnest($2::text[]) AS ex(id)
 		JOIN exercises e ON e.id = ex.id
@@ -697,12 +707,13 @@ func (r *PostgresRepository) RecentEffortsV2(
 			pattern, loadType string
 			sessionID         *string
 			startedAt         *time.Time
+			intent            *SessionIntent
 			position          *int
 			setType           *SetType
 			s                 Set
 		)
 		if err := rows.Scan(&exerciseID, &pattern, &loadType,
-			&sessionID, &startedAt, &position, &setType,
+			&sessionID, &startedAt, &intent, &position, &setType,
 			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE, &s.AssistedReps); err != nil {
 			return nil, fmt.Errorf("session: scan recent effort v2: %w", err)
 		}
@@ -725,7 +736,11 @@ func (r *PostgresRepository) RecentEffortsV2(
 			in.Recent = append(in.Recent, SessionEffort{
 				SessionID:   *sessionID,
 				PerformedAt: *startedAt,
-				Sets:        []Set{s},
+				// Every row in `ranked` came from a real sessions row, so
+				// never actually NULL — see RecentEfforts' identical comment
+				// on its own scan.
+				Intent: *intent,
+				Sets:   []Set{s},
 				// Every row here already passed `s.ended_at IS NOT NULL` in
 				// the CTE, so this is always true — set explicitly rather
 				// than left at Go's zero value, so a reader doesn't have to
@@ -892,13 +907,26 @@ func (r *PostgresRepository) Create(ctx context.Context, in NewSession) (*Sessio
 		return nil, err
 	}
 
+	// Empty/unrecognised falls to IntentNormal here, at the boundary, rather
+	// than leaning on the column's own DEFAULT — an explicit value written by
+	// EVERY caller, client-supplied or not, is what lets Valid() below stay
+	// meaningful: a value that only ever reaches Postgres by omission is a
+	// value nothing in Go ever actually validated.
+	intent := in.Intent
+	if intent == "" {
+		intent = IntentNormal
+	}
+	if !intent.Valid() {
+		return nil, fmt.Errorf("%w: unknown session intent %q", ErrInvalidInput, intent)
+	}
+
 	var created bool
 	err = tx.QueryRow(ctx, `
-		INSERT INTO sessions (id, user_id, workout_id, sport, name, started_at, ended_at, notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO sessions (id, user_id, workout_id, sport, name, intent, started_at, ended_at, notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (id) DO NOTHING
 		RETURNING true`,
-		in.ID, in.UserID, in.WorkoutID, in.Sport, in.Name,
+		in.ID, in.UserID, in.WorkoutID, in.Sport, in.Name, intent,
 		in.StartedAt, in.EndedAt, in.Notes).Scan(&created)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, translatePgError(fmt.Errorf("session: create: %w", err))
@@ -1029,6 +1057,42 @@ func (r *PostgresRepository) Rename(ctx context.Context, userID, sessionID, name
 		`UPDATE sessions SET name = $2, updated_at = now() WHERE id = $1`,
 		sessionID, name); err != nil {
 		return nil, translatePgError(fmt.Errorf("session: rename: %w", err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("session: commit: %w", err)
+	}
+	return r.Get(ctx, userID, sessionID)
+}
+
+// SetIntent changes only intent (N474) — mirrors Rename/Reschedule's own
+// shape: one field, one method, so intent doesn't quietly become editable
+// through some other door.
+//
+// Editable after the session is created, not just at start, because the
+// athlete who realises PARTWAY through — or only afterward, scrolling
+// history — that today wasn't a normal day needs the same correction Rename
+// already gives a mistyped name. It changes nothing about the sets already
+// logged; only which evidence pool the progression rule reads them from on
+// the NEXT suggestion.
+func (r *PostgresRepository) SetIntent(ctx context.Context, userID, sessionID string, intent SessionIntent) (*Session, error) {
+	if !intent.Valid() {
+		return nil, fmt.Errorf("%w: unknown session intent %q", ErrInvalidInput, intent)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("session: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
+	// Same ownership gate as Rename and Finish — an unguarded UPDATE here is
+	// the identical IDOR shape this module has already had to close once.
+	if _, err := requireOwner(ctx, tx, userID, sessionID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions SET intent = $2, updated_at = now() WHERE id = $1`,
+		sessionID, intent); err != nil {
+		return nil, translatePgError(fmt.Errorf("session: set intent: %w", err))
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("session: commit: %w", err)

@@ -77,6 +77,7 @@ function session(over: Partial<Session> & { id: string }): Session {
     workout_id: null,
     sport: 'strength',
     name: 'Legs',
+    intent: 'normal',
     started_at: '2026-08-26T09:00:00-07:00',
     ended_at: '2026-08-26T10:00:00-07:00',
     notes: '',

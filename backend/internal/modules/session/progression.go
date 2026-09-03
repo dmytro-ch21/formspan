@@ -120,6 +120,15 @@ const (
 	// exists but never produced a usable straight-set cohort at all. An
 	// honest "can't tell" rather than a confident guess. See N473/#812.
 	SuggestAbstain SuggestionCode = "abstain"
+	// SuggestNoRecentNormalSession: history exists, but every session this
+	// rule can see (within progressionWindow) is IntentLight/IntentDeload —
+	// there is genuinely no normal-intent evidence to build a suggestion
+	// from (N474). Distinct from SuggestNoHistory, which means nothing was
+	// ever logged at all: this means something WAS logged, repeatedly, and
+	// none of it was offered as evidence of capacity. Falling back silently
+	// to a light session's numbers here would be exactly the bug this whole
+	// feature exists to close, just moved one branch over.
+	SuggestNoRecentNormalSession SuggestionCode = "no_recent_normal_session"
 )
 
 // staleAfter is when a previous performance stops being evidence about today.
@@ -249,6 +258,16 @@ const (
 type SessionEffort struct {
 	SessionID   string
 	PerformedAt time.Time
+	// Intent is what the athlete meant this session to be (N474) — see
+	// SessionIntent's own doc comment. IntentLight and IntentDeload sessions
+	// are skipped when this rule searches for its evidence session and when
+	// it counts consecutive stalled sessions (findEvidence, stalledSessionsAt
+	// below): a session tagged as not representative of true capacity must
+	// not become the evidence the NEXT suggestion is built from, however
+	// much reserve it was left with. Their sets are still real training —
+	// nothing about volume, history or exercise stats reads Intent at all,
+	// only this rule does.
+	Intent SessionIntent
 	// Sets in the order performed, warm-ups already excluded.
 	Sets []Set
 
@@ -262,6 +281,19 @@ type SessionEffort struct {
 	// reading for every fixture written before this field existed — nobody
 	// retroactively becomes "finished" by a field they never populated.
 	Finished bool
+}
+
+// isNormal treats an EMPTY Intent as IntentNormal, not as "unset and
+// therefore excluded". `RecentEfforts` always populates a real value from
+// the database (the column defaults to 'normal', and every scan reads it
+// back), so this only matters for a SessionEffort literal built directly —
+// which is most of this file's own test suite. Requiring every existing
+// test to spell out `Intent: IntentNormal` to keep meaning what it always
+// meant would be exactly backwards: the zero value has to be the safe
+// default, the same way every session logged before this column existed IS
+// a normal session, not an unknown one.
+func (s SessionEffort) isNormal() bool {
+	return s.Intent == "" || s.Intent == IntentNormal
 }
 
 // ProgressionInput is everything the rule reads. Assembled by the repository
@@ -420,7 +452,19 @@ type Suggestion struct {
 func Progress(in ProgressionInput, now time.Time) (p Plan) {
 	rng := repRangeForGoal(in.Goal)
 	p = Plan{RepRange: rng}
-	defer func() { p = applyInSessionSignal(in, p) }()
+	// Set inside the evidence-search loop below, read here — declared before
+	// the defer specifically so the closure can see it (N474). Appended as a
+	// suffix rather than woven into every branch's own Reason string: this is
+	// a fact about how the evidence session was FOUND, orthogonal to what the
+	// rule decided once it was — the same shape applyInSessionSignal already
+	// uses for a different cross-cutting annotation, and not a coincidence.
+	var skippedNonNormal bool
+	defer func() {
+		if skippedNonNormal && p.Code != SuggestNoRecentNormalSession {
+			p.Reason += " (A light or deload session was skipped when finding this.)"
+		}
+		p = applyInSessionSignal(in, p)
+	}()
 
 	if in.LoadType != "weight_reps" {
 		p.Code = SuggestNotApplicable
@@ -435,23 +479,42 @@ func Progress(in ProgressionInput, now time.Time) (p Plan) {
 		return p
 	}
 
-	// The first session with sets this rule can actually read, not simply the
-	// newest one.
+	// The first NORMAL-intent session with sets this rule can actually read,
+	// not simply the newest one.
 	//
 	// The SQL filter admits a row carrying *any* measure; the domain needs
 	// reps and weight together. A weight-only row on a weighted lift passes
 	// one and fails the other, and stopping at Recent[0] threw away a
 	// perfectly good session behind it — the same erasure
 	// TestRecentEfforts_IgnoresSetsWithNothingRecorded pins a layer lower.
+	//
+	// N474: a light/deload session is skipped here exactly like an unusable
+	// one — it is real training, but it is not a claim about capacity, and
+	// this is the ONE place in the rule that decides which session gets to
+	// make that claim. skippedNonNormal is tracked separately from "no
+	// usable session at all" so the two failure reasons stay distinguishable
+	// (SuggestNoRecentNormalSession vs SuggestRepeatUnknownEffort below).
 	var last SessionEffort
 	var sets []Set
 	for _, s := range in.Recent {
+		if !s.isNormal() {
+			if len(workingSetsWithWeight(s.Sets)) > 0 {
+				skippedNonNormal = true
+			}
+			continue
+		}
 		if usable := workingSetsWithWeight(s.Sets); len(usable) > 0 {
 			last, sets = s, usable
 			break
 		}
 	}
 	if len(sets) == 0 {
+		if skippedNonNormal {
+			p.Code = SuggestNoRecentNormalSession
+			p.Reason = "The last few sessions were light or deload, so there's nothing normal-intensity to build a suggestion from yet. " +
+				"A normal session picks the progression back up from where it left off."
+			return p
+		}
 		p.Code = SuggestRepeatUnknownEffort
 		p.Reason = "Nothing weighted recorded last time — log a working set and this starts building."
 		return p
@@ -790,6 +853,16 @@ func readyForLoad(sets []Set, rng RepRange) bool {
 func stalledSessionsAt(recent []SessionEffort, weight float64) int {
 	n, floor := 0, -1
 	for _, s := range recent {
+		// N474: a light/deload session is invisible to the stall counter,
+		// not a break in it — it neither extends a streak (its own weight
+		// may be nothing like `weight`, by design) nor ends one, since it
+		// makes no claim about capacity either way. Without this, a single
+		// lighter Tuesday between two identical normal Mondays would read
+		// as the streak resetting, which quietly hides a real 3-session
+		// stall behind an unrelated light day.
+		if !s.isNormal() {
+			continue
+		}
 		sets := workingSetsWithWeight(s.Sets)
 		if len(sets) == 0 || *topSet(sets).WeightKg != weight {
 			break

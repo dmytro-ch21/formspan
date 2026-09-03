@@ -53519,6 +53519,164 @@ position before trusting any number it produces.
   (`expo-sensors`) and real-device validation that a CI suite cannot
   provide.
 
+## 2026-09-02 — N474 (#813): session intent (Normal/Light/Deload) so an autoregulated session doesn't crater the strength baseline
+
+The reported bug, confirmed exactly: bench progression running ~250×3, one
+session the athlete deliberately goes lighter for real reasons — two BJJ
+sessions that week, life — and logs 185×12. `Progress()` picks the *first*
+session with real working sets as the evidence session, no matter what it
+was for, so the next suggestion computed off 185×12 instead of 250×3: **add
+load to 195×5**, a load *below* what the athlete can already do for triples.
+The algorithm was working exactly as designed, on an input the design never
+anticipated — there was no way to say "this session doesn't represent your
+capacity" anywhere in the data model.
+
+**What shipped is scoped to the manual half of the ticket** — the athlete
+tagging a session themselves — not the auto-detection or rolling-weighted
+baseline ideas raised alongside it; those are named explicitly as follow-ons
+below, per the ticket's own "explicitly out of scope" section.
+
+**The model.** A new `SessionIntent` enum — `normal` (default) | `light` |
+`deload` — living on `sessions.intent`, same shape as the existing `Goal`
+string enum on workouts. Chosen at session start; empty/unset always reads as
+`normal`, both server-side (`.Valid()`'s zero-value handling) and in every
+mobile/web copy of the type, so no historical row needs backfilling logic
+beyond the migration's own `DEFAULT 'normal'`.
+
+**What it changes, and the line drawn around what it doesn't.** A light/
+deload session's sets are logged, synced and counted **exactly like today**
+for volume, exercise history, duration, calories — nothing about *recording*
+changes, which is the whole point: a light session is still real training.
+The ONLY thing intent gates is `Progress()`'s evidence-session search
+(`session/progression.go`) — a `!isNormal()` session is invisible to it, so
+the walk over `Recent` keeps going past it to the last genuinely normal
+session. `stalledSessionsAt` gets the identical treatment: a light/deload
+session neither breaks nor extends the 3-strikes stall streak, because it
+was never attempting to test the same weight in the first place.
+
+**Transparency, matching the module's own "always says why" rule.** When the
+evidence search skips a non-normal session on the way to a usable one, the
+suggestion's `Reason` gets an appended clause — `"(A light or deload session
+was skipped when finding this.)"` — so the number on screen explains itself
+without the athlete having to trust it. If *every* session in the lookback
+window is light/deload, that's a real "no baseline to suggest from" state,
+distinct from never having done the exercise: a new `SuggestionCode`,
+`no_recent_normal_session`, rather than a silent fallback to `no_history` or
+to whatever's there. Both `apps/mobile`'s and `apps/web`'s copies of
+`SuggestionCode`/`Session` — kept as deliberate duplicates of the wire
+contract per their own doc comments — got the new variant and a phase-map
+entry each, so an unhandled code isn't a possibility on either surface.
+
+**Both progression engines, not just one.** This branch rebased past N473
+(#814, landed on `main` mid-flight), which introduced a second, parallel
+engine (`ProgressV2`/`RecentEffortsV2`, behind the `new_recommendation_engine`
+flag) that this ticket had never seen. `backend-reviewer` caught in
+`/pre-merge` that the first version of this fix only reached `Progress`/
+`stalledSessionsAt` — the V2 pair still read a light/deload session as
+evidence exactly like before, reachable the moment that flag is on. Fixed by
+applying the identical skip to `RecentEffortsV2` (now selects `s.intent`,
+same as `RecentEfforts`), `ProgressV2`'s evidence-search loop, and
+`stalledSessionsAtV2` — three functions, not a shared helper, matching the
+file's own "deliberately parallel, not layered" rule for why v1 stays
+untouched. V2 twins of the mutation-verified evidence/stall tests confirm it.
+
+**One more `/pre-merge` finding worth naming, from `frontend-reviewer`.**
+The picker sits on the strength session-start screen, but that screen has
+always auto-started a session the instant a planned `?workout=` param
+resolved — which is the actual path "start today's planned session" takes
+from Today. The picker rendered and was immediately navigated away from
+before the athlete could ever touch it, so a planned deload day — the
+scenario this ticket exists for — could not be marked as one. Fixed by
+skipping the auto-start for `sport === 'strength'` only; every other sport
+keeps the original one-tap behaviour. A second `frontend-reviewer` finding —
+`sessionStore.ts`'s `upsert` bound `s.intent` unguarded into a `NOT NULL`
+column, so a pulled session from an API predating migration 000088 would
+throw and stall the whole sync loop — got the same `?? 'normal'` guard
+`s.notes` already had.
+
+**A sibling reachability gap, caught independently by `ac-verifier` and
+`frontend-reviewer` on the re-review: a template's own "Start session" button
+(`app/workout/[id].tsx`) is a second entry point into a strength session, and
+it bypassed the picker entirely** — every session started from Plan → a
+template's own screen was silently `normal`, with no way to mark it otherwise.
+Not fixed by rerouting through `/session/start`: that screen's whole design
+point, stated in its own comment, is "performing a template is one tap away",
+and sending the athlete through the chooser to re-select the workout they
+just opened would cost exactly that tap. Fixed instead with a second copy of
+the picker on `workout/[id].tsx` itself — same component shape, same
+strength-only gating, same default — feeding the same `startLocalSession`
+call the screen already makes. Two component tests pin it (mutation-verified:
+hardcoding the passed `intent` to `'normal'` turned the wiring test red).
+
+**Mobile (the mobile-first rule's actual test: can a phone-only athlete use
+this at all).** A three-way Normal/Light/Deload picker on the strength
+session-start screen (`app/session/start.tsx`), defaulting to Normal so an
+ordinary day needs no decision — gated to `sport === 'strength'`, since
+double progression and its baseline are a strength concept and putting the
+picker in front of a BJJ or running athlete would ask them to answer a
+question that means nothing to them. `startLocalSession`/`sessionStore.ts`'s
+outbox threads the choice through the offline-first path exactly like every
+other session field: written locally first, carried on the create push (not
+a separate PATCH — same treatment as `name`/`sport`, since v1 only sets
+intent at the moment a session is created, never edits it after). History
+(`app/session/history.tsx`) tags a past light/deload row with a small pill
+next to the sport label — an explicit acceptance criterion, not a nice-to-
+have, since scrolling training history is exactly where "why does this entry
+look lighter than its neighbours" gets asked. The suggestion card already
+rendered `reason` verbatim on both platforms, so the skip note above needed
+no new UI at all — the existing "trust nothing, show the reasoning" design
+paid for itself here.
+
+**Testing.** Backend: unit tests on `Progress()`/`stalledSessionsAt` (9,
+mutation-verified — flipping the `isNormal()` guard to a no-op turned 5 of
+them red) plus their V2 twins (4 more, same mutation treatment), Postgres
+integration tests for `Create`/`SetIntent` including an IDOR-scoped ownership
+test, a golden test that a light session's sets summarise and list identically
+to a normal one's (`ac-verifier` flagged this as the one criterion with no
+pinning test — mutation-verified by adding an accidental `s.intent = 'normal'`
+predicate to `List`'s WHERE clause and watching it correctly fail), and a full
+end-to-end reproduction of the exact reported bug against a real database
+(`TestProgressionCycle_LightSessionDoesNotDisturbIt`: 250kg×3 normal,
+185kg×12 light, next suggestion still evidence-of-250). Mobile: a real-SQLite
+fixture test for the `local_sessions.intent` migration (fresh install,
+upgrade-from-32, re-run idempotency — the schema suite's own convention, per
+`vola-testing`'s "SQL behavior belongs in a fixture test, never a regex"), a
+`sessionStore.ts` round-trip/push-wiring test plus one for the version-skew
+guard above (both mutation-verified), a component test pinning the
+history-row tag, and a component test pinning the auto-start reachability fix
+(mutation-verified: reverting the `sport === 'strength'` skip turned it red).
+`pnpm run verify` green throughout, including `lint:openapi` against the new
+`PATCH /sessions/{id}/intent` endpoint and schema additions.
+
+**Open questions this leaves — named, not silently dropped, per the
+ticket's own scope cut:**
+- **Cross-sport auto-signal** ("two hard BJJ sessions this week, mark today
+  Light?") — the athlete's own worked example, and the most natural next
+  step, but it needs BJJ's `session_rpe`/load threaded somewhere strength
+  progression can read it, which is new plumbing this ticket didn't build.
+  The manual toggle shipped here already solves the athlete's stated case
+  today; the auto-suggestion is a real ticket of its own.
+- **"Readiness Adjusted" mid-session auto-detection** (comparing today's
+  early sets against the recent baseline and offering to downgrade the rest
+  of the session live) — real autoregulation, needs its own design pass on
+  when to prompt and how not to be annoying, deliberately not attempted here.
+- **Rolling-weighted / confidence-scored baseline** — weighting recent
+  sessions instead of picking one evidence session outright is a genuinely
+  different mechanism than the current deterministic-selection design, and
+  probably wants coordinating with #753/#812's larger progression-engine
+  redesign rather than bolting onto this one.
+- **No "edit an existing session's intent" UI.** v1 only sets intent at
+  session start; there is no picker to correct it afterward (mobile's
+  `setSessionIntent` API wrapper exists in `lib/sessions.ts` for exactly this
+  future case, but nothing calls it yet — `sessionStore.ts`'s outbox has no
+  `intent_dirty` tracking either, so wiring an editor needs that piece too).
+- **NEEDS HUMAN EVIDENCE, and this is the ticket's own acceptance
+  criterion**: logging a real normal session, then a real deliberate light
+  session, on a device, and confirming the next suggestion still reflects
+  the normal one — nothing in this environment can drive the actual mobile
+  picker or confirm the suggestion card's copy reads right on a phone.
+
+
 ## Open items / known gaps as of this entry
 
 

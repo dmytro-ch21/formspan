@@ -2,6 +2,7 @@ package session
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -741,5 +742,204 @@ func TestProgress_InSessionSignal_NonFiniteAverageNeverReachesTheResponse(t *tes
 	p = Progress(baselineHypertrophyInput(huge, huge, huge), testNow)
 	if p.InSessionSignal != nil {
 		t.Errorf("an overflowed average should never produce a signal, got %+v", p.InSessionSignal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// N474 — session intent. A deliberately light or deload session must never
+// become the evidence the NEXT suggestion is built from, however much
+// reserve it was left with — see SessionIntent's own doc comment.
+// ---------------------------------------------------------------------------
+
+// sessWithIntent is sess's intent-carrying sibling. sess itself is left
+// unchanged (used by 24+ existing tests) — its SessionEffort literals have a
+// zero-value Intent, which isNormal() treats as IntentNormal by design, so
+// every one of those tests is still exercising exactly the "normal session"
+// path without needing to say so.
+func sessWithIntent(intent SessionIntent, ago time.Duration, now time.Time, sets ...Set) SessionEffort {
+	e := sess(ago, now, sets...)
+	e.Intent = intent
+	return e
+}
+
+// The bug this whole ticket exists to close, reproduced directly: a real
+// bench progression (250kg×3 @8-9, well inside a powerlifting 3-5 range) is
+// followed by a deliberately lighter session (185kg×12) the athlete tagged
+// Light. The powerlifting rep range's own top (5) is nowhere near 12, so if
+// the light session were read as evidence, readyForLoad would fire on it and
+// the "add_load off 185" bug is exactly what the user reported. The fix:
+// this session must never be selected as evidence AT ALL, so the plan is
+// built off the 250 session behind it — the double-progression machinery
+// runs exactly as if the light session were not there.
+func TestProgress_LightSessionIsNeverTheEvidenceSession(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := Progress(progIn("powerlifting",
+		sessWithIntent(IntentLight, day, testNow, set(12, 185, rir2, nil)),
+		sess(2*day, testNow, set(3, 250, rir2, nil)),
+	), testNow)
+
+	if p.LastWeightKg == nil || *p.LastWeightKg != 250 {
+		t.Fatalf("evidence weight = %v, want 250 (the normal session, not the light 185)", p.LastWeightKg)
+	}
+	// The session's own goal is powerlifting (3-5), 3 reps at 2 RIR is below
+	// the top of the range with room, so this is add_reps, not add_load — the
+	// point isn't which branch fires, it's that 185 never entered the
+	// decision at all.
+	if p.Code != ProgressAddReps {
+		t.Fatalf("code = %q, want %q — built from the wrong session if this differs", p.Code, ProgressAddReps)
+	}
+	if *p.TargetWeightKg != 250 {
+		t.Fatalf("target weight = %v, want 250 — a light session must never move the load", *p.TargetWeightKg)
+	}
+}
+
+// IntentDeload gets the identical treatment for the identical reason — see
+// SessionIntent's own doc comment on why the two share this behaviour.
+func TestProgress_DeloadSessionIsNeverTheEvidenceSession(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := Progress(progIn("powerlifting",
+		sessWithIntent(IntentDeload, day, testNow, set(12, 185, rir2, nil)),
+		sess(2*day, testNow, set(3, 250, rir2, nil)),
+	), testNow)
+
+	if p.LastWeightKg == nil || *p.LastWeightKg != 250 {
+		t.Fatalf("evidence weight = %v, want 250", p.LastWeightKg)
+	}
+}
+
+// When EVERY session in reach is light/deload, there is genuinely no normal
+// evidence — and the correct answer is a distinct, explicit code, not a
+// silent fall-through to whatever the light session says (SuggestNoHistory
+// would be equally wrong: something WAS logged, repeatedly).
+func TestProgress_AllLightSessionsYieldNoRecentNormalSession(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := Progress(progIn("powerlifting",
+		sessWithIntent(IntentLight, day, testNow, set(12, 185, rir2, nil)),
+		sessWithIntent(IntentDeload, 2*day, testNow, set(10, 200, rir2, nil)),
+	), testNow)
+
+	if p.Code != SuggestNoRecentNormalSession {
+		t.Fatalf("code = %q, want %q", p.Code, SuggestNoRecentNormalSession)
+	}
+	if p.TargetWeightKg != nil {
+		t.Errorf("no evidence session means no numeric prescription, got %v", *p.TargetWeightKg)
+	}
+}
+
+// A session with NOTHING usable recorded (the pre-existing
+// SuggestRepeatUnknownEffort case) must stay that code when it's the only
+// thing in Recent — SuggestNoRecentNormalSession is specifically for "found
+// light/deload sessions with real data", not a general replacement for it.
+func TestProgress_UnusableSessionWithoutAnyLightSessionsStaysUnknownEffort(t *testing.T) {
+	p := Progress(progIn("powerlifting",
+		sess(24*time.Hour, testNow, Set{ExerciseID: "bench-press", SetType: SetTypeWorking, Completed: true}),
+	), testNow)
+
+	if p.Code != SuggestRepeatUnknownEffort {
+		t.Fatalf("code = %q, want %q", p.Code, SuggestRepeatUnknownEffort)
+	}
+}
+
+// The transparency rule: when the evidence session was found BEHIND a
+// skipped light/deload one, the reason says so, so an athlete reading "255
+// x3" understands why a session they just did isn't reflected in it.
+func TestProgress_ReasonNamesASkippedLightSession(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := Progress(progIn("powerlifting",
+		sessWithIntent(IntentLight, day, testNow, set(12, 185, rir2, nil)),
+		sess(2*day, testNow, set(3, 250, rir2, nil)),
+	), testNow)
+
+	if !strings.Contains(p.Reason, "light") && !strings.Contains(p.Reason, "deload") {
+		t.Fatalf("reason does not mention a skipped session: %q", p.Reason)
+	}
+}
+
+// The mirror case: nothing was skipped, so nothing should be said about it —
+// a false "skipped a light session" note on an ordinary two-normal-session
+// history would be exactly the kind of unearned claim this rule's "always
+// says why" contract exists to prevent.
+func TestProgress_ReasonSaysNothingWhenNoSessionWasSkipped(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := Progress(progIn("powerlifting",
+		sess(day, testNow, set(3, 250, rir2, nil)),
+		sess(2*day, testNow, set(3, 245, rir2, nil)),
+	), testNow)
+
+	if strings.Contains(p.Reason, "light") || strings.Contains(p.Reason, "deload") {
+		t.Fatalf("reason wrongly claims a session was skipped: %q", p.Reason)
+	}
+}
+
+// Explicit backward-compatibility pin: a SessionEffort with Intent left at
+// its Go zero value (every literal in this file's OTHER ~24 tests, and every
+// row RecentEfforts assembles from a real database row — see the comment on
+// scanning in postgres.go) must behave exactly as IntentNormal, not as
+// "unknown and therefore excluded". Getting this backwards would silently
+// blank every existing suggestion the moment this column shipped.
+func TestProgress_ZeroValueIntentReadsAsNormal(t *testing.T) {
+	e := SessionEffort{SessionID: "s", PerformedAt: testNow, Sets: []Set{set(3, 250, ptrInt(2), nil)}}
+	if e.Intent != "" {
+		t.Fatalf("test fixture bug: Intent is %q, want the zero value", e.Intent)
+	}
+	if !e.isNormal() {
+		t.Fatal("a zero-value Intent must read as normal")
+	}
+
+	p := Progress(progIn("powerlifting", e), testNow)
+	if p.Code == SuggestNoRecentNormalSession {
+		t.Fatal("a session with an unset Intent must not be treated as light/deload")
+	}
+	if p.LastWeightKg == nil || *p.LastWeightKg != 250 {
+		t.Fatalf("evidence weight = %v, want 250", p.LastWeightKg)
+	}
+}
+
+// stalledSessionsAt's own N474 behaviour: a light/deload session sitting
+// between two normal sessions at the SAME weight must not read as the
+// streak breaking (it makes no claim about the weight moving) — three
+// normal sessions at one load, with a light day interleaved, is still the
+// stall the automatic deload check exists to catch.
+func TestStalledSessionsAt_LightSessionDoesNotBreakAStall(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+	// Powerlifting range 3-5. Three sessions at 250kg for 3 reps (the floor
+	// of the range, never gaining a rep) is the textbook stall — except a
+	// light day sits between sessions 2 and 3.
+	recent := []SessionEffort{
+		sess(1*day, testNow, set(3, 250, rir2, nil)),
+		sessWithIntent(IntentLight, 2*day, testNow, set(15, 100, rir2, nil)),
+		sess(3*day, testNow, set(3, 250, rir2, nil)),
+		sess(4*day, testNow, set(3, 250, rir2, nil)),
+	}
+	if n := stalledSessionsAt(recent, 250); n != 3 {
+		t.Fatalf("stalled sessions = %d, want 3 — the light session should be invisible to the count, not break it", n)
+	}
+}
+
+// The mirror: a light/deload session at the SAME weight as the stall must
+// not COUNT toward it either — it is invisible in both directions, not
+// merely non-breaking.
+func TestStalledSessionsAt_LightSessionDoesNotCountTowardAStall(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+	recent := []SessionEffort{
+		sess(1*day, testNow, set(3, 250, rir2, nil)),
+		sess(2*day, testNow, set(3, 250, rir2, nil)),
+		// Same weight, tagged light — must not push the count to 3.
+		sessWithIntent(IntentLight, 3*day, testNow, set(3, 250, rir2, nil)),
+	}
+	if n := stalledSessionsAt(recent, 250); n != 2 {
+		t.Fatalf("stalled sessions = %d, want 2 — a light session at the same weight must not count", n)
 	}
 }

@@ -33,7 +33,13 @@ import {
   type Workout,
   type WorkoutItem,
 } from '@/lib/workouts';
-import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
+import {
+  applySuggestions,
+  fetchSuggestions,
+  setsFromWorkout,
+  SESSION_INTENTS,
+  type SessionIntent,
+} from '@/lib/sessions';
 import {
   cacheExercises,
   cachedExercises,
@@ -72,6 +78,12 @@ export default function WorkoutDetailScreen() {
   const [starting, setStarting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
+  // N474: same picker `session/start.tsx` carries, needed here too — this
+  // screen's whole design point is "performing a template is one tap away"
+  // (see `start`'s own comment below), and routing through `/session/start`
+  // instead would cost that tap. Strength-only, defaults to Normal, for the
+  // identical reason as the other screen's copy of this state.
+  const [intent, setIntent] = useState<SessionIntent>('normal');
   const { units } = useUnits();
 
   // Compared against the loaded state so Save only appears when something
@@ -316,6 +328,9 @@ export default function WorkoutDetailScreen() {
       const session = await startLocalSession(userId, {
         sport: workout.sport,
         name: workout.name,
+        // Only strength reads this — see the picker's own comment above —
+        // so any other sport always creates a `normal` session.
+        intent: workout.sport === 'strength' ? intent : 'normal',
         workout_id: workout.id,
         sets,
       });
@@ -451,6 +466,40 @@ export default function WorkoutDetailScreen() {
           {workout.goal ? ` · ${workout.goal}` : ''}
           {workout.visibility === 'public' ? ' · shared' : ''}
         </Text>
+
+        {workout.sport === 'strength' && (
+          <View style={styles.intentSection} testID="workout-intent-picker">
+            <Text style={styles.intentLabel} nativeID="workout-intent-label">
+              {"Today's training"}
+            </Text>
+            <View
+              style={styles.intentRow}
+              accessibilityRole="radiogroup"
+              accessibilityLabelledBy="workout-intent-label"
+            >
+              {SESSION_INTENTS.map((i) => {
+                const active = intent === i.key;
+                return (
+                  <Pressable
+                    key={i.key}
+                    style={[
+                      styles.intentPill,
+                      active && { backgroundColor: accent.accent, borderColor: accent.accent },
+                    ]}
+                    onPress={() => setIntent(i.key)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: active, selected: active }}
+                    testID={`workout-intent-${i.key}`}
+                  >
+                    <Text style={[styles.intentPillText, active && { color: accent.on }]}>
+                      {i.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         <Pressable
           style={[
@@ -945,6 +994,22 @@ const styles = StyleSheet.create({
   },
   renameAction: { fontSize: 16, fontWeight: '700', color: vola.lime },
   meta: { color: vola.textMuted, fontSize: 13, textTransform: 'capitalize' },
+  // N474 — same geometry as `session/start.tsx`'s copy of this picker.
+  intentSection: { gap: 8, marginTop: 12 },
+  intentLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase' },
+  intentRow: { flexDirection: 'row', gap: 8 },
+  intentPill: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+    borderRadius: 12,
+    paddingVertical: 10,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  intentPillText: { fontSize: 14, fontWeight: '600', color: vola.text },
   copy: {
     marginTop: 10,
     borderWidth: 1,

@@ -1657,6 +1657,181 @@ func TestRenameChangesOnlyTheNameAndOnlyForTheOwner(t *testing.T) {
 	}
 }
 
+// N474: a session created without stating an intent gets IntentNormal, not
+// an empty column — every session created before this feature existed, and
+// every ordinary Create call after it, must read the same way to the
+// progression rule (see SessionEffort.isNormal's own doc comment for why the
+// zero value ALSO reads as normal in Go — this pins what actually reaches
+// Postgres).
+func TestCreateAndGet_DefaultsIntentToNormal(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-intent-default")
+
+	s, err := repo.Create(ctx, strengthSession("ses-intent-default", "user_intent_default", nil))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if s.Intent != IntentNormal {
+		t.Fatalf("intent = %q, want %q", s.Intent, IntentNormal)
+	}
+
+	// And it survives a re-read, not just the Create response — the column
+	// default and the Go-side normalisation could disagree without this.
+	got, err := repo.Get(ctx, "user_intent_default", "ses-intent-default")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Intent != IntentNormal {
+		t.Fatalf("re-read intent = %q, want %q", got.Intent, IntentNormal)
+	}
+}
+
+// An explicitly stated intent round-trips, and Create rejects one that isn't
+// one of the three real values — the same defence-in-depth the CHECK
+// constraint backs up, exercised from the Go side.
+func TestCreate_RecordsExplicitIntentAndRejectsAnUnknownOne(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-intent-light")
+
+	in := strengthSession("ses-intent-light", "user_intent_explicit", nil)
+	in.Intent = IntentLight
+	s, err := repo.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if s.Intent != IntentLight {
+		t.Fatalf("intent = %q, want %q", s.Intent, IntentLight)
+	}
+
+	bad := strengthSession("ses-intent-bad", "user_intent_explicit", nil)
+	bad.Intent = "extremely light"
+	if _, err := repo.Create(ctx, bad); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown intent gave %v, want ErrInvalidInput", err)
+	}
+}
+
+// SetIntent, and the boundary it has to respect — same shape as the rename
+// test above, for the sibling PATCH added by N474.
+func TestSetIntentChangesOnlyIntentAndOnlyForTheOwner(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, owner, attacker = "ses-set-intent", "user_set_intent_owner", "user_set_intent_attacker"
+	cleanup(t, pool, id)
+
+	before, err := repo.Create(ctx, strengthSession(id, owner, nil))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if before.Intent != IntentNormal {
+		t.Fatalf("fixture bug: created intent = %q, want %q", before.Intent, IntentNormal)
+	}
+
+	after, err := repo.SetIntent(ctx, owner, id, IntentDeload)
+	if err != nil {
+		t.Fatalf("set intent: %v", err)
+	}
+	if after.Intent != IntentDeload {
+		t.Fatalf("intent = %q, want %q", after.Intent, IntentDeload)
+	}
+	// Only intent. A general update would make sport and name editable
+	// through the same door as a training-intensity correction.
+	if after.Name != before.Name || after.Sport != before.Sport {
+		t.Errorf("set intent changed more than intent: name %q->%q, sport %q->%q",
+			before.Name, after.Name, before.Sport, after.Sport)
+	}
+
+	if _, err := repo.SetIntent(ctx, owner, id, "not a real intent"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown intent gave %v, want ErrInvalidInput", err)
+	}
+
+	// Same IDOR shape Rename already had to close — see that test's comment.
+	// The re-Get below is what actually catches a missing ownership gate; the
+	// error alone does not, since the user-scoped Get would return
+	// ErrNotFound either way.
+	if _, err := repo.SetIntent(ctx, attacker, id, IntentLight); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-user set intent gave %v, want ErrNotFound", err)
+	}
+	still, err := repo.Get(ctx, owner, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if still.Intent != IntentDeload {
+		t.Errorf("owner's intent was changed by another user: %q", still.Intent)
+	}
+}
+
+// The golden test for the OTHER half of N474's invariant — ac-verifier
+// flagged that nothing pinned it. progression_test.go's
+// TestProgress_LightSessionIsNeverTheEvidenceSession proves a light session
+// is invisible to the progression rule; this proves it is otherwise treated
+// EXACTLY like a normal one: identical sets summarise to identical volume
+// regardless of intent, and the session is never filtered out of history.
+// Both would be true by construction — Summarise (session.go) and List's
+// WHERE clause (postgres.go) never read Intent at all — but "true by
+// construction" is exactly the gap a future change (someone "helpfully"
+// excluding light sessions from a totals query, say) could reintroduce
+// silently without a test here to catch it.
+func TestLightSession_CountsFullyForVolumeAndHistory_IdenticalToNormal(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-vol-normal")
+	cleanup(t, pool, "ses-vol-light")
+
+	sets := func() []Set {
+		return []Set{
+			{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40), Completed: true},
+			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(60), RIR: ptrInt(4), Completed: true},
+			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(60), RIR: ptrInt(4), Completed: true},
+		}
+	}
+
+	normal, err := repo.Create(ctx, strengthSession("ses-vol-normal", "user_vol_intent", sets()))
+	if err != nil {
+		t.Fatalf("create normal: %v", err)
+	}
+	lightIn := strengthSession("ses-vol-light", "user_vol_intent", sets())
+	lightIn.Intent = IntentLight
+	light, err := repo.Create(ctx, lightIn)
+	if err != nil {
+		t.Fatalf("create light: %v", err)
+	}
+	if normal.Intent != IntentNormal || light.Intent != IntentLight {
+		t.Fatalf("fixture bug: intents = %q, %q", normal.Intent, light.Intent)
+	}
+
+	nv, lv := Summarise(normal.Sets), Summarise(light.Sets)
+	if nv.WorkingSets != lv.WorkingSets || nv.TotalReps != lv.TotalReps ||
+		nv.TonnageKg != lv.TonnageKg || nv.HardestRPE != lv.HardestRPE ||
+		len(nv.ExerciseIDs) != len(lv.ExerciseIDs) {
+		t.Fatalf("volume differs by intent alone: normal=%+v light=%+v — "+
+			"a light session must count exactly like a normal one", nv, lv)
+	}
+
+	// And the session isn't hidden from history — List's WHERE clause has no
+	// intent predicate, so a light session appears exactly like a normal one.
+	page, err := repo.List(ctx, "user_vol_intent", Filter{Sport: "strength"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var found *Session
+	for i := range page.Sessions {
+		if page.Sessions[i].ID == "ses-vol-light" {
+			found = &page.Sessions[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("light session missing from history — light/deload must never be filtered out of GET /v1/sessions")
+	}
+	if found.Intent != IntentLight {
+		t.Errorf("history returned intent %q, want %q — the tag itself must survive the round trip", found.Intent, IntentLight)
+	}
+	if got := Summarise(found.Sets); got.WorkingSets != lv.WorkingSets || got.TonnageKg != lv.TonnageKg {
+		t.Errorf("volume from a re-listed session differs from the create response: %+v vs %+v", got, lv)
+	}
+}
+
 // Rescheduling, and the boundary it has to respect — same shape as the
 // rename test above, for the sibling PATCH added by N436.
 func TestRescheduleChangesOnlyStartedAtAndOnlyForTheOwner(t *testing.T) {

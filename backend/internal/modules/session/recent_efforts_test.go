@@ -433,3 +433,70 @@ func TestRecentEffortsV2_OpenSessionNeverOccupiesAWindowSlot(t *testing.T) {
 			finishedIDs[0])
 	}
 }
+
+// N474, full round trip through real Postgres — the exact bug report
+// reproduced end to end: a bench progression sits at 250kg for 3 reps (a
+// powerlifting-range top set), the athlete then logs a deliberately lighter
+// session tagged IntentLight (185kg for 12), and the NEXT suggestion must
+// still be built from 250kg, not the intervening light session — proving
+// the intent column, the RecentEfforts query change, and Progress's own
+// evidence-search skip all agree with each other through the real
+// repository, not just in the pure unit tests in progression_test.go.
+func TestProgressionCycle_LightSessionDoesNotDisturbIt(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	mk := func(id string, ago time.Duration, intent SessionIntent, reps []int, kg float64, rir int) {
+		cleanup(t, pool, id)
+		sets := []Set{}
+		for _, r := range reps {
+			sets = append(sets, Set{ExerciseID: exBench, SetType: SetTypeWorking,
+				Reps: ptrInt(r), WeightKg: ptrF(kg), RIR: ptrInt(rir), Completed: true})
+		}
+		s := strengthSession(id, "user_light_cycle", sets)
+		s.Intent = intent
+		s.StartedAt = time.Now().UTC().Add(-ago)
+		if _, err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	plan := func() Plan {
+		got, err := repo.RecentEfforts(ctx, "user_light_cycle", []string{exBench})
+		if err != nil {
+			t.Fatalf("recent efforts: %v", err)
+		}
+		in := got[exBench]
+		in.Goal = "powerlifting" // 3-5
+		return Progress(in, time.Now().UTC())
+	}
+	day := 24 * time.Hour
+
+	// The established progression: 250kg for 3, well inside a 3-5 range
+	// with room (RIR 2).
+	mk("lgt-1", 2*day, IntentNormal, []int{3, 3, 3}, 250, 2)
+	before := plan()
+	if before.LastWeightKg == nil || *before.LastWeightKg != 250 {
+		t.Fatalf("fixture bug: evidence weight = %v before the light session, want 250", before.LastWeightKg)
+	}
+
+	// A deliberately lighter session — 185kg for 12 reps, well outside the
+	// powerlifting range and with plenty of reserve. This is the EXACT shape
+	// the ticket reports: read as evidence by the old rule, this session
+	// alone would satisfy readyForLoad and suggest adding weight off 185.
+	mk("lgt-2", 1*day, IntentLight, []int{12, 12, 12}, 185, 4)
+
+	after := plan()
+	if after.LastWeightKg == nil || *after.LastWeightKg != 250 {
+		t.Fatalf("evidence weight after the light session = %v, want 250 — "+
+			"the light session must never become the evidence session", after.LastWeightKg)
+	}
+	if after.TargetWeightKg == nil || *after.TargetWeightKg != 250 {
+		t.Fatalf("target weight = %v, want 250 — a light session must never move the load", *after.TargetWeightKg)
+	}
+	if after.Code != ProgressAddReps {
+		// 3 reps at RIR 2 in a 3-5 range: room, but not yet at the top —
+		// reps move, load does not. The exact branch matters less than the
+		// weight staying at 250; asserted for completeness.
+		t.Errorf("code = %q, want %q", after.Code, ProgressAddReps)
+	}
+}

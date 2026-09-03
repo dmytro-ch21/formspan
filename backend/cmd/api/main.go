@@ -800,6 +800,9 @@ func main() {
 	// PATCH rather than folded into the bare {sessionID} one above, matching
 	// /sets and /finish's shape rather than growing that endpoint's body.
 	mux.Handle("PATCH /v1/sessions/{sessionID}/schedule", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Reschedule)))
+	// N474: same reasoning as /schedule — a single-field correction gets its
+	// own sub-resource rather than growing the bare {sessionID} PATCH body.
+	mux.Handle("PATCH /v1/sessions/{sessionID}/intent", verifier.RequireAuth(http.HandlerFunc(sessionHandler.SetIntent)))
 	mux.Handle("DELETE /v1/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(sessionHandler.Delete)))
 
 	// The training plan — what the athlete INTENDS to train, as opposed to

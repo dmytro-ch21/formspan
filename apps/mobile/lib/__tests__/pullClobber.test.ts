@@ -71,6 +71,7 @@ const local = (over: Partial<LocalSession> = {}): LocalSession =>
     workout_id: null,
     sport: 'strength',
     name: 'Bench',
+    intent: 'normal',
     started_at: '2026-08-01T09:00:00Z',
     ended_at: AT,
     notes: '',

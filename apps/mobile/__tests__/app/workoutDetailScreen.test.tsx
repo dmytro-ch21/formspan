@@ -78,6 +78,9 @@ const mockDirtyWorkoutIDs = jest.fn(
 const mockUnsyncedWorkoutIDs = jest.fn(
   (..._a: unknown[]): Promise<Set<string>> => Promise.resolve(new Set<string>()),
 );
+const mockStartLocalSession = jest.fn(
+  (..._a: unknown[]): Promise<{ id: string }> => Promise.resolve({ id: 'new-session' }),
+);
 jest.mock('@/lib/sessionStore', () => ({
   cachedWorkouts: (...a: unknown[]) => mockCachedWorkouts(...a),
   dirtyWorkoutIDs: (...a: unknown[]) => mockDirtyWorkoutIDs(...a),
@@ -85,7 +88,7 @@ jest.mock('@/lib/sessionStore', () => ({
   deleteLocalWorkout: jest.fn(),
   renameLocalWorkout: (...a: unknown[]) => mockRenameLocal(...a),
   saveLocalWorkoutItems: jest.fn(async () => {}),
-  startLocalSession: jest.fn(),
+  startLocalSession: (...a: unknown[]) => mockStartLocalSession(...a),
   cacheExercises: jest.fn(async () => {}),
   cachedExercises: jest.fn(async () => []),
 }));
@@ -154,6 +157,15 @@ jest.mock('@/lib/sessions', () => ({
   applySuggestions: jest.fn(),
   fetchSuggestions: jest.fn(async () => new Map()),
   setsFromWorkout: jest.fn(() => []),
+  // N474: real values, not a mock — every fixture in this file is
+  // `sport: 'strength'`, so the picker this module feeds renders on every
+  // test here. `requireActual` would also work; a literal copy is cheaper
+  // and this is pure static data with nothing worth mocking.
+  SESSION_INTENTS: [
+    { key: 'normal', label: 'Normal' },
+    { key: 'light', label: 'Light' },
+    { key: 'deload', label: 'Deload' },
+  ],
 }));
 jest.mock('@/lib/UnitsProvider', () => ({
   useUnits: () => ({ units: 'metric', unitsReady: true, setUnits: jest.fn(), unsynced: false }),
@@ -195,6 +207,47 @@ beforeEach(() => {
   mockDirtyWorkoutIDs.mockReset().mockResolvedValue(new Set<string>());
   mockUnsyncedWorkoutIDs.mockReset().mockResolvedValue(new Set<string>());
   mockSyncState.lastSyncAt = null;
+  mockStartLocalSession.mockReset().mockResolvedValue({ id: 'new-session' });
+});
+
+// N474: this screen's "Start session" is a SIBLING entry point to
+// `session/start.tsx`'s own picker — its whole design point is "performing
+// a template is one tap away" (see the screen's own `start()` comment), so
+// the fix here is a second copy of the picker rather than rerouting through
+// the other screen and losing that tap. ac-verifier and frontend-reviewer
+// both caught this as the same reachability class as the start.tsx fix.
+it('the intent picker defaults to Normal and is not shown for a non-strength plan', async () => {
+  mockCachedWorkouts.mockResolvedValue([plan('Squat Day')]);
+  mockGetWorkout.mockResolvedValue(plan('Squat Day'));
+
+  render(<WorkoutDetailScreen />);
+  await waitFor(() => expect(screen.getByTestId('workout-intent-picker')).toBeTruthy());
+  expect(screen.getByTestId('workout-intent-normal')).toBeTruthy();
+
+  await act(async () => {});
+  const bjjPlan = plan('Rolling', { sport: 'bjj' });
+  mockCachedWorkouts.mockResolvedValue([bjjPlan]);
+  mockGetWorkout.mockResolvedValue(bjjPlan);
+  render(<WorkoutDetailScreen />);
+  await waitFor(() => expect(screen.getByLabelText('Start a session from Rolling')).toBeTruthy());
+  expect(screen.queryByTestId('workout-intent-picker')).toBeNull();
+});
+
+it('starting a session from a template sends the chosen intent, not always normal', async () => {
+  mockCachedWorkouts.mockResolvedValue([plan('Squat Day')]);
+  mockGetWorkout.mockResolvedValue(plan('Squat Day'));
+
+  render(<WorkoutDetailScreen />);
+  await waitFor(() => expect(screen.getByTestId('workout-intent-picker')).toBeTruthy());
+
+  fireEvent.press(screen.getByTestId('workout-intent-light'));
+  fireEvent.press(screen.getByTestId('workout-start-session'));
+
+  await waitFor(() => expect(mockStartLocalSession).toHaveBeenCalled());
+  expect(mockStartLocalSession).toHaveBeenCalledWith(
+    'u1',
+    expect.objectContaining({ intent: 'light' }),
+  );
 });
 
 it('keeps the LOCAL copy on screen when the local row is dirty', async () => {

@@ -248,12 +248,38 @@ export type LoggedSet = {
   completed: boolean;
 };
 
+/**
+ * What the athlete meant this session to be, decided by them — never
+ * inferred from what they actually lifted (N474).
+ *
+ * This is what closes the "a deliberately lighter session became my new
+ * baseline" bug: the progression rule used to have no way to tell a
+ * light/deload session apart from a normal one, so its top set became the
+ * next suggestion's evidence in exactly the way a normal session's would.
+ * `light`/`deload` sessions still count fully toward volume, history and
+ * exercise stats — the ONE thing intent changes is which sessions
+ * `GET /v1/sessions/suggestions` reads as evidence.
+ *
+ * `normal` is the default and the common case — every session logged before
+ * this field existed is `normal`, which is the only reading that doesn't
+ * retroactively change what an old suggestion meant.
+ */
+export type SessionIntent = 'normal' | 'light' | 'deload';
+
+/** `SessionIntent`, labelled for the session-start picker. */
+export const SESSION_INTENTS: { key: SessionIntent; label: string }[] = [
+  { key: 'normal', label: 'Normal' },
+  { key: 'light', label: 'Light' },
+  { key: 'deload', label: 'Deload' },
+];
+
 export type Session = {
   id: string;
   user_id: string;
   workout_id: string | null;
   sport: string;
   name: string;
+  intent: SessionIntent;
   started_at: string;
   ended_at: string | null;
   notes: string;
@@ -261,7 +287,6 @@ export type Session = {
   created_at: string;
   updated_at: string;
 };
-
 
 /**
  * The outcomes of the progression rule.
@@ -300,7 +325,14 @@ export type SuggestionCode =
    * No `target_*` here either — an honest "can't tell" carries no guessed
    * number.
    */
-  | 'abstain';
+  | 'abstain'
+  /**
+   * History exists, but every reachable session was tagged `light`/`deload`
+   * — genuinely no normal-intensity evidence to build a suggestion from
+   * (N474). Distinct from `no_history`: something WAS logged, repeatedly,
+   * and none of it counts as evidence of capacity.
+   */
+  | 'no_recent_normal_session';
 
 /**
  * Flags when today's own already-logged working sets disagree with the
@@ -1105,6 +1137,8 @@ export async function startSession(
   input: {
     sport: string;
     name: string;
+    /** Omitted means `normal` — see `SessionIntent`'s own doc comment. */
+    intent?: SessionIntent;
     workout_id?: string | null;
     sets?: LoggedSet[];
     /** Supplied when pushing a session that was started offline. */
@@ -1198,6 +1232,25 @@ export async function rescheduleSession(
   return request(getToken, `/sessions/${encodeURIComponent(id)}/schedule`, {
     method: 'PATCH',
     body: JSON.stringify({ started_at: startedAt }),
+  });
+}
+
+/**
+ * Change a session's intent — `normal`/`light`/`deload` — and nothing else
+ * (N474). Its own endpoint, matching `/schedule`'s shape: reachable both
+ * before a session starts (the session-start picker is just this call made
+ * early, folded into `startSession`) and afterward, for an athlete who only
+ * realises partway through — or scrolling history later — that a session
+ * wasn't a normal one.
+ */
+export async function setSessionIntent(
+  getToken: TokenGetter,
+  id: string,
+  intent: SessionIntent,
+): Promise<{ session: Session; volume: Volume }> {
+  return request(getToken, `/sessions/${encodeURIComponent(id)}/intent`, {
+    method: 'PATCH',
+    body: JSON.stringify({ intent }),
   });
 }
 

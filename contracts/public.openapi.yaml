@@ -3575,8 +3575,8 @@ components:
         them apart is what preserves the gap between prescribed and actual.
         A session may follow a template or be entirely freeform.
       required:
-        [id, user_id, workout_id, sport, name, started_at, ended_at, notes,
-         sets, created_at, updated_at]
+        [id, user_id, workout_id, sport, name, intent, started_at, ended_at,
+         notes, sets, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3591,6 +3591,20 @@ components:
             the plan it came from.
         sport: { type: string, enum: [strength, running, bjj] }
         name: { type: string, example: Push Day A }
+        intent:
+          type: string
+          enum: [normal, light, deload]
+          default: normal
+          description: >
+            What the athlete meant this session to be (N474) — decided by
+            them, never inferred from what they actually lifted. `light` and
+            `deload` sessions are still real training: their sets count fully
+            toward volume, history and exercise stats. The ONE thing intent
+            changes is `GET /v1/sessions/suggestions` — a `light`/`deload`
+            session is skipped when that endpoint finds its evidence session,
+            so a deliberately lighter day never becomes the next suggestion's
+            baseline. `normal` is the default and the common case; every
+            session created before this field existed is `normal`.
         started_at:
           type: string
           format: date-time
@@ -3820,7 +3834,7 @@ components:
           type: string
           enum: [add_reps, add_load, deload, hold, no_history, not_applicable,
                  repeat_hard, repeat_unknown_effort, repeat_stale,
-                 effort_conflict, abstain]
+                 effort_conflict, abstain, no_recent_normal_session]
           description: >
             The four progression outcomes:
 
@@ -3868,6 +3882,15 @@ components:
             never produced a usable straight-set cohort at all.
             `target_weight_kg`/`target_reps` are both null here too — an
             honest "can't tell" carries no guessed number.
+
+
+            `no_recent_normal_session` (N474) — history exists, but every
+            reachable session was tagged `light`/`deload` on `Session.intent`
+            — there is genuinely no normal-intensity evidence to build a
+            suggestion from. Distinct from `no_history`, which means nothing
+            was ever logged: this means something WAS logged, repeatedly, and
+            none of it counts as evidence of capacity. `target_weight_kg` and
+            `target_reps` are both null on this code, same as `no_history`.
         reason:
           type: string
           description: Human-readable, cites the evidence. Never pattern-match on it.
@@ -3885,10 +3908,11 @@ components:
 
             Null covers three cases alike: nothing logged for this exercise
             yet today, no numeric prescription to compare against
-            (`no_history`/`not_applicable`), or today agrees closely enough
-            with the plan that flagging it would be noise. A client that
-            ignores this field sees exactly the recommendation it always has
-            — this never rewrites `target_weight_kg` or `target_reps`.
+            (`no_history`/`not_applicable`/`no_recent_normal_session`), or
+            today agrees closely enough with the plan that flagging it would
+            be noise. A client that ignores this field sees exactly the
+            recommendation it always has — this never rewrites
+            `target_weight_kg` or `target_reps`.
 
     InSessionSignal:
       type: object
@@ -9451,6 +9475,15 @@ paths:
                     or a VOLA template) and of the same sport.
                 sport: { type: string, enum: [strength, running, bjj] }
                 name: { type: string }
+                intent:
+                  type: string
+                  enum: [normal, light, deload]
+                  default: normal
+                  description: >
+                    What this session is meant to be (N474) — see
+                    `Session.intent`. Omitting it is the common case and
+                    means `normal`, exactly as it always did before this
+                    field existed.
                 started_at:
                   type: string
                   format: date-time
@@ -10115,6 +10148,65 @@ paths:
               schema: { $ref: "#/components/schemas/SessionWithVolume" }
         "400":
           description: started_at missing, a malformed body, or a body over 8 KB.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No such session for this caller
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /sessions/{sessionID}/intent:
+    patch:
+      summary: Correct a session's intent
+      operationId: setSessionIntent
+      description: >
+        Changes `intent` and nothing else (N474) — its own sub-resource,
+        matching `/schedule`, `/sets` and `/finish`, rather than a field on
+        the bare `/sessions/{sessionID}` PATCH.
+
+
+        Reachable both before a session starts (a "Normal · Light · Deload"
+        picker at session start is just this call made early) and afterward
+        — an athlete who only realises partway through, or scrolling history
+        later, that a session wasn't a normal one gets the same correction
+        path the rename endpoint already gives a mistyped name.
+
+
+        Changes nothing about the sets already logged; only which evidence
+        pool `GET /v1/sessions/suggestions` reads them from on the NEXT
+        suggestion for exercises in this session.
+
+
+        Not-yours and does-not-exist both answer 404, deliberately
+        indistinguishable, same as the rename endpoint.
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intent]
+              properties:
+                intent:
+                  type: string
+                  enum: [normal, light, deload]
+      responses:
+        "200":
+          description: The updated session, with its volume summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+        "400":
+          description: intent missing, not one of the three values, a malformed body, or a body over 8 KB.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

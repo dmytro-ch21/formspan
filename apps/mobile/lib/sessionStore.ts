@@ -31,6 +31,7 @@ import {
   startSession as pushCreate,
   type LoggedSet,
   type Session,
+  type SessionIntent,
 } from './sessions';
 import { putDetail as pushBjjDetail, type SessionDetail as BjjDetail } from './bjjSession';
 import { putDetail as pushRunningDetail, type SessionDetail as RunningDetail } from './running';
@@ -72,6 +73,8 @@ type Row = {
   workout_id: string | null;
   sport: string;
   name: string;
+  /** normal / light / deload — see `SessionIntent`'s own doc comment (N474). */
+  intent: string;
   started_at: string;
   ended_at: string | null;
   notes: string;
@@ -176,6 +179,7 @@ function toSession(r: Row): LocalSession {
     workout_id: r.workout_id,
     sport: r.sport,
     name: r.name,
+    intent: (r.intent as SessionIntent) || 'normal',
     started_at: r.started_at,
     ended_at: r.ended_at,
     notes: r.notes,
@@ -210,13 +214,14 @@ export async function upsert(
   const db = await getDb();
   await db.runAsync(
     `INSERT INTO local_sessions
-       (id, user_id, workout_id, sport, name, started_at, ended_at, notes,
+       (id, user_id, workout_id, sport, name, intent, started_at, ended_at, notes,
         sets_json, dirty, remote, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        workout_id = excluded.workout_id,
        sport      = excluded.sport,
        name       = excluded.name,
+       intent     = excluded.intent,
        started_at = excluded.started_at,
        ended_at   = excluded.ended_at,
        notes      = excluded.notes,
@@ -260,6 +265,14 @@ export async function upsert(
      -- which write wins, so a future caller that does conflict gets the right
      -- answer instead of silently losing an edit.
      --
+     -- intent is unconditionally clobbered by excluded.intent, same as sport
+     -- and name above it -- deliberately, not an oversight. N474 v1 only ever
+     -- sets it at session-start (startLocalSession, below), never edits it on
+     -- an existing row, so there is no in-flight local edit for a concurrent
+     -- pull to lose. If a later pass adds "change intent after the session
+     -- already started", it needs an intent_dirty flag alongside dirty, the
+     -- same way name_dirty guards name -- see that comment below.
+     --
      -- name_dirty is deliberately NOT in this clause, and that rests on
      -- renameLocalSession setting dirty = 1 ALONGSIDE name_dirty = 1, so an
      -- unsent rename is already protected by the dirty half. The workout table
@@ -281,6 +294,17 @@ export async function upsert(
     s.workout_id,
     s.sport,
     s.name,
+    // Guarded like `s.notes ?? ''` just below, and for the identical reason
+    // (frontend review, N474): `s` here can be the server's own response,
+    // verbatim, on the pull path — a build of this app talking to an API
+    // that predates migration 000088 hands back a session with no `intent`
+    // field at all, and `local_sessions.intent` is NOT NULL. Without this,
+    // that one row throws, the whole pull loop aborts into runSync's outer
+    // catch, and every session on the device stops syncing until the API
+    // catches up — not a local storage bug, a total sync outage from a
+    // single stale response. `toSession`'s read side already treats a
+    // missing value as 'normal' (N474); this is the write side agreeing.
+    s.intent ?? 'normal',
     s.started_at,
     s.ended_at,
     s.notes ?? '',
@@ -297,6 +321,8 @@ export async function startLocalSession(
   input: {
     sport: string;
     name: string;
+    /** normal/light/deload (N474). Omitted means `normal`. */
+    intent?: SessionIntent;
     workout_id?: string | null;
     sets?: LoggedSet[];
     /**
@@ -325,6 +351,7 @@ export async function startLocalSession(
     workout_id: input.workout_id ?? null,
     sport: input.sport as Workout['sport'],
     name: input.name,
+    intent: input.intent ?? 'normal',
     started_at: input.started_at ?? new Date().toISOString(),
     ended_at: input.ended_at ?? null,
     notes: '',
@@ -978,6 +1005,7 @@ async function pushRow(
         id: s.id,
         sport: s.sport,
         name: s.name,
+        intent: s.intent,
         workout_id: s.workout_id,
         started_at: s.started_at,
         // Sent on the create, not left to the finish call below.
