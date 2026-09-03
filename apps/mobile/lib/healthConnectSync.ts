@@ -192,7 +192,36 @@ async function importVo2Max(getToken: TokenGetter, now: Date): Promise<void> {
 export async function syncHealthConnectBiometrics(
   userID: string,
   getToken: TokenGetter,
+  options: {
+    /**
+     * Whether `userID`/`getToken` are still the CURRENT identity, checked
+     * after every await in the loop below. Defaults to always-true, which
+     * is what every direct call in this file's own test suite gets — this
+     * function has no orchestration state of its own to check identity
+     * against, so a caller with none (a test, most concretely) is not
+     * penalised for not supplying one.
+     *
+     * The real check comes from `runSyncPass` below, which passes a closure
+     * comparing against the module-level `creds` this function otherwise
+     * knows nothing about. See its own doc comment for why this exists:
+     * unlike a finished session's `session_id`-scoped writes (which the
+     * backend's own ownership check on `ComputeSessionMetrics` backstops —
+     * see biometric.go), a raw `putBiometricSamples` call carries no such
+     * check. If the athlete signs out mid-pass and a DIFFERENT athlete
+     * signs in on the same device before an in-flight `await` resolves,
+     * this app's own `getToken` wrapper (see `useAuthToken.ts`) would
+     * authenticate the REST call as the NEW athlete while this loop is
+     * still reasoning about the OLD one's local ledger — writing samples
+     * that are really the old athlete's Health Connect history under the
+     * new athlete's account. Rare (both events have to land inside one
+     * await), but real, since PutSamples has no resource to check ownership
+     * against the way ComputeSessionMetrics does.
+     */
+    stillCurrent?: () => boolean;
+  } = {},
 ): Promise<{ attempted: number }> {
+  const stillCurrent = options.stillCurrent ?? (() => true);
+
   if (!(await readHealthConnectImportEnabled(userID))) return { attempted: 0 };
   if (!(await isHealthConnectSupported())) return { attempted: 0 };
 
@@ -214,6 +243,11 @@ export async function syncHealthConnectBiometrics(
 
   let attempted = 0;
   for (const session of toEnrich) {
+    // Checked at the TOP of every iteration, before this session's own
+    // Health Connect read or network call — see `stillCurrent`'s own doc
+    // comment. A `break` rather than `continue`: once the identity has
+    // moved on, nothing later in `toEnrich` should run under it either.
+    if (!stillCurrent()) break;
     try {
       // `endedAt` is guaranteed non-null here — `selectEnrichmentCandidates`
       // only keeps sessions `needsEnrichmentAttempt` already confirmed are
@@ -257,12 +291,18 @@ export async function syncHealthConnectBiometrics(
     }
   }
 
-  try {
-    await importVo2Max(getToken, now);
-  } catch {
-    // Best-effort, same reasoning as the per-session catch above — VO2max
-    // failing must never block heart-rate enrichment, and there is no
-    // ledger for it to leave inconsistent.
+  // Same identity re-check as the loop above, immediately before the one
+  // remaining network call this pass makes — VO2max is uploaded under
+  // `getToken`, which would otherwise authenticate as whoever is signed in
+  // NOW rather than whoever this pass started as.
+  if (stillCurrent()) {
+    try {
+      await importVo2Max(getToken, now);
+    } catch {
+      // Best-effort, same reasoning as the per-session catch above — VO2max
+      // failing must never block heart-rate enrichment, and there is no
+      // ledger for it to leave inconsistent.
+    }
   }
 
   return { attempted };
@@ -302,7 +342,10 @@ function runSyncPass(reason: string): void {
   if (!creds || running) return;
   const { userID, getToken } = creds;
   running = true;
-  void syncHealthConnectBiometrics(userID, getToken)
+  // See `syncHealthConnectBiometrics`'s `stillCurrent` doc comment — this is
+  // the real check, comparing against `creds` as it stands at the moment
+  // each await resolves, not as it stood when this pass started.
+  void syncHealthConnectBiometrics(userID, getToken, { stillCurrent: () => creds?.userID === userID })
     .catch(() => {
       // See syncHealthConnectBiometrics's own doc comment: nothing here is
       // the athlete's to fix, and nothing here should interrupt anything

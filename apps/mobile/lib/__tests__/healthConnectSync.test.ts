@@ -314,6 +314,59 @@ describe('syncHealthConnectBiometrics', () => {
     expect(rows.map((r) => r.session_id)).toEqual(['good']);
   });
 
+  it('stops mid-pass, before writing anything more, once `stillCurrent` reports the identity has moved on', async () => {
+    // frontend-reviewer's finding: a sign-out + different sign-in landing
+    // inside an in-flight await could otherwise authenticate a later
+    // putBiometricSamples/computeSessionMetrics call as the NEW athlete
+    // while this loop is still reasoning about the OLD one's sessions.
+    await writeHealthConnectImportEnabled(USER, true);
+    // Candidates are read most-recent-started-first (`ORDER BY started_at
+    // DESC`), so 'newer' is what the loop reaches on its FIRST iteration —
+    // named for processing order, not chronology, to keep the assertions
+    // below honest about what actually ran.
+    await seedFinishedRemoteSession('older', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+    await seedFinishedRemoteSession('newer', '2026-09-02T07:00:00.000Z', '2026-09-02T08:00:00.000Z');
+    mockHeartRateReadings = [heartRateReading()];
+    mockComputedMetrics = { hr_source: 'window', sample_count: 1 };
+    mockVo2MaxReadings = [
+      {
+        id: 'hc:vo2:rec-9',
+        time: '2026-09-01T09:00:00.000Z',
+        vo2MillilitersPerMinuteKilogram: 45.2,
+        dataOrigin: 'com.garmin.android.apps.connectmobile',
+      },
+    ];
+
+    let calls = 0;
+    const stillCurrent = () => {
+      calls++;
+      return calls === 1; // true for the first iteration only
+    };
+
+    const result = await syncHealthConnectBiometrics(USER, getToken, { stillCurrent });
+
+    expect(result.attempted).toBe(1); // 'older' and VO2max never ran
+    expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 'newer', 190, 'window');
+    // VO2max is the LAST network call this pass makes — confirms the guard
+    // covers it too, not only the per-session loop.
+    expect(mockPutSamples).not.toHaveBeenCalledWith(
+      getToken,
+      expect.arrayContaining([expect.objectContaining({ metric_type: 'vo2_max' })]),
+    );
+  });
+
+  it('runs the whole pass normally when no `stillCurrent` is supplied (the shape every other test in this file calls it with)', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession('s1', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+    mockHeartRateReadings = [heartRateReading()];
+    mockComputedMetrics = { hr_source: 'window', sample_count: 1 };
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.attempted).toBe(1);
+  });
+
   it('imports VO2max as a profile-level trend, independent of any session', async () => {
     await writeHealthConnectImportEnabled(USER, true);
     // No sessions at all — VO2max import must not depend on having one.
