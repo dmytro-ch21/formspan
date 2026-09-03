@@ -225,6 +225,56 @@ func scanDetail(s scanner) (SessionDetail, error) {
 	return d, nil
 }
 
+// DistanceRecords fetches every running session's splits and start time for
+// the caller, then hands them to BestDistanceRecords — this method is
+// nothing but "fetch the rows, call the pure function", per that function's
+// own doc comment.
+//
+// Driven from `sessions`, not `running_session_detail`, so the query rides
+// the existing `sessions_user_started_idx (user_id, started_at DESC)` index:
+// running_session_detail has no index of its own on user_id (its only keys
+// are the session_id primary key and the healthkit_uuid partial unique
+// index), so a query starting there would be a sequential scan. Starting
+// from `sessions` and joining to `running_session_detail` on its primary
+// key (session_id) gets an index scan on the `sessions` side for free.
+//
+// No LIMIT: this is the caller's own running history, which is bounded by
+// how many times one person can plausibly run, not by anything this query
+// needs to defend against — the same stance session.Repository.Records
+// takes reading every session_sets row for a requested exercise.
+func (r *PostgresRepository) DistanceRecords(
+	ctx context.Context, userID string,
+) ([]DistanceRecord, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT rsd.session_id, rsd.splits, s.started_at
+		FROM sessions s
+		JOIN running_session_detail rsd ON rsd.session_id = s.id
+		WHERE s.user_id = $1 AND s.sport = $2
+		ORDER BY s.started_at, rsd.session_id`,
+		userID, sportKey)
+	if err != nil {
+		return nil, fmt.Errorf("running: distance records: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []RunSplits
+	for rows.Next() {
+		var run RunSplits
+		var splits []byte
+		if err := rows.Scan(&run.SessionID, &splits, &run.StartedAt); err != nil {
+			return nil, fmt.Errorf("running: distance records scan: %w", err)
+		}
+		if err := json.Unmarshal(splits, &run.Splits); err != nil {
+			return nil, fmt.Errorf("running: distance records unmarshal splits: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("running: distance records rows: %w", err)
+	}
+	return BestDistanceRecords(runs), nil
+}
+
 func routePointsOrEmpty(p []RoutePoint) []RoutePoint {
 	if p == nil {
 		return []RoutePoint{}

@@ -11,11 +11,14 @@
 // usually a `session_sets` row against a "run" exercise so the generic
 // personal-record pipeline sees it — see the package doc on
 // `RecordKindsFor`), then PUTs this module's own detail alongside it.
-// Nothing here writes the `sessions` table, and nothing here computes a
-// personal record: `longest_time` and `furthest_distance` already work for
-// any distance_time exercise through `session.Records`, and pace-normalized
-// PRs (fastest 5k, fastest 10k) are explicitly out of scope — see the
-// history entry this package landed with.
+// Nothing here writes the `sessions` table. `longest_time` and
+// `furthest_distance` already work for any distance_time exercise through
+// `session.Records`, unaffected by anything in this file. Distance-normalized
+// PRs (fastest 5k, fastest 10k, fastest half/full marathon SPLIT within a
+// longer run) are a separate concern this package DOES compute, as of L12
+// (#778) — see distance_records.go, and its DistanceRecord doc comment for
+// why that is a deliberately separate mechanism from session.Record rather
+// than a new RecordKind.
 package running
 
 import (
@@ -269,4 +272,11 @@ func (d SessionDetail) Validate() error {
 type Repository interface {
 	PutDetail(ctx context.Context, userID string, d SessionDetail) (SessionDetail, error)
 	GetDetail(ctx context.Context, userID, sessionID string) (SessionDetail, error)
+	// DistanceRecords derives every distance-normalized personal best the
+	// caller holds — see distance_records.go. Computed from the log on
+	// every read, matching session.Repository.Records' own stance and for
+	// the same reason: a kept record would have to be retracted when the
+	// session behind it is corrected or deleted, and a stale one means
+	// congratulating someone for a split they never ran.
+	DistanceRecords(ctx context.Context, userID string) ([]DistanceRecord, error)
 }

@@ -16517,6 +16517,65 @@ ticket). No client surface exists yet — these scenarios are API-level.
   left byte-for-byte unmodified. This is the path a foreign-key-only
   implementation would silently miss.
 
+## L12 (#778) — distance-normalized running PRs: fastest 5k/10k/half/marathon SPLIT within a longer run (`GET /v1/running/records`)
+
+Backend-only, closing the gap N458's own scenarios above named ("deliberately
+no pace-normalized PRs"). Derived from the caller's whole running history on
+every read, matching `GET /v1/records`' own stance — no client surface exists
+yet, so these scenarios are API-level.
+
+### Happy path
+
+- A caller with one running session whose `splits` sum to exactly 5,000m
+  (e.g. five 1km splits) — `GET /v1/running/records` returns one record,
+  `standard_distance: "5k"`, `value_seconds` equal to that window's actual
+  duration (no normalization needed on an exact match), `session_id`
+  matching the session, and `start_split`/`end_split` spanning every split.
+- The same caller with a SECOND, faster run also summing to ~5,000m — the
+  record now cites the faster session; the slower one is gone from the
+  response entirely, not returned as a second, worse "5k" entry.
+- A single long run (e.g. 10km as ten 1km splits) containing several
+  candidate 5-split windows within 5k tolerance — the fastest contiguous
+  window wins, identified by its own `start_split`/`end_split`, not
+  necessarily the first or the last candidate.
+- A run whose matched window's actual distance is off the standard distance
+  but within tolerance (e.g. 5,040m for "5k") — `value_seconds` is the
+  window's pace projected onto exactly 5,000m, not the raw window duration;
+  `actual_distance_m`/`actual_duration_seconds` carry the real, unnormalized
+  numbers alongside it.
+- A caller with running history reaching multiple standard distances (a
+  marathon-length run, say) — the response contains up to four records (5k,
+  10k, half marathon, marathon), each independently the best match for that
+  distance across the caller's whole history, ordered by increasing
+  distance.
+- A record achieved within the last 14 days — `is_recent: true`; the same
+  record achieved longer ago — `false`, matching `PersonalRecord.is_recent`'s
+  own window exactly.
+- A caller with no running sessions at all, or whose runs never reach even
+  5,000m — `200` with `records: []`, not an error.
+
+### Edge cases & errors
+
+- A run whose splits sum to just outside tolerance of every standard
+  distance (e.g. ~5,060m against 5k's ±50m/±1% window) — contributes no
+  record for that distance; a run genuinely too short for any standard
+  distance contributes nothing at all.
+- A session with `splits: []` (a manual entry with only `distance_m`/
+  `duration_seconds` set, no per-split breakdown) — contributes nothing;
+  matching works only against the splits list, not the summary fields.
+- A session belonging to another sport that happens to carry a
+  `running_session_detail`-shaped row — cannot occur through the public API
+  (`PUT /v1/running/sessions/{id}` already refuses a non-running session),
+  so this is a storage-level invariant rather than a reachable client
+  scenario; see the backend module's own tests.
+
+### Auth/security
+
+- No auth header — `401`.
+- Never returns another caller's records — this endpoint takes no id
+  parameter at all, so there is no cross-user id to probe in the first
+  place, unlike the session-detail endpoints above.
+
 ## N461 — post-run report: `SessionCelebration` extended for running (`apps/mobile/lib/celebration.ts`, `apps/mobile/components/SessionCelebration.tsx`, `apps/mobile/lib/units.ts`)
 
 Extends the finish-a-session celebration modal — previously strength and BJJ
