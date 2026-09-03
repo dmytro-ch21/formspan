@@ -52933,6 +52933,265 @@ close to that line. Flagged rather than built.
   what `featureflag` actually supports today. A staged/opt-in rollout, if
   wanted before flipping it for everyone, is not built here.
 
+## 2026-09-02 — F28 (#720): reconciling belt roadmap and syllabus phase titles, completing N110 (#480)
+
+PR #719 (N110/#480) measured, rather than assumed, whether a belt's roadmap
+(`<belt>-belt-basics`, track `belt`) and its reference syllabus
+(`<belt>-belt-syllabus`, track `syllabus`) actually carried the same phase
+titles in the same order — the claim `docs/content/bjj-curriculum-structure.md`
+had stated as fact since N97. They did not, on any of the four belts. #719
+shipped the weaker pairing-only guard
+(`TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases`, then named
+`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart`) rather than commit a
+permanently-red literal test, and filed this ticket to do the content work
+that would make the stronger assertion buildable. This is that work.
+
+### White and purple: retitle only — and one correction to #719's premise
+
+**White belt** was exactly what #719 described: 11 phases on both tracks,
+positionally aligned by topic (each syllabus phase covers the same techniques
+as its same-index roadmap phase, just in more depth and without criteria) —
+only the wording differed, because the syllabus predates
+`docs/design/bjj-belt-curriculum.md` (N20/#277) and the roadmap was
+re-authored against it verbatim (N97/#445). Retitled all 11 syllabus phases
+to the roadmap's Title Case wording — "Start standing" → "Start Standing",
+… "Know when you are in trouble" → "Submission Defense" — with no reordering
+and no items moved.
+
+**Purple belt was NOT what #719's ticket description implied.** #719 stated
+white and purple both "match phase-for-phase in COUNT (11/11, 10/10) but not
+in TITLE TEXT," which reads as "only a rename is needed." Measuring the
+technique-id overlap between each roadmap phase and each syllabus phase
+(the same "verify before touching content" discipline this repo asks for)
+showed purple's 10 syllabus phases were **not** positionally aligned with the
+roadmap's 10 by topic — unlike white. The syllabus was organised by a
+different scheme entirely (grouped by "system": entries, individual guard
+systems, kimura, front headlock, leg entanglements, scrambles) rather than by
+the roadmap's linear milestone order, and one roadmap phase's content
+(`Develop Submission Systems`) was split across two syllabus phases. This is
+recorded here rather than silently corrected because it changes what "just a
+rename" means for purple — it needed reordering and one merge, the same kind
+of editorial call #719 reserved for blue and brown alone.
+
+The purple mapping (old syllabus title → new position/title), derived from
+technique-id overlap with each roadmap phase:
+
+| Old syllabus phase | New position | New title | Basis |
+|---|---|---|---|
+| *(none — content gap)* | 1 | Establish a Standing Game | No existing syllabus phase covered this roadmap milestone at all; backfilled from the roadmap's own 3 techniques + 1 concept |
+| One guard, all the way down | 2 | Build an A-Game Guard | K-guard entry/wrestle-up/back-take system realises the roadmap phase's "enter/retain/sweep/submit/back-take" concept list |
+| The back takes underneath | 3 | Build Guard Connections | Shares `reverse-de-la-riva-kiss-dragon`; both describe the De La Riva → reverse DLR → kiss of the dragon → back-take chain |
+| Retention against intent | 4 | Advanced Guard Retention | Shares `inversion-guard-retention`, `turtle-bottom-granby-recovery` |
+| Float passing and the reaction map | 5 | Build a Passing Tree | Shares `float-pass-backstep`, `leg-drag-to-backtake` |
+| Control that creates dilemmas | 6 | Control Transitions | Shares `north-south-to-backtake`; both describe forcing reactions through pin transitions |
+| The kimura as a system + The front headlock system | 7 | Develop Submission Systems | **Merged** — the roadmap's single phase covers both subsystems; front-headlock items ordered first to mirror the roadmap's own item order, all 8 items from both old phases kept, none dropped |
+| Leg entanglements as positions | 8 | Leg Entanglement System | Strongest overlap of any pair (4 shared technique ids) |
+| Scrambles, owned | 9 | Scrambles and Wrestling | Shares `lapel-single-leg-wrestleup`, `turtle-granby-wrestleup` |
+| Name your game | 10 | Strategy | Both are the belt's only pure-concept, off-the-mat planning phase |
+
+Every existing purple syllabus item was preserved (moved, never dropped). The
+one new phase (position 1) uses the roadmap's own 3 techniques
+(`single-leg-crackdown-finish`, `front-headlock-chinstrap-control`,
+`guard-pull-single-leg-x` — already validated, since the roadmap already uses
+them) plus a lightly-reworded version of the roadmap's own concept, not
+invented content.
+
+### Blue and brown: phase counts genuinely differed, and needed real reconciliation
+
+**Blue** (10 roadmap phases vs. 9 syllabus phases): 8 of the 9 existing
+syllabus phases matched a roadmap phase 1:1 by topic and technique overlap.
+The ninth, "Pins that go somewhere," actually matched roadmap phase 7 (`Build
+Submission Chains`) — not phase 6 (`Control After Passing`), despite the
+title's surface resemblance — so it moved to position 7. That left roadmap
+phase 6, `Control After Passing` (the side-control → north-south →
+knee-on-belly → mount → back connective chain), **entirely absent** from the
+old syllabus: none of its five roadmap items appeared anywhere else in the
+blue syllabus either. Added as a new phase at position 6, using the
+roadmap's own 5 items plus its own concept, none invented.
+
+**Brown** (10 roadmap phases vs. 7 syllabus phases) needed the most work.
+Mapping the 7 existing phases against the 10 roadmap phases by technique
+overlap and theme:
+
+- `A takedown system, not a list` → `Master Your Best Takedown System` (2)
+- `The primary guard, with no leaks` → `Master Your Primary Guard` (3) — all
+  6 items (kneeling/standing/pressure/leg-drag/body-lock passer answers, plus
+  the deliberate-turtle concept) are genuinely about *passing styles*, which
+  is exactly roadmap phase 3's own list, not split with phase 4
+- `Pinning that forces reactions` → `Master Pinning` (6), **minus** one item
+  moved out (below)
+- `Finishing families` → `Develop Finishing Systems` (7)
+- `Defensive layers` → `Master Defensive Layers` (8), **plus** one concept
+  moved in (below)
+- `Strategy, and the standard` → `Strategic Mastery` (10)
+- `What brown belt is` had **no roadmap counterpart at all** (it is a
+  2-concept meta-introduction). Its two concepts were redistributed rather
+  than dropped or left as an 11th, homeless phase: "Almost nothing here is
+  new" opens the new `Create a Complete Starting Strategy` phase (both are
+  belt-opening framing), and "A third of it is what never lands on you"
+  (about prevention) was appended to `Master Defensive Layers`, whose entire
+  theme is prevention.
+
+That left **4 roadmap phases with no syllabus content anywhere**: `Create a
+Complete Starting Strategy` (1), `Remove Guard Weaknesses` (4), `Master a
+Passing Philosophy` (5), and `Control Scrambles` (9). Phases 1 and 5 are
+concept-only in the roadmap (7 archetype/opponent concepts and 10
+passing-philosophy concepts respectively, with no technique ids), so they
+were backfilled **verbatim** — they are already-authored educational prose,
+not new domain claims, and roadmap/syllabus read identically for these two
+phases by construction. Phase 4 was backfilled from the roadmap's own 3
+techniques (`knee-shield-half-guard`, `turtle-granby-wrestleup`,
+`shin-to-shin-wrestleup`) plus its concept. Phase 9 was backfilled from the
+roadmap's 3 techniques and 4 concepts, **plus** `rolling-back-take-from-turtle`
+— which existed in the old "Pinning that forces reactions" phase but is
+roadmap phase 9's item, not phase 6's (the only item in that old phase that
+actually belonged to `Control Scrambles` rather than `Master Pinning`) — moved
+rather than duplicated, since a technique id may only appear once per
+curriculum (`curriculum_items_technique_unique`).
+
+### The strengthened test
+
+`TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases` (renamed during review
+from `TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart`, which undersold
+what it now checks) in `backend/internal/modules/curriculum/seed_test.go` now
+asserts, for every
+belt with both tracks present, that the roadmap and syllabus phase title
+slices are **equal — same length, same titles, same order** — in addition to
+the pairing/uniqueness checks #719 shipped. Comparing by index rather than by
+set catches a reorder, not just a rename or a drop, which purple's own defect
+would otherwise have slipped past. Mutation-verified twice: retitling
+`white-belt-syllabus`'s first phase, and separately swapping two adjacent
+`blue-belt-syllabus` phases, each produced a real assertion failure naming
+the mismatched index and titles (not a crash); reverting each mutation
+restored a green run. The full existing suite in this package
+(`TestTheSeedFileParsesAndIsShaped`, `TestEverySeededTechniqueExistsInTheLibrary`,
+`TestNothingOnTheSyllabusTrackIsCompletable`,
+`TestEveryBeltRoadmapMatchesTheSuppliedDocument`, and the rest) stays green —
+the roadmaps themselves were never touched, and no technique id was dropped
+or duplicated in any of the four syllabuses.
+
+The existing test function was extended in place rather than added
+alongside a second one: it already built the `belt`/`syllabus` id maps this
+needed, and a second test iterating the same maps to check the same pairs
+for a different property would have been two tests asserting overlapping
+things for no reason.
+
+### `docs/content/bjj-curriculum-structure.md` updated to match
+
+The doc's claim that "since N97 they share the section order too" was true
+in the roadmap-vs-document sense but not yet true of the actual syllabus
+content — the paragraph explaining that gap ("filed rather than solved," and
+naming N100/#480 as the pending fix) is rewritten to say the gap is closed,
+with the measured before/after and a pointer to this entry for the mapping.
+The domain-coverage table's per-belt example cells that quoted **exact**
+old syllabus titles (`Retention against intent`, `One guard, all the way
+down`, `Pins that go somewhere`, `The back takes underneath`, `The front
+headlock system`, `Pinning that forces reactions`, `Scrambles, owned` (which
+was already misplaced under Brown's column — a pre-existing error, not one
+this ticket introduced, but the same stale string this ticket's grep would
+otherwise miss), and `Escape the bad places`) were replaced with fresh
+paraphrases; the table's own header already states these cells are "a
+coverage checklist, not a naming scheme," so this is tidying stale flavour
+text, not re-deriving the table's domain assignments — that remains
+unaudited and out of scope here.
+
+### Ambiguous calls, flagged rather than silently resolved
+
+- **Purple position 1's content is thin by necessity, not choice.** The old
+  syllabus never repeated the roadmap's standing-game techniques anywhere
+  (perhaps deliberately, assuming carry-over from blue belt's own standing
+  phase) — there was nothing to move, only the roadmap's own items to
+  reuse, which read as a smaller phase than the rest of purple's syllabus.
+- **Blue's "Pins that go somewhere" mapping to `Build Submission Chains`
+  (not `Control After Passing`) is a judgment call**, not a certainty — the
+  title's surface reading points at "Control After Passing," and only the
+  technique-id overlap (4 shared ids with `Build Submission Chains`, zero
+  with `Control After Passing`) settles it. Worth a second look if anyone
+  re-reads the old title cold.
+- **Brown's `Master Pinning` (6) keeps 3 items
+  (`straightjacket-back-control`, `crucifix-from-turtle`,
+  `rolling-back-take-from-turtle` before it moved) that don't appear
+  anywhere in the roadmap's own `Master Pinning` item list at all** — they
+  were part of the old "Pinning that forces reactions" phase and, short of
+  `rolling-back-take-from-turtle` (moved to `Control Scrambles`, its actual
+  roadmap home), the remaining two don't have an obviously-better home
+  either. Left in place rather than forced; flagging rather than asserting
+  this is the correct final resting place for them.
+
+These are recorded here for the user to sanity-check rather than resolved
+unilaterally, per this ticket's own instruction not to silently pick an
+answer where the editorial call was genuinely close.
+
+### What `backend-reviewer` caught, and the fixes
+
+- **`[blocking]` — reviewer-facing changelog text had leaked into
+  athlete-visible content.** 7 of the new/backfilled syllabus phase
+  `description` fields carried parentheticals like "(N110/F28
+  reconciliation)" — `description` ships on every `Get` and mobile renders it
+  as the milestone's own note, so an athlete opening, say, the brown-belt
+  syllabus would have read a ticket reference under three of its phases.
+  Stripped down to the substantive first sentence(s) in all 7; the
+  provenance belongs here, in this entry, not in the content itself.
+- **ASCII `--`/`->` in the new content, against the file's em-dash/arrow
+  convention** — 8 sites, all from the reconciliation script emitting
+  plain ASCII. Fixed to `—`/`→` throughout. Fixing this surfaced that
+  the "backfilled verbatim, reads identically" claim above was not quite
+  true as first written: two of the eight sites were inside brown's
+  `Master a Passing Philosophy` and `Create a Complete Starting Strategy`
+  phases, and separately, `Master a Passing Philosophy`'s "The order is the
+  philosophy" concept was missing its roadmap's trailing sentence ("This is
+  the single sentence the rest of this milestone is an application of.").
+  Both fixed — the em-dashes and the restored sentence — so the claim above
+  is now actually true, not just intended.
+- **`[suggestion]` — purple's `Strategy` phase (moved from position 1 to
+  position 10) still read as though it opened the belt**, referring to "the
+  phases below" when nothing is below it any more. Reworded to "the phases
+  above."
+- **`[suggestion]` — blue's adjacent `Control After Passing` and `Build
+  Submission Chains` phases both opened with a near-identical "one position
+  seen from N angles" line**, which would read as a copy-paste error to an
+  athlete moving through the syllabus. `Control After Passing`'s opener
+  (the one this ticket added) was reworded to drop the duplicate framing.
+- **`[suggestion]` — the strengthened test's name undersold what it checks.**
+  Renamed `TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart` to
+  `TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases`, updated everywhere
+  in this codebase except the pre-existing #719-era mention of the old name
+  earlier in this file, which describes what shipped at the time and stays
+  accurate under its own name.
+- **`[suggestion]` — `docs/content/bjj-curriculum-structure.md`'s domain
+  table, row 8 (Brown), still said "(folded into pinning and defensive
+  layers)"** after the reconciliation actually placed those items under
+  `Control Scrambles`. Corrected.
+- **A real `ac-verifier` finding, confirmed directly rather than taken on
+  trust: `rolling-back-take-from-turtle`'s authored note was overwritten,
+  not preserved, when it moved from brown's old "Pinning that forces
+  reactions" phase to the new `Control Scrambles`.** The original syllabus
+  note — "Their turn, punished." — was replaced with the roadmap's own note
+  for the same technique ("Chase the back: the scramble's best possible
+  ending.") in the reconciliation script, which is exactly the kind of
+  flattening this ticket's own guidance warned against. Verified by diffing
+  every technique item's `notes` field against `origin/main`'s pre-F28
+  content across all four syllabuses: this was the only one that had
+  changed. Restored the original note verbatim; the diff now confirms
+  zero note changes across all four syllabuses for every existing/moved
+  item — only genuinely new items (backfilled from the roadmap, documented
+  above) carry new notes.
+
+  `ac-verifier`'s background run itself stalled partway through (its
+  transcript stopped growing for several hours with no completion
+  marker, in a session that also saw an unrelated and still-unexplained
+  external corruption of a much larger stretch of this very file, caught
+  and reverted before it could be committed — see the parallel diagnostic
+  work in this session's own record). Rather than wait indefinitely on a
+  transcript that was no longer advancing, this session performed the
+  equivalent checks directly: the note-preservation diff above, plus
+  re-running the mutation-verification and the full package suite. The
+  finding itself is real and independently confirmed either way.
+
+All mutation-verified again after the fixes (retitling a phase, confirming a
+real assertion failure naming the mismatched index and titles, reverting,
+confirming green by re-running); the full package suite stays green.
+
 ## Open items / known gaps as of this entry
 
 
