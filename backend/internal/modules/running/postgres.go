@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,7 +23,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 const detailColumns = `
 	session_id, route_points, splits, elevation_gain_m, avg_pace_sec_per_km,
-	distance_m, duration_seconds, source, created_at, updated_at`
+	distance_m, duration_seconds, source, healthkit_uuid, created_at, updated_at`
 
 // translatePgError turns constraint violations into domain errors.
 //
@@ -41,6 +42,18 @@ func translatePgError(err error) error {
 	switch pgErr.Code {
 	case "23503": // foreign_key_violation
 		return ErrNotFound
+	case "23505": // unique_violation
+		// Scoped by constraint name rather than assumed from the SQL shape,
+		// same discipline profile.translatePgError's own 23505 branch
+		// takes: PutDetail's ON CONFLICT(session_id) clause already absorbs
+		// every session_id collision on the INSERT path, so in practice
+		// this is unreachable for anything but the healthkit_uuid index —
+		// but "in practice" is an argument, and the constraint name check
+		// is what makes the guarantee structural rather than argued.
+		if strings.Contains(pgErr.ConstraintName, "healthkit_uuid") {
+			return ErrAlreadyExists
+		}
+		return fmt.Errorf("%w: a value conflicts with an existing row", ErrInvalidInput)
 	case "23514": // check_violation
 		return fmt.Errorf("%w: a value is out of range", ErrInvalidInput)
 	case "22003": // numeric_value_out_of_range
@@ -104,8 +117,9 @@ func (r *PostgresRepository) PutDetail(
 	row := tx.QueryRow(ctx, `
 		INSERT INTO running_session_detail
 			(session_id, user_id, route_points, splits, elevation_gain_m,
-			 avg_pace_sec_per_km, distance_m, duration_seconds, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			 avg_pace_sec_per_km, distance_m, duration_seconds, source,
+			 healthkit_uuid)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (session_id) DO UPDATE SET
 			route_points        = excluded.route_points,
 			splits              = excluded.splits,
@@ -114,6 +128,7 @@ func (r *PostgresRepository) PutDetail(
 			distance_m          = excluded.distance_m,
 			duration_seconds    = excluded.duration_seconds,
 			source              = excluded.source,
+			healthkit_uuid      = excluded.healthkit_uuid,
 			updated_at          = now()
 		-- Load-bearing, exactly as in bjj.PutDetail: on the INSERT path the
 		-- composite owner FK rejects a session that is not this caller's,
@@ -129,7 +144,8 @@ func (r *PostgresRepository) PutDetail(
 		WHERE running_session_detail.user_id = $2
 		RETURNING `+detailColumns,
 		d.SessionID, userID, points, splits, d.ElevationGainM,
-		d.AvgPaceSecPerKm, d.DistanceM, d.DurationSeconds, string(d.Source))
+		d.AvgPaceSecPerKm, d.DistanceM, d.DurationSeconds, string(d.Source),
+		d.HealthKitUUID)
 
 	out, err := scanDetail(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -183,7 +199,7 @@ func scanDetail(s scanner) (SessionDetail, error) {
 	)
 	err := s.Scan(&d.SessionID, &points, &splits, &d.ElevationGainM,
 		&d.AvgPaceSecPerKm, &d.DistanceM, &d.DurationSeconds, &source,
-		&createdAt, &updatedAt)
+		&d.HealthKitUUID, &createdAt, &updatedAt)
 	if err != nil {
 		return SessionDetail{}, err
 	}

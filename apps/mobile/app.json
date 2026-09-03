@@ -66,7 +66,15 @@
           "motionUsagePermission": false
         }
       ],
-      "react-native-maps"
+      "react-native-maps",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. Import is off until you turn it on in Settings, and VOLA only reads workouts; it never writes anything to Health.",
+          "NSHealthUpdateUsageDescription": false,
+          "background": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

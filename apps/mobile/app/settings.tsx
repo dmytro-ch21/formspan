@@ -10,6 +10,12 @@ import { Icon } from '@/components/ui/Icon';
 import { useAccent, useAccentChoice } from '@/lib/AccentProvider';
 import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
+import { isHealthKitSupported } from '@/lib/healthkit';
+import {
+  readHealthKitImportEnabled,
+  triggerHealthKitImportNow,
+  writeHealthKitImportEnabled,
+} from '@/lib/healthkitSync';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
 import { MONO_ACCENT, monoNeedsRelaunch } from '@/lib/palette';
@@ -52,6 +58,16 @@ export default function SettingsScreen() {
   }, [userId]);
 
   const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
+
+  // N465: read once — this asks HealthKit synchronously, and the answer
+  // cannot change while the process is alive (a native module is either
+  // linked into this binary or it is not, same reasoning as
+  // cameraModule.ts's CameraView).
+  const [healthKitSupported] = useState(() => isHealthKitSupported());
+  const [healthKitImport, setHealthKitImport] = useState(false);
+  useEffect(() => {
+    if (userId) readHealthKitImportEnabled(userId).then(setHealthKitImport).catch(() => {});
+  }, [userId]);
 
   /**
    * Whether a crash mid-session actually reaches us — read fresh on every
@@ -237,6 +253,52 @@ export default function SettingsScreen() {
           last
           onChange={(on) => void setTrackEffort(on)}
           testID="settings-effort"
+        />
+      </Section>
+
+      {/* Its own section: this is a data SOURCE, not a display preference —
+          grouping it with sounds and units would bury a permission-triggering
+          switch among cosmetics. */}
+      <Section title="Integrations">
+        <Toggle
+          label="Import runs from Apple Health"
+          hint={
+            healthKitSupported
+              ? "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history — VOLA only reads workouts, and never writes anything back to Health. Turning this on asks for Health access."
+              : 'Not available on this device.'
+          }
+          value={healthKitImport}
+          disabled={!healthKitSupported}
+          last
+          onChange={(on) => {
+            setHealthKitImport(on);
+            if (!userId) return;
+            void (async () => {
+              try {
+                // Optimistic, reverted on failure — same posture the sharing
+                // switch below takes with its own server-backed state; this
+                // one is device-local, so the only failure is a SQLite
+                // write. AWAITED before triggering the import pass below:
+                // `readHealthKitImportEnabled` inside that pass reads this
+                // exact preference back, and firing the pass before the
+                // write lands races the two — the pass could read the OLD
+                // value and silently import nothing on the very toggle that
+                // was meant to turn it on.
+                await writeHealthKitImportEnabled(userId, on);
+              } catch {
+                setHealthKitImport(!on);
+                return;
+              }
+              // Turning it ON asks HealthKit for permission and runs the
+              // first import pass immediately, rather than making the
+              // athlete wait for the next app foreground to see anything
+              // appear. Goes through the mutex-guarded trigger, never the
+              // raw `importHealthKitRuns`, so this can never race a pass
+              // already in flight from sign-in or a foreground return.
+              if (on) triggerHealthKitImportNow(userId);
+            })();
+          }}
+          testID="settings-healthkit-import"
         />
       </Section>
 

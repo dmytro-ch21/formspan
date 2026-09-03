@@ -549,6 +549,36 @@ const CREATE_TRACKER_ENTRIES = `
 `;
 
 /**
+ * N465: the local ledger of runs already imported from Apple HealthKit —
+ * the SAME-DEVICE half of the dedup story. `lib/healthkitSync.ts` checks
+ * this BEFORE creating any local session for a workout, so a repeat import
+ * pass on this device never even reaches the point of retrying a push; the
+ * server's per-user unique index on `running_session_detail.healthkit_uuid`
+ * (backend migration 000087) is the OTHER half, for a reinstalled app or a
+ * second device that has no ledger of its own to consult.
+ *
+ * A dedicated table rather than scanning every session's `running_json`
+ * blob for a `healthkit_uuid`, so "have I imported this uuid" is one indexed
+ * lookup rather than a full table scan and a JSON parse per row on every
+ * foreground import pass.
+ *
+ * No `dirty`/`remote` flags — this table is never pushed. It exists only to
+ * answer "have I seen this uuid", and the fact the SERVER has accepted the
+ * session it names is exactly what `local_sessions.dirty` on that row
+ * already tracks; duplicating that state here would be a second place for
+ * the two to disagree.
+ */
+const CREATE_HEALTHKIT_IMPORTS = `
+  CREATE TABLE IF NOT EXISTS healthkit_imports (
+    user_id TEXT NOT NULL,
+    healthkit_uuid TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, healthkit_uuid)
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -577,7 +607,7 @@ const CREATE_TRACKER_ENTRIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 31;
+const SCHEMA_VERSION = 32;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -593,7 +623,8 @@ type LocalTable =
   | 'foods'
   | 'barcode_cache'
   | 'daily_trackers'
-  | 'tracker_entries';
+  | 'tracker_entries'
+  | 'healthkit_imports';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -674,6 +705,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_BARCODE_CACHE);
   await db.execAsync(CREATE_DAILY_TRACKERS);
   await db.execAsync(CREATE_TRACKER_ENTRIES);
+  await db.execAsync(CREATE_HEALTHKIT_IMPORTS);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -1199,6 +1231,14 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // are different facts, and only the first should skip the detail push
     // entirely.
     await addColumnIfMissing(db, 'local_sessions', 'running_json', 'TEXT');
+  }
+
+  if (current < 32) {
+    // N465: the same-device half of "don't import a HealthKit run twice" —
+    // see CREATE_HEALTHKIT_IMPORTS's own doc comment for the full argument
+    // and why this is a dedicated table rather than a scan over every
+    // session's `running_json`.
+    await db.execAsync(CREATE_HEALTHKIT_IMPORTS);
   }
 
   // The day query the card runs on every render of Today.

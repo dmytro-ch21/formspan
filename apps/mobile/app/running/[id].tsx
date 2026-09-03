@@ -90,6 +90,12 @@ export default function RunningSessionScreen() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [signalWeak, setSignalWeak] = useState(false);
   const [sessionName, setSessionName] = useState('Run');
+  // N465: only ever set for a session this screen did NOT track live — a
+  // freshly finished run is always 'phone_gps' from `emptyDetail`'s default
+  // and this screen never changes it, so this only matters for the
+  // already-finished branch below, where reopening a HealthKit import from
+  // Training History reads back whatever source it was saved with.
+  const [source, setSource] = useState<RunningDetail['source']>('phone_gps');
 
   const mapRef = useRef<MapView | null>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
@@ -183,6 +189,7 @@ export default function RunningSessionScreen() {
           setPoints(existing.route_points);
           pointsRef.current = existing.route_points;
           if (existing.duration_seconds != null) setElapsedSeconds(existing.duration_seconds);
+          setSource(existing.source);
         }
         setStatus('finished');
         return;
@@ -429,6 +436,16 @@ export default function RunningSessionScreen() {
     return (
       <View style={styles.container} testID="running-finished">
         <Stack.Screen options={{ title: sessionName }} />
+        {/* N465: the only place a run's source is shown — see the ticket's
+            "visually distinguishable" criterion. Phone-GPS and manual runs
+            show nothing here; a badge on every run would be noise for the
+            common case this screen exists to serve. */}
+        {source === 'healthkit' && (
+          <View style={styles.sourceBadge} testID="running-source-healthkit">
+            <Icon name="check" size={12} color={vola.textMuted} />
+            <Text style={styles.sourceBadgeText}>Imported from Apple Health</Text>
+          </View>
+        )}
         <StatRow>
           <Stat label="distance" value={formatDistance(distanceMeters, units)} icon="running" />
           <Stat label="time" value={formatElapsed(elapsedSeconds)} />
@@ -624,6 +641,20 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   errorText: { color: vola.danger, fontSize: 15, textAlign: 'center' },
+  sourceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    marginTop: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+  },
+  sourceBadgeText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
   trendRow: {
     flexDirection: 'row',
     alignItems: 'center',

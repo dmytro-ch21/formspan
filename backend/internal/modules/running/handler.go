@@ -48,6 +48,7 @@ type sessionDetailRequest struct {
 	DistanceM       *float64            `json:"distance_m"`
 	DurationSeconds *int                `json:"duration_seconds"`
 	Source          string              `json:"source"`
+	HealthKitUUID   *string             `json:"healthkit_uuid"`
 }
 
 // maxDetailBody bounds the request body before the decoder materialises it
@@ -66,6 +67,7 @@ func (req sessionDetailRequest) toDetail(sessionID string) (SessionDetail, error
 		DistanceM:       req.DistanceM,
 		DurationSeconds: req.DurationSeconds,
 		Source:          Source(req.Source),
+		HealthKitUUID:   req.HealthKitUUID,
 		RoutePoints:     make([]RoutePoint, 0, len(req.RoutePoints)),
 		Splits:          make([]Split, 0, len(req.Splits)),
 	}
@@ -143,6 +145,9 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		// Covers "no such session", "not yours" and "not a running session"
 		// alike — see the owner-FK and sport notes in the repository.
 		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "session not found")
+	case errors.Is(err, ErrAlreadyExists):
+		apihttp.WriteError(w, http.StatusConflict, apihttp.CodeAlreadyExists,
+			"this HealthKit workout is already attached to a different session")
 	case errors.Is(err, ErrInvalidInput):
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, invalidInputMessage())
 	default:

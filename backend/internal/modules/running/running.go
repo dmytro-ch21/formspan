@@ -34,6 +34,27 @@ var (
 	// ErrInvalidInput covers both a value the domain rejects (Validate) and a
 	// constraint Postgres rejects on our behalf (translatePgError).
 	ErrInvalidInput = errors.New("running: invalid input")
+	// ErrAlreadyExists means this HealthKit UUID is already attached to a
+	// DIFFERENT session's DETAIL row for this user — the per-user unique
+	// index on healthkit_uuid firing. PutDetail is an upsert on session_id,
+	// so this can never mean "the same session was saved twice"; it means
+	// two different sessions are claiming the same HealthKit workout.
+	//
+	// This index refuses the DUPLICATE DETAIL ROW, no more — by the time it
+	// fires, the caller's generic `sessions` row (created through the
+	// session module, before this endpoint is ever reached) already exists
+	// server-side. Refusing the detail alone would leave that a real,
+	// permanent, detail-less duplicate in the athlete's training history.
+	// What makes the end-to-end guarantee "no duplicate RUN" hold is the
+	// mobile client's own handling of this exact error: on a 409 here for a
+	// HealthKit-sourced session, it deletes the session it just created
+	// (locally and via a DELETE call) rather than leaving it orphaned — see
+	// `abandonDuplicateHealthKitImport` in apps/mobile/lib/sessionStore.ts.
+	// This index is the backstop for the case the import flow's own local
+	// ledger cannot catch on its own (a reinstalled app or a second device,
+	// neither of which has a ledger to consult) — see HealthKitUUID's doc
+	// comment.
+	ErrAlreadyExists = errors.New("running: already exists")
 )
 
 // sportKey is the `sessions.sport` value this module owns.
@@ -139,6 +160,15 @@ const MaxRoutePoints = 20000
 // ultra.
 const MaxSplits = 500
 
+// maxHealthKitUUIDLength bounds a HealthKit workout UUID. Not a format check
+// (Validate does not parse this as a real UUID, the same "range, not shape"
+// stance the rest of this file takes on a vocabulary it does not otherwise
+// need to police) — HKWorkout.uuid is Apple's standard 36-character UUID
+// string, and this is generous headroom over that rather than an exact fit,
+// so it stops an absurd payload without becoming a second place the UUID
+// format has to be kept in sync with reality.
+const maxHealthKitUUIDLength = 128
+
 // SessionDetail is everything a run has beyond the generic session row.
 type SessionDetail struct {
 	SessionID string `json:"session_id"`
@@ -175,6 +205,18 @@ type SessionDetail struct {
 
 	Source Source `json:"source"`
 
+	// HealthKitUUID is the `HKWorkout.uuid` a HealthKit-imported run came
+	// from — nil for every other source. This is the dedup key: N465's
+	// import flow checks its own local ledger before ever reaching here, but
+	// a reinstalled or second device has no local ledger to check, so this
+	// column carries a per-user unique index (see the migration) as the
+	// backstop that makes a repeat import of the same watch-recorded run
+	// impossible rather than merely unlikely. Stored as given, not required
+	// to be non-nil for SourceHealthKit — this module stores what it is told
+	// (see ElevationGainM's note above), and enforcing that pairing is the
+	// client's job, not a storage-level invariant.
+	HealthKitUUID *string `json:"healthkit_uuid"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -194,6 +236,9 @@ func (d SessionDetail) Validate() error {
 		return ErrInvalidInput
 	}
 	if d.AvgPaceSecPerKm != nil && *d.AvgPaceSecPerKm < 0 {
+		return ErrInvalidInput
+	}
+	if d.HealthKitUUID != nil && (*d.HealthKitUUID == "" || len(*d.HealthKitUUID) > maxHealthKitUUIDLength) {
 		return ErrInvalidInput
 	}
 	if len(d.RoutePoints) > MaxRoutePoints {

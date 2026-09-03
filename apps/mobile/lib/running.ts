@@ -47,6 +47,11 @@ export type SessionDetail = {
   distance_m: number | null;
   duration_seconds: number | null;
   source: Source;
+  /** The `HKWorkout.uuid` a HealthKit-imported run came from (N465) — null
+   *  for every other source. See `internal/modules/running/running.go`'s
+   *  matching field for the dedup argument; the local half of it lives in
+   *  `lib/healthkitSync.ts`. */
+  healthkit_uuid?: string | null;
   created_at?: string;
   updated_at?: string;
 };
