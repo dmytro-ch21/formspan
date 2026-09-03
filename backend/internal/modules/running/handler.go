@@ -128,6 +128,20 @@ func (h *Handler) PutDetail(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"detail": saved})
 }
 
+// DistanceRecords serves the caller's distance-normalized personal bests —
+// see distance_records.go. Always 200 with a possibly-empty list, matching
+// GET /v1/records' own stance: "no records yet" is not an error.
+func (h *Handler) DistanceRecords(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	recs, err := h.repo.DistanceRecords(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"records": recs})
+}
+
 func (h *Handler) GetDetail(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 

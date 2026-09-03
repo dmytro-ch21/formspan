@@ -455,3 +455,123 @@ func TestHealthKitUUIDIsUniquePerUser(t *testing.T) {
 		t.Fatalf("a different user's identical healthkit_uuid was refused: %v", err)
 	}
 }
+
+// L12/#778: DistanceRecords is otherwise pure logic (see
+// distance_records_test.go) — what only the database can prove is that the
+// fetch itself is scoped correctly: the caller's own running sessions only,
+// no other user's, no other sport's, joined against the real `sessions`
+// table rather than an assumption about its shape.
+func TestDistanceRecords(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_running_distance_records"
+
+	// A slower 5k.
+	const slowID = "ses-distance-records-slow"
+	seedSession(t, pool, slowID, user)
+	if _, err := repo.PutDetail(ctx, user, SessionDetail{
+		SessionID: slowID, Source: SourcePhoneGPS,
+		Splits: []Split{
+			{DistanceM: 1000, DurationSeconds: 300},
+			{DistanceM: 1000, DurationSeconds: 300},
+			{DistanceM: 1000, DurationSeconds: 300},
+			{DistanceM: 1000, DurationSeconds: 300},
+			{DistanceM: 1000, DurationSeconds: 300},
+		},
+	}); err != nil {
+		t.Fatalf("seed slow run: %v", err)
+	}
+
+	// A faster 5k — should win.
+	const fastID = "ses-distance-records-fast"
+	seedSession(t, pool, fastID, user)
+	if _, err := repo.PutDetail(ctx, user, SessionDetail{
+		SessionID: fastID, Source: SourcePhoneGPS,
+		Splits: []Split{
+			{DistanceM: 1000, DurationSeconds: 240},
+			{DistanceM: 1000, DurationSeconds: 240},
+			{DistanceM: 1000, DurationSeconds: 240},
+			{DistanceM: 1000, DurationSeconds: 240},
+			{DistanceM: 1000, DurationSeconds: 240},
+		},
+	}); err != nil {
+		t.Fatalf("seed fast run: %v", err)
+	}
+
+	// A strength session cannot carry a running detail row through
+	// PutDetail — it refuses a non-running session, see
+	// TestDetailCannotAttachToAnotherSportsSession — so a decoy detail row
+	// has to be written directly, bypassing the repository entirely, the
+	// same way TestUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel
+	// bypasses it to reach the SQL layer's own guarantee. Its splits are an
+	// absurdly fast 5k (5 seconds flat) so that IF the query's own
+	// `s.sport = $2` filter were ever dropped, this decoy would not merely
+	// slip into the list unnoticed — it would WIN, and the assertions below
+	// on the winning session/value would fail loudly. Verified directly:
+	// removing that filter from the query made this exact test fail on
+	// `winning session = "ses-distance-records-strength", want …-fast`.
+	const strengthID = "ses-distance-records-strength"
+	seedSessionSport(t, pool, strengthID, user, "strength")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO running_session_detail (session_id, user_id, splits, source)
+		VALUES ($1, $2, $3, 'manual')`,
+		strengthID, user,
+		`[{"distance_m":1000,"duration_seconds":1},{"distance_m":1000,"duration_seconds":1},`+
+			`{"distance_m":1000,"duration_seconds":1},{"distance_m":1000,"duration_seconds":1},`+
+			`{"distance_m":1000,"duration_seconds":1}]`); err != nil {
+		t.Fatalf("seed decoy detail row on a strength session: %v", err)
+	}
+
+	got, err := repo.DistanceRecords(ctx, user)
+	if err != nil {
+		t.Fatalf("distance records: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d records, want 1 (5k only): %+v", len(got), got)
+	}
+	r := got[0]
+	if r.StandardDistance != "5k" {
+		t.Fatalf("record standard = %q, want 5k", r.StandardDistance)
+	}
+	if r.DistanceM != 5000 {
+		t.Fatalf("record distance_m = %v, want 5000", r.DistanceM)
+	}
+	if r.SessionID != fastID {
+		t.Fatalf("winning session = %q, want the faster run %q", r.SessionID, fastID)
+	}
+	if r.ValueSeconds != 1200 {
+		t.Fatalf("value_seconds = %v, want 1200 (20:00 5k)", r.ValueSeconds)
+	}
+
+	// Another user's identical splits must not leak into this user's list —
+	// the same non-disclosure stance every other query in this package
+	// takes.
+	const otherUser2, otherSession2 = "user_running_distance_records_other", "ses-distance-records-other-user"
+	seedSession(t, pool, otherSession2, otherUser2)
+	if _, err := repo.PutDetail(ctx, otherUser2, SessionDetail{
+		SessionID: otherSession2, Source: SourceManual,
+		Splits: []Split{{DistanceM: 5000, DurationSeconds: 900}},
+	}); err != nil {
+		t.Fatalf("seed other user's run: %v", err)
+	}
+	stillGot, err := repo.DistanceRecords(ctx, user)
+	if err != nil {
+		t.Fatalf("distance records after seeding another user: %v", err)
+	}
+	if len(stillGot) != 1 || stillGot[0].SessionID != fastID {
+		t.Fatalf("another user's run leaked into this user's records: %+v", stillGot)
+	}
+}
+
+func TestDistanceRecordsForUserWithNoRunsIsEmpty(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	got, err := repo.DistanceRecords(ctx, "user_running_distance_records_none")
+	if err != nil {
+		t.Fatalf("distance records: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %d records for a user with no runs, want 0", len(got))
+	}
+}

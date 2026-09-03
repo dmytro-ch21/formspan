@@ -1789,6 +1789,66 @@ components:
         created_at: { type: string, format: date-time, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 
+    RunningDistanceRecord:
+      type: object
+      description: >
+        A personal-best pace for a standard race distance (5k, 10k, half
+        marathon, marathon), achieved as a contiguous stretch of splits
+        within a run rather than necessarily the whole run — L12/#778. A
+        deliberately separate concept from `PersonalRecord`: the evidence
+        here is a WINDOW inside one session's own splits (`start_split`/
+        `end_split`), not a single logged row, so it does not fit
+        `PersonalRecord`'s shape and is served from its own endpoint instead
+        of `GET /v1/records`.
+      required:
+        [standard_distance, distance_m, value_seconds, session_id,
+         start_split, end_split, actual_distance_m, actual_duration_seconds,
+         achieved_at, is_recent]
+      properties:
+        standard_distance:
+          type: string
+          enum: [5k, 10k, half_marathon, marathon]
+        distance_m:
+          type: number
+          format: double
+          description: The standard distance's own length in metres (5000, 10000, 21097.5 or 42195).
+        value_seconds:
+          type: number
+          format: double
+          description: >
+            The winning window's average pace projected onto the standard
+            distance EXACTLY (pace × distance_m) — the number a "PR"
+            comparison ranks on. Not the same as `actual_duration_seconds`,
+            whose window rarely lands on the standard distance exactly; see
+            `actual_distance_m`.
+        session_id: { type: string }
+        start_split:
+          type: integer
+          description: >
+            Index (0-based) into that session's own `RunningSessionDetail.splits`
+            where the matched window begins, inclusive.
+        end_split:
+          type: integer
+          description: Index (0-based, inclusive) where the matched window ends.
+        actual_distance_m:
+          type: number
+          format: double
+          description: >
+            The matched window's real total distance — within ±1% of
+            `distance_m` by construction, never exactly equal to it, since a
+            match is only as fine-grained as the splits actually recorded.
+        actual_duration_seconds:
+          type: number
+          format: double
+          description: The matched window's real elapsed time, unnormalized.
+        achieved_at:
+          type: string
+          format: date-time
+          description: The session's own start time, not when the detail row was saved or edited.
+        is_recent:
+          type: boolean
+          description: Set within the last 14 days, matching `PersonalRecord.is_recent`'s own window.
+
     Error:
       type: object
       required: [error]
@@ -8839,6 +8899,36 @@ paths:
           $ref: "#/components/responses/NotModified"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /running/records:
+    get:
+      summary: Distance-normalized personal records the caller holds
+      operationId: listRunningDistanceRecords
+      description: >
+        L12/#778 — a personal-best pace for a standard distance (5k, 10k,
+        half marathon, marathon) achieved as a contiguous stretch of splits
+        within ANY of the caller's runs, not only a run of that exact
+        length. Derived from every running session's splits on every read,
+        matching `GET /v1/records`' own stance: a kept record would have to
+        be retracted when the session behind it is corrected or deleted, and
+        a stale one means congratulating someone for a split they never ran.
+
+
+        A standard distance with no matching window anywhere in the caller's
+        history is simply absent from the list, not zero.
+      responses:
+        "200":
+          description: The caller's own distance-normalized records only, at most one per standard distance.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records]
+                properties:
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/RunningDistanceRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /workouts:
     get:

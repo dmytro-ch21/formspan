@@ -575,6 +575,10 @@ func main() {
 	// client PUTs alongside it.
 	mux.Handle("PUT /v1/running/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(runningHandler.PutDetail)))
 	mux.Handle("GET /v1/running/sessions/{sessionID}", verifier.RequireAuth(http.HandlerFunc(runningHandler.GetDetail)))
+	// Distance-normalized PRs (L12/#778) — a personal-best pace for 5k/10k/
+	// half/full marathon achieved as a split within a longer run, derived
+	// from the caller's whole running history rather than one session.
+	mux.Handle("GET /v1/running/records", verifier.RequireAuth(http.HandlerFunc(runningHandler.DistanceRecords)))
 
 	// Say what happened and have it fill the chips (N33). A DRAFT comes back;
 	// nothing is logged until the athlete confirms it and PUTs it through

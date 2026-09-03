@@ -53287,6 +53287,132 @@ splits are counted into the baseline rather than spoken.
   reasoning above — either is a candidate for its own future ticket rather
   than a reopening of #779.
 
+## 2026-09-02 — N458 stretch, L12 (#778): distance-normalized running PRs — fastest 5k/10k/half/marathon SPLIT within a longer run
+
+**What.** `backend/internal/modules/running/distance_records.go` — a
+personal-best pace for a standard race distance (5k, 10k, half marathon
+21,097.5m, marathon 42,195m), detected as a contiguous stretch of a run's own
+`Splits` rather than requiring the whole run to be exactly that length. A 10k
+tempo run can set a "fastest 5k" the same way a set of 12 at a lighter weight
+can still be an estimated-1RM PR. Served as `GET /v1/running/records`,
+returning `{"records": [...]}`, at most one entry per standard distance,
+ordered 5k → 10k → half → marathon.
+
+**The distance-tolerance window, and why ±1% of the target rather than a
+flat metre count.** Splits are typically recorded at ~1km auto-split
+boundaries (see `running.go`'s `Split` doc), so a standard distance that is
+not itself a round number of kilometres is approached but never exactly hit
+by any whole-split window: 21 one-kilometre splits sum to ~21,000m against
+the true half-marathon distance of 21,097.5m (a 97.5m gap from
+split-boundary rounding alone), and 42 splits leave a marathon ~195m short.
+Those gaps scale with the target distance, so the tolerance has to as well —
+a flat ±50m would refuse a clean marathon attempt on rounding alone (0.12%
+of 42,195m), while a flat ±500m would accept a 5k effort that drifted 10%
+off distance and still call it comparable. **±1% of the target** covers both
+real sources of drift (split-boundary rounding, ordinary GPS noise) at every
+tracked distance while staying tight enough that a "5k PR" still means
+something close to 5,000m — the two failure directions the ticket asked to
+weigh explicitly: too tight and a slightly-long effort at the harder
+distances never counts; too loose and the number stops being comparable
+across attempts.
+
+Matched against a run's own **splits**, not the raw GPS track (`RoutePoints`)
+— a split is already the run's distance-segmented shape, the same list a
+client already renders, so a match lands on a boundary a person can see and
+check rather than an arbitrary point along the raw route that appears
+nowhere in the UI. The cost is resolution: a match can only be as
+fine-grained as the splits actually recorded. `BestDistanceWindows` is a
+pure, storage-agnostic function — prefix sums plus an O(n²) scan over every
+contiguous window (n bounded by `MaxSplits`, 500, so ≤250,000 additions,
+trivial) — table-driven-tested for an exact match, a window just inside and
+just outside the tolerance on both the floor and ceiling, several candidate
+windows in one long run (the fastest must win), a run shorter than every
+standard distance (no match), and the case a "PR" for a mismatched-length
+window projects its own pace onto the exact target distance
+(`NormalizedDurationSeconds`) rather than reporting the raw window duration —
+so a 4,980m effort and a 5,020m effort, both inside tolerance, are directly
+comparable instead of rewarding whichever happened to land closer to 5,000m.
+
+**A deliberately SEPARATE mechanism from `session.Record`/`RecordKind`, not a
+new `RecordKind` — the acceptance criteria's second question, answered by
+reading the evidence model first rather than assuming.** `session.Record`'s
+evidence is a single `session_sets` ROW: `SessionID` plus a value already
+sitting on that row, and `session.Repository.Records`' SQL finds a maximum
+with one window function per exercise because every candidate value already
+IS a row in that table. A distance-normalized PR's evidence is a WINDOW — a
+start and end split index inside one session's own `splits` JSONB array,
+which is never itself a row `RecordKindsFor`'s SQL could rank. Forcing it
+into `RecordKind` would mean either inventing `StartSplit`/`EndSplit` fields
+nothing else on that type needs, or silently dropping the window and
+returning a bare duration nobody could check against the splits list they
+can already see — both worse than a second, smaller, purpose-built
+mechanism (`DistanceRecord`, `RunSplits`, `BestDistanceRecords`) that lives
+entirely inside `running` and says exactly what it is. `discipline.go`'s
+`RecordKinds` registry is UNCHANGED by this ticket — running still
+advertises only `longest_time`/`furthest_distance` there, same as before
+N458; a distance-normalized record is a running-specific concept the generic
+Records screen never has to know about.
+
+**No migration.** Like `session.Repository.Records`, this is computed from
+the log on every read rather than kept in a table — a stored record would
+have to be retracted the moment the session behind it is corrected or
+deleted, and a stale one means congratulating someone for a split they never
+ran. `PostgresRepository.DistanceRecords` is "fetch the rows, call
+`BestDistanceRecords`": one query driven from `sessions` (riding the
+existing `sessions_user_started_idx (user_id, started_at DESC)` index) joined
+to `running_session_detail` on its primary key (`session_id`) — deliberately
+NOT driven from `running_session_detail` itself, which carries no index on
+`user_id` at all (only the `session_id` primary key and the partial
+`healthkit_uuid` unique index), so starting there would be a sequential
+scan.
+
+**Testing.** Pure-logic table-driven tests for `BestDistanceWindows` and
+`BestDistanceRecords` (`distance_records_test.go`) — every case the ticket
+named, plus tie-break-on-recency and result ordering. Mutation-verified
+twice: the tolerance constant (0.01 → 0.05) turned the two "just outside
+tolerance" cases into false matches, confirmed as genuine test failures (not
+compile errors), then restored and reconfirmed green by re-running; the
+window-selection comparison (`<` → `>`) broke the fastest-of-several-windows
+case the same way. `postgres_test.go` gained `TestDistanceRecords` (a
+same-user two-run comparison, a decoy on a `strength` session, and a
+different user's identical splits confirmed not to leak) and
+`TestDistanceRecordsForUserWithNoRunsIsEmpty`. **The `strength`-session decoy
+is written by raw SQL, bypassing `PutDetail` entirely** — `PutDetail` itself
+already refuses to attach a running detail row to a non-running session (see
+N458's `TestDetailCannotAttachToAnotherSportsSession`), so a decoy seeded
+through the repository could never reach the query's own `s.sport = $2`
+filter, and an earlier draft of this test proved exactly that: it kept
+passing after that filter was deleted from the SQL. The decoy's splits are
+an absurdly fast 5k (five 1-second kilometres) specifically so that if the
+sport filter were ever dropped, the decoy would not merely appear in the
+list unnoticed — it would WIN, and the assertion on which session won would
+fail loudly. Verified directly: removing the filter made this exact test
+fail with `winning session = "ses-distance-records-strength", want
+…-fast`. Full backend suite (`go test -p 1 ./...`) green against a freshly
+migrated database alongside every other module.
+
+`contracts/public.openapi.yaml` gained `RunningDistanceRecord` and
+`GET /v1/running/records`; `pnpm run lint:openapi` passes.
+
+**`backend-reviewer` caught a real wire-shape bug before this reached a
+client.** The first draft's `DistanceRecord.Standard` field nested the whole
+`StandardDistance` struct (`{"standard_distance": {"key": "5k", "label":
+"5K", "distance_m": 5000}}`) while the OpenAPI schema — written by hand,
+separately, to describe the intended shape — documented `standard_distance`
+as a bare string enum with a sibling `distance_m`. `pnpm run lint:openapi`
+cannot catch this: it validates the YAML's own internal consistency, not
+that the Go handler's actual JSON matches it. Flattened `DistanceRecord` to
+two top-level fields (`StandardDistance string`, `DistanceM float64`),
+matching `PersonalRecord.kind`'s own shape on the existing `/records`
+endpoint — a string plus sibling value fields, not a nested object — so a
+client already familiar with that endpoint sees the same pattern here.
+
+**Left open:** no mobile/web surface reads this endpoint yet — L12 was
+scoped as backend-only, matching how N458 itself shipped the storage
+contract ahead of any client. A client wanting to show "new 5k PR" after a
+run would call this endpoint and diff against what it showed before the run,
+the same pattern the generic Records screen already uses.
+
 ## Open items / known gaps as of this entry
 
 
