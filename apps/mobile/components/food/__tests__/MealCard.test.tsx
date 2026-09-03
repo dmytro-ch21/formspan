@@ -80,7 +80,7 @@ describe('populated vs. empty — a different sentence, never the same one at ze
       entries: [entry()],
       totals: { ...zeroMacros, kcal: 145, protein_g: 11, carb_g: 0, fat_g: 11 },
     });
-    expect(screen.getByText('Breakfast · 145 kcal')).toBeTruthy();
+    expect(screen.getByText('Breakfast · 1 item · 145 kcal')).toBeTruthy();
     expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
     expect(screen.queryByTestId('meal-breakfast-available')).toBeNull();
   });
@@ -99,6 +99,69 @@ describe('populated vs. empty — a different sentence, never the same one at ze
     renderCard({ entries: [], available: null });
     expect(screen.queryByTestId('meal-breakfast-macros')).toBeNull();
     expect(screen.queryByTestId('meal-breakfast-available')).toBeNull();
+  });
+});
+
+/**
+ * N484 — the header's entry count. Found from a user report: a collapsed
+ * section (the header is the only thing still visible, see "collapsible
+ * sections" below) used to state the kcal total and nothing else, so
+ * "was this one big thing or four small ones" required expanding every
+ * card to answer. `FoodSummaryCard`'s "N items logged · kcal" phrasing is
+ * reused rather than invented fresh, so the day-level card and every
+ * per-meal card agree on how they count.
+ */
+describe('the header counts entries — N484', () => {
+  it('pluralises for more than one entry', () => {
+    renderCard({
+      entries: [entry({ id: 'a' }), entry({ id: 'b' })],
+      totals: { ...zeroMacros, kcal: 290 },
+    });
+    expect(screen.getByText('Breakfast · 2 items · 290 kcal')).toBeTruthy();
+  });
+
+  it('stays singular for exactly one entry', () => {
+    renderCard({ entries: [entry()], totals: { ...zeroMacros, kcal: 145 } });
+    expect(screen.getByText('Breakfast · 1 item · 145 kcal')).toBeTruthy();
+  });
+
+  it('an empty section states no count at all — nothing to count yet', () => {
+    renderCard({ entries: [], available: null });
+    expect(screen.queryByText(/item/)).toBeNull();
+    expect(screen.getByTestId('meal-breakfast-header').props.children).toBe('Breakfast');
+  });
+
+  it('the count stays visible when the section is collapsed — it is the whole point', () => {
+    renderCard({
+      entries: [entry({ id: 'a' }), entry({ id: 'b' })],
+      totals: { ...zeroMacros, kcal: 290 },
+    });
+    fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
+    expect(screen.getByText('Breakfast · 2 items · 290 kcal')).toBeTruthy();
+  });
+
+  /**
+   * `accessibilityLabel` on an accessible `Pressable` REPLACES its visible
+   * children's text for VoiceOver rather than supplementing it — so adding
+   * the count to the on-screen `Text` alone would have widened the existing
+   * gap `accessibilityLabel={label}` already left (the kcal total was never
+   * announced either; see the toggle's own doc comment for why the label
+   * carries no STATE). Sighted-only progress is exactly what this feature
+   * exists to fix, so the label has to carry the same content as the text.
+   */
+  it('announces the count and total to VoiceOver too, not only sighted athletes', () => {
+    renderCard({
+      entries: [entry({ id: 'a' }), entry({ id: 'b' })],
+      totals: { ...zeroMacros, kcal: 290 },
+    });
+    expect(screen.getByTestId('meal-breakfast-toggle').props.accessibilityLabel).toBe(
+      'Breakfast, 2 items, 290 calories',
+    );
+  });
+
+  it('an empty section\'s label stays the bare name — nothing to announce a count of', () => {
+    renderCard({ entries: [], available: null });
+    expect(screen.getByTestId('meal-breakfast-toggle').props.accessibilityLabel).toBe('Breakfast');
   });
 });
 
@@ -128,7 +191,7 @@ describe('collapsible sections — N468/#792', () => {
     // the slot's own total) and the Add button both stay reachable.
     expect(screen.queryByTestId('meal-breakfast-macros')).toBeNull();
     expect(screen.queryByText('Oats')).toBeNull();
-    expect(screen.getByText('Breakfast · 145 kcal')).toBeTruthy();
+    expect(screen.getByText('Breakfast · 1 item · 145 kcal')).toBeTruthy();
     expect(screen.getByTestId('food-add-breakfast')).toBeTruthy();
 
     // Expanding again shows the SAME entry, unaffected by the toggle —

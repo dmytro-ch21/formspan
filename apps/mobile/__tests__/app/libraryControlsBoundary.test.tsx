@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { configure, render, screen, waitFor, within } from '@testing-library/react-native';
+import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import LibraryScreen from '../../app/library';
 import { ApiError } from '@/lib/apiError';
@@ -39,10 +39,24 @@ import { ApiError } from '@/lib/apiError';
 jest.setTimeout(30_000);
 configure({ asyncUtilTimeout: 10_000 });
 
+// Module-level (name prefixed `mock`, which is what jest's hoist-check
+// exempts) rather than created fresh inside `useRouter()` — a fresh
+// `jest.fn()` per call can't be asserted against or reconfigured from a
+// test, since nothing outside the mock factory holds a reference to it.
+const mockPush = jest.fn();
+const mockBack = jest.fn();
+const mockReplace = jest.fn();
+const mockCanGoBack = jest.fn(() => true);
+
 jest.mock('expo-router', () => {
   const { useEffect } = jest.requireActual<typeof import('react')>('react');
   return {
-    useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+    useRouter: () => ({
+      push: mockPush,
+      back: mockBack,
+      replace: mockReplace,
+      canGoBack: mockCanGoBack,
+    }),
     useFocusEffect: (cb: () => void | (() => void)) => {
       useEffect(() => {
         const cleanup = cb();
@@ -122,6 +136,47 @@ jest.mock('@/lib/ModulesProvider', () => ({
 beforeEach(() => {
   mockFetchExercises.mockReset();
   mockFetchExercises.mockResolvedValue([]);
+  mockPush.mockReset();
+  mockBack.mockReset();
+  mockReplace.mockReset();
+  mockCanGoBack.mockReset();
+  mockCanGoBack.mockReturnValue(true);
+});
+
+/**
+ * N484 — `headerShown: false` (the fix for the doubled header above) removes
+ * React Navigation's native header, which was this screen's ONLY back
+ * control: `ScreenHeader` was built for TAB screens and has no back
+ * affordance, only a right-side `action` slot. Found by `frontend-reviewer`
+ * and `ac-verifier` independently against the first version of this fix,
+ * which hid the native header without replacing what it removed — Library
+ * was reachable but not leavable except by an edge-swipe gesture, invisible
+ * to VoiceOver.
+ */
+describe('the back button — N484', () => {
+  it('is present, reachable by accessibility label', async () => {
+    render(<LibraryScreen />);
+    await waitFor(() => expect(screen.getByTestId('library-back')).toBeTruthy());
+    expect(screen.getByLabelText('Back')).toBeTruthy();
+  });
+
+  it('goes back when there is somewhere to go back to', async () => {
+    mockCanGoBack.mockReturnValue(true);
+    render(<LibraryScreen />);
+    await waitFor(() => expect(screen.getByTestId('library-back')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('library-back'));
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the home route with nothing to go back to — a deep link, say', async () => {
+    mockCanGoBack.mockReturnValue(false);
+    render(<LibraryScreen />);
+    await waitFor(() => expect(screen.getByTestId('library-back')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('library-back'));
+    expect(mockReplace).toHaveBeenCalledWith('/');
+    expect(mockBack).not.toHaveBeenCalled();
+  });
 });
 
 describe("the edge beneath Library's fixed chrome", () => {

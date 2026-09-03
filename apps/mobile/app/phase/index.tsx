@@ -149,7 +149,10 @@ export default function PhaseScreen() {
 
   return (
     <View style={styles.screen}>
-      <Stack.Screen options={{ title: 'Phase' }} />
+      {/* headerShown: false — same fix as library.tsx (N484): this screen
+          draws its own ScreenHeader, and without suppressing the native
+          stack header too, both stack, reading as a dead gap at the top. */}
+      <Stack.Screen options={{ title: 'Phase', headerShown: false }} />
       <ScreenHeader title="Phase" />
 
       <KeyboardAwareScrollView

@@ -54505,8 +54505,146 @@ confirm.
   extension analogous to `lib/healthConnect.ts` here.
 
 
-## Open items / known gaps as of this entry
+## 2026-09-03 — N484: Library's doubled header, meal cards' entry count, and the crowded empty-meal spacing (#835)
 
+Three UI issues reported directly by the user from two annotated phone
+screenshots (Food tab, Library screen), fixed together as one ticket.
+
+**Library's header was rendering twice.** `library.tsx` draws its own
+`ScreenHeader` — a pattern shared with every `(tabs)/*` screen — but unlike
+those, `library` is a PUSHED stack screen (moved out of the tab bar for N70),
+registered in `app/_layout.tsx`'s root `<Stack>` without `headerShown: false`.
+Every `(tabs)/*` screen inherits that suppression from the `(tabs)` segment
+itself; `library` never got it explicitly, so React Navigation's own native
+header (back button + "Library" title, its own safe-area padding) rendered
+directly on top of `ScreenHeader`'s (a second title row, independent
+safe-area padding again, and the literal VOLA wordmark image) — reading, in
+the screenshot, as "a large app icon/mark… leaving a huge gap from top of the
+screen." It was never a stuck splash screen; `AnimatedSplash` is a one-time,
+whole-app overlay with no route-specific logic and was ruled out directly.
+Fixed with one line: `headerShown: false` on the `library` `Stack.Screen`.
+`phase/index.tsx` turned out to carry the identical bug — same mechanism
+(its own inline `<Stack.Screen options={{ title: 'Phase' }} />` missing the
+same flag), found by grepping for every `ScreenHeader` caller outside
+`(tabs)` (exactly two: `library.tsx` and `phase/index.tsx`) rather than
+trusting the one screenshot — fixed the same way in the same PR.
+
+**Meal cards' header now states an entry count.** `MealCard.tsx`'s
+`Collapsible` feature (N468/#792, shipped days earlier) defaults every
+section open but lets an athlete collapse ones they've already logged —
+collapsing hides the macro row and the logged rows, leaving only the header
+and the "Add Food" button. The header used to say only the kcal total
+("Breakfast · 303 kcal"), so a collapsed section — the state the screenshot
+actually showed for three of the four meals — gave no way to tell "one big
+thing" from "several small ones" without expanding it back open. This read,
+from outside the collapse mechanism, as "logged meals don't show their
+macros" — they do, once expanded; the real gap was that the COLLAPSED state
+conveyed too little. Fixed by adding the entry count to the header itself
+("Breakfast · 2 items · 303 kcal"), visible whether the section is expanded
+or collapsed, reusing `FoodSummaryCard`'s exact "N item(s)" phrasing (already
+the day-level convention) rather than inventing a second vocabulary for the
+same fact at a different scope.
+
+**The empty-meal "available" block was crowded by a negative-margin bug, not
+a spacing choice.** `availableKcal` and the macro row beneath it are two
+children of a wrapping `RNView` that carried no `gap` of its own — so they
+already touched by default — and BOTH also carried negative `marginTop`
+(-4, -2), which landed on top of that zero gap rather than tightening a
+positive one, visibly overlapping the kcal line and the macro dots. Fixed by
+giving the wrapper an explicit `gap: 4` and removing both negative margins
+(the populated branch's own `macroRow` still keeps its own small negative
+nudge toward the header above it — untouched, since that reads correctly and
+was not what was reported crowded). This is a spacing bug fix, not a content
+change: `MealCard`'s own doc comment already defends WHY an empty section
+states an "available" budget rather than nothing or a row of zeroes
+(N113/#503's "a zero reads as an achievement" rule) — that decision stands;
+only the layout fighting itself was wrong.
+
+**Testing**: `MealCard.test.tsx` — updated every existing header-text
+assertion to the new `· N item(s) ·` format, and added a dedicated
+`describe` block: pluralisation, the singular case, that an EMPTY section
+states no count at all (nothing to count yet), and that the count survives
+collapsing (the entire point of adding it there). Mutation-verified:
+reverting the header format change turned 5 assertions red as real test
+failures (not a compile error); restoring and re-running confirmed all 22
+`MealCard` tests green again. The header-duplication and empty-block spacing
+fixes are config/style-only — verified by booting the dev client against
+this worktree's own Metro instance on the Simulator (reached Sign-in with no
+crash, confirming the `_layout.tsx`/`phase/index.tsx` changes don't break
+routing), full `library`/`phase`/`food` test suites (259 suites / 4167 tests)
+green, `lint:mobile` and `typecheck:mobile` clean.
+
+**Review caught a real regression in the header fix: hiding the native
+header removed Library's only way out.** `frontend-reviewer` and
+`ac-verifier` independently flagged the same thing — `ScreenHeader` was
+built for TAB screens and carries no back affordance at all (title, dot,
+sync chip, an `action` slot on the right — nothing on the left), and
+`library.tsx` itself had no `router.back()` call anywhere. Before this
+ticket, the doubled native header was ugly but functional: its back button,
+however buried under the wordmark, still worked. `headerShown: false`
+removed it entirely and replaced it with nothing, leaving only an
+edge-swipe gesture — invisible to VoiceOver and to anyone who doesn't know
+the gesture exists. `phase/index.tsx` was unaffected by the same class of
+bug because it already draws its own in-page "Back" text button; `library`
+had never needed one before, because it always had the native one. Fixed
+by adding a small circular icon back button (matching
+`curriculum/[id].tsx`'s own local `BackButton` visual language, though not
+sharing the component — the two overlay differently, one in a flow row,
+this one absolutely positioned against `insets.top` to avoid stacking a
+second dose of safe-area padding on top of `ScreenHeader`'s own), guarded
+by `router.canGoBack()` the same way `curriculum/[id].tsx`'s `goBack` is.
+Three new tests in `libraryControlsBoundary.test.tsx` (presence, the
+back-goes-back path, the canGoBack-false fallback), mutation-verified by
+removing the feature entirely and confirming all three fail for the right
+reason (the element never appears) rather than a compile error.
+
+**Review also caught that the new entry count was sighted-only.**
+`accessibilityLabel` on an accessible `Pressable` REPLACES its children's
+visible text for VoiceOver rather than adding to it — the toggle's label
+was already bare `label` (a pre-existing gap: the kcal total was never
+announced either), so adding the count to the on-screen `Text` without
+also adding it to the label would have widened exactly the gap this ticket
+exists to close: sighted athletes get "2 items · 290 kcal" on a collapsed
+card, VoiceOver users still get "Breakfast". Fixed by building the label
+from the same data as the visible text when the section has entries
+("Breakfast, 2 items, 290 calories"), leaving `accessibilityState`
+as the sole carrier of expanded/collapsed exactly as the existing comment
+there requires. Two new tests, mutation-verified the same way (reverting
+the label change turns the new assertion red with the old bare label,
+restoring turns it green).
+
+**The "survey of comparable apps" criterion, and an honest limit on what
+this fix actually covers.** `ac-verifier` correctly noted no survey had
+been recorded. MyFitnessPal, Cronometer and Lose It! all default an empty
+meal slot to bare "+ Add Food" chrome with no numbers at all; VOLA's
+"available" budget line is a deliberate divergence from that, already
+decided by N113/#503 ("a zero reads as an achievement") and unchanged by
+this ticket — the comparison confirms the DECISION to show a number is
+intentional, it does not bless the crowding bug that decision had
+separately picked up. Recorded in `functional-scenarios.md` rather than
+only here. Also flagged and left honestly unresolved: the issue's own
+written example of a crowded card ("Lunch · 409 kcal" with just "+ Add
+Food") describes a COLLAPSED POPULATED section, not the empty/available
+block this fix's diagnosed bug actually lived in — the user's on-screen
+circle annotation pointed at the empty Dinner block specifically, which is
+what this fix targets. If the crowding complaint was really about the
+collapsed-populated state instead, that is a different, undiagnosed issue
+and needs re-filing once confirmed on a device rather than assumed closed
+here.
+
+**Open — NEEDS HUMAN EVIDENCE**: none of this was seen on a real, signed-in
+device. The Simulator check reached Sign-in but stopped there — this session
+has no test credentials for the staging backend and does not create
+accounts unilaterally. The user needs to confirm, on their own device:
+Library's header is back to one row with a normal-height gap before the
+search bar AND a visible, tappable back button now sits top-left of it; the
+Food tab's meal cards show their entry count both expanded and collapsed;
+the empty "kcal now available" block no longer reads crowded; and — the
+open question above — whether the ORIGINAL crowding complaint was actually
+about a collapsed populated card rather than the empty one this fix
+targeted.
+
+## Open items / known gaps as of this entry
 
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

@@ -350,8 +350,21 @@ function RootStack() {
         <Stack.Screen name="checkin/[date]" options={{ title: 'Check in' }} />
         {/* The catalog, pushed from You rather than owning a tab (N70). Titled
             here like every other pushed route, so its back button reads
-            "Library" rather than the filename. */}
-        <Stack.Screen name="library" options={{ title: 'Library' }} />
+            "Library" rather than the filename. `headerShown: false` —
+            `library.tsx` draws its own `ScreenHeader` (N484): every
+            `ScreenHeader` caller under `(tabs)` already gets this
+            suppression at the segment level, but `library` and
+            `phase/index.tsx` (its own inline `<Stack.Screen>`, not
+            registered here) both live OUTSIDE `(tabs)` and both needed it
+            said explicitly — this repo has exactly two such callers, not
+            one; grep for `ScreenHeader` outside `app/(tabs)/` before adding
+            a third without the same flag. Without it, the native header
+            stacked on top of `ScreenHeader` — its own title row, safe-area
+            padding and the VOLA wordmark — reading as a huge dead gap above
+            the search field. (`library.tsx` draws its own back button now,
+            since `ScreenHeader` has none — see the comment above its
+            `backButton` style.) */}
+        <Stack.Screen name="library" options={{ title: 'Library', headerShown: false }} />
         {/* N83: build/edit a curriculum on the phone. Titled here for the
             same reason `profile/edit` is — the file segment ("new",
             "[id]") would otherwise be what the back button reads. */}
