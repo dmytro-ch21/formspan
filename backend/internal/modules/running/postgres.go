@@ -241,7 +241,17 @@ func scanDetail(s scanner) (SessionDetail, error) {
 // No LIMIT: this is the caller's own running history, which is bounded by
 // how many times one person can plausibly run, not by anything this query
 // needs to defend against — the same stance session.Repository.Records
-// takes reading every session_sets row for a requested exercise.
+// takes reading every session_sets row for a requested exercise. Not quite
+// the same shape, though, and worth being explicit about: session.Records
+// reduces in SQL (one window function per exercise), so only the winning
+// rows cross the wire, while this reads every matching session's full
+// splits JSONB into Go and runs BestDistanceWindows per session on every
+// call — compute-bound, not response-size-bound (the RESPONSE stays capped
+// at four records regardless of history size; every Split is individually
+// bounded by MaxSplits). Cheap today at any realistic training volume; if a
+// multi-year, high-frequency runner's history ever makes this a real
+// per-request cost, the fix is capping to recent years or caching, not
+// re-deriving on every read.
 func (r *PostgresRepository) DistanceRecords(
 	ctx context.Context, userID string,
 ) ([]DistanceRecord, error) {
