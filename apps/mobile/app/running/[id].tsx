@@ -34,6 +34,8 @@ import { request as requestSync } from '@/lib/sync';
 import { formatElapsed } from '@/lib/rest';
 import { formatDistance, formatPace } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
+import { announce } from '@/lib/voice';
+import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
 
 /**
  * Live GPS run tracking (N460/#771).
@@ -106,6 +108,11 @@ export default function RunningSessionScreen() {
   const pointsRef = useRef<RoutePoint[]>([]);
   // Guards against a slow permission/load sequence outliving an unmount.
   const mountedRef = useRef(true);
+  // How many splits have already been announced — see the effect below. Null
+  // means "not yet baselined": the value `announce`d splits are compared
+  // against, established the moment tracking (re)starts so a resumed run's
+  // already-completed splits are never replayed.
+  const announcedSplitsRef = useRef<number | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -314,6 +321,35 @@ export default function RunningSessionScreen() {
     }, 1000);
     return () => clearInterval(timer);
   }, [status]);
+
+  /**
+   * Announce each kilometre split the moment it completes (L13/#779).
+   *
+   * Not tracking (loading, paused, finished, permission-denied) always resets
+   * the baseline to null, so the FIRST tick after tracking (re)starts only
+   * establishes where to count from and never announces anything itself —
+   * that is what stops a resumed run (killed and relaunched mid-run, or
+   * simply un-paused) from replaying every split already on the track in one
+   * burst. Only while `status === 'tracking'` on a SECOND or later run of
+   * this effect does a newly grown `splits` array get spoken, via the same
+   * `announce()` the guided-workout timer uses — which already checks the
+   * athlete's Sounds/Spoken-cues preferences, so there is nothing to gate
+   * here beyond calling it.
+   */
+  useEffect(() => {
+    if (status !== 'tracking') {
+      announcedSplitsRef.current = null;
+      return;
+    }
+    if (announcedSplitsRef.current === null) {
+      announcedSplitsRef.current = splits.length;
+      return;
+    }
+    for (const i of newSplitIndices(announcedSplitsRef.current, splits.length)) {
+      announce(spokenSplitAnnouncement(i, splits[i]));
+    }
+    announcedSplitsRef.current = splits.length;
+  }, [status, splits]);
 
   async function pause() {
     if (status !== 'tracking' || !resumedAtRef.current) return;

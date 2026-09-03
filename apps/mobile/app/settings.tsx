@@ -226,7 +226,7 @@ export default function SettingsScreen() {
         />
         <Toggle
           label="Spoken cues"
-          hint="A guided workout says what's next — get ready, start, rest. Only during a guided run; the timer's chimes are the Sounds switch above."
+          hint="A guided workout says what's next — get ready, start, rest — and a tracked run announces each kilometer split. The timer's chimes are the Sounds switch above."
           value={voice}
           onChange={(on) => {
             setVoice(on);
