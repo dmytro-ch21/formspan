@@ -1,5 +1,6 @@
 import {
   fillForward,
+  pendingSuggestableIndices,
   repairSet,
   reorderGroups,
   sessionActiveSeconds,
@@ -66,6 +67,80 @@ describe('sessionDistanceMeters', () => {
 
   it('returns 0 for an empty set list', () => {
     expect(sessionDistanceMeters([])).toBe(0);
+  });
+});
+
+/**
+ * N473/#812, item 7: the progression suggestion's "Use" button used to
+ * target every non-warm-up, not-yet-completed set — backoffs, drops, AMRAPs
+ * and failures included. The prescription is computed server-side from a
+ * coherent straight-set cohort, so it is only ever evidence for another
+ * straight working set.
+ */
+describe('pendingSuggestableIndices', () => {
+  it('excludes a backoff set', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: false }),
+      set('back-squat', { set_type: 'backoff', completed: false }),
+    ];
+    expect(pendingSuggestableIndices([0, 1], sets)).toEqual([0]);
+  });
+
+  it('excludes a drop set', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: false }),
+      set('back-squat', { set_type: 'drop', completed: false }),
+    ];
+    expect(pendingSuggestableIndices([0, 1], sets)).toEqual([0]);
+  });
+
+  it('excludes an AMRAP set', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: false }),
+      set('back-squat', { set_type: 'amrap', completed: false }),
+    ];
+    expect(pendingSuggestableIndices([0, 1], sets)).toEqual([0]);
+  });
+
+  it('excludes a failure set', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: false }),
+      set('back-squat', { set_type: 'failure', completed: false }),
+    ];
+    expect(pendingSuggestableIndices([0, 1], sets)).toEqual([0]);
+  });
+
+  it('still excludes a warm-up (the pre-existing behaviour)', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: false }),
+      set('back-squat', { set_type: 'warmup', completed: false }),
+    ];
+    expect(pendingSuggestableIndices([0, 1], sets)).toEqual([0]);
+  });
+
+  it('still excludes an already-completed working set', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: true }),
+      set('back-squat', { set_type: 'working', completed: false }),
+    ];
+    expect(pendingSuggestableIndices([0, 1], sets)).toEqual([1]);
+  });
+
+  it('treats an undefined set_type as working, matching the backend default', () => {
+    const sets = [
+      { ...set('back-squat'), set_type: undefined as unknown as LoggedSet['set_type'] },
+    ];
+    expect(pendingSuggestableIndices([0], sets)).toEqual([0]);
+  });
+
+  it('includes every pending working set in a mixed group', () => {
+    const sets = [
+      set('back-squat', { set_type: 'working', completed: true }), // done
+      set('back-squat', { set_type: 'working', completed: false }), // pending, eligible
+      set('back-squat', { set_type: 'backoff', completed: false }), // pending, excluded
+      set('back-squat', { set_type: 'working', completed: false }), // pending, eligible
+    ];
+    expect(pendingSuggestableIndices([0, 1, 2, 3], sets)).toEqual([1, 3]);
   });
 });
 

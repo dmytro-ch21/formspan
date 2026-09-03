@@ -2,8 +2,10 @@ package featureflag
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -13,6 +15,24 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
+}
+
+// Enabled answers one flag by key. A missing row (never seeded, or a typo in
+// the key a caller passed) reads as disabled rather than an error — the same
+// "absent means off" reading the migration's seed data establishes for
+// `new_recommendation_engine` itself.
+func (r *PostgresRepository) Enabled(ctx context.Context, key string) (bool, error) {
+	var enabled bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT enabled FROM feature_flags WHERE key = $1`, key,
+	).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("featureflag: enabled %q: %w", key, err)
+	}
+	return enabled, nil
 }
 
 func (r *PostgresRepository) List(ctx context.Context) ([]Flag, error) {

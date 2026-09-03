@@ -319,3 +319,117 @@ func TestProgressionCycle_EndToEnd(t *testing.T) {
 	t.Logf("cycle: add_reps -> add_load -> hold(weakest set) -> deload %v x %v",
 		*p.TargetWeightKg, *p.TargetReps)
 }
+
+// TestRecentEffortsV2_OpenSessionNeverOccupiesAWindowSlot is N473/#812's own
+// wire-level regression: RecentEfforts' DENSE_RANK numbers sessions BEFORE
+// any finished/unfinished distinction, so a currently-open session (which is
+// always the NEWEST by definition — it's the one the athlete is in right
+// now) consumes rank 1 and pushes the window's oldest finished session out.
+// An athlete calling this endpoint mid-session — exactly when `today_sets`
+// exists to be used — would see at most progressionWindow-1 real finished
+// sessions through RecentEfforts, which is precisely the failure that would
+// have made ProgressV2's stall/deload check unreachable in real traffic.
+// Caught in backend review, not by any pure-function test, because every
+// ProgressV2 test builds ProgressionInput by hand and none modeled a session
+// actually occupying a rank slot ahead of real history.
+//
+// RecentEffortsV2 fixes this by moving `ended_at IS NOT NULL` INTO the
+// ranked CTE's WHERE clause, so the window itself only ever ranks finished
+// sessions — asserted here by creating progressionWindow finished sessions
+// plus one still-open session started most recently, and confirming
+// RecentEffortsV2 returns exactly progressionWindow sessions, all finished,
+// while RecentEfforts (called against the identical fixture, unmodified) is
+// shown missing the oldest of them because the open session displaced it.
+func TestRecentEffortsV2_OpenSessionNeverOccupiesAWindowSlot(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	finishedIDs := make([]string, 0, progressionWindow)
+	for i := 0; i < progressionWindow; i++ {
+		id := "ses-v2-finished-" + itoa(i)
+		finishedIDs = append(finishedIDs, id)
+		cleanup(t, pool, id)
+		s := strengthSession(id, "user_v2_window", []Set{
+			{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(5), WeightKg: ptrF(100), RIR: ptrInt(2), Completed: true},
+		})
+		// finishedIDs[0] is the OLDEST (furthest back), finishedIDs[last] the
+		// newest of the three — all still older than the open session
+		// created below. Getting this backwards makes finishedIDs[0] the
+		// session v1's OWN window keeps regardless of the open session
+		// (found by running this test: the first version of it had this
+		// inverted and the "control" assertion below correctly caught it).
+		s.StartedAt = time.Now().UTC().Add(-time.Duration(progressionWindow-i+1) * 24 * time.Hour)
+		end := s.StartedAt.Add(time.Hour)
+		s.EndedAt = &end
+		if _, err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+
+	openID := "ses-v2-open"
+	cleanup(t, pool, openID)
+	open := strengthSession(openID, "user_v2_window", []Set{
+		{ExerciseID: exSquat, SetType: SetTypeWorking, Reps: ptrInt(1), WeightKg: ptrF(200), Completed: true},
+	})
+	open.StartedAt = time.Now().UTC().Add(-time.Hour) // newest — ranks first
+	// EndedAt left nil: this session is still open.
+	if _, err := repo.Create(ctx, open); err != nil {
+		t.Fatalf("create %s: %v", openID, err)
+	}
+
+	v2, err := repo.RecentEffortsV2(ctx, "user_v2_window", []string{exSquat})
+	if err != nil {
+		t.Fatalf("recent efforts v2: %v", err)
+	}
+	sq := v2[exSquat]
+	if len(sq.Recent) != progressionWindow {
+		t.Fatalf("RecentEffortsV2: want %d finished sessions in the window, got %d — "+
+			"the open session must never occupy a slot", progressionWindow, len(sq.Recent))
+	}
+	for _, s := range sq.Recent {
+		if !s.Finished {
+			t.Errorf("RecentEffortsV2 returned an unfinished session (%s) inside the window", s.SessionID)
+		}
+		if s.SessionID == openID {
+			t.Errorf("RecentEffortsV2 returned the open session (%s) at all", openID)
+		}
+	}
+	// The oldest finished session must still be reachable — it must NOT have
+	// been pushed out by the open one, which is exactly what RecentEfforts
+	// (below) fails to guarantee.
+	found := false
+	for _, s := range sq.Recent {
+		if s.SessionID == finishedIDs[0] {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("RecentEffortsV2 lost the oldest finished session (%s) — window slots leaked "+
+			"to something else", finishedIDs[0])
+	}
+
+	// The control: RecentEfforts (v1's own, unmodified) against the IDENTICAL
+	// fixture shows the bug this test exists to pin. If this ever stops
+	// failing to include finishedIDs[0], either the fixture changed or
+	// RecentEfforts itself did — and RecentEfforts must never change.
+	v1, err := repo.RecentEfforts(ctx, "user_v2_window", []string{exSquat})
+	if err != nil {
+		t.Fatalf("recent efforts (v1, control): %v", err)
+	}
+	sq1 := v1[exSquat]
+	if len(sq1.Recent) != progressionWindow {
+		t.Fatalf("control: want %d sessions from RecentEfforts, got %d", progressionWindow, len(sq1.Recent))
+	}
+	v1HasOldest := false
+	for _, s := range sq1.Recent {
+		if s.SessionID == finishedIDs[0] {
+			v1HasOldest = true
+		}
+	}
+	if v1HasOldest {
+		t.Fatalf("control assumption broken: RecentEfforts (v1) unexpectedly still reached the "+
+			"oldest finished session (%s) even with the open session ranked first — "+
+			"the scenario this test relies on to demonstrate RecentEffortsV2's fix no longer holds",
+			finishedIDs[0])
+	}
+}

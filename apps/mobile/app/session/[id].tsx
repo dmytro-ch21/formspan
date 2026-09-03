@@ -53,7 +53,13 @@ import {
   runSeconds,
   type RunContext,
 } from '@/lib/intervalRun';
-import { readPref, writePref } from '@/lib/prefs';
+import {
+  readPref,
+  writePref,
+  PREF_SUGGESTIONS,
+  PREF_SUGGESTIONS_OFF,
+} from '@/lib/prefs';
+import { parseMaster, parseIdSet, suggestionsAllowed } from '@/lib/suggestion';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
@@ -104,6 +110,7 @@ import {
   soloReps,
   withSetChange,
   fetchSuggestions,
+  pendingSuggestableIndices,
   fillForward,
   measuresFor,
   reorderGroups,
@@ -192,6 +199,30 @@ export default function SessionScreen() {
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
+  /**
+   * N473/#812 (item 9) — the strength-suggestion preference
+   * (`/settings/suggestions`) silenced Today's suggestions but never this
+   * screen's, so turning "strength" off there left the mid-session hint and
+   * its "Use" button showing anyway. Read on FOCUS, not once per mount, for
+   * the exact reason `readSuggestionPrefs` in `app/(tabs)/index.tsx` does:
+   * Settings is a Stack route pushed OVER this screen, which stays mounted
+   * underneath it, so a mount-only read never sees a change made there.
+   *
+   * `null` until read, same as Today's own `policy` state and for the same
+   * reason (found in review, N473/#812): starting optimistically at
+   * "allowed" showed the hint for a frame or two on returning from Settings
+   * after switching it off, while the real SQLite read was still in flight —
+   * Today's own comment on this exact state calls that "the setting not
+   * working". A FAILED read still falls back to allowed (see the `.catch`
+   * below) — a suggestions feature that silently disables itself on a read
+   * failure is a worse outcome than one that occasionally shows what a
+   * settings toggle would have hidden; the gap this closes is specifically
+   * the window before any read (success or failure) has resolved at all.
+   */
+  const [suggestionPrefs, setSuggestionPrefs] = useState<{
+    master: boolean;
+    off: ReadonlySet<string>;
+  } | null>(null);
   // The workout's goal, resolved once. Immutable for the life of a session,
   // and `load` re-runs on every focus.
   const goalRef = useRef<{ workoutID: string | null; goal: string | null }>({
@@ -603,10 +634,15 @@ export default function SessionScreen() {
           currentSets.map((x) => x.exercise_id),
           goal,
           currentSets,
+          undefined,
+          // N473/#812 item 8 — the one global unit preference, not
+          // per-exercise `unitFor`; see fetchSuggestions's own doc comment
+          // for why one value per request is the deliberate simplification.
+          units,
         ),
       );
     },
-    [getToken, userId],
+    [getToken, userId, units],
   );
 
   // Local first, always. The network can only ever *add* to what's on
@@ -664,6 +700,25 @@ export default function SessionScreen() {
     useCallback(() => {
       load();
     }, [load]),
+  );
+
+  // See suggestionPrefs's own doc comment above for why this is read on
+  // focus rather than once per mount.
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      let alive = true;
+      Promise.all([readPref(userId, PREF_SUGGESTIONS), readPref(userId, PREF_SUGGESTIONS_OFF)])
+        .then(([m, o]) => {
+          if (alive) setSuggestionPrefs({ master: parseMaster(m), off: parseIdSet(o) });
+        })
+        .catch(() => {
+          if (alive) setSuggestionPrefs({ master: true, off: new Set() });
+        });
+      return () => {
+        alive = false;
+      };
+    }, [userId]),
   );
 
   // Everything writes through — there is no Save button. A Save button in a
@@ -1717,6 +1772,23 @@ export default function SessionScreen() {
               {(() => {
                 const hint = suggestions.get(g.exerciseID);
                 if (!hint || hint.code === 'not_applicable') return null;
+                // N473/#812 (item 9) — see suggestionPrefs's own doc comment
+                // above for why this is read on every focus, and why it
+                // starts `null`. Keyed on `session?.sport ?? 'strength'`,
+                // matching Today's own `suggestionsAllowed` call
+                // (`app/(tabs)/index.tsx`) rather than a literal — this
+                // screen is used by every sport this app logs sets/reps for,
+                // not only strength, and a future non-BJJ, non-running
+                // discipline routed here should respect ITS OWN off-switch
+                // rather than strength's. A non-weighted sport never reaches
+                // this branch at all: `not_applicable` already suppressed it
+                // above.
+                if (
+                  suggestionPrefs === null ||
+                  !suggestionsAllowed(suggestionPrefs.master, suggestionPrefs.off, session?.sport ?? 'strength')
+                ) {
+                  return null;
+                }
                 const u = unitFor(g.exerciseID);
                 const phase = PROGRESSION_PHASE[hint.code] ?? UNKNOWN_PHASE;
                 // Defaulted rather than dereferenced: an app build newer than
@@ -1735,9 +1807,11 @@ export default function SessionScreen() {
                 // count them in the volume. `add_reps` is where most sessions
                 // land, so this control is visible exactly when the early sets
                 // hold fresh real data.
-                const pending = g.indices.filter(
-                  (i) => !sets[i]?.completed && sets[i]?.set_type !== 'warmup',
-                );
+                //
+                // N473/#812 (item 7) — see pendingSuggestableIndices's own
+                // doc comment (lib/sessions.ts) for why this is straight
+                // working sets only, not every non-warm-up set.
+                const pending = pendingSuggestableIndices(g.indices, sets);
                 const first = sets[pending[0]];
                 const applied =
                   pending.length > 0 &&
@@ -2244,6 +2318,14 @@ const PROGRESSION_PHASE: Record<SuggestionCode, { label: string; color: string }
   repeat_unknown_effort: { label: 'LOG EFFORT', color: vola.textMuted },
   no_history: { label: 'FIRST TIME', color: vola.textMuted },
   not_applicable: { label: '', color: vola.textMuted },
+  // N473/#812, behind new_recommendation_engine — see SuggestionCode's own
+  // doc comment (lib/sessions.ts) for why neither carries a target_*.
+  effort_conflict: { label: 'CHECK EFFORT', color: vola.warn },
+  // "UNCLEAR", not "NOT ENOUGH DATA" — abstain means the evidence is
+  // AMBIGUOUS (some effort recorded, some not; or a materially conflicting
+  // read), which repeat_unknown_effort already distinguishes from an
+  // outright ABSENCE of data. "Not enough data" reads as the latter.
+  abstain: { label: 'UNCLEAR', color: vola.textMuted },
 };
 
 /**

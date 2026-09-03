@@ -27,4 +27,9 @@ type Flag struct {
 
 type Repository interface {
 	List(ctx context.Context) ([]Flag, error)
+	// Enabled answers one flag by key, defaulting to false for a key that
+	// doesn't exist — an unseeded flag reads as off, not as an error, so a
+	// caller gating a feature on it fails safe rather than fails closed with
+	// a 500.
+	Enabled(ctx context.Context, key string) (bool, error)
 }

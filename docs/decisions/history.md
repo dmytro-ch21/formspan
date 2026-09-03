@@ -52724,6 +52724,215 @@ Full mobile suite green (3933 tests, TZ=America/Los_Angeles), `tsc --noEmit` cle
 - **Only running workouts are queried** (`WorkoutActivityType.running`), matching the ticket's scope exactly; a cycling or walking workout in Health is never an import candidate. Extending to other sports this app tracks would be a separate ticket, not a natural extension of this one, since strength and BJJ have no HealthKit workout-type analog worth importing.
 - **A duplicate import across devices now costs one extra round trip (create, then delete) rather than a permanent orphan** — correct, but not free. If this pattern recurs elsewhere, it may be worth a pre-flight check (ask the server "does this uuid exist" before creating anything) rather than create-then-cleanup; not done here since this is the only call site today and the extra round trip is rare by construction (same-device imports never reach it at all).
 
+## 2026-09-02 — N473 (#812, phase 1 of #753): strength progression stops inventing sets that were never performed
+
+Phase 1 of #753 (N450) — the "safety release" phase that ticket's own scope
+note asked to be sequenced first as its own ticket, with phases 2–5 (a real
+prescription model, a separate warm-up engine, product separation, an audit
+trail) filed as follow-ups against #753 rather than attempted here. This PR
+does none of those; #753 stays open.
+
+**The bug, precisely.** `repSpread` (`progression.go`) selects the heaviest
+weight performed for an exercise but computes the rep range across every
+non-warm-up set at ANY weight in the session — a squat session with sets of
+12 at 228 and a single top set of 3 at 335 read as "335 for a min of however
+many reps the 228 sets did", clamped into the rep range and handed back as a
+literal instruction to load **335 × 8, a set that was never performed.** Root
+cause: a coherent-cohort problem. The rule compared reps across sets that are
+not comparable — different weights, and, one level down, different set
+roles (a backoff is not the same evidence as a straight working set).
+
+**The fix ships as a parallel engine, `ProgressV2` in a new
+`backend/internal/modules/session/progression_v2.go`, gated behind the
+existing (seeded-disabled) `new_recommendation_engine` feature flag —
+`Progress` and every function it calls are untouched, byte-for-byte, for
+anyone not on the flag.** `session.Handler` gained a `FlagSource` (one
+method, `Enabled(ctx, key)`) rather than depending on `featureflag.Repository`
+directly, so a test double is a one-line stub instead of Postgres-shaped list
+semantics; `featureflag.PostgresRepository` gained the matching `Enabled`
+method (a single-key `SELECT`, an unseeded key reading as disabled rather
+than erroring). A flag-read failure fails safe onto v1 rather than 500ing the
+endpoint — tested directly.
+
+**What `ProgressV2` actually does, item by item:**
+
+- **Coherent cohort**: `sameWeightCohort`, applied AFTER the anchor weight
+  (the heaviest STRAIGHT set) is known — the direct fix for the reported bug.
+- **Straight-sets-only**: `straightWorkingSetsWithWeight` restricts the
+  cohort to `SetTypeWorking`; backoffs, drops, AMRAPs and failures are
+  excluded rather than folded in or given a role-specific rule (that's the
+  phase-2 prescription model's job).
+- **Finished sessions only**: `SessionEffort` gained a `Finished bool` field,
+  populated from a new `s.ended_at` column added to `RecentEfforts`'s
+  existing SQL (additive only — v1 never reads the field, so its behaviour
+  is unchanged). `ProgressV2` filters to finished sessions before doing
+  anything else; the currently-open session can no longer become its own
+  history, including in the multi-session stall lookback
+  (`stalledSessionsAtV2`).
+- **Effort required, and the two new explicit codes**: `SuggestEffortConflict`
+  ("effort_conflict") fires when a set's RIR and RPE imply materially
+  different reserve (a 2-rep-or-more gap — the reported "RPE 8 / 0 RIR"
+  contradiction sits exactly at the threshold) — checked before any other
+  effort question, so it can't be mistaken for the coarser "unknown effort"
+  case. `SuggestAbstain` ("abstain") is new middle ground: effort recorded on
+  SOME but not every cohort set (ambiguous, not absent), or finished history
+  that never produced a usable straight-set cohort at all. Neither code
+  carries a `target_weight_kg`/`target_reps` — an honest "can't tell" or "you
+  disagree with yourself" guesses at nothing. The pre-existing "no effort at
+  all" case keeps its existing `repeat_unknown_effort` behaviour unchanged.
+- **Real equipment-increment rounding**: the reported 68.9 lb came from
+  rounding to a fixed 1.25 kg grid and converting once to lb for display —
+  31.25 kg is a clean metric step, 31.25 × 2.2046226 is not a clean pound
+  one. There's no per-athlete equipment schema in this codebase (a
+  per-workout-item `equipment_increment` is explicitly a phase-2 field in
+  #753), so this stays inside phase 1's boundary: a new, client-supplied
+  `unit_system` query param (same pattern as `goal` — the client already
+  knows the athlete's preference and passes it along rather than this
+  endpoint doing a profile lookup), and `roundToPlateV2`/`incrementWithinV2`
+  do the whole increment/rounding computation in whichever unit that is,
+  converting to kg exactly once at the end. Metric (including no param sent
+  at all) is byte-identical to v1 — pinned by a test that runs both engines
+  side by side on the same fixture.
+
+**The golden test.** `TestProgressV2_GoldenSquat_NeverInventsASetThatWasNeverPerformed`
+reproduces the literal reported session (335/228 lb, converted to kg through
+the same constant the mobile/web clients use) across every effort
+configuration the fix's other branches exercise, and asserts the one
+invariant that matters regardless of which code comes back: `TargetWeightKg`
+≈ 335-lb-equivalent and `TargetReps == 8` may never both hold.
+`TestProgressV1_GoldenSquat_StillReproducesTheOriginalBug` pins the SAME
+fixture against unmodified `Progress`, asserting it still produces exactly
+335 × 8 — if that one ever goes red, either v1 was touched (forbidden) or the
+fixture stopped meaning what it's supposed to. Every new guard was mutation
+tested against a real baseline-green/mutate/red/restore/green cycle:
+`sameWeightCohort` returning everything unfiltered, `finishedSessions` not
+filtering, `hasEffortConflict` hard-coded false, and
+`straightWorkingSetsWithWeight` dropping its `SetType` check each reintroduced
+a real failure the corresponding test caught — the last one needed a SECOND,
+same-weight fixture once the first one turned out to pass by coincidence
+(its backoff set happened to sit at a different weight, so the weight-cohort
+filter caught it even with the set-type filter deleted).
+
+**Mobile: the suggestion button's targeting (item 7).** `apps/mobile/app/session/[id].tsx`'s
+"Use" button computed `pending` as every not-yet-completed, non-warm-up set —
+backoffs, drops, AMRAPs and failures included — so applying a straight-set
+suggestion could overwrite a backoff's deliberately-lighter weight with the
+top set's number. Extracted to a new pure function,
+`pendingSuggestableIndices` (`lib/sessions.ts`), matching this codebase's
+"pure logic in `lib/`, tested in `lib/__tests__/`" convention rather than a
+component-render test for a screen this size — straight working sets only,
+an `undefined` `set_type` (a template-authored set not yet round-tripped)
+reads as `'working'`, matching the backend's own default. Eight new jest
+cases, including a mutation check confirming the guard is reachable.
+
+**Mobile: the strength-suggestion preference (item 9).** `/settings/suggestions`'s
+per-discipline off-switch already silenced Today's card but was never
+consulted by this screen's mid-session hint — turning "strength" off there
+left the hint and its button showing anyway. Read on every FOCUS (not once
+per mount — Settings is a Stack route pushed OVER this screen, the identical
+bug N191 already fixed once on Today for the same reason), scoped to
+`session.sport === 'strength'` since a non-weighted sport using this same
+screen already suppresses the hint via `not_applicable`.
+
+**Client types**: `effort_conflict`/`abstain` added to `SuggestionCode` on
+both mobile (`lib/sessions.ts`) and web (`lib/api.ts`), with matching phase
+labels — both apps key an exhaustive `Record<SuggestionCode, …>` off this
+type, so leaving the client blind to the two new codes would have meant an
+unrecognised string silently falling back to the "unknown code" rendering
+the day the flag is ever flipped, rather than a considered label.
+
+**contracts/public.openapi.yaml**: `unit_system` query param documented on
+`GET /sessions/suggestions`; the `code` enum and its description extended
+with `effort_conflict`/`abstain`; the endpoint description notes what changes
+behind the flag. Re-validated with `lint:openapi`.
+
+**Full backend suite run against a real migrated Postgres** (own branch-scoped
+database, not the shared `vola_test`): 1806 passing subtests, exactly one
+skip (`TestLiveComplete`, the documented live-money gate), zero failures —
+including the new `featureflag.Enabled` integration test and every
+`progression`/`progression_v2` case. `pnpm run verify` green end to end;
+`engine`'s Postgres-container test failed once on a stray leftover
+`engine-egress-*` docker network from an unrelated concurrent worktree (zero
+containers attached, confirmed by inspecting it before removing it) — nothing
+under `engine/` is touched by this PR, and the suite passed clean once that
+orphan was cleared.
+
+**Where this leaves #753's phase 1/phase 2 boundary.** No schema in
+`backend/internal/modules/workout/workout.go` was touched, and nothing here
+builds a per-workout-item prescription model — the equipment-rounding fix
+deliberately stayed a per-unit-system table rather than the phase-2
+`equipment_increment` field, which is the one place this ticket's scope came
+close to that line. Flagged rather than built.
+
+**Three real gaps found by `backend-reviewer`, `frontend-reviewer` and
+`ac-verifier` — all fixed before merge, none of them cosmetic:**
+
+- **`backend-reviewer`**: finished-sessions-only was correct at the pure-
+  function layer and silently undermined one layer down. `RecentEfforts`'s
+  `DENSE_RANK` numbers sessions BEFORE any finished/unfinished distinction is
+  applied, so a currently-open session — always the newest by definition —
+  still occupied one of the window's `progressionWindow` slots merely by
+  ranking first. An athlete mid-session, which is exactly when this endpoint
+  is called (via `today_sets`), would see at most `progressionWindow`-1
+  genuinely finished sessions through that ranking, and `ProgressV2`'s stall
+  count could then never reach `stallSessions` — the deload branch would go
+  quiet in real traffic even though every pure-function test passed, because
+  every one of them builds `ProgressionInput` by hand and none modeled a
+  session occupying a rank slot ahead of real history. Fixed with a new,
+  self-contained `RecentEffortsV2` (`postgres.go`) whose ranked CTE moves
+  `s.ended_at IS NOT NULL` into the WHERE clause itself, so the window is
+  `progressionWindow` real finished sessions, never fewer — `RecentEfforts`
+  itself is untouched (reverted back to byte-identical after an earlier,
+  wrong instinct to extend it in place). New integration test
+  `TestRecentEffortsV2_OpenSessionNeverOccupiesAWindowSlot` creates exactly
+  this shape and asserts the difference against `RecentEfforts` directly, not
+  just `RecentEffortsV2`'s own output; mutation-verified (removing the CTE
+  filter reproduces both symptoms — the open session appearing, and the
+  oldest finished one disappearing — restored, confirmed green again).
+- **`ac-verifier`**: item 8's rounding fix was real and tested but **dead
+  from every shipping client** — neither `apps/mobile/lib/sessions.ts` nor
+  `apps/web/src/lib/api.ts`'s `fetchSuggestions` sent `unit_system` at all,
+  so an athlete in pounds, flag on, still saw the 68.9 lb round-trip loss
+  regardless. Fixed by threading `unitSystem` through both `fetchSuggestions`
+  signatures (appended last, so no existing positional caller shifts) and
+  every real call site — both apps' existing `useUnits()` (already in scope
+  everywhere `fetchSuggestions` is called) supplies the one global
+  preference, the same per-request simplification `goal` already makes
+  rather than per-exercise `unitFor` overrides.
+- **`ac-verifier`**, separately: the issue's two `NEEDS HUMAN EVIDENCE` lines
+  were a bold header over plain checkboxes, a shape
+  `scripts/evidence-latch.py` does not recognise as opening a checkbox — so
+  `closes #812` would have closed the ticket with the marker never armed.
+  Edited on the live issue to the exact `- [ ] **NEEDS HUMAN EVIDENCE** —
+  ...` form per row; re-verified directly against the latch's own
+  `evidence_criteria`/`outstanding` functions before proceeding.
+- **`frontend-reviewer`**: the strength-suggestion-preference gate (item 9)
+  initialized to "allowed" rather than `null`-until-read, unlike Today's own
+  identical pattern — Today's own comment on that state calls a frame of a
+  suggestion showing after switching it off "the setting not working". Fixed
+  to `null`-until-read, gated on `suggestionPrefs !== null`, matching
+  Today exactly. The gate also hard-coded `'strength'` instead of keying on
+  `session?.sport ?? 'strength'` (Today's own call does the latter) — fixed,
+  so a future non-BJJ, non-running discipline sharing this screen respects
+  its own off-switch. The `abstain` label ("NOT ENOUGH DATA") read as
+  *absence*, contradicting the code's own doc comment defining abstain as
+  *ambiguous* evidence — renamed to "UNCLEAR" / "Unclear" on both clients.
+
+### Open items this leaves
+
+- **NEEDS HUMAN EVIDENCE**: the pasted squat scenario, re-run against a real
+  account with `new_recommendation_engine` on, confirmed not to produce 335 ×
+  8 or any other invented set.
+- **NEEDS HUMAN EVIDENCE**: the upright-row case from the original report
+  (workout-wide 5–8 range resetting on weight increase) reads as fixed on a
+  real device.
+- Phases 2–5 of #753 (prescription model, warm-up engine, product
+  separation, audit trail) remain unbuilt and unscoped by this PR; #753
+  stays open for them.
+- The flag is global (operator-controlled, no per-user targeting) — matching
+  what `featureflag` actually supports today. A staged/opt-in rollout, if
+  wanted before flipping it for everyone, is not built here.
+
 ## Open items / known gaps as of this entry
 
 

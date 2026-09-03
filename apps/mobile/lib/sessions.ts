@@ -286,7 +286,21 @@ export type SuggestionCode =
   | 'not_applicable'
   | 'repeat_hard'
   | 'repeat_unknown_effort'
-  | 'repeat_stale';
+  | 'repeat_stale'
+  /**
+   * N473/#812, behind `new_recommendation_engine` — a set logged both an RIR
+   * and an RPE and they imply materially different reserve. No `target_*`
+   * accompanies this: the server is declining to guess which reading is
+   * right rather than letting RIR silently win, same reasoning as `abstain`.
+   */
+  | 'effort_conflict'
+  /**
+   * N473/#812 — the evidence is ambiguous rather than simply absent
+   * (`repeat_unknown_effort` already covers "no effort recorded at all").
+   * No `target_*` here either — an honest "can't tell" carries no guessed
+   * number.
+   */
+  | 'abstain';
 
 /**
  * Flags when today's own already-logged working sets disagree with the
@@ -904,6 +918,17 @@ async function request<T>(
  * would drag the average down against a TargetWeightKg that's derived from
  * the top set — manufacturing a false "lighter day" note on a session that
  * went exactly to plan. Found in review.
+ *
+ * `unitSystem` is N473/#812's own fix for the reported 68.9lb — behind
+ * `new_recommendation_engine`, the server rounds a suggestion in whichever
+ * unit this names rather than a kilogram grid that can land on an unloadable
+ * number once converted for display. The one global preference from
+ * `useUnits()`, not a per-exercise override (`unitFor` in the session
+ * screen) — this is a single request for a whole workout, same simplifying
+ * choice `goal` already makes. Omitted entirely reads as metric on the
+ * server, which is this endpoint's behaviour without this parameter at all,
+ * so a caller that doesn't have a unit preference in hand yet loses nothing
+ * by leaving it out.
  */
 export async function fetchSuggestions(
   getToken: TokenGetter,
@@ -911,11 +936,13 @@ export async function fetchSuggestions(
   goal?: string | null,
   todaySets?: readonly Pick<LoggedSet, 'exercise_id' | 'weight_kg' | 'completed' | 'set_type'>[],
   signal?: AbortSignal,
+  unitSystem?: UnitSystem | null,
 ): Promise<Map<string, Suggestion>> {
   const unique = [...new Set(exerciseIDs)].filter(Boolean);
   if (unique.length === 0) return new Map();
   const q = new URLSearchParams({ exercise_ids: unique.join(',') });
   if (goal) q.set('goal', goal);
+  if (unitSystem) q.set('unit_system', unitSystem);
   if (todaySets && todaySets.length > 0) {
     const pairs = todaySets
       .filter((s) => countsAsSet(s) && s.weight_kg != null && s.weight_kg > 0)
@@ -1601,6 +1628,40 @@ export function contributesVolume(set: Pick<LoggedSet, 'completed' | 'set_type'>
  */
 export function countsAsSet(set: Pick<LoggedSet, 'completed' | 'set_type'>): boolean {
   return contributesVolume(set) && set.set_type !== 'drop';
+}
+
+/**
+ * Which of a group's set indices the progression suggestion's "Use" button
+ * may write onto — N473/#812, item 7.
+ *
+ * The prescription itself is computed server-side from a coherent
+ * SAME-WEIGHT, STRAIGHT-SET cohort (see `straightWorkingSetsWithWeight` in
+ * `backend/internal/modules/session/progression_v2.go`), so it is only ever
+ * evidence for another straight working set. A backoff is deliberately
+ * lighter than the top set the plan reasons from; a drop exists only
+ * because the set before it hit failure; an AMRAP or failure set is
+ * measuring something the plan doesn't reason about at all. Writing the
+ * plan's weight/reps onto any of those overwrites a number the athlete chose
+ * on purpose with one that was never evidence for it.
+ *
+ * Before this, the button targeted every non-warm-up, not-yet-completed
+ * set — backoffs, drops, AMRAPs and failures included — which is exactly the
+ * mismatch N473/#812 reports.
+ *
+ * `set_type` is never blank on a set that has round-tripped through the
+ * server — `session_sets.set_type` defaults to `'working'` at the database
+ * column, and the backend's own insert path applies that same default to an
+ * empty client value before it's ever written. A freshly template-authored
+ * set not yet synced can still carry `undefined` here, and that reads as
+ * `'working'` too, for the same reason.
+ */
+export function pendingSuggestableIndices(
+  indices: readonly number[],
+  sets: readonly Pick<LoggedSet, 'completed' | 'set_type'>[],
+): number[] {
+  return indices.filter(
+    (i) => !sets[i]?.completed && (sets[i]?.set_type ?? 'working') === 'working',
+  );
 }
 
 /**

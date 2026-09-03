@@ -295,7 +295,15 @@ export default function WorkoutDetailScreen() {
         // general 5-8 range that the session screen then re-derives on 3-5.
         sets = applySuggestions(
           sets,
-          await fetchSuggestions(getToken, sets.map((x) => x.exercise_id), workout.goal),
+          await fetchSuggestions(
+            getToken,
+            sets.map((x) => x.exercise_id),
+            workout.goal,
+            undefined,
+            undefined,
+            // N473/#812 item 8 — see fetchSuggestions's own doc comment.
+            units,
+          ),
           // The catalog, so a dual-mode set already prescribed in seconds does
           // not also acquire a rep target — see lib/setMode.ts.
           (id) => catalog.get(id)?.load_type,

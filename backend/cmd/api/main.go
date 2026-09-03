@@ -259,7 +259,8 @@ func main() {
 		"friend_requests": friendRepo,
 		"shares":          shareRepo,
 	}))
-	featureFlagHandler := featureflag.NewHandler(featureflag.NewPostgresRepository(pool))
+	featureFlagRepo := featureflag.NewPostgresRepository(pool)
+	featureFlagHandler := featureflag.NewHandler(featureFlagRepo)
 	activityHandler := activity.NewHandler(activity.NewPostgresRepository(pool))
 	exerciseRepo := exercise.NewPostgresRepository(pool)
 	exerciseHandler := exercise.NewHandler(exerciseRepo, os.Getenv("MEDIA_BASE_URL"))
@@ -277,7 +278,10 @@ func main() {
 	}
 	techniqueHandler := technique.NewHandler(techniqueRepo, roundMap)
 	techniqueContentHandler := technique.NewContentHandler(techniqueRepo)
-	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool))
+	// featureFlagRepo satisfies session.FlagSource structurally (its Enabled
+	// method) — N473/#812's new_recommendation_engine gate. Seeded disabled,
+	// so this is a no-op for every deployment until the flag is flipped.
+	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool), featureFlagRepo)
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
 	themeHandler := theme.NewHandler(theme.NewPostgresRepository(pool))
 

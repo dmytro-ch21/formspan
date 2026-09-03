@@ -625,6 +625,122 @@ func (r *PostgresRepository) RecentEfforts(
 	return out, nil
 }
 
+// RecentEffortsV2 is RecentEfforts' sibling for ProgressV2 (N473/#812, item
+// 3) — a DELIBERATE near-duplicate rather than RecentEfforts plus a filter,
+// and the reason is the ranking itself, not merely which rows survive it.
+//
+// RecentEfforts' DENSE_RANK numbers sessions BEFORE any finished/unfinished
+// distinction is applied — reviewed and confirmed: filtering afterward (in
+// Go, on SessionEffort.Finished) means a currently-open session still
+// CONSUMES one of the window's `progressionWindow` slots merely by ranking
+// first, so an athlete mid-session — which is exactly when this endpoint is
+// called, via `today_sets` — sees at most progressionWindow-1 genuinely
+// finished sessions. `stalledSessionsAtV2`'s stall count then can never
+// reach `stallSessions`, and the deload branch goes quiet, for every
+// mid-session request. Confirmed in review; there is no existing test that
+// would have caught it, because every ProgressV2 test builds ProgressionInput
+// by hand and simply never modeled an open session occupying a rank slot.
+//
+// The fix: `s.ended_at IS NOT NULL` moves INTO the ranked CTE's WHERE clause,
+// so `session_rank` numbers only finished sessions in the first place — a
+// window of `progressionWindow` here is `progressionWindow` REAL finished
+// sessions, never fewer because an open one happened to rank ahead of them.
+//
+// This does not touch RecentEfforts itself, whose own ranking and behaviour
+// must stay exactly what TestRecentEfforts_* already pins — v1's `Progress`
+// still reads precisely what it always has.
+func (r *PostgresRepository) RecentEffortsV2(
+	ctx context.Context, userID string, exerciseIDs []string,
+) (map[string]ProgressionInput, error) {
+	out := map[string]ProgressionInput{}
+	if len(exerciseIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		WITH ranked AS (
+			SELECT ss.exercise_id, ss.session_id, s.started_at, ss.position,
+			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
+			       DENSE_RANK() OVER (
+			           PARTITION BY ss.exercise_id
+			           ORDER BY s.started_at DESC, ss.session_id
+			       ) AS session_rank
+			FROM session_sets ss
+			JOIN sessions s ON s.id = ss.session_id
+			WHERE s.user_id = $1
+			  AND ss.user_id = $1
+			  AND ss.exercise_id = ANY($2)
+			  AND `+SQLWorkingSet+`
+			  AND (ss.reps IS NOT NULL OR ss.weight_kg IS NOT NULL
+			       OR ss.seconds IS NOT NULL OR ss.distance_m IS NOT NULL)
+			  -- The one difference from RecentEfforts' own CTE: an unfinished
+			  -- session is excluded from the ranking itself, not merely from
+			  -- what ProgressV2 later decides to trust — see the doc comment
+			  -- above for why that distinction is the whole fix.
+			  AND s.ended_at IS NOT NULL
+		)
+		SELECT ex.id, e.movement_pattern, e.load_type,
+		       r.session_id, r.started_at, r.position, r.set_type,
+		       r.reps, r.weight_kg, r.rir, r.rpe, r.assisted_reps
+		FROM unnest($2::text[]) AS ex(id)
+		JOIN exercises e ON e.id = ex.id
+		LEFT JOIN ranked r ON r.exercise_id = ex.id AND r.session_rank <= $3
+		ORDER BY ex.id, r.started_at DESC NULLS LAST, r.session_id, r.position`,
+		userID, exerciseIDs, progressionWindow)
+	if err != nil {
+		return nil, fmt.Errorf("session: recent efforts v2: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			exerciseID        string
+			pattern, loadType string
+			sessionID         *string
+			startedAt         *time.Time
+			position          *int
+			setType           *SetType
+			s                 Set
+		)
+		if err := rows.Scan(&exerciseID, &pattern, &loadType,
+			&sessionID, &startedAt, &position, &setType,
+			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE, &s.AssistedReps); err != nil {
+			return nil, fmt.Errorf("session: scan recent effort v2: %w", err)
+		}
+
+		in := out[exerciseID]
+		in.ExerciseID = exerciseID
+		in.MovementPattern, in.LoadType = pattern, loadType
+		if sessionID == nil {
+			out[exerciseID] = in
+			continue
+		}
+
+		s.Completed = true
+		s.ExerciseID = exerciseID
+		s.Position, s.SetType = *position, *setType
+
+		if n := len(in.Recent); n > 0 && in.Recent[n-1].SessionID == *sessionID {
+			in.Recent[n-1].Sets = append(in.Recent[n-1].Sets, s)
+		} else {
+			in.Recent = append(in.Recent, SessionEffort{
+				SessionID:   *sessionID,
+				PerformedAt: *startedAt,
+				Sets:        []Set{s},
+				// Every row here already passed `s.ended_at IS NOT NULL` in
+				// the CTE, so this is always true — set explicitly rather
+				// than left at Go's zero value, so a reader doesn't have to
+				// trace back to the SQL to know why.
+				Finished: true,
+			})
+		}
+		out[exerciseID] = in
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: recent effort v2 rows: %w", err)
+	}
+	return out, nil
+}
+
 func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Session, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+sessionColumns+` FROM sessions s WHERE s.id = $1 AND s.user_id = $2`, id, userID)

@@ -506,8 +506,18 @@ type Repository interface {
 	History(ctx context.Context, userID string, f HistoryFilter) (*History, error)
 	// RecentEfforts returns, per requested exercise, the working sets of its
 	// last few sessions — everything the progression rule reads. Missing keys
-	// mean "never logged".
+	// mean "never logged". Used by v1's Progress; UNCHANGED by N473/#812 —
+	// see RecentEffortsV2 for why v2 needs a separate query rather than this
+	// one plus a filter.
 	RecentEfforts(ctx context.Context, userID string, exerciseIDs []string) (map[string]ProgressionInput, error)
+	// RecentEffortsV2 is ProgressV2's own history read (N473/#812, item 3),
+	// ranking sessions FINISHED-ONLY so a currently-open session can never
+	// occupy one of the window's slots and starve it of real history —
+	// exactly the failure a post-hoc Go-side filter over RecentEfforts'
+	// existing ranking would have, since that ranking is computed before any
+	// finished/unfinished distinction is applied. Missing keys mean "never
+	// logged", same as RecentEfforts.
+	RecentEffortsV2(ctx context.Context, userID string, exerciseIDs []string) (map[string]ProgressionInput, error)
 	// BestOneRMs returns the highest estimated one-rep max in the caller's
 	// history per requested exercise. Missing keys mean "no estimate".
 	BestOneRMs(ctx context.Context, userID string, exerciseIDs []string) (map[string]float64, error)

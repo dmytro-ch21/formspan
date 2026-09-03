@@ -3,6 +3,7 @@ package session
 import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -16,9 +17,50 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 )
 
-type Handler struct{ repo Repository }
+// newRecommendationEngineFlag gates ProgressV2 (progression_v2.go, N473/#812)
+// — the flag itself is seeded disabled (featureflag/postgres_test.go pins
+// that default), so a Handler built with a nil FlagSource, or one backed by
+// an unseeded key, always takes the existing v1 Progress path unchanged.
+const newRecommendationEngineFlag = "new_recommendation_engine"
 
-func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
+// FlagSource is the one feature-flag operation this package needs — not
+// featureflag.Repository's full List, which would make every test double
+// here carry Postgres-shaped list semantics for a single yes/no question.
+// featureflag.PostgresRepository satisfies this structurally (see its
+// Enabled method) without importing that package here.
+type FlagSource interface {
+	Enabled(ctx context.Context, key string) (bool, error)
+}
+
+type Handler struct {
+	repo  Repository
+	flags FlagSource
+}
+
+// NewHandler takes an optional FlagSource. Nil is valid and deliberate: every
+// existing caller that doesn't care about the new engine (main tests, a
+// handler built only to exercise Create/ReplaceSets) keeps compiling and
+// keeps taking the v1 path, which is exactly the "unaffected for anyone not
+// on the flag" contract N473/#812 requires.
+func NewHandler(repo Repository, flags FlagSource) *Handler {
+	return &Handler{repo: repo, flags: flags}
+}
+
+// newEngineEnabled resolves the flag defensively: a nil FlagSource, or the
+// flag lookup itself failing, both read as "stay on v1" rather than as a
+// request error — a feature flag that can 500 the suggestions endpoint on a
+// transient flags-table hiccup would be a worse failure mode than serving
+// the (already shipped, already tolerated) old behaviour for one request.
+func (h *Handler) newEngineEnabled(ctx context.Context) bool {
+	if h.flags == nil {
+		return false
+	}
+	enabled, err := h.flags.Enabled(ctx, newRecommendationEngineFlag)
+	if err != nil {
+		return false
+	}
+	return enabled
+}
 
 // maxSets bounds a single session. No real session comes close; anything
 // larger is a mistake or an attempt to make the database work for nothing,
@@ -437,6 +479,15 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	// just doesn't narrow anything.
 	goal := strings.TrimSpace(r.URL.Query().Get("goal"))
 
+	// Same pattern as goal above, for ProgressV2's rounding (item 8, see
+	// progression_v2.go's doc comment on roundToPlateV2) — the client already
+	// knows the athlete's own unit preference and passes it along rather
+	// than this handler reaching into the profile module for it. Not
+	// validated for the same reason goal isn't: anything other than exactly
+	// "imperial" reads as metric, which is the rounding this endpoint has
+	// always done, so an old client that never sends this is unaffected.
+	unitSystem := strings.TrimSpace(r.URL.Query().Get("unit_system"))
+
 	todaySets, err := parseInSessionWeights(r.URL.Query().Get("today_sets"))
 	if err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
@@ -444,7 +495,24 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	efforts, err := h.repo.RecentEfforts(r.Context(), claims.UserID, ids)
+	// Resolved BEFORE the history read, not after: which repository method
+	// runs is part of what the flag decides, not just which pure function
+	// gets called afterward. See RecentEffortsV2's doc comment (postgres.go)
+	// for why a Go-side filter over RecentEfforts' own results is not
+	// equivalent to ranking finished-only in the first place — found in
+	// backend review, N473/#812. Resolved once per request, not once per
+	// exercise: it's one global flag (see FlagSource/newEngineEnabled's doc
+	// comments), not a per-exercise decision. Disabled — including a nil
+	// h.flags — means every exercise in this response takes the unchanged v1
+	// path, reading from the unchanged v1 query.
+	v2 := h.newEngineEnabled(r.Context())
+
+	var efforts map[string]ProgressionInput
+	if v2 {
+		efforts, err = h.repo.RecentEffortsV2(r.Context(), claims.UserID, ids)
+	} else {
+		efforts, err = h.repo.RecentEfforts(r.Context(), claims.UserID, ids)
+	}
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -462,10 +530,16 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		// Zero value is the "never logged" case, and Progress reads it as
 		// such — no history, so no claim.
 		in := efforts[id]
-		in.ExerciseID, in.Goal = id, goal
+		in.ExerciseID, in.Goal, in.UnitSystem = id, goal, unitSystem
 		in.InSessionWorkingWeightsKg = todaySets[id]
 
-		s := Suggestion{ExerciseID: id, Plan: Progress(in, now)}
+		var plan Plan
+		if v2 {
+			plan = ProgressV2(in, now)
+		} else {
+			plan = Progress(in, now)
+		}
+		s := Suggestion{ExerciseID: id, Plan: plan}
 
 		// Estimated off the same top set the plan reasons from, so the two
 		// always agree about which set they're describing.

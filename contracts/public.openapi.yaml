@@ -3759,7 +3759,8 @@ components:
         code:
           type: string
           enum: [add_reps, add_load, deload, hold, no_history, not_applicable,
-                 repeat_hard, repeat_unknown_effort, repeat_stale]
+                 repeat_hard, repeat_unknown_effort, repeat_stale,
+                 effort_conflict, abstain]
           description: >
             The four progression outcomes:
 
@@ -3789,6 +3790,24 @@ components:
             effort: an old easy set is evidence about someone who has since
             detrained. `no_history` — never logged. `not_applicable` — not
             measured in weight.
+
+
+            Behind `new_recommendation_engine` only (N473/#812) — see the
+            endpoint description above:
+
+
+            `effort_conflict` — a set logged both a RIR and a RPE and they
+            imply materially different reserve (an "RPE 8 / 0 RIR"-style
+            contradiction). `target_weight_kg`/`target_reps` are both null:
+            the engine is declining to guess which reading is right rather
+            than letting RIR silently win.
+            `abstain` — the evidence is ambiguous rather than simply absent
+            (`repeat_unknown_effort` above already covers "no effort recorded
+            at all"): effort was recorded on some but not every straight
+            working set at the anchor weight, or finished history exists but
+            never produced a usable straight-set cohort at all.
+            `target_weight_kg`/`target_reps` are both null here too — an
+            honest "can't tell" carries no guessed number.
         reason:
           type: string
           description: Human-readable, cites the evidence. Never pattern-match on it.
@@ -9739,6 +9758,20 @@ paths:
         already logged working sets for the same exercise earlier in the
         session making this request; it never changes the prescription
         itself.
+
+
+        **Behind the `new_recommendation_engine` feature flag** (operator-
+        controlled, seeded disabled — see N473/#812), this endpoint serves a
+        corrected engine instead: it compares only a coherent cohort (same
+        exercise, same STRAIGHT working-set role, same anchor weight —
+        backoffs, drops, AMRAPs and failures are excluded rather than folded
+        in), reads only FINISHED sessions as history (the currently-open
+        session is never its own history), requires effort data before
+        authorizing progression, and can return `effort_conflict` or
+        `abstain` where the old engine would guess. Rounding also uses real
+        per-unit plate increments (see `unit_system` below) rather than a
+        fixed kilogram step. Callers not on the flag see byte-identical
+        behaviour to before this existed.
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
         - name: exercise_ids
@@ -9789,6 +9822,27 @@ paths:
 
             Malformed entries are dropped rather than failing the request
             (this is advisory data); more than 500 entries is refused.
+        - name: unit_system
+          in: query
+          required: false
+          schema:
+            type: string
+            example: imperial
+          description: >
+            `imperial` or `metric` — the caller's own unit preference, same
+            pattern as `goal`: the client already knows it and passes it
+            along rather than this endpoint looking it up. Only consulted
+            behind `new_recommendation_engine` (N473/#812), to round
+            `target_weight_kg` to a real increment in the unit the athlete
+            actually trains in (5/10 lb, matching the existing
+            1.25/2.5/5 kg scheme) instead of a kilogram grid that can land on
+            an unloadable number once converted — 31.25 kg is a clean 1.25 kg
+            step and 68.9 lb once displayed.
+
+
+            Deliberately not validated, for the same reason `goal` isn't:
+            anything other than exactly `imperial` reads as metric, which is
+            this endpoint's behaviour without this parameter at all.
       responses:
         "200":
           description: >

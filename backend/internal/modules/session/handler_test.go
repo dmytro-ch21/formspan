@@ -35,7 +35,7 @@ func createResponse(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/sessions", strings.NewReader(body))
-	NewHandler(nil).Create(rec, req)
+	NewHandler(nil, nil).Create(rec, req)
 	return rec
 }
 
@@ -44,7 +44,7 @@ func replaceSetsResponse(t *testing.T, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPut, "/v1/sessions/ses-1/sets", strings.NewReader(body))
 	req.SetPathValue("sessionID", "ses-1")
 	rec := httptest.NewRecorder()
-	NewHandler(nil).ReplaceSets(rec, req)
+	NewHandler(nil, nil).ReplaceSets(rec, req)
 	return rec
 }
 
@@ -288,6 +288,16 @@ func (f *suggestionsFakeRepo) RecentEfforts(_ context.Context, _ string, ids []s
 	}
 	return out, nil
 }
+
+// RecentEffortsV2 (N473/#812) reuses the same fixture map RecentEfforts
+// does — the real PostgresRepository's version differs from RecentEfforts
+// only in ranking finished-only in SQL (see its own doc comment), and every
+// fixture in this file that cares about that distinction already sets
+// SessionEffort.Finished explicitly rather than relying on this fake to
+// simulate the SQL-level filtering.
+func (f *suggestionsFakeRepo) RecentEffortsV2(ctx context.Context, userID string, ids []string) (map[string]ProgressionInput, error) {
+	return f.RecentEfforts(ctx, userID, ids)
+}
 func (f *suggestionsFakeRepo) BestOneRMs(_ context.Context, _ string, _ []string) (map[string]float64, error) {
 	return f.bestRMs, nil
 }
@@ -362,7 +372,7 @@ func TestSuggestionsHandler_TodaySetsReachesTheSignal(t *testing.T) {
 		efforts: map[string]ProgressionInput{"bench-press": in},
 		bestRMs: map[string]float64{},
 	}
-	h := NewHandler(repo)
+	h := NewHandler(repo, nil)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/sessions/suggestions?exercise_ids=bench-press&goal=hypertrophy&today_sets=bench-press:95",
@@ -409,4 +419,144 @@ func TestSuggestionsHandler_TodaySetsReachesTheSignal(t *testing.T) {
 
 func signedInSession(r *http.Request, userID string) *http.Request {
 	return r.WithContext(auth.ContextWithClaims(r.Context(), &auth.Claims{UserID: userID}))
+}
+
+// fakeFlagSource is the smallest possible FlagSource: one key, one bool, no
+// Postgres. errOnRead, if set, makes Enabled fail — proving the handler's
+// "a flag error stays on v1" guard (newEngineEnabled) actually does that
+// rather than propagating the error into a 500.
+type fakeFlagSource struct {
+	enabled   bool
+	errOnRead error
+}
+
+func (f *fakeFlagSource) Enabled(context.Context, string) (bool, error) {
+	if f.errOnRead != nil {
+		return false, f.errOnRead
+	}
+	return f.enabled, nil
+}
+
+// goldenSquatFixture is the same reported shape used throughout
+// progression_v2_test.go's golden test, reproduced here because the wire
+// path builds ProgressionInput from the handler's map-keyed join rather than
+// from progIn/squatIn.
+func goldenSquatFixture(finished bool) ProgressionInput {
+	sets := []Set{
+		straightSet(12, lb228Kg, nil, nil),
+		straightSet(12, lb228Kg, nil, nil),
+		straightSet(12, lb228Kg, nil, nil),
+		straightSet(3, lb335Kg, nil, nil),
+	}
+	return ProgressionInput{
+		ExerciseID:      "back-squat",
+		LoadType:        "weight_reps",
+		MovementPattern: "squat",
+		Recent: []SessionEffort{{
+			SessionID:   "s1",
+			PerformedAt: time.Now().Add(-24 * time.Hour),
+			Sets:        sets,
+			Finished:    finished,
+		}},
+	}
+}
+
+// TestSuggestionsHandler_FlagOffKeepsV1PathUnchanged is N473/#812's own
+// wiring requirement made concrete: with the flag off (including a nil
+// FlagSource — see NewHandler's doc comment), the endpoint must still
+// reproduce the ORIGINAL reported bug byte-for-byte, because that is exactly
+// what "unaffected for anyone not on the flag" promises. If this ever goes
+// green with a different weight/reps pair, either v1 changed (forbidden) or
+// something upstream of it did.
+func TestSuggestionsHandler_FlagOffKeepsV1PathUnchanged(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: false})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	s := body.Suggestions[0]
+	if s.TargetWeightKg == nil || !nearlyEqual(*s.TargetWeightKg, lb335Kg) || s.TargetReps == nil || *s.TargetReps != 8 {
+		t.Fatalf("expected the unchanged v1 bug (335-equivalent x 8) with the flag off, "+
+			"got weight=%v reps=%v", s.TargetWeightKg, s.TargetReps)
+	}
+}
+
+// TestSuggestionsHandler_FlagOnUsesV2AndNeverInventsTheSet is the same
+// fixture through the SAME endpoint with the flag on, confirming the wire
+// path (query params -> ProgressionInput -> ProgressV2 -> JSON) actually
+// reaches the fix rather than only the pure-function tests exercising it.
+func TestSuggestionsHandler_FlagOnUsesV2AndNeverInventsTheSet(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: true})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	s := body.Suggestions[0]
+	if s.TargetWeightKg != nil && nearlyEqual(*s.TargetWeightKg, lb335Kg) && s.TargetReps != nil && *s.TargetReps == 8 {
+		t.Fatalf("GOLDEN TEST VIOLATION over the wire: got 335-equivalent x 8 with the "+
+			"flag on. code=%s reason=%q", s.Code, s.Reason)
+	}
+}
+
+// TestSuggestionsHandler_FlagSourceErrorStaysOnV1 is newEngineEnabled's own
+// guard: a flags-table read failure must not turn into a 500, and must not
+// silently switch a request onto the new engine either — it stays on the
+// already-shipped v1 path, same as a nil FlagSource does.
+func TestSuggestionsHandler_FlagSourceErrorStaysOnV1(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo, &fakeFlagSource{errOnRead: errors.New("connection reset")})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a flag-source error must not surface as a request failure, got %d: %s",
+			rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	s := body.Suggestions[0]
+	if s.TargetWeightKg == nil || !nearlyEqual(*s.TargetWeightKg, lb335Kg) || s.TargetReps == nil || *s.TargetReps != 8 {
+		t.Fatalf("a flag read error must fail safe onto v1, got weight=%v reps=%v",
+			s.TargetWeightKg, s.TargetReps)
+	}
 }

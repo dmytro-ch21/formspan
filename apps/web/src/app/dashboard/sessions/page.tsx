@@ -209,6 +209,10 @@ export default function HistoryPage() {
               getToken,
               sets.map((x) => x.exercise_id),
               workout?.goal ?? null,
+              undefined,
+              undefined,
+              // N473/#812 item 8 — see fetchSuggestions's own doc comment.
+              units,
             ),
           );
         } catch {
