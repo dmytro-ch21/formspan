@@ -17629,3 +17629,60 @@ because nothing shipped; revisit this section if the feature is ever built.
   back — a light/deload session is exactly as visible via `GET /v1/sessions`
   and `GET /v1/sessions/{id}` as a normal one; only the progression engine's
   internal evidence search treats it differently.
+
+## N111 — the derivation converts g/kg and kcal/kg for an imperial athlete (`apps/mobile/lib/units.ts`, `apps/web/src/lib/units.ts`, `apps/mobile/lib/macroModel.ts`, `apps/mobile/components/nutrition/AdjustmentCard.tsx`, `apps/web/src/app/dashboard/nutrition/targets/AdjustmentCard.tsx`, `apps/web/src/app/dashboard/nutrition/targets/Derivation.tsx`)
+
+Decision recorded in `docs/decisions/history.md`: convert, not leave in kg.
+N105 converted every weight an athlete owns to their own units and
+deliberately left the per-bodyweight coefficients (`protein_g_per_kg`,
+`fat_g_per_kg`, `kcal_per_kg`) in kg — leaving an imperial athlete reading
+"180.8lb" on one line and "2.2 g per kg" on the next, unable to multiply the
+two. `toDisplayPerWeight`/`formatMacroCoefficient`/`formatEnergyCoefficient`
+in `units.ts` now convert these too, display-side only — the wire values
+(`Basis`/`AdjustmentBasis` on `GET /v1/nutrition/targets/suggested`,
+`GET/POST /v1/nutrition/targets/adjustment`) stay kg-based, unchanged.
+
+### Happy path
+
+- An **imperial** athlete opens Goals (`app/(tabs)/goals.tsx`) with a live
+  target: the macro donut's legend reads "1 g per lb" for a 2.2 g/kg protein
+  rule and "0.36 g per lb" for a 0.8 g/kg fat rule — never "g per kg" — and
+  the numbers agree with the athlete's own displayed bodyweight (e.g. a
+  185lb athlete's protein grams ≈ 185 × the shown coefficient, within
+  rounding).
+- The same athlete expands "Show the arithmetic" on the weekly adjustment
+  card (`AdjustmentCard.tsx`): the gap row reads "× 3493 kcal per lb ÷ 7
+  days", not kcal per kg — and multiplying that figure by the shown
+  weekly weight gap (in lb) against 7 days reproduces the shown kcal delta,
+  within rounding.
+- On web, `/dashboard/nutrition/targets`'s Derivation panel shows the same
+  two conversions for an imperial athlete: the phase row's "at N kcal per
+  lb" and the macros section's "· N g per lb" beside protein and fat — and
+  the web `AdjustmentCard`'s gap row matches mobile's phrasing and figure
+  exactly (same server-supplied `kcal_per_kg`, same conversion).
+- A **metric** athlete sees no change at all: "2.2 g per kg", "0.8 g per
+  kg" and "7700 kcal per kg" render exactly as before this ticket, on both
+  platforms.
+- Flip the unit-system setting from metric to imperial (and back) while the
+  Goals/Derivation screen is open (or re-open it after flipping): every
+  coefficient re-renders in the new system in the same pass as the
+  bodyweight figures beside it — never one converted and the other not.
+
+### Edge cases & errors
+
+- A typed (manual) target has no `basis`: the macro legend's rule is still
+  null/absent on both platforms — the unit conversion must not fabricate a
+  coefficient for a target that has none.
+- Carbs and fibre never carry a per-weight coefficient ("Whatever the
+  calories leave" / "A floor, not a ceiling") — confirm the unit-system
+  setting has no effect on their text on either platform.
+- A weekly adjustment that is `blocked_by` (no proposal): no coefficient
+  renders at all — the blocked-state copy is unaffected by unit system.
+- Boundary values: a fat coefficient that converts to a value rounding to a
+  whole number in lb (so it does not visually read as "converted") still
+  matches the equivalent kg-based multiplication when checked by hand.
+
+### Auth/security
+
+- N/A — purely a display-layer conversion of numbers the response already
+  contains; no new endpoint, no new field, no authorization surface.

@@ -35,7 +35,7 @@ import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import type { Adjustment, AdjustmentResponse, BlockedBy } from '@/lib/nutritionApi';
-import { formatWeight, type UnitSystem } from '@/lib/units';
+import { formatEnergyCoefficient, formatWeight, type UnitSystem } from '@/lib/units';
 
 /**
  * The copy for every blocked state, carried over from web verbatim in
@@ -174,7 +174,7 @@ export function AdjustmentCard({
           />
           <Row
             label="The gap"
-            hint={`× ${b.kcal_per_kg} kcal per kg ÷ 7 days`}
+            hint={`× ${formatEnergyCoefficient(b.kcal_per_kg, units)} ÷ 7 days`}
             value={`${signedKg(b.observed_kg_per_week - b.target_kg_per_week, units)} / week`}
           />
           <Row

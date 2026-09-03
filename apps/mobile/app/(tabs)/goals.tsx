@@ -200,7 +200,14 @@ const INFO = {
     'Nothing here is saved. This is what we would suggest; it becomes your target only when you tap the button at the bottom, and the workings are stored alongside it so this page still answers the question months from now.',
   ],
   macros: [
-    'Protein and fat are set per kilogram of bodyweight, because that is what the evidence is expressed in — protein high enough to hold muscle while you are in a deficit, fat high enough for hormones and for food to be worth eating. Carbohydrate is whatever the calories leave once those two are paid for, which is why it moves most when your target moves.',
+    // N111 (#494): used to say "set per kilogram of bodyweight", naming the
+    // unit the coefficient beside this sheet was rendered in. Once that
+    // coefficient converts to g/lb for an imperial athlete, a sentence still
+    // saying "kilogram" would be the exact half-converted mismatch this
+    // ticket exists to remove — so the unit is dropped from the prose rather
+    // than made conditional on it, since the underlying claim (scaled to
+    // your own bodyweight) holds regardless of which unit is on screen.
+    'Protein and fat are scaled to your own bodyweight, not to a flat number — protein high enough to hold muscle while you are in a deficit, fat high enough for hormones and for food to be worth eating. Carbohydrate is whatever the calories leave once those two are paid for, which is why it moves most when your target moves.',
     'Fibre is a floor, not a ceiling. Going over it is fine and normal; the number is the least you want, not the most you are allowed.',
     'The ring is drawn by GRAMS, not by calories, and the pill above it says so. An energy ring would be the obvious alternative and would be wrong here: fibre is itself a carbohydrate, so the four figures do not divide the calories between them and some of them would be counted twice. By grams the ring is a picture of the four numbers beside it and of nothing else.',
     'If the calories are too few to cover the usual protein and fat, one of them gives way rather than the target quietly becoming impossible — and the screen names which.',
@@ -927,11 +934,20 @@ export default function TargetScreen() {
    * its tiles have to be that target's macros. Falling back to the suggestion
    * is right only when there is nothing in force to show.
    */
-  const cardRows = useMemo(
-    () => (live ? macroRowsFromTarget(live) : macroRows(s, b)),
-    [live, s, b],
-  );
-  const derivedRows = useMemo(() => macroRows(s, b), [s, b]);
+  const cardRows = useMemo(() => {
+    const rows = live ? macroRowsFromTarget(live) : macroRows(s, b, units);
+    // Held back exactly like the resting-rate hint below (N111, #494): `units`
+    // defaults to metric before `useUnits` has read the cache, and this is the
+    // first UNIT-DEPENDENT value macroRows has ever returned — before N111 the
+    // rule text was a unit-independent literal, so this flash could not
+    // happen. Nulling the rule until `unitsReady` keeps an imperial athlete
+    // from seeing a "g per kg" coefficient flash before it corrects itself.
+    return unitsReady ? rows : rows.map((r) => ({ ...r, rule: null }));
+  }, [live, s, b, units, unitsReady]);
+  const derivedRows = useMemo(() => {
+    const rows = macroRows(s, b, units);
+    return unitsReady ? rows : rows.map((r) => ({ ...r, rule: null }));
+  }, [s, b, units, unitsReady]);
 
   const ladder: LadderRow[] = useMemo(() => {
     if (!b || !s) return [];

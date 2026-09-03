@@ -1,7 +1,12 @@
 "use client";
 
 import type { Basis, Projection } from "@/lib/nutritionApi";
-import { formatWeight, type UnitSystem } from "@/lib/units";
+import {
+  formatEnergyCoefficient,
+  formatMacroCoefficient,
+  formatWeight,
+  type UnitSystem,
+} from "@/lib/units";
 
 /**
  * The arithmetic behind a target, line by line.
@@ -82,7 +87,7 @@ export function Derivation({
     },
     {
       label: PHASE_LABEL[basis.phase_kind] ?? basis.phase_kind,
-      detail: `${signedPct(basis.target_rate_pct_per_week)} of bodyweight per week — ${signedKg(basis.target_rate_kg_per_week, units)} per week, at ${basis.kcal_per_kg} kcal per kg`,
+      detail: `${signedPct(basis.target_rate_pct_per_week)} of bodyweight per week — ${signedKg(basis.target_rate_kg_per_week, units)} per week, at ${formatEnergyCoefficient(basis.kcal_per_kg, units)}`,
       value: `${basis.energy_delta_kcal >= 0 ? "+" : "−"} ${Math.abs(basis.energy_delta_kcal)} kcal`,
     },
     {
@@ -139,11 +144,11 @@ export function Derivation({
         <ul className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
           <li>
             Protein <strong className="tabular-nums">{proteinG} g</strong>
-            <span className="text-text-dim"> · {basis.protein_g_per_kg} g/kg</span>
+            <span className="text-text-dim"> · {formatMacroCoefficient(basis.protein_g_per_kg, units)}</span>
           </li>
           <li>
             Fat <strong className="tabular-nums">{fatG} g</strong>
-            <span className="text-text-dim"> · {basis.fat_g_per_kg} g/kg</span>
+            <span className="text-text-dim"> · {formatMacroCoefficient(basis.fat_g_per_kg, units)}</span>
           </li>
           <li>
             Carbs <strong className="tabular-nums">{carbG} g</strong>

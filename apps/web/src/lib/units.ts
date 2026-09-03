@@ -174,6 +174,67 @@ export function formatVolume(kg: number | null | undefined, u: UnitSystem): stri
 }
 
 /**
+ * A per-bodyweight COEFFICIENT — `protein_g_per_kg`, `fat_g_per_kg`,
+ * `kcal_per_kg` on `Basis`/`AdjustmentBasis` (N111, #494).
+ *
+ * The server computes these from a weight in kilograms and sends them
+ * per-kilogram, always — same "storage is one canonical unit" rule as
+ * everything else in this file, and there is no migration to make: nothing
+ * about the wire format changes, only the display side.
+ *
+ * **Why this needs its own function rather than reusing `toDisplayWeight`.**
+ * A coefficient is not a weight — it is a RATE, "grams of protein per unit of
+ * bodyweight" — so converting it means DIVIDING by `LB_PER_KG` where a weight
+ * would be multiplied. Getting that backwards silently produces a number
+ * around 4.86× too large rather than a visibly broken one, which is exactly
+ * the kind of error that survives a glance.
+ *
+ * **This is the half of the arithmetic N105 deliberately left alone.** N105
+ * converted every weight an athlete *owns* to their own units and left the
+ * coefficients in kg, on the reasoning that a coefficient the server computed
+ * is not a measurement the athlete owns. That left an imperial athlete
+ * reading "180.8lb" on one line and "2.2 g per kg" on the next — two units on
+ * one screen whose entire job is showing the working (N69's "show the
+ * arithmetic") — unable to multiply the two together. Converting this half
+ * too keeps that multiplication checkable: `formatMacroCoefficient` and
+ * `formatEnergyCoefficient` below move the SAME weight this athlete's
+ * bodyweight is already displayed in, so the two sides of the derivation
+ * agree.
+ */
+export function toDisplayPerWeight(perKg: number, u: UnitSystem): number {
+  return u === 'imperial' ? perKg / LB_PER_KG : perKg;
+}
+
+/**
+ * "2.2 g per kg" / "1 g per lb" — `protein_g_per_kg` or `fat_g_per_kg`, in the
+ * athlete's own units.
+ *
+ * Two decimal places, trimmed the way `formatWeight` trims — the source
+ * figure itself is authored to one or two decimals (2.2, 0.8, …), so this
+ * neither invents precision nor throws any away.
+ */
+export function formatMacroCoefficient(perKg: number, u: UnitSystem): string {
+  return `${trim(round(toDisplayPerWeight(perKg, u), 2))} g per ${weightUnit(u)}`;
+}
+
+/**
+ * "7700 kcal per kg" / "3493 kcal per lb" — `kcal_per_kg`, the Wishnofsky
+ * energy-per-bodyweight coefficient, in the athlete's own units.
+ *
+ * Whole numbers only, matching every other kcal figure on these screens (none
+ * of them carry a decimal, because nobody logs a fractional calorie) and
+ * matching how the source figure itself is authored — 7700, not 7700.0.
+ * **Not 3,500** — the culturally familiar "3,500 kcal per pound of fat"
+ * figure is a separately-derived rule of thumb (implying ≈7,716 kcal/kg) and
+ * is close to but not the same number as this app's own 7,700 kcal/kg
+ * converted; rendering the real converted value is what keeps this line
+ * multiplying out against the kg-based line it came from.
+ */
+export function formatEnergyCoefficient(perKg: number, u: UnitSystem): string {
+  return `${Math.round(toDisplayPerWeight(perKg, u))} kcal per ${weightUnit(u)}`;
+}
+
+/**
  * Distance switches unit by magnitude, in both systems — nobody says "0.02
  * miles" and nobody says "5000 metres" for a run.
  */

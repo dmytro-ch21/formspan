@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import type { Adjustment, AdjustmentResponse, BlockedBy } from "@/lib/nutritionApi";
-import { formatWeight, type UnitSystem } from "@/lib/units";
+import { formatEnergyCoefficient, formatWeight, type UnitSystem } from "@/lib/units";
 
 /**
  * The weekly target adjustment — N27's first and only client.
@@ -161,7 +161,7 @@ export function AdjustmentCard({
           />
           <Row
             label="The gap"
-            detail={`× ${b.kcal_per_kg} kcal per kg ÷ 7 days`}
+            detail={`× ${formatEnergyCoefficient(b.kcal_per_kg, units)} ÷ 7 days`}
             value={`${signedKg(b.observed_kg_per_week - b.target_kg_per_week, units)} / week`}
           />
           <Row

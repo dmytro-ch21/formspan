@@ -17,6 +17,7 @@
 import { activeMacroColors, type MacroColor } from '@/constants/Colors';
 import type { Basis, Suggestion } from '@/lib/nutritionApi';
 import type { Target } from '@/lib/nutrition';
+import { formatMacroCoefficient, type UnitSystem } from '@/lib/units';
 
 export type MacroKey = MacroColor;
 
@@ -68,13 +69,18 @@ export type MacroRow = {
 export function macroRows(
   s: Pick<Suggestion, 'protein_g' | 'fat_g' | 'carb_g' | 'fibre_g'> | null,
   b: Pick<Basis, 'protein_g_per_kg' | 'fat_g_per_kg'> | null,
+  // Defaults to metric so every existing caller — including every test in
+  // this file's own suite — keeps behaving exactly as it did before N111
+  // (#494), rather than every call site needing an update the same day the
+  // parameter was added.
+  units: UnitSystem = 'metric',
 ): MacroRow[] {
   return MACRO_ORDER.map((key) => ({
     key,
     label: MACRO_LABEL[key],
     colour: macroColor(key),
     grams: s ? gramsOf(s, key) : null,
-    rule: b ? ruleOf(b, key) : null,
+    rule: b ? ruleOf(b, key, units) : null,
   }));
 }
 
@@ -126,22 +132,23 @@ function targetGramsOf(t: Target, key: MacroKey): number | null {
 /**
  * One line saying where the number came from.
  *
- * Protein and fat are per-kilogram rules, so they carry their coefficient.
- * Carbs are the remainder — deliberately phrased as a consequence rather than
- * as a rule, because that is what they are. Fibre is a floor, and saying so is
- * what stops it being read as a cap somebody is failing to stay under.
- *
- * **The `g per kg` spellings are load-bearing text, not prose.** They are on
- * `check-unit-literals.py`'s allowlist, keyed on that exact snippet, pending
- * N111 (#494) — which is the ticket for rendering them in the athlete's own
- * units. Rewording them here breaks that check.
+ * Protein and fat are per-bodyweight rules, so they carry their coefficient —
+ * through `formatMacroCoefficient`, in the athlete's own units, resolved N111
+ * (#494). Carbs are the remainder — deliberately phrased as a consequence
+ * rather than as a rule, because that is what they are. Fibre is a floor, and
+ * saying so is what stops it being read as a cap somebody is failing to stay
+ * under.
  */
-function ruleOf(b: Pick<Basis, 'protein_g_per_kg' | 'fat_g_per_kg'>, key: MacroKey): string {
+function ruleOf(
+  b: Pick<Basis, 'protein_g_per_kg' | 'fat_g_per_kg'>,
+  key: MacroKey,
+  units: UnitSystem,
+): string {
   switch (key) {
     case 'protein':
-      return `${trim(b.protein_g_per_kg)} g per kg`;
+      return formatMacroCoefficient(b.protein_g_per_kg, units);
     case 'fat':
-      return `${trim(b.fat_g_per_kg)} g per kg`;
+      return formatMacroCoefficient(b.fat_g_per_kg, units);
     case 'carbs':
       return 'Whatever the calories leave';
     case 'fibre':
@@ -172,9 +179,4 @@ export function macroArcs(rows: readonly MacroRow[]): { key: MacroKey; colour: s
   return rows
     .map((r) => ({ key: r.key, colour: r.colour, fraction: Math.max(0, r.grams ?? 0) / total }))
     .filter((a) => a.fraction > 0);
-}
-
-/** One decimal at most, and no trailing `.0` on a whole number. */
-function trim(n: number): string {
-  return String(Math.round(n * 100) / 100);
 }
