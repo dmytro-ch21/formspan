@@ -1,7 +1,7 @@
 import { haversineMeters, type RoutePoint } from './running';
 
 /**
- * Auto-pause detection for a live-tracked run (N467/#777, the "auto-pause"
+ * Auto-pause detection for a live-tracked run (L11/#777, the "auto-pause"
  * half of L11 — the cadence half was evaluated and deliberately deferred, see
  * `docs/decisions/history.md`'s entry for the reasoning).
  *

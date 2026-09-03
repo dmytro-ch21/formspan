@@ -17451,7 +17451,7 @@ turns this on or off.
   neither exists yet; if either is picked up later, it gets its own N-numbered
   section rather than reusing this one.
 
-## N467 — running auto-pause (`apps/mobile/lib/runningAutoPause.ts`, `apps/mobile/app/running/[id].tsx`)
+## L11 — running auto-pause (`apps/mobile/lib/runningAutoPause.ts`, `apps/mobile/app/running/[id].tsx`)
 
 ### Happy path
 
@@ -17514,7 +17514,7 @@ turns this on or off.
   (rather than tearing it down like a manual pause) over a long run with
   several stops — not measurable from a desk.
 
-## N467 — cadence detection: evaluated, not built
+## L11 — cadence detection: evaluated, not built
 
 Deliberately out of scope for this ticket. `expo-sensors` is not currently a
 dependency of `apps/mobile`; building step-cadence detection would need a

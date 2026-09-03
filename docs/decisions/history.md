@@ -53413,7 +53413,7 @@ contract ahead of any client. A client wanting to show "new 5k PR" after a
 run would call this endpoint and diff against what it showed before the run,
 the same pattern the generic Records screen already uses.
 
-## 2026-09-02 — N467 (#777, L11): running auto-pause, and cadence deliberately deferred
+## 2026-09-02 — L11 (#777): running auto-pause, and cadence deliberately deferred
 
 Backlog stretch ticket, scoped down on purpose. The issue asked for a
 scoping spike on both halves; auto-pause turned out cheap enough to build

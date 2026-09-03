@@ -78,7 +78,7 @@ import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
  * suspended `setInterval` catches up the instant the app resumes, since the
  * arithmetic only ever asks "what is `Date.now()` right now".
  *
- * ## Auto-pause (N467/#777)
+ * ## Auto-pause (L11/#777)
  *
  * The GPS watch is deliberately NOT torn down on an auto-pause the way it is
  * on a manual one — the location callback's auto-pause branch (inside
@@ -152,6 +152,13 @@ export default function RunningSessionScreen() {
   const autoPausedRef = useRef(false);
   const autoPauseStateRef = useRef<AutoPauseState>(initialAutoPauseState);
   const lastRawFixRef = useRef<RoutePoint | null>(null);
+  // Bumped by every `startWatch()` call and captured by that call's own
+  // location callback — see the callback's own first line for why: without
+  // this, a fix from a subscription `startWatch()` is in the middle of
+  // superseding (the `await Location.watchPositionAsync(...)` below has not
+  // resolved yet) could still fire once more and process against the freshly
+  // -reset auto-pause refs, using an old, unrelated fix's speed.
+  const watchGenerationRef = useRef(0);
 
   useEffect(() => {
     runStatusRef.current = status;
@@ -311,6 +318,12 @@ export default function RunningSessionScreen() {
     autoPausedRef.current = false;
     autoPauseStateRef.current = initialAutoPauseState;
     lastRawFixRef.current = null;
+    // Captured now, before the `await` below — a fix delivered by a PRIOR
+    // subscription that has not finished being torn down yet (see this
+    // function's replace-the-old-one comment further down) will carry the
+    // generation it closed over, not this one, and gets ignored outright by
+    // the callback's own first line.
+    const myGeneration = ++watchGenerationRef.current;
     requestSync('run-started');
     const sub = await Location.watchPositionAsync(
       {
@@ -320,6 +333,14 @@ export default function RunningSessionScreen() {
       },
       (loc) => {
         if (!mountedRef.current) return;
+        // A fix from a subscription this screen no longer considers current
+        // — superseded by a later `startWatch()` call (a manual Resume, or a
+        // fast double-tap of it) that started before this one's own
+        // `Location.watchPositionAsync` promise had resolved and torn this
+        // subscription down. Ignored completely, before touching ANY shared
+        // state, so it cannot process against auto-pause bookkeeping that
+        // has already been reset for the newer subscription.
+        if (watchGenerationRef.current !== myGeneration) return;
         // A wildly inaccurate fix (a bad multipath reflection indoors, a
         // cold-start estimate) is worse than a gap — it draws a spike in the
         // route and a spike in the distance total that no amount of later
@@ -481,7 +502,6 @@ export default function RunningSessionScreen() {
     watchRef.current?.remove();
     watchRef.current = null;
     autoPausedRef.current = false;
-    runStatusRef.current = 'finished';
 
     const finalPoints = pointsRef.current;
     const finalDistance = trackDistanceMeters(finalPoints);
@@ -523,10 +543,16 @@ export default function RunningSessionScreen() {
       ]);
       await finishLocalSession(userId, id);
     } catch (err) {
+      // The save failed — the screen falls back to the ordinary error state,
+      // so `runStatusRef` follows it rather than being left at a stale
+      // 'tracking'/'paused' value (or asserting 'finished' before the finish
+      // has actually succeeded).
+      runStatusRef.current = 'error';
       setError(err instanceof Error ? err.message : String(err));
       setStatus('error');
       return;
     }
+    runStatusRef.current = 'finished';
     requestSync('run-finished');
 
     setPoints(finalPoints);

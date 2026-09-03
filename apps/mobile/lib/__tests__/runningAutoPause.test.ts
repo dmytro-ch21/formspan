@@ -8,7 +8,7 @@ import {
 } from '../runningAutoPause';
 
 /**
- * N467/#777 — the auto-pause hysteresis, and the speed derivation that feeds
+ * L11/#777 — the auto-pause hysteresis, and the speed derivation that feeds
  * it, tested as pure functions against a fixture sequence of readings. No
  * SQLite, no location APIs, no React — see the file's own doc comment for why
  * this shape was chosen.
