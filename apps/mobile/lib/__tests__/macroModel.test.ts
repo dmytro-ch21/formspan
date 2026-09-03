@@ -56,10 +56,29 @@ describe('macroRows', () => {
     ]);
   });
 
-  it('states the per-kilogram rules for protein and fat', () => {
+  it('states the per-kilogram rules for protein and fat, metric by default', () => {
+    // No units argument — every existing caller of macroRows, this test
+    // included, is entitled to keep working unchanged after N111 (#494).
     const rows = macroRows(SUGGESTION, BASIS);
     expect(rows[0].rule).toBe('2.2 g per kg');
     expect(rows[1].rule).toBe('0.8 g per kg');
+  });
+
+  it('converts the rules to the athlete’s own units (N111, #494)', () => {
+    // The bug N111 exists to fix: an imperial athlete reading "180.8lb" on
+    // one line and "2.2 g per kg" on the next cannot multiply the two. Both
+    // sides now move together.
+    const metric = macroRows(SUGGESTION, BASIS, 'metric');
+    expect(metric[0].rule).toBe('2.2 g per kg');
+    expect(metric[1].rule).toBe('0.8 g per kg');
+
+    const imperial = macroRows(SUGGESTION, BASIS, 'imperial');
+    expect(imperial[0].rule).toBe('1 g per lb');
+    expect(imperial[1].rule).toBe('0.36 g per lb');
+    // Carbs and fibre have no per-weight coefficient — units must not touch
+    // their rule text.
+    expect(imperial[2].rule).toBe('Whatever the calories leave');
+    expect(imperial[3].rule).toBe('A floor, not a ceiling');
   });
 
   it('gives carbs and fibre their consequences rather than a coefficient', () => {

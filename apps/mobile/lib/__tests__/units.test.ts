@@ -1,8 +1,10 @@
 import {
   formatDistance,
+  formatEnergyCoefficient,
   formatFluid,
   formatGirth,
   formatHeight,
+  formatMacroCoefficient,
   formatPace,
   formatWeight,
   formatWeightRate,
@@ -18,6 +20,7 @@ import {
   toDisplayFluid,
   toDisplayGirth,
   toDisplayHeight,
+  toDisplayPerWeight,
   toDisplayWeight,
   toFeetInches,
   weightUnit,
@@ -327,5 +330,81 @@ describe('formatWeightRate', () => {
     // A phase with no rate and a phase holding weight are different facts.
     expect(formatWeightRate(null, 'metric')).toBe('—');
     expect(formatWeightRate(undefined, 'imperial')).toBe('—');
+  });
+});
+
+/**
+ * Per-bodyweight coefficients — N111 (#494). `protein_g_per_kg`,
+ * `fat_g_per_kg` and `kcal_per_kg` arrive from the server per KILOGRAM,
+ * always; these are what convert them for an imperial athlete, the half of
+ * the derivation N105 deliberately left alone.
+ */
+describe('toDisplayPerWeight', () => {
+  it('leaves a metric coefficient untouched', () => {
+    expect(toDisplayPerWeight(2.2, 'metric')).toBe(2.2);
+    expect(toDisplayPerWeight(7700, 'metric')).toBe(7700);
+  });
+
+  it('DIVIDES by LB_PER_KG for imperial — a coefficient is a rate, not a weight', () => {
+    // The sharpest way this goes wrong: multiplying instead of dividing,
+    // which produces a number about 4.86× too large rather than a visibly
+    // broken one. Asserted against a hand-computed value, not the module's
+    // own arithmetic mirrored back at it.
+    expect(toDisplayPerWeight(2.2, 'imperial')).toBeCloseTo(0.9979, 4);
+    expect(toDisplayPerWeight(7700, 'imperial')).toBeCloseTo(3492.6612, 3);
+  });
+
+  it('is the inverse of toDisplayWeight’s multiplication, so the two sides of a derivation still multiply out', () => {
+    // The whole point of converting the coefficient at all: an athlete's
+    // bodyweight in lb times the coefficient in g/lb has to equal the same
+    // athlete's bodyweight in kg times the coefficient in g/kg, because both
+    // describe the same grams of protein.
+    const weightKg = 84.3;
+    const perKg = 2.2;
+    const gramsFromKg = weightKg * perKg;
+    const weightLb = toDisplayWeight(weightKg, 'imperial');
+    const perLb = toDisplayPerWeight(perKg, 'imperial');
+    // Both sides are display-precision (rounded), so this checks they agree
+    // to within the display rounding rather than bit-for-bit.
+    expect(weightLb * perLb).toBeCloseTo(gramsFromKg, 0);
+  });
+});
+
+describe('formatMacroCoefficient', () => {
+  it('renders a metric coefficient exactly as before N111', () => {
+    expect(formatMacroCoefficient(2.2, 'metric')).toBe('2.2 g per kg');
+    expect(formatMacroCoefficient(0.8, 'metric')).toBe('0.8 g per kg');
+  });
+
+  it('converts to g per lb for an imperial athlete', () => {
+    // 2.2 g/kg converts to ~0.998 g/lb, which rounds to the familiar "about
+    // 1g of protein per pound of bodyweight" bodybuilding heuristic — not a
+    // coincidence chosen for the test, the actual converted figure.
+    expect(formatMacroCoefficient(2.2, 'imperial')).toBe('1 g per lb');
+    expect(formatMacroCoefficient(0.8, 'imperial')).toBe('0.36 g per lb');
+  });
+
+  it('trims a trailing zero rather than printing "1.00 g per lb"', () => {
+    expect(formatMacroCoefficient(2.2, 'imperial')).not.toMatch(/\.0+/);
+  });
+});
+
+describe('formatEnergyCoefficient', () => {
+  it('renders the Wishnofsky figure unconverted for a metric athlete', () => {
+    expect(formatEnergyCoefficient(7700, 'metric')).toBe('7700 kcal per kg');
+  });
+
+  it('converts to kcal per lb for an imperial athlete', () => {
+    // NOT 3,500 — that is a separately-derived US rule of thumb (implying
+    // ≈7,716 kcal/kg), close to but not the same number as this app's own
+    // 7,700 kcal/kg actually converted. Rendering the real converted value is
+    // what keeps this line multiplying out against the kg-based figure it
+    // came from, rather than substituting a culturally familiar one that
+    // does not.
+    expect(formatEnergyCoefficient(7700, 'imperial')).toBe('3493 kcal per lb');
+  });
+
+  it('rounds to a whole number, matching every other kcal figure on these screens', () => {
+    expect(formatEnergyCoefficient(7700, 'imperial')).not.toMatch(/\./);
   });
 });

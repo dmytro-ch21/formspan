@@ -53676,6 +53676,116 @@ ticket's own scope cut:**
   the normal one — nothing in this environment can drive the actual mobile
   picker or confirm the suggestion card's copy reads right on a phone.
 
+### 2026-09-03 — N111: the derivation converts g/kg and kcal/kg for an imperial athlete, closing the gap N105 deliberately left (#494)
+
+**The decision, since the ticket required one recorded either way: convert.**
+N105 (units-system infrastructure) converted every weight an athlete *owns* —
+goal weight, gap, shortfall, height, distance, fluid volume — to their own
+units, and deliberately left the nutrition derivation's coefficients
+(`protein_g_per_kg`, `fat_g_per_kg`, `kcal_per_kg`) in kg, recording the
+choice as a genuine product decision rather than an oversight (the case for
+leaving them: g/kg is the universal sports-science convention, including in
+the US, and the reference designs pair `2.2 g per kg` beside a weight in
+`lb`). That left an imperial athlete reading `180.8lb` on one line of the
+derivation and `2.2 g per kg` on the next — on the one screen whose entire
+job is showing the arithmetic (N69) — unable to multiply the two together.
+The user's call: convert, so both sides of the derivation move together.
+
+**Server-side stays exactly as it was.** `nutrition/target.go`'s
+`kcalPerKG = 7700.0` and the protein/fat per-kg constants are unchanged, and
+so is the wire contract (`contracts/public.openapi.yaml`'s `Basis` and
+`AdjustmentBasis` schemas) — `kcal_per_kg`, `protein_g_per_kg` and
+`fat_g_per_kg` are still plain kg-based numbers on every response. This is
+purely a display-layer conversion, the same "convert at the last possible
+moment on the way out" rule `apps/mobile/lib/units.ts`'s header already
+states for every other quantity in the file; there was no reason to make an
+exception of these three just because a server computed them.
+
+**Two new functions in `units.ts` (the mobile SOURCE, regenerated into
+`apps/web/src/lib/units.ts` via `sync-units.py --write`, so mobile and web
+share one implementation rather than two that can drift):**
+`toDisplayPerWeight` divides a per-kg coefficient by `LB_PER_KG` for an
+imperial athlete (a coefficient is a *rate*, so converting it means
+*dividing* where converting a weight means *multiplying* — getting that
+backwards silently produces a number ≈4.86× too large rather than a visibly
+broken one, which is exactly the class of error that survives a glance, and
+is why it has a mutation test rather than only a value test).
+`formatMacroCoefficient` and `formatEnergyCoefficient` build on it: `2.2 g
+per kg` → `1 g per lb` (which happens to land on the familiar "about a gram
+of protein per pound of bodyweight" bodybuilding heuristic — not chosen for
+that, just where the real conversion lands), and `7700 kcal per kg` → `3493
+kcal per lb` — **not** the culturally familiar `3,500 kcal per lb` rule of
+thumb, which is a separately-derived figure (implying ≈7,716 kcal/kg) close
+to but not equal to this app's actual 7,700. Rendering the real converted
+value, not the nearby folk number, is what keeps the line multiplying out
+against the kg-based figure it came from.
+
+**Four render sites converted, all previously carrying a hardcoded `kg`/`g
+per kg` literal that `check-unit-literals.py` had allowlisted by name
+against this exact ticket:** mobile's `AdjustmentCard.tsx` and web's mirror
+(the weekly adjustment's "gap" row), mobile's `macroModel.ts` (the macro
+donut's legend, shared by the tiles/donut/legend since N106), and web's
+`Derivation.tsx` (the phase row's energy coefficient and the macros
+section's two `g/kg` figures). `macroModel.ts`'s `macroRows` grew a third
+`units` parameter defaulting to `'metric'`, so every existing caller —
+including its own test suite — kept working unchanged; only the two Goals
+call sites now pass the athlete's real setting. Since none of these four
+sites renders a bare unit literal any more, all six of `check-unit-
+literals.py`'s N111-tagged `ALLOW` entries came out — the check's own
+self-check (`ALLOW` entries must still match something) caught all six as
+stale the moment the conversion landed, which is the guard doing exactly
+what its docstring says.
+
+**One more site, found by reading rather than by the check:** Goals'
+`INFO.macros` explanation sheet used to say "Protein and fat are set per
+*kilogram* of bodyweight, because that is what the evidence is expressed
+in" — prose tied directly to the coefficient it sits beside. Left unchanged
+it would have become the exact half-converted mismatch this ticket exists
+to remove (the sheet naming kilograms next to a number now reading `g per
+lb`), so the sentence was reworded to drop the unit claim entirely ("scaled
+to your own bodyweight, not to a flat number") rather than made
+unit-conditional — safer too, since the underlying scientific literature
+really is g/kg-denominated regardless of what an imperial athlete sees on
+screen, so a sentence claiming "the evidence is expressed in pounds" would
+have been a new inaccuracy in the other direction.
+
+**Testing.** `units.test.ts` covers `toDisplayPerWeight` (metric no-op,
+imperial division against a hand-computed value, and a multiply-back-out
+check that an athlete's displayed bodyweight times the displayed
+coefficient reproduces the same grams the kg-based figures do, within
+display rounding) and both formatters in both systems, including the
+"not 3,500" boundary. `macroModel.test.ts` covers `macroRows`' new default
+parameter (metric-by-default, existing tests untouched) and the imperial
+conversion, including that carbs/fibre's non-coefficient rules are
+untouched by unit system. Mutation-verified: flipping
+`toDisplayPerWeight`'s `/` to `*` turned 5 tests red across both files
+(the multiply-back-out test, both formatter tests, and the macroModel
+conversion test), confirming the guard actually covers the arithmetic
+rather than merely re-stating it; restored and green again by re-running.
+`pnpm run check:unit-literals` was run before and after: before, removing
+the six stale `ALLOW` entries without also fixing the four render sites
+fails loudly ("nothing matching … left in it" is the wrong direction —
+the actual failure mode checked was the reverse, leaving a literal behind
+after removing its entry, which the check's ordinary violation path
+catches); after, `7 allowed exceptions` (down from 13), all still genuine.
+
+**No backend change, no migration, no OpenAPI change** — confirmed by
+reading `target.go`/`adjustment.go` and the `contracts/public.openapi.yaml`
+schemas first, per the ticket's own instruction to check before assuming.
+
+**Docs**: functional scenarios added under N111 in
+`docs/testing/functional-scenarios.md` (happy path across both platforms and
+both unit systems, edge cases for missing-basis and blocked-adjustment
+states, and a note that this has no auth surface). This entry is the
+decision record the ticket's own acceptance criteria required, whichever way
+the call went.
+
+**Open question this leaves:** the ticket's `NEEDS HUMAN EVIDENCE` criterion
+was specifically the product decision itself (which reading is right,
+against the reference designs) — that has been made and is recorded above,
+so nothing further needs a device or a live check to close this ticket. No
+new gap is left behind.
+
 
 ## Open items / known gaps as of this entry
 

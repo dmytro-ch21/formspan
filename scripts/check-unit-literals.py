@@ -98,12 +98,17 @@ Every entry names a file, a token and a REASON. They fall into two kinds:
   on rather than a word anybody reads — `trackerModel.ts` converts it through
   `fluidUnit()` at the point of display, which is correct.
 
-Deliberately NOT allowlisted, and the distinction matters: the `g/kg` and
-`kcal/kg` coefficients in the nutrition derivation. Those are a **product
-decision** — sports nutrition states protein in g/kg universally, including in
-the US, and the reference designs pair `2.2 g per kg` with a weight in `lb` —
-so they are recorded here as an exception with the ticket that owns the
-decision (N111, #494), rather than silently blessed.
+N111 (#494) used to sit here as a THIRD kind — a scientific coefficient
+(`protein_g_per_kg`, `fat_g_per_kg`, `kcal_per_kg`) left in kg deliberately,
+as a recorded product decision pending a human call on whether to convert it.
+The decision came back **convert**: an imperial athlete's bodyweight already
+renders in lb, and a coefficient left in kg was half of an equation the
+athlete could not check. `formatMacroCoefficient` and `formatEnergyCoefficient`
+in `lib/units.ts` now do that conversion, so every render site that used to
+carry a bare `g per kg` / `kcal per kg` literal calls one of those instead —
+which is why none of the six N111 entries this section used to describe are
+still in `ALLOW` below. `lib/units.ts` itself is exempt from this whole check
+(see `violations()`), which is where a unit word is allowed to be spelled out.
 
 Stdlib-only, like its siblings, so `verify` needs no toolchain and the
 `Scripts (Python)` CI job — which installs neither Node nor pnpm — runs it
@@ -163,55 +168,6 @@ ALLOW: list[tuple[str, str, str, str]] = [
         "increment needs converting at all. Moved here from app/trackers/[id].tsx "
         "when N78 gave creating and editing one shared form — the exception follows "
         "the branch, it is not a second one.",
-    ),
-    (
-        "apps/mobile/components/nutrition/AdjustmentCard.tsx",
-        "kg",
-        "kcal per kg",
-        "A scientific coefficient in a derivation, not a measurement the athlete owns. "
-        "Left in kcal/kg deliberately — the decision is N111 (#494).",
-    ),
-    (
-        "apps/web/src/app/dashboard/nutrition/targets/AdjustmentCard.tsx",
-        "kg",
-        "kcal per kg",
-        "Same coefficient as the mobile card above, same deliberate exception.",
-    ),
-    (
-        "apps/mobile/lib/macroModel.ts",
-        "kg",
-        "g per kg",
-        "`protein_g_per_kg` and `fat_g_per_kg` — the mobile mirror of the web "
-        "derivation below, and the same product decision — N111 (#494). It moved "
-        "here from `app/(tabs)/goals.tsx` in N106 (#485), when the four macros "
-        "became one model shared by the tiles, the donut and the legend; the "
-        "exception followed the string rather than being re-argued.",
-    ),
-    (
-        "apps/mobile/app/(tabs)/goals.tsx",
-        "kilogram",
-        "set per kilogram of bodyweight",
-        "The MACROS explanation sheet, explaining the `2.2 g per kg` coefficient "
-        "shown beside it — which is itself allowlisted two entries up. Sports "
-        "nutrition states these in g/kg universally, including in the US, so the "
-        "prose has to name the unit the rule is actually expressed in or it is "
-        "explaining a different number. Same product decision, N111 (#494); this "
-        "entry goes when that one does.",
-    ),
-    (
-        "apps/web/src/app/dashboard/nutrition/targets/Derivation.tsx",
-        "kg",
-        "kcal per kg",
-        "The same energy-per-kilogram coefficient as the two adjustment cards, in the "
-        "line that shows how the rate becomes a calorie delta.",
-    ),
-    (
-        "apps/web/src/app/dashboard/nutrition/targets/Derivation.tsx",
-        "kg",
-        "g/kg",
-        "`protein_g_per_kg` and `fat_g_per_kg`. Sports nutrition states these in g/kg "
-        "universally, including in the US, and the reference designs pair them with a "
-        "weight in lb. Product decision, tracked as N111 (#494).",
     ),
     (
         "apps/mobile/lib/foodQuantity.ts",
