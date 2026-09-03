@@ -16,6 +16,7 @@ import {
   triggerHealthKitImportNow,
   writeHealthKitImportEnabled,
 } from '@/lib/healthkitSync';
+import { triggerBiometricSyncNow } from '@/lib/biometricSync';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
 import { MONO_ACCENT, monoNeedsRelaunch } from '@/lib/palette';
@@ -261,10 +262,17 @@ export default function SettingsScreen() {
           switch among cosmetics. */}
       <Section title="Integrations">
         <Toggle
-          label="Import runs from Apple Health"
+          label="Sync with Apple Health"
           hint={
             healthKitSupported
-              ? "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history — VOLA only reads workouts, and never writes anything back to Health. Turning this on asks for Health access."
+              ? // N477/#822 widened this from "Import runs" — the same toggle
+                // and the same permission prompt now also cover heart rate for
+                // any finished session and your VO2max trend, since HealthKit
+                // asks for read access to everything this app will ever read
+                // in one consent screen (see READ_TYPES in lib/healthkit.ts).
+                // Splitting this into two toggles would ask the athlete to
+                // consent to the same underlying grant twice.
+                "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history. Heart rate from any finished session, and your VO2max trend, are read the same way — VOLA never writes anything back to Health. Turning this on asks for Health access."
               : 'Not available on this device.'
           }
           value={healthKitImport}
@@ -295,7 +303,15 @@ export default function SettingsScreen() {
               // appear. Goes through the mutex-guarded trigger, never the
               // raw `importHealthKitRuns`, so this can never race a pass
               // already in flight from sign-in or a foreground return.
-              if (on) triggerHealthKitImportNow(userId);
+              if (on) {
+                triggerHealthKitImportNow(userId);
+                // N477/#822: the same toggle now also covers heart rate and
+                // VO2max — see this toggle's own hint. A separate trigger,
+                // not folded into the call above, because the two
+                // orchestrators are separate modules with separate mutexes
+                // (see lib/biometricSync.ts's doc comment for why).
+                triggerBiometricSyncNow(userId, getToken);
+              }
             })();
           }}
           testID="settings-healthkit-import"

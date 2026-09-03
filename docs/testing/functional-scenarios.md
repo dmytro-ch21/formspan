@@ -17915,3 +17915,94 @@ is the design.
   `ComputeSessionMetrics` only ever reads the calling user's own
   `biometric_samples` rows for the window, never another account's, even
   when both sessions' time windows overlap.
+
+## N477 — iOS HealthKit heart rate + VO2max, window-joined to sessions (`apps/mobile/lib/healthkit.ts`, `apps/mobile/lib/biometric.ts`, `apps/mobile/lib/biometricSync.ts`, `apps/mobile/app/vo2max/trend.tsx`, `apps/mobile/app/(tabs)/you.tsx`)
+
+### Happy path
+
+- Settings → Integrations → "Sync with Apple Health" (the existing N465
+  toggle, widened — see its own hint text): turning it on asks for read
+  access to workouts/routes AND heart rate/VO2max in one system consent
+  screen, then immediately triggers both the existing run-import pass and
+  this ticket's biometric-enrichment pass.
+- With a real Watch workout worn through a finished strength, running, or
+  BJJ session logged in VOLA: within one foreground pass after the session
+  ends, `GET /v1/biometric/sessions/{id}/metrics` returns a row with
+  `hr_source: 'window'`, a non-null `avg_hr_bpm`/`max_hr_bpm`/`trimp`, and a
+  populated `time_in_zones`. **This is the ticket's own `NEEDS HUMAN
+  EVIDENCE` criterion** — nothing in the automated suite can wear a Watch.
+- The identical check for a BJJ or strength session, not only running —
+  the window read is sport-agnostic by construction (`sessionHRWindow`
+  takes any session's `started_at`/`ended_at`), so this is worth confirming
+  on at least one non-running sport explicitly.
+- A finished session logged with NO Watch worn (phone-only, or no wearable
+  at all): `GET .../metrics` returns `hr_source: 'none'`, `sample_count: 0`,
+  and null `avg_hr_bpm`/`max_hr_bpm`/`trimp` — never a fabricated zero. This
+  is a stored, honest row, not an absent one — see the pure-logic coverage
+  in `apps/mobile/lib/__tests__/biometric.test.ts` (`planHRSync`) and the
+  fixture coverage in `biometricSync.test.ts` for the mechanism; a device
+  confirms the end-to-end shape.
+- VO2max: with a device that has written at least one `vo2Max` sample to
+  Health, the "VO2max" row on the You tab shows a value and navigates to
+  `/vo2max/trend`, which draws a dot per reading with value-readable axes,
+  a delta since the earliest visible reading, and a list of entries below —
+  the mobile-chart rules (one question, no metric picker, preset windows
+  ending today).
+- Background the app, finish a second session, foreground VOLA: the second
+  session's window is read and enriched on that foreground pass without
+  re-processing the first (the `biometric_hr_synced` local ledger).
+- A backlogged device (several finished sessions predating this feature,
+  toggle just turned on): the first foreground pass processes up to
+  `MAX_SESSIONS_PER_PASS` oldest-first, and a second foreground pass picks
+  up where the first left off — no session is skipped or double-processed.
+
+### Edge cases & errors
+
+- A session with a Watch worn for only PART of it (put on mid-session, or
+  taken off early): the window read finds whatever samples exist in
+  `[started_at, ended_at]` and reports the true (lower) `sample_count` —
+  never padded or extrapolated.
+- A session that predates this device's HealthKit history (an old backfilled
+  session logged today with a past `started_at`): reads back `hr_source:
+  'none'` exactly like "no Watch worn", since HealthKit cannot distinguish
+  the two (design doc §5.1) and this app must not pretend it can.
+- The athlete has no date of birth on their profile: no session's metrics
+  are computed at all this pass (no HRmax to seed from — see
+  `hrMaxFromDateOfBirth`'s doc comment) and no session is marked synced, so
+  filling in a date of birth later and re-foregrounding computes every
+  still-pending session rather than silently never catching up.
+- Turn the toggle on, then deny the system permission prompt: no crash, no
+  wrongly-labelled data — sessions simply never gain HR evidence, the same
+  "cannot tell denial from emptiness" posture N465's own scenarios document
+  for run import (design doc §5.1).
+- A device/simulator with no HealthKit module linked: the You screen's
+  VO2max row does not render at all (gated on `isHealthKitSupported()`,
+  matching Settings' own disabled-row treatment for the same case) rather
+  than opening to a screen that can only say "not available."
+- VO2max trend screen opened with the toggle off: states plainly that Health
+  sync needs to be turned on, rather than rendering a chart with "no
+  readings" (which would look identical to "you have readings but this
+  screen is broken").
+- Two consecutive VO2max samples with the exact same `measured_at` (a
+  defensive case): both submit, `PutSamples`'s idempotent `id` (the
+  HealthKit sample uuid) means each is stored once regardless of how many
+  passes see it.
+- A sample source this app's classifier does not recognise (a device other
+  than Watch/Whoop/Oura/Garmin writing to Health): stored with `source:
+  'apple_watch'` — a documented, accepted approximation (see
+  `classifyHealthKitSource`'s own doc comment) rather than a rejected write.
+
+### Auth/security
+
+- Every network call this feature makes (`PutSamples`, `ComputeMetrics`)
+  goes through the same authenticated `apiRequest` path as every other
+  mobile API client — no separate, unauthenticated path for HealthKit data.
+- The shared toggle's permission scope is READ-ONLY for heart rate and
+  VO2max too — `NSHealthUpdateUsageDescription: false` in `app.json` is
+  unchanged by this ticket, so nothing this feature adds can write to
+  Health.
+- A session's HRmax/enrichment call is scoped to sessions the signed-in
+  athlete owns — `computeSessionMetrics` is called only with session ids
+  `sessionsNeedingBiometricSync` already filtered to the calling `user_id`,
+  and the backend's own ownership check (N476/#821) is the second,
+  authoritative gate.

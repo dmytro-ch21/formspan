@@ -94,6 +94,22 @@ type NativeWorkout = {
   >;
 };
 
+/**
+ * One raw quantity sample, as the package's `queryQuantitySamples` returns
+ * it — narrowed to the fields this app reads (N477/#822). `sourceRevision`
+ * carries what wrote it, which is the only signal this app has for guessing
+ * which `biometric.Source` a reading belongs to (see `classifyHealthKitSource`
+ * in `lib/biometric.ts`) — HealthKit exposes no vendor enum, only the
+ * free-text name and bundle id the writer chose for itself.
+ */
+type NativeQuantitySample = {
+  readonly uuid: string;
+  readonly quantity: number;
+  readonly unit: string;
+  readonly startDate: Date;
+  readonly sourceRevision: { readonly source: { readonly name: string; readonly bundleIdentifier: string } };
+};
+
 type HealthKitModule = {
   isHealthDataAvailable: () => boolean;
   requestAuthorization: (toRequest: { toRead: readonly string[] }) => Promise<boolean>;
@@ -102,6 +118,15 @@ type HealthKitModule = {
     limit: number;
     ascending?: boolean;
   }) => Promise<readonly NativeWorkout[]>;
+  queryQuantitySamples: (
+    identifier: string,
+    options: {
+      filter?: { date?: { startDate?: Date; endDate?: Date } };
+      limit: number;
+      ascending?: boolean;
+      unit?: string;
+    },
+  ) => Promise<readonly NativeQuantitySample[]>;
 };
 
 function load(): HealthKitModule | null {
@@ -119,12 +144,22 @@ function load(): HealthKitModule | null {
 
 const hk = load();
 
-/** Both read types this feature needs: the workouts themselves, and their
- *  GPS routes — HealthKit authorizes these separately even though they are
- *  read together here. `HKWorkoutTypeIdentifier` / `HKWorkoutRouteTypeIdentifier`
+/** Every read type this feature needs — workouts and their GPS routes
+ *  (N465), plus heart rate and VO₂max (N477/#822). All four are asked for in
+ *  ONE `requestAuthorization` call: HealthKit shows a per-type consent
+ *  screen regardless, and asking for everything this app will ever read up
+ *  front means a returning athlete who granted heart rate later never has to
+ *  see a second prompt when VO₂max reading shipped after it.
+ *  `HKWorkoutTypeIdentifier` / `HKWorkoutRouteTypeIdentifier` /
+ *  `HKQuantityTypeIdentifierHeartRate` / `HKQuantityTypeIdentifierVO2Max`
  *  spelled as literals for the same reason `RUNNING_ACTIVITY_TYPE` is: no
  *  value import from the guarded package outside `load()`. */
-const READ_TYPES = ['HKWorkoutTypeIdentifier', 'HKWorkoutRouteTypeIdentifier'] as const;
+const READ_TYPES = [
+  'HKWorkoutTypeIdentifier',
+  'HKWorkoutRouteTypeIdentifier',
+  'HKQuantityTypeIdentifierHeartRate',
+  'HKQuantityTypeIdentifierVO2Max',
+] as const;
 
 /** Whether this binary has a working HealthKit module linked in. `false` on
  *  Android unconditionally (the package is iOS-only; `load()` throws there
@@ -349,4 +384,125 @@ export function mapWorkoutToRunningDetail(
     source: 'healthkit',
     healthkit_uuid: workout.uuid,
   };
+}
+
+/**
+ * -----------------------------------------------------------------------
+ * N477/#822 — heart rate and VO₂max
+ * -----------------------------------------------------------------------
+ *
+ * Everything below follows the same split as the running import above: the
+ * two `query*` functions are the ONLY code in this file (or this feature)
+ * that touches the native module, and everything downstream of them —
+ * `lib/biometric.ts`'s mapping and window/plan logic — is pure and
+ * platform-agnostic, so the Android sibling ticket (Health Connect, #823)
+ * can hand `lib/biometric.ts` the SAME shape without importing anything
+ * from this file. See that file's own doc comment for the split's other
+ * half.
+ */
+
+/** One quantity sample, reduced to plain data at the native boundary —
+ *  the shape `lib/biometric.ts`'s pure mapping functions take. */
+export type HealthKitQuantitySample = {
+  uuid: string;
+  value: number;
+  /** Whatever unit string the native query was asked to report in. */
+  unit: string;
+  /** RFC3339. */
+  measuredAt: string;
+  sourceName: string;
+  sourceBundleId: string;
+};
+
+/** How many samples one window/backfill query asks for. Generous, on the
+ *  same reasoning as `QUERY_LIMIT` above — the real ceiling is the caller's
+ *  own bounding (a session's window, or a last-synced watermark), not this
+ *  number. Continuous per-second heart rate during an active Watch workout
+ *  (design doc §2) is the densest realistic case: a two-hour session is on
+ *  the order of a couple thousand samples, comfortably under this. */
+const QUANTITY_QUERY_LIMIT = 20000;
+
+function toHealthKitQuantitySample(s: NativeQuantitySample): HealthKitQuantitySample {
+  return {
+    uuid: s.uuid,
+    value: s.quantity,
+    unit: s.unit,
+    measuredAt: s.startDate.toISOString(),
+    sourceName: s.sourceRevision.source.name,
+    sourceBundleId: s.sourceRevision.source.bundleIdentifier,
+  };
+}
+
+/**
+ * Read heart-rate samples HealthKit recorded within `[startDate, endDate]`
+ * — the design doc's §2 "window read", and the DEFAULT join, not a
+ * fallback: `predicateForObjects(from: workout)` returns only samples a
+ * writer explicitly associated with its own workout object, and Whoop and
+ * Garmin both write workouts without correctly attaching the underlying
+ * heart rate (design doc §2). Querying the window directly is what still
+ * finds those athletes' data.
+ *
+ * `count/min` is requested explicitly rather than left to the identifier's
+ * default (`count/s`, per this package's own `QuantityUnitByIdentifierMap`
+ * — verified against the installed v14.1.0 types) — BPM is what the zone
+ * math in `backend/internal/modules/biometric/trimp.go` and every athlete-
+ * facing number in this app already assumes, and converting a `count/s`
+ * reading by ×60 in JS would be a second unit conversion this app has to
+ * keep in sync with the native package's default, for no benefit over
+ * asking the query for the unit already wanted.
+ *
+ * Returns `[]`, never throws, on any native failure — denied authorization,
+ * no HealthKit module, or a genuinely empty store (indistinguishable from
+ * denial per §5.1) all read as "no heart-rate evidence for this session",
+ * which is exactly the honest `hr_source: 'none'` state
+ * `lib/biometric.ts`'s `planHRSync` derives from an empty array.
+ */
+export async function queryHeartRateSamples(
+  startDate: Date,
+  endDate: Date,
+): Promise<HealthKitQuantitySample[]> {
+  if (!hk) return [];
+  try {
+    const samples = await hk.queryQuantitySamples('HKQuantityTypeIdentifierHeartRate', {
+      filter: { date: { startDate, endDate } },
+      limit: QUANTITY_QUERY_LIMIT,
+      ascending: true,
+      unit: 'count/min',
+    });
+    return samples.map(toHealthKitQuantitySample);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read VO₂max samples recorded SINCE `sinceDate`, ascending.
+ *
+ * Unlike heart rate, this is never windowed to a session — design doc §3:
+ * "VO₂max is read, never computed... show it as a trend on the athlete's
+ * profile; do not attach it to a session." `lib/biometricSync.ts` calls
+ * this with a high-water mark (the latest previously-synced reading, or a
+ * bounded first-run backfill) on every foreground pass, the same
+ * "foreground/launch, not background delivery" posture `lib/healthkitSync.ts`
+ * takes for runs and for the identical reasoning — see that file's doc
+ * comment.
+ *
+ * `ml/(kg*min)` is this identifier's own native unit (verified against the
+ * installed package's `QuantityUnitByIdentifierMap`) and is requested
+ * explicitly rather than left to a default, for the same "ask for the unit
+ * actually wanted" reasoning as `queryHeartRateSamples`.
+ */
+export async function queryVO2MaxSamples(sinceDate: Date): Promise<HealthKitQuantitySample[]> {
+  if (!hk) return [];
+  try {
+    const samples = await hk.queryQuantitySamples('HKQuantityTypeIdentifierVO2Max', {
+      filter: { date: { startDate: sinceDate } },
+      limit: QUANTITY_QUERY_LIMIT,
+      ascending: true,
+      unit: 'ml/(kg*min)',
+    });
+    return samples.map(toHealthKitQuantitySample);
+  } catch {
+    return [];
+  }
 }

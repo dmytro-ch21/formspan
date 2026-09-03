@@ -58,6 +58,14 @@ var (
 // Growing this list is a one-line Go change, matching running.Source's
 // stance on its own closed-but-extensible vocabulary — deliberately no
 // database CHECK constraint (see the migration), for the same reason.
+//
+// MetricVO2Max is exactly that one-line growth, added by N477/#822 rather
+// than N476/#821: the design doc's §3 is explicit that VO₂max is "read,
+// never computed" and shown as a profile-level trend rather than joined to
+// a session, so it needed no session-window plumbing of its own — only a
+// vocabulary slot for whatever client reads it first to write into. No
+// migration alongside it, for the same "no CHECK constraint" reason as
+// every other value here.
 type MetricType string
 
 const (
@@ -68,11 +76,13 @@ const (
 	MetricHRVRMSSD         MetricType = "hrv_rmssd"
 	MetricSleepDuration    MetricType = "sleep_duration"
 	MetricBodyMass         MetricType = "body_mass"
+	MetricVO2Max           MetricType = "vo2_max"
 )
 
 var metricTypes = []MetricType{
 	MetricHeartRate, MetricActiveEnergy, MetricRestingHeartRate,
 	MetricHRVSDNN, MetricHRVRMSSD, MetricSleepDuration, MetricBodyMass,
+	MetricVO2Max,
 }
 
 // MetricTypes lists the vocabulary, for a client rendering something without

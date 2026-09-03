@@ -11,6 +11,7 @@ import { ModulesProvider } from '@/lib/ModulesProvider';
 import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
 import { setHealthKitSyncIdentity, startHealthKitImportOrchestrator } from '@/lib/healthkitSync';
+import { setBiometricSyncIdentity, startBiometricSyncOrchestrator } from '@/lib/biometricSync';
 import { seedIfNeeded } from '@/lib/seed';
 import { syncSessions } from '@/lib/sessionStore';
 
@@ -175,6 +176,16 @@ function RootLayoutNav() {
   useEffect(() => {
     setHealthKitSyncIdentity(isSignedIn ? (userId ?? null) : null);
   }, [isSignedIn, userId]);
+
+  // N477/#822: a THIRD, separate orchestrator — heart-rate/VO2max reading
+  // needs a token from the very first step (unlike the two above), so it
+  // takes lib/sync.ts's identity shape while keeping lib/healthkitSync.ts's
+  // foreground-trigger shape. See lib/biometricSync.ts's own doc comment for
+  // the full argument.
+  useEffect(() => startBiometricSyncOrchestrator(), []);
+  useEffect(() => {
+    setBiometricSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
+  }, [isSignedIn, userId, getToken]);
 
   // Catch what nobody catches: unhandled JS errors and unhandled promise
   // rejections. Installed once for the process, at the root, because an error

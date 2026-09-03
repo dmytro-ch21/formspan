@@ -11,6 +11,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
+import { isHealthKitSupported } from '@/lib/healthkit';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
@@ -394,6 +395,34 @@ export default function YouScreen() {
                 athlete on no roadmap with no focus, so a strength-only account
                 never sees an empty BJJ block. */}
             <RoadmapSummary />
+
+            {/* Your VO2max trend (N477/#822) — a device-read cardio-fitness
+                estimate, per design doc §3: "read, never computed... show it
+                as a trend on the athlete's profile; do not attach it to a
+                session." That is why it lives in the IDENTITY block, beside
+                what you're learning, rather than on Progress: it is a fact
+                ABOUT the athlete rather than a verdict on whether training is
+                working, which is the line N178 already drew for the roadmap
+                above.
+
+                GATED on `isHealthKitSupported()`, unlike Library below —
+                unlike a catalog that always exists, there is genuinely
+                nothing to show on a build with no HealthKit module linked in
+                (Android today; any iOS build predating this ticket), and a
+                row that always opens to "not available on this device" would
+                be the same "cannot tell not-enabled from not-built" trap N61
+                found for a DIFFERENT reason. Reading from Health itself is a
+                further gate the trend screen states in words rather than
+                hiding the row over, matching `you-sports`'/`you-phase`'s own
+                "explain yourself, don't disappear" rule. */}
+            {isHealthKitSupported() && (
+              <NavRow
+                label="VO2max"
+                detail="Your cardio fitness trend, read from Apple Health"
+                onPress={() => router.push('/vo2max/trend')}
+                testID="you-vo2max"
+              />
+            )}
 
             {/* The position map used to be a row here and is on Progress now
                 (N178, #583) — "where you score and where you get stuck" is a

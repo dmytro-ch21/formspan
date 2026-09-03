@@ -426,6 +426,43 @@ export async function trainingSince(
   return { sessions: row?.sessions ?? 0, days: row?.days ?? 0 };
 }
 
+/**
+ * Sessions (any sport) that have finished but have not yet been offered to
+ * the `biometric` module's heart-rate window read — N477/#822.
+ *
+ * A `LEFT JOIN ... IS NULL` against the ledger `lib/biometricSync.ts` owns,
+ * rather than a second flag on `local_sessions` itself: the ledger already
+ * exists for the identical HealthKit-import question (`healthkit_imports`),
+ * and every session qualifies here regardless of whether it has anything to
+ * do with HealthKit at all — a strength or BJJ session logged entirely by
+ * hand still needs its window checked once.
+ *
+ * Bounded by `limit`, oldest-finished-first, matching
+ * `lib/healthkitSync.ts`'s own "oldest first, so an interrupted pass leaves
+ * the ledger consistent with a contiguous prefix" reasoning — a device
+ * catching up on months of unsynced sessions should not spend one
+ * foreground pass working backward from the newest.
+ */
+export async function sessionsNeedingBiometricSync(
+  userID: string,
+  limit: number,
+): Promise<Pick<LocalSession, 'id' | 'started_at' | 'ended_at'>[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ id: string; started_at: string; ended_at: string }>(
+    `SELECT s.id, s.started_at, s.ended_at
+       FROM local_sessions s
+       LEFT JOIN biometric_hr_synced b ON b.user_id = s.user_id AND b.session_id = s.id
+      WHERE s.user_id = ?
+        AND s.deleted_at IS NULL
+        AND s.ended_at IS NOT NULL
+        AND b.session_id IS NULL
+      ORDER BY s.ended_at ASC
+      LIMIT ?`,
+    userID,
+    limit,
+  );
+}
+
 /** Every local edit lands here: write, mark dirty, return. */
 export async function saveLocalSets(
   userID: string,

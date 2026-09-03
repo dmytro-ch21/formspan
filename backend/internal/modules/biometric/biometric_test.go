@@ -124,6 +124,23 @@ func TestSample_Validate_AcceptsPeriodEndAfterMeasuredAt(t *testing.T) {
 	}
 }
 
+// TestMetricType_VO2Max_WireValueAndAcceptance pins the literal wire string
+// N477/#822's mobile client writes ("vo2_max") and checks a real Sample
+// carrying it clears Validate — a generic "every MetricTypes() value is
+// Valid()" loop would pass even if this constant's string were wrong, since
+// Valid() checks membership in the very slice the loop reads from.
+func TestMetricType_VO2Max_WireValueAndAcceptance(t *testing.T) {
+	if MetricVO2Max != "vo2_max" {
+		t.Fatalf("MetricVO2Max = %q, want \"vo2_max\"", MetricVO2Max)
+	}
+	s := validSample()
+	s.MetricType = MetricVO2Max
+	s.Unit = "ml/(kg*min)"
+	if err := s.Validate(); err != nil {
+		t.Errorf("vo2_max sample rejected: %v", err)
+	}
+}
+
 func TestMetricTypes_EveryValueValidatesItself(t *testing.T) {
 	for _, m := range MetricTypes() {
 		if !m.Valid() {

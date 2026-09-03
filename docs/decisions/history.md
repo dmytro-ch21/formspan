@@ -54182,6 +54182,143 @@ confirmed green again by re-running — never by re-reading the file).
   window, but nothing writes `active_energy` samples yet either — untested
   against real device data, only against hand-seeded rows.
 
+## 2026-09-03 — N477 (#822): iOS HealthKit heart rate + VO2max, window-joined to sessions
+
+Extends N465's HealthKit integration (`apps/mobile/lib/healthkit.ts`, running
+only) to also read heart rate and VO2max, and feeds the former into N476/#821's
+new `biometric` module for any finished session — any sport, not only running.
+The design doc's §2 window-read is the whole join: query
+`HKQuantityTypeIdentifierHeartRate` for `[started_at, ended_at]`, no anchor
+refinement, since third-party straps (Whoop/Garmin) frequently don't attach HR
+correctly to HealthKit's own workout object and the window is the primary path
+for exactly that reason.
+
+**One small backend change, not scoped as mobile-only despite the ticket's own
+"what this touches" line.** `biometric.MetricType` had six values and none of
+them was VO2max — N476 deliberately left it out (§3: "VO2max is read, never
+computed... shown as a trend," so it needed no session-window plumbing) but
+never added the vocabulary slot either. Added `MetricVO2Max = "vo2_max"`, one
+line plus a wire-string-pinning test (`TestMetricType_VO2Max_WireValueAndAcceptance`)
+and the matching `enum` in both `BiometricSample` occurrences in
+`contracts/public.openapi.yaml`. No migration — the column has deliberately no
+Postgres `CHECK` constraint (same reasoning as every other value there).
+
+**Three orchestrators now, not two, and the reason is the failure mode, not the
+feature.** `lib/healthkitSync.ts`'s own doc comment argues for keeping the
+running-import pass separate from `lib/sync.ts`'s outbox because it "never
+fails on a bad connection... until the very end." This feature is the mirror
+image: every write (`PutSamples`, `ComputeMetrics`) is a live network call from
+the first step, with no local staging table upstream of it. So the new
+`lib/biometricSync.ts` takes `lib/sync.ts`'s IDENTITY shape (a module-level
+`{userID, getToken}`, since it needs a token from the start) while keeping
+`lib/healthkitSync.ts`'s TRIGGER shape (foreground/launch, its own mutex, no
+retry/backoff ladder — a failed pass just leaves the session's ledger row
+unwritten so the next foreground return retries it wholesale, which is
+sufficient given design doc §6.4's "enrichment is not blocking... arrives
+later, possibly much later"). Wired into `app/_layout.tsx` as a third,
+independent `useEffect` pair alongside the sync and HealthKit-import ones, and
+into the SAME Settings toggle ("Sync with Apple Health", widened copy) rather
+than a second one — the toggle already asks for every read type in one
+consent screen, so a second toggle would ask the athlete to consent to the
+same underlying grant twice.
+
+**The platform-agnostic/iOS-specific split, for #823's (N478, Android) benefit.**
+`lib/biometric.ts` holds everything that has nothing to do with either health
+store once a sample is reduced to a plain object: the wire types, the
+window-join (`sessionHRWindow`), the metric-type mapping (`toBiometricSample`),
+the `hr_source` upload-plan decision (`planHRSync`), the HRmax seed
+(`hrMaxFromDateOfBirth`), and the API client. `lib/healthkit.ts` holds only the
+native call surface (`queryHeartRateSamples`/`queryVO2MaxSamples`, thin, the
+one thing device evidence has to cover) and the guessed source classification
+(`classifyHealthKitSource`, kept there since it happens to also live next to
+the boundary type it reads). A Health Connect implementation of the same
+native surface can hand `lib/biometric.ts` the identical plain-object shape
+without touching anything downstream of it.
+
+**HRmax: seeded, not refined, and that is a stated gap, not an oversight.**
+`hrMaxFromDateOfBirth` does design doc §3's first step only (`220 - age` from
+`profile.date_of_birth`) — the second and third steps (replace with the
+athlete's own observed maximum; never silently switch between the two) are
+explicit future work. No date of birth means no session in that pass gets its
+metrics computed at all (an honest absence, matching §6.4's "not an error"
+posture for enrichment generally) rather than a guessed HRmax being sent.
+
+**The zero-samples case is deliberate, not a default.** `planHRSync` always
+calls `ComputeMetrics` — even with zero HR samples found — claiming
+`hr_source: 'window'`; the SERVER (N476's `ComputeSessionMetrics`) is what
+downgrades that to the honest `'none'` once it sees `sample_count: 0`. The
+alternative (skip the call entirely when nothing was found) would leave
+`session_metrics` silently absent, which the acceptance criteria are explicit
+reads as "not synced yet" rather than "checked, no wearable evidence" —
+exactly the false-precision-by-omission system-design §7 already rules out for
+a fabricated number.
+
+**A new local ledger, `biometric_hr_synced`, mirroring `healthkit_imports`
+one layer up** (SCHEMA_VERSION 33 → 34). Keyed on `session_id` rather than a
+HealthKit uuid, because every finished session needs its window checked once
+regardless of whether it has anything to do with HealthKit at all — a
+strength or BJJ session logged entirely by hand still needs the check, and the
+answer ("no samples found") is worth recording so the same session isn't
+re-queried every foreground pass forever.
+
+**VO2max: no ledger, a high-water-mark pref instead
+(`biometric_vo2max_last_synced_at`)** — it has no session id to key a ledger
+row on (design doc §3: profile-level, never attached to a session). First-run
+backfill is capped at 90 days, not the full 400-day list-endpoint ceiling; a
+sparse daily-ish device estimate does not need a three-year first fetch to be
+a useful trend.
+
+**The trend screen (`app/vo2max/trend.tsx`) is the second instance of the
+shared `TrendChart`/`trendSeries.ts` layer**, alongside weight's
+`app/goals/trend.tsx` — same component, no goal/projection (VO2max has none to
+show), no smoothing (readings are too sparse to invent a rolling mean over
+without manufacturing the "confident line through a hole"
+`trendSeries.ts`'s own doc comment warns against). Reached from a new "VO2max"
+row on the You tab's identity block, beside `RoadmapSummary` — a fact ABOUT the
+athlete, per design doc §3, not a verdict on whether training is working
+(Progress's job). Gated on `isHealthKitSupported()`, since there is genuinely
+nothing to show without it — unlike Library's deliberately-ungated row (N61),
+where the lesson was the opposite: don't let a module-off state look
+indistinguishable from "not built."
+
+**Testing.** Pure-logic coverage in `lib/__tests__/biometric.test.ts`
+(window-join edge cases including inverted/unparseable dates, source
+classification, the `hr_source` upload-plan decision, HRmax/age arithmetic)
+and a real-SQLite fixture suite in `biometricSync.test.ts` (the same
+`getDb`-redirection pattern `healthkitSync.test.ts` established) covering the
+gating, the zero-vs-nonzero-sample paths, the missing-date-of-birth case, a
+network failure leaving the ledger unwritten for retry, per-user ledger
+scoping, and VO2max's independent success/failure from the HR pass. Two guards
+mutation-verified directly: `planHRSync`'s zero/nonzero branch (flipped the
+condition, four tests went red as real test failures, restored, confirmed
+green by re-running) and the ledger-write-on-failure guard (moved the write
+outside the `catch`'s `continue`, the dedicated retry test went red, restored,
+confirmed green again).
+
+**Open questions this leaves:**
+- **`NEEDS HUMAN EVIDENCE`, per the ticket itself** — a real session with a
+  Watch actually worn, showing real HR-derived load/zones after a foreground
+  sync. Nothing in this stack can produce that evidence; it is the
+  ac-verifier finding handed to the user as a numbered checklist.
+- HRmax's observed-maximum refinement (design doc §3, steps 2–3) is unbuilt —
+  every session's zones today are seeded-only, `220 − age`, and
+  `session_metrics` carries no marker distinguishing a seeded HRmax from an
+  eventually-observed one, because there is only ever the one kind so far.
+- Anchor refinement (`hr_source: 'workout'`) still has no producer — this
+  ticket, like N476 before it, only ever claims `'window'`. The backend schema
+  and API already support the value; nothing client-side reads a platform
+  workout object yet.
+- `active_energy` reading (design doc §3's Tier 1 energy cost) is untouched —
+  this ticket reads heart rate and VO2max only, per its own explicit scope.
+- The Android sibling (#823/N478, Health Connect) has not landed. `lib/biometric.ts`
+  is written to be reusable by it without modification; whether it actually is
+  will only be known once that ticket is implemented.
+- `classifyHealthKitSource`'s fallback (unrecognised source → `apple_watch`)
+  is a documented approximation, not a lookup — `biometric.Source` has no
+  "unknown" slot to fall back to instead, and today nothing downstream keys
+  behavior on `source` (it is informational, reserved for a future
+  per-`(metric_type, source)` trend split per design doc §6.3). Revisit if
+  that changes.
 
 ## Open items / known gaps as of this entry
 

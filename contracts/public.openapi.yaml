@@ -1871,11 +1871,14 @@ components:
           type: string
           enum:
             [heart_rate, active_energy, resting_heart_rate, hrv_sdnn,
-             hrv_rmssd, sleep_duration, body_mass]
+             hrv_rmssd, sleep_duration, body_mass, vo2_max]
           description: >
             hrv_sdnn and hrv_rmssd are deliberately separate values rather
             than one `hrv` type with a unit column — Apple's SDNN and
             everyone else's rMSSD must never be compared (design doc §5.4).
+            vo2_max (N477/#822) is read, never computed from a session
+            window — design doc §3 — and is shown as a profile-level trend
+            rather than joined to any one session.
         source:
           type: string
           enum: [apple_watch, oura, whoop, garmin, manual]
@@ -9139,7 +9142,7 @@ paths:
         - name: metric_type
           in: query
           required: true
-          schema: { type: string, enum: [heart_rate, active_energy, resting_heart_rate, hrv_sdnn, hrv_rmssd, sleep_duration, body_mass] }
+          schema: { type: string, enum: [heart_rate, active_energy, resting_heart_rate, hrv_sdnn, hrv_rmssd, sleep_duration, body_mass, vo2_max] }
         - name: from
           in: query
           required: true
