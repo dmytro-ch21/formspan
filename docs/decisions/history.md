@@ -53567,6 +53567,33 @@ to whatever's there. Both `apps/mobile`'s and `apps/web`'s copies of
 contract per their own doc comments — got the new variant and a phase-map
 entry each, so an unhandled code isn't a possibility on either surface.
 
+**Both progression engines, not just one.** This branch rebased past N473
+(#814, landed on `main` mid-flight), which introduced a second, parallel
+engine (`ProgressV2`/`RecentEffortsV2`, behind the `new_recommendation_engine`
+flag) that this ticket had never seen. `backend-reviewer` caught in
+`/pre-merge` that the first version of this fix only reached `Progress`/
+`stalledSessionsAt` — the V2 pair still read a light/deload session as
+evidence exactly like before, reachable the moment that flag is on. Fixed by
+applying the identical skip to `RecentEffortsV2` (now selects `s.intent`,
+same as `RecentEfforts`), `ProgressV2`'s evidence-search loop, and
+`stalledSessionsAtV2` — three functions, not a shared helper, matching the
+file's own "deliberately parallel, not layered" rule for why v1 stays
+untouched. V2 twins of the mutation-verified evidence/stall tests confirm it.
+
+**One more `/pre-merge` finding worth naming, from `frontend-reviewer`.**
+The picker sits on the strength session-start screen, but that screen has
+always auto-started a session the instant a planned `?workout=` param
+resolved — which is the actual path "start today's planned session" takes
+from Today. The picker rendered and was immediately navigated away from
+before the athlete could ever touch it, so a planned deload day — the
+scenario this ticket exists for — could not be marked as one. Fixed by
+skipping the auto-start for `sport === 'strength'` only; every other sport
+keeps the original one-tap behaviour. A second `frontend-reviewer` finding —
+`sessionStore.ts`'s `upsert` bound `s.intent` unguarded into a `NOT NULL`
+column, so a pulled session from an API predating migration 000088 would
+throw and stall the whole sync loop — got the same `?? 'normal'` guard
+`s.notes` already had.
+
 **Mobile (the mobile-first rule's actual test: can a phone-only athlete use
 this at all).** A three-way Normal/Light/Deload picker on the strength
 session-start screen (`app/session/start.tsx`), defaulting to Normal so an
@@ -53586,20 +53613,26 @@ rendered `reason` verbatim on both platforms, so the skip note above needed
 no new UI at all — the existing "trust nothing, show the reasoning" design
 paid for itself here.
 
-**Testing.** Backend: unit tests on `Progress()`/`stalledSessionsAt` (9 new,
+**Testing.** Backend: unit tests on `Progress()`/`stalledSessionsAt` (9,
 mutation-verified — flipping the `isNormal()` guard to a no-op turned 5 of
-them red), Postgres integration tests for `Create`/`SetIntent` including an
-IDOR-scoped ownership test, and a full end-to-end reproduction of the exact
-reported bug against a real database (`TestProgressionCycle_LightSessionDoesNotDisturbIt`:
-250kg×3 normal, 185kg×12 light, next suggestion still evidence-of-250).
-Mobile: a real-SQLite fixture test for the `local_sessions.intent` migration
-(fresh install, upgrade-from-32, re-run idempotency — the schema suite's own
-convention, per `vola-testing`'s "SQL behavior belongs in a fixture test,
-never a regex"), a `sessionStore.ts` round-trip/push-wiring test (mutation-
-verified: hardcoding the stored intent to `'normal'` turned 3 of 5 red), and
-a component test pinning the history-row tag (mutation-verified the same
-way). `pnpm run verify` green throughout, including `lint:openapi` against
-the new `PATCH /sessions/{id}/intent` endpoint and schema additions.
+them red) plus their V2 twins (4 more, same mutation treatment), Postgres
+integration tests for `Create`/`SetIntent` including an IDOR-scoped ownership
+test, a golden test that a light session's sets summarise and list identically
+to a normal one's (`ac-verifier` flagged this as the one criterion with no
+pinning test — mutation-verified by adding an accidental `s.intent = 'normal'`
+predicate to `List`'s WHERE clause and watching it correctly fail), and a full
+end-to-end reproduction of the exact reported bug against a real database
+(`TestProgressionCycle_LightSessionDoesNotDisturbIt`: 250kg×3 normal,
+185kg×12 light, next suggestion still evidence-of-250). Mobile: a real-SQLite
+fixture test for the `local_sessions.intent` migration (fresh install,
+upgrade-from-32, re-run idempotency — the schema suite's own convention, per
+`vola-testing`'s "SQL behavior belongs in a fixture test, never a regex"), a
+`sessionStore.ts` round-trip/push-wiring test plus one for the version-skew
+guard above (both mutation-verified), a component test pinning the
+history-row tag, and a component test pinning the auto-start reachability fix
+(mutation-verified: reverting the `sport === 'strength'` skip turned it red).
+`pnpm run verify` green throughout, including `lint:openapi` against the new
+`PATCH /sessions/{id}/intent` endpoint and schema additions.
 
 **Open questions this leaves — named, not silently dropped, per the
 ticket's own scope cut:**

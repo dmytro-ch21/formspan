@@ -18,6 +18,15 @@ func finishedSess(ago time.Duration, now time.Time, sets ...Set) SessionEffort {
 	return s
 }
 
+// finishedSessWithIntent is finishedSess's N474 sibling — a real,
+// completed session tagged something other than IntentNormal, used by the
+// V2 twins of progression_test.go's TestProgress_LightSessionIsNever… suite.
+func finishedSessWithIntent(intent SessionIntent, ago time.Duration, now time.Time, sets ...Set) SessionEffort {
+	s := finishedSess(ago, now, sets...)
+	s.Intent = intent
+	return s
+}
+
 // straightSet is set's v2 shorthand for a plain SetTypeWorking set on the
 // squat, since every golden-squat fixture below is a squat, not a bench.
 func straightSet(reps int, kg float64, rir *int, rpe *float64) Set {
@@ -519,5 +528,78 @@ func TestProgressV2_NoHistoryAtAll(t *testing.T) {
 	p := ProgressV2(in, testNow)
 	if p.Code != SuggestNoHistory {
 		t.Fatalf("code = %q, want %q", p.Code, SuggestNoHistory)
+	}
+}
+
+// N474's own invariant, reached through ProgressV2 rather than Progress —
+// backend review on this ticket caught that the first version of N474 fixed
+// Progress alone and left this engine reading a light session as evidence
+// exactly like before, reachable the moment new_recommendation_engine is on.
+// Same fixture shape as TestProgress_LightSessionIsNeverTheEvidenceSession
+// (progression_test.go), rebuilt on V2's finished/straight-set primitives.
+func TestProgressV2_LightSessionIsNeverTheEvidenceSession(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := ProgressV2(squatIn("powerlifting",
+		finishedSessWithIntent(IntentLight, day, testNow, straightSet(12, 185, rir2, nil)),
+		finishedSess(2*day, testNow, straightSet(3, 250, rir2, nil)),
+	), testNow)
+
+	if p.LastWeightKg == nil || *p.LastWeightKg != 250 {
+		t.Fatalf("evidence weight = %v, want 250 (the normal session, not the light 185)", p.LastWeightKg)
+	}
+	if p.Code != ProgressAddReps {
+		t.Fatalf("code = %q, want %q — built from the wrong session if this differs", p.Code, ProgressAddReps)
+	}
+	if *p.TargetWeightKg != 250 {
+		t.Fatalf("target weight = %v, want 250 — a light session must never move the load", *p.TargetWeightKg)
+	}
+}
+
+// The all-light V2 twin of TestProgress_AllLightSessionsYieldNoRecentNormalSession.
+func TestProgressV2_AllLightSessionsYieldNoRecentNormalSession(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+
+	p := ProgressV2(squatIn("powerlifting",
+		finishedSessWithIntent(IntentLight, day, testNow, straightSet(12, 185, rir2, nil)),
+		finishedSessWithIntent(IntentDeload, 2*day, testNow, straightSet(10, 200, rir2, nil)),
+	), testNow)
+
+	if p.Code != SuggestNoRecentNormalSession {
+		t.Fatalf("code = %q, want %q", p.Code, SuggestNoRecentNormalSession)
+	}
+	if p.TargetWeightKg != nil {
+		t.Errorf("no evidence session means no numeric prescription, got %v", *p.TargetWeightKg)
+	}
+}
+
+// The stalledSessionsAtV2 twin of TestStalledSessionsAt_LightSessionDoesNotBreakAStall.
+func TestStalledSessionsAtV2_LightSessionDoesNotBreakAStall(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+	finished := []SessionEffort{
+		finishedSess(1*day, testNow, straightSet(3, 250, rir2, nil)),
+		finishedSessWithIntent(IntentLight, 2*day, testNow, straightSet(15, 100, rir2, nil)),
+		finishedSess(3*day, testNow, straightSet(3, 250, rir2, nil)),
+		finishedSess(4*day, testNow, straightSet(3, 250, rir2, nil)),
+	}
+	if n := stalledSessionsAtV2(finished, 250); n != 3 {
+		t.Fatalf("stalled sessions = %d, want 3 — the light session should be invisible to the count, not break it", n)
+	}
+}
+
+// The stalledSessionsAtV2 twin of TestStalledSessionsAt_LightSessionDoesNotCountTowardAStall.
+func TestStalledSessionsAtV2_LightSessionDoesNotCountTowardAStall(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+	finished := []SessionEffort{
+		finishedSess(1*day, testNow, straightSet(3, 250, rir2, nil)),
+		finishedSess(2*day, testNow, straightSet(3, 250, rir2, nil)),
+		finishedSessWithIntent(IntentLight, 3*day, testNow, straightSet(3, 250, rir2, nil)),
+	}
+	if n := stalledSessionsAtV2(finished, 250); n != 2 {
+		t.Fatalf("stalled sessions = %d, want 2 — a light session at the same weight must not count", n)
 	}
 }

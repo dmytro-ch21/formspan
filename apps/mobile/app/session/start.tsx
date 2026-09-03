@@ -120,10 +120,19 @@ export default function StartSessionScreen() {
    * a reachable state, not a defensive flourish: a plan can outlive the
    * template it points at (there is no foreign key, by design), and silently
    * starting *something else* would be worse than asking.
+   *
+   * **Skipped for strength (N474).** This is the actual common path for a
+   * planned strength day — Today's "start today's session" lands here with
+   * `plannedWorkoutId` already set — and auto-starting the instant the list
+   * loads redirected away before the picker above could ever be touched.
+   * Frontend review caught that this made the feature's whole point
+   * unreachable from the flow it exists for: a planned Light or Deload day
+   * could never be marked as one. Every other sport has no picker and keeps
+   * the original one-tap auto-start unchanged.
    */
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoStarted.current || loading || !plannedWorkoutId) return;
+    if (autoStarted.current || loading || !plannedWorkoutId || sport === 'strength') return;
     const planned = workouts.find((w) => w.id === plannedWorkoutId);
     if (!planned) return;
     autoStarted.current = true;
@@ -131,7 +140,7 @@ export default function StartSessionScreen() {
     // `begin` is redeclared every render and is not a dependency worth
     // stabilising here — the ref is what makes this run once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, plannedWorkoutId, workouts]);
+  }, [loading, plannedWorkoutId, workouts, sport]);
 
   async function begin(workout: Workout | null) {
     if (starting || !sport || !userId) return;
@@ -229,8 +238,14 @@ export default function StartSessionScreen() {
 
         {sport === 'strength' && (
           <View style={styles.intentSection} testID="session-intent-picker">
-            <Text style={styles.sectionLabel}>{"Today's training"}</Text>
-            <View style={styles.intentRow}>
+            <Text style={styles.sectionLabel} nativeID="session-intent-label">
+              {"Today's training"}
+            </Text>
+            <View
+              style={styles.intentRow}
+              accessibilityRole="radiogroup"
+              accessibilityLabelledBy="session-intent-label"
+            >
               {SESSION_INTENTS.map((i) => {
                 const active = intent === i.key;
                 return (
@@ -241,8 +256,8 @@ export default function StartSessionScreen() {
                       active && { backgroundColor: accent.accent, borderColor: accent.accent },
                     ]}
                     onPress={() => setIntent(i.key)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: active, selected: active }}
                     testID={`session-intent-${i.key}`}
                   >
                     <Text
@@ -371,6 +386,10 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
     borderRadius: 12,
     paddingVertical: 10,
+    // 44pt minimum, matching `secondary` below — this is the one control on
+    // the screen that changes what a session MEANS, so it should not also
+    // be the smallest tap target on it.
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },

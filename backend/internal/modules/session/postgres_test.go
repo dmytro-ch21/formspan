@@ -1762,6 +1762,76 @@ func TestSetIntentChangesOnlyIntentAndOnlyForTheOwner(t *testing.T) {
 	}
 }
 
+// The golden test for the OTHER half of N474's invariant — ac-verifier
+// flagged that nothing pinned it. progression_test.go's
+// TestProgress_LightSessionIsNeverTheEvidenceSession proves a light session
+// is invisible to the progression rule; this proves it is otherwise treated
+// EXACTLY like a normal one: identical sets summarise to identical volume
+// regardless of intent, and the session is never filtered out of history.
+// Both would be true by construction — Summarise (session.go) and List's
+// WHERE clause (postgres.go) never read Intent at all — but "true by
+// construction" is exactly the gap a future change (someone "helpfully"
+// excluding light sessions from a totals query, say) could reintroduce
+// silently without a test here to catch it.
+func TestLightSession_CountsFullyForVolumeAndHistory_IdenticalToNormal(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-vol-normal")
+	cleanup(t, pool, "ses-vol-light")
+
+	sets := func() []Set {
+		return []Set{
+			{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40), Completed: true},
+			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(60), RIR: ptrInt(4), Completed: true},
+			{ExerciseID: exBench, SetType: SetTypeWorking, Reps: ptrInt(12), WeightKg: ptrF(60), RIR: ptrInt(4), Completed: true},
+		}
+	}
+
+	normal, err := repo.Create(ctx, strengthSession("ses-vol-normal", "user_vol_intent", sets()))
+	if err != nil {
+		t.Fatalf("create normal: %v", err)
+	}
+	lightIn := strengthSession("ses-vol-light", "user_vol_intent", sets())
+	lightIn.Intent = IntentLight
+	light, err := repo.Create(ctx, lightIn)
+	if err != nil {
+		t.Fatalf("create light: %v", err)
+	}
+	if normal.Intent != IntentNormal || light.Intent != IntentLight {
+		t.Fatalf("fixture bug: intents = %q, %q", normal.Intent, light.Intent)
+	}
+
+	nv, lv := Summarise(normal.Sets), Summarise(light.Sets)
+	if nv.WorkingSets != lv.WorkingSets || nv.TotalReps != lv.TotalReps ||
+		nv.TonnageKg != lv.TonnageKg || nv.HardestRPE != lv.HardestRPE ||
+		len(nv.ExerciseIDs) != len(lv.ExerciseIDs) {
+		t.Fatalf("volume differs by intent alone: normal=%+v light=%+v — "+
+			"a light session must count exactly like a normal one", nv, lv)
+	}
+
+	// And the session isn't hidden from history — List's WHERE clause has no
+	// intent predicate, so a light session appears exactly like a normal one.
+	page, err := repo.List(ctx, "user_vol_intent", Filter{Sport: "strength"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var found *Session
+	for i := range page.Sessions {
+		if page.Sessions[i].ID == "ses-vol-light" {
+			found = &page.Sessions[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("light session missing from history — light/deload must never be filtered out of GET /v1/sessions")
+	}
+	if found.Intent != IntentLight {
+		t.Errorf("history returned intent %q, want %q — the tag itself must survive the round trip", found.Intent, IntentLight)
+	}
+	if got := Summarise(found.Sets); got.WorkingSets != lv.WorkingSets || got.TonnageKg != lv.TonnageKg {
+		t.Errorf("volume from a re-listed session differs from the create response: %+v vs %+v", got, lv)
+	}
+}
+
 // Rescheduling, and the boundary it has to respect — same shape as the
 // rename test above, for the sibling PATCH added by N436.
 func TestRescheduleChangesOnlyStartedAtAndOnlyForTheOwner(t *testing.T) {

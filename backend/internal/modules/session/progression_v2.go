@@ -84,7 +84,22 @@ import (
 func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 	rng := repRangeForGoal(in.Goal)
 	p = Plan{RepRange: rng}
-	defer func() { p = applyInSessionSignal(in, p) }()
+	// N474: identical treatment to Progress's own `skippedNonNormal` — see
+	// that function's doc comment. Backend review on this ticket caught that
+	// the first version of N474 skipped `Progress` alone and left this
+	// engine reading a light/deload session as evidence exactly like before,
+	// reachable the moment `new_recommendation_engine` is on. The two engines
+	// are deliberately parallel (see the file header), so the fix is applied
+	// to both rather than to one and a shared helper — same reasoning as
+	// keeping `finishedSessions`/`straightWorkingSetsWithWeight` duplicated
+	// in spirit rather than shared: v1 must stay untouched.
+	var skippedNonNormal bool
+	defer func() {
+		if skippedNonNormal && p.Code != SuggestNoRecentNormalSession {
+			p.Reason += " (A light or deload session was skipped when finding this.)"
+		}
+		p = applyInSessionSignal(in, p)
+	}()
 
 	if in.LoadType != "weight_reps" {
 		p.Code = SuggestNotApplicable
@@ -113,9 +128,20 @@ func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 	// coherent straight-set cohort — same reasoning
 	// TestProgress_SkipsAnUnusableSessionForARealOneBehindIt already pins on
 	// v1: an unusable session must not hide a usable one behind it.
+	//
+	// N474: a light/deload session is skipped here exactly as it is in
+	// Progress's own evidence loop — real training, not a claim about
+	// capacity, and this is the one place this engine decides which session
+	// gets to make that claim.
 	var last SessionEffort
 	var cohort []Set
 	for _, s := range finished {
+		if !s.isNormal() {
+			if len(straightWorkingSetsWithWeight(s.Sets)) > 0 {
+				skippedNonNormal = true
+			}
+			continue
+		}
 		straight := straightWorkingSetsWithWeight(s.Sets)
 		if len(straight) == 0 {
 			continue
@@ -128,6 +154,12 @@ func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 		}
 	}
 	if len(cohort) == 0 {
+		if skippedNonNormal {
+			p.Code = SuggestNoRecentNormalSession
+			p.Reason = "The last few sessions were light or deload, so there's nothing normal-intensity to build a suggestion from yet. " +
+				"A normal session picks the progression back up from where it left off."
+			return p
+		}
 		p.Code = SuggestAbstain
 		p.Reason = "Recent finished sessions for this exercise have no plain working " +
 			"set with a recorded weight — not enough to reason from. Log a straight " +
@@ -373,6 +405,15 @@ func effortCoverage(sets []Set) (all, none bool) {
 func stalledSessionsAtV2(finished []SessionEffort, weight float64) int {
 	n, floor := 0, -1
 	for _, s := range finished {
+		// N474: identical treatment to stalledSessionsAt's own guard — a
+		// light/deload session is invisible to the stall counter, neither
+		// extending a streak nor ending one, since it makes no claim about
+		// capacity either way. See that function's comment for the full
+		// reasoning (a lighter Tuesday between two identical normal Mondays
+		// must not read as the streak resetting).
+		if !s.isNormal() {
+			continue
+		}
 		straight := straightWorkingSetsWithWeight(s.Sets)
 		if len(straight) == 0 {
 			break

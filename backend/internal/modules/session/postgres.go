@@ -668,7 +668,7 @@ func (r *PostgresRepository) RecentEffortsV2(
 	}
 	rows, err := r.pool.Query(ctx, `
 		WITH ranked AS (
-			SELECT ss.exercise_id, ss.session_id, s.started_at, ss.position,
+			SELECT ss.exercise_id, ss.session_id, s.started_at, s.intent, ss.position,
 			       ss.set_type, ss.reps, ss.weight_kg, ss.rir, ss.rpe, ss.assisted_reps,
 			       DENSE_RANK() OVER (
 			           PARTITION BY ss.exercise_id
@@ -689,7 +689,7 @@ func (r *PostgresRepository) RecentEffortsV2(
 			  AND s.ended_at IS NOT NULL
 		)
 		SELECT ex.id, e.movement_pattern, e.load_type,
-		       r.session_id, r.started_at, r.position, r.set_type,
+		       r.session_id, r.started_at, r.intent, r.position, r.set_type,
 		       r.reps, r.weight_kg, r.rir, r.rpe, r.assisted_reps
 		FROM unnest($2::text[]) AS ex(id)
 		JOIN exercises e ON e.id = ex.id
@@ -707,12 +707,13 @@ func (r *PostgresRepository) RecentEffortsV2(
 			pattern, loadType string
 			sessionID         *string
 			startedAt         *time.Time
+			intent            *SessionIntent
 			position          *int
 			setType           *SetType
 			s                 Set
 		)
 		if err := rows.Scan(&exerciseID, &pattern, &loadType,
-			&sessionID, &startedAt, &position, &setType,
+			&sessionID, &startedAt, &intent, &position, &setType,
 			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE, &s.AssistedReps); err != nil {
 			return nil, fmt.Errorf("session: scan recent effort v2: %w", err)
 		}
@@ -735,7 +736,11 @@ func (r *PostgresRepository) RecentEffortsV2(
 			in.Recent = append(in.Recent, SessionEffort{
 				SessionID:   *sessionID,
 				PerformedAt: *startedAt,
-				Sets:        []Set{s},
+				// Every row in `ranked` came from a real sessions row, so
+				// never actually NULL — see RecentEfforts' identical comment
+				// on its own scan.
+				Intent: *intent,
+				Sets:   []Set{s},
 				// Every row here already passed `s.ended_at IS NOT NULL` in
 				// the CTE, so this is always true — set explicitly rather
 				// than left at Go's zero value, so a reader doesn't have to

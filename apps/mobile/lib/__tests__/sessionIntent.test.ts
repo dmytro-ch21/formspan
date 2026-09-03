@@ -131,3 +131,35 @@ it('a server-pulled session carries its intent onto the local row (upsert)', asy
   const reread = await readLocalSession(USER, 'from-server');
   expect(reread?.intent).toBe('deload');
 });
+
+// Frontend review, N474: `local_sessions.intent` is NOT NULL, but `upsert`
+// is also called with whatever a real HTTP response deserialises to — and a
+// build of this app talking to an API that predates migration 000088 hands
+// back a session object with no `intent` key at all. Without a guard on the
+// write side (matching `toSession`'s `|| 'normal'` on the read side), that
+// one row throws a NOT NULL constraint violation, and since this is the
+// exact function `runSync`'s pull loop calls per row, the failure aborts
+// the whole sync — not a corrupt row, a dead sync loop for the entire
+// device until the API catches up.
+it('a pulled session missing intent entirely (API/app version skew) does not throw and defaults to normal', async () => {
+  const staleServerResponse = {
+    id: 'from-old-api',
+    user_id: USER,
+    workout_id: null,
+    sport: 'strength',
+    name: 'Legs',
+    // intent deliberately OMITTED — exactly what a pre-000088 API returns.
+    started_at: '2026-08-01T10:00:00Z',
+    ended_at: '2026-08-01T11:00:00Z',
+    notes: '',
+    sets: [],
+    created_at: '2026-08-01T10:00:00Z',
+    updated_at: '2026-08-01T10:00:00Z',
+    dirty: false,
+  } as unknown as Parameters<typeof upsert>[0];
+
+  await expect(upsert(staleServerResponse, USER, false, true)).resolves.toBeUndefined();
+
+  const reread = await readLocalSession(USER, 'from-old-api');
+  expect(reread?.intent).toBe('normal');
+});

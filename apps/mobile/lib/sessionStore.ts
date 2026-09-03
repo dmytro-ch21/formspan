@@ -294,7 +294,17 @@ export async function upsert(
     s.workout_id,
     s.sport,
     s.name,
-    s.intent,
+    // Guarded like `s.notes ?? ''` just below, and for the identical reason
+    // (frontend review, N474): `s` here can be the server's own response,
+    // verbatim, on the pull path — a build of this app talking to an API
+    // that predates migration 000088 hands back a session with no `intent`
+    // field at all, and `local_sessions.intent` is NOT NULL. Without this,
+    // that one row throws, the whole pull loop aborts into runSync's outer
+    // catch, and every session on the device stops syncing until the API
+    // catches up — not a local storage bug, a total sync outage from a
+    // single stale response. `toSession`'s read side already treats a
+    // missing value as 'normal' (N474); this is the write side agreeing.
+    s.intent ?? 'normal',
     s.started_at,
     s.ended_at,
     s.notes ?? '',

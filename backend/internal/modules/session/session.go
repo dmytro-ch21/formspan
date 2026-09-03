@@ -454,9 +454,12 @@ type NewSession struct {
 	WorkoutID *string
 	Sport     string
 	Name      string
-	// Intent defaults to IntentNormal when left empty — see the handler,
-	// which is where an absent/unrecognised value is normalised, matching
-	// how every other enum field on this type is handled at the boundary.
+	// Intent defaults to IntentNormal when left empty and is otherwise
+	// validated against Valid() — both in the REPOSITORY's Create, not the
+	// handler (which passes the request body's value straight through). An
+	// unrecognised non-empty value is REJECTED, not silently normalised —
+	// see Valid()'s own comment for why that asymmetry (empty=ok,
+	// garbage=refused) is deliberate.
 	Intent    SessionIntent
 	StartedAt time.Time
 	EndedAt   *time.Time
