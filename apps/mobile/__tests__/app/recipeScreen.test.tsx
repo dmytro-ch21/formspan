@@ -27,6 +27,8 @@ jest.mock('@/lib/foodLog', () => ({
   localFood: (...a: unknown[]) => mockLocalFood(...a),
   localFoods: jest.fn(async () => []),
   saveFoodLocally: (...a: unknown[]) => mockSaveFoodLocally(...a),
+  // N116/#505: unblocked by default — synced, and nothing owed.
+  foodSyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
 }));
 
 jest.mock('@/lib/catalogApi', () => {

@@ -1935,8 +1935,9 @@ components:
         resource_type:
           type: string
           description: >
-            What kind of thing this is — "sequence" or "workout" today, more
-            later. DELIBERATELY NOT AN ENUM: the set is whatever the running
+            What kind of thing this is — "sequence", "workout",
+            "nutrition_entry", "nutrition_food" or "nutrition_day" today,
+            more later. DELIBERATELY NOT AN ENUM: the set is whatever the running
             build has registered, so a client that hard-codes it starts
             rejecting kinds a newer server can legitimately send. Render an
             unknown value rather than failing on it.
@@ -6300,10 +6301,14 @@ paths:
                 resource_type:
                   type: string
                   description: >
-                    Must be a type this build can copy — "sequence" or
-                    "workout" today. Anything else is 400 `invalid_input`,
-                    rejected BEFORE the handle is resolved, so a bogus type
-                    cannot be used to probe whether an account exists.
+                    Must be a type this build can copy — "sequence",
+                    "workout", "nutrition_entry" (one logged food),
+                    "nutrition_food" (an already-saved food or meal/recipe)
+                    or "nutrition_day" (a whole day's entries — never the
+                    sender's target or body weight) today. Anything else is
+                    400 `invalid_input`, rejected BEFORE the handle is
+                    resolved, so a bogus type cannot be used to probe
+                    whether an account exists.
                   example: workout
                 resource_id: { type: string }
       responses:

@@ -53833,6 +53833,135 @@ than merely looked at, and re-checked at the largest *ordinary* size
   as the original ticket says — it is local to that screen, not `TrendCard`.
 
 
+## 2026-09-03 — N116 (#505): a food, a meal or a day's log is sendable to a friend as an editable copy, reusing N80's share plumbing
+
+**What was built.** Three more resource types in the generic `share` package's
+registry (N80/#414's design — see `backend/internal/modules/share/share.go`'s
+package doc): `nutrition_entry` (one logged food), `nutrition_food` (an
+already-saved food or a saved meal/recipe — N115's `combine.tsx` output), and
+`nutrition_day` (a whole day's entries). No new endpoint, no second inbox, no
+change to the `share` package itself — exactly the promise that package's doc
+comment makes about adding a shareable domain: two methods per kind plus one
+line in `cmd/api/main.go`'s registry.
+
+**Why three Copiers instead of one.** Go has no method overloading, so one
+struct cannot carry three `Describe`/`CopyTo` pairs. `backend/internal/modules/
+nutrition/share.go` adds `EntryCopier`, `FoodCopier` and `DayCopier`, all
+backed by the same `*pgxpool.Pool`, none importing `share` — the same
+structural-typing shape `workout.PostgresRepository` and
+`sequence.PostgresRepository` already use for their own single Copier.
+
+**What each accepts INTO, and why none of the three land as a dated log row.**
+All three produce a new `nutrition_foods` row (a saved food), never a dated
+`nutrition_entries` row:
+
+- `EntryCopier` reads the shared entry's ABSOLUTE macros (already ×servings)
+  and divides by `servings` to store PER-SERVING numbers — the unit
+  `nutrition_foods` uses — into a new `kind=food` row.
+- `FoodCopier` duplicates the `nutrition_foods` row and, for a recipe, its
+  `nutrition_recipe_items`, unchanged.
+- `DayCopier` reads every entry for the sender's date (`resourceID` is the
+  date itself, "YYYY-MM-DD", scoped to the sharer the same way every other
+  lookup in this module is) and bundles them into ONE new `kind=recipe`,
+  `yield_servings=1` row — the identical shape `food/combine.tsx` (N115)
+  already builds client-side from a hand-picked selection, built here from a
+  whole day instead.
+
+The day case is the one that needed a real decision. Landing the sender's
+entries straight into the recipient's OWN day-by-day log, under a date they
+did not actually eat those things on, would assert false history — and would
+need a date to land on, which the server cannot honestly pick (the recipient's
+local "today" is not knowable server-side; `Entry.EatenOn`'s own doc comment
+is explicit that this is never derived here). Landing everything as one
+reviewable, editable, freely re-loggable saved recipe sidesteps both problems
+and reuses machinery N115 already built rather than inventing a fourth shape.
+
+**The privacy boundary (AC6) is structural, not a filter.** `DayCopier.CopyTo`
+names only `nutrition_entries` in its query — there is no second query
+anywhere in the method that could reach `nutrition_targets` or
+`body_checkins`, so "shares what was eaten, not the athlete's targets or
+weight" is a fact about which tables the code touches, not a rule that could
+be silently disabled. `TestDayCopierExcludesTargetsAndBodyWeight` (own-module)
+and `TestSharedNutritionDayThroughAcceptExcludesTargetsAndWeight` (through the
+real `share.Repository.Create`/`Accept` round trip) both seed a distinctive
+target and a distinctive body-weight checkin next to the entries that ARE
+meant to travel, and assert the copy's totals equal exactly the entries summed
+— a leaked target or checkin would show up as a wrong number, not a
+coincidentally-right one — and that the recipient acquired zero rows in either
+table as a side effect of accepting.
+
+**What none of the three copy**, matching `workout.CopyTo`'s own list for the
+identical reasons: `source` is always forced to `'user'` (never `'seed'` or
+`'ai'` — N40/#313's whole point was keeping an AI-drafted number permanently
+distinguishable from one a human verified, and a copy inheriting `'ai'` from
+someone else's confirmed draft would misattribute that). `external_id`/
+`barcode` are always nulled — `nutrition_foods_external_idx` is a UNIQUE
+constraint scoped globally, not per-athlete, so copying either across owners
+risks colliding with the recipient's own scanned history.
+
+**AC2 (bidirectional independence), verified both directions in Postgres**:
+`TestEntryCopierCopyToScalesToOneServingAndIsIndependent`,
+`TestFoodCopierCopyToDuplicatesARecipeAndIsIndependent`, and the end-to-end
+`TestSharedNutritionMealBecomesAnIndependentSavedItem` all rename/edit the
+sender's original after the copy exists and assert the recipient's row is
+unaffected, then edit the recipient's copy and assert the sender's original is
+unaffected — the actual `SaveFood`/`SaveEntry` calls a real editor issues, not
+a hand-rolled UPDATE standing in for one. Every new guard was mutation-verified
+in this session: baseline green, mutated (dropped the per-serving scaling;
+leaked a stray kcal into the day total), confirmed red as a real test failure
+— never a compile error — restored, confirmed green again by re-running.
+
+**Mobile-first (the hard rule).** `apps/mobile/components/ShareToFriend.tsx`
+already existed, generic on `resourceType`/`resourceId` since N80 — this
+ticket's mobile work is three call sites, not a new component:
+`food/entry/[id].tsx` (a food item, `nutrition_entry`), `food/saved/[id].tsx`
+and `food/recipe/[id].tsx` (a meal, `nutrition_food` — the same screen already
+redirects `kind=recipe` to the recipe editor, so the destination map needs no
+branch), and `(tabs)/food.tsx` (a day's log, `nutrition_day`, keyed on `on`,
+the date already on screen). All three gate on the same two flags
+`removeEntry`/`removeFood` already read (`entrySyncState`/`foodSyncState`, new
+exports in `foodLog.ts`, real-SQLite fixture tested, mutation-verified) via
+the existing `shareBlockedReason` helper, plus a `touched` flag on the two
+screens with on-screen drafts (`food/saved`, `food/recipe`) — sharing sends
+what the SERVER holds, never this screen's own unsaved edits, the identical
+rule `workoutDetailScreen`'s copy of `ShareToFriend` already enforces.
+`app/shared/index.tsx`'s `DESTINATION`/`KIND_LABEL` maps gained three lines
+each; every one of the three lands on `/food/saved/[id]`, since all three
+accept into the same table. `apps/web/src/app/dashboard/shared/page.tsx` got
+`KIND_LABEL` entries for polish but deliberately no `DESTINATION` ones — web
+has no per-food editing screen to send an accepted share to (food logging is
+mobile's surface; see the "Which platform gets a feature" rule), so those
+three accept correctly and simply do not navigate, the same degradation any
+type without a registered destination already gets.
+
+**#115/#504 status, checked before writing any of this.** The "reusable
+meal" storage AC4 needs — a `nutrition_foods` row with `kind=recipe` and its
+`nutrition_recipe_items` — already exists and is already reachable on mobile
+(`food/combine.tsx`, `food/recipe/[id].tsx`). The GitHub issue #504 (N115)
+itself is still open on the board, but its shipped code is what `FoodCopier`
+and `DayCopier` both build on — this ticket reused that storage rather than
+rebuilding it, per the board triage's own instruction.
+
+**Testing.** Backend: `nutrition/share_postgres_test.go` (Describe/CopyTo
+directly, own-module, matching `vola-testing`'s "own the library rows you
+depend on") plus two end-to-end tests added to
+`share/postgres_test.go`'s existing harness (extended with the nutrition
+registry, exactly like `workout`'s addition did). Mobile: 8 new real-SQLite
+fixture tests in `foodLog.test.ts` for the two new sync-state helpers, plus
+the three affected component test files' `@/lib/foodLog` mocks updated (they
+crashed with "is not a function" until patched — the missing piece was the
+mock, not the code). `pnpm run verify` green throughout, `lint:openapi`
+against the widened `resource_type` description text (still deliberately not
+an enum — see `ShareCard.resource_type`'s own schema comment).
+
+**NEEDS HUMAN EVIDENCE, this ticket's own acceptance criterion**: sent
+between two real accounts on two devices — a food, a meal and a day's log —
+received, edited, and the sender's copy confirmed unchanged on the device
+that sent it. Nothing in this environment can drive two physical phones at
+once; every guarantee above is proven in Postgres and in the mobile test
+suite, not on hardware.
+
+
 ## Open items / known gaps as of this entry
 
 

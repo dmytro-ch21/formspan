@@ -64,9 +64,18 @@ import {
  * types to check against. Green in CI, red the moment anyone starts Metro.
  * Found by review from a worktree that had.
  */
+/**
+ * N116/#505's three additions all land in the same place: every one of them
+ * — a food item, a meal, and a whole day's log — is accepted as a saved
+ * `Food` row (see nutrition/share.go's package doc for why), so all three
+ * route to the same screen a saved food already opens on.
+ */
 const DESTINATION: Record<string, (id: string) => Href> = {
   workout: (id) => `/workout/${id}` as Href,
   sequence: (id) => `/sequence/${id}` as Href,
+  nutrition_entry: (id) => `/food/saved/${id}` as Href,
+  nutrition_food: (id) => `/food/saved/${id}` as Href,
+  nutrition_day: (id) => `/food/saved/${id}` as Href,
 };
 
 /**
@@ -84,6 +93,9 @@ const LANDED_MESSAGE = 'Accepted — the copy is yours now.';
 const KIND_LABEL: Record<string, string> = {
   sequence: 'Sequence',
   workout: 'Workout',
+  nutrition_entry: 'Food',
+  nutrition_food: 'Meal',
+  nutrition_day: 'Day’s log',
 };
 
 export default function SharedScreen() {

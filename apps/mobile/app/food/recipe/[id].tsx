@@ -49,13 +49,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { ShareToFriend } from '@/components/ShareToFriend';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { Text } from '@/components/Themed';
 import { IngredientPicker } from '@/components/food/IngredientPicker';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { localFood, saveFoodLocally } from '@/lib/foodLog';
+import { foodSyncState, localFood, saveFoodLocally } from '@/lib/foodLog';
 import type { Food, RecipeItem } from '@/lib/nutrition';
 import {
   draftToFood,
@@ -64,6 +65,7 @@ import {
   recipeProblem,
   type RecipeDraft,
 } from '@/lib/recipe';
+import { shareBlockedReason } from '@/lib/shares';
 import { request } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 
@@ -112,6 +114,12 @@ export default function RecipeScreen() {
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // N116/#505 — same reasoning as the plain-food editor's copy of this pair:
+  // `touched` covers this screen's own unsaved edits, `shareSync` covers
+  // what the server has (or has not) confirmed.
+  const [touched, setTouched] = useState(false);
+  const [shareSync, setShareSync] = useState<{ unsynced: boolean; owed: boolean } | null>(null);
+
   useEffect(() => {
     if (!userId || !id) return;
     // `fresh` is an explicit route parameter rather than something inferred
@@ -131,6 +139,18 @@ export default function RecipeScreen() {
       setServingLabel(food.serving_label);
       setYieldText(String(food.yield_servings ?? 4));
       setItems(food.items);
+      setTouched(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [userId, id, fresh]);
+
+  useEffect(() => {
+    if (!userId || !id || fresh === '1') return;
+    let live = true;
+    foodSyncState(userId, id).then((s) => {
+      if (live) setShareSync(s);
     });
     return () => {
       live = false;
@@ -150,11 +170,19 @@ export default function RecipeScreen() {
   const per = useMemo(() => perServing(items, yieldServings), [items, yieldServings]);
   const problem = recipeProblem(draft);
 
+  // N116/#505. A `fresh` (never-saved) recipe has nothing on the server to
+  // share yet — the button below renders only for `editing`, so this is
+  // never read in that state.
+  const blockedFromSharing = shareSync
+    ? shareBlockedReason({ ...shareSync, unsavedOnScreen: touched })
+    : 'Loading…';
+
   const save = useCallback(async () => {
     if (!userId || !id || problem || saving) return;
     setSaving(true);
     try {
       await saveFoodLocally(userId, { ...draftToFood(draft), id });
+      setTouched(false);
       // Fire and forget, like every other write here: awaiting the push would
       // put the network between the tap and the recipe existing, and it already
       // exists — locally, which is where it is read from.
@@ -198,6 +226,7 @@ export default function RecipeScreen() {
           onCancel={() => setPicking(false)}
           onPick={(item) => {
             setItems((cur) => [...cur, item]);
+            setTouched(true);
             setPicking(false);
           }}
         />
@@ -214,21 +243,30 @@ export default function RecipeScreen() {
       <Field
         label="Recipe"
         value={name}
-        onChangeText={setName}
+        onChangeText={(t) => {
+          setName(t);
+          setTouched(true);
+        }}
         placeholder="Chicken and rice traybake"
         testID="recipe-name"
       />
       <Field
         label="Note"
         value={note}
-        onChangeText={setNote}
+        onChangeText={(t) => {
+          setNote(t);
+          setTouched(true);
+        }}
         placeholder="Optional"
         testID="recipe-note"
       />
       <Field
         label="Makes how many portions"
         value={yieldText}
-        onChangeText={setYieldText}
+        onChangeText={(t) => {
+          setYieldText(t);
+          setTouched(true);
+        }}
         placeholder="4"
         numeric
         testID="recipe-yield"
@@ -236,7 +274,10 @@ export default function RecipeScreen() {
       <Field
         label="One portion is"
         value={servingLabel}
-        onChangeText={setServingLabel}
+        onChangeText={(t) => {
+          setServingLabel(t);
+          setTouched(true);
+        }}
         placeholder="1 portion"
         testID="recipe-serving-label"
       />
@@ -254,7 +295,10 @@ export default function RecipeScreen() {
             // server keys these on `(food_id, position)` — and two identical
             // ingredients are a real thing to put in a recipe.
             key={`${it.name}-${i}`}
-            onDelete={() => setItems((cur) => cur.filter((_, j) => j !== i))}
+            onDelete={() => {
+              setItems((cur) => cur.filter((_, j) => j !== i));
+              setTouched(true);
+            }}
             accessibilityLabel={`Remove ${it.name}`}
             testID={`recipe-item-${i}`}
           >
@@ -322,6 +366,22 @@ export default function RecipeScreen() {
           {load.status === 'fresh' ? 'Save recipe' : 'Save changes'}
         </Text>
       </Pressable>
+
+      {/* N116/#505. Only once there is a saved row to send — a `fresh`
+          recipe has nothing on the server yet. Accepting stores this as the
+          receiver's OWN saved meal (AC4), independent of this one — see
+          nutrition/share.go's FoodCopier. */}
+      {load.status === 'editing' ? (
+        <View style={styles.shareRow}>
+          <ShareToFriend
+            resourceType="nutrition_food"
+            resourceId={load.food.id}
+            disabled={blockedFromSharing !== null}
+            disabledReason={blockedFromSharing ?? undefined}
+            testID="recipe-share-open"
+          />
+        </View>
+      ) : null}
     </KeyboardAwareScrollView>
   );
 }
@@ -410,4 +470,5 @@ const styles = StyleSheet.create({
   save: { borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   saveOff: { opacity: 0.4 },
   saveText: { fontSize: 16, fontWeight: '700' },
+  shareRow: { marginTop: 12, alignItems: 'center' },
 });

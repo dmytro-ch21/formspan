@@ -33,6 +33,8 @@ jest.mock('@/lib/foodLog', () => ({
   localFood: (...a: unknown[]) => mockLocalFood(...a),
   removeEntry: (...a: unknown[]) => mockRemoveEntry(...a),
   splitEntry: (...a: unknown[]) => mockSplitEntry(...a),
+  // N116/#505: unblocked by default — synced, and nothing owed.
+  entrySyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
 }));
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 

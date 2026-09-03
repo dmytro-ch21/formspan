@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/nutrition"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/sequence"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 )
@@ -48,6 +49,7 @@ type harness struct {
 	seqs  *sequence.PostgresRepository
 	wrks  *workout.PostgresRepository
 	frnds *friend.PostgresRepository
+	nutr  *nutrition.PostgresRepository
 }
 
 func newHarness(t *testing.T) *harness {
@@ -56,10 +58,22 @@ func newHarness(t *testing.T) *harness {
 	seqs := sequence.NewPostgresRepository(pool)
 	wrks := workout.NewPostgresRepository(pool)
 	frnds := friend.NewPostgresRepository(pool)
-	reg := Registry{"sequence": seqs, "workout": wrks}
+	nutr := nutrition.NewPostgresRepository(pool)
+	// N116/#505: three MORE registrations, not a second sharing mechanism —
+	// see nutrition/share.go's package doc for what each Copier accepts
+	// into. Registered here, from the real repositories, for the same
+	// reason sequence/workout are: a stub registry would show only that the
+	// stub satisfies the interface.
+	reg := Registry{
+		"sequence":        seqs,
+		"workout":         wrks,
+		"nutrition_entry": nutrition.NewEntryCopier(pool),
+		"nutrition_food":  nutrition.NewFoodCopier(pool),
+		"nutrition_day":   nutrition.NewDayCopier(pool),
+	}
 	return &harness{
 		pool: pool, repo: NewPostgresRepository(pool, reg, frnds),
-		seqs: seqs, wrks: wrks, frnds: frnds,
+		seqs: seqs, wrks: wrks, frnds: frnds, nutr: nutr,
 	}
 }
 
@@ -77,6 +91,17 @@ func person(t *testing.T, pool *pgxpool.Pool, id, handle string) string {
 		// workout_items cascade. Includes the copies accepting produced, whose
 		// ids the test never sees — they are server-generated.
 		_, _ = pool.Exec(ctx, `DELETE FROM workouts WHERE owner_user_id = $1`, id)
+		// N116/#505: entries/foods/recipe items, and everything a nutrition_day
+		// share must NEVER touch (targets, body weight) — cleaned here too so a
+		// test that failed to exclude them would still leave the database
+		// clean for the next one, rather than compounding into a second false
+		// signal.
+		_, _ = pool.Exec(ctx, `DELETE FROM nutrition_entries WHERE user_id = $1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM nutrition_recipe_items
+			WHERE food_id IN (SELECT id FROM nutrition_foods WHERE user_id = $1)`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM nutrition_foods WHERE user_id = $1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM nutrition_targets WHERE user_id = $1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM body_checkins WHERE user_id = $1`, id)
 		_, _ = pool.Exec(ctx, `DELETE FROM friendships WHERE user_a = $1 OR user_b = $1`, id)
 		_, _ = pool.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1`, id)
 	})
@@ -1400,3 +1425,159 @@ func TestAcceptingStopsWhenTheWorkoutStopsBeingVisible(t *testing.T) {
 		t.Fatalf("bob ended up with %d copies of a private plan", copies)
 	}
 }
+
+// N116/#505 end-to-end: the full Create -> Inbox -> Accept round trip for a
+// shared MEAL, through the real share.Repository — the same registry
+// cmd/api/main.go wires. This is what proves "nutrition_food" is really
+// reachable through this package's Create/Accept, not just through its own
+// Copier in isolation (that half is covered directly in
+// nutrition/share_postgres_test.go).
+func TestSharedNutritionMealBecomesAnIndependentSavedItem(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_nma", "sh_nma_h")
+	bob := person(t, h.pool, "sh_nmb", "sh_nmb_h")
+	befriend(t, h, alice, "sh_nma_h", bob, "sh_nmb_h")
+
+	recipe, err := h.nutr.SaveFood(ctx, nutrition.Food{
+		ID: "77777777-7777-4777-8777-777777777701", UserID: alice,
+		Kind: nutrition.KindRecipe, Name: "Protein shake", ServingLabel: "1 serving",
+		YieldServings: ptrF(1),
+		Items: []nutrition.RecipeItem{
+			{Name: "Milk", Quantity: 1, ServingLabel: "250 ml",
+				Macros: nutrition.Macros{Kcal: 120, ProteinG: 8, CarbG: 12, FatG: 5}},
+			{Name: "Protein powder", Quantity: 1, ServingLabel: "1 scoop",
+				Macros: nutrition.Macros{Kcal: 110, ProteinG: 24, CarbG: 2, FatG: 1}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("save recipe: %v", err)
+	}
+
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_nmb_h", ResourceType: "nutrition_food", ResourceID: recipe.ID}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	inbox, err := h.repo.Inbox(ctx, bob)
+	if err != nil || len(inbox) != 1 {
+		t.Fatalf("inbox: %+v %v", inbox, err)
+	}
+	if inbox[0].ResourceType != "nutrition_food" || inbox[0].ResourceLabel != "Protein shake" {
+		t.Fatalf("card: %+v", inbox[0])
+	}
+
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if got.ResourceID == recipe.ID {
+		t.Fatalf("the copy reused the sender's id")
+	}
+
+	// AC4: it landed as BOB'S OWN saved item — a real row in HIS
+	// nutrition_foods, reusable and re-loggable, not a one-off.
+	copied, err := h.nutr.GetFood(ctx, bob, got.ResourceID)
+	if err != nil {
+		t.Fatalf("bob cannot read his copy: %v", err)
+	}
+	if copied.Kind != nutrition.KindRecipe || len(copied.Items) != 2 {
+		t.Fatalf("copy: %+v", copied)
+	}
+
+	// AC2, bidirectional. Alice renaming hers must not reach Bob's, and Bob
+	// editing his must not reach Alice's.
+	renamed := recipe
+	renamed.Name = "Protein shake (v2)"
+	renamed.Items = recipe.Items
+	if _, err := h.nutr.SaveFood(ctx, renamed); err != nil {
+		t.Fatalf("alice renames hers: %v", err)
+	}
+	stillBobs, err := h.nutr.GetFood(ctx, bob, got.ResourceID)
+	if err != nil || stillBobs.Name != "Protein shake" {
+		t.Fatalf("alice's rename reached bob's copy: %+v %v", stillBobs, err)
+	}
+	edited := copied
+	edited.Name = "Bob's shake"
+	edited.Items = copied.Items
+	if _, err := h.nutr.SaveFood(ctx, edited); err != nil {
+		t.Fatalf("bob edits his copy: %v", err)
+	}
+	stillAlices, err := h.nutr.GetFood(ctx, alice, recipe.ID)
+	if err != nil || stillAlices.Name != "Protein shake (v2)" {
+		t.Fatalf("bob's edit reached alice's original: %+v %v", stillAlices, err)
+	}
+}
+
+// N116/#505 end-to-end, the privacy boundary: sharing a LOG through the real
+// Create -> Accept path must never hand the recipient the sender's target or
+// body weight, even though both sit in the same database right next to the
+// entries that ARE meant to travel.
+func TestSharedNutritionDayThroughAcceptExcludesTargetsAndWeight(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	alice := person(t, h.pool, "sh_nda", "sh_nda_h")
+	bob := person(t, h.pool, "sh_ndb", "sh_ndb_h")
+	befriend(t, h, alice, "sh_nda_h", bob, "sh_ndb_h")
+	const day = "2026-08-20"
+
+	if _, err := h.nutr.SaveEntry(ctx, nutrition.Entry{
+		ID: "88888888-8888-4888-8888-888888888801", UserID: alice,
+		EatenOn: day, Meal: nutrition.MealBreakfast, Name: "Oats",
+		Servings: 1, ServingLabel: "100 g",
+		Macros: nutrition.Macros{Kcal: 150, ProteinG: 5, CarbG: 27, FatG: 3},
+	}); err != nil {
+		t.Fatalf("save entry: %v", err)
+	}
+	if _, err := h.nutr.SaveTarget(ctx, nutrition.Target{
+		UserID: alice, EffectiveOn: day, Kcal: 7000, ProteinG: 400, CarbG: 900, FatG: 300,
+		Source: nutrition.TargetManual,
+	}); err != nil {
+		t.Fatalf("save target: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO body_checkins (user_id, measured_on, weight_kg) VALUES ($1, $2, $3)`,
+		alice, day, 77.7); err != nil {
+		t.Fatalf("save checkin: %v", err)
+	}
+
+	if err := h.repo.Create(ctx, alice,
+		New{ToUsername: "sh_ndb_h", ResourceType: "nutrition_day", ResourceID: day}); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	inbox, err := h.repo.Inbox(ctx, bob)
+	if err != nil || len(inbox) != 1 {
+		t.Fatalf("inbox: %+v %v", inbox, err)
+	}
+
+	got, err := h.repo.Accept(ctx, bob, inbox[0].ID)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	copied, err := h.nutr.GetFood(ctx, bob, got.ResourceID)
+	if err != nil {
+		t.Fatalf("bob cannot read his copy: %v", err)
+	}
+	if len(copied.Items) != 1 || copied.Kcal != 150 || copied.ProteinG != 5 {
+		t.Fatalf("copy = %+v, want exactly alice's one entry", copied)
+	}
+
+	// The actual boundary: bob acquired NOTHING in nutrition_targets or
+	// body_checkins as a side effect of accepting.
+	var targets, checkins int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM nutrition_targets WHERE user_id = $1`, bob).Scan(&targets); err != nil {
+		t.Fatalf("count bob's targets: %v", err)
+	}
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM body_checkins WHERE user_id = $1`, bob).Scan(&checkins); err != nil {
+		t.Fatalf("count bob's checkins: %v", err)
+	}
+	if targets != 0 {
+		t.Fatalf("bob acquired %d targets from accepting a food log", targets)
+	}
+	if checkins != 0 {
+		t.Fatalf("bob acquired %d body checkins from accepting a food log", checkins)
+	}
+}
+
+func ptrF(v float64) *float64 { return &v }
