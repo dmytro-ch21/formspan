@@ -18208,3 +18208,65 @@ confusing — Health Connect's 30-day default history wall.
 - N476's existing `/v1/biometric/*` auth/ownership scenarios (above) apply
   unchanged to samples/metrics arriving via this path — there is no
   separate code path per `source_platform`.
+
+
+## N480 — BJJ: heart rate as corroboration for session RPE, never a replacement (`apps/mobile/app/bjj/session/[id].tsx`, `apps/mobile/lib/bjjSession.ts`'s `hrCorroboration`, `GET /v1/biometric/sessions/{id}/metrics` via `apps/mobile/lib/biometric.ts`)
+
+The display half of N476–N478's biometric module, specifically for BJJ's
+purely-retrospective session review screen. Design doc §5.5: optical wrist HR
+is unreliable under grip, flexion and contact — "grappling is the pathological
+case" — so `session_rpe` stays the primary internal-load metric for BJJ and
+heart rate only ever corroborates it. `hrCorroboration` is the one function
+deciding whether any of this reaches the screen, covered directly by
+`apps/mobile/lib/__tests__/bjjHrCorroboration.test.ts`.
+
+### Happy path
+
+- Finish a BJJ session with a dense, workout-anchored HR reading behind it
+  (`hr_source: 'workout'` or `'window'` with a sample count at or above
+  `HR_LIMITED_SAMPLE_THRESHOLD`, currently 12): the session review screen
+  shows a small "HEART RATE" block below the existing "HOW IT FELT" (RPE)
+  block — smaller type, dimmer color, no tile of its own — reading
+  "Avg _ bpm · Max _ bpm" with the caption "Corroborates your RPE above —
+  not a replacement for it".
+- The HR block never appears above, beside, or in a same-sized tile as the
+  RPE block — a glance at the screen has to land on RPE first.
+- Only the figures actually present render: a row with `avg_hr_bpm` but no
+  `max_hr_bpm` (or vice versa) shows just the one, not a blank/dash for the
+  other.
+
+### Edge cases & errors
+
+- **`hr_source: 'none'`**: the HR block is absent entirely — no "no data"
+  row, no dash, no placeholder. A session with no wearable, or nothing that
+  fell inside its window, must look identical to one this feature doesn't
+  know about yet.
+- **Sparse/low-confidence data** (`sample_count` below
+  `HR_LIMITED_SAMPLE_THRESHOLD`): the HR block still shows the avg/max
+  figures, but the caption changes to "Only N reading(s) — limited data,
+  treat as a hint" instead of the corroboration line — never presented with
+  the same confidence as a dense reading. Verify the boundary is exact (N-1
+  reads "limited", N reads normal confidence).
+- **No `session_metrics` computed yet** (design doc §6.4: absent is a
+  normal state, not an error — the watch may not have synced): the screen
+  renders with no HR block and no error state, exactly like `hr_source:
+  'none'` from the athlete's point of view.
+- **Offline / the metrics fetch fails**: same as "not yet computed" — no
+  error surfaced on this screen, no retry storm; `getSessionMetrics`
+  already turns a 404 into `null` and any other failure is swallowed the
+  same best-effort way the technique-name lookup on this screen already is.
+- **A session that hasn't ended yet**: no metrics fetch is attempted at all
+  (nothing to enrich from an open-ended window) — verify no network call
+  fires for an in-progress session opened from Today.
+- **A strength or running session's review screen**: out of scope for this
+  ticket by design — §5.5's ordering reversal ("for strength and running,
+  wrist HR is fine and the ordering can be reversed") means this specific
+  secondary-to-RPE framing is BJJ-only; verify no other sport's review
+  screen was touched by this change.
+
+### Auth/security
+
+- The HR figures shown are only ever the signed-in athlete's own —
+  inherited entirely from `GET /v1/biometric/sessions/{id}/metrics`'s
+  existing ownership check (N476/#821); this ticket adds no new endpoint
+  and no new authorization surface.

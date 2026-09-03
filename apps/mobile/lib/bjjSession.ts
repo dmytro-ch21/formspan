@@ -1,4 +1,5 @@
 import { apiRequest } from './apiRequest';
+import type { SessionMetrics } from './biometric';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -381,6 +382,77 @@ export function describeRPE(rpe: number): string {
   if (rpe <= 7) return 'Hard';
   if (rpe <= 9) return 'Very hard';
   return 'All out';
+}
+
+/**
+ * Below this many `heart_rate` samples backing a session's `session_metrics`,
+ * the reading gets a "limited data" caveat rather than the same confidence as
+ * a dense one — N480/#825.
+ *
+ * Grounded in the design doc's own measurement (§2): "a 60-minute BJJ session
+ * logged in VOLA with no Watch workout running yields on the order of a dozen
+ * sparse samples, several of them taken while the athlete was sitting down."
+ * That is what "sparse" looks like for THIS sport specifically, so a count in
+ * that range is exactly the case §5.5 warns about — real evidence, but not
+ * enough of it to lean on.
+ */
+export const HR_LIMITED_SAMPLE_THRESHOLD = 12;
+
+/** What the BJJ session review screen shows for a session's HR corroboration. */
+export type HRCorroboration =
+  | { show: false }
+  | { show: true; confidence: 'normal' | 'limited'; value: string; caption: string };
+
+/**
+ * Whether — and how — a BJJ session's HR-derived metrics belong on the
+ * review screen, secondary to the athlete's own `session_rpe`.
+ *
+ * Design doc §5.5: optical wrist HR is unreliable under grip, flexion and
+ * contact — "grappling is the pathological case" — so session RPE stays the
+ * primary internal-load metric for BJJ and heart rate only ever corroborates
+ * it. This function is the one place that decision is enforced in code:
+ *
+ * - `hr_source: 'none'` (no wearable, or nothing fell in the session's
+ *   window) shows nothing at all — no fabricated placeholder. A dash or a
+ *   "no data" row would read as "we tried to measure and got nothing," which
+ *   is a different, false claim from "there is nothing to measure."
+ * - Anything else is shown, but always as a corroborating detail (the
+ *   `caption` says so explicitly) rather than a verdict on the RPE above it,
+ *   and caveated once the sample count is the kind of sparse §2 describes —
+ *   see `HR_LIMITED_SAMPLE_THRESHOLD`.
+ *
+ * Deliberately returns display strings rather than raw numbers: the
+ * confidence framing (never "confirmed by HR", never "validated") is part of
+ * what this ticket exists to enforce, and a screen re-deriving its own copy
+ * from the raw fields could drift away from that framing one call site at a
+ * time.
+ */
+export function hrCorroboration(
+  metrics: Pick<
+    SessionMetrics,
+    'hr_source' | 'sample_count' | 'avg_hr_bpm' | 'max_hr_bpm'
+  > | null,
+): HRCorroboration {
+  if (!metrics || metrics.hr_source === 'none') return { show: false };
+  // Compute forces hr_source to 'none' whenever no samples were found (see
+  // the backend's HRSource doc comment), so this is defence in depth against
+  // a row with real evidence but nothing left to show — never expected in
+  // practice, but "show nothing" is still the right answer for it.
+  if (metrics.avg_hr_bpm == null && metrics.max_hr_bpm == null) return { show: false };
+
+  const parts: string[] = [];
+  if (metrics.avg_hr_bpm != null) parts.push(`Avg ${metrics.avg_hr_bpm} bpm`);
+  if (metrics.max_hr_bpm != null) parts.push(`Max ${metrics.max_hr_bpm} bpm`);
+
+  const limited = metrics.sample_count < HR_LIMITED_SAMPLE_THRESHOLD;
+  return {
+    show: true,
+    confidence: limited ? 'limited' : 'normal',
+    value: parts.join(' · '),
+    caption: limited
+      ? `Only ${metrics.sample_count} reading${metrics.sample_count === 1 ? '' : 's'} — limited data, treat as a hint`
+      : 'Corroborates your RPE above — not a replacement for it',
+  };
 }
 
 /** Blank reflection for a kind, used as the starting point of a new log. */

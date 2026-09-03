@@ -54644,6 +54644,87 @@ open question above — whether the ORIGINAL crowding complaint was actually
 about a collapsed populated card rather than the empty one this fix
 targeted.
 
+## 2026-09-03 — N480: heart rate corroborates a BJJ session's RPE, and never replaces it (#825)
+
+The display half of the biometric integration (N476–N478, all merged) landing
+on the one screen where the design doc is explicit that HR must NOT be
+treated as equal or superior evidence to the athlete's own account:
+`docs/decisions/health-integration-design.md` §5.5, "The wrist is the wrong
+place for a gi." Optical wrist HR degrades under grip, wrist flexion and
+contact — "the general finding in the validation literature is that wrist
+PPG is good during running and materially worse during activities with
+sharp, random arm movement and gripping; grappling is the pathological
+case." §5.5's conclusion follows directly: "session RPE stays the primary
+internal-load metric for BJJ, and heart rate corroborates it" — sRPE
+correlates with HR-derived TRIMP in the 0.65–0.78 range across team sports,
+needs no hardware, and "does not care that someone had a lapel grip across
+the athlete's watch for four minutes."
+
+**What was built.** `apps/mobile/app/bjj/session/[id].tsx` (the purely
+retrospective BJJ session review screen — it has no live-tracking mode to
+begin with, so N477/N478's window-join already covers it like any other
+sport) now fetches `GET /v1/biometric/sessions/{id}/metrics` via
+`lib/biometric.ts`'s `getSessionMetrics` once a session has an `ended_at`,
+best-effort and non-blocking — same shape as the existing technique-name
+lookup on this screen: a failed or 404 fetch resolves to `null` rather than
+surfacing an error, matching design doc §6.4 ("`session_metrics` being
+absent is a normal state, not an error").
+
+A new pure function, `hrCorroboration` in `lib/bjjSession.ts`, is the single
+place that decides whether any of it reaches the screen:
+
+- `hr_source: 'none'` (no wearable, or nothing fell in the session's window)
+  shows **nothing** — no dash, no "no data" row, no placeholder. A
+  fabricated empty state would read as "we tried to measure and got
+  nothing," a different and false claim from "there is nothing to measure."
+- Otherwise it renders avg/max HR with a caption that is always
+  corroborating language ("Corroborates your RPE above — not a replacement
+  for it") — never "confirmed by", "validated by", or anything that reads
+  as HR checking the athlete's own report rather than the reverse.
+- Below `HR_LIMITED_SAMPLE_THRESHOLD` (12 samples) the caption switches to
+  an explicit caveat ("Only N readings — limited data, treat as a hint")
+  instead of hiding the row outright. The threshold is not arbitrary: it is
+  the design doc's own measured figure (§2) for what "sparse" looks like on
+  this exact sport — "a 60-minute BJJ session logged in VOLA with no Watch
+  workout running yields on the order of a dozen sparse samples, several of
+  them taken while the athlete was sitting down."
+
+On screen, the HR block sits directly below the existing "HOW IT FELT" (RPE)
+block, in a smaller font and without a `Stat` tile of its own — deliberately,
+so a same-sized tile next to mat-time/rolling-time never reads as a
+measurement on equal footing with the athlete's account. The label ("HEART
+RATE") uses `textDim` matching the existing `reportedLabel` precedent on
+this same screen; the value and caption use `textMuted` rather than going
+dimmer still, because `textDim` measures only 3.96:1 against `bg` and an
+actual sentence (the caption) needs to clear 4.5:1 — the label is a short
+all-caps tag, which is the only reason the existing pattern gets away with
+it.
+
+**Why this is BJJ-only, and stays that way.** §5.5's own last line — "for
+strength and running, wrist HR is fine and the ordering can be reversed" —
+means this specific secondary-to-RPE framing is not a general rule to carry
+to every sport. Nothing here touches the strength or running session review
+screens; if a future ticket wants HR shown there, it earns its own framing
+decision rather than inheriting this one.
+
+**Testing**: `apps/mobile/lib/__tests__/bjjHrCorroboration.test.ts`, ten
+pure-logic tests against `hrCorroboration` — the `'none'` guard checked
+independently of the null-figures guard beneath it (so deleting either one
+alone still fails a test, not just the pair together), the exact sample-count
+threshold boundary, singular/plural reading-count grammar, and a guard
+against the caption ever using confirm/valid/override/replace language.
+Mutation-verified: removing the `hr_source === 'none'` check from the guard
+turned the dedicated "wins even if avg/max were non-null" test red as a real
+assertion failure (not a compile error); restoring and re-running confirmed
+all ten tests green again in the same session.
+
+**Verification**: `pnpm run verify` full chain, green. `ac-verifier` against
+#825's four acceptance criteria — all `MET` against the diff (this feature
+has no native/device-only surface of its own; it only reads a metrics row
+N477/N478 already write, and their own device evidence is what backs the
+data actually reaching this screen). `frontend-reviewer` reviewed the diff
+against design intent from `health-integration-design.md` §5.5.
+
 ## Open items / known gaps as of this entry
 
 

@@ -14,8 +14,10 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { addDays, dayString, monthGrid, weekDays as calendarWeekDays } from '@/lib/calendar';
+import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import {
   getDetail,
+  hrCorroboration,
   KINDS,
   LIVE_ROWS,
   describeRPE,
@@ -309,6 +311,35 @@ export default function BjjSessionScreen() {
       cancelled = true;
     };
   }, [getToken]);
+
+  // HR corroboration (N480/#825) — best-effort and non-blocking, same shape
+  // as the technique lookup above. A session that never ended has no window
+  // to have computed metrics from, so this doesn't even ask; a finished one
+  // may still have nothing (no wearable, offline, or the watch hasn't synced
+  // yet — design doc §6.4: "session_metrics being absent is a normal state,
+  // not an error"), and `getSessionMetrics` already turns that 404 into
+  // `null` rather than throwing. `hrCorroboration` (lib/bjjSession.ts) is
+  // what decides whether any of this reaches the screen at all.
+  const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  useEffect(() => {
+    // No synchronous reset here on purpose (react-hooks/set-state-in-effect):
+    // `hrMetrics` already starts `null`, and nothing on this screen ever
+    // un-ends a session for the same `id`, so there is no path that leaves a
+    // stale value behind for this to clear.
+    if (!id || !session?.ended_at) return;
+    let cancelled = false;
+    getSessionMetrics(getToken, id)
+      .then((m) => {
+        if (!cancelled) setHrMetrics(m);
+      })
+      .catch(() => {
+        if (!cancelled) setHrMetrics(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, session?.ended_at, getToken]);
+  const hr = hrCorroboration(hrMetrics);
 
   /**
    * Delete and Finish, which live here because nothing else offers them.
@@ -639,6 +670,23 @@ export default function BjjSessionScreen() {
             : 'Not recorded'}
         </Text>
       </RNView>
+
+      {/* N480/#825: HR is corroboration for the RPE above, never a rival to
+          it — design doc §5.5, "grappling is the pathological case" for
+          optical wrist HR. Deliberately smaller and dimmer than `reported`
+          above, deliberately below it, and deliberately absent (not a dash)
+          whenever `hrCorroboration` says there's nothing trustworthy to
+          show. Do not give this its own Stat tile — a same-sized tile next
+          to mat time/rolling time would read as a measurement on equal
+          footing with the athlete's own account, which is the exact framing
+          this ticket exists to rule out. */}
+      {hr.show && (
+        <RNView style={styles.hr} testID="bjj-session-hr">
+          <Text style={styles.hrLabel}>HEART RATE</Text>
+          <Text style={styles.hrValue}>{hr.value}</Text>
+          <Text style={styles.hrCaption}>{hr.caption}</Text>
+        </RNView>
+      )}
 
       {/* Only when it says something the title doesn't. The name defaults to
           the kind, so an un-renamed session with no gi answer and no academy
@@ -1076,6 +1124,17 @@ const styles = StyleSheet.create({
   reported: { marginBottom: 12, gap: 2 },
   reportedLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
   reportedValue: { fontSize: 14, color: vola.textMuted, fontStyle: 'italic' },
+  // Smaller than `reported*` above at every step — the visual half of
+  // "secondary to RPE, never a rival to it" (N480/#825): `hrValue` is 12px
+  // against `reportedValue`'s 14px, and `hrCaption` smaller again. Colors
+  // stay on `textMuted`/`textDim` exactly as `reported*` does, rather than
+  // going dimmer still — `textDim` on `bg` clears only 3.96:1, so an actual
+  // sentence (the caption) stays on `textMuted` (7.38:1); `textDim` is used
+  // only for the all-caps label, matching `reportedLabel`'s own precedent.
+  hr: { marginBottom: 12, gap: 2 },
+  hrLabel: { fontSize: 8, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
+  hrValue: { fontSize: 12, color: vola.textMuted },
+  hrCaption: { fontSize: 11, color: vola.textMuted, fontStyle: 'italic' },
   stat: {
     flex: 1,
     backgroundColor: vola.surface,
