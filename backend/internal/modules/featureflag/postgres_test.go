@@ -51,3 +51,40 @@ func TestPostgresRepository_List(t *testing.T) {
 		t.Fatalf("expected %q to have a description, got %+v", "new_recommendation_engine", seeded)
 	}
 }
+
+// TestPostgresRepository_Enabled exercises the method N473/#812 added —
+// session.Handler's FlagSource gate reads exactly this. Covers both the
+// seeded-but-disabled case (matching List's own assertion above) and the
+// "never seeded at all" case, which must read as false rather than error —
+// see Enabled's own doc comment for why a missing row isn't a failure.
+func TestPostgresRepository_Enabled(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	repo := NewPostgresRepository(pool)
+
+	enabled, err := repo.Enabled(ctx, "new_recommendation_engine")
+	if err != nil {
+		t.Fatalf("enabled: %v", err)
+	}
+	if enabled {
+		t.Fatalf("expected %q to default to disabled", "new_recommendation_engine")
+	}
+
+	enabled, err = repo.Enabled(ctx, "this_key_has_never_been_seeded_"+t.Name())
+	if err != nil {
+		t.Fatalf("enabled for an unseeded key must not error, got: %v", err)
+	}
+	if enabled {
+		t.Fatalf("an unseeded key must read as disabled, not enabled")
+	}
+}

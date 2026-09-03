@@ -248,6 +248,10 @@ export default function WorkoutEditorPage({
             getToken,
             sets.map((x) => x.exercise_id),
             workout.goal,
+            undefined,
+            undefined,
+            // N473/#812 item 8 — see fetchSuggestions's own doc comment.
+            units,
           ),
         );
       } catch {

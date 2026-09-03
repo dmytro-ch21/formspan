@@ -106,6 +106,20 @@ const (
 	// SuggestRepeatStale: long enough ago that the last number isn't evidence
 	// of what you can do today.
 	SuggestRepeatStale SuggestionCode = "repeat_stale"
+
+	// SuggestEffortConflict: ProgressV2 only (progression_v2.go) — a set
+	// carried both a RIR and an RPE, and they imply materially different
+	// reserve (the "RPE 8 / 0 RIR" contradiction). v1 lets RIR silently win;
+	// v2 says so explicitly instead of guessing which reading is right. See
+	// N473/#812.
+	SuggestEffortConflict SuggestionCode = "effort_conflict"
+	// SuggestAbstain: ProgressV2 only — the evidence is ambiguous rather
+	// than simply absent (SuggestRepeatUnknownEffort already covers "no
+	// effort recorded at all"). Reached when effort is recorded on some but
+	// not every straight working set in the cohort, or when finished history
+	// exists but never produced a usable straight-set cohort at all. An
+	// honest "can't tell" rather than a confident guess. See N473/#812.
+	SuggestAbstain SuggestionCode = "abstain"
 )
 
 // staleAfter is when a previous performance stops being evidence about today.
@@ -237,6 +251,17 @@ type SessionEffort struct {
 	PerformedAt time.Time
 	// Sets in the order performed, warm-ups already excluded.
 	Sets []Set
+
+	// Finished is true once the session carries an ended_at — see N473/#812.
+	// V1's `Progress` below has never read this field and must not start:
+	// this exists purely for ProgressV2 (progression_v2.go), which treats an
+	// unfinished session (false here) as never having happened, because the
+	// currently-open session becoming its own history is exactly the "12
+	// reps at 228, recombined with 335" failure mode's sibling bug. Left
+	// false by any test fixture that doesn't set it, which is the correct
+	// reading for every fixture written before this field existed — nobody
+	// retroactively becomes "finished" by a field they never populated.
+	Finished bool
 }
 
 // ProgressionInput is everything the rule reads. Assembled by the repository
@@ -269,6 +294,19 @@ type ProgressionInput struct {
 	// inventing a second axis — reps, effort — that it does not reason
 	// about.
 	InSessionWorkingWeightsKg []float64
+
+	// UnitSystem is "imperial" or "metric" — client-supplied, same pattern as
+	// Goal above, and for the same reason: the client already knows the
+	// athlete's own preference (profile.UnitSystem), and round-tripping
+	// through a lookup here would be a new cross-module dependency for a
+	// value the caller already has in hand. Anything else, including empty,
+	// reads as metric — the rounding this repo has always done, so a client
+	// that doesn't send this yet sees byte-identical numbers.
+	//
+	// Read only by ProgressV2 (progression_v2.go) — see roundToPlateV2's doc
+	// comment for why a suggestion has to be rounded in the unit the athlete
+	// actually trains in rather than converted through kg.
+	UnitSystem string
 }
 
 // InSessionSignalCode flags when today's own performance disagrees with the

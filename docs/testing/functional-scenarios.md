@@ -945,6 +945,108 @@ Reported from a device: logging a heavier set didn't change the recommendation f
 - The rep range is the workout's goal, not a per-exercise choice — an accessory movement in a powerlifting session still gets 3–5.
 - Deload adjusts load only, never set count or frequency.
 
+### N473/#812, phase 1 of #753 — the corrected engine (`new_recommendation_engine`)
+
+Domain: the same endpoint, a parallel engine (`ProgressV2`), gated behind an
+operator-controlled feature flag seeded disabled. Reported bug: `repSpread`
+computed a rep range across every set at ANY weight in a session, so a squat
+session with sets of 12 at 228 and a single top set of 3 at 335 came back as
+"335 × 8" — a set never performed. Every scenario below assumes
+`new_recommendation_engine` is **on**; with it off, the endpoint must behave
+exactly as the section above describes, unchanged.
+
+**The golden scenario, and it anchors everything else**
+- The reported session (12 reps at one weight, fewer reps at a heavier top
+  set, in the same finished session) must never come back as the heavier
+  weight paired with the lower weight's rep count, on ANY combination of
+  effort recorded on the top set. Test with no effort, with reserve-showing
+  effort, and with a conflicting RIR/RPE pair on the top set — the invariant
+  (heavier weight + the lighter set's rep ceiling never appear together) must
+  hold in every case, not just one.
+
+**Coherent cohort (the root fix)**
+- A rep range must be computed only from sets at the SAME weight as the
+  session's heaviest straight working set — sets at other weights in the
+  same session must not widen or narrow it.
+- The anchor weight itself must come from straight working sets only; a
+  backoff or drop set weighing more or less than the straight sets must not
+  become the anchor.
+
+**Straight-sets-only**
+- A backoff, drop, AMRAP or failure set must never enter the cohort a rep
+  range is computed from, even when it sits at the exact same weight as the
+  straight sets — test this specifically at equal weight, since a
+  different-weight backoff can pass by coincidence through the cohort filter
+  alone without the set-type filter doing anything.
+- A session where every logged set for an exercise is a non-straight role
+  (all backoff/AMRAP/failure/drop) must return `abstain`, not a guess built
+  from the wrong role and not `repeat_unknown_effort`.
+
+**Finished sessions only**
+- The currently-open session (no `ended_at`) must never be read as its own
+  history, however recent or heavy its sets — the recommendation must come
+  from the most recent FINISHED session instead.
+- If every session in the lookback window is still open, the result must be
+  `no_history`, with wording that doesn't claim "first time logging this" to
+  someone mid-workout.
+- The stall/deload count must also skip an open session — three finished
+  sessions at one load deloads; two finished plus one open must not.
+
+**Effort required, and the two new results**
+- Both a RIR and an RPE recorded on the same set, implying materially
+  different reserve (roughly a 2-rep-or-more gap — an RPE-8/RIR-0 pair is the
+  reported case) → `effort_conflict`, with `target_weight_kg`/`target_reps`
+  both null. RIR must not silently win.
+- A RIR/RPE pair that roughly agrees (e.g. RIR 2 and RPE 8) must NOT trigger
+  `effort_conflict` — a negative control, since a check that never has one is
+  unfalsifiable.
+- An assisted set's RIR/RPE must not trigger `effort_conflict` either —
+  assistance already forces reserve to zero regardless of what was logged.
+- Effort recorded on some but not every straight set at the anchor weight →
+  `abstain` (both targets null), distinct from the existing behaviour when
+  NO set in the cohort has effort recorded (still `repeat_unknown_effort`,
+  unchanged).
+
+**Rounding**
+- With `unit_system=imperial`, a suggested weight must convert to a whole
+  multiple of the movement's real pound increment (5 or 10 lb) — never a
+  value like 68.9 lb, which is what a 1.25 kg-grid round-trip produces.
+- With `unit_system` omitted or anything other than exactly `imperial`, the
+  suggested weight must be byte-identical to the same request against the
+  OLD engine (flag off) — metric behaviour must not have moved at all.
+
+**Wiring**
+- The flag off (including a client that predates it) must reproduce the
+  original reported bug byte-for-byte — this is the "unaffected" contract,
+  not merely "still works".
+- A feature-flag lookup failure must return `200` with the old engine's
+  answer, never a `500`.
+
+**Mobile — suggestion button targeting (item 7)**
+- The "Use" button must apply only to pending STRAIGHT working sets. A
+  pending backoff, drop, AMRAP or failure set in the same exercise group must
+  be left untouched by it — test with a mixed group and confirm only the
+  straight sets' weight/reps change.
+
+**Mobile — the strength-suggestion preference (item 9)**
+- Turning "Strength" off in Settings → Suggestions must hide the mid-session
+  hint (and its "Use" button) on the session screen, not only on Today.
+  Turning "BJJ" off must leave the strength hint showing. The preference must
+  be re-read on returning from Settings, not only on the session screen's
+  first mount.
+
+**Not yet covered / deferred (phase 1 boundary)**
+- A per-workout-item prescription model, exercise profiles, and priority
+  ordering (phase 2 of #753) — not attempted here.
+- A separate warm-up generation engine or fatigue-detection advisories
+  (phase 3) — not attempted here.
+- Splitting next-session/warm-up/in-session/weekly-program recommendations
+  into distinct products (phase 4) — not attempted here.
+- An immutable per-suggestion decision record, shadow replay, or staged
+  rollout (phase 5) — not attempted here.
+- The flag is a single global on/off — no staged or per-user rollout exists
+  to test.
+
 ---
 
 ## Rest timer (`apps/mobile` only)

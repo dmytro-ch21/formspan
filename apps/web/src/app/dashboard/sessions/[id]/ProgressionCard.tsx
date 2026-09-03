@@ -62,6 +62,14 @@ const PHASE: Record<SuggestionCode, Phase> = {
   },
   no_history: { label: "First time", dot: "bg-text-muted", pip: "bg-text-muted" },
   not_applicable: { label: "—", dot: "bg-text-muted", pip: "bg-text-muted" },
+  // N473/#812, behind new_recommendation_engine — see SuggestionCode's own
+  // doc comment (lib/api.ts) for why neither carries a target_*.
+  effort_conflict: { label: "Check effort", dot: "bg-warn", pip: "bg-warn" },
+  // "Unclear", not "Not enough data" — abstain means the evidence is
+  // AMBIGUOUS (some effort recorded, some not; or a materially conflicting
+  // read), which repeat_unknown_effort already distinguishes from an
+  // outright ABSENCE of data. "Not enough data" reads as the latter.
+  abstain: { label: "Unclear", dot: "bg-text-muted", pip: "bg-text-muted" },
 };
 
 /**

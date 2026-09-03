@@ -78,11 +78,12 @@ export default function ExerciseDetailScreen() {
       // History is a bonus, never a blocker — the catalog entry renders
       // whether or not this succeeds. But a failure has to be *said*, not
       // rendered as an absence of history.
-      fetchSuggestions(getToken, [id])
+      fetchSuggestions(getToken, [id], undefined, undefined, undefined, units)
         .then((m) => setStats(m.get(id) ?? null))
         .catch(() => setStatsUnavailable(true));
     })();
-  }, [getToken, id]);
+    // N473/#812 item 8: units added to the deps below.
+  }, [getToken, id, units]);
 
   if (loading) {
     return (

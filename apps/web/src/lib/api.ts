@@ -384,7 +384,21 @@ export type SuggestionCode =
   | "not_applicable"
   | "repeat_hard"
   | "repeat_unknown_effort"
-  | "repeat_stale";
+  | "repeat_stale"
+  /**
+   * N473/#812, behind `new_recommendation_engine` — a set logged both an RIR
+   * and an RPE and they imply materially different reserve. No `target_*`
+   * accompanies this: the server is declining to guess which reading is
+   * right rather than letting RIR silently win, same reasoning as `abstain`.
+   */
+  | "effort_conflict"
+  /**
+   * N473/#812 — the evidence is ambiguous rather than simply absent
+   * (`repeat_unknown_effort` already covers "no effort recorded at all").
+   * No `target_*` here either — an honest "can't tell" carries no guessed
+   * number.
+   */
+  | "abstain";
 
 /**
  * Flags when today's own already-logged working sets disagree with the
@@ -1167,6 +1181,15 @@ export async function copyWorkout(
  * `target_weight_kg` derived from the top set — manufacturing a false
  * "lighter day" note on a session that went exactly to plan. Found in
  * review.
+ *
+ * `unitSystem` is N473/#812's own fix for the reported 68.9lb — behind
+ * `new_recommendation_engine`, the server rounds a suggestion in whichever
+ * unit this names rather than a kilogram grid that can land on an unloadable
+ * number once converted for display. The one global preference from
+ * `useUnits()`, not a per-exercise override — this is a single request for a
+ * whole workout, same simplifying choice `goal` already makes. Omitted
+ * entirely reads as metric on the server, which is this endpoint's
+ * behaviour without this parameter at all.
  */
 export async function fetchSuggestions(
   getToken: Token,
@@ -1174,11 +1197,13 @@ export async function fetchSuggestions(
   goal?: string | null,
   todaySets?: readonly Pick<LoggedSet, "exercise_id" | "weight_kg" | "completed" | "set_type">[],
   signal?: AbortSignal,
+  unitSystem?: UnitSystem | null,
 ): Promise<Map<string, Suggestion>> {
   const unique = [...new Set(exerciseIDs)].filter(Boolean);
   if (unique.length === 0) return new Map();
   const q = new URLSearchParams({ exercise_ids: unique.join(",") });
   if (goal) q.set("goal", goal);
+  if (unitSystem) q.set("unit_system", unitSystem);
   if (todaySets && todaySets.length > 0) {
     const pairs = todaySets
       .filter(

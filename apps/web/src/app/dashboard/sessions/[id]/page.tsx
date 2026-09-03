@@ -275,7 +275,15 @@ export default function SessionPage({
     if (!exerciseKey) return;
 
     const controller = new AbortController();
-    fetchSuggestions(getToken, exerciseKey.split(","), goal, completedWorkingSets, controller.signal)
+    fetchSuggestions(
+      getToken,
+      exerciseKey.split(","),
+      goal,
+      completedWorkingSets,
+      controller.signal,
+      // N473/#812 item 8 — see fetchSuggestions's own doc comment.
+      units,
+    )
       // Advice, not content: a failed lookup leaves the session usable.
       .then(setSuggestions)
       .catch(() => {});
@@ -286,7 +294,7 @@ export default function SessionPage({
     // completedWorkingSetsKey is the stable proxy — the effect still reads the
     // freshest completedWorkingSets value from whichever render it fires on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exerciseKey, goal, getToken, completedWorkingSetsKey]);
+  }, [exerciseKey, goal, getToken, completedWorkingSetsKey, units]);
 
   const pending = useRef<LoggedSet[] | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
