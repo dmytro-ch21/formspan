@@ -13118,6 +13118,36 @@ picture** check; none of them can be answered from a number.
     `useWeightTrend`/`listPhases` value) and should be treated as covering the
     mechanism, with this scenario covering the observable symptom on a device.
 
+### W11 — the action pill stays inside the card at accessibility text sizes (`components/TrendCard.tsx`)
+
+Found during #484's device audit at accessibility XXXL: the footer row's
+action pill (`Record Weight`) had no `flexShrink`, so its label widened the
+pill past the card's border and off the screen's right edge. Fixed in the
+shared `TrendCard` component, so every caller benefits — currently that is
+exactly one caller, the weight card at the top of Goals.
+
+35. **Set accessibility XXXL before launching the app** — the same trap named
+    in the W10/F21 scenarios above applies here identically: layout has to be
+    MEASURED at that size, not re-measured into it after the fact.
+36. **`Record Weight` stays inside the card border.** Wrapping onto a second
+    line is fine; any part of the pill or its label sitting outside the card,
+    or off the screen edge, is the defect.
+37. **The control is still fully tappable, not merely visible.** Tap the
+    pill's rightmost portion specifically — a clipped or partially off-screen
+    hit target that happens to still register somewhere is not the same thing
+    as the control being reachable.
+38. **Repeat at the largest *ordinary* size** (`extra-extra-extra-large`, one
+    step below the accessibility range) **and confirm no regression** — this
+    size already fit before the fix, and the two Dynamic Type tiers behave
+    differently enough that a fix aimed at one can leave the other untested.
+39. **NEEDS HUMAN EVIDENCE, and it is this ticket's own acceptance
+    criterion**: nothing in this environment can drive real Yoga layout or a
+    real screen edge — `trendCard.test.tsx`'s regression test only pins that
+    the pill's and its label's styles both carry `flexShrink: 1` (mutation-
+    verified: removing either turns the test red), which proves the mechanism
+    the fix depends on is present, not that the pill visibly stays inside the
+    card at a given text scale on a real device.
+
 ## W10 — the scrolling region has a visible top edge (`components/ScreenHeader.tsx`)
 
 Covers the hairline `ScreenHeader` draws when its own bottom edge is the top of

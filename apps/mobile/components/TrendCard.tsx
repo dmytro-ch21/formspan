@@ -155,7 +155,9 @@ export function TrendCard({
           {/* `accent.on`, NOT `accent.ink` — this pill IS the fill, and `ink`
               paints the label in the accent colour on the accent colour. That
               shipped once; only a Simulator can see it. */}
-          <Text style={[styles.actionText, { color: accent.on }]}>{actionLabel}</Text>
+          <Text style={[styles.actionText, { color: accent.on }]} testID="trend-card-action-label">
+            {actionLabel}
+          </Text>
         </Pressable>
       </RNView>
     </View>
@@ -217,6 +219,15 @@ const styles = StyleSheet.create({
   footLabel: { fontSize: 10, letterSpacing: 1, opacity: 0.5 },
   footValue: { fontSize: 20, fontWeight: '700' },
   footWhen: { fontSize: 11, opacity: 0.5 },
-  action: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
-  actionText: { fontSize: 13, fontWeight: '600' },
+  action: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    // Without this the pill refuses to give up width at accessibility text
+    // sizes, and `actionLabel` runs past the card's border and off the
+    // screen — #491. `flexShrink` lets it give up width instead, so the
+    // label wraps onto a second line rather than overflowing.
+    flexShrink: 1,
+  },
+  actionText: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
 });

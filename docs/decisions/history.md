@@ -53677,6 +53677,52 @@ ticket's own scope cut:**
   picker or confirm the suggestion card's copy reads right on a phone.
 
 
+## 2026-09-03 — W11 (#491): TrendCard's action pill stops running off screen at accessibility text sizes
+
+Fixed the overflow #484's device audit measured at accessibility XXXL: the
+shared `TrendCard`'s footer row (`apps/mobile/components/TrendCard.tsx`) put
+no `flexShrink` on the "Record Weight" action pill or its label. React
+Native's default `flexShrink` is `0` (unlike CSS's `1`), so at ordinary text
+sizes the pill fit purely by luck — nothing was actually letting it give up
+width — and at accessibility XXXL the label grew past the pill's intrinsic
+size, the pill refused to shrink, and it pushed off the card's right edge and
+past the screen boundary, with `justifyContent: 'space-between'` doing nothing
+to stop it since neither sibling ever shrinks.
+
+The fix is `flexShrink: 1` on both the pill (`styles.action`) and its label
+(`styles.actionText`) — one component, so every caller benefits. Right now
+that is exactly one call site: `TrendCard` is only ever rendered from
+`apps/mobile/components/WeightTrendCard.tsx`, itself only used by
+`apps/mobile/app/(tabs)/goals.tsx`'s weight card (the four other `trend.tsx`
+screens only import `TrendCard`'s `emptyCopy` helper, not the component).
+`apps/mobile/components/nutrition/TargetCard.tsx`'s `edit` pill already
+carries this exact fix with a comment citing #491 and #484 — landed slightly
+earlier as its own defensive measure, so this PR's fix and that comment now
+point at each other rather than one being stale.
+
+**Testing**: no Dynamic-Type-sensitive layout test convention exists anywhere
+in this repo — `jest-expo` doesn't run Yoga's real layout engine, so there is
+no way to assert actual on-screen wrapping or overflow from this suite. What
+`apps/mobile/components/__tests__/trendCard.test.tsx` now pins instead is the
+mechanism the fix depends on: a new test flattens the rendered pill's and
+label's styles and asserts `flexShrink: 1` on both, mutation-verified
+(removing either `flexShrink` turns it red as an actual test failure, not a
+compile error; restored and re-run green). That is a narrower claim than "the
+pill stays inside the card at XXXL" — it only proves nothing in the fix's own
+styling can silently regress RN's shrink-refusing default. The real claim
+stays the ticket's own **NEEDS HUMAN EVIDENCE** criterion: seen on a device at
+accessibility XXXL, with the pill's right-hand portion actually tapped rather
+than merely looked at, and re-checked at the largest *ordinary* size
+(`extra-extra-extra-large`) for no regression there.
+
+**Open questions this leaves:**
+- The device check above is unresolved as of this entry — the PR does not
+  close #491 on the strength of this fix alone; that verdict is the user's.
+- The sibling defect #485 (`Row`'s `flex: 1` label column squeezing "Resting
+  rate" onto three lines on the Goals screen) is explicitly out of scope here,
+  as the original ticket says — it is local to that screen, not `TrendCard`.
+
+
 ## Open items / known gaps as of this entry
 
 

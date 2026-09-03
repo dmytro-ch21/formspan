@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { TrendCard } from '../TrendCard';
 import { buildTrend, type Reading } from '@/lib/trendSeries';
@@ -97,6 +98,24 @@ test('TODAY shows the latest raw reading', () => {
 test('the action is always reachable, even with nothing to draw', () => {
   card(null);
   expect(screen.getByTestId('trend-card-action')).toBeTruthy();
+});
+
+// #491: at accessibility XXXL, `actionLabel` widened the pill past the card's
+// border and off the screen, because nothing in the footer row was allowed to
+// give up width. jest-expo does not run Yoga's real layout — there is no
+// pixel measurement available here to prove the pill stays inside the card at
+// a given text scale, and that check stays a NEEDS HUMAN EVIDENCE item on
+// #491 (device run at accessibility XXXL, control actually tapped). What this
+// CAN pin is the mechanism the fix depends on: both the pill and its label
+// must be able to shrink, or RN's default `flexShrink: 0` reproduces the
+// overflow regardless of what the device check finds. Removing either
+// `flexShrink` fails this test.
+test('the action pill and its label can both give up width rather than overflow the card', () => {
+  card([{ on: shift(TODAY, -1), value: 97 }]);
+  const pillStyle = StyleSheet.flatten(screen.getByTestId('trend-card-action').props.style);
+  const labelStyle = StyleSheet.flatten(screen.getByTestId('trend-card-action-label').props.style);
+  expect(pillStyle.flexShrink).toBe(1);
+  expect(labelStyle.flexShrink).toBe(1);
 });
 
 // ---------------------------------------------------------------------------
