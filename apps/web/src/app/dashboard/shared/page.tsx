@@ -35,7 +35,13 @@ import {
 
 /** Where a given kind of accepted thing lives, once it is yours. A type absent
  *  from this map still accepts — it just does not navigate, which is the right
- *  failure for a client that is older than the server it is talking to. */
+ *  failure for a client that is older than the server it is talking to.
+ *
+ *  N116/#505's three additions (a food, a meal, a day's log) are deliberately
+ *  absent here: web has no per-food editing screen to send them to — food
+ *  logging is mobile's surface, see `apps/mobile/app/food/*` — so those
+ *  accept correctly here and simply do not navigate, same as any other type
+ *  this build has not built a destination for. */
 const DESTINATION: Record<string, (id: string) => string> = {
   sequence: (id) => `/dashboard/sequences/${id}`,
   workout: (id) => `/dashboard/workouts/${id}`,
@@ -44,6 +50,9 @@ const DESTINATION: Record<string, (id: string) => string> = {
 const KIND_LABEL: Record<string, string> = {
   sequence: "Sequence",
   workout: "Workout",
+  nutrition_entry: "Food",
+  nutrition_food: "Meal",
+  nutrition_day: "Day’s log",
 };
 
 export default function SharedWithYouPage() {

@@ -82,11 +82,13 @@ import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { editEntry, localEntry, localFood, removeEntry, splitEntry } from '@/lib/foodLog';
+import { ShareToFriend } from '@/components/ShareToFriend';
+import { editEntry, entrySyncState, localEntry, localFood, removeEntry, splitEntry } from '@/lib/foodLog';
 import { gramsBasisFromLabel, parseQuantity, servingsForLabelGrams } from '@/lib/foodQuantity';
 import { fmtAmount, MEALS, rescale, todayString, type Entry, type Food, type Meal } from '@/lib/nutrition';
 import { entriesFromRecipeItems } from '@/lib/recipe';
-import { request } from '@/lib/sync';
+import { shareBlockedReason } from '@/lib/shares';
+import { request, useSyncState } from '@/lib/sync';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
 
@@ -132,6 +134,10 @@ export default function EditEntryScreen() {
   // state) so this and the servings chips can share one rescale path.
   const [gramsText, setGramsText] = useState('');
 
+  // N116/#505 — whether this entry is safe to hand to `ShareToFriend`. Read
+  // alongside the entry itself, from the same two flags `removeEntry` reads.
+  const [shareSync, setShareSync] = useState<{ unsynced: boolean; owed: boolean } | null>(null);
+
   useEffect(() => {
     if (!userId || !id) return;
     let live = true;
@@ -169,6 +175,29 @@ export default function EditEntryScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, id]);
+
+  // N116/#505 — a separate read, same reasoning workoutDetailScreen's own
+  // `blockedFromSharing` effect gives: sync flags can change without the
+  // entry's own fields changing (a background push finishing), so this is
+  // not derivable from `entry` alone.
+  //
+  // `lastSyncAt` IN THE DEPS, not just `[userId, id]` — `workout/[id].tsx`'s
+  // own copy of this effect documents why: `request()` returns immediately
+  // and pushes in the background, so at the moment this screen first reads
+  // the flags a freshly-logged entry is still `unsynced` in SQLite. Without
+  // `lastSyncAt`, Share would stay stuck saying "Not synced yet" long after
+  // the push actually landed, until the screen was left and reopened.
+  const { lastSyncAt } = useSyncState();
+  useEffect(() => {
+    if (!userId || !id) return;
+    let live = true;
+    entrySyncState(userId, id).then((s) => {
+      if (live) setShareSync(s);
+    });
+    return () => {
+      live = false;
+    };
+  }, [userId, id, lastSyncAt]);
 
   // N115 — a second, separate read rather than folded into the one above: it
   // depends on `entry.source_food_id`, which is not known until the first
@@ -362,6 +391,13 @@ export default function EditEntryScreen() {
   // Recomputed every render rather than memoised: it is one cheap regex
   // against a string that only ever changes when a fresh `entry` loads.
   const quantityBasis = gramsBasisFromLabel(entry.serving_label);
+
+  // N116/#505. `shareSync === null` (still loading, or this device somehow
+  // has no local row for an entry it just displayed) reads as blocked rather
+  // than as permitted — the safe default while the answer is unknown.
+  const blockedFromSharing = shareSync
+    ? shareBlockedReason({ ...shareSync, unsavedOnScreen: false })
+    : 'Loading…';
 
   const save = async () => {
     if (!userId || saving) return;
@@ -624,6 +660,19 @@ export default function EditEntryScreen() {
           This entry has been deleted, so there is nothing left to correct.
         </Text>
       ) : null}
+
+      {/* N116/#505. Sends WHAT THE SERVER HOLDS for this entry — not this
+          screen's own draft state, hence `blockedFromSharing` covering the
+          two sync flags. Landing shape: the receiver gets a new saved food,
+          scaled to one serving of it — never a dated row in their own log,
+          see nutrition/share.go's EntryCopier doc comment for why. */}
+      <ShareToFriend
+        resourceType="nutrition_entry"
+        resourceId={entry.id}
+        disabled={blockedFromSharing !== null}
+        disabledReason={blockedFromSharing ?? undefined}
+        testID="entry-share-open"
+      />
 
       <View style={styles.actions}>
         <Pressable

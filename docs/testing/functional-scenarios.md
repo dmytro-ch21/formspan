@@ -6994,10 +6994,13 @@ Two switches, and the second one only ever narrows what the first allows.
 
 ## Sharing (`/v1/shares`, both clients' Share control + Sharing screens)
 
-Two kinds are shareable: **sequences** and **workouts**. Everything in this
-section that says "sequence" should be run for a workout too — the module is
-generic, so a bug in one kind is usually a bug in the registration of the other,
-not in the share module.
+Five kinds are shareable: **sequences**, **workouts**, and (N116/#505) **a
+food item**, **a meal**, and **a day's log**. Everything in this section that
+says "sequence" should be run for a workout too — the module is generic, so a
+bug in one kind is usually a bug in the registration of the other, not in the
+share module. The nutrition three have their own subsection below, since what
+they accept INTO (a saved food/recipe, never a dated log row) and the day
+type's privacy boundary are specific to that module.
 
 ### Happy path
 
@@ -7122,6 +7125,80 @@ All of these must be indistinguishable 404s:
   empty inbox. "Nothing waiting" is a claim about other people's actions, and
   making it from a failed request is inventing the absence of a message.
 - Accept, then background and reopen: the row does not come back.
+
+### N116/#505 — sharing a food, a meal, or a day's log
+
+Three MORE resource types (`nutrition_entry`, `nutrition_food`,
+`nutrition_day`), same generic module — everything above about friends-only,
+one-copy-ever, the sent list, and decline-leaves-nothing applies unchanged.
+This subsection is the nutrition-specific behaviour: what each accepts INTO,
+and the privacy boundary a day's log carries that nothing else here does.
+
+**A food item (`nutrition_entry`, `food/entry/[id].tsx`)**
+- Log a food, open its entry, Share → friend receives it, accepts, and lands
+  on a NEW saved food (never a dated log row) — confirm it has no `eaten_on`
+  the receiver can see, because there isn't one.
+- Log 1.5 servings of something (e.g. a 200 kcal item at 1.5× = 300 kcal
+  absolute), share it, and confirm the receiver's saved copy shows the
+  PER-SERVING figure (200 kcal), not the absolute one they were sent.
+- Share is disabled, with a reason, on an entry this device has not yet
+  pushed (`unsynced`) or has since edited without saving that edit
+  (`owed`) — same two flags `workoutDetailScreen`'s Share button already
+  gates on, reused here via `entrySyncState`.
+- Editing the RECEIVER's new saved food afterward must not touch the
+  sender's original entry, and correcting the sender's original entry
+  afterward must not touch the receiver's copy — assert both directions.
+
+**A meal (`nutrition_food`, `food/saved/[id].tsx` and `food/recipe/[id].tsx`)**
+- Share a plain saved food → receiver gets their own `kind=food` row.
+- Share a recipe (built via `food/combine.tsx`'s N115 flow, or the recipe
+  editor directly) → receiver gets their own `kind=recipe` row with every
+  ingredient, in order, and the same summed per-serving macros. **This is
+  the literal AC4 test**: "accepting a shared meal stores it as their own
+  saved item" — confirm the receiver can find it in `food/saved`, re-log it,
+  and edit it like any other saved item they created themselves, not a
+  one-off they can only view.
+- Rename the sender's recipe after sharing it (before OR after the receiver
+  accepts) → the receiver's copy keeps its original name. Edit an ingredient
+  in the receiver's copy → the sender's recipe is unaffected.
+- Share is disabled on a `fresh` (never-saved) recipe — nothing exists on the
+  server yet to send.
+
+**A day's log (`nutrition_day`, `(tabs)/food.tsx`, the day currently on
+screen)**
+- Log several items across different meal slots on one day, tap Share on
+  that day → friend receives ONE card (not one per entry), accepts, and
+  lands on a NEW saved recipe whose items are exactly that day's entries, in
+  the same order, and whose total macros are exactly their sum.
+- **The privacy boundary, and this is the sharpest scenario in this whole
+  section:** set a target AND log a body weight for the same day being
+  shared. After the receiver accepts, confirm on THEIR account: no new row
+  in their targets, no new row in their body weight/check-ins, and the
+  shared recipe's kcal/macros total is exactly the entries — nowhere near
+  the sender's target number. The ticket's own words: "shares what was
+  eaten, not the athlete's targets or weight."
+- Share is disabled, with a reason, on a day with nothing logged yet.
+- Share a day, then the sender logs one more item to that same day
+  afterward → the receiver's already-accepted copy does NOT grow the new
+  item; sharing is a snapshot at accept time, same as every other type here.
+- Share the same day twice, to two different friends → two independent
+  copies; editing one must not touch the other or the sender's live log.
+
+**Accept-side landing, both clients**
+- Mobile: all three types land the receiver on `/food/saved/[id]` —
+  including a day/meal, which redirects to the recipe editor because it is
+  `kind=recipe`. Confirm the row that opens is genuinely the receiver's own
+  (editable, not read-only).
+- Web has no per-food editing screen: accepting any of the three on
+  `/dashboard/shared` must still succeed (200, the copy exists in the
+  database) even though the page does not navigate anywhere afterward — the
+  same degradation an unregistered `resource_type` already gets.
+
+**NEEDS HUMAN EVIDENCE**: the full round trip on two real devices — send a
+food, a meal, and a day's log between two real accounts, accept each,
+confirm the edits are independent in both directions, and confirm the
+day-share's privacy boundary by eye (the receiver's Food tab shows no target
+number and no weight that were never theirs).
 
 ## Friends (`/v1/friends`, mobile Friends screen + web `/dashboard/friends`)
 

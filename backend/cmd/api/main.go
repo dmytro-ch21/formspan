@@ -229,9 +229,18 @@ func main() {
 	//
 	// The KEY IS WIRE FORMAT: it is stored in shares.resource_type and sent by
 	// clients, so renaming one orphans every stored row of that type.
+	// N116/#505 — three MORE lines, not a second sharing mechanism: a food
+	// item, an already-saved meal, and a whole day's log, each a small
+	// Copier in nutrition/share.go because Go has no method overloading and
+	// one repository cannot carry three Describe/CopyTo pairs. See that
+	// file's package doc for what each accepts into (a saved food; the same;
+	// one new saved recipe built from the day) and why.
 	shareRegistry := share.Registry{
-		"sequence": sequenceRepo,
-		"workout":  workoutRepo,
+		"sequence":        sequenceRepo,
+		"workout":         workoutRepo,
+		"nutrition_entry": nutrition.NewEntryCopier(pool),
+		"nutrition_food":  nutrition.NewFoodCopier(pool),
+		"nutrition_day":   nutrition.NewDayCopier(pool),
 	}
 	shareRepo := share.NewPostgresRepository(pool, shareRegistry, friendRepo)
 	shareHandler := share.NewHandler(shareRepo, shareRegistry)

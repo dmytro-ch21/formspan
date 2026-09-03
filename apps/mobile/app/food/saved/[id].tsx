@@ -35,12 +35,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { ShareToFriend } from '@/components/ShareToFriend';
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { localFood, saveFoodLocally } from '@/lib/foodLog';
+import { foodSyncState, localFood, saveFoodLocally } from '@/lib/foodLog';
 import type { Food } from '@/lib/nutrition';
-import { request } from '@/lib/sync';
+import { shareBlockedReason } from '@/lib/shares';
+import { request, useSyncState } from '@/lib/sync';
 
 /** The four numbers, in the order a packet prints them. */
 const FIELDS = [
@@ -75,6 +77,12 @@ export default function EditSavedFoodScreen() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+
+  // N116/#505. Set on any edit, cleared on load and on a successful save —
+  // sharing sends what the SERVER holds, and an athlete mid-correction on
+  // this exact screen is the one case that is never true.
+  const [touched, setTouched] = useState(false);
+  const [shareSync, setShareSync] = useState<{ unsynced: boolean; owed: boolean } | null>(null);
 
   useEffect(() => {
     if (!userId || !id) return;
@@ -119,6 +127,7 @@ export default function EditSavedFoodScreen() {
           fat_g: String(round(f.fat_g)),
           fibre_g: f.fibre_g == null ? '' : String(round(f.fibre_g)),
         });
+        setTouched(false);
       })
       .catch(() => {
         if (live) setMissing(true);
@@ -127,6 +136,23 @@ export default function EditSavedFoodScreen() {
       live = false;
     };
   }, [userId, id]);
+
+  // N116/#505 — same reasoning as the entry screen's own copy of this
+  // effect: sync flags can change (a background push landing) without any
+  // of `food`'s own fields changing. `lastSyncAt` IN THE DEPS — see
+  // `workout/[id].tsx`'s own copy of this effect for why: without it, Share
+  // stays stuck on "Not synced yet" long after the push actually landed.
+  const { lastSyncAt } = useSyncState();
+  useEffect(() => {
+    if (!userId || !id) return;
+    let live = true;
+    foodSyncState(userId, id).then((s) => {
+      if (live) setShareSync(s);
+    });
+    return () => {
+      live = false;
+    };
+  }, [userId, id, lastSyncAt]);
 
   const save = useCallback(async () => {
     if (!userId || !food || saving) return;
@@ -190,6 +216,7 @@ export default function EditSavedFoodScreen() {
         // authored data three times in this repo: a field a screen does not
         // own, restated by a screen that happens to have read it.
       });
+      setTouched(false);
       request('saved food corrected');
       router.back();
     } catch {
@@ -224,6 +251,12 @@ export default function EditSavedFoodScreen() {
     );
   }
 
+  // N116/#505 — same reasoning as the entry screen: unknown reads as
+  // blocked, not permitted.
+  const blockedFromSharing = shareSync
+    ? shareBlockedReason({ ...shareSync, unsavedOnScreen: touched })
+    : 'Loading…';
+
   return (
     <KeyboardAwareScrollView
       contentContainerStyle={styles.scroll}
@@ -251,7 +284,10 @@ export default function EditSavedFoodScreen() {
         <TextInput
           style={styles.input}
           value={name}
-          onChangeText={setName}
+          onChangeText={(t) => {
+            setName(t);
+            setTouched(true);
+          }}
           accessibilityLabel="Name"
           testID="saved-name"
         />
@@ -262,7 +298,10 @@ export default function EditSavedFoodScreen() {
         <TextInput
           style={styles.input}
           value={servingLabel}
-          onChangeText={setServingLabel}
+          onChangeText={(t) => {
+            setServingLabel(t);
+            setTouched(true);
+          }}
           placeholder="100 g"
           placeholderTextColor={vola.textDim}
           accessibilityLabel="What one serving is"
@@ -277,7 +316,10 @@ export default function EditSavedFoodScreen() {
             <TextInput
               style={styles.input}
               value={draft[key] ?? ''}
-              onChangeText={(t) => setDraft((d) => ({ ...d, [key]: t }))}
+              onChangeText={(t) => {
+                setDraft((d) => ({ ...d, [key]: t }));
+                setTouched(true);
+              }}
               keyboardType="decimal-pad"
               inputMode="decimal"
               placeholder="—"
@@ -294,7 +336,10 @@ export default function EditSavedFoodScreen() {
         <TextInput
           style={styles.input}
           value={draft.fibre_g ?? ''}
-          onChangeText={(t) => setDraft((d) => ({ ...d, fibre_g: t }))}
+          onChangeText={(t) => {
+            setDraft((d) => ({ ...d, fibre_g: t }));
+            setTouched(true);
+          }}
           keyboardType="decimal-pad"
           inputMode="decimal"
           placeholder="—"
@@ -324,6 +369,15 @@ export default function EditSavedFoodScreen() {
             {saving ? 'Saving…' : 'Save'}
           </Text>
         </Pressable>
+        {/* N116/#505. The receiver gets their own copy of this saved food,
+            independently editable — see nutrition/share.go's FoodCopier. */}
+        <ShareToFriend
+          resourceType="nutrition_food"
+          resourceId={food.id}
+          disabled={blockedFromSharing !== null}
+          disabledReason={blockedFromSharing ?? undefined}
+          testID="saved-share-open"
+        />
       </View>
     </KeyboardAwareScrollView>
   );

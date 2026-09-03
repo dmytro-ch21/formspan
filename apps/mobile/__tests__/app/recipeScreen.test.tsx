@@ -27,6 +27,8 @@ jest.mock('@/lib/foodLog', () => ({
   localFood: (...a: unknown[]) => mockLocalFood(...a),
   localFoods: jest.fn(async () => []),
   saveFoodLocally: (...a: unknown[]) => mockSaveFoodLocally(...a),
+  // N116/#505: unblocked by default — synced, and nothing owed.
+  foodSyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
 }));
 
 jest.mock('@/lib/catalogApi', () => {
@@ -40,7 +42,9 @@ jest.mock('@/lib/catalogApi', () => {
   };
 });
 
-jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
+// N116/#505: `useSyncState` is new on this screen — a static value is
+// enough, since nothing in this file exercises a re-fetch on a sync tick.
+jest.mock('@/lib/sync', () => ({ request: jest.fn(), useSyncState: () => ({ lastSyncAt: null }) }));
 
 const mockBack = jest.fn();
 let mockParams: Record<string, string> = { id: 'r1' };

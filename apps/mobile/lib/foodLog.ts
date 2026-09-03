@@ -217,6 +217,51 @@ export async function removeEntry(userId: string, id: string): Promise<void> {
 }
 
 /**
+ * Whether an entry or a saved food is safe to hand `shareBlockedReason`
+ * (`lib/shares.ts`) — N116/#505.
+ *
+ * Sharing is ONLINE-ONLY (see `shares.ts`'s own doc comment) and copies what
+ * the SERVER holds, not what is on this screen. `unsynced` (`remote = 0`)
+ * means this device has never pushed the row at all — sharing it would 404
+ * against an id the server has never heard of. `owed` (`dirty = 1`) means it
+ * pushed once but this device holds an edit the server has not got yet — the
+ * friend would receive the stale version. Both are the same two flags
+ * `removeEntry`/`removeFood` above already read for the identical reason.
+ *
+ * Returns null for an id this device has no local row for at all, which the
+ * caller should treat as "not shareable" — there is nothing here to send.
+ */
+export async function entrySyncState(
+  userId: string,
+  id: string,
+): Promise<{ unsynced: boolean; owed: boolean } | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ remote: number; dirty: number }>(
+    `SELECT remote, dirty FROM food_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id, userId,
+  );
+  if (!row) return null;
+  return { unsynced: row.remote === 0, owed: row.dirty === 1 };
+}
+
+/** The `foods` table's version of {@link entrySyncState} — same two flags,
+ *  same reason, a different table's default polarity (`remote` defaults to
+ *  1 there — see `CREATE_FOODS`'s own comment — so a food this device has
+ *  never heard the server confirm still reads `unsynced` correctly here). */
+export async function foodSyncState(
+  userId: string,
+  id: string,
+): Promise<{ unsynced: boolean; owed: boolean } | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ remote: number; dirty: number }>(
+    `SELECT remote, dirty FROM foods WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id, userId,
+  );
+  if (!row) return null;
+  return { unsynced: row.remote === 0, owed: row.dirty === 1 };
+}
+
+/**
  * The food-to-caffeine link — N468/#792. Computes whether `input` is
  * recognised as caffeinated (`caffeineMgForFoodEntry`, the name-matching
  * heuristic documented in `foodCaffeine.ts`) and keeps the athlete's

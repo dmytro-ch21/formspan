@@ -17,6 +17,8 @@ import {
   cacheEntries,
   editEntry,
   cacheTargets,
+  entrySyncState,
+  foodSyncState,
   localEntries,
   localLoggedDayKcal,
   localLoggedDays,
@@ -180,6 +182,65 @@ describe('logging', () => {
     await logFood('u2', meal({ name: 'Theirs' }));
     const mine = await localEntries(USER, TODAY);
     expect(mine.map((e) => e.name)).toEqual(['Chicken thigh']);
+  });
+});
+
+/**
+ * N116/#505 — the two flags `ShareToFriend` is gated on. Real SQLite for the
+ * same reason as everything else in this file: a mock supplying the answer
+ * would prove nothing about the actual `remote`/`dirty` columns.
+ */
+describe('sync state, for the ShareToFriend gate (N116/#505)', () => {
+  it('a freshly logged entry is both unsynced and owed', async () => {
+    const id = await logFood(USER, meal());
+    await expect(entrySyncState(USER, id)).resolves.toEqual({ unsynced: true, owed: true });
+  });
+
+  it('a pushed, unedited entry is shareable', async () => {
+    const id = await logFood(USER, meal());
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await expect(entrySyncState(USER, id)).resolves.toEqual({ unsynced: false, owed: false });
+  });
+
+  it('a pushed entry with a LOCAL edit not yet pushed is owed, not unsynced', async () => {
+    const id = await logFood(USER, meal());
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await editEntry(USER, id, meal({ kcal: 200 }));
+    await expect(entrySyncState(USER, id)).resolves.toEqual({ unsynced: false, owed: true });
+  });
+
+  it('returns null for an id this device holds no row for', async () => {
+    await expect(entrySyncState(USER, 'no-such-id')).resolves.toBeNull();
+  });
+
+  it('returns null for a tombstoned entry — nothing left to send', async () => {
+    const id = await logFood(USER, meal());
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await removeEntry(USER, id);
+    await expect(entrySyncState(USER, id)).resolves.toBeNull();
+  });
+
+  it('a freshly saved food is both unsynced and owed, the same as an entry', async () => {
+    const id = await saveFoodLocally(USER, {
+      kind: 'food', name: 'Mine', brand: '', serving_label: '1',
+      serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
+    });
+    await expect(foodSyncState(USER, id)).resolves.toEqual({ unsynced: true, owed: true });
+  });
+
+  it('a pushed, unedited food is shareable', async () => {
+    const id = await saveFoodLocally(USER, {
+      kind: 'food', name: 'Mine', brand: '', serving_label: '1',
+      serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
+      saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
+    });
+    await db.runAsync(`UPDATE foods SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await expect(foodSyncState(USER, id)).resolves.toEqual({ unsynced: false, owed: false });
+  });
+
+  it('returns null for a food id this device holds no row for', async () => {
+    await expect(foodSyncState(USER, 'no-such-id')).resolves.toBeNull();
   });
 });
 
