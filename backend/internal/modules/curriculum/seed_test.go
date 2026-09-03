@@ -353,7 +353,7 @@ func TestEveryNonSyllabusCurriculumStillHasMilestones(t *testing.T) {
 // content at all, adding a phase for it (backfilled from the roadmap's own
 // items/concepts, never invented). See the 2026-08-28 and F28 history
 // entries for the full per-belt mapping and reasoning.
-func TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart(t *testing.T) {
+func TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases(t *testing.T) {
 	data, err := SeedData()
 	if err != nil {
 		t.Fatalf("parse seed: %v", err)

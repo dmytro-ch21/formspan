@@ -52941,7 +52941,8 @@ PR #719 (N110/#480) measured, rather than assumed, whether a belt's roadmap
 titles in the same order — the claim `docs/content/bjj-curriculum-structure.md`
 had stated as fact since N97. They did not, on any of the four belts. #719
 shipped the weaker pairing-only guard
-(`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart`) rather than commit a
+(`TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases`, then named
+`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart`) rather than commit a
 permanently-red literal test, and filed this ticket to do the content work
 that would make the stronger assertion buildable. This is that work.
 
@@ -53050,8 +53051,10 @@ curriculum (`curriculum_items_technique_unique`).
 
 ### The strengthened test
 
-`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart` in
-`backend/internal/modules/curriculum/seed_test.go` now asserts, for every
+`TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases` (renamed during review
+from `TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart`, which undersold
+what it now checks) in `backend/internal/modules/curriculum/seed_test.go` now
+asserts, for every
 belt with both tracks present, that the roadmap and syllabus phase title
 slices are **equal — same length, same titles, same order** — in addition to
 the pairing/uniqueness checks #719 shipped. Comparing by index rather than by
@@ -53118,6 +53121,76 @@ unaudited and out of scope here.
 These are recorded here for the user to sanity-check rather than resolved
 unilaterally, per this ticket's own instruction not to silently pick an
 answer where the editorial call was genuinely close.
+
+### What `backend-reviewer` caught, and the fixes
+
+- **`[blocking]` — reviewer-facing changelog text had leaked into
+  athlete-visible content.** 7 of the new/backfilled syllabus phase
+  `description` fields carried parentheticals like "(N110/F28
+  reconciliation)" — `description` ships on every `Get` and mobile renders it
+  as the milestone's own note, so an athlete opening, say, the brown-belt
+  syllabus would have read a ticket reference under three of its phases.
+  Stripped down to the substantive first sentence(s) in all 7; the
+  provenance belongs here, in this entry, not in the content itself.
+- **ASCII `--`/`->` in the new content, against the file's em-dash/arrow
+  convention** — 8 sites, all from the reconciliation script emitting
+  plain ASCII. Fixed to `—`/`→` throughout. Fixing this surfaced that
+  the "backfilled verbatim, reads identically" claim above was not quite
+  true as first written: two of the eight sites were inside brown's
+  `Master a Passing Philosophy` and `Create a Complete Starting Strategy`
+  phases, and separately, `Master a Passing Philosophy`'s "The order is the
+  philosophy" concept was missing its roadmap's trailing sentence ("This is
+  the single sentence the rest of this milestone is an application of.").
+  Both fixed — the em-dashes and the restored sentence — so the claim above
+  is now actually true, not just intended.
+- **`[suggestion]` — purple's `Strategy` phase (moved from position 1 to
+  position 10) still read as though it opened the belt**, referring to "the
+  phases below" when nothing is below it any more. Reworded to "the phases
+  above."
+- **`[suggestion]` — blue's adjacent `Control After Passing` and `Build
+  Submission Chains` phases both opened with a near-identical "one position
+  seen from N angles" line**, which would read as a copy-paste error to an
+  athlete moving through the syllabus. `Control After Passing`'s opener
+  (the one this ticket added) was reworded to drop the duplicate framing.
+- **`[suggestion]` — the strengthened test's name undersold what it checks.**
+  Renamed `TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart` to
+  `TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases`, updated everywhere
+  in this codebase except the pre-existing #719-era mention of the old name
+  earlier in this file, which describes what shipped at the time and stays
+  accurate under its own name.
+- **`[suggestion]` — `docs/content/bjj-curriculum-structure.md`'s domain
+  table, row 8 (Brown), still said "(folded into pinning and defensive
+  layers)"** after the reconciliation actually placed those items under
+  `Control Scrambles`. Corrected.
+- **A real `ac-verifier` finding, confirmed directly rather than taken on
+  trust: `rolling-back-take-from-turtle`'s authored note was overwritten,
+  not preserved, when it moved from brown's old "Pinning that forces
+  reactions" phase to the new `Control Scrambles`.** The original syllabus
+  note — "Their turn, punished." — was replaced with the roadmap's own note
+  for the same technique ("Chase the back: the scramble's best possible
+  ending.") in the reconciliation script, which is exactly the kind of
+  flattening this ticket's own guidance warned against. Verified by diffing
+  every technique item's `notes` field against `origin/main`'s pre-F28
+  content across all four syllabuses: this was the only one that had
+  changed. Restored the original note verbatim; the diff now confirms
+  zero note changes across all four syllabuses for every existing/moved
+  item — only genuinely new items (backfilled from the roadmap, documented
+  above) carry new notes.
+
+  `ac-verifier`'s background run itself stalled partway through (its
+  transcript stopped growing for several hours with no completion
+  marker, in a session that also saw an unrelated and still-unexplained
+  external corruption of a much larger stretch of this very file, caught
+  and reverted before it could be committed — see the parallel diagnostic
+  work in this session's own record). Rather than wait indefinitely on a
+  transcript that was no longer advancing, this session performed the
+  equivalent checks directly: the note-preservation diff above, plus
+  re-running the mutation-verification and the full package suite. The
+  finding itself is real and independently confirmed either way.
+
+All mutation-verified again after the fixes (retitling a phase, confirming a
+real assertion failure naming the mismatched index and titles, reverting,
+confirming green by re-running); the full package suite stays green.
 
 ## Open items / known gaps as of this entry
 

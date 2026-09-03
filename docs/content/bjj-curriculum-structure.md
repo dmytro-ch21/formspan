@@ -53,7 +53,7 @@ syllabus content itself — retitling, reordering, and for purple, blue and
 brown, moving items between phases or adding a phase entirely where the
 syllabus had no counterpart for a roadmap milestone — so the claim above is
 now actually true rather than aspirational.
-`TestEveryBeltRoadmapHasExactlyOneSyllabusCounterpart` in
+`TestEveryBeltRoadmapAndSyllabusPairAndAgreeOnPhases` in
 `backend/internal/modules/curriculum/seed_test.go` now asserts identical
 phase titles in identical order, not just pairing, so a future edit to one
 side without the other goes red. The full per-belt reconciliation mapping is
@@ -82,7 +82,7 @@ table fixes is which domains exist and which belt owns what depth of each.
 | 5 | **Passing** | Headquarters, one pass | One pressure, one movement | The reaction map | A passing philosophy |
 | 6 | **Pins** | Side control and mount, held | Connecting the pins | Dilemmas between them | Pins that force a reaction |
 | 7 | **The back** | Take it, hold it, finish it | (inside submission chains) | Guard connections that end there | The back system |
-| 8 | **Turtle and the front headlock** | A door, not a home | The front headlock arrives | Kimura and front headlock, merged | (folded into pinning and defensive layers) |
+| 8 | **Turtle and the front headlock** | A door, not a home | The front headlock arrives | Kimura and front headlock, merged | (folded into Control Scrambles) |
 | 9 | **Submissions** | The handful that work | Chains | Systems | Families, finished |
 | 10 | **Legs** | (defence only — know when to tap) | Responsibly: position, then the ankle | Entanglements as positions | The full family, where the rules allow |
 | 11 | **Escapes and defence** | Getting out of the bad places | Escape chains | (folded into retention) | Defensive layers |

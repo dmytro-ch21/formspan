@@ -3141,7 +3141,7 @@
       },
       {
         "title": "Control After Passing",
-        "description": "Connect the pins instead of holding one forever: side control, north-south, knee-on-belly, mount and back are one position seen from five angles. Absent from the old syllabus phase list entirely; backfilled from the roadmap milestone of the same name (N110/F28 reconciliation).",
+        "description": "Connect the pins instead of holding one forever: side control, north-south, knee-on-belly, mount and back are one position seen from five angles.",
         "items": [
           {
             "technique_id": "side-control-crossface-underhook",
@@ -3340,7 +3340,7 @@
     "phases": [
       {
         "title": "Establish a Standing Game",
-        "description": "The standing game the roadmap names directly: know which exit you are hunting -- guillotine or back take -- before the shot goes in, or pull straight into an attack instead. Absent from the old syllabus phase list entirely; backfilled from the roadmap milestone of the same name (N110/F28 reconciliation).",
+        "description": "The standing game the roadmap names directly: know which exit you are hunting — guillotine or back take — before the shot goes in, or pull straight into an attack instead.",
         "items": [
           {
             "technique_id": "single-leg-crackdown-finish",
@@ -3357,7 +3357,7 @@
           {
             "kind": "concept",
             "title": "Know what you want before it starts",
-            "notes": "Decided, not discovered. The purple belt's edge over the blue belt is rarely a better single leg -- it is having decided what the sprawl was going to turn into before shooting."
+            "notes": "Decided, not discovered. The purple belt's edge over the blue belt is rarely a better single leg — it is having decided what the sprawl was going to turn into before shooting."
           }
         ]
       },
@@ -3502,7 +3502,7 @@
       },
       {
         "title": "Develop Submission Systems",
-        "description": "Two systems that both end at the back: the front headlock, the junction every stuffed shot and duck-out lands in, and the kimura, a grip that outlives whatever position it started in. Merged from the old syllabus's separate \"The front headlock system\" and \"The kimura as a system\" phases so the syllabus carries one phase per roadmap milestone (N110/F28 reconciliation) -- no item from either was dropped.",
+        "description": "Two systems that both end at the back: the front headlock, the junction every stuffed shot and duck-out lands in, and the kimura, a grip that outlives whatever position it started in.",
         "items": [
           {
             "technique_id": "darce-side-control",
@@ -3599,17 +3599,17 @@
       },
       {
         "title": "Strategy",
-        "description": "Purple belt starts with an architecture, written down: a primary standing entry, a primary guard, a secondary guard that solves the primary's problems, a passing system and a finishing system.",
+        "description": "The architecture every phase above this one was an application of: a primary standing entry, a primary guard, a secondary guard that solves the primary's problems, a passing system and a finishing system, all written down rather than assumed.",
         "items": [
           {
             "kind": "concept",
             "title": "Write it down",
-            "notes": "If you cannot say your game in five lines, you do not have one yet — you have a collection. The phases below are the five lines."
+            "notes": "If you cannot say your game in five lines, you do not have one yet — you have a collection. The phases above are the five lines."
           },
           {
             "kind": "concept",
             "title": "The question changes",
-            "notes": "It stops being what do I do here and becomes which reaction do I want. Everything below is a way of asking for one."
+            "notes": "It stops being what do I do here and becomes which reaction do I want. Every phase above this one is a way of asking for one."
           }
         ]
       }
@@ -3624,7 +3624,7 @@
     "phases": [
       {
         "title": "Create a Complete Starting Strategy",
-        "description": "Have an answer for each of the seven people you will actually meet, and several ways to dictate where the match happens. Absent from the old syllabus phase list entirely; backfilled verbatim from the roadmap milestone of the same name (N110/F28 reconciliation) -- these are concepts, not techniques, so roadmap and syllabus read identically here.",
+        "description": "Have an answer for each of the seven people you will actually meet, and several ways to dictate where the match happens.",
         "items": [
           {
             "kind": "concept",
@@ -3639,7 +3639,7 @@
           {
             "kind": "concept",
             "title": "Against a guard puller",
-            "notes": "They will sit down. What you do in the second after that decides the match -- engage, disengage, or make them stand back up."
+            "notes": "They will sit down. What you do in the second after that decides the match — engage, disengage, or make them stand back up."
           },
           {
             "kind": "concept",
@@ -3735,7 +3735,7 @@
       },
       {
         "title": "Remove Guard Weaknesses",
-        "description": "If the primary guard fails -> secondary guard -> half guard -> turtle -> wrestle up -> return to top. Absent from the old syllabus phase list entirely; backfilled from the roadmap milestone of the same name (N110/F28 reconciliation).",
+        "description": "If the primary guard fails → secondary guard → half guard → turtle → wrestle up → return to top.",
         "items": [
           {
             "technique_id": "knee-shield-half-guard",
@@ -3758,12 +3758,12 @@
       },
       {
         "title": "Master a Passing Philosophy",
-        "description": "Understand why passes work -- control the feet, then the knees, then the hips, then the shoulders, then the head -- and have a complete system against each guard you will meet. Absent from the old syllabus phase list entirely; backfilled verbatim from the roadmap milestone of the same name (N110/F28 reconciliation) -- these are concepts, not techniques, so roadmap and syllabus read identically here.",
+        "description": "Understand why passes work — control the feet, then the knees, then the hips, then the shoulders, then the head — and have a complete system against each guard you will meet.",
         "items": [
           {
             "kind": "concept",
             "title": "The order is the philosophy",
-            "notes": "Feet, knees, hips, shoulders, head. Every pass that works is that order; every pass that fails skipped a step."
+            "notes": "Feet, knees, hips, shoulders, head. Every pass that works is that order; every pass that fails skipped a step. This is the single sentence the rest of this milestone is an application of."
           },
           {
             "kind": "concept",
@@ -3788,7 +3788,7 @@
           {
             "kind": "concept",
             "title": "Against De La Riva",
-            "notes": "Their hook is a lever on your base. Clear the hook or take the leg away -- arguing with it in place is how you get swept."
+            "notes": "Their hook is a lever on your base. Clear the hook or take the leg away — arguing with it in place is how you get swept."
           },
           {
             "kind": "concept",
@@ -3935,7 +3935,7 @@
       },
       {
         "title": "Control Scrambles",
-        "description": "Know when to scramble and, more importantly, when to stop. Backfilled from the roadmap milestone of the same name (N110/F28 reconciliation); \"Chase the back\" moved here from the old \"Pinning that forces reactions\" phase, where it was the one item that actually belonged to this milestone rather than to Master Pinning.",
+        "description": "Know when to scramble and, more importantly, when to stop.",
         "items": [
           {
             "kind": "concept",
@@ -3966,7 +3966,7 @@
           },
           {
             "technique_id": "rolling-back-take-from-turtle",
-            "notes": "Chase the back: the scramble's best possible ending."
+            "notes": "Their turn, punished."
           },
           {
             "kind": "concept",
