@@ -222,6 +222,7 @@ function session(over: Partial<Session> & { id: string }): Session {
     workout_id: null,
     sport: 'strength',
     name: 'Legs',
+    intent: 'normal',
     started_at: new Date(noon.getTime() - 30 * 60_000).toISOString(),
     ended_at: noon.toISOString(),
     notes: '',

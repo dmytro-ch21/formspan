@@ -337,6 +337,9 @@ func (f *suggestionsFakeRepo) Finish(context.Context, string, string, time.Time)
 func (f *suggestionsFakeRepo) Rename(context.Context, string, string, string) (*Session, error) {
 	panic("not used by Suggestions")
 }
+func (f *suggestionsFakeRepo) SetIntent(context.Context, string, string, SessionIntent) (*Session, error) {
+	panic("not used by Suggestions")
+}
 func (f *suggestionsFakeRepo) Reschedule(context.Context, string, string, time.Time) (*Session, error) {
 	panic("not used by Suggestions")
 }

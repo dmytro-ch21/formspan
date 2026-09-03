@@ -1,4 +1,12 @@
-import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import {
+  act,
+  configure,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react-native';
 
 import SessionHistoryScreen from '../../app/session/history';
 import { OfflineError } from '@/lib/apiError';
@@ -133,6 +141,38 @@ it('the offline fallback respects the active sport filter, not the whole local c
 
   await waitFor(() => expect(screen.queryByTestId('session-history-row-bjj-1')).toBeNull());
   expect(screen.getByTestId('session-history-row-strength-1')).toBeTruthy();
+});
+
+it('N474: a light or deload session is tagged in the list; a normal one carries no tag', async () => {
+  // The AC this pins: scrolling history is exactly where "why does this
+  // entry look lighter than its neighbours" gets asked, and the answer has
+  // to be visible without opening the session.
+  mockPage.mockResolvedValue({
+    sessions: [
+      session('normal-1', { intent: 'normal' }),
+      session('light-1', { intent: 'light' }),
+      session('deload-1', { intent: 'deload' }),
+    ],
+    total: 3,
+    limit: 20,
+    offset: 0,
+  });
+
+  render(<SessionHistoryScreen />);
+
+  await waitFor(() => expect(screen.getByTestId('session-history-row-normal-1')).toBeTruthy());
+  expect(
+    within(screen.getByTestId('session-history-row-normal-1')).queryByText('LIGHT'),
+  ).toBeNull();
+  expect(
+    within(screen.getByTestId('session-history-row-normal-1')).queryByText('DELOAD'),
+  ).toBeNull();
+  expect(
+    within(screen.getByTestId('session-history-row-light-1')).getByText('LIGHT'),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByTestId('session-history-row-deload-1')).getByText('DELOAD'),
+  ).toBeTruthy();
 });
 
 it('a genuine server error is distinct from the offline fallback — no fabricated local list', async () => {

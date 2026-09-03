@@ -60,6 +60,7 @@ it('the upsert genuinely refuses to write over a tombstone', async () => {
       workout_id: null,
       sport: 'strength',
       name: 'Back',
+      intent: 'normal',
       started_at: '2026-08-01T10:00:00Z',
       ended_at: null,
       notes: '',
@@ -155,7 +156,7 @@ it('upsert still updates a LIVE row', async () => {
   await upsert(
     {
       id: 's1', user_id: 'u1', workout_id: null, sport: 'strength',
-      name: 'Renamed', started_at: '2026-08-01T10:00:00Z', ended_at: null,
+      name: 'Renamed', intent: 'normal', started_at: '2026-08-01T10:00:00Z', ended_at: null,
       notes: '', sets: [], created_at: '2026-08-01T10:00:00Z',
       updated_at: '2026-08-09T00:00:00Z', dirty: false,
     },

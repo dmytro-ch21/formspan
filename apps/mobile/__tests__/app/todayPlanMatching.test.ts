@@ -29,6 +29,7 @@ const session = (day: string, sport: string): Session => ({
   workout_id: null,
   sport,
   name: '',
+  intent: 'normal',
   started_at: new Date(`${day}T18:00:00`).toISOString(),
   ended_at: null,
   notes: '',

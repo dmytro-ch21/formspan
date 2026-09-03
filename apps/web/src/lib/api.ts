@@ -350,12 +350,26 @@ export type LoggedSet = {
   completed: boolean;
 };
 
+/**
+ * What the athlete meant this session to be (N474) — `normal` progressive
+ * work, a deliberately `light` session (fatigue, cross-training, life), or a
+ * planned `deload`. Kept identical to `apps/mobile`'s copy on purpose: this
+ * is the server's vocabulary, not a UI concept either app invents locally.
+ *
+ * The point of recording it: a light/deload session is a real, honest
+ * training exposure and still counts for volume and history, but it is not
+ * evidence for the double-progression baseline — see `SuggestionCode`'s
+ * `no_recent_normal_session`. Empty/unset reads as `normal`.
+ */
+export type SessionIntent = "normal" | "light" | "deload";
+
 export type Session = {
   id: string;
   user_id: string;
   workout_id: string | null;
   sport: Sport;
   name: string;
+  intent: SessionIntent;
   started_at: string;
   ended_at: string | null;
   notes: string;
@@ -398,7 +412,15 @@ export type SuggestionCode =
    * No `target_*` here either — an honest "can't tell" carries no guessed
    * number.
    */
-  | "abstain";
+  | "abstain"
+  /**
+   * There IS recent history for this exercise, but every session that used
+   * it was `light` or `deload` (N474) — so unlike `no_history`, this isn't
+   * "never done it", it's "nothing normal-intent to build the next number
+   * from". Distinct from `no_history` deliberately: the UI copy and any
+   * future "log a normal session to unstick this" nudge differ.
+   */
+  | "no_recent_normal_session";
 
 /**
  * Flags when today's own already-logged working sets disagree with the

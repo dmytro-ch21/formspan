@@ -56,6 +56,7 @@ const mockSession: LocalSession = {
   workout_id: null,
   sport: 'bjj',
   name: 'Gi class',
+  intent: 'normal',
   started_at: '2026-08-04T18:00:00Z',
   ended_at: '2026-08-04T19:30:00Z',
   notes: '',

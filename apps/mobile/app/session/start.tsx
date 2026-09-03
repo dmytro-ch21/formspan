@@ -15,7 +15,13 @@ import { labelFor } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
-import { applySuggestions, fetchSuggestions, setsFromWorkout } from '@/lib/sessions';
+import {
+  applySuggestions,
+  fetchSuggestions,
+  setsFromWorkout,
+  SESSION_INTENTS,
+  type SessionIntent,
+} from '@/lib/sessions';
 import { cachedExercises, cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
 import { sessionHref } from '@/lib/startSession';
 import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
@@ -65,6 +71,14 @@ export default function StartSessionScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  // N474: what today's session is meant to be. Strength-only — the
+  // double-progression baseline this exists to protect is a strength
+  // concept, and putting it in front of every sport would ask a BJJ or
+  // running athlete to answer a question that means nothing to them.
+  // Always starts on Normal: the picker's whole job is catching the
+  // exception, so the exception must never be the thing you forget to
+  // change back.
+  const [intent, setIntent] = useState<SessionIntent>('normal');
 
   const label = labelFor(modules, sport) || 'Session';
 
@@ -167,6 +181,10 @@ export default function StartSessionScreen() {
       const session = await startLocalSession(userId, {
         sport,
         name: workout ? workout.name : `${label} session`,
+        // Only strength reads this — see the picker's own comment above —
+        // so every other sport always creates a `normal` session, same as
+        // before this field existed.
+        intent: sport === 'strength' ? intent : 'normal',
         workout_id: workout ? workout.id : null,
         sets,
         ...(date ? { started_at: backdatedTimestamp(date, new Date()).toISOString() } : {}),
@@ -207,6 +225,43 @@ export default function StartSessionScreen() {
           <Text style={styles.error} accessibilityLiveRegion="polite">
             {error}
           </Text>
+        )}
+
+        {sport === 'strength' && (
+          <View style={styles.intentSection} testID="session-intent-picker">
+            <Text style={styles.sectionLabel}>{"Today's training"}</Text>
+            <View style={styles.intentRow}>
+              {SESSION_INTENTS.map((i) => {
+                const active = intent === i.key;
+                return (
+                  <Pressable
+                    key={i.key}
+                    style={[
+                      styles.intentPill,
+                      active && { backgroundColor: accent.accent, borderColor: accent.accent },
+                    ]}
+                    onPress={() => setIntent(i.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    testID={`session-intent-${i.key}`}
+                  >
+                    <Text
+                      style={[styles.intentPillText, active && { color: accent.on }]}
+                    >
+                      {i.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {intent !== 'normal' && (
+              <Text style={styles.muted}>
+                {intent === 'light'
+                  ? "Still counts toward volume and history — it just won't be used to set next time's weight."
+                  : "A planned step back. Counts toward volume and history, and won't be used to set next time's weight."}
+              </Text>
+            )}
+          </View>
         )}
 
         {loading ? (
@@ -307,6 +362,19 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, gap: 10, paddingBottom: 48 },
   loading: { marginTop: 32 },
   sectionLabel: { fontSize: 12, color: vola.textDim, textTransform: 'uppercase', marginTop: 8 },
+  intentSection: { gap: 8, marginBottom: 4 },
+  intentRow: { flexDirection: 'row', gap: 8 },
+  intentPill: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  intentPillText: { fontSize: 14, fontWeight: '600', color: vola.text },
   // Geometry copied from the Plan tab's template card rather than approximated:
   // no `gap` on the row, the disc's own `marginLeft` doing the spacing, and the
   // body carrying its own padding. Keeping `gap: 12` as well put the disc 24pt

@@ -454,12 +454,26 @@ function SessionRow({
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${session.name || sportLabel}, ${meta.join(', ')}`}
+      accessibilityLabel={`${session.name || sportLabel}${
+        session.intent && session.intent !== 'normal' ? `, ${session.intent}` : ''
+      }, ${meta.join(', ')}`}
       testID={`session-history-row-${session.id}`}
     >
       <RNView style={[styles.rowRule, { backgroundColor: sportColor(session.sport) ?? vola.green }]} />
       <RNView style={styles.rowBody}>
-        <Text style={styles.rowSport}>{sportLabel.toUpperCase()}</Text>
+        <RNView style={styles.rowTopLine}>
+          <Text style={styles.rowSport}>{sportLabel.toUpperCase()}</Text>
+          {/* N474: a scroll through history is exactly where "why does this
+              entry look lighter than its neighbours" gets asked — this is
+              the answer, without opening the session. `normal` renders
+              nothing: it's the ordinary case and every other row already
+              implies it. */}
+          {session.intent && session.intent !== 'normal' && (
+            <RNView style={styles.intentTag}>
+              <Text style={styles.intentTagText}>{session.intent.toUpperCase()}</Text>
+            </RNView>
+          )}
+        </RNView>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {session.name || `${sportLabel} session`}
         </Text>
@@ -517,7 +531,15 @@ const styles = StyleSheet.create({
   rowPressed: { backgroundColor: vola.surfaceHover },
   rowRule: { width: 3, alignSelf: 'stretch' },
   rowBody: { flex: 1, paddingVertical: 9, paddingLeft: 8, gap: 1 },
+  rowTopLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rowSport: { fontSize: 9, fontWeight: '700', letterSpacing: 0.9, color: vola.textDim },
+  intentTag: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    backgroundColor: `${vola.warn}22`,
+  },
+  intentTagText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.6, color: vola.warn },
   rowTitle: { fontSize: 14, fontWeight: '700' },
   rowMeta: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
 

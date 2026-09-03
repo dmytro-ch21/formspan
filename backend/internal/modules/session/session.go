@@ -30,6 +30,65 @@ const (
 	SetTypeFailure SetType = "failure"
 )
 
+// SessionIntent is what the athlete meant this session to be, decided by
+// them — never inferred from what they actually lifted (N474).
+//
+// This is what closes the "185×12 became my new bench baseline" bug: the
+// progression rule in progression.go used to have no way to tell a
+// deliberately lighter session apart from a normal one, so a light day's top
+// set became next session's evidence in exactly the way a normal day's
+// would. Autoregulation research treats this as two separate questions —
+// what a lifter is truly capable of, versus what today's prescription
+// should be — and a session's INTENT is the signal that keeps them separate:
+// a light session still happened, still counts as training, and still
+// belongs in history and volume; it just isn't asked to speak for the
+// athlete's underlying strength.
+//
+// Three values, not the four once considered. "Readiness adjusted" (started
+// normal, backed off mid-session because performance wasn't there) needs its
+// own design — when to prompt, how not to be annoying — and a rolling,
+// weighted confidence score is a different mechanism entirely from this
+// rule's deterministic evidence-session selection. Both are real follow-on
+// work, not silently dropped — see N474's own ticket for the fuller
+// reasoning — but they don't block the fix an athlete can use today: tap
+// Light before a session they already know will be lighter.
+type SessionIntent string
+
+const (
+	// IntentNormal is the default and the common case — an ordinary training
+	// session, read as evidence by the progression rule exactly as before
+	// this type existed. Every session logged before this column existed is
+	// IntentNormal, which is the only reading that doesn't retroactively
+	// change what an old suggestion meant.
+	IntentNormal SessionIntent = "normal"
+	// IntentLight is a deliberately reduced-intensity session — tired,
+	// travelling, coming off a hard BJJ block, simply not pushing today.
+	// Its sets count fully toward volume, history and exercise stats; they
+	// are excluded only from the progression rule's evidence pool.
+	IntentLight SessionIntent = "light"
+	// IntentDeload is a planned recovery session. Behaves identically to
+	// IntentLight for the progression rule's purposes — both are "this
+	// session doesn't speak for your capacity" — kept as a separate value
+	// because it's a different CLAIM the athlete is making (planned
+	// recovery, not just a lighter day) and reads differently in training
+	// history. Also does not count toward the rule's own AUTOMATIC stall
+	// counter — a session already acknowledged as a deload is not evidence
+	// that one is needed.
+	IntentDeload SessionIntent = "deload"
+)
+
+// Valid reports whether s is one of the three sessions above. An unrecognised
+// value is never coerced into IntentNormal — that would silently promote a
+// future value this code doesn't know about into "counts as evidence",
+// which is the one direction this type exists to guard.
+func (s SessionIntent) Valid() bool {
+	switch s {
+	case IntentNormal, IntentLight, IntentDeload:
+		return true
+	}
+	return false
+}
+
 // Grip is how the implement was held for one set.
 //
 // A property of the SET, not of the exercise. A catalog row per grip would
@@ -213,6 +272,11 @@ type Session struct {
 	WorkoutID *string `json:"workout_id"`
 	Sport     string  `json:"sport"`
 	Name      string  `json:"name"`
+	// Intent is what the athlete meant this session to be — see
+	// SessionIntent's own doc comment. Chosen at session start, editable
+	// afterward (SetIntent) for the athlete who decides partway through, or
+	// after the fact, that today wasn't a normal day.
+	Intent SessionIntent `json:"intent"`
 
 	StartedAt time.Time  `json:"started_at"`
 	EndedAt   *time.Time `json:"ended_at"`
@@ -390,6 +454,10 @@ type NewSession struct {
 	WorkoutID *string
 	Sport     string
 	Name      string
+	// Intent defaults to IntentNormal when left empty — see the handler,
+	// which is where an absent/unrecognised value is normalised, matching
+	// how every other enum field on this type is handled at the boundary.
+	Intent    SessionIntent
 	StartedAt time.Time
 	EndedAt   *time.Time
 	Notes     string
@@ -546,6 +614,9 @@ type Repository interface {
 	// Rename changes only the name — see the implementation for why it is not
 	// a general Update.
 	Rename(ctx context.Context, userID, sessionID, name string) (*Session, error)
+	// SetIntent changes only intent (N474) — see the implementation for why
+	// this is a third single-field method rather than folded into Rename.
+	SetIntent(ctx context.Context, userID, sessionID string, intent SessionIntent) (*Session, error)
 	// Reschedule changes only started_at — see the implementation for why
 	// this is a second single-field method rather than folded into Rename.
 	Reschedule(ctx context.Context, userID, sessionID string, startedAt time.Time) (*Session, error)

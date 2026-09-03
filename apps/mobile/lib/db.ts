@@ -607,7 +607,7 @@ const CREATE_HEALTHKIT_IMPORTS = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 32;
+const SCHEMA_VERSION = 33;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1239,6 +1239,17 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // and why this is a dedicated table rather than a scan over every
     // session's `running_json`.
     await db.execAsync(CREATE_HEALTHKIT_IMPORTS);
+  }
+
+  if (current < 33) {
+    // N474: what the athlete meant this session to be — see
+    // SessionIntent's own doc comment in lib/sessions.ts. NOT NULL DEFAULT
+    // 'normal', same reasoning as the server-side column: every session
+    // recorded before this existed IS a normal session (there is nothing
+    // else it could have meant), so a backfilled default is the honest
+    // value here, unlike `category`/`bjj_json` above where NULL is the
+    // honest answer for a fact nothing before this version ever asked.
+    await addColumnIfMissing(db, 'local_sessions', 'intent', "TEXT NOT NULL DEFAULT 'normal'");
   }
 
   // The day query the card runs on every render of Today.

@@ -23,6 +23,7 @@ function session(day: string, hour = 18): Session {
     workout_id: null,
     sport: 'strength',
     name: '',
+    intent: 'normal',
     started_at: new Date(`${day}T${String(hour).padStart(2, '0')}:00:00`).toISOString(),
     ended_at: null,
     notes: '',

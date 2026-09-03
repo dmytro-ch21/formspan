@@ -66,6 +66,7 @@ function session(over: Partial<Session> & { id?: string } = {}): Session {
     workout_id: null,
     sport: 'strength',
     name: 'Legs',
+    intent: 'normal',
     started_at: `${TODAY}T09:00:00`,
     ended_at: `${TODAY}T10:00:00`,
     notes: '',
