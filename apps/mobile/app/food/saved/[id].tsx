@@ -42,7 +42,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { foodSyncState, localFood, saveFoodLocally } from '@/lib/foodLog';
 import type { Food } from '@/lib/nutrition';
 import { shareBlockedReason } from '@/lib/shares';
-import { request } from '@/lib/sync';
+import { request, useSyncState } from '@/lib/sync';
 
 /** The four numbers, in the order a packet prints them. */
 const FIELDS = [
@@ -139,7 +139,10 @@ export default function EditSavedFoodScreen() {
 
   // N116/#505 — same reasoning as the entry screen's own copy of this
   // effect: sync flags can change (a background push landing) without any
-  // of `food`'s own fields changing.
+  // of `food`'s own fields changing. `lastSyncAt` IN THE DEPS — see
+  // `workout/[id].tsx`'s own copy of this effect for why: without it, Share
+  // stays stuck on "Not synced yet" long after the push actually landed.
+  const { lastSyncAt } = useSyncState();
   useEffect(() => {
     if (!userId || !id) return;
     let live = true;
@@ -149,7 +152,7 @@ export default function EditSavedFoodScreen() {
     return () => {
       live = false;
     };
-  }, [userId, id]);
+  }, [userId, id, lastSyncAt]);
 
   const save = useCallback(async () => {
     if (!userId || !food || saving) return;

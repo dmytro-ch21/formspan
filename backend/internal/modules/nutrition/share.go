@@ -78,6 +78,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,6 +95,16 @@ func divPtr(v *float64, factor float64) *float64 {
 	}
 	out := *v * factor
 	return &out
+}
+
+// derefOr0 is for a SQL sum() the caller has already established cannot
+// really be nil (count > 0 over a NOT NULL column) — a safe default rather
+// than a panic if that invariant is ever wrong.
+func derefOr0(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // scaleMacros multiplies every stated field by factor. Used to turn an
@@ -139,30 +150,6 @@ func insertFood(ctx context.Context, tx pgx.Tx, newOwnerID, kind, name, brand, s
 		m.SaturatedFatG, m.SugarG, m.AddedSugarG, m.SodiumMG, m.CholesterolMG,
 		yieldServings).Scan(&newID)
 	return newID, err
-}
-
-// insertRecipeItem writes one component of a copied recipe. `position` is
-// the caller's loop index, re-derived from read order rather than carried —
-// the same densification workout.CopyTo and sequence.CopyTo both already do
-// for their own ordered children.
-//
-// source_food_id is always NULL on a copy: it is provenance pointing back at
-// the SENDER's own saved foods (see the FK's own comment in migration
-// 000059 on why it is deliberately not enforced), and a raw id copied across
-// owners would name nothing the recipient has, or worse, something they own
-// that merely shares that uuid by coincidence.
-func insertRecipeItem(ctx context.Context, tx pgx.Tx, foodID string, position int,
-	name, servingLabel string, quantity float64, m Macros) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO nutrition_recipe_items (
-			food_id, position, name, quantity, serving_label,
-			kcal, protein_g, carb_g, fat_g, fibre_g,
-			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source_food_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NULL)`,
-		foodID, position, name, quantity, servingLabel,
-		m.Kcal, m.ProteinG, m.CarbG, m.FatG, m.FibreG,
-		m.SaturatedFatG, m.SugarG, m.AddedSugarG, m.SodiumMG, m.CholesterolMG)
-	return err
 }
 
 // EntryCopier shares one logged Entry — see the package doc above.
@@ -271,7 +258,14 @@ func (c FoodCopier) Describe(ctx context.Context, resourceID, sharerID string) (
 
 // CopyTo duplicates the Food row and, for a recipe, its items — atomically,
 // inside the share module's transaction, exactly like workout.CopyTo and
-// sequence.CopyTo. A plain food has no items and the loop below is a no-op.
+// sequence.CopyTo.
+//
+// The items are copied with ONE INSERT ... SELECT rather than a read-then-
+// loop-insert — the same shape workout.CopyTo already uses for its own
+// ordered children (see that method's comment: "the items never leave the
+// database, so a long template costs one round trip and cannot half-copy").
+// A no-op for a plain food, which has no rows in nutrition_recipe_items to
+// match.
 func (c FoodCopier) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (string, bool, error) {
 	if !isUUID(resourceID) {
 		return "", false, nil
@@ -299,46 +293,22 @@ func (c FoodCopier) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID,
 		return "", false, fmt.Errorf("nutrition: copy food read: %w", err)
 	}
 
-	type item struct {
-		name, servingLabel string
-		quantity           float64
-		m                  Macros
-	}
-	var items []item
-	if kind == string(KindRecipe) {
-		rows, err := tx.Query(ctx, `
-			SELECT name, quantity, serving_label,
-			       kcal, protein_g, carb_g, fat_g, fibre_g,
-			       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg
-			FROM nutrition_recipe_items WHERE food_id = $1 ORDER BY position`, resourceID)
-		if err != nil {
-			return "", false, fmt.Errorf("nutrition: copy food items read: %w", err)
-		}
-		for rows.Next() {
-			var it item
-			if err := rows.Scan(&it.name, &it.quantity, &it.servingLabel,
-				&it.m.Kcal, &it.m.ProteinG, &it.m.CarbG, &it.m.FatG, &it.m.FibreG,
-				&it.m.SaturatedFatG, &it.m.SugarG, &it.m.AddedSugarG, &it.m.SodiumMG, &it.m.CholesterolMG); err != nil {
-				rows.Close()
-				return "", false, fmt.Errorf("nutrition: copy food items scan: %w", err)
-			}
-			items = append(items, it)
-		}
-		rowsErr := rows.Err()
-		rows.Close()
-		if rowsErr != nil {
-			return "", false, fmt.Errorf("nutrition: copy food items: %w", rowsErr)
-		}
-	}
-
 	newID, err := insertFood(ctx, tx, newOwnerID, kind, name, brand, servingLabel, servingGrams, m, yieldServings)
 	if err != nil {
 		return "", false, fmt.Errorf("nutrition: copy food insert: %w", err)
 	}
-	for i, it := range items {
-		if err := insertRecipeItem(ctx, tx, newID, i, it.name, it.servingLabel, it.quantity, it.m); err != nil {
-			return "", false, fmt.Errorf("nutrition: copy food item insert: %w", err)
-		}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO nutrition_recipe_items (
+			food_id, position, name, quantity, serving_label,
+			kcal, protein_g, carb_g, fat_g, fibre_g,
+			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source_food_id)
+		SELECT $1, row_number() OVER (ORDER BY position) - 1,
+		       name, quantity, serving_label,
+		       kcal, protein_g, carb_g, fat_g, fibre_g,
+		       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, NULL
+		FROM nutrition_recipe_items WHERE food_id = $2`,
+		newID, resourceID); err != nil {
+		return "", false, fmt.Errorf("nutrition: copy food items: %w", err)
 	}
 	return newID, true, nil
 }
@@ -362,6 +332,15 @@ const maxDayEntries = maxRecipeItems
 // send, and treating an empty day as "not found" is the same non-oracle
 // answer every other miss in this module already gives.
 func (c DayCopier) Describe(ctx context.Context, resourceID, sharerID string) (string, bool, error) {
+	// A malformed date is a miss, not a 500 — matching EntryCopier/
+	// FoodCopier's isUUID() short-circuit above and for the identical
+	// reason: without this, a non-date resource_id reaches Postgres as
+	// `eaten_on = $2::date` and comes back 22007/22008 (invalid_datetime_format),
+	// which is not pgx.ErrNoRows, so it would surface as a 500 instead of
+	// the 400/404 every other bad id in this module resolves to.
+	if _, err := time.Parse("2006-01-02", resourceID); err != nil {
+		return "", false, nil
+	}
 	var count int
 	err := c.pool.QueryRow(ctx, `
 		SELECT count(*) FROM nutrition_entries WHERE user_id = $1 AND eaten_on = $2::date`,
@@ -379,118 +358,91 @@ func (c DayCopier) Describe(ctx context.Context, resourceID, sharerID string) (s
 	return fmt.Sprintf("%s (%d %s)", resourceID, count, noun), true, nil
 }
 
-// CopyTo reads the sharer's entries for resourceID (a "YYYY-MM-DD" date) and
-// bundles them into ONE new recipe, one serving, in the recipient's library —
-// the same shape food/combine.tsx already builds client-side for a
-// hand-picked selection (N115), built here from a whole day instead.
+// CopyTo bundles the sharer's entries for resourceID (a "YYYY-MM-DD" date)
+// into ONE new recipe, one serving, in the recipient's library — the same
+// shape food/combine.tsx already builds client-side for a hand-picked
+// selection (N115), built here from a whole day instead.
 //
-// STRUCTURALLY excludes targets and body weight: this method names only
-// nutrition_entries. There is no second query anywhere here that could reach
-// nutrition_targets or body_checkins, which is what makes #505's "shares
-// what was eaten, not targets or weight" a fact about the code rather than a
-// filter someone could forget to apply.
+// STRUCTURALLY excludes targets and body weight: every statement below names
+// only nutrition_entries. There is no query anywhere in this method that
+// could reach nutrition_targets or body_checkins, which is what makes #505's
+// "shares what was eaten, not targets or weight" a fact about the code rather
+// than a filter someone could forget to apply.
+//
+// ONE INSERT ... SELECT for the items, not a read-then-loop — the same shape
+// workout.CopyTo already uses for its own ordered children, and for the
+// identical reason its comment states: "the items never leave the database,
+// so a long [day] costs one round trip and cannot half-copy." The totals are
+// summed in SQL first (one round trip, SUM() skipping NULLs exactly as
+// DayTotals' own query already documents — nil stays nil unless at least one
+// entry stated a value), so the parent row is inserted with its real numbers
+// the first time rather than zeroed-then-corrected.
 func (c DayCopier) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, newOwnerID string) (string, bool, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT name, servings, serving_label,
-		       kcal, protein_g, carb_g, fat_g, fibre_g,
-		       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg
-		FROM nutrition_entries
-		WHERE user_id = $1 AND eaten_on = $2::date
-		ORDER BY meal, created_at, id
-		LIMIT $3`, sharerID, resourceID, maxDayEntries+1)
+	if _, err := time.Parse("2006-01-02", resourceID); err != nil {
+		return "", false, nil
+	}
+	// sum() over ZERO rows is NULL regardless of the column's own
+	// nullability — even kcal, which nutrition_entries declares NOT NULL —
+	// so every destination has to be a pointer here, count==0 checked
+	// BEFORE any of them are dereferenced below.
+	var (
+		count                                  int
+		kcalSum, proteinSum, carbSum, fatSum   *float64
+		fibre, sat, sugar, added, sodium, chol *float64
+	)
+	err := tx.QueryRow(ctx, `
+		SELECT count(*),
+		       sum(kcal), sum(protein_g), sum(carb_g), sum(fat_g),
+		       sum(fibre_g), sum(saturated_fat_g), sum(sugar_g), sum(added_sugar_g),
+		       sum(sodium_mg), sum(cholesterol_mg)
+		FROM nutrition_entries WHERE user_id = $1 AND eaten_on = $2::date`,
+		sharerID, resourceID).Scan(
+		&count,
+		&kcalSum, &proteinSum, &carbSum, &fatSum,
+		&fibre, &sat, &sugar, &added, &sodium, &chol)
 	if err != nil {
-		return "", false, fmt.Errorf("nutrition: copy day read: %w", err)
+		return "", false, fmt.Errorf("nutrition: copy day totals: %w", err)
 	}
-	type item struct {
-		name, servingLabel string
-		servings           float64
-		m                  Macros
-	}
-	var items []item
-	for rows.Next() {
-		var it item
-		if err := rows.Scan(&it.name, &it.servings, &it.servingLabel,
-			&it.m.Kcal, &it.m.ProteinG, &it.m.CarbG, &it.m.FatG, &it.m.FibreG,
-			&it.m.SaturatedFatG, &it.m.SugarG, &it.m.AddedSugarG, &it.m.SodiumMG, &it.m.CholesterolMG); err != nil {
-			rows.Close()
-			return "", false, fmt.Errorf("nutrition: copy day scan: %w", err)
-		}
-		items = append(items, it)
-	}
-	rowsErr := rows.Err()
-	rows.Close()
-	if rowsErr != nil {
-		return "", false, fmt.Errorf("nutrition: copy day: %w", rowsErr)
-	}
-	if len(items) == 0 {
+	if count == 0 {
 		// Gone between sending and accepting — every entry that day was
-		// deleted. Same ErrGone treatment as a deleted food or entry.
+		// deleted (or it was never real). Same ErrGone treatment as a
+		// deleted food or entry.
 		return "", false, nil
 	}
 	// A day with more entries than a recipe can hold (100, N115's own limit)
 	// is not silently truncated: refuse the whole copy rather than hand over
 	// a day that quietly lost its last few entries.
-	if len(items) > maxDayEntries {
+	if count > maxDayEntries {
 		return "", false, fmt.Errorf("nutrition: day %s has more than %d entries, too many to share as one meal", resourceID, maxDayEntries)
+	}
+	// count > 0 and kcal/protein_g/carb_g/fat_g are all NOT NULL columns, so
+	// each sum is guaranteed non-nil here — derefOr0 is a defensive default,
+	// never actually reached at nil.
+	total := Macros{
+		Kcal: derefOr0(kcalSum), ProteinG: derefOr0(proteinSum),
+		CarbG: derefOr0(carbSum), FatG: derefOr0(fatSum),
+		FibreG: fibre, SaturatedFatG: sat, SugarG: sugar, AddedSugarG: added,
+		SodiumMG: sodium, CholesterolMG: chol,
 	}
 
 	yield := 1.0
 	newID, err := insertFood(ctx, tx, newOwnerID, string(KindRecipe),
-		fmt.Sprintf("Shared day — %s", resourceID), "", "1 day", nil, Macros{}, &yield)
+		fmt.Sprintf("Shared day — %s", resourceID), "", "1 day", nil, total, &yield)
 	if err != nil {
 		return "", false, fmt.Errorf("nutrition: copy day insert: %w", err)
 	}
-	var total Macros
-	sums := map[string]float64{}
-	stated := map[string]bool{}
-	add := func(key string, v *float64) {
-		if v == nil {
-			return
-		}
-		sums[key] += *v
-		stated[key] = true
-	}
-	for i, it := range items {
-		if err := insertRecipeItem(ctx, tx, newID, i, it.name, it.servingLabel, it.servings, it.m); err != nil {
-			return "", false, fmt.Errorf("nutrition: copy day item insert: %w", err)
-		}
-		total.Kcal += it.m.Kcal
-		total.ProteinG += it.m.ProteinG
-		total.CarbG += it.m.CarbG
-		total.FatG += it.m.FatG
-		add("fibre", it.m.FibreG)
-		add("sat", it.m.SaturatedFatG)
-		add("sugar", it.m.SugarG)
-		add("added", it.m.AddedSugarG)
-		add("sodium", it.m.SodiumMG)
-		add("chol", it.m.CholesterolMG)
-	}
-	per := func(key string) *float64 {
-		if !stated[key] {
-			return nil
-		}
-		v := sums[key]
-		return &v
-	}
-	total.FibreG = per("fibre")
-	total.SaturatedFatG = per("sat")
-	total.SugarG = per("sugar")
-	total.AddedSugarG = per("added")
-	total.SodiumMG = per("sodium")
-	total.CholesterolMG = per("chol")
-	// The parent row was inserted with zeroed macros above (items did not
-	// exist yet to sum), so it is corrected here to the real total — one
-	// serving of a one-serving recipe IS the sum of its items, the identical
-	// rule food/combine.tsx's `draftToFood` already applies client-side for
-	// N115.
 	if _, err := tx.Exec(ctx, `
-		UPDATE nutrition_foods SET
-			kcal = $2, protein_g = $3, carb_g = $4, fat_g = $5, fibre_g = $6,
-			saturated_fat_g = $7, sugar_g = $8, added_sugar_g = $9, sodium_mg = $10, cholesterol_mg = $11
-		WHERE id = $1`,
-		newID, total.Kcal, total.ProteinG, total.CarbG, total.FatG, total.FibreG,
-		total.SaturatedFatG, total.SugarG, total.AddedSugarG, total.SodiumMG, total.CholesterolMG); err != nil {
-		return "", false, fmt.Errorf("nutrition: copy day totals: %w", err)
+		INSERT INTO nutrition_recipe_items (
+			food_id, position, name, quantity, serving_label,
+			kcal, protein_g, carb_g, fat_g, fibre_g,
+			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source_food_id)
+		SELECT $1, row_number() OVER (ORDER BY meal, created_at, id) - 1,
+		       name, servings, serving_label,
+		       kcal, protein_g, carb_g, fat_g, fibre_g,
+		       saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, NULL
+		FROM nutrition_entries WHERE user_id = $2 AND eaten_on = $3::date`,
+		newID, sharerID, resourceID); err != nil {
+		return "", false, fmt.Errorf("nutrition: copy day items: %w", err)
 	}
 	return newID, true, nil
 }

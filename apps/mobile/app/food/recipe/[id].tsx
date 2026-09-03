@@ -66,7 +66,7 @@ import {
   type RecipeDraft,
 } from '@/lib/recipe';
 import { shareBlockedReason } from '@/lib/shares';
-import { request } from '@/lib/sync';
+import { request, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -146,6 +146,10 @@ export default function RecipeScreen() {
     };
   }, [userId, id, fresh]);
 
+  // `lastSyncAt` IN THE DEPS — see `workout/[id].tsx`'s own copy of this
+  // effect for why: without it, Share stays stuck on "Not synced yet" long
+  // after a background push has actually landed.
+  const { lastSyncAt } = useSyncState();
   useEffect(() => {
     if (!userId || !id || fresh === '1') return;
     let live = true;
@@ -155,7 +159,7 @@ export default function RecipeScreen() {
     return () => {
       live = false;
     };
-  }, [userId, id, fresh]);
+  }, [userId, id, fresh, lastSyncAt]);
 
   const yieldServings = useMemo(() => {
     const n = Number(yieldText.replace(',', '.'));

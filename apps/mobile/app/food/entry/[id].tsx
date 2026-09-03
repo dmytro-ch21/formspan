@@ -88,7 +88,7 @@ import { gramsBasisFromLabel, parseQuantity, servingsForLabelGrams } from '@/lib
 import { fmtAmount, MEALS, rescale, todayString, type Entry, type Food, type Meal } from '@/lib/nutrition';
 import { entriesFromRecipeItems } from '@/lib/recipe';
 import { shareBlockedReason } from '@/lib/shares';
-import { request } from '@/lib/sync';
+import { request, useSyncState } from '@/lib/sync';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
 
@@ -180,6 +180,14 @@ export default function EditEntryScreen() {
   // `blockedFromSharing` effect gives: sync flags can change without the
   // entry's own fields changing (a background push finishing), so this is
   // not derivable from `entry` alone.
+  //
+  // `lastSyncAt` IN THE DEPS, not just `[userId, id]` — `workout/[id].tsx`'s
+  // own copy of this effect documents why: `request()` returns immediately
+  // and pushes in the background, so at the moment this screen first reads
+  // the flags a freshly-logged entry is still `unsynced` in SQLite. Without
+  // `lastSyncAt`, Share would stay stuck saying "Not synced yet" long after
+  // the push actually landed, until the screen was left and reopened.
+  const { lastSyncAt } = useSyncState();
   useEffect(() => {
     if (!userId || !id) return;
     let live = true;
@@ -189,7 +197,7 @@ export default function EditEntryScreen() {
     return () => {
       live = false;
     };
-  }, [userId, id]);
+  }, [userId, id, lastSyncAt]);
 
   // N115 — a second, separate read rather than folded into the one above: it
   // depends on `entry.source_food_id`, which is not known until the first

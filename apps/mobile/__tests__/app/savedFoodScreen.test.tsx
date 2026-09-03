@@ -32,7 +32,11 @@ jest.mock('@/lib/foodLog', () => ({
   // N116/#505: unblocked by default — synced, and nothing owed.
   foodSyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
 }));
-jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
+// N116/#505: `useSyncState` is new on this screen — a static, never-changing
+// value is enough here, since nothing in this file exercises a re-fetch on a
+// sync tick (that behaviour is covered directly in foodLog.test.ts's own
+// sync-state tests, not through this screen).
+jest.mock('@/lib/sync', () => ({ request: jest.fn(), useSyncState: () => ({ lastSyncAt: null }) }));
 
 const mockBack = jest.fn();
 const mockReplace = jest.fn();

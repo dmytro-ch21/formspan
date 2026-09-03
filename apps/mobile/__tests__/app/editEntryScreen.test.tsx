@@ -36,7 +36,9 @@ jest.mock('@/lib/foodLog', () => ({
   // N116/#505: unblocked by default — synced, and nothing owed.
   entrySyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
 }));
-jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
+// N116/#505: `useSyncState` is new on this screen — a static value is
+// enough, since nothing in this file exercises a re-fetch on a sync tick.
+jest.mock('@/lib/sync', () => ({ request: jest.fn(), useSyncState: () => ({ lastSyncAt: null }) }));
 
 /** Frozen "now" so `entry.eaten_on === todayString()` is deterministic — the
  *  split feature's whole behaviour hinges on that comparison (N115). */

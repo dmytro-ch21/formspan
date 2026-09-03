@@ -42,7 +42,9 @@ jest.mock('@/lib/catalogApi', () => {
   };
 });
 
-jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
+// N116/#505: `useSyncState` is new on this screen — a static value is
+// enough, since nothing in this file exercises a re-fetch on a sync tick.
+jest.mock('@/lib/sync', () => ({ request: jest.fn(), useSyncState: () => ({ lastSyncAt: null }) }));
 
 const mockBack = jest.fn();
 let mockParams: Record<string, string> = { id: 'r1' };
