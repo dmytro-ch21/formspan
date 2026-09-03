@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { accents, vola, type AccentName } from '@/constants/Colors';
@@ -17,6 +17,12 @@ import {
   writeHealthKitImportEnabled,
 } from '@/lib/healthkitSync';
 import { triggerBiometricSyncNow } from '@/lib/biometricSync';
+import { isHealthConnectSupported } from '@/lib/healthConnect';
+import {
+  readHealthConnectImportEnabled,
+  triggerHealthConnectSyncNow,
+  writeHealthConnectImportEnabled,
+} from '@/lib/healthConnectSync';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
 import { MONO_ACCENT, monoNeedsRelaunch } from '@/lib/palette';
@@ -68,6 +74,21 @@ export default function SettingsScreen() {
   const [healthKitImport, setHealthKitImport] = useState(false);
   useEffect(() => {
     if (userId) readHealthKitImportEnabled(userId).then(setHealthKitImport).catch(() => {});
+  }, [userId]);
+
+  // N478: the Android equivalent, one row down. Unlike `healthKitSupported`
+  // above, `isHealthConnectSupported` is ASYNC — it asks the Health Connect
+  // SDK's own availability, not just whether a native module is linked —
+  // so this starts `false` and settles after mount rather than reading
+  // synchronously.
+  const [healthConnectSupported, setHealthConnectSupported] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    isHealthConnectSupported().then(setHealthConnectSupported).catch(() => {});
+  }, []);
+  const [healthConnectImport, setHealthConnectImportState] = useState(false);
+  useEffect(() => {
+    if (userId) readHealthConnectImportEnabled(userId).then(setHealthConnectImportState).catch(() => {});
   }, [userId]);
 
   /**
@@ -277,7 +298,7 @@ export default function SettingsScreen() {
           }
           value={healthKitImport}
           disabled={!healthKitSupported}
-          last
+          last={Platform.OS !== 'android'}
           onChange={(on) => {
             setHealthKitImport(on);
             if (!userId) return;
@@ -316,6 +337,45 @@ export default function SettingsScreen() {
           }}
           testID="settings-healthkit-import"
         />
+        {/* N478: the Android equivalent — only rendered on Android, the
+            same "nothing hides, but a platform-impossible control isn't
+            reachability" reasoning `Toggle`'s own `disabled` state uses on
+            an unsupported iOS device above, just one level earlier: an iOS
+            phone has no Health Connect at all, not merely an unauthorized
+            one. Heart rate read this way is fed into TRIMP/zones for
+            whichever session it falls inside; VO2max is read as a
+            profile-level trend only — see `lib/healthConnectSync.ts`. */}
+        {Platform.OS === 'android' && (
+          <Toggle
+            label="Read heart rate from Health Connect"
+            hint={
+              healthConnectSupported
+                ? "Heart rate and VO2max recorded by your watch or fitness app, via Android's Health Connect, enrich your session history with load and heart-rate zones — VOLA only reads, and never writes anything back. Only the last 30 days of history are readable by default. Turning this on asks for Health Connect access."
+                : 'Not available on this device.'
+            }
+            value={healthConnectImport}
+            disabled={!healthConnectSupported}
+            last
+            onChange={(on) => {
+              setHealthConnectImportState(on);
+              if (!userId) return;
+              void (async () => {
+                try {
+                  // Same AWAITED-before-triggering reasoning as the
+                  // HealthKit toggle above — `readHealthConnectImportEnabled`
+                  // inside the triggered pass reads this exact preference
+                  // back.
+                  await writeHealthConnectImportEnabled(userId, on);
+                } catch {
+                  setHealthConnectImportState(!on);
+                  return;
+                }
+                if (on) triggerHealthConnectSyncNow(userId, getToken);
+              })();
+            }}
+            testID="settings-health-connect-import"
+          />
+        )}
       </Section>
 
       {/* Its own section, because it is not a display preference like the ones

@@ -24,7 +24,11 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.vola.fitness",
-      "versionCode": 1
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_VO2_MAX"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -73,6 +77,17 @@
           "NSHealthShareUsageDescription": "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. It can also read heart rate for any finished session and your VO2max trend. All of this is off until you turn it on in Settings, and VOLA never writes anything to Health.",
           "NSHealthUpdateUsageDescription": false,
           "background": false
+        }
+      ],
+      "react-native-health-connect",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 26
+          }
         }
       ]
     ],

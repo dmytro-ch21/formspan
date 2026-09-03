@@ -110,9 +110,24 @@ const (
 	SourceWhoop      Source = "whoop"
 	SourceGarmin     Source = "garmin"
 	SourceManual     Source = "manual"
+	// SourceAndroidWearable covers a Health Connect sample whose writing app
+	// (its `dataOrigin`, in Health Connect's own terms) isn't one of the
+	// vendors above — Samsung Health chief among them: extremely common on
+	// Android, and Health Connect's own docs list no stable per-vendor
+	// identifier this package could match against the way SourceGarmin/
+	// SourceOura/SourceWhoop do for named apps. Added for N478 rather than
+	// silently mislabelling those readings as SourceGarmin (a real lie) or
+	// SourceManual (also a lie — nobody typed these in), which is exactly
+	// the kind of false precision the hr_source honesty discipline (design
+	// doc §6.3) exists to rule out one level up. Matches this package's own
+	// doc comment on MetricType: "growing this list is a one-line Go
+	// change."
+	SourceAndroidWearable Source = "android_wearable"
 )
 
-var sources = []Source{SourceAppleWatch, SourceOura, SourceWhoop, SourceGarmin, SourceManual}
+var sources = []Source{
+	SourceAppleWatch, SourceOura, SourceWhoop, SourceGarmin, SourceManual, SourceAndroidWearable,
+}
 
 func Sources() []Source {
 	out := make([]Source, len(sources))

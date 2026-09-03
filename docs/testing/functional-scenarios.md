@@ -18006,3 +18006,88 @@ is the design.
   `sessionsNeedingBiometricSync` already filtered to the calling `user_id`,
   and the backend's own ownership check (N476/#821) is the second,
   authoritative gate.
+
+## N478 — Android Health Connect heart rate + VO2max reading, window-joined to sessions (`apps/mobile/lib/healthConnect.ts`, `apps/mobile/lib/healthConnectSync.ts`, `apps/mobile/lib/biometricEnrichment.ts`, `apps/mobile/lib/biometricApi.ts`, `apps/mobile/app/settings.tsx`, N476's `/v1/biometric/*`)
+
+The Android equivalent of N477 (iOS HealthKit), feeding the same N476
+backend module. Same §2 window-join approach and `hr_source` honesty
+discipline; `docs/decisions/health-integration-design.md` §5.2 is the
+platform-specific caution this ticket exists to make legible rather than
+confusing — Health Connect's 30-day default history wall.
+
+### Happy path
+
+- Settings → Integrations → "Read heart rate from Health Connect" (Android
+  only — never rendered on iOS, which has no Health Connect): off by
+  default on a fresh install. Turning it on triggers the system Health
+  Connect authorization screen, preceded by the rationale text already
+  visible on the row.
+- With a real watch/fitness app writing heart rate to Health Connect, finish
+  a session (any sport) and let it sync to the server: within one
+  foreground pass the session gains `session_metrics` — `avg_hr_bpm`,
+  `max_hr_bpm`, `trimp`, `time_in_zones` — sourced from whatever heart rate
+  actually fell in that session's `[started_at, ended_at]` window.
+- VO2max recorded by the same watch/app appears as a profile-level trend
+  reading, not attached to any individual session (design doc §3 — it is a
+  device-computed daily-ish estimate, never a per-session one).
+- Background the app, finish a second session, then foreground VOLA: the
+  second session is enriched without re-querying or re-uploading the
+  first's already-confirmed (`hr_source: 'window'`) samples.
+- A session finished with the watch not worn / no wearable at all: enriches
+  to `hr_source: 'none'`, `sample_count: 0`, all HR-derived fields null —
+  not an error, and not a silently-missing row.
+
+### Edge cases & errors
+
+- **The Health Connect 30-day history wall (§5.2), this ticket's own
+  documented limitation**: a session older than 30 days is never even
+  queried — Health Connect makes reading that far back a native ERROR
+  rather than an empty result, so the app skips the call entirely
+  (`isWithinHealthConnectHistoryWall`) rather than surfacing a confusing
+  failure. Verify a session from, say, 45 days ago simply never gains
+  `session_metrics` through this path, with no error toast or retry storm.
+- Turn the toggle on, then deny the system Health Connect permission
+  screen: the toggle stays visibly on (a device setting, not a permission
+  grant) but nothing enriches — same "never distinguishable from no data"
+  posture N465's HealthKit scenario documents, and for the same platform
+  reason (neither store tells an app that access was denied).
+- A device/simulator with no Health Connect provider installed (pre-14
+  devices without the standalone app), or a build missing the native
+  module (see `lib/healthConnect.ts`'s blast-shield doc comment): the
+  Settings row shows disabled with "Not available on this device" rather
+  than crashing the Settings screen.
+- **No retry storm on a session with genuinely no data**: `hr_source:
+  'none'` is retried for up to 3 days after the session ends (giving a slow
+  watch sync a chance to catch up), then never asked about again — verify a
+  months-old `'none'` session does not trigger a Health Connect query on
+  every foreground return. Covered at the pure/retry-logic level by
+  `apps/mobile/lib/__tests__/biometricEnrichment.test.ts`; the device
+  version (confirming Health Connect itself is not re-queried, not just the
+  local decision) is this ticket's own `NEEDS HUMAN EVIDENCE` criterion.
+- An athlete with no `date_of_birth` on their profile: raw heart-rate
+  samples still upload (real data, worth having regardless), but
+  `ComputeSessionMetrics` is never called — no `hr_max_bpm` can be honestly
+  derived — and the session stays retryable rather than permanently
+  abandoned, in case the athlete fills in their profile within the retry
+  window.
+- A `HeartRateRecord` whose interval merely overlaps the session's exact
+  window (Health Connect's own `timeRangeFilter` filters at the record
+  level, not the sample level): only samples actually inside
+  `[started_at, ended_at]` are uploaded, not the whole record's — covered
+  directly by `heartRateSamplesInWindow`'s own tests.
+- A Health Connect writer app this feature doesn't specifically recognise
+  (Samsung Health, most commonly — extremely common on Android): stored
+  with `source: 'android_wearable'` rather than a fabricated/wrong vendor
+  name (`garmin`/`oura`/`whoop` are matched by known package name only).
+- Turning the toggle off after sessions have already been enriched: those
+  `session_metrics` rows remain exactly as computed — turning the setting
+  off must never delete or hide data already brought in.
+
+### Auth/security
+
+- Health Connect access is READ-ONLY — `requestPermission` never asks for
+  `write`, and the settings toggle never requests write access to any
+  Health Connect record type.
+- N476's existing `/v1/biometric/*` auth/ownership scenarios (above) apply
+  unchanged to samples/metrics arriving via this path — there is no
+  separate code path per `source_platform`.

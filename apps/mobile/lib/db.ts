@@ -604,6 +604,34 @@ const CREATE_BIOMETRIC_HR_SYNCED = `
 `;
 
 /**
+ * The retry ledger for N478's Health Connect heart-rate enrichment — NOT a
+ * dedup table the way `healthkit_imports` (or N477's `biometric_hr_synced`
+ * above, which IS a dedup/checked-once table despite the name) is. This one
+ * exists because asking Health Connect (and the biometric API) about the
+ * same finished session on every single foreground return, forever, is real
+ * ongoing cost for no benefit once a session has either got real evidence
+ * or is old enough that it never will.
+ *
+ * One row per (user, session) enrichment ATTEMPT, overwritten each time —
+ * see `lib/biometricEnrichment.ts`'s `needsEnrichmentAttempt` for exactly
+ * how `hr_source`/`attempted_at` decide whether the next foreground pass
+ * tries again. `hr_source` is `'window'` or `'none'` only (never `'workout'`
+ * — see that module's own doc comment on why this app never claims it), and
+ * once it is `'window'` the row is terminal: real evidence has been found
+ * and stored server-side, and there is nothing left to retry for.
+ */
+const CREATE_HEALTH_CONNECT_ENRICHMENT = `
+  CREATE TABLE IF NOT EXISTS health_connect_enrichment (
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    hr_source TEXT NOT NULL,
+    sample_count INTEGER NOT NULL,
+    attempted_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, session_id)
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -632,7 +660,7 @@ const CREATE_BIOMETRIC_HR_SYNCED = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 34;
+const SCHEMA_VERSION = 35;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -650,7 +678,8 @@ type LocalTable =
   | 'daily_trackers'
   | 'tracker_entries'
   | 'healthkit_imports'
-  | 'biometric_hr_synced';
+  | 'biometric_hr_synced'
+  | 'health_connect_enrichment';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -733,6 +762,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_TRACKER_ENTRIES);
   await db.execAsync(CREATE_HEALTHKIT_IMPORTS);
   await db.execAsync(CREATE_BIOMETRIC_HR_SYNCED);
+  await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -1282,6 +1312,13 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   if (current < 34) {
     // N477/#822: see CREATE_BIOMETRIC_HR_SYNCED's own doc comment.
     await db.execAsync(CREATE_BIOMETRIC_HR_SYNCED);
+  }
+
+  if (current < 35) {
+    // N478: see CREATE_HEALTH_CONNECT_ENRICHMENT's own doc comment for why
+    // this is a retry ledger rather than a dedup table like
+    // healthkit_imports/biometric_hr_synced above.
+    await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
   }
 
   // The day query the card runs on every render of Today.
