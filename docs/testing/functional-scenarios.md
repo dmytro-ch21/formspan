@@ -17763,3 +17763,66 @@ in `units.ts` now convert these too, display-side only — the wire values
 
 - N/A — purely a display-layer conversion of numbers the response already
   contains; no new endpoint, no new field, no authorization surface.
+
+## N475 — Android distribution baseline (`apps/mobile/eas.json`, `apps/mobile/app.json`, `apps/mobile/package.json`)
+
+Scope is deliberately narrow: an Android **development** dev-client build
+exists and installs. Not Play Store distribution, not a `preview`/`production`
+Android profile — those are explicitly out of scope for this ticket.
+
+### Happy path
+
+- `pnpm --dir apps/mobile run build:android` (`eas build --platform android
+  --profile development`) produces an installable `.apk` (the `development`
+  profile's `android.buildType` is `apk`, not `app-bundle`, specifically so it
+  installs directly on a device/emulator without going through Play internal
+  testing).
+- The built dev client installs on an Android device or emulator and launches
+  to the sign-in screen (Clerk).
+- After signing in, the Today tab renders, and at least one other tab (e.g.
+  Library or Plan) navigates without a crash.
+- `expo start --dev-client` (via `pnpm --dir apps/mobile run start`) hands the
+  installed Android dev client a Metro bundle the same way it already does for
+  iOS.
+
+### Edge cases & errors
+
+- **The running-tracking map will not render tiles on Android.**
+  `react-native-maps`'s Android config plugin only ever writes or removes the
+  `com.google.android.geo.API_KEY` manifest meta-data based on
+  `androidGoogleMapsApiKey` (`plugin/build/android.js`, confirmed by reading
+  the plugin source and by a dry `expo prebuild --platform android` in this
+  ticket, whose generated `AndroidManifest.xml` carries no
+  `com.google.android.geo.API_KEY` entry at all) — unlike iOS, there is no
+  free/keyless path. Tracked separately as a known gap, not silently left
+  broken: N482 (#829).
+- Location permission scope matches iOS's when-in-use-only choice:
+  `expo-location`'s Android plugin unconditionally adds
+  `ACCESS_COARSE_LOCATION`/`ACCESS_FINE_LOCATION` but — because
+  `isAndroidBackgroundLocationEnabled` is never set in `app.json` — adds
+  neither `ACCESS_BACKGROUND_LOCATION` nor a foreground-service permission.
+  Confirmed in the generated manifest.
+- Microphone stays undeclared on Android the same way it does on iOS:
+  `expo-camera`'s `recordAudioAndroid: false` and `expo-image-picker`'s
+  `microphonePermission: false` together produce a manifest with
+  `RECORD_AUDIO` explicitly `tools:node="remove"` rather than merely absent —
+  confirmed in the generated manifest.
+- A stale Android dev client behaves the same as a stale iOS one: add a new
+  native dependency, run `start` instead of `run:android` (or rebuild via
+  `build:android`), and the JS references a module the installed binary
+  doesn't contain yet.
+
+### Auth/security
+
+- Same Clerk instance, same token flow as iOS — no Android-specific auth
+  surface was introduced by this ticket.
+
+### Needs a device
+
+- **Everything above marked "on a device or emulator" is unverified in this
+  environment** — no Android SDK, emulator, or physical Android device was
+  available. What *was* verified without one: `expo prebuild --platform
+  android` resolves every config plugin cleanly and produces the manifest
+  described above (package `com.vola.fitness`, versionCode 1, permissions as
+  listed) — that is a real exercise of the same config-plugin logic a full
+  build runs, just short of compiling and installing.

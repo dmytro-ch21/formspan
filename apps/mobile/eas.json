@@ -8,6 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": { "simulator": true },
+      "android": { "buildType": "apk" },
       "env": {
         "EXPO_PUBLIC_API_URL": "http://localhost:8080"
       }

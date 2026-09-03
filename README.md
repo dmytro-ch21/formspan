@@ -85,6 +85,15 @@ and `apps/mobile/android` are generated (CNG) and gitignored — `app.json` plus
 the dependency list is the source of truth, and `pnpm --dir apps/mobile run
 prebuild` regenerates them from scratch.
 
+**Android** has a `development` EAS build profile as of N475 (#820) —
+`pnpm --dir apps/mobile run build:android` (`eas build --platform android
+--profile development`) produces an installable `.apk`. This is a baseline
+only: no `preview`/`production` Android profile and no Play Store
+distribution exist yet, and the running-tracking map will not render tiles on
+Android until a Google Maps API key is wired up (tracked as N482, #829) —
+`react-native-maps` has no free/keyless tier on Android the way it does on
+iOS.
+
 Then open http://localhost:3000 (web) or http://localhost:3001 (admin). Each app needs its own `.env.local` (copy from `.env.example`) — the admin console additionally needs `ADMIN_USER_IDS` set to your Clerk user ID, matching the same var in `backend/.env`, before `/users` will let you in (find your ID via `GET /v1/me` or the Clerk dashboard).
 
 ### Run the backend tests

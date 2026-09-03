@@ -66,6 +66,7 @@
     "build:ios": "eas build --platform ios --profile preview",
     "build:ios:prod": "eas build --platform ios --profile production",
     "submit:ios": "eas submit --platform ios --latest",
+    "build:android": "eas build --platform android --profile development",
     "test": "TZ=America/Los_Angeles jest",
     "test:watch": "jest --watch",
     "lint": "eslint . --max-warnings=50"

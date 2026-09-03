@@ -53962,7 +53962,93 @@ once; every guarantee above is proven in Postgres and in the mobile test
 suite, not on hardware.
 
 
+## 2026-09-03 — N475 (#820): Android distribution baseline — build profile + working dev-client build (config-verified, no device/emulator in this environment)
+
+Part of the Biometric/HR integration initiative (Android now in scope
+alongside iOS, decided 2026-09-01). Stood up the minimum needed to build the
+app for Android at all — deliberately not Play Store distribution, and no
+`preview`/`production` Android profile, both explicitly out of scope.
+
+**What was added:**
+
+- `apps/mobile/eas.json`'s `development` build profile gained an `android`
+  override — `{ "buildType": "apk" }` — mirroring the shape of its existing
+  `ios: { simulator: true }` override. `apk` rather than the default
+  `app-bundle` was a deliberate choice: an `.apk` installs directly on a
+  device/emulator, an `.aab` needs Play's bundle tooling to become
+  installable, and this profile's whole purpose is a directly-installable
+  dev client.
+- `apps/mobile/package.json` gained `build:android`, wired to `eas build
+  --platform android --profile development` — **note this targets a
+  different profile than `build:ios` does** (`build:ios` builds `preview`;
+  there is no Android `preview` profile in scope for this ticket, so
+  `build:android` targets the one Android profile that exists). At the
+  mobile-package script level, an `android`/`ios` pair already existed
+  side-by-side (`expo run:android` / `expo run:ios`, both pre-dating this
+  ticket) — so no new `dev:android`-shaped script was needed there, and the
+  root `package.json` has no `dev:ios` either, so nothing was added there.
+- `app.json`'s existing `"android"` block (package `com.vola.fitness`,
+  versionCode 1, adaptive icon set) was **confirmed sufficient, not
+  changed** — see verification below.
+
+**What was verified, and how, given no Android SDK/emulator/device exists in
+this environment:** `pnpm install` (to get `node_modules` into this worktree,
+which starts without one) followed by `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+npx expo prebuild --platform android --no-install` from a clean worktree.
+This is a real exercise of the same config-plugin resolution a full EAS/local
+build runs — every plugin in `app.json`'s `plugins` array (`expo-router`,
+`expo-splash-screen`, `expo-image`, `expo-image-picker`, `expo-camera`,
+`expo-sharing`, `expo-location`, `react-native-maps`,
+`@kingstinct/react-native-healthkit`) resolved cleanly with no errors, and the
+generated `android/app/build.gradle` carries `applicationId
+'com.vola.fitness'` and `versionCode 1` as expected. The generated
+`AndroidManifest.xml` was then read directly and confirmed:
+
+- `ACCESS_COARSE_LOCATION`/`ACCESS_FINE_LOCATION` present, no
+  `ACCESS_BACKGROUND_LOCATION` or foreground-service permission — matching
+  N459's iOS when-in-use-only scope, because `expo-location`'s Android plugin
+  (`plugin/build/withLocation.js`) only adds the background/foreground-service
+  permissions when `isAndroidBackgroundLocationEnabled` is set, which `app.json`
+  never sets.
+- `RECORD_AUDIO` present but explicitly `tools:node="remove"` — confirming
+  `expo-camera`'s `recordAudioAndroid: false` and `expo-image-picker`'s
+  `microphonePermission: false` both took effect on Android the same way the
+  `vola-mobile-build` skill already documents for iOS's
+  `microphonePermission: false`.
+- No `com.google.android.geo.API_KEY` meta-data anywhere in the manifest —
+  see the known gap below.
+
+The generated `android/` directory (gitignored, CNG-generated, same as
+`ios/`) was deleted after inspection and does not appear in this PR's diff.
+
+**What was NOT verified, and could not be, in this sandboxed environment:**
+no Android SDK/`adb`/emulator is installed here, and `eas-cli` is not
+authenticated (no Expo account login available non-interactively) — so
+neither `eas build --profile development --platform android` (cloud) nor
+`--local` was actually run, and nothing installed or launched on a real
+device or emulator. The ticket's own **NEEDS HUMAN EVIDENCE** criterion — a
+build installing and launching on a real device/emulator, Today tab and one
+other tab navigating — is left unchecked for the user to run.
+
+**Known gap, surfaced rather than silently left broken: Android has no
+Google Maps API key, so the running-tracking map will not render tiles.**
+This was already flagged as deferred cost in N459's history entry (2026-09-01)
+when `react-native-maps` was first added — "Whoever adds an Android build for
+running will need `androidGoogleMapsApiKey` and a Google Cloud billing
+account at that point." This ticket is that point. `react-native-maps`'s
+Android config plugin (`plugin/build/android.js`, `withMapsAndroid`) only
+ever writes or removes the `com.google.android.geo.API_KEY` manifest
+meta-data based on an `androidGoogleMapsApiKey` plugin prop — there is no
+free/keyless path the way Apple Maps gives iOS. `app.json` is static JSON
+with no templating, so wiring a real key in **from an env var, not a
+hardcoded string** likely means converting to `app.config.js`/`.ts` first, to
+read `process.env` at config-evaluation time — a bigger change than this
+ticket's narrow scope, and one that also needs an actual Google Cloud
+project/billing account/API key, none of which exist yet. Filed as N482
+(#829) rather than left implicit.
+
 ## Open items / known gaps as of this entry
+
 
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.
