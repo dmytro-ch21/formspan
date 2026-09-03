@@ -54854,6 +54854,109 @@ confirmed on-device — the native `queryOtherWorkouts`/`queryOtherExerciseSessi
 call is, per this feature's own split, the one piece no test in this
 environment can reach.
 
+## 2026-09-03 — N481 (#826): deterministic session-effectiveness summary (TRIMP + zones + sRPE calibration) — built client-side, not on the backend
+
+Part of the Biometric/HR integration initiative. Design doc §8 item 3,
+"calibrating sRPE against measurement," calls this "the most valuable use
+case" the HR integration buys: hold both signals — the athlete's session RPE
+and what their heart actually did — and say when the two disagree.
+`sessionEffectivenessSummary` in the new `apps/mobile/lib/
+sessionEffectiveness.ts` is that comparison: given a session's `SessionMetrics`
+(TRIMP, `time_in_zones`, `hr_source` — N476/#821) and its `session_rpe`
+(BJJ's existing field), it returns a deterministic verdict — `felt_harder`,
+`felt_easier` or `aligned` — or `null` when the evidence doesn't support one.
+
+**The architectural decision this ticket asked for, made explicitly rather
+than defaulted from the issue's `area: backend` label.** The issue's own "what
+this touches" named backend computation; the actual precedent for this exact
+shape of feature — deterministic, evidence-gated, capped, never
+LLM-generated — is `apps/mobile/lib/progress.ts`'s `Insight`/`whatChanged`,
+which is entirely client-side. Weighed directly rather than assumed:
+
+- **Both raw ingredients are already client-readable with no new backend
+  work.** `GET /biometric/sessions/{id}/metrics` already returns TRIMP, zones
+  and `hr_source` (N476/#821, already merged); BJJ's session read already
+  returns `session_rpe`. Nothing here needs a write, a migration or a new
+  round trip — it is arithmetic over two numbers the client already has in
+  hand once it has made two calls it already makes.
+- **No shared package exists between `apps/web` and `apps/mobile`**
+  (`pnpm-workspace.yaml` declares a `packages/*` slot; nothing lives there
+  yet) — this codebase's convention for logic that must agree across web and
+  mobile is two independent copies plus a parity test (`basisParity.test.ts`
+  is the existing example), not one shared module. A backend endpoint would
+  have bought parity for free; a client function does not. That cost is real
+  and is written down here rather than glossed over — it is why this entry
+  says "mobile" and not "mobile and web."
+- **`backend/internal/modules/biometric`'s own doc comments already earmarked
+  this ticket for the CLIENT side of the read path**: `Repository.ListSamples`
+  says the read path "a later ticket's trend/effectiveness surface
+  (N477/N481) uses," describing a client consumer of an existing read, not a
+  new backend capability.
+- Against a backend implementation: `biometric` doesn't read `session_rpe`
+  (owned by `bjj_session_details`), so a backend version would need to cross
+  module boundaries the way `sessioncard` already does for its share-card
+  — which is a fine pattern, but for a *different* concern (a public,
+  postable share card, not a private per-athlete calibration read) and would
+  have added a new cross-module read path this feature doesn't strictly need.
+
+**Decided: client-side, on mobile, following the `Insight` pattern exactly** —
+see that file's own doc comment before touching `sessionEffectiveness.ts`.
+Web gets nothing today, honestly: it has no biometric surface of its own yet
+(no HR/TRIMP anywhere in `apps/web`), so there is nothing to feed this
+function there — a gap recorded here rather than silently deferred.
+
+**Deterministic, not LLM, on purpose — the ticket's own explicit requirement,
+and the same evidence-based-rules-before-AI stance the design doc already
+takes** (§8: "measurement calibrates the subjective scale, it does not
+replace it," §5.5). The verdict is pure arithmetic: TRIMP divided by total
+zone-attributed minutes recovers the session's weighted-average zone (TRIMP
+is itself `Σ(minutes in zone × zone weight)`, so this is exact, not an
+approximation); that average, doubled and rounded, is the "HR-implied RPE" on
+the same 1-10 scale `bjjSession.ts`'s existing `describeRPE`/Foster labels
+already use. A gap of 2 or more points is `felt_harder`/`felt_easier`; smaller
+is `aligned`. Two points was chosen because sRPE correlates with HR-derived
+TRIMP in the 0.65–0.78 range across team sports (§5.5) — real but imperfect,
+so a 1-point gap is exactly the scatter that correlation predicts and calling
+it out every time would be crying wolf.
+
+**Evidence-gated, matching the `Insight` pattern's own discipline**: returns
+`null` (never a fabricated verdict) unless `hr_source` isn't `'none'`, `trimp`
+is non-nil (the backend never reports a fabricated zero — see `Compute` in
+`trimp.go`), `session_rpe` is a real 1-10 report, and the zone-attributed time
+behind it is at least `MIN_ZONE_MINUTES_FOR_CALIBRATION` (10 minutes) — below
+that, the weighted average is too thin to say anything with confidence, the
+same honesty `ZoneBreakdown` already applies to a session with mostly-skipped
+sample gaps.
+
+**No screen wiring in this PR, and that is a deliberate scope decision, not an
+oversight.** #825 (N480, BJJ HR-as-corroboration) is concurrently in progress
+against the exact same file this summary would naturally render on
+(`apps/mobile/app/bjj/session/[id].tsx`), and none of this issue's five
+acceptance criteria requires rendering anywhere — only that the summary be
+computed, deterministic, evidence-gated, capped and non-LLM. Wiring it onto a
+screen is left to #825 or a follow-up ticket, once that concurrent edit has
+landed, rather than risking a collision on a file this ticket does not need to
+touch to satisfy its own criteria.
+
+24 table-driven Jest tests in `apps/mobile/lib/__tests__/
+sessionEffectiveness.test.ts` cover evidence-gating (each of the four gates
+individually, including the RPE-range boundary), determinism (identical
+inputs across repeated calls and across structurally-equal-but-distinct
+objects), the three-way calibration boundary (a full RPE sweep against one
+fixed HR picture, including both threshold edges), dominant-zone tie-breaking,
+and copy pinned to literal strings. Mutation-verified: deleting the
+`hr_source === 'none'` guard turned the corresponding test red as a real test
+failure (not a compile error), restoring it went green again by re-running —
+not by rereading the file.
+
+**Open**: web-side surfacing (no biometric data reaches `apps/web` yet at
+all, so this is a gap upstream of this ticket, not created by it); wiring this
+summary onto the BJJ session review screen once #825 lands; and a longitudinal
+version of this calibration ("your RPE-6 sessions consistently run low," the
+design doc's own phrasing) — this ticket only compares one session at a time,
+per its own acceptance criteria.
+
+
 ## Open items / known gaps as of this entry
 
 
