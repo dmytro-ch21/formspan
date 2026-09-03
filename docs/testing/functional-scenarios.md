@@ -17450,3 +17450,77 @@ turns this on or off.
   L13 entry for the full reasoning. Neither has scenarios here because
   neither exists yet; if either is picked up later, it gets its own N-numbered
   section rather than reusing this one.
+
+## N467 — running auto-pause (`apps/mobile/lib/runningAutoPause.ts`, `apps/mobile/app/running/[id].tsx`)
+
+### Happy path
+
+- Starting a run and then coming to a complete stop (e.g. at a light) for
+  longer than the hold time (12s) auto-pauses the run: the screen switches
+  to the paused state exactly as if Pause had been tapped (Resume button
+  shown, clock stopped), with no action from the athlete.
+- Starting to move again while auto-paused resumes tracking automatically —
+  no tap needed — and the route/distance/clock pick back up from that point,
+  without a spurious jump or a gap drawn on the map for the stopped
+  interval.
+- The athlete can still tap Resume manually while auto-paused rather than
+  waiting for the app to detect movement — both paths land in the same
+  tracking state.
+- The athlete can still tap Pause manually at any time while tracking,
+  independent of auto-pause; a manual pause always requires a manual Resume
+  (it does not auto-resume on movement).
+- A short stop — a crosswalk, checking a phone — well under the hold time
+  does not pause the run at all: no visible pause/resume flicker, no
+  fragmented history.
+- Splits, distance, elevation gain and pace exclude the time spent
+  auto-paused, the same way they already exclude manually-paused time.
+
+### Edge cases & errors
+
+- A stop that happens right as the app is backgrounded/killed and relaunched
+  mid-run: on relaunch, the run resumes tracking from the wall clock as
+  today (N460) already does; a fresh auto-pause hysteresis starts clean
+  rather than carrying a stale "below threshold since" timestamp forward.
+- GPS signal is weak/absent during a stop (e.g. underground, dense
+  buildings): fixes with accuracy worse than the existing 50m filter are
+  excluded from auto-pause the same way they're excluded from the route, so
+  a burst of bad fixes cannot itself trigger or block a pause.
+- A fix reporting no reliable native speed (the platform's own "unknown"
+  sentinel) does not itself trigger or clear a pause — the app falls back to
+  distance/time against the last accepted fix.
+- Tapping Finish (hold-to-confirm) while auto-paused ends the run cleanly,
+  with the correct final duration (auto-paused time excluded) and no error.
+- Auto-pausing and then manually pausing again (or vice versa) does not
+  double-count elapsed time or leave the clock in an inconsistent state.
+
+### Auth/security
+
+- No new surface — auto-pause only changes when/how the existing local
+  pause/resume state machine transitions; it reads no new endpoint and
+  writes no new data shape (still `running_json` on `local_sessions` via the
+  existing `saveLocalRunningDetail`/`persistProgress` path).
+
+### Needs a device
+
+- **Everything about real-world feel.** No test in this repo can reach a
+  real GPS signal or real human movement: whether the 0.3 m/s threshold and
+  12s hold genuinely avoid pausing at a crosswalk, whether they still catch
+  a longer stop (a red light, a stopped conversation) promptly, and whether
+  auto-resume feels responsive once the athlete starts moving again. Run
+  outdoors, at both a brief stop and a longer one, and confirm the pause/
+  resume transitions match what a runner would expect — a `NEEDS HUMAN
+  EVIDENCE` item on the PR.
+- Battery impact of keeping the GPS watch running through an auto-pause
+  (rather than tearing it down like a manual pause) over a long run with
+  several stops — not measurable from a desk.
+
+## N467 — cadence detection: evaluated, not built
+
+Deliberately out of scope for this ticket. `expo-sensors` is not currently a
+dependency of `apps/mobile`; building step-cadence detection would need a
+new native dependency (with the install/pod/rebuild chain the
+`vola-mobile-build` skill documents), a real peak-detection algorithm with
+noise filtering (arm swing vs. actual footfall) this codebase has no
+precedent for, and real-device validation no CI suite can provide. See the
+2026-09-02 history.md entry for the full reasoning. No scenarios listed here
+because nothing shipped; revisit this section if the feature is ever built.

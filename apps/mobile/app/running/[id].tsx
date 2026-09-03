@@ -22,6 +22,12 @@ import {
   type RoutePoint,
   type SessionDetail as RunningDetail,
 } from '@/lib/running';
+import {
+  deriveSpeedMps,
+  initialAutoPauseState,
+  nextAutoPauseState,
+  type AutoPauseState,
+} from '@/lib/runningAutoPause';
 import { emptySet } from '@/lib/sessions';
 import {
   finishLocalSession,
@@ -71,6 +77,30 @@ import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
  * JS timer, it is also correct across the phone being backgrounded — a
  * suspended `setInterval` catches up the instant the app resumes, since the
  * arithmetic only ever asks "what is `Date.now()` right now".
+ *
+ * ## Auto-pause (N467/#777)
+ *
+ * The GPS watch is deliberately NOT torn down on an auto-pause the way it is
+ * on a manual one — the location callback's auto-pause branch (inside
+ * `startWatch()`) leaves `watchRef` running so the same subscription can
+ * notice movement resuming and clear itself, per the ticket's "resume
+ * automatically once movement resumes" criterion. A manual
+ * pause has no such requirement (only the athlete's own tap resumes it), so
+ * it keeps stopping the watch outright, exactly as before this ticket — that
+ * is strictly cheaper on battery for the common case (an athlete who pauses
+ * to talk to someone, not a light).
+ *
+ * While auto-paused, incoming fixes still update `runningAutoPause`'s
+ * hysteresis (so movement can be noticed) but are NOT appended to the route:
+ * a stationary fix is noise, not a place the athlete ran through, and
+ * letting it through would put a spurious point (and, via `persistProgress`,
+ * a spurious "moving" instant) at the exact spot the athlete stopped.
+ * `autoPausedRef` gates that; `pause()`/`resume()` (the button handlers) and
+ * `startWatch()` all keep it in sync with the visible `status`, since the
+ * screen deliberately renders an auto-pause identically to a manual one (the
+ * ticket: "pause the run the same way the manual pause button does") — the
+ * athlete never needs to know which kind of pause they are looking at, only
+ * that tapping Resume always works regardless of which caused it.
  */
 
 const MIN_ACCURACY_M = 50;
@@ -113,6 +143,19 @@ export default function RunningSessionScreen() {
   // against, established the moment tracking (re)starts so a resumed run's
   // already-completed splits are never replayed.
   const announcedSplitsRef = useRef<number | null>(null);
+  // Auto-pause bookkeeping — see the file doc comment above. `runStatusRef`
+  // mirrors the `status` state so the long-lived location callback (created
+  // once per `startWatch()` call, which does NOT re-run across an auto-
+  // pause/resume) can read the CURRENT status rather than the one in scope
+  // when the callback closure was created.
+  const runStatusRef = useRef<Status>('loading');
+  const autoPausedRef = useRef(false);
+  const autoPauseStateRef = useRef<AutoPauseState>(initialAutoPauseState);
+  const lastRawFixRef = useRef<RoutePoint | null>(null);
+
+  useEffect(() => {
+    runStatusRef.current = status;
+  }, [status]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -257,7 +300,17 @@ export default function RunningSessionScreen() {
 
   async function startWatch() {
     resumedAtRef.current = Date.now();
+    runStatusRef.current = 'tracking';
     setStatus('tracking');
+    // A fresh subscription always starts un-paused, whether this is the
+    // first start or a manual Resume (including a manual Resume that
+    // pre-empts an auto-pause) — the hysteresis and the last-raw-fix
+    // baseline for speed derivation should not carry across a gap in
+    // watching, or a stale timestamp would make the first post-gap fix look
+    // like an implausibly slow (or fast) segment.
+    autoPausedRef.current = false;
+    autoPauseStateRef.current = initialAutoPauseState;
+    lastRawFixRef.current = null;
     requestSync('run-started');
     const sub = await Location.watchPositionAsync(
       {
@@ -271,16 +324,62 @@ export default function RunningSessionScreen() {
         // cold-start estimate) is worse than a gap — it draws a spike in the
         // route and a spike in the distance total that no amount of later
         // good fixes removes, because distance is a sum of segments and a
-        // bad segment's length does not un-happen.
+        // bad segment's length does not un-happen. The same fix is unfit to
+        // judge "are we stopped" from, so it is excluded from auto-pause too.
         if (loc.coords.accuracy != null && loc.coords.accuracy > MIN_ACCURACY_M) return;
-        lastPointAtRef.current = Date.now();
-        setSignalWeak(false);
+
+        const now = Date.now();
         const point: RoutePoint = {
           lat: loc.coords.latitude,
           lng: loc.coords.longitude,
           elevation_m: loc.coords.altitude,
           recorded_at: new Date(loc.timestamp).toISOString(),
         };
+
+        // Auto-pause: feed this fix's speed through the hysteresis regardless
+        // of whether tracking is about to stop or already stopped, so the fix
+        // that arrives right as the runner starts moving again is the one
+        // that resumes. See `lib/runningAutoPause.ts` for the threshold/hold
+        // reasoning and `deriveSpeedMps` for where the speed itself comes
+        // from.
+        const speedMps = deriveSpeedMps(loc.coords.speed, lastRawFixRef.current, point);
+        lastRawFixRef.current = point;
+        const { state: nextAutoState, action } = nextAutoPauseState(
+          autoPauseStateRef.current,
+          speedMps,
+          now,
+        );
+        autoPauseStateRef.current = nextAutoState;
+
+        if (action === 'pause' && runStatusRef.current === 'tracking') {
+          elapsedMsRef.current += now - (resumedAtRef.current ?? now);
+          resumedAtRef.current = null;
+          autoPausedRef.current = true;
+          runStatusRef.current = 'paused';
+          setStatus('paused');
+          setSignalWeak(false);
+          persistProgress({ duration_seconds: Math.round(elapsedMsRef.current / 1000) });
+          requestSync('run-auto-paused');
+          return;
+        }
+
+        if (action === 'resume' && autoPausedRef.current) {
+          autoPausedRef.current = false;
+          resumedAtRef.current = now;
+          runStatusRef.current = 'tracking';
+          setStatus('tracking');
+          requestSync('run-auto-resumed');
+          // Falls through: this fix is the resumption and is recorded below
+          // like any other moving fix.
+        } else if (autoPausedRef.current) {
+          // Still stopped — keep the watch alive for the next fix (so
+          // movement can resume it), but this fix is stationary noise, not
+          // a place the athlete ran through.
+          return;
+        }
+
+        lastPointAtRef.current = now;
+        setSignalWeak(false);
         const next = [...pointsRef.current, point];
         pointsRef.current = next;
         setPoints(next);
@@ -355,6 +454,11 @@ export default function RunningSessionScreen() {
     if (status !== 'tracking' || !resumedAtRef.current) return;
     elapsedMsRef.current += Date.now() - resumedAtRef.current;
     resumedAtRef.current = null;
+    // A manual pause always wins and always fully stops the watch — unlike
+    // an auto-pause, there is no "resume automatically" requirement here, so
+    // there is nothing left for the subscription to watch for.
+    autoPausedRef.current = false;
+    runStatusRef.current = 'paused';
     watchRef.current?.remove();
     watchRef.current = null;
     setStatus('paused');
@@ -376,6 +480,8 @@ export default function RunningSessionScreen() {
     }
     watchRef.current?.remove();
     watchRef.current = null;
+    autoPausedRef.current = false;
+    runStatusRef.current = 'finished';
 
     const finalPoints = pointsRef.current;
     const finalDistance = trackDistanceMeters(finalPoints);
