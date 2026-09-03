@@ -1849,6 +1849,129 @@ components:
           type: boolean
           description: Set within the last 14 days, matching `PersonalRecord.is_recent`'s own window.
 
+    BiometricSample:
+      type: object
+      required:
+        [id, metric_type, source, source_platform, value, unit, measured_at]
+      description: >
+        One raw reading from a platform health store (HealthKit / Health
+        Connect) or typed in manually — N476/#821,
+        docs/decisions/health-integration-design.md §6.3. Not scoped to a
+        session: a session's heart-rate enrichment (SessionMetrics below) is
+        derived by reading whatever samples fall in that session's own
+        started_at/ended_at window, not written against a session directly.
+      properties:
+        id:
+          type: string
+          description: >
+            Client-generated, matching activities' idempotency pattern — a
+            sync retry re-sends the same id and converges rather than
+            duplicating.
+        metric_type:
+          type: string
+          enum:
+            [heart_rate, active_energy, resting_heart_rate, hrv_sdnn,
+             hrv_rmssd, sleep_duration, body_mass]
+          description: >
+            hrv_sdnn and hrv_rmssd are deliberately separate values rather
+            than one `hrv` type with a unit column — Apple's SDNN and
+            everyone else's rMSSD must never be compared (design doc §5.4).
+        source:
+          type: string
+          enum: [apple_watch, oura, whoop, garmin, manual]
+        source_platform:
+          type: string
+          enum: [healthkit, health_connect, manual]
+        value:
+          type: number
+          format: double
+        unit:
+          type: string
+          example: bpm
+        measured_at:
+          type: string
+          format: date-time
+          description: >
+            When the reading was taken — for an interval reading (e.g.
+            sleep_duration) this is the interval's START.
+        period_end:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Null for an instantaneous reading (heart_rate, body_mass — most
+            rows). Set for one covering an interval, and never before
+            measured_at.
+        created_at: { type: string, format: date-time, readOnly: true }
+
+    SessionMetrics:
+      type: object
+      required: [session_id, time_in_zones, hr_source, sample_count, computed_at, rule_version]
+      description: >
+        Per-session derived enrichment — average/peak heart rate, a
+        five-zone breakdown, and one Edwards' TRIMP load number — computed
+        on demand from whatever `heart_rate` BiometricSamples fall in the
+        session's own time window (design doc §2's "window read"). Absence
+        of this object for a session is a NORMAL state (design doc §6.4),
+        not an error: enrichment is not blocking, and a session's watch may
+        not have synced its samples yet.
+      properties:
+        session_id: { type: string, readOnly: true }
+        avg_hr_bpm:
+          type: integer
+          nullable: true
+          description: Null together with max_hr_bpm and trimp whenever sample_count is 0.
+        max_hr_bpm:
+          type: integer
+          nullable: true
+        active_kcal:
+          type: integer
+          nullable: true
+          description: Sum of whatever active_energy samples fall in the window. Null when none were found.
+        trimp:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            Edwards' zone-weighted training impulse — Σ(minutes in zone ×
+            zone weight 1-5). Null whenever no HRmax was available to
+            classify zones by, even with real samples present — see
+            time_in_zones.
+        time_in_zones:
+          type: object
+          description: >
+            Minutes spent in each of Edwards' five heart-rate zones, keyed
+            "1".."5". An empty object when zones could not be computed
+            (no HRmax, or no samples) — never null, so a client can iterate
+            without a null check.
+          additionalProperties:
+            type: number
+            format: double
+        hr_source:
+          type: string
+          enum: [workout, window, none]
+          description: >
+            REQUIRED honesty field (design doc §6.3) — how confidently this
+            row is grounded in real evidence. `window` is a plain time-window
+            read (the primary path today); `workout` means the samples are
+            known to come from a platform workout object matched to this
+            session (no caller of this API can produce this yet — the match
+            is client-side and nothing client-side reads/writes this API);
+            `none` means no heart-rate samples were found at all, which is
+            forced regardless of what a caller claims whenever sample_count
+            is 0 — never silently defaulted to a value implying more
+            confidence than the data has.
+        sample_count:
+          type: integer
+          description: How many heart_rate samples this row was computed from.
+        computed_at: { type: string, format: date-time, readOnly: true }
+        rule_version:
+          type: integer
+          description: >
+            The TRIMP/zone formula version this row was computed under —
+            bumps whenever the formula or zone boundaries change, so a
+            client can tell a stale computation apart from a fresh one.
+
     Error:
       type: object
       required: [error]
@@ -8958,6 +9081,180 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/RunningDistanceRecord" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /biometric/samples:
+    post:
+      summary: Store a batch of raw biometric readings
+      operationId: putBiometricSamples
+      description: >
+        N476/#821. Idempotent — a client-generated `id` already stored is a
+        no-op retry, matching activities' sync pattern. A batch where one id
+        collides with a DIFFERENT user's existing sample is refused
+        WHOLESALE (409), never partially applied, so a retry can safely
+        re-send the entire batch. No client reads or writes this endpoint
+        yet; it exists for the storage/computation layer two later tickets
+        (iOS HR reading, an effectiveness summary) build on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [samples]
+              properties:
+                samples:
+                  type: array
+                  maxItems: 10000
+                  items: { $ref: "#/components/schemas/BiometricSample" }
+      responses:
+        "200":
+          description: The stored samples (both freshly inserted and idempotent retries).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [samples]
+                properties:
+                  samples:
+                    type: array
+                    items: { $ref: "#/components/schemas/BiometricSample" }
+        "400":
+          description: >
+            Empty or oversized `samples`; an unknown metric_type, source or
+            source_platform; an empty unit; a zero measured_at; or a
+            period_end before measured_at.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: One or more sample ids already belong to a different user's account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      summary: List the caller's own samples of one metric type in a time range
+      operationId: listBiometricSamples
+      parameters:
+        - name: metric_type
+          in: query
+          required: true
+          schema: { type: string, enum: [heart_rate, active_energy, resting_heart_rate, hrv_sdnn, hrv_rmssd, sleep_duration, body_mass] }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          description: The [from, to] range must not exceed 400 days.
+      responses:
+        "200":
+          description: >
+            Ascending by measured_at, capped at 20,000 rows — the 400-day
+            window bounds TIME, not row count, and continuous per-second
+            heart_rate sampling can exceed that count well inside the
+            window. Narrow `from`/`to` if the cap is hit; results are
+            oldest-first so nothing recent is silently dropped in its place.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [samples]
+                properties:
+                  samples:
+                    type: array
+                    items: { $ref: "#/components/schemas/BiometricSample" }
+        "400":
+          description: Unknown metric_type; from/to not RFC3339; to before from; or a range over 400 days.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /biometric/sessions/{sessionID}/metrics:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Compute (or recompute) a session's heart-rate metrics
+      operationId: computeBiometricSessionMetrics
+      description: >
+        Derives and stores SessionMetrics for a session the caller owns,
+        from whatever `heart_rate` BiometricSamples already fall in that
+        session's started_at/ended_at window. Recomputing an existing row
+        (e.g. once more samples have synced in — design doc §6.4) updates it
+        in place rather than creating a second one.
+
+
+        Ownership is checked explicitly. Two cases answer identically with
+        404 (no such session, a session belonging to somebody else) —
+        telling them apart would confirm which session ids are real. A
+        session with no `ended_at` yet is different: ownership has already
+        been confirmed by then, so it's an ordinary 400 validation failure
+        ("a load number needs a finished window"), not a 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hr_max_bpm, hr_source]
+              properties:
+                hr_max_bpm:
+                  type: number
+                  format: double
+                  minimum: 100
+                  maximum: 250
+                  description: The athlete's HRmax — the one unavoidable input to Edwards' TRIMP (design doc §3).
+                hr_source:
+                  type: string
+                  enum: [workout, window]
+                  description: >
+                    The caller's claim about how it gathered the samples
+                    behind this computation (design doc §2). `none` is never
+                    a legal claim here — it is what the server derives
+                    itself from an empty result, never something a caller
+                    asks for.
+      responses:
+        "200":
+          description: The computed (and stored) metrics.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [metrics]
+                properties:
+                  metrics: { $ref: "#/components/schemas/SessionMetrics" }
+        "400":
+          description: hr_max_bpm out of range; hr_source not workout/window; or the session has no ended_at yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      summary: Read a session's previously computed heart-rate metrics
+      operationId: getBiometricSessionMetrics
+      description: >
+        404 when nothing has been computed yet for this session — a NORMAL
+        state (design doc §6.4: enrichment is not blocking, and a watch may
+        not have synced yet), not a fault.
+      responses:
+        "200":
+          description: The stored metrics.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [metrics]
+                properties:
+                  metrics: { $ref: "#/components/schemas/SessionMetrics" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /workouts:
     get:

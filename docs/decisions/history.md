@@ -54047,6 +54047,142 @@ ticket's narrow scope, and one that also needs an actual Google Cloud
 project/billing account/API key, none of which exist yet. Filed as N482
 (#829) rather than left implicit.
 
+## 2026-09-03 — N476 (#821): a `biometric` module — HR samples, session metrics, Edwards' TRIMP
+
+New `backend/internal/modules/biometric/` — the storage and computation
+layer the health-integration design doc (`docs/decisions/health-integration-design.md`)
+scoped in §6.3, and the foundation two later tickets (#822/N477 iOS reading,
+#826/N481 an effectiveness summary) build on. Named `biometric`, not
+`health` — that name is already `internal/modules/health`, operational
+telemetry, a different domain that happens to share the word.
+
+**Two tables, migration 000089** (claimed against `origin/main`'s highest,
+000088, at push time — the repo's hard rule on migration numbering). Both
+follow the standard module pattern (`biometric.go` domain types +
+`Repository`, `postgres.go` translating pg errors, `handler.go` on
+`apihttp.WriteJSON`/`WriteError`, `postgres_test.go` gated on
+`TEST_DATABASE_URL`, wired under `/v1`, an OpenAPI entry):
+
+- **`biometric_samples`** — raw readings, source-agnostic (`metric_type`:
+  `heart_rate`, `active_energy`, `resting_heart_rate`, `hrv_sdnn`,
+  `hrv_rmssd`, `sleep_duration`, `body_mass` — the design doc's own example
+  list). Client-generated `id`, `ON CONFLICT DO NOTHING`, matching
+  activities' idempotency pattern. Independent of any session — a session's
+  heart-rate enrichment is derived by reading whatever falls in the
+  session's own `started_at`/`ended_at` window (design doc §2's "window
+  read"), never written against a session directly.
+- **`session_metrics`** — one row per session: avg/peak HR, a five-zone
+  breakdown (`time_in_zones` JSONB), one Edwards' TRIMP number, and the
+  `hr_source`/`sample_count` honesty pair. `hr_source` (`workout`/`window`/
+  `none`) is a required TEXT column with a real database `CHECK` constraint
+  — a deliberate departure from most of this schema's vocabularies (which
+  validate in Go only, no `CHECK`, so they can grow without a migration):
+  `hr_source` is small, stable and load-bearing in a way `metric_type`/
+  `source` are not, the same stability profile `sessions.sport` has, and
+  that column keeps its own `CHECK` too. The database now refuses a row
+  claiming `workout`/`window` confidence with an invalid value even if a
+  future bug in `Compute` tried to write one — though the "zero samples
+  forces `none`" rule itself still lives in Go, since a `CHECK` can't see
+  `sample_count`'s relationship to the samples table.
+
+  `session_metrics` also carries a denormalised `user_id` and a composite
+  `(session_id, user_id) REFERENCES sessions(id, user_id)` owner FK — **not**
+  in the design doc's original §6.3 sketch, which showed a plain
+  `references sessions(id)`. Added deliberately, matching
+  `running_session_detail`/`bjj_session_details`'s established convention:
+  the FK is a database-enforced backstop (not the authorization itself —
+  the Go layer still checks ownership explicitly, since Postgres skips the
+  FK re-check on an `ON CONFLICT ... DO UPDATE` that doesn't touch
+  `session_id`/`user_id`) against exactly the class of bug this module can
+  least afford, given what it stores. A dedicated integration test
+  (`TestSessionMetricsUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel`,
+  mirroring `running`'s test of the identical shape) issues the upsert
+  statement directly, as an attacker, and asserts the database refuses it —
+  because no call through the repository can ever reach that line with the
+  wrong `user_id` to prove the predicate is still there.
+
+**TRIMP: Edwards' formula, not Banister's — per the design doc's explicit
+§3 recommendation and this ticket's own scope.** `Σ(minutes in zone ×
+zone weight 1-5)`, needing only HRmax rather than Banister's resting-HR
+input, which would drag in a second daily read and a whole recovery
+pipeline this phase deliberately doesn't build. Implemented as a pure,
+table-driven-tested function (`trimp.go`): `ZoneForHR` (the standard
+50/60/70/80/90%-of-HRmax boundaries, inclusive on the low end), `TRIMP`
+(the weighted sum), and `ZoneBreakdown`/`Compute` (deriving minutes-in-zone
+and the final `SessionMetrics` from a set of timestamped samples). The
+interval between two consecutive samples is attributed to the FIRST
+sample's zone, capped at 6 minutes (`maxSampleGapForZoneAttribution`) —
+long enough to keep Apple Watch's ordinary ~5-minute background-HR cadence
+(design doc §2) from being treated as missing data, short enough that a
+genuine 40-minute gap (phone locked, watch removed) isn't silently
+extrapolated across as though the athlete held that heart rate the whole
+time. A gap past the cap is simply not attributed to any zone — the
+session's own `time_in_zones` legitimately sums to less than its duration
+when the evidence is this thin, and `sample_count` is what tells a reader
+why, rather than the module inventing precision it doesn't have.
+
+`Compute` never trusts a caller's `hr_source` hint past the data: zero
+samples always forces `HRSourceNone`, and `TRIMP`/`time_in_zones` stay
+nil/empty (not zero) whenever no HRmax was supplied, even with real samples
+present — "measured and it was zero effort" and "couldn't be computed" are
+different claims, and only the first is ever true here. HRmax itself is a
+required, range-checked (100-250bpm) parameter on the compute endpoint
+rather than something this module derives from `profile.date_of_birth` —
+the design doc's `220 − age` seeding (§3) is future work for whichever
+ticket actually needs it; this ticket's job was the storage/computation
+shape, not building ahead into a HRmax-estimation feature nothing calls yet.
+
+**Retention: indefinite — resolves the design doc's §7/§10 open item,
+decided 2026-09-01.** The design doc flagged retention as unresolved and
+legally blocking (resting HR/sleep/HRV under a user identity is GDPR
+Article 9 special-category data) before the first write. This ticket's
+answer: biometric data is kept the same way every other piece of training
+history in this product is — sessions, sets, body-weight checkins — no
+special TTL, no separate deletion job, no bespoke expiry path for this
+table to build or maintain. Recorded in the migration's own comment as
+well as here, per the ticket's explicit instruction, since this is exactly
+the kind of decision that is easy to lose if it lives in only one place.
+
+**No client surface** — deliberately. This ticket is storage and
+computation only; nothing in `apps/mobile` or `apps/web` reads or writes
+these endpoints yet. `POST /v1/biometric/samples` (batch, idempotent) and
+`GET /v1/biometric/samples` (a metric-type + time-range read, capped at 400
+days, for whatever trend surface #826/N481 turns out to need) exist for
+that reason: get the shape right for the tickets that build on it rather
+than build ahead into their concerns. `POST` (compute) and
+`GET /v1/biometric/sessions/{sessionID}/metrics` round out the pair.
+
+**Testing.** `trimp_test.go`/`biometric_test.go` are pure, table-driven,
+covering the zone boundaries at their exact edges (a heart rate landing
+precisely on a floor belongs to the zone it opens), the gap-attribution cap
+on both sides of its threshold, and every `Compute`/`Validate` honesty rule
+above. `postgres_test.go` adds the properties only the database can prove:
+idempotent retries converging, a same-id collision from a different user
+refused wholesale (matching `activity.Create`'s IDOR handling exactly — a
+mixed batch with one fresh id and one colliding id commits NEITHER), the
+cross-user isolation this ticket called out explicitly on both the sample
+read path and the session-metrics read/write paths, cascade deletion when
+a session is removed, and the `hr_source` `CHECK` constraint rejecting an
+invalid value directly. The cross-user ownership guard in
+`ComputeSessionMetrics` was mutation-tested directly (dropped the
+`AND user_id = $2` predicate from the ownership `SELECT`, confirmed two
+tests go red as real test failures rather than a compile error, restored,
+confirmed green again by re-running — never by re-reading the file).
+
+**Open questions this leaves:**
+- `hr_source: workout` (the platform-workout-anchor refinement, design doc
+  §2) has no producer anywhere in this stack yet — nothing client-side
+  reads a platform workout object, so every real row this module has ever
+  computed carries `window` or `none`. The value exists in the schema and
+  the API so #822/N477 doesn't have to touch this shape when it lands.
+- HRmax derivation (`220 − age` seeded from `profile.date_of_birth`,
+  replaced by an observed maximum — design doc §3) is unbuilt; callers must
+  supply `hr_max_bpm` themselves for now.
+- `active_kcal` sums whatever `active_energy` samples land in a session's
+  window, but nothing writes `active_energy` samples yet either — untested
+  against real device data, only against hand-seeded rows.
+
+
 ## Open items / known gaps as of this entry
 
 

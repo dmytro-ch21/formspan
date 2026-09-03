@@ -17826,3 +17826,92 @@ Android profile — those are explicitly out of scope for this ticket.
   described above (package `com.vola.fitness`, versionCode 1, permissions as
   listed) — that is a real exercise of the same config-plugin logic a full
   build runs, just short of compiling and installing.
+
+## N476 — the `biometric` module: HR samples, session metrics, Edwards' TRIMP (`POST/GET /v1/biometric/samples`, `POST/GET /v1/biometric/sessions/{sessionID}/metrics`)
+
+Storage and computation only — no client (mobile/web) surface exists yet,
+so every scenario below is at the API level. `backend/internal/modules/biometric/`
+is the reference; `docs/decisions/health-integration-design.md` §2/§3/§6.3
+is the design.
+
+### Happy path
+
+- `POST /v1/biometric/samples` with a batch of `heart_rate` samples (valid
+  `id`/`metric_type`/`source`/`source_platform`/`value`/`unit`/`measured_at`)
+  returns 200 with all of them echoed back.
+- The identical batch re-sent (same ids) returns 200 with the SAME rows
+  unchanged — an idempotent sync retry, not a duplicate or an error.
+- `GET /v1/biometric/samples?metric_type=heart_rate&from=...&to=...` returns
+  only the caller's own samples of that metric type within the range,
+  ascending by `measured_at`.
+- After samples exist in a finished session's `started_at`/`ended_at`
+  window, `POST /v1/biometric/sessions/{sessionID}/metrics` with a valid
+  `hr_max_bpm` (100-250) and `hr_source` (`workout` or `window`) returns 200
+  with `avg_hr_bpm`, `max_hr_bpm`, `trimp`, `time_in_zones` (keyed "1".."5"),
+  `hr_source` echoing the request, and `sample_count` matching how many
+  samples actually fell in the window.
+- `GET /v1/biometric/sessions/{sessionID}/metrics` on the same session
+  afterward returns the same computed row.
+- Recomputing (calling `POST .../metrics` again after more samples have
+  synced in) updates the SAME row in place — `sample_count` reflects the
+  new total, and there is still exactly one metrics row for the session.
+
+### Edge cases & errors
+
+- Zero heart-rate samples in a session's window: `POST .../metrics` still
+  returns 200, but `hr_source` is `none` regardless of what the request
+  claimed, `sample_count` is 0, and `avg_hr_bpm`/`max_hr_bpm`/`trimp` are
+  all null — never zero, which would read as "measured, and it was zero."
+- Sparse samples (a handful of readings roughly five minutes apart, no
+  active watch workout — the ordinary "no wearable running an active
+  session" case per the design doc's §2): `time_in_zones`'s minutes
+  legitimately sum to LESS than the session's duration; a gap between two
+  samples past ~6 minutes contributes to no zone at all rather than being
+  extrapolated across.
+- A single heart-rate sample in the window: `avg_hr_bpm`/`max_hr_bpm` are
+  reported (both equal to that one reading) but every zone is 0 and `trimp`
+  is present but 0 — there is no interval to derive a duration from one
+  point.
+- `hr_max_bpm` omitted, zero, or outside 100-250: `POST .../metrics` 400s
+  `invalid_input`.
+- `hr_source` set to `none` (never a legal claim — only the server derives
+  it) or to any value outside `workout`/`window`: 400 `invalid_input`.
+- `POST .../metrics` against a session with no `ended_at` yet (still in
+  progress): 400 `invalid_input` — a load number needs a finished window.
+- `POST .../metrics` / `GET .../metrics` against an unknown `sessionID`:
+  404 `not_found`.
+- `GET .../metrics` on a session that exists but has never had metrics
+  computed: 404 `not_found` — a normal state (the watch may not have synced
+  yet), not a fault a client should alarm on.
+- `POST /v1/biometric/samples` with an empty `samples` array, more than
+  10,000 samples, an unknown `metric_type`/`source`/`source_platform`, an
+  empty `unit`, a non-RFC3339 `measured_at`/`period_end`, or a `period_end`
+  before `measured_at`: 400 `invalid_input`.
+- `GET /v1/biometric/samples` with an unknown `metric_type`, a non-RFC3339
+  `from`/`to`, `to` before `from`, or a range over 400 days: 400
+  `invalid_input`.
+- A batch submitted with a sample `id` that collides with an existing id the
+  SAME user already owns: idempotent no-op, 200, original row returned
+  unchanged (not the new values).
+
+### Auth/security
+
+- Every endpoint 401s with no `Authorization` header/an invalid token.
+- A sample `id` colliding with a DIFFERENT user's existing sample: 409
+  `already_exists`, and the response must not disclose whose row it is. A
+  batch containing both a fresh id and a colliding id from another user is
+  refused WHOLESALE (nothing partially committed) — a retry must be able to
+  resend the entire batch safely.
+- `GET /v1/biometric/samples` never returns another user's samples, however
+  the metric type/range is chosen — cross-user isolation on the raw-sample
+  read path, not just the derived-metrics one.
+- `POST`/`GET /v1/biometric/sessions/{sessionID}/metrics` against a session
+  belonging to a different user: 404 `not_found` (indistinguishable from a
+  session that doesn't exist), and — for the `POST` path — no
+  `session_metrics` row is created against that session id as a side
+  effect of the refused attempt.
+- A user who owns a session but has samples from ANOTHER user's account
+  (impossible through the API, but worth asserting at the storage layer):
+  `ComputeSessionMetrics` only ever reads the calling user's own
+  `biometric_samples` rows for the window, never another account's, even
+  when both sessions' time windows overlap.
