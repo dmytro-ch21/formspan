@@ -53413,6 +53413,112 @@ contract ahead of any client. A client wanting to show "new 5k PR" after a
 run would call this endpoint and diff against what it showed before the run,
 the same pattern the generic Records screen already uses.
 
+## 2026-09-02 — L11 (#777): running auto-pause, and cadence deliberately deferred
+
+Backlog stretch ticket, scoped down on purpose. The issue asked for a
+scoping spike on both halves; auto-pause turned out cheap enough to build
+for real, cadence did not.
+
+**Auto-pause: built.** `apps/mobile/lib/runningAutoPause.ts` is a pure
+hysteresis state machine — `nextAutoPauseState(state, speedMps, nowMs)` —
+tested the same way `lib/running.ts`'s distance/pace/split functions are
+(fixture sequences, no SQLite/location/React), wired into
+`app/running/[id].tsx`'s existing `watchPositionAsync` callback rather than
+building a parallel pause mechanism, per the ticket's own instruction.
+
+- **Threshold: 0.3 m/s (~1.1 km/h).** A dead stop reads near 0 m/s through
+  ordinary GPS jitter; the slowest pace anyone would call jogging is still
+  well clear of it (a 12-minute mile is ~2.2 m/s, a brisk walk ~1.4 m/s,
+  ambling ~0.8 m/s) — satisfies the issue's own "tuned to avoid false
+  positives at slow jogging pace" criterion with room to spare on both
+  sides.
+- **Hold time: 12 seconds.** Tuned directly against the ticket's own two
+  examples: "a runner stopped at a crosswalk for 8 seconds shouldn't have
+  their run fragmented... but someone who stops for 2 minutes definitely
+  should auto-pause." 12s sits clear above the 8s crosswalk figure and is a
+  small fraction of a genuine 2-minute stop, so the crosswalk case never
+  fires and a real stop fires within the first ~6% of its duration. No live
+  GPS ground truth exists to measure this against in CI, so this is a
+  considered choice against the ticket's own stated examples, not a guess —
+  a real outdoor run is the `NEEDS HUMAN EVIDENCE` item on the PR.
+- **Speed source**: prefers `expo-location`'s own `coords.speed`, falling
+  back to distance/time against the last accepted fix (the same haversine
+  segment `trackDistanceMeters` sums) when the native reading is missing or
+  carries the iOS/Android "unknown" sentinel (negative). Cannot disagree
+  with the live screen's own distance/pace numbers, because it's built from
+  the same points.
+- **Resume has no hold** — a runner who starts moving again shouldn't wait
+  12 seconds for the app to notice, and there's no "confusing noise" risk on
+  that side (worst case: one fast fix resumes a stop that re-triggers 12s
+  later, which is strictly better than staying stuck auto-paused).
+- **The GPS watch stays alive through an auto-pause**, unlike a manual one —
+  a manual pause fully tears down `watchRef` (only a tap resumes it, so
+  there's nothing to watch for), but auto-pause needs the subscription
+  running to notice movement and clear itself. While auto-paused, incoming
+  fixes still feed the hysteresis (so resumption is detected) but are not
+  appended to the route — a stationary fix is noise, not a place the
+  athlete ran through, and letting it through would put a spurious "moving"
+  instant at the exact spot the athlete stopped. The screen renders an
+  auto-pause identically to a manual one (both are `status: 'paused'`, both
+  show the same Resume button), matching the ticket's "pause the run the
+  same way the manual pause button does."
+- `runStatusRef`, `autoPausedRef`, `autoPauseStateRef` and `lastRawFixRef`
+  are new refs on the screen — needed because the location callback is
+  created once per `startWatch()` call and does NOT get recreated across an
+  auto-pause/resume (there is deliberately no new subscription on
+  auto-resume), so it cannot rely on the `status` state variable it closed
+  over without going stale; the existing `pointsRef`/`mountedRef` pattern
+  already established this shape for the same reason.
+- 17 jest tests in `apps/mobile/lib/__tests__/runningAutoPause.test.ts`,
+  including the ticket's own two examples verbatim (the 8-second crosswalk
+  that must NOT pause, the 2-minute stop that must). Every guard mutation-
+  tested — baseline green, mutated, confirmed red as a real test failure
+  (not a compile error), restored, confirmed green again by re-running. One
+  mutation (removing the `speedMps == null` early return) was initially
+  NOT caught by the first test set — JS coerces `null < threshold` to
+  `0 < threshold` (true), so most scenarios "accidentally" produced the
+  same result whether nulls were ignored or treated as stationary. Added a
+  test specifically for a long run of unknown readings arriving while
+  genuinely moving, which the naive version pauses on and the correct
+  version does not — that one does catch it, confirmed by the same
+  mutate/restore cycle.
+
+**Cadence: evaluated, deliberately deferred — not built.** `expo-sensors`
+is not currently a dependency of `apps/mobile` (confirmed against
+`package.json`/`app.json`), so a real implementation would need: a brand-new
+native dependency behind the full install chain the `vola-mobile-build`
+skill documents (`package.json` → `pnpm install` → `pod install` → a native
+rebuild, with a silent no-crash-dialog termination if any step is skipped);
+a genuine peak-detection algorithm on the vertical-acceleration signal with
+noise filtering to distinguish an actual footfall from arm swing or phone
+jostle in a pocket — a problem this codebase has no existing precedent for,
+unlike GPS-track math which `lib/running.ts` already established a tested
+pattern for; and no way to validate that filtering against real motion data
+without a device, which is exactly the kind of apparatus-that-can't-fail
+risk this project has been burned by before (`CLAUDE.md`'s "Verify that a
+check can fail"). Given L11 is an explicitly low-priority stretch ticket,
+shipping a step-detector that has never been checked against a real stride
+would be exactly the "something half-working" outcome the issue says not to
+ship. Left unimplemented, per the issue's own explicit provision for a
+stretch ticket that correctly scopes itself down. If ever revisited: start
+with `expo-sensors`' `Accelerometer` at a fixed sample rate, a simple
+threshold-crossing or moving-average peak detector as the first cut (not a
+FFT-based cadence estimator — likely overkill for the accuracy this needs),
+and validate directly against a phone in a runner's actual arm-swing/pocket
+position before trusting any number it produces.
+
+### Open items this leaves
+
+- **NEEDS HUMAN EVIDENCE**: a real outdoor run confirming the auto-pause
+  threshold/hold feel right in practice — a stoplight/crosswalk stop should
+  not fragment the run, a longer stop should auto-pause, and resuming after
+  an auto-pause should pick back up promptly once running resumes. No test
+  in this repo can reach a real GPS signal or real human movement.
+- Cadence (steps/min) remains unimplemented. See the feasibility notes
+  above if it's picked back up later — it needs a new native dependency
+  (`expo-sensors`) and real-device validation that a CI suite cannot
+  provide.
+
 ## Open items / known gaps as of this entry
 
 
