@@ -197,7 +197,19 @@ const recentDistanceWindow = 14 * 24 * time.Hour
 // see. Both are worse than a second, smaller, purpose-built mechanism that
 // says exactly what it is and lives entirely inside this module.
 type DistanceRecord struct {
-	Standard StandardDistance `json:"standard_distance"`
+	// StandardDistance is the StandardDistance.Key this record is for
+	// ("5k", "10k", "half_marathon", "marathon") — flattened to a bare
+	// string on the wire rather than nesting the whole StandardDistance
+	// struct, matching PersonalRecord.kind's own shape (a string plus
+	// sibling value fields, not a nested object) so a client already
+	// familiar with GET /v1/records sees the same pattern here.
+	StandardDistance string `json:"standard_distance"`
+	// DistanceM is that standard distance's own canonical length in metres
+	// (5000, 10000, 21097.5 or 42195) — a convenience so a client need not
+	// separately look StandardDistance up against StandardDistances().
+	// Distinct from ActualDistanceM below, which is what the matched
+	// window really covered.
+	DistanceM float64 `json:"distance_m"`
 
 	// ValueSeconds is the winning window's NormalizedDurationSeconds — what
 	// a "PR" comparison ranks on, for the reason DistanceWindow's own doc
@@ -247,7 +259,8 @@ func BestDistanceRecords(runs []RunSplits) []DistanceRecord {
 	for _, run := range runs {
 		for key, w := range BestDistanceWindows(run.Splits) {
 			cand := DistanceRecord{
-				Standard:              w.Standard,
+				StandardDistance:      w.Standard.Key,
+				DistanceM:             w.Standard.DistanceM,
 				ValueSeconds:          w.NormalizedDurationSeconds,
 				SessionID:             run.SessionID,
 				StartSplit:            w.StartSplit,

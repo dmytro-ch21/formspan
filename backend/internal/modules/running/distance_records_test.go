@@ -239,8 +239,8 @@ func TestBestDistanceRecords(t *testing.T) {
 			t.Fatalf("got %d records, want %d", len(got), len(wantOrder))
 		}
 		for i, key := range wantOrder {
-			if got[i].Standard.Key != key {
-				t.Fatalf("records[%d].Standard.Key = %q, want %q", i, got[i].Standard.Key, key)
+			if got[i].StandardDistance != key {
+				t.Fatalf("records[%d].StandardDistance = %q, want %q", i, got[i].StandardDistance, key)
 			}
 		}
 	})

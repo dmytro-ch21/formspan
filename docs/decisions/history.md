@@ -53394,6 +53394,19 @@ migrated database alongside every other module.
 `contracts/public.openapi.yaml` gained `RunningDistanceRecord` and
 `GET /v1/running/records`; `pnpm run lint:openapi` passes.
 
+**`backend-reviewer` caught a real wire-shape bug before this reached a
+client.** The first draft's `DistanceRecord.Standard` field nested the whole
+`StandardDistance` struct (`{"standard_distance": {"key": "5k", "label":
+"5K", "distance_m": 5000}}`) while the OpenAPI schema — written by hand,
+separately, to describe the intended shape — documented `standard_distance`
+as a bare string enum with a sibling `distance_m`. `pnpm run lint:openapi`
+cannot catch this: it validates the YAML's own internal consistency, not
+that the Go handler's actual JSON matches it. Flattened `DistanceRecord` to
+two top-level fields (`StandardDistance string`, `DistanceM float64`),
+matching `PersonalRecord.kind`'s own shape on the existing `/records`
+endpoint — a string plus sibling value fields, not a nested object — so a
+client already familiar with that endpoint sees the same pattern here.
+
 **Left open:** no mobile/web surface reads this endpoint yet — L12 was
 scoped as backend-only, matching how N458 itself shipped the storage
 contract ahead of any client. A client wanting to show "new 5k PR" after a

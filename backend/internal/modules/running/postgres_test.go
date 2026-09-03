@@ -530,8 +530,11 @@ func TestDistanceRecords(t *testing.T) {
 		t.Fatalf("got %d records, want 1 (5k only): %+v", len(got), got)
 	}
 	r := got[0]
-	if r.Standard.Key != "5k" {
-		t.Fatalf("record standard = %q, want 5k", r.Standard.Key)
+	if r.StandardDistance != "5k" {
+		t.Fatalf("record standard = %q, want 5k", r.StandardDistance)
+	}
+	if r.DistanceM != 5000 {
+		t.Fatalf("record distance_m = %v, want 5000", r.DistanceM)
 	}
 	if r.SessionID != fastID {
 		t.Fatalf("winning session = %q, want the faster run %q", r.SessionID, fastID)
