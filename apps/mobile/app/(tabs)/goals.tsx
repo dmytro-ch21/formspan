@@ -934,11 +934,20 @@ export default function TargetScreen() {
    * its tiles have to be that target's macros. Falling back to the suggestion
    * is right only when there is nothing in force to show.
    */
-  const cardRows = useMemo(
-    () => (live ? macroRowsFromTarget(live) : macroRows(s, b, units)),
-    [live, s, b, units],
-  );
-  const derivedRows = useMemo(() => macroRows(s, b, units), [s, b, units]);
+  const cardRows = useMemo(() => {
+    const rows = live ? macroRowsFromTarget(live) : macroRows(s, b, units);
+    // Held back exactly like the resting-rate hint below (N111, #494): `units`
+    // defaults to metric before `useUnits` has read the cache, and this is the
+    // first UNIT-DEPENDENT value macroRows has ever returned — before N111 the
+    // rule text was a unit-independent literal, so this flash could not
+    // happen. Nulling the rule until `unitsReady` keeps an imperial athlete
+    // from seeing a "g per kg" coefficient flash before it corrects itself.
+    return unitsReady ? rows : rows.map((r) => ({ ...r, rule: null }));
+  }, [live, s, b, units, unitsReady]);
+  const derivedRows = useMemo(() => {
+    const rows = macroRows(s, b, units);
+    return unitsReady ? rows : rows.map((r) => ({ ...r, rule: null }));
+  }, [s, b, units, unitsReady]);
 
   const ladder: LadderRow[] = useMemo(() => {
     if (!b || !s) return [];
