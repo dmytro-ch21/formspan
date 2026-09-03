@@ -17525,7 +17525,7 @@ precedent for, and real-device validation no CI suite can provide. See the
 2026-09-02 history.md entry for the full reasoning. No scenarios listed here
 because nothing shipped; revisit this section if the feature is ever built.
 
-## N474 — session intent (Normal/Light/Deload) so an autoregulated session doesn't crater the strength baseline (`PATCH /v1/sessions/{sessionID}/intent`, `POST /v1/sessions`, `apps/mobile/app/session/start.tsx`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/app/session/history.tsx`, `apps/web/src/app/dashboard/sessions/[id]/ProgressionCard.tsx`)
+## N474 — session intent (Normal/Light/Deload) so an autoregulated session doesn't crater the strength baseline (`PATCH /v1/sessions/{sessionID}/intent`, `POST /v1/sessions`, `apps/mobile/app/session/start.tsx`, `apps/mobile/app/workout/[id].tsx`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/app/session/history.tsx`, `apps/web/src/app/dashboard/sessions/[id]/ProgressionCard.tsx`)
 
 ### Happy path
 
@@ -17533,6 +17533,11 @@ because nothing shipped; revisit this section if the feature is ever built.
   Deload picker on `app/session/start.tsx` defaults to Normal, and the
   created session's `intent` is `normal` whether or not the picker is
   touched.
+- Plan → a strength template's own detail screen → "Start session" (the
+  template's own button, NOT the `/session/start` chooser): the identical
+  picker appears above the Start button, defaults to Normal, and the choice
+  reaches the created session — a second, independent entry point into a
+  strength session, and the picker has to be reachable from both.
 - Log a normal session on an exercise (e.g. bench 250kg×3), finish it, then
   start a NEW strength session, pick **Light**, and log deliberately lighter
   reps on the same exercise (e.g. 185kg×12). Open that exercise's suggestion

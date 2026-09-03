@@ -53594,6 +53594,20 @@ column, so a pulled session from an API predating migration 000088 would
 throw and stall the whole sync loop — got the same `?? 'normal'` guard
 `s.notes` already had.
 
+**A sibling reachability gap, caught independently by `ac-verifier` and
+`frontend-reviewer` on the re-review: a template's own "Start session" button
+(`app/workout/[id].tsx`) is a second entry point into a strength session, and
+it bypassed the picker entirely** — every session started from Plan → a
+template's own screen was silently `normal`, with no way to mark it otherwise.
+Not fixed by rerouting through `/session/start`: that screen's whole design
+point, stated in its own comment, is "performing a template is one tap away",
+and sending the athlete through the chooser to re-select the workout they
+just opened would cost exactly that tap. Fixed instead with a second copy of
+the picker on `workout/[id].tsx` itself — same component shape, same
+strength-only gating, same default — feeding the same `startLocalSession`
+call the screen already makes. Two component tests pin it (mutation-verified:
+hardcoding the passed `intent` to `'normal'` turned the wiring test red).
+
 **Mobile (the mobile-first rule's actual test: can a phone-only athlete use
 this at all).** A three-way Normal/Light/Deload picker on the strength
 session-start screen (`app/session/start.tsx`), defaulting to Normal so an
