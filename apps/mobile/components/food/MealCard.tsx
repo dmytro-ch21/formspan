@@ -163,6 +163,14 @@ export function MealCard({
   testID?: string;
 }) {
   const hasEntries = entries.length > 0;
+  // N484 — the header is the one thing still visible when a section is
+  // COLLAPSED (see the "Collapsible" doc section above), and it used to say
+  // only the kcal total. An athlete scanning collapsed sections had no way
+  // to tell "one big thing" from "several small ones" without expanding
+  // every card — the count closes that, in the same "N item(s)" phrasing
+  // `FoodSummaryCard` already uses for the day total, so the two never read
+  // as two different vocabularies for the same fact at two scopes.
+  const itemWord = entries.length === 1 ? 'item' : 'items';
   const { foodUnit } = useUnits();
   const accent = useAccent();
   const selectedCount = selectedIds?.size ?? 0;
@@ -196,13 +204,29 @@ export function MealCard({
           // one, which iOS DOES read `expanded` from, is the one case where
           // the state prop is the single source and the label must not repeat
           // it).
-          accessibilityLabel={label}
+          //
+          // The CONTENT, unlike the state, is not free — `accessibilityLabel`
+          // on an accessible Pressable REPLACES its children's visible text
+          // for VoiceOver rather than supplementing it, so the on-screen
+          // header `Text` below is invisible to a screen reader unless the
+          // label restates it. **frontend-reviewer, N484**: this already cost
+          // the kcal total before this ticket; adding the entry count to the
+          // visible text without also adding it here would have widened that
+          // gap rather than closed it, on the exact feature this ticket
+          // exists to make reachable without expanding a card.
+          accessibilityLabel={
+            hasEntries
+              ? `${label}, ${entries.length} ${itemWord}, ${fmtAmount(totals.kcal)} calories`
+              : label
+          }
           accessibilityHint="Toggles whether this meal's items are shown"
           accessibilityState={{ expanded: effectiveExpanded }}
           testID={testID ? `${testID}-toggle` : undefined}
         >
           <Text style={styles.header} testID={testID ? `${testID}-header` : undefined}>
-            {hasEntries ? `${label} · ${fmtAmount(totals.kcal)} kcal` : label}
+            {hasEntries
+              ? `${label} · ${entries.length} ${itemWord} · ${fmtAmount(totals.kcal)} kcal`
+              : label}
           </Text>
           <Icon name={effectiveExpanded ? 'chevron-down' : 'chevron'} size={13} color={vola.textDim} />
         </Pressable>
@@ -235,9 +259,9 @@ export function MealCard({
             </RNView>
           ) : (
             available && (
-              <RNView testID={testID ? `${testID}-available` : undefined}>
+              <RNView style={styles.availableBlock} testID={testID ? `${testID}-available` : undefined}>
                 <Text style={styles.availableKcal}>{fmtAmount(available.kcal)} kcal now available</Text>
-                <RNView style={styles.macroRow}>
+                <RNView style={[styles.macroRow, styles.availableMacroRow]}>
                   {macroLine(available.protein_g, available.carb_g, available.fat_g).map((m) => (
                     <RNView key={m.key} style={styles.macroCell}>
                       <RNView style={[styles.dot, { backgroundColor: m.colour }]} />
@@ -367,8 +391,23 @@ const styles = StyleSheet.create({
   headerToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   header: { fontSize: 15, fontWeight: '700' },
   combineLink: { fontSize: 13, fontWeight: '600' },
-  availableKcal: { fontSize: 13, fontWeight: '600', color: vola.textMuted, marginTop: -4 },
+  // N484 — the empty (`available`) branch's `availableKcal` + `macroRow`
+  // used to fight `card`'s own `gap: 10` with negative margins tuned to
+  // pull them close under the header, but the RNView wrapping the two of
+  // them had no gap of its own — so the negatives landed on top of a
+  // default-zero gap between THEM, not just the header, and the kcal line
+  // and macro dots visibly crowded each other rather than reading as one
+  // grouped unit. `availableBlock`'s own small positive gap replaces both:
+  // still tighter than `card`'s outer rhythm (they belong together), but
+  // never overlapping.
+  availableBlock: { gap: 4 },
+  availableKcal: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+  // Used both by the populated branch directly (where its own `marginTop`
+  // nudges it slightly closer to the header above) and, via
+  // `availableMacroRow`, by the empty branch inside `availableBlock` —
+  // where that same nudge would double up on `availableBlock`'s own gap.
   macroRow: { flexDirection: 'row', gap: 14, marginTop: -2 },
+  availableMacroRow: { marginTop: 0 },
   macroCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   macroText: { fontSize: 12, color: vola.textMuted },

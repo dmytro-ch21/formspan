@@ -12019,6 +12019,114 @@ quoted on N70's task line.
   touches enough files to add one. Removing `router.back()` left `router` as an
   unused `useCallback` dependency — one new warning, which failed the gate. The
   fix is the dependency, never the ceiling.
+## Library and Phase: one header, not two (N484 — `apps/mobile/app/_layout.tsx`, `apps/mobile/app/library.tsx`, `apps/mobile/app/phase/index.tsx`)
+
+Both screens are pushed stack routes (not tab screens) that draw their own
+`ScreenHeader` — the same component every `(tabs)/*` screen uses, which
+relies on the tab segment's `headerShown: false` to be the ONLY header on
+screen. `library` and `phase/index` are the two `ScreenHeader` callers that
+live OUTSIDE `(tabs)`, and neither had that flag set on its own
+`Stack.Screen`, so React Navigation's native header rendered on top of
+`ScreenHeader`'s — a doubled title row, doubled safe-area padding, and (on
+Library specifically) the literal VOLA wordmark image, all sitting between
+the back button and the first real content. Reported directly by a user
+screenshot as "a huge gap... leaving the top of the screen useless."
+
+### Happy path
+
+- Push into Library (from `You`): exactly ONE header row reading "Library"
+  — no second title, no wordmark image, no dead gap before the search
+  field. The search field should be the very next thing below the header,
+  at a normal header height.
+- **A visible, tappable back control is present** — a circular icon button,
+  top-left, overlaying the header row (`testID="library-back"`,
+  `accessibilityLabel="Back"`). This is NOT a leftover from the native
+  header: `headerShown: false` removes that entirely, and `ScreenHeader`
+  itself has no back affordance (right-side `action` slot only), so
+  `library.tsx` now draws its own. Found missing — Library was reachable
+  but not leavable except by an edge-swipe gesture, invisible to
+  VoiceOver — by `frontend-reviewer` and `ac-verifier` independently
+  against the first version of this fix, which hid the native header
+  without replacing what it removed.
+- Push into a Phase screen: one "Phase" header, not two. Phase keeps its
+  own pre-existing in-page "Back" text button (bottom of the form) — it
+  never relied on the native header for navigation, so no equivalent
+  addition was needed there.
+
+### Edge cases & errors
+
+- **Tap the back button with nothing to go back to** (a deep link straight
+  onto `/library`, say): falls back to the home route rather than throwing
+  — `router.canGoBack()` guards it, same pattern `curriculum/[id].tsx`'s
+  own back control already uses.
+
+### Regression trap
+
+- **This is a class of bug, not a single screen's typo.** Any FUTURE screen
+  that is pushed (not a tab) and wants a `ScreenHeader` for consistency with
+  the tab screens must set `headerShown: false` on its own `Stack.Screen`
+  entry — grep for every `ScreenHeader` caller under `apps/mobile/app/`
+  living outside `(tabs)/` and confirm each one does, rather than trusting
+  that the two fixed here are the only two that will ever exist.
+- **Hiding a native header is not free — check what it was carrying.**
+  `phase/index.tsx` was safe because it already drew its own "Back";
+  `library.tsx` was not, and the first version of this exact fix shipped
+  the regression before review caught it. `headerShown: false` on a screen
+  with no other exit is a silent trap, not just a missing title.
+
+## Meal cards' entry count and empty-state spacing (N484 — `apps/mobile/components/food/MealCard.tsx`)
+
+Extends N468 §2 above (collapsible meal sections): a populated section's
+header now states its entry count, not only its kcal total — see that
+section's own scenarios for the wording and the collapse-survives check.
+This section is the empty-state spacing fix specifically.
+
+### Happy path
+
+- Open an empty meal section (nothing logged, a target set): the "N kcal now
+  available" line and the three macro dots beneath it read as one clearly
+  grouped block, close to each other but with visible breathing room — never
+  overlapping or touching.
+
+### What comparable apps do, and why this app diverges on purpose
+
+The issue asked for "a bit of research on how modern apps" present an empty
+meal slot. MyFitnessPal, Cronometer and Lose It! all default an empty meal
+to bare minimum chrome — a "+ Add Food" row and nothing else, no numbers at
+all. VOLA's empty state states an "available" budget instead
+(`MealCard.tsx`'s own doc comment: "populated vs. empty is a DIFFERENT
+SENTENCE, not the same one at zero"), which is the deliberate, already-
+decided divergence N113/#503 shipped — a zero reads as an achievement, and
+this app refuses to present absence as an answer. That decision is
+unchanged here. What this ticket fixes is narrower and purely mechanical:
+the "available" block's own two lines were visually overlapping each other
+(a negative margin landing on top of an already-zero gap, not a design
+choice anyone made on purpose) — the comparison above confirms the
+DECISION to show a budget is deliberate; it does not bless the crowding bug
+that decision had picked up along the way.
+
+### Not covered by the suite
+
+- Whether the spacing reads as "crowded" or "comfortable" is a device-only
+  judgement — jest has no layout engine (`MealCard.test.tsx`'s own doc
+  comment already says as much for the boundary-rule case). The regression
+  this fix targets (a negative margin landing on top of an already-zero
+  gap, visibly overlapping the kcal line and the macro dots) is structural
+  and caught by reading the styles, not by a rendered assertion — worth a
+  screenshot check on a real device at default and accessibility text
+  sizes before trusting it fully fixed.
+- **Possible mismatch, flagged rather than silently assumed fixed**: the
+  issue's own written example of a crowded card ("Lunch · 409 kcal" with
+  just "+ Add Food") describes what a COLLAPSED, POPULATED section looks
+  like, not the empty/available block this fix actually targets — the
+  user's on-screen circle annotation, separately, pointed at the empty
+  Dinner block's available-line-plus-macros, which is where the diagnosed
+  overlap bug lived. If the crowding complaint was really about the
+  collapsed-populated state (header → `card`'s own `gap: 10` → "Add Food",
+  no negative margins involved and nothing changed here), that is a
+  different, undiagnosed issue and needs re-filing once confirmed on a
+  device, not assumed closed by this fix.
+
 ## Food search result cards (N58 — `app/food/add.tsx`, `lib/foodGlyph.ts`)
 
 Follows N51, which wired the search. This is what a result looks like.
@@ -17137,6 +17245,12 @@ mutually exclusive at `Validate()`.
   exactly what it showed before — same entries, same totals.
 - Step to a different day: each meal section opens expanded again (the
   default), not carrying over a collapse from the previous day.
+- **N484**: a populated section's header states an entry count alongside the
+  kcal total ("Breakfast · 2 items · 303 kcal"), matching the "N item(s)"
+  wording `FoodSummaryCard`'s day-level line already uses. Collapse the
+  section — the count stays visible in the header, since the header is the
+  one thing collapsing does not hide; that is the whole reason it was moved
+  there rather than left only in the (now-hidden) macro row.
 
 ### Edge cases & errors
 
@@ -17148,6 +17262,9 @@ mutually exclusive at `Validate()`.
 - The summary card renders nothing while the day's food is still loading or
   failed to load locally — it must not assert a zero from a read that never
   completed.
+- **N484**: exactly one entry in a section reads "1 item", not "1 items" —
+  and an EMPTY section (the "available" branch) states no count at all,
+  since there is nothing yet to count.
 
 ### Auth/security
 

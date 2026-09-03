@@ -183,7 +183,7 @@ import { useAccent } from '@/lib/AccentProvider';
  *
  * ## Default ON, opt out with `contentScrollsUnder={false}`
  *
- * Five of seven callers opt out, which looks backwards until you compare the
+ * Five of eight callers opt out, which looks backwards until you compare the
  * two failure directions. A **missing** edge where content scrolls under the
  * header is the reported bug: invisible in code review, invisible to every
  * test, and found only when somebody reports it from a device. A **surplus**
@@ -240,10 +240,27 @@ function useMeasuredWidth(): [number | null, (e: LayoutChangeEvent) => void] {
 
 export function ScreenHeader({
   title,
+  leading,
   action,
   contentScrollsUnder = true,
 }: {
   title: string;
+  /**
+   * N484 — an optional control BEFORE the title, inside the same measured
+   * `titleWrap` the wordmark's fit arithmetic already reads `left` from.
+   * The only caller today is `library.tsx`'s own back button: this screen
+   * is pushed (not a tab), so unlike every other `ScreenHeader` caller it
+   * has no native header supplying one. Deliberately part of `titleWrap`
+   * rather than a sibling absolutely positioned against `insets.top` —
+   * that was the first version of this fix, and it overlaid the title
+   * text rather than making room for it, because nothing told
+   * `wordmarkFits` the left edge had grown. Putting it inside the
+   * MEASURED box means `onLeftLayout` sees the true left extent
+   * automatically, the same way it already does for the title and the
+   * dot beside it — no new arithmetic, no magic number tied to this
+   * header's own padding.
+   */
+  leading?: React.ReactNode;
   action?: React.ReactNode;
   /**
    * Does this header's bottom edge sit at the top of the scrolling region?
@@ -287,6 +304,7 @@ export function ScreenHeader({
     >
       <View style={styles.row} onLayout={onRowLayout} testID="screen-header-row">
         <RNView style={styles.titleWrap} onLayout={onLeftLayout}>
+          {leading}
           <Text style={styles.title}>{title}</Text>
           {/* A dot, not a word. It marks the current screen in the accent the
               athlete chose, which is the same job the tab bar's underline does

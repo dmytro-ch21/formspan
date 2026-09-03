@@ -297,6 +297,20 @@ export default function LibraryScreen() {
   const techniqueSportOff = moduleOffWithCatalog(modules, 'techniques');
   const { userId } = useAuth();
   const router = useRouter();
+  // N484 — this screen's ONLY back control. `headerShown: false` (see
+  // `_layout.tsx`'s `library` Stack.Screen entry) removes React Navigation's
+  // native header, and `ScreenHeader` was built for TAB screens: it has no
+  // back affordance at all, only a right-side `action` slot. Without this,
+  // Library was reachable but not leavable except by an edge-swipe gesture —
+  // invisible to VoiceOver and to anyone who doesn't know the gesture exists.
+  // `router.canGoBack()` matches the guard `curriculum/[id].tsx`'s own
+  // `goBack` uses for the same reason: Library is always PUSHED here (from
+  // `you.tsx`), but a fallback keeps this from throwing if that ever isn't
+  // true — a deep link, say.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [router]);
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [techniques, setTechniques] = useState<TechniqueSummary[]>([]);
@@ -846,7 +860,28 @@ export default function LibraryScreen() {
           real boundary, and it draws the rule itself (F21/#497). Two rules
           would be the stacked-seams pattern ScreenHeader exists to have
           removed, so this stays `false`. */}
-      <ScreenHeader title="Library" contentScrollsUnder={false} />
+      <ScreenHeader
+        title="Library"
+        contentScrollsUnder={false}
+        leading={
+          // Inside `ScreenHeader`'s own measured `titleWrap` (its `leading`
+          // slot, N484), not an overlay positioned against `insets.top` —
+          // that was the first version of this fix, and it sat on top of
+          // the title text rather than making room for it, because nothing
+          // told `wordmarkFits` the left edge had grown. Being part of the
+          // MEASURED box fixes that for free.
+          <Pressable
+            onPress={goBack}
+            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            testID="library-back"
+          >
+            <Icon name="back" size={20} color={vola.text} />
+          </Pressable>
+        }
+      />
 
       {/* `styles.chrome` wraps the controls block AND the two error banners
           below, not `styles.controls` alone — an error is fixed chrome too
@@ -1622,6 +1657,25 @@ function TechniqueRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  // N484 — same visual language as `curriculum/[id].tsx`'s own local
+  // `BackButton` (`circleButton`/`pressed`), duplicated rather than shared:
+  // that one sits in its own `topRow`, this one is passed into
+  // `ScreenHeader`'s `leading` slot and lives inside `titleWrap`'s flex row
+  // instead, so the two aren't the same shape of component. Worth
+  // factoring into one shared control if a third screen ever needs this
+  // exact pattern. A flow child now, not an absolute overlay — the first
+  // version of this fix positioned it against `insets.top` directly and it
+  // sat on top of the title text, because nothing told `ScreenHeader`'s
+  // wordmark-fit measurement the left edge had grown.
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: vola.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonPressed: { opacity: 0.6 },
   // F21 (#497): the boundary the ScreenHeader call site above opts out of —
   // content scrolls under THIS chrome, not under the header, so this is where
   // W10's mechanism actually needed marking. Wraps `styles.controls` AND the
