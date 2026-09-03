@@ -17,6 +17,7 @@ import (
 
 	"github.com/dmytro-ch21/vola/backend/internal/modules/accomplishment"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/activity"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/biometric"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/bjj"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/classplan"
@@ -111,6 +112,7 @@ func main() {
 	bjjPositionHandler := bjj.NewPositionHandler(bjjRepo)
 	bjjFocusHandler := bjj.NewFocusHandler(bjjRepo)
 	runningHandler := running.NewHandler(running.NewPostgresRepository(pool))
+	biometricHandler := biometric.NewHandler(biometric.NewPostgresRepository(pool))
 	accomplishmentHandler := accomplishment.NewHandler(accomplishment.NewPostgresRepository(pool))
 	contestHandler := contest.NewHandler(contest.NewPostgresRepository(pool))
 	curriculumHandler := curriculum.NewHandler(curriculum.NewPostgresRepository(pool))
@@ -588,6 +590,17 @@ func main() {
 	// half/full marathon achieved as a split within a longer run, derived
 	// from the caller's whole running history rather than one session.
 	mux.Handle("GET /v1/running/records", verifier.RequireAuth(http.HandlerFunc(runningHandler.DistanceRecords)))
+	// N476/#821 — raw HR (and related) samples, and the per-session metrics
+	// derived from them (avg/peak HR, zone breakdown, Edwards' TRIMP load).
+	// Storage and computation only: no client reads or writes these routes
+	// yet, and that is deliberate — see internal/modules/biometric's package
+	// doc. Sport-agnostic, like the running/BJJ pair above, but NOT nested
+	// under a sport prefix: a session's heart-rate window read has nothing
+	// to do with which sport that session is.
+	mux.Handle("POST /v1/biometric/samples", verifier.RequireAuth(http.HandlerFunc(biometricHandler.PutSamples)))
+	mux.Handle("GET /v1/biometric/samples", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ListSamples)))
+	mux.Handle("POST /v1/biometric/sessions/{sessionID}/metrics", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ComputeMetrics)))
+	mux.Handle("GET /v1/biometric/sessions/{sessionID}/metrics", verifier.RequireAuth(http.HandlerFunc(biometricHandler.GetMetrics)))
 
 	// Say what happened and have it fill the chips (N33). A DRAFT comes back;
 	// nothing is logged until the athlete confirms it and PUTs it through
