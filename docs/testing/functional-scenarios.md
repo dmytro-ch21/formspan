@@ -18343,3 +18343,59 @@ otherwise surface, and offer it on Today as something to log or dismiss.
   native `queryOtherWorkouts`/`queryOtherExerciseSessions` call is, per this
   feature's own native/pure split, the one piece no test in this repo's
   suite can reach.
+
+## N481 — deterministic session-effectiveness summary (TRIMP + zones + sRPE calibration) (`apps/mobile/lib/sessionEffectiveness.ts`)
+
+Pure client-side calibration logic — see the N481/#826 history entry for the
+architectural decision (client-side, matching `lib/progress.ts`'s `Insight`
+pattern, rather than a new backend endpoint). No new API surface; these
+scenarios are about the deterministic function itself, since nothing renders
+it on a screen yet.
+
+### Happy path
+
+- A session with real HR evidence (`hr_source: 'workout'` or `'window'`, a
+  non-null `trimp`, at least `MIN_ZONE_MINUTES_FOR_CALIBRATION` minutes of
+  zone-attributed time) and a real `session_rpe` (1-10) produces a summary
+  whose `direction` is one of `aligned`/`felt_harder`/`felt_easier`, with a
+  `headline`, `detail`, the echoed `reportedRPE`, the computed `hrImpliedRPE`
+  and the `dominantZone` the HR time was mostly spent in.
+- Calling the function twice with the identical inputs (same object, or a
+  structurally-equal distinct object) returns identical output — the
+  ticket's own "reproducible, not model-sampled" requirement.
+
+### Edge cases & errors
+
+- No summary is ever produced when `hr_source` is `'none'` — the case of no
+  wearable at all, this app's most common state — even if `trimp` and
+  `session_rpe` both happen to be present in the input (defence in depth:
+  the backend should never send real numbers alongside `hr_source: 'none'`,
+  but this function does not trust that it never will).
+- No summary when `trimp` is `null` (the backend had no HRmax to classify
+  zones against, even with real samples — see `Compute` in `trimp.go`).
+- No summary when `session_rpe` is `null`, or outside the BJJ 1-10 range —
+  a corrupt/out-of-range report is treated the same as no report, never
+  clamped into range and calibrated against anyway.
+- No summary when the zone-attributed time is thinner than
+  `MIN_ZONE_MINUTES_FOR_CALIBRATION` (10 minutes) — a session with a couple
+  of sparse background HR samples must not produce a confident verdict off
+  them.
+- A tie between two zones for "most time" resolves to the lower zone number,
+  deterministically (not "whichever key iterates first" — Node's own object
+  key order for numeric-looking string keys would happen to agree here, but
+  the implementation does not rely on that).
+- No LLM call anywhere in this path — the calibration verdict is pure
+  arithmetic (TRIMP ÷ total zone minutes recovers the weighted-average zone
+  exactly, since TRIMP is defined as that sum); an LLM may narrate the
+  output in words in a future ticket, but does not decide it in this one.
+
+### Not yet covered (recorded as an open gap, not silently skipped)
+
+- Nothing renders this summary on any screen yet (deliberately out of this
+  ticket's scope — see the history entry on why, and the concurrent BJJ HR
+  ticket it would otherwise collide with). Once wired onto
+  `apps/mobile/app/bjj/session/[id].tsx`, add a scenario for the visual
+  framing (secondary to `session_rpe`, never presented as more authoritative
+  — the same discipline N480/#825 establishes for raw HR data on that
+  screen).
+- No web-side equivalent — `apps/web` has no biometric data at all yet.
