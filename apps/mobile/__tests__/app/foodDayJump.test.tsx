@@ -203,8 +203,10 @@ it('does not build the grid until it is opened', async () => {
     await settle();
 
     // Measured, not guessed: 0 calls to mount this screen with the grid
-    // closed — the day pill states `on`/'Today' directly and does no date
-    // formatting of its own — against exactly 100 once the ~42-cell grid is
+    // closed — the pinned "today" means the day pill's own `dayPillLabel`
+    // short-circuits to the literal 'TODAY' without calling
+    // `toLocaleDateString` at all (it only formats on a NON-today day) —
+    // against exactly 100 once the ~42-cell grid is
     // built for the pinned August 2026 (7 head cells plus 2 calls per cell:
     // the visible date's own formatting and the accessibility label's). 50
     // is the midpoint of the two, matching `weekPlanner.test.tsx`'s own rule
@@ -244,7 +246,7 @@ it('picking a day in the grid jumps the screen straight to it', async () => {
   // The grid closes and the day pill now names the picked day — two taps
   // total (label, then the cell) to reach a day three months back.
   expect(screen.queryByTestId('food-month-close')).toBeNull();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-05-12');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TUE, MAY 12');
 });
 
 it('reopens on the month of the day now on screen, not the calendar’s last position', async () => {
@@ -289,7 +291,7 @@ it('cannot pick a day that has not happened yet', async () => {
   // Disabled means genuinely inert, not merely styled that way — the grid
   // must still be open and the day on screen must not have moved.
   expect(screen.getByTestId('food-month-close')).toBeTruthy();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('Today');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 });
 
 it('the sheet\'s Today button returns to today from anywhere and closes the sheet', async () => {
@@ -301,7 +303,7 @@ it('the sheet\'s Today button returns to today from anywhere and closes the shee
   fireEvent.press(screen.getByTestId('food-month-prev'));
   fireEvent.press(screen.getByTestId('food-month-day-2026-07-04'));
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-07-04');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('SAT, JUL 4');
 
   fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
@@ -309,7 +311,7 @@ it('the sheet\'s Today button returns to today from anywhere and closes the shee
   await settle();
 
   expect(screen.queryByTestId('food-month-close')).toBeNull();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('Today');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 });
 
 it('marks a day that already has an entry, and leaves an empty one bare', async () => {
@@ -334,13 +336,13 @@ it('the ±1-day arrows still work — the grid is an addition, not a replacement
   render(<FoodScreen />);
   await settle();
 
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('Today');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 
   fireEvent.press(screen.getByTestId('food-day-prev'));
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-04');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TUE, AUG 4');
 
   fireEvent.press(screen.getByTestId('food-day-next'));
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('Today');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 });

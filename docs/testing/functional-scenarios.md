@@ -9947,6 +9947,15 @@ training. Everything here is about it telling the truth.
   having done anything is not success.
 - Retry while offline: the row keeps its existing message. A dead spot is not a
   new diagnosis.
+- **N493**: a TRANSIENT failure (a 5xx, a timeout — anything not classified
+  `permanent`) that keeps failing, with no permanent rows to show: this
+  screen used to say "Nothing is stuck" directly under the red "Sync
+  failed" chip that sent the athlete here, disagreeing with itself.
+  Confirm instead: the raw error text from `SyncChip`, under a "Still
+  trying" heading, with a line saying it's retrying on its own. As soon as
+  a permanent row exists, the permanent-row list takes over — the
+  transient-error copy is only for the empty-but-still-failing gap between
+  "nothing to show" and "actually fine."
 
 ### Getting to the problem
 
@@ -15337,6 +15346,30 @@ on screen. That, and only that, is what moved.
   data path. Confirm a signed-out state still routes to sign-in before any
   of the above is reachable, unchanged from before this ticket.
 
+## N493 — Food's day pill matches Today's (`apps/mobile/lib/calendar.ts`'s `dayPillLabel`, `apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/app/(tabs)/food.tsx`)
+
+Both tabs render `PeriodSwitcher`, so the two pills reading as two
+different components — Today formatted, Food showing the raw
+`YYYY-MM-DD` — was a bug in one shared shell with two independently
+written labels, not two components disagreeing.
+
+- On either tab, on today: the pill reads `TODAY`.
+- On either tab, browsed to a past or future day: the pill reads the
+  SAME shape on both — `FRI, AUG 28`, weekday/day/month, never the
+  machine date key (`2026-08-28`) on either screen.
+- Browse Food and Today to the same day independently: confirm the two
+  pills read byte-for-byte identically, not merely "similar."
+
+## N493 — Food's day-level Share button is gone (`apps/mobile/app/(tabs)/food.tsx`)
+
+- Open Food on any day, with or without entries logged: no "Share"
+  control appears between the daily target block and the meal cards —
+  the row it used to occupy is gone entirely, not merely disabled.
+- Every OTHER `ShareToFriend` mount is unaffected: a saved food, a single
+  logged entry, a recipe, and a workout all still offer to share that one
+  specific thing, unchanged. Only the day-level share (the one with no
+  clear referent) is removed.
+
 ## W15 — Today's macro rings stop carrying a previous day's fill after browsing away and back (`apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/components/today/MomentumCard.tsx`, `apps/mobile/components/today/MacroRings.tsx`)
 
 ### Happy path
@@ -17541,6 +17574,19 @@ are navigation shortcuts to a different screen, not filters on this one).
      file (the facet-picker sheet this one is modeled on never navigates).
      Does the pushed screen appear cleanly, or does the sheet's own
      slide-out animation visibly overlap it?
+  4. **N493**: user-reported the sheet's colors read "way off" from the
+     rest of the app. Read against the real tokens, the fill (`vola.
+     surfaceRaised` at 93%) and backdrop (`vola.bg` at 62%) are correct —
+     converted from hand-computed literals to token-derived ones. The
+     sheet's own FILL is pixel-identical to before (already the token,
+     just spelled as a literal); the BACKDROP is genuinely different —
+     roughly double each channel, `(4,6,10)` → `(8,11,18)` — still
+     near-black behind a modal, but not a rounding difference. Check both
+     independently rather than assuming "converted to a token" means
+     "looks the same." If it still reads wrong on a device, this fix did
+     not fully address the
+     actual report — worth a screenshot of the sheet OPEN, not just the
+     screen behind it, before assuming this is resolved.
 
 ## N465 — import runs from Apple HealthKit (`apps/mobile/lib/healthkit.ts`, `apps/mobile/lib/healthkitSync.ts`, `apps/mobile/app/settings.tsx`, `PUT /v1/running/sessions/{sessionID}`)
 

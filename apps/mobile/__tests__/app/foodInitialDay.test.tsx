@@ -138,21 +138,24 @@ beforeEach(() => {
 it('with no `?date=`, opens on today — unchanged from before N430/#692', async () => {
   render(<FoodScreen />);
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('Today');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 });
 
 it('seeds the stepper from `?date=` on first mount, without a flash of today first', async () => {
   mockDateParam.current = '2026-08-03'; // two days before the pinned "today"
   render(<FoodScreen />);
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-03');
+  // N493 — the pill states a formatted weekday/date (`dayPillLabel`,
+  // matching the Today tab's own pill), not the raw `YYYY-MM-DD` `on`
+  // string this used to assert. 2026-08-03 is a Monday.
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('MON, AUG 3');
 });
 
 it('a FUTURE `?date=` seeds the stepper too — Today can browse forward, not just back', async () => {
   mockDateParam.current = '2026-08-08';
   render(<FoodScreen />);
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-08');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('SAT, AUG 8');
 });
 
 it('reads trackers for the seeded day, not real today', async () => {
@@ -170,18 +173,18 @@ it('a manual day-step is not clobbered by a mere refocus with the SAME lingering
   mockDateParam.current = '2026-08-03';
   render(<FoodScreen />);
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-03');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('MON, AUG 3');
 
   fireEvent.press(screen.getByTestId('food-day-next'));
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-04');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TUE, AUG 4');
 
   // A refocus with the identical param — every registered focus callback
   // fires again, exactly as a real tab switch would trigger.
   mockFocusCbs.forEach((cb) => cb());
   await settle();
 
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-04');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TUE, AUG 4');
 });
 
 it('a SECOND, genuinely new `?date=` while already mounted DOES move the stepper', async () => {
@@ -191,11 +194,11 @@ it('a SECOND, genuinely new `?date=` while already mounted DOES move the stepper
   mockDateParam.current = '2026-08-03';
   render(<FoodScreen />);
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-03');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('MON, AUG 3');
 
   mockDateParam.current = '2026-08-07';
   mockFocusCbs.forEach((cb) => cb());
   await settle();
 
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('2026-08-07');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent('FRI, AUG 7');
 });

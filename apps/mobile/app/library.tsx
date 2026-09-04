@@ -23,6 +23,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { ApiError, transportDiagnosis } from '@/lib/apiError';
 import { getStanding } from '@/lib/bjj';
+import { withAlpha } from '@/lib/palette';
 import { stillWanted } from '@/lib/inflight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1780,7 +1781,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(4,6,10,0.62)',
+    // N493 — was a hand-computed `rgba(4,6,10,0.62)`, a near-match for
+    // `vola.bg` nobody had written down as a derivation. `withAlpha` exists
+    // precisely so a scrim like this reads from the real token instead —
+    // see its own doc comment, which already named this file's `ShareToFriend`
+    // and `MomentumCard` counterparts as the ones it replaced.
+    backgroundColor: withAlpha(vola.bg, 0.62),
   },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
@@ -1792,7 +1798,7 @@ const styles = StyleSheet.create({
     // exercise names, and at 0.86 they showed through the option labels
     // clearly enough to fight them. "A little transparent" is the brief —
     // enough to see what you are filtering, not enough to read it.
-    backgroundColor: 'rgba(23,30,43,0.93)',
+    backgroundColor: withAlpha(vola.surfaceRaised, 0.93),
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     borderWidth: 1,
