@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, View as RNView 
 
 import { EndTimeCorrection } from '@/components/EndTimeCorrection';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { HRSessionReport } from '@/components/HRSessionReport';
 import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
@@ -18,7 +19,6 @@ import { addDays, dayString, monthGrid, weekDays as calendarWeekDays } from '@/l
 import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import {
   getDetail,
-  hrCorroboration,
   KINDS,
   LIVE_ROWS,
   describeRPE,
@@ -323,15 +323,24 @@ export default function BjjSessionScreen() {
     };
   }, [getToken]);
 
-  // HR corroboration (N480/#825) — best-effort and non-blocking, same shape
-  // as the technique lookup above. A session that never ended has no window
-  // to have computed metrics from, so this doesn't even ask; a finished one
-  // may still have nothing (no wearable, offline, or the watch hasn't synced
-  // yet — design doc §6.4: "session_metrics being absent is a normal state,
-  // not an error"), and `getSessionMetrics` already turns that 404 into
-  // `null` rather than throwing. `hrCorroboration` (lib/bjjSession.ts) is
-  // what decides whether any of this reaches the screen at all.
+  // HR report (N480/#825, N488/#849) — best-effort and non-blocking, same
+  // shape as the technique lookup above. A session that never ended has no
+  // window to have computed metrics from, so this doesn't even ask; a
+  // finished one may still have nothing (no wearable, offline, or the watch
+  // hasn't synced yet — design doc §6.4: "session_metrics being absent is a
+  // normal state, not an error"), and `getSessionMetrics` already turns that
+  // 404 into `null` rather than throwing. `<HRSessionReport>`
+  // (components/HRSessionReport.tsx, backed by lib/hrSessionReport.ts) is
+  // what decides whether — and how much of — any of this reaches the screen.
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  // Separate from `hrMetrics` itself: `null` is BOTH "haven't asked yet" and
+  // "asked, and there is genuinely nothing" (a 404), and `<HRSessionReport>`
+  // reads `metrics === null` as the latter — an honest "no HR data" card. Not
+  // gating on this would flash that card for every session while the fetch
+  // is still in flight, the exact "an in-flight load is not an empty answer"
+  // bug `components/TrendCard.tsx`'s own tests exist to catch, one screen
+  // over.
+  const [hrLoaded, setHrLoaded] = useState(false);
   useEffect(() => {
     // No synchronous reset here on purpose (react-hooks/set-state-in-effect):
     // `hrMetrics` already starts `null`, and nothing on this screen ever
@@ -341,16 +350,21 @@ export default function BjjSessionScreen() {
     let cancelled = false;
     getSessionMetrics(getToken, id)
       .then((m) => {
-        if (!cancelled) setHrMetrics(m);
+        if (!cancelled) {
+          setHrMetrics(m);
+          setHrLoaded(true);
+        }
       })
       .catch(() => {
-        if (!cancelled) setHrMetrics(null);
+        if (!cancelled) {
+          setHrMetrics(null);
+          setHrLoaded(true);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [id, session?.ended_at, getToken]);
-  const hr = hrCorroboration(hrMetrics);
 
   /**
    * Delete and Finish, which live here because nothing else offers them.
@@ -685,21 +699,19 @@ export default function BjjSessionScreen() {
         </Text>
       </RNView>
 
-      {/* N480/#825: HR is corroboration for the RPE above, never a rival to
-          it — design doc §5.5, "grappling is the pathological case" for
-          optical wrist HR. Deliberately smaller and dimmer than `reported`
-          above, deliberately below it, and deliberately absent (not a dash)
-          whenever `hrCorroboration` says there's nothing trustworthy to
-          show. Do not give this its own Stat tile — a same-sized tile next
-          to mat time/rolling time would read as a measurement on equal
-          footing with the athlete's own account, which is the exact framing
-          this ticket exists to rule out. */}
-      {hr.show && (
-        <RNView style={styles.hr} testID="bjj-session-hr">
-          <Text style={styles.hrLabel}>HEART RATE</Text>
-          <Text style={styles.hrValue}>{hr.value}</Text>
-          <Text style={styles.hrCaption}>{hr.caption}</Text>
-        </RNView>
+      {/* N480/#825 introduced a two-line HR corroboration here — value
+          smaller and dimmer than `reported` above, secondary to the
+          athlete's own RPE. N488/#849 replaces it with the fuller
+          cross-sport report (TRIMP, zone breakdown, the effectiveness
+          verdict) rather than keeping both on screen at once. `session_rpe`
+          still feeds `sessionEffectivenessSummary`'s calibration the same
+          way it always has — see `lib/hrSessionReport.ts`. */}
+      {session.ended_at && hrLoaded && (
+        <HRSessionReport
+          metrics={hrMetrics}
+          sessionRPE={detail?.session_rpe ?? null}
+          testID="bjj-session-hr"
+        />
       )}
 
       {/* Only when it says something the title doesn't. The name defaults to
@@ -1162,17 +1174,9 @@ const styles = StyleSheet.create({
   reported: { marginBottom: 12, gap: 2 },
   reportedLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
   reportedValue: { fontSize: 14, color: vola.textMuted, fontStyle: 'italic' },
-  // Smaller than `reported*` above at every step — the visual half of
-  // "secondary to RPE, never a rival to it" (N480/#825): `hrValue` is 12px
-  // against `reportedValue`'s 14px, and `hrCaption` smaller again. Colors
-  // stay on `textMuted`/`textDim` exactly as `reported*` does, rather than
-  // going dimmer still — `textDim` on `bg` clears only 3.96:1, so an actual
-  // sentence (the caption) stays on `textMuted` (7.38:1); `textDim` is used
-  // only for the all-caps label, matching `reportedLabel`'s own precedent.
-  hr: { marginBottom: 12, gap: 2 },
-  hrLabel: { fontSize: 8, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
-  hrValue: { fontSize: 12, color: vola.textMuted },
-  hrCaption: { fontSize: 11, color: vola.textMuted, fontStyle: 'italic' },
+  // N480/#825's dedicated `hr`/`hrLabel`/`hrValue`/`hrCaption` styles lived
+  // here — removed by N488/#849, which replaced the two-line corroboration
+  // they drew with `<HRSessionReport>` (its own component, its own styles).
   stat: {
     flex: 1,
     backgroundColor: vola.surface,
