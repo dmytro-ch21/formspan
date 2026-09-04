@@ -55607,6 +55607,46 @@ not built now because reading BOTH `readHealthKitImportEnabled` (iOS) and
 cross-sport screen felt like real added surface for a distinction the
 current single sentence already covers honestly.
 
+**Two `[blocking]` findings from the pre-merge review, both fixed before the
+PR opened.**
+
+- **`backend-reviewer`**: `ListSessionLoad`'s query shipped with no row
+  ceiling of its own — only `maxSessionLoadRangeDays`, which bounds TIME, not
+  ROW COUNT, the exact gap `docs/architecture/api-conventions.md`'s
+  conditional-GET section names for a new list endpoint (every response
+  passes through `apihttp`'s ETag hashing, which buffers the whole body).
+  Fixed with a new `MaxSessionLoadRows` (5,000) and a `LIMIT` on the query,
+  matching `ListSamples`' own `MaxSamplesPerListQuery` precedent in this same
+  package — deterministic `(started_at, id)` tiebreak already existed, so
+  only the `LIMIT` itself needed adding. Covered by a new
+  `TestListSessionLoad_LimitTruncatesToTheOldestRowsFirst`, which exercises
+  the query's `LIMIT`+`ORDER BY` shape directly (seeding 5,000 real rows to
+  hit the actual constant is impractical — the same reason
+  `MaxSamplesPerListQuery` itself has no dedicated cap-truncation test).
+
+- **`frontend-reviewer`**: the mobile screen's own fetch window was WIDER
+  than the backend would ever accept — `FETCH_DAYS` (1095) plus the hook's
+  `LOOKBACK_SLACK_DAYS` (7) plus a full calendar day at each request boundary
+  (`T00:00:00Z`..`T23:59:59Z`) comes to **~1103 days every single request**,
+  computed directly with this app's own `shiftDate` rather than estimated —
+  and `maxSessionLoadRangeDays` was 1100 at the time, so every load of this
+  screen failed, unconditionally, for every athlete, from the moment it
+  shipped. Not caught by `trainingLoadTrendScreen.test.tsx` because
+  `listSessionLoad` was mocked wholesale with no assertion on what it was
+  actually called WITH — the "a stub built from an assumption cannot falsify
+  it" shape CLAUDE.md's testing philosophy already warns about. Fixed by
+  raising `maxSessionLoadRangeDays` to 1200 (real headroom over the measured
+  1103-day requirement, not a number that merely sounded like enough) and
+  adding a regression test that pins the actual request window against that
+  cap as a literal — mutation-verified by temporarily widening the mobile
+  hook's lookback slack and confirming the new test fails on the real
+  computed day-span, then restored and re-run green. Also fixed alongside it:
+  the chart's accessibility label was quoting the FULL fetch-window session
+  count rather than one scoped to the selected preset range (the same defect
+  `vo2max/trend.tsx` avoids by reading `series.readings.length`) — now reads
+  the range-scoped day count and says "training days" rather than "sessions",
+  matching the daily-summed reading model the rest of this file already uses.
+
 
 ## Open items / known gaps as of this entry
 

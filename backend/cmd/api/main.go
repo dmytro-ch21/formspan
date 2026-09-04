@@ -603,10 +603,10 @@ func main() {
 	mux.Handle("GET /v1/biometric/sessions/{sessionID}/metrics", verifier.RequireAuth(http.HandlerFunc(biometricHandler.GetMetrics)))
 	// N489/#850 — the cross-session training-load trend (Progress tab): every
 	// one of the caller's own sessions with a computed TRIMP in a date range,
-	// across all three sports. A literal path segment ("load"), not a second
-	// wildcard under sessions/ — ServeMux resolves this against the
-	// {sessionID}/metrics pattern above by literal-vs-wildcard segment count,
-	// not registration order, so this is unambiguous regardless of where it sits.
+	// across all three sports. A literal 3-segment path ("sessions/load"), not
+	// a second wildcard under sessions/ — it never competes with the 4-segment
+	// {sessionID}/metrics pattern above at all, since ServeMux matches on the
+	// full segment shape, so registration order here is not load-bearing.
 	mux.Handle("GET /v1/biometric/sessions/load", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ListSessionLoad)))
 
 	// Say what happened and have it fill the chips (N33). A DRAFT comes back;

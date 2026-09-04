@@ -9349,10 +9349,16 @@ paths:
           in: query
           required: true
           schema: { type: string, format: date-time }
-          description: The [from, to] range must not exceed 1100 days.
+          description: The [from, to] range must not exceed 1200 days.
       responses:
         "200":
-          description: The caller's own sessions with a computed trimp, ascending by started_at.
+          description: >
+            The caller's own sessions with a computed trimp, ascending by
+            started_at, capped at 5,000 rows — the 1100-day window bounds
+            TIME, not row count, the same distinction ListSamples' own 200
+            response draws about its 400-day/20,000-row pair. Narrow
+            `from`/`to` if the cap is hit; results are oldest-first so
+            nothing recent is silently dropped in its place.
           content:
             application/json:
               schema:
@@ -9363,7 +9369,7 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/SessionLoad" }
         "400":
-          description: from/to not RFC3339, to before from, or a range over 1100 days.
+          description: from/to not RFC3339, to before from, or a range over 1200 days.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

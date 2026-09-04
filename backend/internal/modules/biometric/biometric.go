@@ -389,6 +389,22 @@ type SessionMetrics struct {
 	RuleVersion int `json:"rule_version"`
 }
 
+// MaxSessionLoadRows bounds one ListSessionLoad call — the row-count ceiling
+// `docs/architecture/api-conventions.md`'s conditional-GET section requires
+// of every list endpoint, independent of maxSessionLoadRangeDays' TIME cap
+// (handler.go): every response passes through apihttp's ETag hashing, which
+// buffers the whole body to hash it, so peak memory is only bounded when
+// every list has a row ceiling of its own — the exact property that section
+// names two endpoints (`activity.ListByUser`, `workout.List`) for lacking
+// before it was added there. `ListSamples`' MaxSamplesPerListQuery is the
+// direct precedent in this same package. 5000 is generous headroom over any
+// realistic training history — training five times a week for a decade is
+// under 2,700 sessions with a computed load — and results are returned
+// oldest-first with a deterministic `(started_at, id)` tiebreak, so a caller
+// that hits the cap narrows `from`/`to` rather than losing recent data
+// silently.
+const MaxSessionLoadRows = 5000
+
 // SessionLoad is one session's contribution to a cross-session training-load
 // trend — N489/#850. Deliberately a NARROW projection of SessionMetrics
 // joined with the owning session's sport/started_at, not the full

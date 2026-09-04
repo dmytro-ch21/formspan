@@ -103,3 +103,27 @@ it('switching the range does not re-fetch — it slices what is already loaded',
   );
   expect(mockFetch).toHaveBeenCalledTimes(1);
 });
+
+// frontend-reviewer, N489/#850: the screen's own fetch window used to be
+// WIDER than the backend would ever accept (FETCH_DAYS + the hook's lookback
+// slack came to ~1103 days, and maxSessionLoadRangeDays was 1100 at the
+// time) — every load of this screen failed, unconditionally, and nothing in
+// this file caught it because `listSessionLoad` was mocked wholesale with no
+// assertion on what it was actually called WITH. This pins the real request
+// window against the backend's own cap (1200 days,
+// backend/internal/modules/biometric/handler.go's maxSessionLoadRangeDays),
+// so a future FETCH_DAYS/slack change that regresses past it fails here
+// rather than only in production.
+it('requests a window that stays under the backend range cap', async () => {
+  mockFetch.mockResolvedValue([]);
+  render(<TrainingLoadTrendScreen />);
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+
+  const [, from, to] = mockFetch.mock.calls[0] as [unknown, string, string];
+  const days = (new Date(to).getTime() - new Date(from).getTime()) / (24 * 60 * 60 * 1000);
+  // The backend's own cap, mirrored here as a literal rather than imported —
+  // this is a Go constant, and the whole point is to catch a drift between
+  // the two sides, not to read the same number from both.
+  const BACKEND_MAX_RANGE_DAYS = 1200;
+  expect(days).toBeLessThan(BACKEND_MAX_RANGE_DAYS);
+});

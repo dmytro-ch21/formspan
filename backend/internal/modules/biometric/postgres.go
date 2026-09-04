@@ -391,9 +391,13 @@ func (r *PostgresRepository) GetSessionMetrics(
 }
 
 // ListSessionLoad returns the caller's own sessions with a computed TRIMP in
-// [from, to], ascending by started_at — see the Repository interface's doc
-// comment for why this is one JOIN rather than N calls to
-// GetSessionMetrics.
+// [from, to], ascending by started_at, capped at MaxSessionLoadRows — see
+// the Repository interface's doc comment for why this is one JOIN rather
+// than N calls to GetSessionMetrics, and MaxSessionLoadRows' own doc comment
+// for why a query with no row ceiling of its own is unsafe here regardless
+// of the date-range cap (handler.go's maxSessionLoadRangeDays bounds TIME,
+// not ROW COUNT — the identical distinction ListSamples' own doc comment
+// draws about MaxSamplesPerListQuery).
 //
 // `trimp IS NOT NULL` is the whole of the "exclude hr_source='none' /
 // never-enriched sessions honestly" rule: Compute (trimp.go) only ever
@@ -412,8 +416,9 @@ func (r *PostgresRepository) ListSessionLoad(
 		WHERE s.user_id = $1 AND m.user_id = $1
 			AND m.trimp IS NOT NULL
 			AND s.started_at >= $2 AND s.started_at <= $3
-		ORDER BY s.started_at, s.id`,
-		userID, from, to)
+		ORDER BY s.started_at, s.id
+		LIMIT $4`,
+		userID, from, to, MaxSessionLoadRows)
 	if err != nil {
 		return nil, fmt.Errorf("biometric: list session load: %w", err)
 	}

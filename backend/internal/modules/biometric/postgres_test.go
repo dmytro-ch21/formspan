@@ -3,6 +3,7 @@ package biometric
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -848,6 +849,75 @@ func TestListSessionLoad_SpansAllThreeSports(t *testing.T) {
 	// Ascending by started_at.
 	if got[0].Sport != "bjj" || got[1].Sport != "strength" || got[2].Sport != "running" {
 		t.Fatalf("not ascending by started_at: %+v", got)
+	}
+}
+
+// backend-reviewer, N489/#850: ListSessionLoad shipped with no row ceiling
+// of its own — only the date-range cap (maxSessionLoadRangeDays), which
+// bounds TIME, not ROW COUNT, the exact gap docs/architecture/api-
+// conventions.md's conditional-GET section calls out for a new list
+// endpoint. Fixed with MaxSessionLoadRows + a `LIMIT`. Seeding 5000 real
+// rows to exercise the constant itself is impractical (mirrors
+// ListSamples' own untested MaxSamplesPerListQuery for the same reason),
+// so this proves the CLAUSE — a literal small LIMIT against a few real
+// rows — both truncates and keeps the OLDEST rows given the query's own
+// `ORDER BY s.started_at, s.id`, which is the property that makes hitting
+// the real cap "narrow from/to" rather than "lose recent data silently".
+func TestListSessionLoad_LimitTruncatesToTheOldestRowsFirst(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_bio_load_cap"
+	cleanupSamples(t, pool, user)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("ses-bio-load-cap-%d", i)
+		start := base.Add(time.Duration(i) * 24 * time.Hour)
+		seedSession(t, pool, id, user, start, start.Add(30*time.Minute))
+		if _, err := repo.PutSamples(ctx, user, []Sample{
+			hrSample(fmt.Sprintf("bio-load-cap-%d-1", i), start, 150),
+			hrSample(fmt.Sprintf("bio-load-cap-%d-2", i), start.Add(5*time.Minute), 160),
+		}); err != nil {
+			t.Fatalf("seed samples %d: %v", i, err)
+		}
+		if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+			t.Fatalf("compute %d: %v", i, err)
+		}
+	}
+
+	// The exact shape ListSessionLoad's query takes, minus the Go-level
+	// constant -- a literal LIMIT 3 against 5 real rows.
+	rows, err := pool.Query(ctx, `
+		SELECT s.id
+		FROM sessions s
+		JOIN session_metrics m ON m.session_id = s.id
+		WHERE s.user_id = $1 AND m.user_id = $1 AND m.trimp IS NOT NULL
+			AND s.started_at >= $2 AND s.started_at <= $3
+		ORDER BY s.started_at, s.id
+		LIMIT 3`, user, base.Add(-time.Hour), base.Add(10*24*time.Hour))
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	want := []string{"ses-bio-load-cap-0", "ses-bio-load-cap-1", "ses-bio-load-cap-2"}
+	if len(ids) != len(want) {
+		t.Fatalf("got %d rows with LIMIT 3, want %d: %v", len(ids), len(want), ids)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("row %d = %q, want %q (LIMIT must keep the OLDEST rows first): %v", i, ids[i], want[i], ids)
+		}
 	}
 }
 

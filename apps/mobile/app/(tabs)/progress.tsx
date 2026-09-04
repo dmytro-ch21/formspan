@@ -381,8 +381,9 @@ export default function ProgressScreen() {
             itself (a 7-day rolling TRIMP total, cross-sport) lives at
             `/trainingLoad/trend`, following the same "summary row here, the
             actual reading lives on its own screen" shape as Weight trend
-            below and Position map two rows down — this screen's own doc
-            comment says why: no section here computes its own figures.
+            below and Position map two rows down. This Row fetches and
+            computes nothing itself — same posture as every other row on this
+            screen.
 
             Unconditional, like the nutrition links further down: it needs no
             module gate, since TRIMP is computed identically for every sport

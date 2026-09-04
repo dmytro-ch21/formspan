@@ -54,9 +54,17 @@ const TRAINING_LOAD_RANGES = RANGES.filter((r) => r.key !== 'Plan');
 /**
  * Three years, matching `goals/trend.tsx`/`vo2max/trend.tsx`'s own
  * `FETCH_DAYS` — enough for the widest preset ('All') to have real history
- * to draw from. The backend's `maxSessionLoadRangeDays` (1100) is
- * deliberately wider than this fetch (1095 + a week of lookback slack) for
- * exactly that headroom — see that constant's own doc comment.
+ * to draw from.
+ *
+ * **The actual request is wider than this number**, and that gap already
+ * shipped a bug once: `useTrainingLoadTrend` adds its own week of lookback
+ * slack and requests a full calendar day at each end
+ * (`T00:00:00Z`..`T23:59:59Z`), which comes to ~1103 days every time, not
+ * 1095 — frontend-reviewer caught the backend's `maxSessionLoadRangeDays`
+ * (1100 at the time) silently rejecting every single request this screen
+ * ever made. It is 1200 now, with real headroom over the measured 1103, not
+ * a number that merely sounds like enough — see that constant's own doc
+ * comment on the backend for the exact arithmetic.
  */
 const FETCH_DAYS = 365 * 3;
 
@@ -70,7 +78,7 @@ export default function TrainingLoadTrendScreen() {
 
   const [range, setRange] = useState<TrendRangeKey>('3M');
 
-  const { loading, series, sessionCount } = useTrainingLoadTrend(getToken, range, FETCH_DAYS);
+  const { loading, series } = useTrainingLoadTrend(getToken, range, FETCH_DAYS);
   const fmt = (v: number) => Math.round(v).toString();
 
   return (
@@ -124,7 +132,7 @@ export default function TrainingLoadTrendScreen() {
                 minSpan={MIN_SPAN}
                 height={200}
                 formatDate={(on) => on.slice(5)}
-                accessibilityLabel={`Weekly training load over the selected range, ${sessionCount} sessions with heart-rate data`}
+                accessibilityLabel={`Weekly training load over the selected range, ${series.readings.length} training days with heart-rate data`}
                 testID="training-load-chart"
               />
             )}
