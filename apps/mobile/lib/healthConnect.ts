@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 
-import { heartRateSamplesInWindow, type RawHeartRateSample } from './biometricEnrichment';
-import type { BiometricSource } from './biometricApi';
+import { heartRateSamplesInWindow, type BiometricSource, type RawHeartRateSample } from './biometric';
 
 /**
  * `react-native-health-connect`, imported the same defensive way
@@ -26,8 +25,8 @@ import type { BiometricSource } from './biometricApi';
  *
  * ## Why the native call surface stays this thin
  *
- * `lib/biometricEnrichment.ts` holds every pure decision (the window clip,
- * the history-wall check, the HRmax estimate, the retry ledger logic) and
+ * `lib/biometric.ts` holds every pure decision (the window clip, the
+ * history-wall check, the HRmax estimate, the retry ledger logic) and
  * imports nothing from this file's guarded module. This file's only job is
  * turning a Health Connect record into plain data and back — `load()`,
  * `ensureInitialized()` and the two `query*` functions below are the entire
@@ -216,7 +215,7 @@ export function vo2MaxSampleID(recordID: string): string {
  * window past the history wall the caller forgot to check, or any other
  * native failure) — the same "nothing to import right now" posture
  * `healthkit.ts`'s `queryRunningWorkouts` takes. Callers MUST apply
- * `biometricEnrichment.ts`'s `isWithinHealthConnectHistoryWall` themselves
+ * `biometric.ts`'s `isWithinHealthConnectHistoryWall` themselves
  * before calling this for an old session — this function does not check it,
  * so a caller that skips that guard gets a swallowed native error rather
  * than the honest "the platform wall stopped this" this ticket exists to

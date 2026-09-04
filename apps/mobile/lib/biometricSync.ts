@@ -58,9 +58,15 @@ import type { TokenGetter } from './useAuthToken';
  * upload plan, the HRmax seed, the API client) is platform-agnostic — see
  * that file's own doc comment. The only iOS-specific calls in this whole
  * module are `queryHeartRateSamples`/`queryVO2MaxSamples`/`isHealthKitSupported`
- * from `./healthkit`, which the Android sibling ticket (#823) would swap for
- * its own Health Connect equivalents without touching anything below this
- * comment.
+ * from `./healthkit`. The Android sibling (`lib/healthConnectSync.ts`, N478)
+ * turned out different enough in orchestration shape — a retry ledger with
+ * cooldown semantics rather than this file's dedupe-once table, an extra
+ * N479 activity-detection pass riding the same trigger — that it stayed its
+ * own module rather than becoming this file with `./healthkit` swapped for
+ * `./healthConnect`; N485/#837 consolidated the two orchestrators' SHARED
+ * dependency (`./biometric`, this file's import above) rather than the
+ * orchestrators themselves, which is the boundary this ticket actually
+ * found duplicated.
  */
 
 // --- identity, mirroring lib/sync.ts's `creds` shape ----------------------
@@ -181,7 +187,11 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
       if (plan.kind === 'upload-and-compute') {
         await putBiometricSamples(getToken, plan.samples);
       }
-      await computeSessionMetrics(getToken, session.id, hrMaxBPM, plan.hrSource);
+      // 'estimated' — hrMaxBPM above only ever comes from
+      // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
+      // HRMaxSource doc comment for why nothing in this app produces
+      // 'observed' yet.
+      await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', plan.hrSource);
     } catch {
       // Leave this session's ledger row unwritten so the next pass retries
       // it — see this file's doc comment on why no backoff ladder is

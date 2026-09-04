@@ -130,9 +130,12 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     expect(uploaded[0].metric_type).toBe('heart_rate');
 
     expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
-    const [, sessionID, hrMaxBPM, hrSource] = mockComputeMetrics.mock.calls[0];
+    const [, sessionID, hrMaxBPM, hrMaxSource, hrSource] = mockComputeMetrics.mock.calls[0];
     expect(sessionID).toBe(session.id);
     expect(hrMaxBPM).toBeGreaterThan(0);
+    // Every producer of hrMaxBPM in this app today is the 220 - age estimate
+    // — see biometric.ts's HRMaxSource doc comment.
+    expect(hrMaxSource).toBe('estimated');
     expect(hrSource).toBe('window');
 
     expect(await sessionsNeedingBiometricSync(USER, 10)).toEqual([]);
@@ -148,7 +151,7 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     // The claim sent is still 'window' (see planHRSync's doc comment) — the
     // server is what downgrades it to 'none' once it sees SampleCount is 0.
     expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
-    const [, , , hrSource] = mockComputeMetrics.mock.calls[0];
+    const [, , , , hrSource] = mockComputeMetrics.mock.calls[0];
     expect(hrSource).toBe('window');
   });
 

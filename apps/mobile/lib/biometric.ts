@@ -3,25 +3,80 @@ import { isNotFound } from './apiError';
 import type { TokenGetter } from './useAuthToken';
 
 /**
- * The `biometric` module's wire shapes, and everything about reading a
- * session's heart-rate window and an athlete's VO₂max trend that does NOT
- * need a native call — N477/#822.
+ * The `biometric` module's wire shapes, and every platform-agnostic decision
+ * around a session's heart-rate window and an athlete's VO₂max trend — N477
+ * (iOS), N478 (Android), consolidated by N485/#837.
  *
- * ## Why this file is platform-agnostic and `lib/healthkit.ts` is not
+ * ## Why this is the ONE module, not two
  *
- * A sibling ticket (#823, N478) does the identical job for Android's Health
- * Connect. The two platforms disagree about almost everything upstream of a
- * sample existing — how you ask for one, what a denial looks like, whether a
- * background read needs a second permission (design doc §5.1–§5.2) — and
- * agree completely about what to DO with a sample once it is a plain
- * `{ value, measured_at, sourceName, sourceBundleId }` object: classify its
- * source, decide whether a session's window has anything worth uploading,
- * and call this API. Everything in this file operates on that plain shape,
- * never on a native type, so `lib/health/android.ts` (or whatever #823 ends
- * up naming its own native boundary) can hand this module the SAME inputs
- * `lib/healthkit.ts` does, and the window-join and upload-planning logic
- * below runs unmodified either way. `lib/healthkitSync.ts`'s own doc comment
- * makes the equivalent point about WHEN a pass runs; this file is the WHAT.
+ * N477 and N478 were built concurrently against the same backend (N476)
+ * targeting the same conceptual problem — read HR/VO₂max from a platform
+ * health store, window-join it against a finished session, upload to
+ * `/v1/biometric/*` — on two different platforms. Neither had merged before
+ * the other started, so each ended up with its own parallel implementation of
+ * the platform-agnostic half: N477 shipped this file (`biometric.ts`) already
+ * combining the pure decisions and the wire client in one place; N478 shipped
+ * the same logic split across `biometricEnrichment.ts` (pure) and
+ * `biometricApi.ts` (wire), explicitly designed with zero platform imports
+ * "so a later consolidation is easy rather than a rewrite."
+ *
+ * That reasoning was sound, but it did not actually distinguish the two
+ * candidates — THIS file has zero platform imports too (see the imports
+ * above: `apiRequest`, `isNotFound`, a token type, nothing from `healthkit.ts`
+ * or `healthConnect.ts`). Both were equally shareable; the tie-break was
+ * everything else: this file already matched the wire contract more closely
+ * (the full `MetricType` enum; `listBiometricSamples`/`getSessionMetrics`,
+ * which N478 never needed and never built), and it already had three
+ * downstream consumers beyond its own orchestrator
+ * (`useVo2MaxTrend.ts`, `hrSessionReport.ts`, `bjjSession.ts`) against
+ * N478's one. Consolidating onto the Android pair would have meant adding
+ * those two functions back rather than deleting anything. So this file
+ * stays, absorbing N478's genuinely additional pieces — the Health Connect
+ * window-overlap clip, the history-wall check, and the retry-ledger pure
+ * decisions — and `biometricEnrichment.ts`/`biometricApi.ts` are deleted.
+ * `lib/healthkit.ts` (iOS-specific) and `lib/healthConnect.ts`
+ * (Android-specific) are untouched — this ticket moves nothing across that
+ * boundary, only removes the duplicate on this side of it.
+ *
+ * ## Two real bugs this consolidation fixes, not just moves
+ *
+ * 1. **`BiometricSource` was missing `android_wearable`.** N478's own copy of
+ *    this type had it (added there because `healthConnect.ts`'s
+ *    `sourceFromDataOrigin` needs it — a Health Connect sample from an
+ *    unrecognised vendor). This file's copy did not, because iOS never
+ *    produces that value. A single shared type has to carry the union of
+ *    both platforms' legal values, matching `contracts/public.openapi.yaml`'s
+ *    `BiometricSample.source` enum exactly.
+ * 2. **`computeSessionMetrics` never sent `hr_max_source`.** N483/#833
+ *    (merged 2026-09-04, after both N477 and N478) added a REQUIRED
+ *    `hr_max_source` field to `POST /biometric/sessions/{id}/metrics` —
+ *    backend-only, no mobile client ever updated. Since then, EVERY call
+ *    this app makes to that endpoint (either platform) has been rejected
+ *    with `invalid_input`, silently — the pass swallows the error and the
+ *    next foreground return tries again, forever, with the same missing
+ *    field. Both the iOS and Android sync passes were broken, unnoticed,
+ *    because nothing here calls the live endpoint in a test. Fixed by
+ *    threading an `HRMaxSource` argument through — see `computeSessionMetrics`
+ *    below. Every caller today only ever produces the `220 − age` estimate
+ *    (`hrMaxFromDateOfBirth`), so both orchestrators pass `'estimated'`;
+ *    `'observed'` has no producer yet anywhere in this app (future work, not
+ *    this ticket's scope).
+ *
+ * ## One real behavior reconciliation
+ *
+ * N477's `hrMaxFromDateOfBirth` and N478's `estimateHRMaxBPM` disagreed for
+ * an implausible date of birth that seeds an HRmax outside
+ * [`MIN_HR_MAX_BPM`, `MAX_HR_MAX_BPM`] (in practice: an athlete recorded as
+ * roughly 120+ years old) — N477 returned `null` ("leave `session_metrics`
+ * uncomputed this pass rather than inventing a number", this file's own
+ * design stance, stated below on `hrMaxFromDateOfBirth`); N478 CLAMPED to
+ * the nearest bound instead. This merge keeps N477's null-rather-than-invent
+ * behavior for both platforms — clamping is itself a fabricated number, just
+ * one sitting exactly on the boundary, and the "don't invent" stance is the
+ * one already written down as this app's design intent. This is the only
+ * behavioral difference found between the two implementations; the edge case
+ * it touches (a profile date of birth implying an age past ~120) has never
+ * been observed in practice on either platform.
  */
 
 // --- wire vocabulary, mirroring backend/internal/modules/biometric ---------
@@ -44,8 +99,12 @@ export type MetricType =
   | 'body_mass'
   | 'vo2_max';
 
-/** Mirrors `biometric.Source`. */
-export type BiometricSource = 'apple_watch' | 'oura' | 'whoop' | 'garmin' | 'manual';
+/** Mirrors `biometric.Source`. `android_wearable` (N478) is a Health Connect
+ *  sample whose writing app isn't one of the named vendors — Samsung Health
+ *  chief among them, since Health Connect exposes no stable per-vendor
+ *  identifier this API could otherwise match against; see
+ *  `lib/healthConnect.ts`'s `sourceFromDataOrigin`. */
+export type BiometricSource = 'apple_watch' | 'oura' | 'whoop' | 'garmin' | 'manual' | 'android_wearable';
 
 /** Mirrors `biometric.SourcePlatform`. */
 export type SourcePlatform = 'healthkit' | 'health_connect' | 'manual';
@@ -55,6 +114,13 @@ export type SourcePlatform = 'healthkit' | 'health_connect' | 'manual';
  *  (see `ComputeMetrics`'s doc comment on the backend), never something this
  *  app asks for. */
 export type HRSource = 'workout' | 'window' | 'none';
+
+/** Mirrors `biometric.HRMaxSource` (N483/#833) — whether `hr_max_bpm` is the
+ *  `220 − age` estimate or an observed maximum from the athlete's own
+ *  history. This app currently only ever produces `'estimated'`;
+ *  `'observed'` has no producer yet (design doc §3's second/third steps —
+ *  future work). */
+export type HRMaxSource = 'estimated' | 'observed';
 
 /** One raw reading, on the wire — mirrors `biometric.Sample`'s JSON shape. */
 export type BiometricSample = {
@@ -78,6 +144,12 @@ export type SessionMetrics = {
   max_hr_bpm: number | null;
   trimp: number | null;
   active_kcal: number | null;
+  /** The HRmax value that actually produced this row's trimp/time_in_zones
+   *  (N483/#833) — null together with them on the same "couldn't classify"
+   *  gate, and on any row computed before this field existed. */
+  hr_max_bpm: number | null;
+  /** Null under the identical conditions as hr_max_bpm. */
+  hr_max_source: HRMaxSource | null;
   time_in_zones: Record<string, number>;
   hr_source: HRSource;
   sample_count: number;
@@ -114,6 +186,15 @@ export type SessionMetrics = {
  * label nothing downstream currently keys behavior on (`source` is
  * informational today; design doc §6.3 reserves it for a future
  * per-`(metric_type, source)` trend split). Revisit if that changes.
+ *
+ * iOS-specific in what it classifies (HealthKit's `sourceName`/
+ * `sourceBundleId`) — `lib/healthConnect.ts`'s `sourceFromDataOrigin` is the
+ * Android equivalent, classifying a different platform's own provenance
+ * data with a genuinely different rule (package-name lookup, defaulting to
+ * `android_wearable` rather than `apple_watch`). The two are not the same
+ * function wearing different names; each stays with the platform whose
+ * provenance shape it reads, both living here only because neither imports
+ * anything platform-specific to do it.
  */
 export function classifyHealthKitSource(sourceName: string, sourceBundleId: string): BiometricSource {
   const hay = `${sourceName} ${sourceBundleId}`.toLowerCase();
@@ -152,12 +233,79 @@ export function sessionHRWindow(startedAt: string, endedAt: string | null | unde
   return { start, end };
 }
 
+/** One heart-rate reading, reduced to plain data — what a Health Connect
+ *  `HeartRateRecord`'s `samples` array becomes after `lib/healthConnect.ts`
+ *  maps it (N478). */
+export type RawHeartRateSample = {
+  /** RFC3339 */
+  time: string;
+  beatsPerMinute: number;
+};
+
+/**
+ * Individual samples actually inside `[windowStart, windowEnd]`, inclusive.
+ *
+ * Needed because Health Connect's own `timeRangeFilter` on `readRecords`
+ * filters at the RECORD level, not the sample level — a `HeartRateRecord`
+ * whose interval merely OVERLAPS the query window is returned in full, and
+ * its `samples` array can carry points from a few seconds either side of the
+ * record's queried boundary. Clipping here is what makes the window join
+ * exact rather than approximately-the-window, the same edge case the design
+ * doc's `enrich.ts` sketch calls out ("a session that spans midnight, a
+ * watch workout that starts before ours").
+ *
+ * Android-specific in why it exists (Health Connect's record-level
+ * filtering), but pure over plain data, so it lives here rather than in
+ * `lib/healthConnect.ts` — `queryHeartRateSamples` there applies it before
+ * this app ever sees a raw sample. Harmless, and unused, on the iOS side
+ * today, since `lib/healthkit.ts`'s own query already returns samples
+ * exactly bounded by its predicate.
+ */
+export function heartRateSamplesInWindow(
+  samples: readonly RawHeartRateSample[],
+  windowStart: string,
+  windowEnd: string,
+): RawHeartRateSample[] {
+  const startMs = new Date(windowStart).getTime();
+  const endMs = new Date(windowEnd).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return [];
+  return samples.filter((s) => {
+    const t = new Date(s.time).getTime();
+    return Number.isFinite(t) && t >= startMs && t <= endMs;
+  });
+}
+
+/**
+ * Health Connect's own read wall (design doc §5.2, N478): by default a read
+ * permission only ever surfaces the previous 30 days of another app's
+ * history — reading further back needs a SEPARATE, Play-review-gated
+ * permission (`PERMISSION_READ_HEALTH_DATA_HISTORY`) this app does not
+ * request. Attempting to read past the wall without it is a native ERROR,
+ * not an empty result (§5.2 again) — so the fix is not to attempt it: a
+ * session whose window starts before the wall is skipped before any native
+ * call is made, which is what turns an inevitable failure into a documented,
+ * predictable gap instead of a confusing one. HealthKit has no equivalent
+ * wall, so this check is only ever applied on the Android path.
+ */
+export const HEALTH_CONNECT_HISTORY_WALL_DAYS = 30;
+
+export function isWithinHealthConnectHistoryWall(
+  sessionStartedAt: string,
+  now: Date,
+  wallDays: number = HEALTH_CONNECT_HISTORY_WALL_DAYS,
+): boolean {
+  const startedMs = new Date(sessionStartedAt).getTime();
+  if (!Number.isFinite(startedMs)) return false;
+  const wallStartMs = now.getTime() - wallDays * 24 * 60 * 60 * 1000;
+  return startedMs >= wallStartMs;
+}
+
 // --- metric-type mapping --------------------------------------------------
 
 /** The plain shape ANY platform's native boundary reduces a quantity sample
  *  to — `lib/healthkit.ts`'s `HealthKitQuantitySample` already matches this
- *  exactly; a Health Connect boundary would produce the same shape from a
- *  `HeartRateRecord`/`Vo2MaxRecord`. */
+ *  exactly; `lib/healthConnect.ts`'s Health Connect boundary produces the
+ *  same shape from a `HeartRateRecord`/`Vo2MaxRecord`. */
 export type RawQuantitySample = {
   uuid: string;
   value: number;
@@ -213,13 +361,14 @@ export function toBiometricSample(
  *   "not synced yet" rather than "no wearable evidence".
  * - One or more samples → `upload-and-compute`: PUT them, then compute.
  *
- * `hrSource` is ALWAYS the claim `'window'` in both branches — this ticket
- * builds no anchor refinement (design doc §2's second tier), so this app can
- * never honestly claim `'workout'`. The backend downgrades `'window'` to the
- * true `'none'` itself whenever `SampleCount` comes out zero regardless of
- * what is claimed (see `ComputeSessionMetrics`'s doc comment) — this
- * function's `hrSource` is a claim about EVIDENCE QUALITY conditional on
- * evidence existing, not a prediction of what the server will store.
+ * `hrSource` is ALWAYS the claim `'window'` in both branches — neither
+ * platform builds any anchor refinement (design doc §2's second tier), so
+ * this app can never honestly claim `'workout'`. The backend downgrades
+ * `'window'` to the true `'none'` itself whenever `SampleCount` comes out
+ * zero regardless of what is claimed (see `ComputeSessionMetrics`'s doc
+ * comment) — this function's `hrSource` is a claim about EVIDENCE QUALITY
+ * conditional on evidence existing, not a prediction of what the server
+ * will store.
  */
 type ClaimableHRSource = Extract<HRSource, 'workout' | 'window'>;
 
@@ -246,6 +395,10 @@ export const MAX_HR_MAX_BPM = 250;
  * exported for its own test — the one place a birthday's month/day matters
  * to a whole-years count, which a naive `on.getFullYear() - dob.getFullYear()`
  * gets wrong for anyone whose birthday this year hasn't happened yet.
+ *
+ * UTC throughout, deliberately — a whole-years count must not depend on the
+ * device's own timezone, which would make the same profile report a
+ * different age depending on where the phone happens to be.
  */
 export function ageInYears(dateOfBirth: string, on: Date): number {
   const dob = new Date(`${dateOfBirth}T00:00:00Z`);
@@ -261,16 +414,18 @@ export function ageInYears(dateOfBirth: string, on: Date): number {
  * HRmax, seeded from `220 - age` — design doc §3's first of three steps
  * ("Seed from 220 − age... mark the session's zones as estimated"; the
  * other two — replacing this with the athlete's own observed maximum, and
- * never silently switching between the two — are explicitly future work,
- * not built by this ticket. Flagged as an open item in this ticket's
- * history entry.).
+ * never silently switching between the two — are explicitly future work).
+ * The sole producer of `hr_max_source: 'estimated'` in this app today; see
+ * `HRMaxSource`'s doc comment.
  *
  * Returns `null` when there is no date of birth to seed from, or when the
  * seeded value falls outside what `ComputeMetrics` will accept — an absent
- * HRmax means `lib/biometricSync.ts` leaves `session_metrics` uncomputed for
- * this pass rather than inventing a number, the same "absence is a normal
- * state, not an error" posture design doc §6.4 takes for enrichment
- * generally.
+ * HRmax means the calling sync module leaves `session_metrics` uncomputed
+ * for this pass rather than inventing a number, the same "absence is a
+ * normal state, not an error" posture design doc §6.4 takes for enrichment
+ * generally. Deliberately does NOT clamp an out-of-range estimate to the
+ * nearest bound — see this file's own doc comment on why that would just be
+ * a different fabricated number.
  */
 export function hrMaxFromDateOfBirth(dateOfBirth: string | null | undefined, on: Date): number | null {
   if (!dateOfBirth) return null;
@@ -279,6 +434,90 @@ export function hrMaxFromDateOfBirth(dateOfBirth: string | null | undefined, on:
   const hrMax = 220 - age;
   if (hrMax < MIN_HR_MAX_BPM || hrMax > MAX_HR_MAX_BPM) return null;
   return hrMax;
+}
+
+// --- Health Connect retry ledger (pure decisions, N478) --------------------
+
+/** What this device already knows about one session's enrichment attempt —
+ *  the local ledger row (see `lib/db.ts`'s `health_connect_enrichment`
+ *  table). Android-specific: iOS's `biometric_hr_synced` ledger is a
+ *  dedupe-once table with no retry semantics, so it needs none of this. */
+export type EnrichmentLedgerEntry = {
+  /** `'window'` once real evidence has been found and stored — a session
+   *  never needs retrying past that point. `'none'` means the last attempt
+   *  found zero samples; see `needsEnrichmentAttempt` for the retry
+   *  window. */
+  hrSource: 'window' | 'none';
+  /** RFC3339, when the last attempt ran. */
+  attemptedAt: string;
+};
+
+/**
+ * How long a `'none'` result stays worth re-checking, and how long between
+ * re-checks.
+ *
+ * The watch may not have synced its samples to the phone yet at the moment
+ * the athlete closes the app (design doc §6.4: "enrichment is not
+ * blocking… possibly much later") — so a fresh `'none'` deserves a few more
+ * tries. Past `RETRY_WINDOW_DAYS`, a session that still has no samples
+ * almost certainly never will (no watch, or the watch was never worn for
+ * this one), and asking Health Connect again on every single foreground
+ * return forever, for every session an athlete without a wearable has ever
+ * logged, is real ongoing cost with no plausible upside.
+ */
+export const RETRY_WINDOW_DAYS = 3;
+export const RETRY_COOLDOWN_HOURS = 12;
+
+/** A finished session, reduced to what enrichment needs to know about it. */
+export type EnrichmentCandidate = {
+  id: string;
+  /** RFC3339 */
+  startedAt: string;
+  /** RFC3339, or `null` for a session still in progress — never a
+   *  candidate. */
+  endedAt: string | null;
+};
+
+/**
+ * Whether THIS session is worth asking Health Connect about right now —
+ * everything except the history-wall check, which
+ * `selectEnrichmentCandidates` applies separately since it needs no ledger
+ * state at all.
+ */
+export function needsEnrichmentAttempt(
+  session: Pick<EnrichmentCandidate, 'endedAt'>,
+  ledgerEntry: EnrichmentLedgerEntry | undefined,
+  now: Date,
+): boolean {
+  if (!session.endedAt) return false;
+  if (!ledgerEntry) return true;
+  if (ledgerEntry.hrSource === 'window') return false;
+
+  const endedMs = new Date(session.endedAt).getTime();
+  if (!Number.isFinite(endedMs)) return false;
+  const stillWorthRetrying = now.getTime() - endedMs <= RETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  if (!stillWorthRetrying) return false;
+
+  const attemptedMs = new Date(ledgerEntry.attemptedAt).getTime();
+  if (!Number.isFinite(attemptedMs)) return true;
+  return now.getTime() - attemptedMs >= RETRY_COOLDOWN_HOURS * 60 * 60 * 1000;
+}
+
+/**
+ * Every locally-known finished session actually worth an enrichment pass
+ * right now — combines `needsEnrichmentAttempt` (the ledger/retry decision)
+ * with the history-wall skip (§5.2), so a caller need not remember to apply
+ * both. Order is preserved from `sessions`.
+ */
+export function selectEnrichmentCandidates<S extends EnrichmentCandidate>(
+  sessions: readonly S[],
+  ledger: ReadonlyMap<string, EnrichmentLedgerEntry>,
+  now: Date,
+): S[] {
+  return sessions.filter((s) => {
+    if (!needsEnrichmentAttempt(s, ledger.get(s.id), now)) return false;
+    return isWithinHealthConnectHistoryWall(s.startedAt, now);
+  });
 }
 
 // --- the API client ---------------------------------------------------
@@ -321,17 +560,28 @@ export async function listBiometricSamples(
  * `POST /v1/biometric/sessions/{id}/metrics`. `hrSource` is always the claim
  * `'workout'` or `'window'` — see `HRSyncPlan`'s doc comment; the server
  * derives the true `'none'` itself when there is no evidence.
+ *
+ * `hrMaxSource` has been REQUIRED by the backend since N483/#833 — see this
+ * file's own doc comment on the bug that went unnoticed until this
+ * consolidation. Every caller today passes `'estimated'`, since
+ * `hrMaxFromDateOfBirth` is the only HRmax producer in this app.
  */
-export function computeSessionMetrics(
+export async function computeSessionMetrics(
   getToken: TokenGetter,
   sessionID: string,
   hrMaxBPM: number,
+  hrMaxSource: HRMaxSource,
   hrSource: Extract<HRSource, 'workout' | 'window'>,
-): Promise<{ metrics: SessionMetrics }> {
-  return apiRequest(getToken, `/biometric/sessions/${sessionID}/metrics`, {
-    method: 'POST',
-    body: JSON.stringify({ hr_max_bpm: hrMaxBPM, hr_source: hrSource }),
-  });
+): Promise<SessionMetrics> {
+  const res = await apiRequest<{ metrics: SessionMetrics }>(
+    getToken,
+    `/biometric/sessions/${sessionID}/metrics`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ hr_max_bpm: hrMaxBPM, hr_max_source: hrMaxSource, hr_source: hrSource }),
+    },
+  );
+  return res.metrics;
 }
 
 /**

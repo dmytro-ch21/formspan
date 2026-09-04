@@ -613,7 +613,8 @@ const CREATE_BIOMETRIC_HR_SYNCED = `
  * or is old enough that it never will.
  *
  * One row per (user, session) enrichment ATTEMPT, overwritten each time —
- * see `lib/biometricEnrichment.ts`'s `needsEnrichmentAttempt` for exactly
+ * see `lib/biometric.ts`'s `needsEnrichmentAttempt` (formerly
+ * `lib/biometricEnrichment.ts`, consolidated by N485/#837) for exactly
  * how `hr_source`/`attempted_at` decide whether the next foreground pass
  * tries again. `hr_source` is `'window'` or `'none'` only (never `'workout'`
  * — see that module's own doc comment on why this app never claims it), and

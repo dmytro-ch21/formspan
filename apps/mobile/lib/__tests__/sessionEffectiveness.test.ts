@@ -4,7 +4,7 @@ import {
   sessionEffectivenessSummary,
   type SessionEffectivenessSummary,
 } from '../sessionEffectiveness';
-import type { SessionMetrics } from '../biometricApi';
+import type { SessionMetrics } from '../biometric';
 
 /**
  * The calibration this module exists for, and the two guards that keep it

@@ -4,9 +4,12 @@
  * redirected to a migrated fixture (the real `local_sessions` and
  * `health_connect_enrichment` tables, not a mock standing in for either),
  * while `../healthConnect` (the native boundary — covered by nothing this
- * environment can run, see that module's doc comment), `../biometricApi`
- * (the network boundary) and `../profile` are replaced with controllable
- * fakes.
+ * environment can run, see that module's doc comment), the network half of
+ * `../biometric` (formerly `../biometricApi`, consolidated by N485/#837) and
+ * `../profile` are replaced with controllable fakes. The PURE half of
+ * `../biometric` (`hrMaxFromDateOfBirth`, `selectEnrichmentCandidates`, ...)
+ * stays real via `jest.requireActual`, same as `biometricSync.test.ts`'s own
+ * pattern — the decision under test here is the one the app actually ships.
  */
 
 /*
@@ -16,7 +19,7 @@
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 import { upsert, type LocalSession } from '../sessionStore';
 import type { HeartRateReading, Vo2MaxReading } from '../healthConnect';
-import type { SessionMetrics } from '../biometricApi';
+import type { SessionMetrics } from '../biometric';
 import {
   readHealthConnectImportEnabled,
   syncHealthConnectBiometrics,
@@ -71,6 +74,8 @@ const mockComputeSessionMetrics = jest.fn((...args: unknown[]) => {
     max_hr_bpm: null,
     trimp: null,
     active_kcal: null,
+    hr_max_bpm: null,
+    hr_max_source: null,
     time_in_zones: {},
     hr_source: 'none',
     sample_count: 0,
@@ -79,10 +84,14 @@ const mockComputeSessionMetrics = jest.fn((...args: unknown[]) => {
     ...mockComputedMetrics,
   } satisfies SessionMetrics);
 });
-jest.mock('../biometricApi', () => ({
-  putBiometricSamples: (...args: unknown[]) => mockPutSamples(...args),
-  computeSessionMetrics: (...args: unknown[]) => mockComputeSessionMetrics(...args),
-}));
+jest.mock('../biometric', () => {
+  const real = jest.requireActual('../biometric');
+  return {
+    ...real,
+    putBiometricSamples: (...args: unknown[]) => mockPutSamples(...args),
+    computeSessionMetrics: (...args: unknown[]) => mockComputeSessionMetrics(...args),
+  };
+});
 
 let mockDateOfBirth: string | null = '1996-01-15';
 let mockProfileThrows = false;
@@ -212,7 +221,7 @@ describe('syncHealthConnectBiometrics', () => {
       }),
     ]);
 
-    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'window');
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'estimated', 'window');
 
     const ledger = await mockFixture.getAllAsync<{ hr_source: string; sample_count: number }>(
       `SELECT hr_source, sample_count FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
@@ -234,7 +243,7 @@ describe('syncHealthConnectBiometrics', () => {
     // Still asked the backend to compute — it is the authority on the
     // result, and doing so is what gives the athlete a real "none" row
     // rather than one that silently never exists.
-    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'window');
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'estimated', 'window');
 
     const ledger = await mockFixture.getAllAsync<{ hr_source: string }>(
       `SELECT hr_source FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
@@ -347,7 +356,7 @@ describe('syncHealthConnectBiometrics', () => {
 
     expect(result.attempted).toBe(1); // 'older' and VO2max never ran
     expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
-    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 'newer', 190, 'window');
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 'newer', 190, 'estimated', 'window');
     // VO2max is the LAST network call this pass makes — confirms the guard
     // covers it too, not only the per-session loop.
     expect(mockPutSamples).not.toHaveBeenCalledWith(

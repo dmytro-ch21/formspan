@@ -55863,6 +55863,130 @@ class reads correctly end-to-end (elapsed Stat, history row, HR window) —
 this fix is unit-tested at the screen's wiring boundary only, same class of
 gap N434's own original fix carried on the strength side.
 
+### 2026-09-04 — N485/#837: one `biometric.ts`, not two — and it fixes a live break
+
+Follow-up from **N477/#822** (iOS, merged `22c7b864`) and **N478/#823**
+(Android, merged `558a3856`), flagged by N478's own implementer during that
+ticket's review rather than fixed mid-PR under time pressure: the two
+tickets developed concurrently against the same backend (N476) and neither
+had merged before the other started, so each ended up with its own
+parallel implementation of the platform-agnostic half — window-join math,
+the `hr_source` claim decision, and the `/v1/biometric/*` wire client. N477
+shipped `apps/mobile/lib/biometric.ts` (pure decisions + wire client, one
+file) + `biometricSync.ts` (iOS orchestrator); N478 shipped
+`biometricEnrichment.ts` (pure) + `biometricApi.ts` (wire, two files) +
+`healthConnectSync.ts` (Android orchestrator). This already produced two
+smaller collisions caught during N478's review (a duplicate `SCHEMA_VERSION`
+claim, a duplicate backend enum addition) — this ticket is the consolidation
+those near-misses were warning about.
+
+**Which module won, and why not by default.** Both `biometric.ts` and
+`biometricEnrichment.ts`/`biometricApi.ts` turned out to have zero platform
+imports — N478's own doc comment argued this was true only of its half
+("designed... so that whichever ticket lands N477... can import this file
+unchanged"), but reading N477's file fresh showed the same property already
+held there, so that argument didn't actually distinguish the two candidates.
+The tie-break was everything else: `biometric.ts` already matched the wire
+contract more completely (the full 8-value `MetricType` enum vs. N478's
+2-value subset; `listBiometricSamples`/`getSessionMetrics`, which Android
+never needed and never built), and already had three downstream consumers
+beyond its own orchestrator (`useVo2MaxTrend.ts`, `hrSessionReport.ts`,
+`bjjSession.ts`) against N478's one (`sessionEffectiveness.ts`). Consolidating
+onto the Android pair would have meant re-adding those two functions rather
+than deleting anything, and touching five production call sites instead of
+three. `biometric.ts` stays as the one shared module, absorbing N478's
+genuinely additional pieces — the Health Connect window-overlap clip
+(`heartRateSamplesInWindow`), the 30-day history-wall check
+(`isWithinHealthConnectHistoryWall`), and the retry-ledger pure decisions
+(`needsEnrichmentAttempt`/`selectEnrichmentCandidates`) — and
+`biometricEnrichment.ts`/`biometricApi.ts` are deleted outright.
+`lib/healthkit.ts` and `lib/healthConnect.ts` (the two platforms' native
+boundaries) are untouched, as is each platform's own orchestrator
+(`biometricSync.ts`, `healthConnectSync.ts`) — those turned out to differ
+enough in shape (a dedupe-once ledger vs. a retry-with-cooldown one, an
+extra N479 activity-detection pass on the Android trigger) that folding one
+into the other was never in scope; only their shared dependency moved.
+
+**This surfaced a real, live production bug, not just duplicated code.**
+N483/#833 (merged the same day, `5f9b6a4a`, before this ticket started)
+added a REQUIRED `hr_max_source` field to `POST
+/biometric/sessions/{id}/metrics` — backend-only; its own history entry
+above states "no mobile/web surface reads or writes `biometric` at all
+yet," which was wrong at the time it was written (both N477 and N478 had
+already shipped clients calling this exact endpoint) and is presumably why
+nobody updated either one. Since N483 merged, **every call either platform's
+sync pass makes to that endpoint has been rejected with `invalid_input`**,
+silently: the pass swallows the error (by design — "the next foreground
+return tries again") and the next attempt sends the identical incomplete
+request forever. Nothing in the test suite calls the live endpoint, so
+nothing caught it. Fixed by threading an `hrMaxSource: HRMaxSource`
+(`'estimated' | 'observed'`) argument through `computeSessionMetrics`, with
+`biometricSync.ts` and `healthConnectSync.ts` both passing `'estimated'` —
+the only value either platform's HRmax producer (`hrMaxFromDateOfBirth`, the
+`220 − age` seed) can honestly claim; `'observed'` has no producer anywhere
+in this app yet. Also fixed while in the file: `BiometricSource` was missing
+`android_wearable` — N478's own copy had it (`healthConnect.ts`'s
+`sourceFromDataOrigin` needs it), N477's did not, and a single shared type
+has to carry the union of both platforms' legal wire values.
+
+**One real behavioral difference, reconciled rather than picked arbitrarily.**
+N477's `hrMaxFromDateOfBirth` returned `null` for a date of birth that seeds
+an HRmax outside `[MIN_HR_MAX_BPM, MAX_HR_MAX_BPM]` (in practice: an age
+past ~120); N478's `estimateHRMaxBPM` CLAMPED to the nearest bound instead.
+Kept N477's null-rather-than-invent behavior for both platforms — clamping
+is itself a fabricated number, just one sitting exactly on the boundary,
+and "leave `session_metrics` uncomputed this pass rather than inventing a
+number" is the design stance N477's own doc comment already commits to.
+This is the only behavioral difference found between the two
+implementations, and the edge case it touches has never been observed on
+either platform in practice.
+
+**`computeSessionMetrics`'s return shape also changed**, from N477's
+`Promise<{ metrics: SessionMetrics }>` (a raw passthrough of the wrapped
+wire response) to N478's `Promise<SessionMetrics>` (unwrapped) — matching
+`getSessionMetrics`'s existing convention on the same file and Android's
+already-nicer API. `biometricSync.ts` discards the return value, so this
+cost nothing there; `healthConnectSync.ts` already assumed the unwrapped
+shape (`const metrics = await computeSessionMetrics(...); metrics.hr_source`)
+and needed no change at all once the shape matched.
+
+**Tests**: `lib/__tests__/biometricEnrichment.test.ts` (N478, 27 cases) was
+merged into `lib/__tests__/biometric.test.ts` (N477's suite) rather than
+kept alongside it — every case migrated, plus one new case
+(`hrMaxFromDateOfBirth` on an unparseable date of birth, previously only
+covered on the Android side) and the clamp test rewritten to assert the
+now-unified null behavior. `biometricSync.test.ts` and
+`healthConnectSync.test.ts` both updated for the new `computeSessionMetrics`
+signature and mock module path (the Android suite now uses
+`jest.requireActual('../biometric')` + selective overrides, the same
+pattern the iOS suite already established, rather than replacing the whole
+module); `sessionEffectiveness.test.ts`,
+`components/__tests__/HRSessionReport.test.tsx` and
+`lib/__tests__/bjjHrCorroboration.test.ts` updated for the new import path
+and the two new `SessionMetrics` fields their full-object fixtures now have
+to carry. `pnpm --filter mobile test`: 4327/4330 green (the 2 remaining
+failures — `bjjSessionScreen.test.tsx`, `goalsScreen.test.tsx` — are
+pre-existing timeout flakiness under full-suite parallel load, unrelated to
+this change and confirmed to be shared with `origin/main`; both pass clean
+in isolation). `pnpm run typecheck:mobile` and `pnpm run lint:mobile` clean.
+No migration, no `db.ts`/`SCHEMA_VERSION` change — this ticket touches
+nothing in either platform's local ledger table, which is exactly why the
+`SCHEMA_VERSION` collision N477/N478 hit twice never had a chance to recur
+here.
+
+**Open**: the `hr_max_source: 'observed'` path this ticket's type makes
+representable has no producer on either platform — design doc §3's second
+and third HRmax steps (replacing the estimate with an athlete's own observed
+maximum, and never silently switching between the two) remain unbuilt, same
+gap N483's own entry left. No device verification that either sync pass's
+NEXT foreground return actually succeeds against the live staging backend
+now that `hr_max_source` is sent — this ticket is verified against the
+OpenAPI contract and the backend's own validation code, not a live call
+(see this repo's "verify an external contract against the real service"
+rule); worth a real device/staging check as a fast follow, since the whole
+finding here was a client silently disagreeing with a contract nothing
+exercised end-to-end.
+
 ## Open items / known gaps as of this entry
 
 
