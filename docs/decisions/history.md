@@ -55786,6 +55786,83 @@ in those hooks referenced the new binding — worked around by deriving the
 pill's `Date` from the already-existing `on` string inline at the call
 site instead of introducing a new top-level variable.
 
+## 2026-09-04 — BJJ's Finish button skipped the N434 day-mapping fix entirely (N492/#856)
+
+`app/bjj/session/[id].tsx`'s `finishNow()` called
+`finishLocalSession(userId, id, finishEndOverride?.toISOString())` — when the
+athlete never opened N487's new end-time correction sheet,
+`finishEndOverride` is `null`, so this always passed `undefined` straight
+through to `finishLocalSession`, which stamps real wall-clock "now".
+
+That is exactly the bug N434 fixed on the STRENGTH screen
+(`app/session/[id].tsx`), which instead computes
+`finishTimestampFor(new Date(session.started_at), new Date())` and passes
+that. `finishTimestampFor` (`lib/calendar.ts`) returns `undefined` — real
+"now" — only when the session's `started_at` falls on the same calendar day
+as "now"; otherwise it maps "now" onto the session's own day, preserving the
+real elapsed duration instead of producing a multi-day one.
+
+The BJJ screen never got that wiring. A class rescheduled to a past day (the
+month-grid sheet already on this screen, `commitReschedule` — reachable
+without N487 at all, it predates it) and then finished today with no
+correction got `ended_at` stamped with today's real timestamp: `started_at`
+on the past day, `ended_at` today, a "duration" of however many days apart
+they are. The elapsed Stat, `history`'s totals and the reflection screen all
+read that literally — there is no clamp anywhere downstream that would catch
+it, because nothing about it looks malformed; it is just wrong.
+
+This was found in passing while building N487 (#848) — out of scope there
+because N487 was about giving the athlete a way to set a REAL end time, not
+about the pre-existing fallback default when they don't. Filed as N492
+(#856) and fixed the same day.
+
+**Fix**: `finishNow` now branches the same way the strength screen's finish
+handler does —
+
+```ts
+const endedAt = finishEndOverride
+  ? finishEndOverride.toISOString()
+  : finishTimestampFor(new Date(session!.started_at), new Date());
+await finishLocalSession(userId, id, endedAt);
+```
+
+so a same-day finish is byte-identical to before (`finishTimestampFor`
+itself returns `undefined` there), and a backdated one now maps onto the
+session's own day exactly like strength already does.
+
+**Why the existing N487 test didn't catch it, and why that's not a gap in
+that test.** `bjjSessionScreen.test.tsx`'s "fast path" test asserts
+`finishLocalSession` is called with `undefined` when no correction is
+opened — which was true before this fix and stayed true after it, because
+the fixture's `started_at` and the fake clock happen to land on the same
+day. The bug only shows up when they DON'T, which N487's test was never
+built to exercise (N487 was about the override path, not the fallback's
+day-sensitivity — that sensitivity didn't exist yet). It did, incidentally,
+expose one thing worth naming: that test's `mockSession.started_at` (fixed
+at 2026-08-04) and its own fake clock (set to 2026-08-20) were already on
+different days, which the pre-fix code's unconditional `undefined` made
+invisible. Fixing `finishNow` surfaced that mismatch as a spurious failure —
+not a second bug, just a fixture that was never exercising what its own
+description claimed. Corrected by pinning that fixture's `started_at` to the
+same day as its fake clock, with a comment explaining why the day now
+matters where it didn't before.
+
+**New regression test** (`describe('finishing a session backdated to a past
+day')`): a session `started_at` on a Monday, finished for real three days
+later with no correction opened — asserts `finishLocalSession`'s third
+argument is defined and lands on the Monday, not the real Thursday.
+Mutation-checked by reverting only the screen's fix and confirming this test
+goes red (`expect(endedAt).toBeDefined()` fails, receiving `undefined`) while
+the rest of the suite stays green — proving the guard actually depends on
+the fix rather than passing by construction.
+
+`pnpm --filter mobile test -- bjjSessionScreen`: 13/13 green.
+
+**Open**: no device verification that a real backdated-and-finished BJJ
+class reads correctly end-to-end (elapsed Stat, history row, HR window) —
+this fix is unit-tested at the screen's wiring boundary only, same class of
+gap N434's own original fix carried on the strength side.
+
 ## Open items / known gaps as of this entry
 
 

@@ -18614,15 +18614,29 @@ default it to "now" or "duration before now").
 
 ### Edge cases & errors
 
-- **The fast path is unaffected when the sheet is never opened.** Logging
-  with no correction (post-hoc) or finishing with no correction (live)
-  produces the exact `started_at`/`ended_at` either screen computed before
-  this ticket — same duration-preset arithmetic, same "now" default. No new
-  required tap on either screen's three-tap floor.
+- **The fast path is unaffected when the sheet is never opened, FOR A
+  SAME-DAY SESSION.** Logging with no correction (post-hoc) or finishing with
+  no correction (live) produces the exact `started_at`/`ended_at` either
+  screen computed before this ticket — same duration-preset arithmetic, same
+  "now" default. No new required tap on either screen's three-tap floor.
+- **N492/#856 follow-up: live-session Finish with no correction opened, on a
+  session backdated to a past day** (via `commitReschedule`, the bullet
+  below — reachable without ever touching the correction sheet at all) **now
+  lands `ended_at` on the SESSION's day, not the real day it was finished.**
+  Before N492, the no-correction fallback was an unconditional real "now"
+  regardless of what day `started_at` fell on — this is the N434 bug,
+  recreated on the BJJ screen: a class rescheduled to last Monday and
+  finished for real today got a multi-day "duration" the elapsed Stat and
+  history both read literally. The strength screen's own finish handler
+  already avoided this (`finishTimestampFor`); the BJJ screen now uses the
+  same function.
 - **Existing day-granularity reschedule (`bjj/session/[id].tsx`'s
   `commitReschedule`, the month-grid sheet) is untouched** — correcting the
   end time and correcting the day are two independent controls; setting one
-  does not reset or interact with the other.
+  does not reset or interact with the other. Their INTERACTION is the
+  N492 bullet above: rescheduling to a past day changes what the no-
+  correction Finish fallback now computes, even though rescheduling itself
+  didn't change.
 - **A second visit to the sheet doesn't compound.** Correct the end time
   once (e.g. "1h ago"), reopen the sheet, tap "1h ago" again — the result is
   1 hour before the real current moment (captured fresh when the sheet
