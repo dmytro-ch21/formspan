@@ -6,11 +6,24 @@
 // app.json's `expo` object.
 //
 // `androidGoogleMapsApiKey` is deliberately NOT an `EXPO_PUBLIC_*` var — that
-// prefix means "inline into the client JS bundle" (see .env.example), and
-// this key is never read by app code. It only has to exist in `process.env`
-// while THIS file evaluates, which the Expo CLI already does for `.env`/
-// `.env.local` regardless of prefix (https://docs.expo.dev/guides/environment-variables/,
-// "Reading environment variables with Expo CLI, in app config").
+// prefix means "Metro/Babel string-substitutes this into the JS bundle at
+// transform time" (see .env.example), and nothing in this app reads it that
+// way (no app code calls `Constants.expoConfig`). It only has to exist in
+// `process.env` while THIS file evaluates, which the Expo CLI already does
+// for `.env`/`.env.local` regardless of prefix
+// (https://docs.expo.dev/guides/environment-variables/, "Reading environment
+// variables with Expo CLI, in app config").
+//
+// This is NOT the same claim as "never reachable from app code" — Expo's
+// `isPublicConfig` resolution (what `expo-constants` bakes into the binary
+// for `Constants.expoConfig`, and what the dev-client/EAS-Update manifest
+// serves over the network) does NOT strip the `plugins` array, so this value
+// would be readable there too if something ever called `Constants.expoConfig`
+// (verified against the installed `@expo/config` package's source — as of
+// this writing it does not). The real protection was always Google Cloud's
+// package-name + SHA-1 restriction (see below and .env.example), not this
+// env var's naming — the key ends up unencrypted in the built
+// AndroidManifest.xml either way, which restriction is what accounts for.
 //
 // react-native-maps' plugin (`plugin/build/android.js`, `withMapsAndroid`)
 // writes `androidGoogleMapsApiKey` into AndroidManifest.xml as
