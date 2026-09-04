@@ -1,16 +1,14 @@
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
-  estimateHRMaxBPM,
+  computeSessionMetrics,
+  hrMaxFromDateOfBirth,
+  putBiometricSamples,
   selectEnrichmentCandidates,
+  type BiometricSample,
   type EnrichmentCandidate,
   type EnrichmentLedgerEntry,
-} from './biometricEnrichment';
-import {
-  computeSessionMetrics,
-  putBiometricSamples,
-  type BiometricSampleInput,
-} from './biometricApi';
+} from './biometric';
 import { getDb } from './db';
 import { upsertDetectedActivities, DETECTED_ACTIVITY_WINDOW_DAYS } from './detectedActivity';
 import {
@@ -28,9 +26,11 @@ import type { TokenGetter } from './useAuthToken';
 /**
  * Orchestrates Health Connect biometric enrichment (N478) — the settings
  * toggle, the retry ledger, and WHEN a pass runs. `lib/healthConnect.ts` is
- * the native boundary and `lib/biometricEnrichment.ts` the pure decisions;
- * this file is what decides to call them and what to do with what they
- * return. Mirrors `lib/healthkitSync.ts`'s orchestration shape deliberately
+ * the native boundary and `lib/biometric.ts` the pure decisions (formerly
+ * `lib/biometricEnrichment.ts` + `lib/biometricApi.ts`, consolidated with
+ * the iOS side's own copy of the same logic by N485/#837); this file is what
+ * decides to call them and what to do with what they return. Mirrors
+ * `lib/healthkitSync.ts`'s orchestration shape deliberately
  * (module-level identity set once from `app/_layout.tsx`, an `AppState`
  * listener registered once for the process, a mutex-guarded trigger run on
  * sign-in and every foreground return) — see that file's doc comment for why
@@ -148,7 +148,7 @@ async function recordAttempt(
 
 function toHeartRateSample(
   reading: { id: string; time: string; beatsPerMinute: number; dataOrigin: string | null },
-): BiometricSampleInput {
+): BiometricSample {
   return {
     id: reading.id,
     metric_type: 'heart_rate',
@@ -171,7 +171,7 @@ async function importVo2Max(getToken: TokenGetter, now: Date): Promise<void> {
   const sinceISO = new Date(now.getTime() - CANDIDATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const readings = await queryVo2MaxReadings(sinceISO, now.toISOString());
   if (readings.length === 0) return;
-  const samples: BiometricSampleInput[] = readings.map((r) => ({
+  const samples: BiometricSample[] = readings.map((r) => ({
     id: r.id,
     metric_type: 'vo2_max',
     source: sourceFromDataOrigin(r.dataOrigin),
@@ -290,7 +290,7 @@ export async function syncHealthConnectBiometrics(
     // stays unavailable for THIS pass only; nothing here remembers a
     // negative result, so the next foreground return tries again.
   }
-  const hrMaxBPM = estimateHRMaxBPM(dateOfBirth, now);
+  const hrMaxBPM = hrMaxFromDateOfBirth(dateOfBirth, now);
 
   let attempted = 0;
   for (const session of toEnrich) {
@@ -316,7 +316,11 @@ export async function syncHealthConnectBiometrics(
         // heart_rate samples in the window, regardless of this claim (see
         // `ComputeSessionMetrics`'s own doc comment) — so the ledger below
         // records what the server actually decided, not what was claimed.
-        const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'window');
+        // 'estimated' — hrMaxBPM above only ever comes from
+        // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
+        // HRMaxSource doc comment for why nothing in this app produces
+        // 'observed' yet.
+        const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', 'window');
         await recordAttempt(
           userID,
           session.id,

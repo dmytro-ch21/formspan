@@ -20,6 +20,8 @@ function metrics(overrides: Partial<SessionMetrics> = {}): SessionMetrics {
     max_hr_bpm: 168,
     trimp: 187.3,
     active_kcal: 410,
+    hr_max_bpm: 190,
+    hr_max_source: 'estimated',
     time_in_zones: {},
     hr_source: 'window',
     sample_count: 40,

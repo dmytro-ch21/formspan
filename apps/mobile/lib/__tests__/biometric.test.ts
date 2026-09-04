@@ -1,20 +1,36 @@
 /**
- * The pure half of the biometric enrichment feature (N477/#822): the
- * window-join, the source classification, the upload-plan/hr_source
- * decision, and the HRmax seed. Deliberately not testing the API client
- * functions (`putBiometricSamples` etc.) beyond what a mocked `apiRequest`
- * proves about the request shape — see `apiRequest.ts`'s own tests for the
- * transport machinery itself.
+ * The pure half of the consolidated biometric-sync module (N477/#822 iOS,
+ * N478/#823 Android, unified by N485/#837): the window-join (both the
+ * simple session-window derivation and Health Connect's overlap clip), the
+ * source classification, the upload-plan/hr_source decision, the HRmax
+ * seed, and the Health Connect retry-ledger decisions. Deliberately not
+ * testing the API client functions (`putBiometricSamples` etc.) beyond what
+ * a mocked `apiRequest` proves about the request shape — see
+ * `apiRequest.ts`'s own tests for the transport machinery itself.
+ *
+ * Absorbs what was `lib/__tests__/biometricEnrichment.test.ts` (N478) prior
+ * to the consolidation — see `biometric.ts`'s own doc comment for the one
+ * behavioral reconciliation this merge made (the out-of-range HRmax case:
+ * `null`, never a clamp).
  */
 
 import {
+  HEALTH_CONNECT_HISTORY_WALL_DAYS,
+  RETRY_COOLDOWN_HOURS,
+  RETRY_WINDOW_DAYS,
   ageInYears,
   classifyHealthKitSource,
+  heartRateSamplesInWindow,
   hrMaxFromDateOfBirth,
+  isWithinHealthConnectHistoryWall,
+  needsEnrichmentAttempt,
   planHRSync,
+  selectEnrichmentCandidates,
   sessionHRWindow,
   toBiometricSample,
   type BiometricSample,
+  type EnrichmentCandidate,
+  type EnrichmentLedgerEntry,
   type RawQuantitySample,
 } from '../biometric';
 
@@ -167,5 +183,165 @@ describe('hrMaxFromDateOfBirth', () => {
 
   it('returns null for a birth date in the future (age <= 0)', () => {
     expect(hrMaxFromDateOfBirth('2030-01-01', new Date('2026-06-01T00:00:00Z'))).toBeNull();
+  });
+
+  it('returns null for an unparseable date of birth rather than throwing', () => {
+    expect(hrMaxFromDateOfBirth('not-a-date', new Date('2026-06-01T00:00:00Z'))).toBeNull();
+  });
+});
+
+describe('heartRateSamplesInWindow', () => {
+  const samples = [
+    { time: '2026-09-01T06:59:00.000Z', beatsPerMinute: 60 }, // before window
+    { time: '2026-09-01T07:00:00.000Z', beatsPerMinute: 90 }, // exactly at start
+    { time: '2026-09-01T07:15:00.000Z', beatsPerMinute: 140 }, // inside
+    { time: '2026-09-01T07:30:00.000Z', beatsPerMinute: 100 }, // exactly at end
+    { time: '2026-09-01T07:31:00.000Z', beatsPerMinute: 70 }, // after window
+  ];
+  const start = '2026-09-01T07:00:00.000Z';
+  const end = '2026-09-01T07:30:00.000Z';
+
+  it('keeps only samples inside [start, end], inclusive of both boundaries', () => {
+    expect(heartRateSamplesInWindow(samples, start, end)).toEqual([
+      samples[1],
+      samples[2],
+      samples[3],
+    ]);
+  });
+
+  it('clips a record whose interval merely OVERLAPS the window — the exact edge case this exists for', () => {
+    // A HeartRateRecord returned by Health Connect's own time-range filter
+    // can carry samples slightly outside the record's queried boundary
+    // (design doc §2's "a session that spans midnight" class of edge case)
+    // — this is what makes the window join EXACT rather than
+    // approximately-the-window.
+    expect(heartRateSamplesInWindow(samples, start, end)).not.toContainEqual(samples[0]);
+    expect(heartRateSamplesInWindow(samples, start, end)).not.toContainEqual(samples[4]);
+  });
+
+  it('returns empty for an empty input', () => {
+    expect(heartRateSamplesInWindow([], start, end)).toEqual([]);
+  });
+
+  it('returns empty for an unparseable window rather than throwing', () => {
+    expect(heartRateSamplesInWindow(samples, 'not-a-date', end)).toEqual([]);
+  });
+});
+
+describe('isWithinHealthConnectHistoryWall', () => {
+  const now = new Date('2026-09-01T12:00:00.000Z');
+
+  it('is true for a session that started today', () => {
+    expect(isWithinHealthConnectHistoryWall('2026-09-01T07:00:00.000Z', now)).toBe(true);
+  });
+
+  it(`is true for a session exactly ${HEALTH_CONNECT_HISTORY_WALL_DAYS} days ago`, () => {
+    const started = new Date(now.getTime() - HEALTH_CONNECT_HISTORY_WALL_DAYS * 24 * 60 * 60 * 1000);
+    expect(isWithinHealthConnectHistoryWall(started.toISOString(), now)).toBe(true);
+  });
+
+  it('is false for a session one day past the wall', () => {
+    const started = new Date(
+      now.getTime() - (HEALTH_CONNECT_HISTORY_WALL_DAYS + 1) * 24 * 60 * 60 * 1000,
+    );
+    expect(isWithinHealthConnectHistoryWall(started.toISOString(), now)).toBe(false);
+  });
+
+  it('is false for an unparseable date rather than throwing', () => {
+    expect(isWithinHealthConnectHistoryWall('not-a-date', now)).toBe(false);
+  });
+});
+
+describe('needsEnrichmentAttempt', () => {
+  const now = new Date('2026-09-10T12:00:00.000Z');
+
+  it('is false for a session still in progress (no endedAt)', () => {
+    expect(needsEnrichmentAttempt({ endedAt: null }, undefined, now)).toBe(false);
+  });
+
+  it('is true for a finished session with no ledger row at all — never attempted', () => {
+    expect(needsEnrichmentAttempt({ endedAt: '2026-09-10T08:00:00.000Z' }, undefined, now)).toBe(true);
+  });
+
+  it("is false once real evidence ('window') has been recorded — terminal, never retried", () => {
+    const ledger: EnrichmentLedgerEntry = { hrSource: 'window', attemptedAt: '2026-09-01T00:00:00.000Z' };
+    expect(needsEnrichmentAttempt({ endedAt: '2026-09-01T08:00:00.000Z' }, ledger, now)).toBe(false);
+  });
+
+  it(`is true for a fresh 'none' result within the retry window and past the cooldown`, () => {
+    const attemptedAt = new Date(
+      now.getTime() - (RETRY_COOLDOWN_HOURS + 1) * 60 * 60 * 1000,
+    ).toISOString();
+    const ledger: EnrichmentLedgerEntry = { hrSource: 'none', attemptedAt };
+    // Session ended well within RETRY_WINDOW_DAYS of `now`.
+    expect(needsEnrichmentAttempt({ endedAt: '2026-09-09T08:00:00.000Z' }, ledger, now)).toBe(true);
+  });
+
+  it("is false for a 'none' result still inside its cooldown — do not hammer the API every foreground return", () => {
+    const attemptedAt = new Date(
+      now.getTime() - (RETRY_COOLDOWN_HOURS - 1) * 60 * 60 * 1000,
+    ).toISOString();
+    const ledger: EnrichmentLedgerEntry = { hrSource: 'none', attemptedAt };
+    expect(needsEnrichmentAttempt({ endedAt: '2026-09-09T08:00:00.000Z' }, ledger, now)).toBe(false);
+  });
+
+  it(`is false for a 'none' result once the session is past RETRY_WINDOW_DAYS old — stop asking forever`, () => {
+    const endedAt = new Date(
+      now.getTime() - (RETRY_WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    // Cooldown elapsed long ago too, so the ONLY thing that can be making
+    // this false is the retry-window check — isolates the guard under test.
+    const attemptedAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const ledger: EnrichmentLedgerEntry = { hrSource: 'none', attemptedAt };
+    expect(needsEnrichmentAttempt({ endedAt }, ledger, now)).toBe(false);
+  });
+});
+
+describe('selectEnrichmentCandidates', () => {
+  const now = new Date('2026-09-10T12:00:00.000Z');
+
+  function session(overrides: Partial<EnrichmentCandidate> = {}): EnrichmentCandidate {
+    return {
+      id: 's1',
+      startedAt: '2026-09-10T07:00:00.000Z',
+      endedAt: '2026-09-10T08:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('includes a fresh finished session within the history wall', () => {
+    const result = selectEnrichmentCandidates([session()], new Map(), now);
+    expect(result).toEqual([session()]);
+  });
+
+  it('excludes a session whose window starts past the 30-day Health Connect history wall', () => {
+    const old = session({
+      id: 'old',
+      startedAt: new Date(
+        now.getTime() - (HEALTH_CONNECT_HISTORY_WALL_DAYS + 5) * 24 * 60 * 60 * 1000,
+      ).toISOString(),
+      endedAt: new Date(
+        now.getTime() - (HEALTH_CONNECT_HISTORY_WALL_DAYS + 5) * 24 * 60 * 60 * 1000 + 3_600_000,
+      ).toISOString(),
+    });
+    expect(selectEnrichmentCandidates([old], new Map(), now)).toEqual([]);
+  });
+
+  it('excludes a session already carrying real (window) evidence', () => {
+    const s = session({ id: 'done' });
+    const ledger = new Map([['done', { hrSource: 'window' as const, attemptedAt: now.toISOString() }]]);
+    expect(selectEnrichmentCandidates([s], ledger, now)).toEqual([]);
+  });
+
+  it('excludes a session still in progress', () => {
+    const inProgress = session({ id: 'live', endedAt: null });
+    expect(selectEnrichmentCandidates([inProgress], new Map(), now)).toEqual([]);
+  });
+
+  it('preserves input order across a mix of included and excluded sessions', () => {
+    const a = session({ id: 'a', startedAt: '2026-09-10T06:00:00.000Z' });
+    const excluded = session({ id: 'excluded', endedAt: null });
+    const b = session({ id: 'b', startedAt: '2026-09-10T07:00:00.000Z' });
+    expect(selectEnrichmentCandidates([a, excluded, b], new Map(), now)).toEqual([a, b]);
   });
 });

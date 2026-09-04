@@ -1,9 +1,9 @@
-import type { SessionMetrics } from './biometricApi';
+import type { SessionMetrics } from './biometric';
 import { describeRPE, MAX_RPE } from './bjjSession';
 
 /**
  * A deterministic "how this session went" calibration — comparing a
- * session's HR-derived load (TRIMP + zone breakdown, from `biometricApi.ts`)
+ * session's HR-derived load (TRIMP + zone breakdown, from `biometric.ts`)
  * against the athlete's own session RPE. N481/#826 —
  * `docs/decisions/health-integration-design.md` §8 item 3, "calibrating sRPE
  * against measurement": "the most valuable use case" the HR integration

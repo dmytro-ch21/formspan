@@ -18235,7 +18235,7 @@ Still API-level only — no client surface exists yet, same as N476.
   and the backend's own ownership check (N476/#821) is the second,
   authoritative gate.
 
-## N478 — Android Health Connect heart rate + VO2max reading, window-joined to sessions (`apps/mobile/lib/healthConnect.ts`, `apps/mobile/lib/healthConnectSync.ts`, `apps/mobile/lib/biometricEnrichment.ts`, `apps/mobile/lib/biometricApi.ts`, `apps/mobile/app/settings.tsx`, N476's `/v1/biometric/*`)
+## N478 — Android Health Connect heart rate + VO2max reading, window-joined to sessions (`apps/mobile/lib/healthConnect.ts`, `apps/mobile/lib/healthConnectSync.ts`, `apps/mobile/lib/biometric.ts` — formerly `biometricEnrichment.ts`/`biometricApi.ts`, consolidated with N477's own copy by N485/#837 — `apps/mobile/app/settings.tsx`, N476's `/v1/biometric/*`)
 
 The Android equivalent of N477 (iOS HealthKit), feeding the same N476
 backend module. Same §2 window-join approach and `hr_source` honesty
@@ -18289,7 +18289,8 @@ confusing — Health Connect's 30-day default history wall.
   watch sync a chance to catch up), then never asked about again — verify a
   months-old `'none'` session does not trigger a Health Connect query on
   every foreground return. Covered at the pure/retry-logic level by
-  `apps/mobile/lib/__tests__/biometricEnrichment.test.ts`; the device
+  `apps/mobile/lib/__tests__/biometric.test.ts` (formerly
+  `biometricEnrichment.test.ts`, merged in by N485/#837); the device
   version (confirming Health Connect itself is not re-queried, not just the
   local decision) is this ticket's own `NEEDS HUMAN EVIDENCE` criterion.
 - An athlete with no `date_of_birth` on their profile: raw heart-rate
@@ -18833,3 +18834,20 @@ sits on Progress rather than beside VO2max on You.
   claim — a real Apple Watch/Health Connect HR sync feeding a real BJJ,
   strength and running session each, then the trend screen showing a
   believable weekly figure across all three — has not been run on a device.
+
+## N485 — biometric-sync consolidation (`apps/mobile/lib/biometric.ts`, formerly `biometricEnrichment.ts`/`biometricApi.ts` merged in; `apps/mobile/lib/biometricSync.ts`, `apps/mobile/lib/healthConnectSync.ts`)
+
+A pure internal refactor — N477 (iOS) and N478 (Android) had each built their
+own copy of the shared window-join/`hr_source`-claim/wire-client logic; this
+ticket unified them onto one module. No new user-facing behavior and no new
+scenario beyond what N477/N478/N480/N488's own sections above already cover
+— those scenarios are unchanged and still the reference for this code path.
+
+One thing worth a device check as a fast follow, not a new scenario:
+`computeSessionMetrics` was silently failing on BOTH platforms since N483
+added a required `hr_max_source` field that neither mobile client sent
+(see `docs/decisions/history.md`'s N485 entry) — this ticket fixes the
+request shape, but nothing here has confirmed against the live staging
+backend that a real foreground sync pass now succeeds end-to-end where it
+previously 400'd. Existing N477/N478 device-verification gaps (noted in
+their own sections above) still apply unchanged.
