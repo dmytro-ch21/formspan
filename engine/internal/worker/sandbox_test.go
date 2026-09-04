@@ -407,17 +407,41 @@ func TestCancelledRunDoesNotLeaveAnOrphanedContainer(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	// sandboxFilter is reused from the polling loop above — same RunID, same
 	// pattern.
-	egressFilter := fmt.Sprintf("name=engine-egress-%d", ws.RunID) // matches both engine-egress-N and engine-egress-broker-N
+	//
+	// TWO distinct filters, not one reused for both `docker ps` and `docker
+	// network ls` — found in `/pre-merge` review (ac-verifier). The old
+	// single `egressFilter` ("name=engine-egress-%d", no trailing dash)
+	// carried a comment claiming it "matches both engine-egress-N and
+	// engine-egress-broker-N", which is false: Docker's `--filter name=`
+	// does a plain substring match, and "engine-egress-44" is NOT a
+	// substring of "engine-egress-broker-44-abc" — "broker-" sits between
+	// "engine-egress-" and "44" in the container's real name (see
+	// containerName in egress.go). There is no bare "engine-egress-N"
+	// CONTAINER to match in the first place — only the NETWORK is named
+	// that way; the broker sidecar is always "engine-egress-broker-N-…".
+	// So the `docker ps` query below silently could never find a leaked
+	// broker CONTAINER, only a leaked sandbox container — this test could
+	// pass with exactly the resource N470/#799 is about still sitting on
+	// the daemon, unnoticed. Measured directly: a leaked
+	// `engine-egress-broker-44-…` container (state `Created`, left by
+	// unrelated unpatched code from a different concurrent session) sat on
+	// this host through several green runs of this test under the old
+	// filter. Split into a container-specific and a network-specific
+	// filter, each matching only the name shape that actually exists for
+	// that resource kind, both with the trailing dash `sandboxFilter`
+	// already uses (RunID 4 must not match RunID 44's resources).
+	egressContainerFilter := fmt.Sprintf("name=engine-egress-broker-%d-", ws.RunID)
+	egressNetworkFilter := fmt.Sprintf("name=engine-egress-%d-", ws.RunID)
 	for {
 		sandboxOut, err := exec.Command("docker", "ps", "-a", "--filter", sandboxFilter, "--format", "{{.Names}}").CombinedOutput()
 		if err != nil {
 			t.Fatal(err)
 		}
-		egressOut, err := exec.Command("docker", "ps", "-a", "--filter", egressFilter, "--format", "{{.Names}}").CombinedOutput()
+		egressOut, err := exec.Command("docker", "ps", "-a", "--filter", egressContainerFilter, "--format", "{{.Names}}").CombinedOutput()
 		if err != nil {
 			t.Fatal(err)
 		}
-		egressNetOut, err := exec.Command("docker", "network", "ls", "--filter", egressFilter, "--format", "{{.Name}}").CombinedOutput()
+		egressNetOut, err := exec.Command("docker", "network", "ls", "--filter", egressNetworkFilter, "--format", "{{.Name}}").CombinedOutput()
 		if err != nil {
 			t.Fatal(err)
 		}

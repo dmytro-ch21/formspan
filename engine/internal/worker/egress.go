@@ -318,6 +318,14 @@ func (ws *Workspace) ensureEgressBroker(ctx context.Context, allowedHosts []stri
 // OS user cache directory) ever starts. Returns "" if the OS cache directory
 // can't be resolved (e.g. no $HOME) — callers must treat that as "skip the
 // mount", never as an error, since this is a speed optimization only.
+//
+// On native Linux (this project's CI runner, or a Linux dev host) the
+// broker container runs as root by default, so files written under this
+// directory end up root-owned on the host — harmless on CI (the runner is
+// thrown away after the job), but removing the directory by hand on a
+// persistent Linux box needs sudo. Not worth `--user` here: `go run .`
+// needs a writable $HOME, and fighting that for an ownership nicety isn't
+// worth the complexity.
 func brokerGoCacheDir() string {
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -480,16 +488,33 @@ func (ws *Workspace) teardownEgressLocked(ctx context.Context) error {
 // it (see ensureEgressBroker) closes the original leak (a cancelled client
 // can leave a container the daemon still creates, that this process never
 // otherwise learns the name of), but exposed why a single removal attempt
-// is not enough to close it in practice: measured directly, `docker rm -f`/
-// `docker network rm` can report SUCCESS (exit 0, no error — true even for
-// "No such container"/"No such network", so a target that plain doesn't
-// exist looks identical to one that was truly just removed) against a
-// container still mid-transition (Docker's own "Created" state — created,
-// never started, since the client that would have started it was the one
-// killed above) WITHOUT the removal actually taking effect, still findable
-// via `docker inspect` moments later. Trusting the exit code alone reads as
-// "cleaned up" on exactly the case this exists to catch. `exists` is the
-// actual proof.
+// is not enough to close it in practice: measured directly, `docker rm -f`
+// against an already-gone CONTAINER exits 0, no error — a target that
+// plain doesn't exist looks identical to one that was truly just removed —
+// against a container still mid-transition (Docker's own "Created" state —
+// created, never started, since the client that would have started it was
+// the one killed above) WITHOUT the removal actually taking effect, still
+// findable via `docker inspect` moments later. Trusting the exit code
+// alone reads as "cleaned up" on exactly the case this exists to catch.
+// `exists` is the actual proof.
+//
+// `exists` is checked regardless of the command's own exit code, not only
+// on success — found in `/pre-merge` review, measured directly on this
+// host (Docker client/daemon 29.x): unlike `docker rm -f`, **`docker
+// network rm` against an already-gone NETWORK exits 1**, an error, not the
+// silent-success `docker rm -f` gives for a missing container. The
+// original shape of this loop only consulted `exists` inside the
+// err-is-nil branch, so a network recorded-but-never-actually-created (the
+// exact case the reorder fix above exists to make survivable) took the
+// err!=nil branch on every attempt and burned this function's ENTIRE
+// retry budget on a resource that plain never existed — the opposite of
+// fast-passing the instant `exists` agrees, and a regression of the same
+// "must not stall a cancellation path" property `waitForBrokerReady`'s own
+// fail-fast-on-done-ctx guard exists to hold. `ctx.Err() == nil` guards
+// against the mirror mistake: `docker inspect` against an already-expired
+// ctx also errors, which `exists` (defined at the call site) reads as
+// false — without this guard, simply running OUT OF BUDGET would read
+// identically to the resource having actually been removed.
 //
 // This is a best-effort mitigation, not a guarantee: on a sufficiently
 // contended host the daemon can still take longer than this retries for to
@@ -513,12 +538,12 @@ func removeDockerResourceWithRetry(ctx context.Context, action string, exists fu
 	var lastErr error
 	for {
 		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
-		switch {
-		case err != nil:
-			lastErr = fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(out)))
-		case !exists(ctx):
+		if ctx.Err() == nil && !exists(ctx) {
 			return nil
-		default:
+		}
+		if err != nil {
+			lastErr = fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(out)))
+		} else {
 			lastErr = fmt.Errorf("%s: reported success but the resource still exists", action)
 		}
 		select {

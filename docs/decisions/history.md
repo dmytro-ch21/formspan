@@ -56113,13 +56113,79 @@ sequence a real daemon only produces by chance. These three **do** catch
 the retry-loop mutation above (reverted, ran, confirmed all three red for
 the right reason — 0 calls to `exists` instead of 3, `nil` instead of an
 error, and an near-instant return instead of one retry interval elapsed —
-restored, confirmed green by re-running). The reorder fix in
-`ensureEgressBroker` itself remains **not** mechanically mutation-verified;
-its correctness rests on the invariant being obviously sound by inspection
-(recording a name before the call that creates it can only ever help an
-exit path that runs after it, regardless of timing) rather than on a red/
-green test, and that gap is worth naming rather than silently claiming full
-coverage.
+restored, confirmed green by re-running).
+
+**The reorder fix's own gap closed too, suggested in `/pre-merge` review and
+built out.** Rather than leaving "not mechanically mutation-verified" as a
+permanent limitation, `backend-reviewer` sketched a deterministic
+reproduction: install a fake `docker` executable at the front of `PATH`
+(`os/exec` resolves the name via `PATH` lookup at call time, so the code
+under test cannot tell it apart from the real thing) that makes `network
+create` write a marker file — simulating the daemon genuinely having
+created it — and THEN exit non-zero, deterministically forcing the exact
+client-observed-error/daemon-really-did-it disagreement the real bug
+depended on winning a race to produce. `TestEnsureEgressBroker_Cancelled
+NetworkCreateStillGetsCleanedUp` (`egress_retry_test.go`) calls
+`ensureEgressBroker` directly against that fake, then asserts the marker
+file is gone — proving `teardownEgressLocked` actually found and removed
+what the "daemon" created. Mutation-verified the same way as everything
+else here: reverting the reorder (recording the name after the command
+again) makes this test fail immediately, naming the exact leftover marker
+file, restored, confirmed green by re-running. This is the one thing in
+this whole entry that can now catch a regression in the fix that started
+it, deterministically, on every run — not by chance, the way the real bug
+was originally found.
+
+**Two more real bugs, both caught by `/pre-merge` review, both closed
+before this landed.**
+
+`ac-verifier` measured that `TestCancelledRunDoesNotLeaveAnOrphanedContainer`'s
+own residue check had a hole matching its target exactly: `egressFilter` was
+`"name=engine-egress-%d"`, with a comment claiming it "matches both
+engine-egress-N and engine-egress-broker-N" — false. Docker's `--filter
+name=` is a plain substring match, and `"engine-egress-44"` is not a
+substring of `"engine-egress-broker-44-abc"` (`"broker-"` sits in between).
+There is no bare `engine-egress-N` CONTAINER to match in the first place —
+only the NETWORK is named that way; the broker sidecar is always
+`engine-egress-broker-N-…`. So the `docker ps` half of the check could
+never find a leaked broker CONTAINER — one of the two resource kinds this
+whole ticket is about — while still reading as passing. Measured directly
+against a real leaked container already sitting on this host
+(`engine-egress-broker-44-…`, left by unrelated unpatched code from a
+different concurrent session, `Created`/never-started): the old filter
+found nothing, a corrected one found it immediately. Fixed with two
+distinct filters — one for the network's own name shape, one for the
+broker container's — matching the production code's own `egressResidue`
+(`AuditResidue`'s helper), which already used this exact split for the
+identical reason and was never wrong; the test just hadn't matched it.
+
+`backend-reviewer` then measured a second, more serious bug in
+`removeDockerResourceWithRetry` itself: the retry loop only consulted
+`exists` inside the "command succeeded" branch. Unlike `docker rm -f`
+(exits 0 against an already-gone container), **`docker network rm` exits 1
+against an already-gone NETWORK** — confirmed directly on this host, Docker
+client/daemon 29.x. So a network recorded-but-never-actually-created (the
+exact case the reorder fix earlier in this entry exists to make
+survivable) took the `err != nil` branch on *every* attempt, `exists` was
+never consulted, and the function burned its entire 30s retry budget
+before giving up — the opposite of the fast-pass it exists to provide, and
+a regression of the same "a cancellation path must not stall" property
+`waitForBrokerReady`'s own fail-fast-on-done-ctx guard exists to hold
+elsewhere in this file. The doc comment's own claim ("a harmless no-op
+error... true even for 'No such network'") was flatly wrong for `network
+rm`, and the unit tests — built on `true`/`false` as a stand-in for the
+Docker command — encoded that same wrong belief rather than testing it,
+exactly the "stub built from an assumption cannot falsify it" shape
+CLAUDE.md's own "Verify that a check can fail" section warns about. Fixed
+by checking `exists` regardless of the command's exit code, guarded by
+`ctx.Err() == nil` so an already-expired ctx cannot masquerade as "gone"
+(`docker inspect` against a done ctx also errors, which `exists` reads as
+false). The existing unit test asserting the old, stalling behaviour was
+replaced with two: one pinning the fast-pass (command fails, resource
+already gone → near-instant nil), one pinning that a command failure with
+the resource genuinely still there still retries rather than becoming
+immediately fatal. Both mutation-verified the same way as everything else
+in this entry.
 
 **Open**: NEEDS HUMAN EVIDENCE — this is satisfiable by the PR's own CI run
 (the `Backend (Go)` job's `engine` step), not a device check: confirm it
