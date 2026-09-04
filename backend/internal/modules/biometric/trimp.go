@@ -167,7 +167,16 @@ func ZoneBreakdown(samples []HRSample, hrMaxBPM float64) (minutesInZone [5]float
 // reporting a TRIMP of 0 would assert "measured, and it was zero effort"
 // rather than "couldn't be computed", which is the wrong claim to make on
 // missing input. AvgHRBPM/MaxHRBPM need no HRmax and are still reported.
-func Compute(samples []HRSample, hrMaxBPM float64, hrSourceHint HRSource) SessionMetrics {
+//
+// HRMaxBPM/HRMaxSource (design doc §3, N483/#833) are recorded on the result
+// under the SAME gate as TRIMP/TimeInZones — hrMaxBPM > 0 — rather than
+// whenever a caller happens to pass one: an HRmax that classified nothing
+// (no samples, or hrMaxBPM <= 0) is not "the HRmax that produced this row's
+// zones," so recording it there would misstate what actually happened. This
+// does not validate hrMaxSource itself (callers are expected to have done
+// that, matching hrSourceHint's own contract) — it only decides whether the
+// pair is stamped onto the result at all.
+func Compute(samples []HRSample, hrMaxBPM float64, hrMaxSource HRMaxSource, hrSourceHint HRSource) SessionMetrics {
 	m := SessionMetrics{
 		TimeInZones: map[string]float64{},
 		SampleCount: len(samples),
@@ -190,6 +199,8 @@ func Compute(samples []HRSample, hrMaxBPM float64, hrSourceHint HRSource) Sessio
 		}
 		trimp := TRIMP(zones)
 		m.TRIMP = &trimp
+		m.HRMaxBPM = &hrMaxBPM
+		m.HRMaxSource = &hrMaxSource
 	}
 	return m
 }

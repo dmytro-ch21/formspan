@@ -55075,6 +55075,109 @@ file both clean. No test referenced the removed bottom button's testID, so
 nothing else needed updating. No functional-scenario changes — this is a
 navigation-affordance fix, not new behavior.
 
+### 2026-09-04 — N483/#833: `session_metrics` records which HRmax produced its zones
+
+Follow-up from **N476/#821** (`backend/internal/modules/biometric`, the
+storage half of the HealthKit/Health Connect integration), flagged by
+`ac-verifier` during that ticket's own review rather than folded into it —
+`session_metrics` stored `rule_version` (which formula computed the row) and
+`hr_source` (how confidently the *samples* are grounded) but not which
+**HRmax** value actually classified those samples into zones, or whether
+that HRmax was an estimate or an observed maximum.
+
+`docs/decisions/health-integration-design.md` §3 already called for exactly
+this, in its HRmax sequencing:
+
+> Seed from `220 − age`... and mark the session's zones as estimated...
+> Replace it with the observed maximum across the athlete's own history as
+> soon as there is one... Never silently switch between them. Which HRmax
+> produced a given session's zones belongs in `session_metrics` alongside
+> `hr_source`, for the same reason.
+
+N476 shipped `hr_source` but not this — this ticket is the other half of
+that sentence.
+
+**Two new nullable columns, migration `000090`**: `hr_max_bpm DOUBLE
+PRECISION` and `hr_max_source TEXT` (a real `CHECK (hr_max_source IS NULL OR
+hr_max_source IN ('estimated', 'observed'))`, matching `hr_source`'s own
+CHECK-constraint stance in 000089 — this is a small, stable, two-value
+vocabulary, not a growing one like `metric_type`). Pure `ADD COLUMN`; neither
+of N476's existing constraints on this table
+(`session_metrics_hr_source_valid`, `session_metrics_session_owner_fk`) is
+touched.
+
+**Nullable, deliberately, and with no backfill** — not because a legitimate
+computed row can lack the pair (`biometric.Compute` always writes both
+together whenever it writes a `trimp`, gated on the identical `hrMaxBPM > 0`
+condition `TRIMP`/`TimeInZones` already use), but because
+`biometric.go`'s own package doc already states "No client (mobile/web)
+surface exists yet" — nothing has ever called `ComputeSessionMetrics` outside
+this package's own tests, so there is nothing in staging or production to
+backfill. This is stated as an assumption rather than a measurement: this
+session had no staging Postgres credentials to check directly (they live in
+`backend/.env.staging.local`, gitignored and not copied into this worktree).
+A `NULL` on a row that already carries a `trimp` means exactly one thing —
+"computed before N483 shipped" — and a `NULL` alongside a `NULL` `trimp` is
+the ordinary "couldn't classify anything" case those two fields already
+covered.
+
+**No history table for past HRmax values, and no new mechanism at all** —
+the existing one already does the job. `session_metrics` is "derive on
+demand, never kept in sync automatically" (000089's own table comment), and
+`ComputeSessionMetrics` UPSERTs exactly one row per `session_id`
+(`ON CONFLICT (session_id) DO UPDATE`). A recompute against a different
+HRmax (the exact scenario the design doc's sequencing anticipates — an
+estimate later replaced by an observed max) simply overwrites
+`hr_max_bpm`/`hr_max_source` in that same row, in the same statement that
+already overwrites `trimp`/`time_in_zones`/`hr_source`. The row itself is
+the record of what produced its current numbers; there was never a second
+copy of the old numbers for a newer HRmax to silently clobber, so "silently
+overwritten with no record" — the acceptance criterion's stated failure
+mode — cannot happen: the *current* row always names the HRmax that produced
+the *current* zones.
+
+**Go changes, `internal/modules/biometric`**: a new `HRMaxSource` type
+(`HRMaxSourceEstimated`/`HRMaxSourceObserved`, `Valid()`, `HRMaxSources()`)
+mirroring `HRSource`'s shape exactly; `SessionMetrics.HRMaxBPM *float64` and
+`.HRMaxSource *HRMaxSource`, nil together under the same gate as
+`TRIMP`/`TimeInZones`; `Repository.ComputeSessionMetrics` and `trimp.Compute`
+both gain an `hrMaxSource HRMaxSource` parameter (positioned next to
+`hrMaxBPM`, since the two travel together); the handler's
+`computeMetricsRequest` gains a required `hr_max_source` field, validated the
+same way `hr_source` already is. `contracts/public.openapi.yaml` gained
+`hr_max_bpm`/`hr_max_source` on `SessionMetrics` and a required
+`hr_max_source` on the compute-metrics request body.
+
+**Tests**: new unit coverage in `trimp_test.go` for the recording/non-recording
+gate, and in `biometric_test.go` for `HRMaxSource.Valid()`/wire values. The
+load-bearing one is a new Postgres integration test,
+`TestComputeSessionMetrics_RecomputeWithDifferentHRMaxOverwritesProvenance` —
+it computes a session's metrics once against an estimated 190 bpm HRmax,
+recomputes against an observed 205 bpm HRmax using the *same* HR sample
+(171 bpm, chosen so it sits exactly on zone 5's floor against 190 but only
+zone 4 against 205 — a real reclassification, not just different TRIMP
+arithmetic on an unchanged zone), and asserts the row now carries only the
+second compute's HRmax/source/TRIMP, with exactly one `session_metrics` row
+for the session throughout. This test caught its own first draft: an
+earlier version used two HR values that happened to land in the same zone
+under both HRmax figures, so `trimp` stayed numerically identical between
+computes and the assertion meaning to catch a *stale* value would have
+passed against a genuinely-updated-but-coincidentally-equal one — fixed by
+picking BPM/HRmax pairs that provably cross a zone boundary. Also new: direct
+CHECK-constraint tests (`TestSessionMetricsHRMaxSourceCheckConstraintRejects
+UnknownValues`, `...AllowsNull`) mirroring `hr_source`'s existing pair. All
+run against a scratch database (migrated to version 90, dropped after) since
+this worktree also has no `TEST_DATABASE_URL` configured by default.
+
+**Open**: the client side of all of this is still nothing — no mobile/web
+surface reads or writes `biometric` at all yet (same gap N476/N477's own
+history entries already recorded), so nothing yet exercises the estimated→
+observed transition this ticket makes safe to record. The 220−age seed
+itself (reading `profile.date_of_birth`) is also still unbuilt on any
+client — this ticket only makes the backend able to tell the two provenances
+apart once something starts sending them.
+
+
 ## Open items / known gaps as of this entry
 
 

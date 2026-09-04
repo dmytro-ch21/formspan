@@ -197,7 +197,7 @@ func TestZoneBreakdown_NegativeOrZeroGapIsSkipped(t *testing.T) {
 }
 
 func TestCompute_NoSamplesForcesHRSourceNone(t *testing.T) {
-	m := Compute(nil, 200, HRSourceWorkout) // caller claims high confidence
+	m := Compute(nil, 200, HRMaxSourceEstimated, HRSourceWorkout) // caller claims high confidence
 	if m.HRSource != HRSourceNone {
 		t.Errorf("HRSource = %v, want HRSourceNone -- must never trust a hint past the data", m.HRSource)
 	}
@@ -206,6 +206,9 @@ func TestCompute_NoSamplesForcesHRSourceNone(t *testing.T) {
 	}
 	if m.AvgHRBPM != nil || m.MaxHRBPM != nil || m.TRIMP != nil {
 		t.Error("Avg/Max/TRIMP must all be nil with zero samples")
+	}
+	if m.HRMaxBPM != nil || m.HRMaxSource != nil {
+		t.Errorf("HRMaxBPM/HRMaxSource = %v/%v, want nil/nil with zero samples", m.HRMaxBPM, m.HRMaxSource)
 	}
 	if m.TimeInZones == nil || len(m.TimeInZones) != 0 {
 		t.Errorf("TimeInZones = %v, want a non-nil empty map", m.TimeInZones)
@@ -217,7 +220,7 @@ func TestCompute_UsesTheHintWhenSamplesArePresent(t *testing.T) {
 		{MeasuredAt: t0(0), BPM: 150},
 		{MeasuredAt: t0(600), BPM: 160},
 	}
-	m := Compute(samples, 200, HRSourceWindow)
+	m := Compute(samples, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if m.HRSource != HRSourceWindow {
 		t.Errorf("HRSource = %v, want HRSourceWindow", m.HRSource)
 	}
@@ -231,7 +234,7 @@ func TestCompute_NoHRMaxLeavesTRIMPAndZonesAbsentButKeepsAvgMax(t *testing.T) {
 		{MeasuredAt: t0(0), BPM: 150},
 		{MeasuredAt: t0(600), BPM: 160},
 	}
-	m := Compute(samples, 0, HRSourceWindow)
+	m := Compute(samples, 0, HRMaxSourceEstimated, HRSourceWindow)
 	if m.TRIMP != nil {
 		t.Errorf("TRIMP = %v, want nil -- cannot compute without HRmax", *m.TRIMP)
 	}
@@ -240,6 +243,10 @@ func TestCompute_NoHRMaxLeavesTRIMPAndZonesAbsentButKeepsAvgMax(t *testing.T) {
 	}
 	if m.AvgHRBPM == nil || *m.AvgHRBPM != 155 {
 		t.Errorf("AvgHRBPM should still be reported: got %v, want 155", m.AvgHRBPM)
+	}
+	if m.HRMaxBPM != nil || m.HRMaxSource != nil {
+		t.Errorf("HRMaxBPM/HRMaxSource = %v/%v, want nil/nil -- hrMaxBPM <= 0 classified nothing",
+			m.HRMaxBPM, m.HRMaxSource)
 	}
 }
 
@@ -250,7 +257,7 @@ func TestCompute_TimeInZonesAndTRIMPAgree(t *testing.T) {
 		{MeasuredAt: t0(0), BPM: 180},                                  // zone 5
 		{MeasuredAt: t0(int(5 * time.Minute / time.Second)), BPM: 100}, // zone 1, ends the interval
 	}
-	m := Compute(samples, 200, HRSourceWindow)
+	m := Compute(samples, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if m.TimeInZones["5"] != 5 {
 		t.Errorf(`TimeInZones["5"] = %v, want 5`, m.TimeInZones["5"])
 	}
@@ -272,9 +279,38 @@ func TestCompute_TRIMPZeroInputsMatchesEdwardsFormulaDirectly(t *testing.T) {
 	}
 	zones, _, _ := ZoneBreakdown(samples, 200)
 	want := TRIMP(zones)
-	m := Compute(samples, 200, HRSourceWindow)
+	m := Compute(samples, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if m.TRIMP == nil || !almostEqual(*m.TRIMP, want) {
 		t.Errorf("Compute TRIMP = %v, want %v (from ZoneBreakdown+TRIMP directly)", m.TRIMP, want)
+	}
+}
+
+// N483/#833: the whole point of this ticket -- a row that DID classify
+// zones must record which HRmax and which provenance did it, byte for byte
+// what the caller supplied, so a later reader can tell an estimated row from
+// an observed one without re-deriving anything.
+func TestCompute_RecordsHRMaxAndSourceWhenZonesAreClassified(t *testing.T) {
+	samples := []HRSample{
+		{MeasuredAt: t0(0), BPM: 150},
+		{MeasuredAt: t0(600), BPM: 160},
+	}
+	m := Compute(samples, 187.5, HRMaxSourceObserved, HRSourceWindow)
+	if m.HRMaxBPM == nil || *m.HRMaxBPM != 187.5 {
+		t.Fatalf("HRMaxBPM = %v, want 187.5", m.HRMaxBPM)
+	}
+	if m.HRMaxSource == nil || *m.HRMaxSource != HRMaxSourceObserved {
+		t.Fatalf("HRMaxSource = %v, want HRMaxSourceObserved", m.HRMaxSource)
+	}
+}
+
+func TestCompute_RecordsEstimatedSourceDistinctlyFromObserved(t *testing.T) {
+	samples := []HRSample{
+		{MeasuredAt: t0(0), BPM: 150},
+		{MeasuredAt: t0(600), BPM: 160},
+	}
+	m := Compute(samples, 200, HRMaxSourceEstimated, HRSourceWindow)
+	if m.HRMaxSource == nil || *m.HRMaxSource != HRMaxSourceEstimated {
+		t.Fatalf("HRMaxSource = %v, want HRMaxSourceEstimated", m.HRMaxSource)
 	}
 }
 

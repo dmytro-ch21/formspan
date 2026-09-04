@@ -1947,6 +1947,28 @@ components:
             zone weight 1-5). Null whenever no HRmax was available to
             classify zones by, even with real samples present — see
             time_in_zones.
+        hr_max_bpm:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            The HRmax value that actually produced this row's trimp/
+            time_in_zones (design doc §3) — null together with them on the
+            same "couldn't classify" gate, AND on any row computed before
+            this field existed (N483/#833; see the 000090 migration — no
+            backfill, since no client surface existed yet to have written a
+            real row). A recompute overwrites this in place along with the
+            rest of the row; there is no history of earlier values.
+        hr_max_source:
+          type: string
+          enum: [estimated, observed]
+          nullable: true
+          description: >
+            Whether hr_max_bpm was the `220 − age` estimate or an observed
+            maximum from the athlete's own history — design doc §3: "never
+            silently switch between them... which HRmax produced a given
+            session's zones belongs in session_metrics alongside hr_source."
+            Null under the identical conditions as hr_max_bpm.
         time_in_zones:
           type: object
           description: >
@@ -9212,7 +9234,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [hr_max_bpm, hr_source]
+              required: [hr_max_bpm, hr_max_source, hr_source]
               properties:
                 hr_max_bpm:
                   type: number
@@ -9220,6 +9242,16 @@ paths:
                   minimum: 100
                   maximum: 250
                   description: The athlete's HRmax — the one unavoidable input to Edwards' TRIMP (design doc §3).
+                hr_max_source:
+                  type: string
+                  enum: [estimated, observed]
+                  description: >
+                    Whether hr_max_bpm is the `220 − age` estimate or an
+                    observed maximum from the athlete's own history (design
+                    doc §3, N483/#833). Required alongside hr_max_bpm — a
+                    bare number loses the distinction the design doc calls
+                    for, and this is what stops a later recompute from
+                    silently switching between the two with no record.
                 hr_source:
                   type: string
                   enum: [workout, window]
@@ -9240,7 +9272,9 @@ paths:
                 properties:
                   metrics: { $ref: "#/components/schemas/SessionMetrics" }
         "400":
-          description: hr_max_bpm out of range; hr_source not workout/window; or the session has no ended_at yet.
+          description: >-
+            hr_max_bpm out of range; hr_max_source not estimated/observed;
+            hr_source not workout/window; or the session has no ended_at yet.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

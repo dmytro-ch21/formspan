@@ -284,6 +284,47 @@ func HRSources() []HRSource {
 
 func (s HRSource) Valid() bool { return slices.Contains(hrSources, s) }
 
+// HRMaxSource records whether the HRmax value that produced a session's
+// zones/TRIMP (SessionMetrics.HRMaxBPM) was an ESTIMATE or an OBSERVED
+// maximum — N483/#833, following design doc §3's HRmax sequencing directly:
+//
+//	"Seed from 220 − age, and mark the session's zones as estimated...
+//	Replace it with the observed maximum across the athlete's own history
+//	as soon as there is one... Never silently switch between them. Which
+//	HRmax produced a given session's zones belongs in session_metrics
+//	alongside hr_source, for the same reason."
+//
+// Required whenever HRMaxBPM is non-nil — the honest-confidence pairing
+// this package already uses for HRSource/SampleCount, applied to the OTHER
+// input a session's zones depend on. Not a growing vocabulary (unlike
+// MetricType/Source): exactly two provenances exist for HRmax per the design
+// doc's sequencing, so — like HRSource — this gets a real database CHECK
+// constraint too (see the migration), not just Go-side validation.
+type HRMaxSource string
+
+const (
+	// HRMaxSourceEstimated means the value is the 220 − age formula seeded
+	// from profile.date_of_birth — design doc §3 step 1. A poor estimator
+	// (±10-12 bpm standard deviation) that a client must label as such
+	// wherever a session's zones are shown, per that section.
+	HRMaxSourceEstimated HRMaxSource = "estimated"
+	// HRMaxSourceObserved means the value is the highest heart rate actually
+	// recorded across the athlete's own history — design doc §3 step 2,
+	// preferred over the estimate the moment one exists.
+	HRMaxSourceObserved HRMaxSource = "observed"
+)
+
+var hrMaxSources = []HRMaxSource{HRMaxSourceEstimated, HRMaxSourceObserved}
+
+// HRMaxSources lists the vocabulary, matching HRSources' shape.
+func HRMaxSources() []HRMaxSource {
+	out := make([]HRMaxSource, len(hrMaxSources))
+	copy(out, hrMaxSources)
+	return out
+}
+
+func (s HRMaxSource) Valid() bool { return slices.Contains(hrMaxSources, s) }
+
 // SessionMetrics is the derived per-session enrichment — one row per session.
 type SessionMetrics struct {
 	SessionID string `json:"session_id"`
@@ -301,6 +342,31 @@ type SessionMetrics struct {
 	// ActiveKcal sums whatever active_energy samples fall in the session's
 	// window. Nil when none were found — same "absent, not zero" stance.
 	ActiveKcal *int `json:"active_kcal"`
+
+	// HRMaxBPM and HRMaxSource record which HRmax value produced THIS row's
+	// zones/TRIMP, and whether it was estimated or observed — design doc §3:
+	// "which HRmax produced a given session's zones belongs in
+	// session_metrics alongside hr_source." N483/#833, a follow-up to
+	// N476/#821 which stored zones/TRIMP without this provenance.
+	//
+	// Nil together whenever TRIMP is nil (same gating as TimeInZones) — there
+	// is no HRmax to attribute when nothing was classified against one — AND
+	// on any row computed before N483 shipped, since the migration adds both
+	// columns nullable with no backfill (see the migration's comment: no
+	// client surface existed yet to have written a real row). A nil here on
+	// a row that DOES carry a TRIMP means exactly one thing: "computed before
+	// this ticket," never "computed with no HRmax," which TRIMP-is-nil
+	// already covers.
+	//
+	// No separate history of past values: ComputeSessionMetrics UPSERTs one
+	// row per session (ON CONFLICT DO UPDATE, see postgres.go), so a
+	// recompute with a different HRmax simply overwrites these two fields
+	// along with the rest of the row — the row itself is the up-to-date
+	// record of what produced its current numbers, the same "derive on
+	// demand, don't keep a stale copy" stance this table already takes on
+	// zones/TRIMP overall (see the migration's own comment).
+	HRMaxBPM    *float64     `json:"hr_max_bpm"`
+	HRMaxSource *HRMaxSource `json:"hr_max_source"`
 
 	// TimeInZones maps zone number ("1".."5") to minutes spent in that
 	// zone. Always present as a (possibly empty) object once JSON-encoded —
@@ -341,9 +407,12 @@ type Repository interface {
 	// session the caller owns, from whatever biometric_samples already fall
 	// in that session's started_at/ended_at window (design doc §2's window
 	// read). hrMaxBPM must be > 0 — see Compute in trimp.go for why zones
-	// and TRIMP cannot be derived without it. hrSourceHint is downgraded to
-	// HRSourceNone whenever no heart-rate samples are found, regardless of
-	// what the caller claims — see HRSource's doc comment.
+	// and TRIMP cannot be derived without it. hrMaxSource must be Valid()
+	// and records whether hrMaxBPM is the 220−age estimate or an observed
+	// maximum (design doc §3, HRMaxSource's doc comment) — stored alongside
+	// hrMaxBPM whenever zones actually get computed from it. hrSourceHint is
+	// downgraded to HRSourceNone whenever no heart-rate samples are found,
+	// regardless of what the caller claims — see HRSource's doc comment.
 	//
 	// ErrNotFound covers "no such session" and "not yours" alike — telling
 	// them apart would confirm which session ids are real. A session with
@@ -353,7 +422,8 @@ type Repository interface {
 	// avoid disclosing — it is an ordinary validation failure ("a load
 	// number needs a finished window"), not an authorization one.
 	ComputeSessionMetrics(
-		ctx context.Context, userID, sessionID string, hrMaxBPM float64, hrSourceHint HRSource,
+		ctx context.Context, userID, sessionID string,
+		hrMaxBPM float64, hrMaxSource HRMaxSource, hrSourceHint HRSource,
 	) (SessionMetrics, error)
 
 	// GetSessionMetrics reads back a previously computed row.

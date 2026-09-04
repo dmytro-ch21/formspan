@@ -230,7 +230,8 @@ func (r *PostgresRepository) ListSamples(
 // caller owns, from whatever heart_rate samples fall in that session's
 // started_at/ended_at window (design doc §2).
 func (r *PostgresRepository) ComputeSessionMetrics(
-	ctx context.Context, userID, sessionID string, hrMaxBPM float64, hrSourceHint HRSource,
+	ctx context.Context, userID, sessionID string,
+	hrMaxBPM float64, hrMaxSource HRMaxSource, hrSourceHint HRSource,
 ) (SessionMetrics, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -301,7 +302,7 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 		activeKcal = &k
 	}
 
-	m := Compute(hrSamples, hrMaxBPM, hrSourceHint)
+	m := Compute(hrSamples, hrMaxBPM, hrMaxSource, hrSourceHint)
 	m.SessionID = sessionID
 	m.ActiveKcal = activeKcal
 	m.ComputedAt = time.Now().UTC()
@@ -312,11 +313,23 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 		return SessionMetrics{}, fmt.Errorf("biometric: marshal time_in_zones: %w", err)
 	}
 
+	// hr_max_source is stored as *string, not string(m.HRMaxSource) directly
+	// — m.HRMaxSource is nil whenever Compute didn't actually classify
+	// anything against it (see Compute's doc comment), and that has to reach
+	// Postgres as a real NULL, not the empty string HRMaxSource("") would
+	// otherwise write past the column's own CHECK constraint.
+	var hrMaxSourceParam *string
+	if m.HRMaxSource != nil {
+		s := string(*m.HRMaxSource)
+		hrMaxSourceParam = &s
+	}
+
 	row := tx.QueryRow(ctx, `
 		INSERT INTO session_metrics
 			(session_id, user_id, avg_hr_bpm, max_hr_bpm, active_kcal, trimp,
-			 time_in_zones, hr_source, sample_count, computed_at, rule_version)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			 time_in_zones, hr_source, sample_count, computed_at, rule_version,
+			 hr_max_bpm, hr_max_source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (session_id) DO UPDATE SET
 			avg_hr_bpm    = excluded.avg_hr_bpm,
 			max_hr_bpm    = excluded.max_hr_bpm,
@@ -326,7 +339,9 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 			hr_source     = excluded.hr_source,
 			sample_count  = excluded.sample_count,
 			computed_at   = excluded.computed_at,
-			rule_version  = excluded.rule_version
+			rule_version  = excluded.rule_version,
+			hr_max_bpm    = excluded.hr_max_bpm,
+			hr_max_source = excluded.hr_max_source
 		-- Load-bearing exactly as in running.PutDetail: Postgres skips the
 		-- referencing FK check on DO UPDATE when session_id/user_id don't
 		-- change, so this predicate is what stops one athlete's recompute
@@ -334,9 +349,11 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 		-- this far with the wrong user_id.
 		WHERE session_metrics.user_id = $2
 		RETURNING session_id, avg_hr_bpm, max_hr_bpm, active_kcal, trimp,
-			time_in_zones, hr_source, sample_count, computed_at, rule_version`,
+			time_in_zones, hr_source, sample_count, computed_at, rule_version,
+			hr_max_bpm, hr_max_source`,
 		sessionID, userID, m.AvgHRBPM, m.MaxHRBPM, m.ActiveKcal, m.TRIMP,
-		zonesJSON, string(m.HRSource), m.SampleCount, m.ComputedAt, m.RuleVersion)
+		zonesJSON, string(m.HRSource), m.SampleCount, m.ComputedAt, m.RuleVersion,
+		m.HRMaxBPM, hrMaxSourceParam)
 
 	out, err := scanSessionMetrics(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -358,7 +375,8 @@ func (r *PostgresRepository) GetSessionMetrics(
 ) (SessionMetrics, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT session_id, avg_hr_bpm, max_hr_bpm, active_kcal, trimp,
-			time_in_zones, hr_source, sample_count, computed_at, rule_version
+			time_in_zones, hr_source, sample_count, computed_at, rule_version,
+			hr_max_bpm, hr_max_source
 		FROM session_metrics
 		WHERE session_id = $1 AND user_id = $2`, sessionID, userID)
 
@@ -398,16 +416,22 @@ func scanSample(s scanner) (Sample, error) {
 
 func scanSessionMetrics(s scanner) (SessionMetrics, error) {
 	var (
-		out       SessionMetrics
-		zonesJSON []byte
-		hrSource  string
+		out         SessionMetrics
+		zonesJSON   []byte
+		hrSource    string
+		hrMaxSource *string
 	)
 	err := s.Scan(&out.SessionID, &out.AvgHRBPM, &out.MaxHRBPM, &out.ActiveKcal, &out.TRIMP,
-		&zonesJSON, &hrSource, &out.SampleCount, &out.ComputedAt, &out.RuleVersion)
+		&zonesJSON, &hrSource, &out.SampleCount, &out.ComputedAt, &out.RuleVersion,
+		&out.HRMaxBPM, &hrMaxSource)
 	if err != nil {
 		return SessionMetrics{}, err
 	}
 	out.HRSource = HRSource(hrSource)
+	if hrMaxSource != nil {
+		v := HRMaxSource(*hrMaxSource)
+		out.HRMaxSource = &v
+	}
 	if err := json.Unmarshal(zonesJSON, &out.TimeInZones); err != nil {
 		return SessionMetrics{}, fmt.Errorf("biometric: unmarshal time_in_zones: %w", err)
 	}

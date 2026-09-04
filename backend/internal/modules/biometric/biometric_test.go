@@ -204,3 +204,33 @@ func TestHRSource_RejectsUnknownValue(t *testing.T) {
 		t.Error(`HRSource("").Valid() = true, want false -- must never silently default`)
 	}
 }
+
+func TestHRMaxSources_EveryValueValidatesItself(t *testing.T) {
+	for _, s := range HRMaxSources() {
+		if !s.Valid() {
+			t.Errorf("%q from HRMaxSources() is not Valid()", s)
+		}
+	}
+}
+
+func TestHRMaxSource_RejectsUnknownValue(t *testing.T) {
+	if HRMaxSource("bogus").Valid() {
+		t.Error(`HRMaxSource("bogus").Valid() = true, want false`)
+	}
+	if HRMaxSource("").Valid() {
+		t.Error(`HRMaxSource("").Valid() = true, want false -- must never silently default`)
+	}
+}
+
+// N483/#833: pins the two literal wire values a client sends, the same way
+// TestMetricType_VO2Max_WireValueAndAcceptance pins its constant -- a
+// generic membership loop would pass even if these strings were mistyped,
+// since Valid() checks membership in the very slice these constants define.
+func TestHRMaxSource_WireValues(t *testing.T) {
+	if HRMaxSourceEstimated != "estimated" {
+		t.Errorf("HRMaxSourceEstimated = %q, want %q", HRMaxSourceEstimated, "estimated")
+	}
+	if HRMaxSourceObserved != "observed" {
+		t.Errorf("HRMaxSourceObserved = %q, want %q", HRMaxSourceObserved, "observed")
+	}
+}

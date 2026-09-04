@@ -173,6 +173,11 @@ const (
 
 type computeMetricsRequest struct {
 	HRMaxBPM float64 `json:"hr_max_bpm"`
+	// HRMaxSource is required alongside hr_max_bpm — design doc §3: "which
+	// HRmax produced a given session's zones belongs in session_metrics
+	// alongside hr_source." 'estimated' (220 − age) or 'observed' (the
+	// athlete's own recorded maximum) only — see HRMaxSource's doc comment.
+	HRMaxSource string `json:"hr_max_source"`
 	// HRSource is the caller's claim about how it gathered the samples
 	// behind this computation (design doc §2) — 'workout' or 'window' only;
 	// 'none' is never a legal claim to make (Repository.ComputeSessionMetrics
@@ -197,6 +202,12 @@ func (h *Handler) ComputeMetrics(w http.ResponseWriter, r *http.Request) {
 			"hr_max_bpm must be between 100 and 250")
 		return
 	}
+	hrMaxSource := HRMaxSource(req.HRMaxSource)
+	if !hrMaxSource.Valid() {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"hr_max_source must be one of "+join(HRMaxSources()))
+		return
+	}
 	hrSource := HRSource(req.HRSource)
 	if hrSource != HRSourceWorkout && hrSource != HRSourceWindow {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
@@ -205,7 +216,7 @@ func (h *Handler) ComputeMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m, err := h.repo.ComputeSessionMetrics(
-		r.Context(), claims.UserID, r.PathValue("sessionID"), req.HRMaxBPM, hrSource)
+		r.Context(), claims.UserID, r.PathValue("sessionID"), req.HRMaxBPM, hrMaxSource, hrSource)
 	if err != nil {
 		writeError(w, r, err)
 		return
