@@ -356,3 +356,47 @@ export async function getSessionMetrics(
     throw err;
   }
 }
+
+/**
+ * One session's contribution to the cross-session training-load trend —
+ * N489/#850. Mirrors `biometric.SessionLoad` on the backend. `trimp` is
+ * never absent here: a session with no computed metrics, or with
+ * `hr_source: 'none'`, is excluded from the list server-side rather than
+ * reported as zero load — see `listSessionLoad`'s doc comment.
+ */
+export type SessionLoad = {
+  session_id: string;
+  sport: 'strength' | 'running' | 'bjj';
+  /** RFC3339. */
+  started_at: string;
+  trimp: number;
+};
+
+/**
+ * List the caller's own sessions with a computed TRIMP in `[from, to]`,
+ * ascending — `GET /v1/biometric/sessions/load`. What
+ * `lib/useTrainingLoadTrend.ts` fetches for the Progress-tab trend.
+ *
+ * **One call, not N** — the reasoning that made this a real endpoint rather
+ * than a per-session loop over `getSessionMetrics` lives on the backend
+ * (`biometric.Repository.ListSessionLoad`'s doc comment) and in this
+ * ticket's history entry: a "last year" window can legitimately hold
+ * hundreds of sessions, and one query beats hundreds of round trips.
+ *
+ * A session with no computed metrics yet, or with `hr_source: 'none'` (no
+ * HR evidence at all — no wearable, or it never synced), is excluded from
+ * the result by the server, never reported as zero load. Cross-sport by
+ * construction: BJJ, strength and running sessions all appear in one list,
+ * since TRIMP is computed identically regardless of sport.
+ */
+export async function listSessionLoad(
+  getToken: TokenGetter,
+  from: string,
+  to: string,
+): Promise<SessionLoad[]> {
+  const res = await apiRequest<{ sessions: SessionLoad[] }>(
+    getToken,
+    `/biometric/sessions/load?${new URLSearchParams({ from, to }).toString()}`,
+  );
+  return res.sessions;
+}

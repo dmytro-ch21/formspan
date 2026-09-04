@@ -51,6 +51,26 @@ func seedSession(t *testing.T, pool *pgxpool.Pool, id, userID string, startedAt,
 	})
 }
 
+// seedSessionSport is seedSession with a caller-chosen sport — needed for
+// ListSessionLoad's cross-sport tests, where seedSession's hardcoded
+// 'strength' would defeat the point.
+func seedSessionSport(t *testing.T, pool *pgxpool.Pool, id, userID, sport string, startedAt, endedAt time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO sessions (id, user_id, sport, name, started_at, ended_at)
+		VALUES ($1, $2, $3, 'Test session', $4, $5)`,
+		id, userID, sport, startedAt, endedAt)
+	if err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup %s: %v", id, err)
+		}
+	})
+}
+
 // seedInProgressSession writes a session with no ended_at — the "still
 // happening" state ComputeSessionMetrics must refuse.
 func seedInProgressSession(t *testing.T, pool *pgxpool.Pool, id, userID string, startedAt time.Time) {
@@ -773,6 +793,157 @@ func TestComputeSessionMetrics_ActiveEnergySummed(t *testing.T) {
 	}
 	if m.ActiveKcal == nil || *m.ActiveKcal != 201 { // round(120.4+80.2) = 201
 		t.Fatalf("active_kcal = %v, want 201", m.ActiveKcal)
+	}
+}
+
+// --- ListSessionLoad ---------------------------------------------------
+
+// N489/#850's core claim: BJJ, strength and running sessions all contribute
+// to one cross-sport load view, because TRIMP is computed identically
+// regardless of sport.
+func TestListSessionLoad_SpansAllThreeSports(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_bio_load_sports"
+	cleanupSamples(t, pool, user)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+
+	for i, sport := range []string{"bjj", "strength", "running"} {
+		id := "ses-bio-load-" + sport
+		start := base.Add(time.Duration(i) * 24 * time.Hour)
+		seedSessionSport(t, pool, id, user, sport, start, start.Add(30*time.Minute))
+		// Gap under maxSampleGapForZoneAttribution (6 min) so the interval is
+		// actually attributed to a zone -- a wider gap is skipped entirely
+		// (trimp.go) and would make this test assert 0 > 0 for the wrong reason.
+		if _, err := repo.PutSamples(ctx, user, []Sample{
+			hrSample("bio-load-"+sport+"-1", start, 150),
+			hrSample("bio-load-"+sport+"-2", start.Add(5*time.Minute), 160),
+		}); err != nil {
+			t.Fatalf("seed samples for %s: %v", sport, err)
+		}
+		if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+			t.Fatalf("compute for %s: %v", sport, err)
+		}
+	}
+
+	got, err := repo.ListSessionLoad(ctx, user, base.Add(-time.Hour), base.Add(3*24*time.Hour))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d sessions, want 3 (one per sport): %+v", len(got), got)
+	}
+	sports := map[string]bool{}
+	for _, l := range got {
+		sports[l.Sport] = true
+		if l.TRIMP <= 0 {
+			t.Errorf("session %s: trimp = %v, want > 0", l.SessionID, l.TRIMP)
+		}
+	}
+	for _, sport := range []string{"bjj", "strength", "running"} {
+		if !sports[sport] {
+			t.Errorf("missing %s in the result: %+v", sport, got)
+		}
+	}
+	// Ascending by started_at.
+	if got[0].Sport != "bjj" || got[1].Sport != "strength" || got[2].Sport != "running" {
+		t.Fatalf("not ascending by started_at: %+v", got)
+	}
+}
+
+// The honesty rule this ticket's acceptance criteria call out explicitly: a
+// session with hr_source='none' (no HR evidence — the athlete has no
+// wearable, or it never synced) must be excluded from the trend, not counted
+// as zero load.
+func TestListSessionLoad_ExcludesHRSourceNoneSessions(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-load-none", "user_bio_load_none"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+
+	// No samples put at all -- Compute forces hr_source to 'none' and leaves
+	// trimp nil regardless of the caller's hint (see trimp.go's Compute).
+	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+		t.Fatalf("compute: %v", err)
+	}
+
+	got, err := repo.ListSessionLoad(ctx, user, start.Add(-time.Hour), start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("hr_source=none session appeared in the load trend: %+v, want excluded entirely (not zero)", got)
+	}
+}
+
+// A session nobody has ever called ComputeMetrics for at all -- the most
+// common state (design doc §6.4: enrichment is not blocking) -- must be
+// excluded exactly like an hr_source='none' one, not surfaced as some other
+// kind of gap.
+func TestListSessionLoad_ExcludesSessionsWithNoComputedMetricsAtAll(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-load-uncomputed", "user_bio_load_uncomputed"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+	// Deliberately never call ComputeSessionMetrics for this session.
+
+	got, err := repo.ListSessionLoad(ctx, user, start.Add(-time.Hour), start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("never-enriched session appeared in the load trend: %+v", got)
+	}
+}
+
+func TestListSessionLoad_ExcludesOutOfRangeSessions(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-load-range", "user_bio_load_range"
+	cleanupSamples(t, pool, user)
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(30*time.Minute))
+	if _, err := repo.PutSamples(ctx, user, []Sample{hrSample("bio-load-range-1", start, 150)}); err != nil {
+		t.Fatalf("seed samples: %v", err)
+	}
+	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+		t.Fatalf("compute: %v", err)
+	}
+
+	// A window that does not contain this session's started_at at all.
+	got, err := repo.ListSessionLoad(ctx, user, start.Add(24*time.Hour), start.Add(48*time.Hour))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("out-of-range session appeared in the load trend: %+v", got)
+	}
+}
+
+// The cross-user isolation this module's every other read already
+// guarantees, exercised on the new query too.
+func TestListSessionLoad_CrossUserIsolation(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, owner, other = "ses-bio-load-iso", "user_bio_load_iso_owner", "user_bio_load_iso_other"
+	cleanupSamples(t, pool, owner)
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, owner, start, start.Add(30*time.Minute))
+	if _, err := repo.PutSamples(ctx, owner, []Sample{hrSample("bio-load-iso-1", start, 150)}); err != nil {
+		t.Fatalf("seed samples: %v", err)
+	}
+	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+		t.Fatalf("compute: %v", err)
+	}
+
+	got, err := repo.ListSessionLoad(ctx, other, start.Add(-time.Hour), start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("another user's session load leaked: %+v", got)
 	}
 }
 

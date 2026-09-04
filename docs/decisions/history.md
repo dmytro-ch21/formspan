@@ -55497,6 +55497,117 @@ therefore correctly ordered) rather than at whichever response happens to
 resolve first. A new test (`discards even when the reload after the flip
 fails`) pins it, mutation-verified the same way as the original two guards.
 
+## 2026-09-04 — N489 (#850): Progress tab gets a cross-sport training-load trend (TRIMP)
+
+The cross-session rollup N488 (per-session HR report) was filed alongside —
+that ticket reads one session's TRIMP/zones/effectiveness; this one asks "is
+my training load rising or falling across BJJ, strength and running
+together," which is a Progress-tab question, not a session-detail one.
+
+**Where it went, and why not next to VO2max (N477).** VO2max deliberately
+stayed on the You tab — a device-read fact about the athlete, not a verdict
+on training (see N477's own placement note). A TRIMP trend is the opposite
+shape: it is entirely a function of the sessions the athlete chose to log,
+so it belongs on Progress, in `progress-section-training`, as a summary Row
+(`progress-training-load`) routing to `/trainingLoad/trend` — the exact
+"summary row here, the reading lives on its own screen" pattern every other
+row in that section already follows, and unconditional (no module gate,
+since TRIMP is computed identically for every sport this app has).
+
+**Investigated first: N+1 vs. a batch endpoint, per the ticket's own
+instruction to check before assuming one was needed.** The existing
+`GET /v1/biometric/sessions/{id}/metrics` (N476/N477) answers one session at
+a time; nothing in `internal/modules/biometric` served many at once. A
+year-or-more preset window can legitimately hold hundreds of sessions for an
+athlete training several times a week, and the Progress row is exactly the
+kind of screen that reloads on every tab focus — so a per-session fetch loop
+scaling with how often the athlete trains was rejected as a real N+1, not a
+premature optimisation. Added `GET /v1/biometric/sessions/load` instead: one
+query joining `sessions`/`session_metrics` on `user_id` + `started_at` range,
+filtered to `trimp IS NOT NULL`. No migration needed — both tables already
+existed; this is a read query, not a schema change. `sessions_user_started_idx`
+(already indexed on `user_id, started_at`) covers it, and `session_metrics`
+is joined by its own primary key, so the query stays index-only regardless of
+window width.
+
+`trimp IS NOT NULL` is the whole of the honesty rule the acceptance criteria
+call for: `Compute` (`trimp.go`) only ever writes a non-nil `trimp` when real
+samples were classified against a real HRmax, so a session with
+`hr_source: 'none'` (no wearable, or it never synced) or one nobody has
+called `ComputeMetrics` for yet is excluded from the result entirely rather
+than reported as zero load — the same "absent, not zero" stance
+`SessionMetrics.TRIMP` itself already takes, applied again at the read
+instead of re-derived from `hr_source` a second time.
+
+The new endpoint's own range cap (`maxSessionLoadRangeDays`, 1100 days) is
+deliberately wider than `ListSamples`' existing 400-day cap: that cap bounds
+continuous per-second `heart_rate` sampling, whose row count can run into the
+hundreds of thousands well inside a year; this query is against at most one
+row per session ever logged, so a few thousand rows even after years of
+training is the realistic ceiling.
+
+**Mobile: the third instance of the shared `TrendChart`/`trendSeries.ts`
+layer**, alongside `goals/trend.tsx` (weight) and `vo2max/trend.tsx`. New
+`lib/trainingLoadTrend.ts` is the pure aggregation layer feeding it, and it
+deliberately diverges from `trendWeight`'s shape in two ways, both explained
+in its own doc comment:
+
+- **A 7-day rolling SUM, not a rolling mean.** Weight has one value at a
+  time and the mean IS the trend; training load is cumulative, and every
+  load-management convention (and every consumer app that shows one) reports
+  it as a trailing weekly total. Same-day sessions are summed into one daily
+  figure first (`dailyLoads`) — two dots at the same x-coordinate for an AM
+  lift and a PM roll would either overlap invisibly or read as a chart bug.
+- **The "not enough evidence" gate is "before the athlete's first-ever
+  session with a computed load," not a minimum reading count.** `trendWeight`
+  needs 3 real weigh-ins in its window before it will report anything — a
+  stray reading is not a trend. A training-load rest week is different: zero
+  sessions in the trailing 7 days is real, current information an athlete who
+  has trained for months should see as a flat or falling line, not "not
+  enough data." So the smoother returns `null` only when the date predates
+  any known session at all (no evidence of ANY kind, not even zero); on or
+  after that date, a quiet week legitimately sums to zero and is shown as
+  one.
+
+No goal, no projection — same reasoning as VO2max: there is no target an
+athlete sets for weekly TRIMP anywhere in this app, so those `TrendChart`
+props are simply omitted. `RANGES` minus `Plan` (no plan concept applies)
+mirrors `vo2max/trend.tsx`'s own filter exactly.
+
+**Testing.** Backend: `handler_test.go` covers the validation guards
+(bad/missing `from`/`to`, `to` before `from`, over-range); `postgres_test.go`
+adds `TestListSessionLoad_SpansAllThreeSports` (seeding a real
+`bjj`/`strength`/`running` session each, all three coming back ascending by
+`started_at`), plus dedicated tests for the `hr_source: 'none'` exclusion,
+the never-enriched-session exclusion, the out-of-range exclusion, and
+cross-user isolation. The `trimp IS NOT NULL` filter is mutation-verified:
+removing it from the query makes `TestListSessionLoad_ExcludesHRSourceNoneSessions`
+fail as a real scan error (`cannot scan NULL into *float64`) rather than
+silently passing, confirmed restored and green by re-running. Mobile:
+`lib/__tests__/trainingLoadTrend.test.ts` covers the pure aggregation (same-
+day summing, the half-open 7-day window, the null-before-earliest-session
+gate vs. the honest-zero-after-it distinction — the latter mutation-verified
+by deleting the gate and confirming the covering test goes red, then
+restored and re-run green); `__tests__/app/trainingLoadTrendScreen.test.tsx`
+covers the screen (failed fetch reads "couldn't load" rather than the empty
+copy, a genuinely empty account says so honestly, two same-day sessions
+render as one entry, switching the preset range re-slices already-loaded
+data rather than re-fetching); one addition to `progressScreen.test.tsx`
+confirms the new row lives inside `progress-section-training` without
+touching the pinned section-order assertion.
+
+**Gap left open.** This screen does not distinguish "no wearable" from
+"sync turned off" from "genuinely no training logged" the way
+`vo2max/trend.tsx` does by reading the platform sync toggle directly — all
+three currently render the same honest "no training load yet" copy, since
+the endpoint's emptiness already covers every case without a client-side
+toggle read. Revisit if that turns out to read as unhelpful in practice;
+not built now because reading BOTH `readHealthKitImportEnabled` (iOS) and
+`readHealthConnectImportEnabled` (Android) correctly per-platform for a
+cross-sport screen felt like real added surface for a distinction the
+current single sentence already covers honestly.
+
+
 ## Open items / known gaps as of this entry
 
 

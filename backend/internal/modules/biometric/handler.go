@@ -224,6 +224,54 @@ func (h *Handler) ComputeMetrics(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"metrics": m})
 }
 
+// maxSessionLoadRangeDays bounds a ListSessionLoad query window.
+//
+// Wider than maxListRangeDays (400) on purpose: that cap bounds a query
+// against biometric_samples, whose row count scales with continuous
+// per-second HR sampling and can run into the hundreds of thousands well
+// inside a year. This query is against sessions/session_metrics instead —
+// at most one row per session ever logged — so the realistic row count for
+// even several years of daily training is a few thousand, and the mobile
+// trend screen's widest preset ('All'/'1Y') fetches up to three years (see
+// apps/mobile/app/trainingLoad/trend.tsx's FETCH_DAYS) to give 'All' enough
+// history to actually draw from. 1100 gives that three-year fetch headroom
+// without being unbounded.
+const maxSessionLoadRangeDays = 1100
+
+// ListSessionLoad serves the cross-session training-load trend — N489/#850.
+// See Repository.ListSessionLoad's doc comment for why this is one query
+// rather than a per-session fetch loop.
+func (h *Handler) ListSessionLoad(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	from, err := parseTimestamp(r.URL.Query().Get("from"))
+	if err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "from must be RFC3339")
+		return
+	}
+	to, err := parseTimestamp(r.URL.Query().Get("to"))
+	if err != nil {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "to must be RFC3339")
+		return
+	}
+	if to.Before(from) {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "to must not be before from")
+		return
+	}
+	if to.Sub(from) > maxSessionLoadRangeDays*24*time.Hour {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"the range between from and to must not exceed "+strconv.Itoa(maxSessionLoadRangeDays)+" days")
+		return
+	}
+
+	loads, err := h.repo.ListSessionLoad(r.Context(), claims.UserID, from, to)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": loads})
+}
+
 // GetMetrics reads back a previously computed row. 404 when none exists yet
 // — a normal state (design doc §6.4), not a fault.
 func (h *Handler) GetMetrics(w http.ResponseWriter, r *http.Request) {
