@@ -137,7 +137,7 @@ func computeMetricsResponse(t *testing.T, body string) *httptest.ResponseRecorde
 }
 
 func TestComputeMetrics_RejectsMissingHRMax(t *testing.T) {
-	rec := computeMetricsResponse(t, `{"hr_source":"window"}`)
+	rec := computeMetricsResponse(t, `{"hr_max_source":"estimated","hr_source":"window"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("want 400, got %d", rec.Code)
 	}
@@ -145,8 +145,8 @@ func TestComputeMetrics_RejectsMissingHRMax(t *testing.T) {
 
 func TestComputeMetrics_RejectsOutOfRangeHRMax(t *testing.T) {
 	for _, body := range []string{
-		`{"hr_max_bpm":50,"hr_source":"window"}`,  // too low to be a real HRmax
-		`{"hr_max_bpm":300,"hr_source":"window"}`, // too high
+		`{"hr_max_bpm":50,"hr_max_source":"estimated","hr_source":"window"}`,  // too low to be a real HRmax
+		`{"hr_max_bpm":300,"hr_max_source":"estimated","hr_source":"window"}`, // too high
 	} {
 		rec := computeMetricsResponse(t, body)
 		if rec.Code != http.StatusBadRequest {
@@ -155,17 +155,33 @@ func TestComputeMetrics_RejectsOutOfRangeHRMax(t *testing.T) {
 	}
 }
 
+// N483/#833: hr_max_source is required alongside hr_max_bpm — a bare number
+// loses the estimated/observed distinction the design doc calls for.
+func TestComputeMetrics_RejectsMissingHRMaxSource(t *testing.T) {
+	rec := computeMetricsResponse(t, `{"hr_max_bpm":190,"hr_source":"window"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestComputeMetrics_RejectsUnknownHRMaxSource(t *testing.T) {
+	rec := computeMetricsResponse(t, `{"hr_max_bpm":190,"hr_max_source":"bogus","hr_source":"window"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
 func TestComputeMetrics_RejectsHRSourceNoneAsAClaim(t *testing.T) {
 	// 'none' is what the server derives from an empty result, never a
 	// legal thing for a caller to assert while asking for a computation.
-	rec := computeMetricsResponse(t, `{"hr_max_bpm":190,"hr_source":"none"}`)
+	rec := computeMetricsResponse(t, `{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"none"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("want 400, got %d", rec.Code)
 	}
 }
 
 func TestComputeMetrics_RejectsUnknownHRSource(t *testing.T) {
-	rec := computeMetricsResponse(t, `{"hr_max_bpm":190,"hr_source":"bogus"}`)
+	rec := computeMetricsResponse(t, `{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"bogus"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("want 400, got %d", rec.Code)
 	}
@@ -183,7 +199,7 @@ func TestComputeMetrics_ValidBodyReachesTheRepository(t *testing.T) {
 		}
 	}()
 	req := httptest.NewRequest(http.MethodPost, "/v1/biometric/sessions/ses-1/metrics",
-		strings.NewReader(`{"hr_max_bpm":190,"hr_source":"window"}`))
+		strings.NewReader(`{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"window"}`))
 	req.SetPathValue("sessionID", "ses-1")
 	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{UserID: "user_x"}))
 	h := NewHandler(nil)

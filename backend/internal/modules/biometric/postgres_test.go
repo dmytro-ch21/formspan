@@ -312,7 +312,7 @@ func TestComputeSessionMetrics_HappyPath(t *testing.T) {
 		t.Fatalf("seed samples: %v", err)
 	}
 
-	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWindow)
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if err != nil {
 		t.Fatalf("compute: %v", err)
 	}
@@ -335,6 +335,14 @@ func TestComputeSessionMetrics_HappyPath(t *testing.T) {
 	if m.TimeInZones["5"] != 5 || m.TimeInZones["1"] != 5 {
 		t.Fatalf("time_in_zones = %+v, want zone1=5 zone5=5", m.TimeInZones)
 	}
+	// N483/#833: which HRmax (and its provenance) produced these zones must
+	// be persisted alongside them.
+	if m.HRMaxBPM == nil || *m.HRMaxBPM != 200 {
+		t.Fatalf("hr_max_bpm = %v, want 200", m.HRMaxBPM)
+	}
+	if m.HRMaxSource == nil || *m.HRMaxSource != HRMaxSourceEstimated {
+		t.Fatalf("hr_max_source = %v, want estimated", m.HRMaxSource)
+	}
 
 	// And it round-trips through GetSessionMetrics.
 	got, err := repo.GetSessionMetrics(ctx, user, id)
@@ -343,6 +351,12 @@ func TestComputeSessionMetrics_HappyPath(t *testing.T) {
 	}
 	if got.TRIMP == nil || *got.TRIMP != wantTRIMP {
 		t.Fatalf("get trimp = %v, want %v", got.TRIMP, wantTRIMP)
+	}
+	if got.HRMaxBPM == nil || *got.HRMaxBPM != 200 {
+		t.Fatalf("get hr_max_bpm = %v, want 200", got.HRMaxBPM)
+	}
+	if got.HRMaxSource == nil || *got.HRMaxSource != HRMaxSourceEstimated {
+		t.Fatalf("get hr_max_source = %v, want estimated", got.HRMaxSource)
 	}
 }
 
@@ -356,7 +370,7 @@ func TestComputeSessionMetrics_NoSamplesForcesHRSourceNone(t *testing.T) {
 	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	seedSession(t, pool, id, user, start, start.Add(time.Hour))
 
-	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWorkout)
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWorkout)
 	if err != nil {
 		t.Fatalf("compute: %v", err)
 	}
@@ -369,6 +383,9 @@ func TestComputeSessionMetrics_NoSamplesForcesHRSourceNone(t *testing.T) {
 	if m.TRIMP != nil || m.AvgHRBPM != nil {
 		t.Fatalf("trimp/avg should be nil with no samples: trimp=%v avg=%v", m.TRIMP, m.AvgHRBPM)
 	}
+	if m.HRMaxBPM != nil || m.HRMaxSource != nil {
+		t.Fatalf("hr_max_bpm/hr_max_source should be nil with no samples: %v/%v", m.HRMaxBPM, m.HRMaxSource)
+	}
 }
 
 func TestComputeSessionMetrics_SessionNotEndedIsInvalidInput(t *testing.T) {
@@ -377,7 +394,7 @@ func TestComputeSessionMetrics_SessionNotEndedIsInvalidInput(t *testing.T) {
 	const id, user = "ses-bio-inprogress", "user_bio_inprogress"
 	seedInProgressSession(t, pool, id, user, time.Now().UTC())
 
-	_, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWindow)
+	_, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("compute on an in-progress session gave %v, want ErrInvalidInput", err)
 	}
@@ -387,7 +404,7 @@ func TestComputeSessionMetrics_UnknownSessionIsNotFound(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	ctx := context.Background()
 
-	_, err := repo.ComputeSessionMetrics(ctx, "user_bio_ghost", "ses-does-not-exist", 200, HRSourceWindow)
+	_, err := repo.ComputeSessionMetrics(ctx, "user_bio_ghost", "ses-does-not-exist", 200, HRMaxSourceEstimated, HRSourceWindow)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("compute against a missing session gave %v, want ErrNotFound", err)
 	}
@@ -402,7 +419,7 @@ func TestComputeSessionMetrics_CannotBeComputedForAnotherUsersSession(t *testing
 	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	seedSession(t, pool, id, owner, start, start.Add(time.Hour))
 
-	_, err := repo.ComputeSessionMetrics(ctx, attacker, id, 200, HRSourceWindow)
+	_, err := repo.ComputeSessionMetrics(ctx, attacker, id, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("computing against another user's session gave %v, want ErrNotFound", err)
 	}
@@ -430,7 +447,7 @@ func TestGetSessionMetrics_CrossUserIsolation(t *testing.T) {
 	if _, err := repo.PutSamples(ctx, owner, []Sample{hrSample("bio-read-iso-1", start, 150)}); err != nil {
 		t.Fatalf("seed samples: %v", err)
 	}
-	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 
@@ -474,7 +491,7 @@ func TestComputeSessionMetrics_RecomputeUpdatesInPlace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed first sample: %v", err)
 	}
-	first, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWindow)
+	first, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if err != nil {
 		t.Fatalf("first compute: %v", err)
 	}
@@ -490,7 +507,7 @@ func TestComputeSessionMetrics_RecomputeUpdatesInPlace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed second sample: %v", err)
 	}
-	second, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWindow)
+	second, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if err != nil {
 		t.Fatalf("second compute: %v", err)
 	}
@@ -508,6 +525,89 @@ func TestComputeSessionMetrics_RecomputeUpdatesInPlace(t *testing.T) {
 	}
 }
 
+// N483/#833's core acceptance criterion: a recompute against a DIFFERENT
+// HRmax (e.g. once an observed maximum replaces the athlete's estimate, per
+// design doc §3) must not silently overwrite hr_max_bpm/hr_max_source with
+// no record of the change -- and since ComputeSessionMetrics UPSERTs one row
+// per session (see postgres.go), "no record" would otherwise be exactly what
+// happened. The row itself IS that record: it must always reflect exactly
+// the HRmax/source the MOST RECENT call actually used, never a value left
+// over from an earlier compute.
+func TestComputeSessionMetrics_RecomputeWithDifferentHRMaxOverwritesProvenance(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-hrmax-recompute", "user_bio_hrmax_recompute"
+	cleanupSamples(t, pool, user)
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(30*time.Minute))
+
+	// 171 bpm sits exactly on zone 5's floor (90%) against a 190 HRmax, but
+	// only 83% -- zone 4 -- against a 205 HRmax, so the two computes below
+	// classify this SAME sample into different zones, not just different
+	// TRIMP arithmetic on the same classification.
+	if _, err := repo.PutSamples(ctx, user, []Sample{
+		hrSample("bio-hrmax-recompute-1", start, 171),
+		hrSample("bio-hrmax-recompute-2", start.Add(5*time.Minute), 100),
+	}); err != nil {
+		t.Fatalf("seed samples: %v", err)
+	}
+
+	// First compute: the seeded 220-age estimate.
+	first, err := repo.ComputeSessionMetrics(ctx, user, id, 190, HRMaxSourceEstimated, HRSourceWindow)
+	if err != nil {
+		t.Fatalf("first compute: %v", err)
+	}
+	if first.HRMaxBPM == nil || *first.HRMaxBPM != 190 {
+		t.Fatalf("first hr_max_bpm = %v, want 190", first.HRMaxBPM)
+	}
+	if first.HRMaxSource == nil || *first.HRMaxSource != HRMaxSourceEstimated {
+		t.Fatalf("first hr_max_source = %v, want estimated", first.HRMaxSource)
+	}
+	firstTRIMP := first.TRIMP
+
+	// The athlete's observed maximum arrives later and supersedes the
+	// estimate -- a recompute against a DIFFERENT HRmax and a DIFFERENT
+	// source.
+	second, err := repo.ComputeSessionMetrics(ctx, user, id, 205, HRMaxSourceObserved, HRSourceWindow)
+	if err != nil {
+		t.Fatalf("second compute: %v", err)
+	}
+	if second.HRMaxBPM == nil || *second.HRMaxBPM != 205 {
+		t.Fatalf("second hr_max_bpm = %v, want 205 -- the recompute's value must win", second.HRMaxBPM)
+	}
+	if second.HRMaxSource == nil || *second.HRMaxSource != HRMaxSourceObserved {
+		t.Fatalf("second hr_max_source = %v, want observed -- the recompute's provenance must win",
+			second.HRMaxSource)
+	}
+	if firstTRIMP != nil && second.TRIMP != nil && *firstTRIMP == *second.TRIMP {
+		t.Fatalf("trimp unchanged (%v) after a different hr_max_bpm -- the recompute did not actually reclassify",
+			*second.TRIMP)
+	}
+
+	// And reading it back confirms there is exactly one row, carrying only
+	// the SECOND compute's provenance -- nothing about the first HRmax
+	// survives anywhere for a reader to find.
+	got, err := repo.GetSessionMetrics(ctx, user, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.HRMaxBPM == nil || *got.HRMaxBPM != 205 {
+		t.Fatalf("get hr_max_bpm = %v, want 205", got.HRMaxBPM)
+	}
+	if got.HRMaxSource == nil || *got.HRMaxSource != HRMaxSourceObserved {
+		t.Fatalf("get hr_max_source = %v, want observed", got.HRMaxSource)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM session_metrics WHERE session_id = $1`, id).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("%d session_metrics rows after a recompute with a different HRmax, want 1 (no history row created)", n)
+	}
+}
+
 // Deleting the session must take its metrics with it.
 func TestDeletingTheSessionCascadesToSessionMetrics(t *testing.T) {
 	repo, pool := newTestRepo(t)
@@ -520,7 +620,7 @@ func TestDeletingTheSessionCascadesToSessionMetrics(t *testing.T) {
 	if _, err := repo.PutSamples(ctx, user, []Sample{hrSample("bio-cascade-1", start, 150)}); err != nil {
 		t.Fatalf("seed sample: %v", err)
 	}
-	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 
@@ -602,6 +702,54 @@ func TestSessionMetricsHRSourceCheckConstraintRejectsUnknownValues(t *testing.T)
 	}
 }
 
+// N483/#833's hr_max_source CHECK — the same defence-in-depth stance the
+// migration takes on hr_max_source that 000089 already takes on hr_source,
+// exercised directly against the database rather than only through Go's
+// HRMaxSource.Valid().
+func TestSessionMetricsHRMaxSourceCheckConstraintRejectsUnknownValues(t *testing.T) {
+	_, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-hrmax-check", "user_bio_hrmax_check"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+
+	_, err := pool.Exec(ctx, `
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_max_source)
+		VALUES ($1, $2, 'window', 0, 1, 'made_up_value')`, id, user)
+	if err == nil {
+		t.Fatal("insert with an invalid hr_max_source succeeded, want a check_violation")
+	}
+}
+
+// A NULL hr_max_source must remain legal at the database level -- that is
+// exactly the "computed before N483 shipped" state the migration's own
+// comment documents, and the CHECK constraint has to allow it explicitly
+// (`hr_max_source IS NULL OR ...`) rather than only the two named values.
+func TestSessionMetricsHRMaxSourceCheckConstraintAllowsNull(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-hrmax-null", "user_bio_hrmax_null"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+
+	// A row written the way a pre-N483 caller would have -- no
+	// hr_max_bpm/hr_max_source at all, simulating a legacy row this
+	// migration never backfills.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version)
+		VALUES ($1, $2, 'window', 0, 1)`, id, user); err != nil {
+		t.Fatalf("insert pre-N483-shaped row: %v", err)
+	}
+
+	got, err := repo.GetSessionMetrics(ctx, user, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.HRMaxBPM != nil || got.HRMaxSource != nil {
+		t.Fatalf("hr_max_bpm/hr_max_source = %v/%v, want nil/nil for a legacy row", got.HRMaxBPM, got.HRMaxSource)
+	}
+}
+
 func TestComputeSessionMetrics_ActiveEnergySummed(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
@@ -619,7 +767,7 @@ func TestComputeSessionMetrics_ActiveEnergySummed(t *testing.T) {
 		t.Fatalf("seed active_energy: %v", err)
 	}
 
-	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRSourceWindow)
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
 	if err != nil {
 		t.Fatalf("compute: %v", err)
 	}

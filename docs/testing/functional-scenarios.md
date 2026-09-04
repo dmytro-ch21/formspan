@@ -18041,6 +18041,54 @@ is the design.
   `biometric_samples` rows for the window, never another account's, even
   when both sessions' time windows overlap.
 
+## N483 — `session_metrics` records which HRmax produced its zones (`POST /v1/biometric/sessions/{sessionID}/metrics`, `hr_max_bpm`/`hr_max_source`)
+
+Follow-up from N476, storing the other half of design doc §3's HRmax
+sequencing ("never silently switch between them... which HRmax produced a
+given session's zones belongs in `session_metrics` alongside `hr_source`").
+Still API-level only — no client surface exists yet, same as N476.
+
+### Happy path
+
+- `POST .../metrics` with a valid `hr_max_bpm` (100-250), a valid
+  `hr_max_source` (`estimated` or `observed`), and `hr_source` returns 200
+  with `hr_max_bpm` echoing the request and `hr_max_source` echoing which
+  provenance was claimed — both present whenever `trimp`/`time_in_zones` are
+  (i.e. whenever real samples existed to classify).
+- `GET .../metrics` afterward returns the same `hr_max_bpm`/`hr_max_source`
+  pair.
+- Recomputing the same session against a DIFFERENT `hr_max_bpm` and/or a
+  different `hr_max_source` (e.g. an `estimated` first compute followed by
+  an `observed` one, once the athlete's real max is known) updates
+  `hr_max_bpm`/`hr_max_source` — along with `trimp`/`time_in_zones` — IN
+  PLACE on the same row; there is still exactly one `session_metrics` row
+  for the session, and it reflects only the most recent compute's HRmax and
+  provenance, never a mix of the two.
+
+### Edge cases & errors
+
+- `hr_max_source` omitted, or any value outside `estimated`/`observed`:
+  `POST .../metrics` 400s `invalid_input` — required alongside `hr_max_bpm`,
+  a bare number is not accepted.
+- Zero heart-rate samples in the window (the existing `hr_source: none`
+  case): `hr_max_bpm`/`hr_max_source` are both null in the response, exactly
+  like `avg_hr_bpm`/`trimp` — there was nothing to classify, so nothing is
+  recorded as having classified it.
+- A `session_metrics` row that predates this field (a real possibility only
+  if one was ever created before this ticket shipped, which — per N476's
+  own package doc — nothing outside its own tests has done yet): `GET
+  .../metrics` returns `hr_max_bpm`/`hr_max_source` as null rather than
+  erroring or fabricating a value, distinguishable from "no HRmax could
+  classify anything" only by the fact that `trimp` is non-null on this row
+  and null on that one.
+
+### Auth/security
+
+- No new surface beyond N476's existing `POST`/`GET
+  /v1/biometric/sessions/{sessionID}/metrics` auth/ownership scenarios
+  (above) — `hr_max_bpm`/`hr_max_source` ride along on the same
+  request/response and the same cross-user isolation guarantees.
+
 ## N477 — iOS HealthKit heart rate + VO2max, window-joined to sessions (`apps/mobile/lib/healthkit.ts`, `apps/mobile/lib/biometric.ts`, `apps/mobile/lib/biometricSync.ts`, `apps/mobile/app/vo2max/trend.tsx`, `apps/mobile/app/(tabs)/you.tsx`)
 
 ### Happy path
