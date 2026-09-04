@@ -3,6 +3,7 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
+import { EndTimeCorrection } from '@/components/EndTimeCorrection';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { SessionCelebration } from '@/components/SessionCelebration';
@@ -250,6 +251,16 @@ export default function BjjSessionScreen() {
   // on, which matters the moment a correction is more than a few days back.
   const [reschedulingAnchor, setReschedulingAnchor] = useState<Date | null>(null);
   const [reschedulingError, setReschedulingError] = useState<string | null>(null);
+  /**
+   * N487/#848: a real end time for the live-session Finish path, set only
+   * when the athlete corrects it — `null` means `finishNow` below keeps
+   * stamping real "now", exactly as it did before this ticket. The app-
+   * tracked session case this exists for: the athlete trained, forgot to
+   * finish it, and only opens the app to close it out hours later — "now" at
+   * that moment is the couch, not the mat, and N476/N477 already join HR
+   * data to this window.
+   */
+  const [finishEndOverride, setFinishEndOverride] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
     if (!userId || !id) return;
@@ -374,7 +385,10 @@ export default function BjjSessionScreen() {
     // an unhandled rejection and, to the athlete, a button that silently did
     // nothing. The screen has an error state; it should use it.
     try {
-      await finishLocalSession(userId, id);
+      // `undefined` when the athlete never opened the correction sheet —
+      // `finishLocalSession` stamps real "now", byte-identical to before
+      // this ticket touched the file.
+      await finishLocalSession(userId, id, finishEndOverride?.toISOString());
       await load();
       requestSync('bjj-session-finished');
       /*
@@ -826,16 +840,30 @@ export default function BjjSessionScreen() {
           without it, Today's "in progress" card opens a screen with no way to
           close the session. */}
       {!session.ended_at && (
-        <HoldToConfirm
-          label="Finish this session"
-          holdingLabel="Keep holding to finish…"
-          confirmTitle="Finish this session?"
-          confirmBody="You won't be able to add to it afterwards."
-          style={styles.cta}
-          textStyle={[styles.ctaText, { color: accent.ink }]}
-          testID="bjj-session-finish"
-          onConfirm={finishNow}
-        />
+        <>
+          {/* N487/#848: optional, above the hold-to-confirm rather than
+              inside it — correcting the end time and confirming Finish stay
+              two separate gestures, so a mis-tap on the sheet can never also
+              close the session. Defaults to real "now"; only worth touching
+              when this app-tracked session is being closed out well after
+              training actually stopped. */}
+          <EndTimeCorrection
+            value={finishEndOverride ?? new Date()}
+            now={() => new Date()}
+            onChange={setFinishEndOverride}
+            testID="bjj-session-finish-end-time"
+          />
+          <HoldToConfirm
+            label="Finish this session"
+            holdingLabel="Keep holding to finish…"
+            confirmTitle="Finish this session?"
+            confirmBody="You won't be able to add to it afterwards."
+            style={styles.cta}
+            textStyle={[styles.ctaText, { color: accent.ink }]}
+            testID="bjj-session-finish"
+            onConfirm={finishNow}
+          />
+        </>
       )}
 
       {/*

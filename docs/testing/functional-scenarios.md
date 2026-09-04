@@ -18520,3 +18520,66 @@ Config plumbing only — no new screen. These scenarios cover the
   sandboxed environment (no Android SDK/emulator, no Google Cloud Console
   access) can produce it. See the N482 history.md entry for the precise
   human steps this is gated on.
+
+## N487 — a real end time for BJJ sessions, so the HR window is real too (`apps/mobile/components/EndTimeCorrection.tsx`, `apps/mobile/app/bjj/log.tsx`, `apps/mobile/app/bjj/session/[id].tsx`)
+
+Mobile-only, no new API surface — `POST /v1/sessions` and
+`POST /v1/sessions/{id}/finish` already accepted `started_at`/`ended_at`.
+See the N487/#848 history entry for the HR-window-correctness motivation
+(N476/N477's join reads whatever `ended_at` says, and both screens used to
+default it to "now" or "duration before now").
+
+### Happy path
+
+- **Post-hoc log (`bjj/log.tsx`):** tap "Ended at", tap a quick-offset chip
+  (e.g. "2h ago") — the sheet closes immediately, the collapsed row now
+  reads the corrected time, and tapping "Log it" sends `ended_at` equal to
+  that corrected time and `started_at` equal to it minus the selected
+  duration preset (the preset still governs `started_at`; only which moment
+  it's measured back FROM changed).
+- **Post-hoc log, fine-tune:** open the sheet, tap `+15m`/`−15m` one or more
+  times, tap Save — the field updates to the nudged time and a subsequent
+  "Log it" carries it. Tapping Cancel after nudging discards the nudges
+  entirely; the field is unchanged.
+- **Live-session Finish (`bjj/session/[id].tsx`):** on an open (no
+  `ended_at`) session, tap "Ended at" above the hold-to-confirm Finish
+  control, pick a quick offset, then hold-to-confirm Finish — the session's
+  `ended_at` lands on the corrected time, not the moment the hold completed.
+- **Backfilled log (`?date=` present):** the quick-offset chips compute
+  against that day's mapped "now" (today's wall-clock time-of-day moved onto
+  the backfilled calendar day — `backdatedTimestamp`), not the literal
+  current moment, so "1h ago" on a session backfilled to last Tuesday means
+  an hour before the time-of-day currently showing, on Tuesday.
+
+### Edge cases & errors
+
+- **The fast path is unaffected when the sheet is never opened.** Logging
+  with no correction (post-hoc) or finishing with no correction (live)
+  produces the exact `started_at`/`ended_at` either screen computed before
+  this ticket — same duration-preset arithmetic, same "now" default. No new
+  required tap on either screen's three-tap floor.
+- **Existing day-granularity reschedule (`bjj/session/[id].tsx`'s
+  `commitReschedule`, the month-grid sheet) is untouched** — correcting the
+  end time and correcting the day are two independent controls; setting one
+  does not reset or interact with the other.
+- **A second visit to the sheet doesn't compound.** Correct the end time
+  once (e.g. "1h ago"), reopen the sheet, tap "1h ago" again — the result is
+  1 hour before the real current moment (captured fresh when the sheet
+  reopens), not 2 hours before the first correction.
+- **Changing the duration preset after correcting the end time** re-derives
+  `started_at` from the corrected end, not from "now" — the correction
+  isn't silently discarded by a later preset tap.
+- Picking an end time that would put `started_at` before the session
+  actually existed (an implausibly long duration against an early
+  correction) is not specially guarded here — same as the existing
+  duration-preset math, which never validated this either.
+
+### NEEDS HUMAN EVIDENCE
+
+- Log a BJJ class with the corrected end-time input a few hours after it
+  actually happened (both the post-hoc flow and, separately, the live-Finish
+  flow), and confirm the HR data that syncs afterward reflects the real
+  class window — elevated heart rate during the corrected window, not
+  whatever the device's HR happened to read at the time of logging. This
+  needs a real device with real HealthKit workout/HR data; no test or
+  simulator can produce it.

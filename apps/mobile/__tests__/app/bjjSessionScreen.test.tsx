@@ -2,7 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 
 import BjjSessionScreen from '../../app/bjj/session/[id]';
 import type { SessionDetail } from '@/lib/bjjSession';
-import { readLocalBjjDetail, readLocalSession, type LocalSession } from '@/lib/sessionStore';
+import {
+  finishLocalSession,
+  readLocalBjjDetail,
+  readLocalSession,
+  type LocalSession,
+} from '@/lib/sessionStore';
 import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
 import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
 import { playSound } from '@/lib/sounds';
@@ -348,6 +353,64 @@ it('offers no share card while the class is still open', async () => {
   // one: the finish control is what stands where Share stands afterwards.
   expect(screen.getByTestId('bjj-session-finish')).toBeTruthy();
   expect(screen.queryByTestId('bjj-session-share')).toBeNull();
+});
+
+/*
+ * N487/#848: the live-session Finish path, which had no way to carry a real
+ * end time at all before this ticket — `finishLocalSession(userId, id)`, no
+ * third argument, always "now". The two tests below are the wiring: the
+ * arithmetic for what an offset chip computes has its own suite
+ * (`components/__tests__/endTimeCorrection.test.tsx`); this is about whether
+ * `finishNow` actually reads the athlete's choice.
+ */
+describe('finishing with a corrected end time', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 7, 20, 21, 30, 0)); // 21:30 local
+    (readLocalSession as jest.Mock).mockImplementation(() =>
+      deferred({ ...mockSession, ended_at: null }),
+    );
+    (finishLocalSession as jest.Mock).mockClear();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('leaves the fast path alone: no correction opened, ended_at is real now', async () => {
+    render(<BjjSessionScreen />);
+    const finish = await screen.findByTestId('bjj-session-finish');
+    fireEvent.press(finish);
+
+    await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
+    // `undefined` — the exact call this screen made before this ticket
+    // touched it. `finishLocalSession` itself is what stamps real "now"
+    // when its third argument is absent (see `lib/sessionStore.ts`).
+    expect(finishLocalSession).toHaveBeenCalledWith('u1', 's1', undefined);
+  });
+
+  it('sends the corrected end time when the athlete sets one before finishing', async () => {
+    render(<BjjSessionScreen />);
+    await screen.findByTestId('bjj-session-finish');
+    // Read the fake clock back rather than trusting the literal set in
+    // `beforeEach`: `findByTestId` above polls under fake timers, which
+    // (correctly — see `waitFor`'s own fake-timer support) advances them by
+    // its poll interval while it waits for the session to finish loading.
+    // The screen's own `now()` capture below reads whatever the clock says
+    // AT THAT MOMENT, so the assertion has to start from the same place.
+    const openedAt = new Date();
+
+    fireEvent.press(screen.getByTestId('bjj-session-finish-end-time-row'));
+    fireEvent.press(screen.getByTestId('bjj-session-finish-end-time-offset-120'));
+
+    fireEvent.press(screen.getByTestId('bjj-session-finish'));
+
+    await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
+    expect(finishLocalSession).toHaveBeenCalledWith(
+      'u1',
+      's1',
+      new Date(openedAt.getTime() - 120 * 60_000).toISOString(),
+    );
+  });
 });
 
 
