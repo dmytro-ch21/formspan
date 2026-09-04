@@ -54957,6 +54957,32 @@ design doc's own phrasing) — this ticket only compares one session at a time,
 per its own acceptance criteria.
 
 
+## 2026-09-03 — Phase screen: back control moved to top-left ScreenHeader `leading` slot
+
+Small follow-up flagged as a [suggestion] (not blocking) during N484's
+(#835/#838) `frontend-reviewer` pass, left out of that PR to stay in scope:
+`apps/mobile/app/phase/index.tsx`'s only exit was a `Pressable` at the very
+bottom of the `KeyboardAwareScrollView`, below the phase-selection form —
+under the keyboard while typing a target weight/date, and below the fold on
+a small device. `headerShown` is `false` on this screen and `ScreenHeader`
+itself carries no back affordance, so the top-left corner had no exit at
+all.
+
+N484 added exactly the slot this needed: `leading?: React.ReactNode` on
+`ScreenHeader`, first consumed by `library.tsx`'s own back button. This
+reuses that pattern verbatim — the same 38pt circular button, the same
+`router.canGoBack()` guard (falling back to `router.replace('/')`, since
+this screen is always pushed from a tab, `goals.tsx` or `you.tsx`, but a
+deep link could reach it with nothing to pop). The redundant bottom `Back`
+button is removed rather than kept alongside it — one exit, always reachable,
+rather than two, one of which was the accessibility bug this fix exists to
+close.
+
+**Verification**: `pnpm run typecheck:mobile` and `eslint` on the changed
+file both clean. No test referenced the removed bottom button's testID, so
+nothing else needed updating. No functional-scenario changes — this is a
+navigation-affordance fix, not new behavior.
+
 ## Open items / known gaps as of this entry
 
 
