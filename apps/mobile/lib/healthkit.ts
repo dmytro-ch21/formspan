@@ -89,6 +89,11 @@ type NativeWorkout = {
   readonly endDate: Date;
   readonly duration: NativeQuantity;
   readonly totalDistance?: NativeQuantity;
+  /** Verified present on every `WorkoutSample` against the installed
+   *  package's `types/Workouts.d.ts` (N479/#824) — used by `queryOtherWorkouts`
+   *  below to tell walking from hiking after the native `OR` filter, and to
+   *  ignore anything that filter should have excluded but didn't. */
+  readonly workoutActivityType: number;
   getWorkoutRoutes: () => Promise<
     readonly { readonly locations: readonly NativeRouteLocation[] }[]
   >;
@@ -114,7 +119,18 @@ type HealthKitModule = {
   isHealthDataAvailable: () => boolean;
   requestAuthorization: (toRequest: { toRead: readonly string[] }) => Promise<boolean>;
   queryWorkoutSamples: (options: {
-    filter?: { workoutActivityType?: number };
+    filter?: {
+      workoutActivityType?: number;
+      /** `FilterForSamplesBase.date` — verified present against the
+       *  installed package's `types/QueryOptions.d.ts` (N479/#824). Not used
+       *  by `queryRunningWorkouts` above (see its own doc comment for why
+       *  that one stays unbounded), but load-bearing for `queryOtherWorkouts`
+       *  below, which has a real reason to bound its query by recency. */
+      date?: { startDate?: Date; endDate?: Date };
+      /** `FilterForWorkouts.OR` — verified against the same file, used to ask
+       *  for more than one `workoutActivityType` in a single native query. */
+      OR?: readonly { workoutActivityType?: number }[];
+    };
     limit: number;
     ascending?: boolean;
   }) => Promise<readonly NativeWorkout[]>;
@@ -505,4 +521,105 @@ export async function queryVO2MaxSamples(sinceDate: Date): Promise<HealthKitQuan
   } catch {
     return [];
   }
+}
+
+/**
+ * -----------------------------------------------------------------------
+ * N479/#824 — activity HealthKit noticed that VOLA never asked about
+ * -----------------------------------------------------------------------
+ *
+ * `queryRunningWorkouts` above already reads `WorkoutActivityType.running`;
+ * this reads everything else worth surfacing as a "you did this, want to log
+ * it?" card on Today (design doc's own N465 precedent, generalised). Walking
+ * and hiking specifically: both are outdoor, GPS-trackable activity a Watch
+ * auto-detects without the athlete ever opening VOLA, which is exactly the
+ * "detected, not logged" case this ticket names. No route fetch here (unlike
+ * `queryRunningWorkouts`) — this feature only needs to know a workout
+ * happened and roughly how long/far, never its track, so the second native
+ * round trip `getWorkoutRoutes()` costs is never spent for something that
+ * might just get dismissed.
+ */
+
+/** `WorkoutActivityType.walking` / `.hiking` — verified against v14.1.0's
+ *  generated enum the same way `RUNNING_ACTIVITY_TYPE` above was (52 and 24
+ *  respectively). Literals, not the imported enum, for the identical reason. */
+const OTHER_ACTIVITY_TYPE_CODES = { walking: 52, hiking: 24 } as const;
+
+/** How far back one detection pass looks. Bounded, unlike `QUERY_LIMIT`
+ *  above's unbounded running query — a walk from months ago is training
+ *  history HealthKit already has, not something worth a Today card; see
+ *  `lib/detectedActivity.ts`'s `DETECTED_ACTIVITY_WINDOW_DAYS`, which this
+ *  mirrors so a sync pass never fetches more than the display window can
+ *  ever show. */
+export type DetectedActivityType = 'walking' | 'hiking';
+
+function otherActivityTypeFromCode(code: number): DetectedActivityType | null {
+  if (code === OTHER_ACTIVITY_TYPE_CODES.walking) return 'walking';
+  if (code === OTHER_ACTIVITY_TYPE_CODES.hiking) return 'hiking';
+  return null;
+}
+
+/** One walking/hiking workout, reduced to plain data — the shape
+ *  `lib/detectedActivity.ts`'s pure functions and SQLite ledger take. */
+export type HealthKitOtherWorkout = {
+  uuid: string;
+  type: DetectedActivityType;
+  /** RFC3339 */
+  startDate: string;
+  /** RFC3339 */
+  endDate: string;
+  durationSeconds: number;
+  distanceMeters: number | null;
+};
+
+/**
+ * Read this device's recent walking/hiking workouts from HealthKit, newest
+ * first — the second function in this file device evidence has to cover
+ * (`queryRunningWorkouts` is the first); everything downstream
+ * (`lib/detectedActivity.ts`'s filtering) is pure and already unit tested.
+ *
+ * Returns `[]`, never throws, on any native failure — denied authorization,
+ * an unavailable store, or a genuinely empty result all read as "nothing
+ * detected right now", the same posture `queryRunningWorkouts` takes.
+ * Defensively re-checks `workoutActivityType` per result rather than trusting
+ * the native `OR` filter alone, same caution `filterNewWorkouts` already
+ * applies to the ledger it is handed.
+ */
+export async function queryOtherWorkouts(sinceDate: Date): Promise<HealthKitOtherWorkout[]> {
+  if (!hk) return [];
+  let workouts: readonly NativeWorkout[];
+  try {
+    workouts = await hk.queryWorkoutSamples({
+      filter: {
+        date: { startDate: sinceDate },
+        OR: [
+          { workoutActivityType: OTHER_ACTIVITY_TYPE_CODES.walking },
+          { workoutActivityType: OTHER_ACTIVITY_TYPE_CODES.hiking },
+        ],
+      },
+      limit: QUERY_LIMIT,
+      ascending: false,
+    });
+  } catch {
+    return [];
+  }
+
+  const out: HealthKitOtherWorkout[] = [];
+  for (const w of workouts) {
+    const type = otherActivityTypeFromCode(w.workoutActivityType);
+    if (!type) continue;
+    const durationSeconds =
+      w.duration.unit === 's'
+        ? Math.round(w.duration.quantity)
+        : Math.max(0, Math.round((w.endDate.getTime() - w.startDate.getTime()) / 1000));
+    out.push({
+      uuid: w.uuid,
+      type,
+      startDate: w.startDate.toISOString(),
+      endDate: w.endDate.toISOString(),
+      durationSeconds,
+      distanceMeters: metersFromQuantity(w.totalDistance),
+    });
+  }
+  return out;
 }

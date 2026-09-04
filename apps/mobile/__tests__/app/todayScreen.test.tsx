@@ -47,6 +47,24 @@ jest.mock('@/lib/sessionStore', () => ({
   listLocalSessions: (...a: unknown[]) => mockListLocalSessions(...a),
   cachedWorkouts: (...a: unknown[]) => mockCachedWorkouts(...a),
   trainingSince: () => Promise.resolve(null),
+  // N479/#824's `useDetectedActivity` reads this — mocked empty here for the
+  // identical "a failure here is a failure in this screen, not in SQLite"
+  // reason every other read on this list is. Its own SQLite behaviour has a
+  // dedicated fixture test: lib/__tests__/detectedActivity.test.ts.
+  sessionsSince: () => Promise.resolve([]),
+}));
+
+// N479/#824: same reasoning as `@/lib/sessionStore` above — `readRecentDetections`
+// touches real SQLite (`getDb()`) if left unmocked, and this file's whole
+// premise is a render that never does. `visibleDetections`/`activityTypeLabel`/
+// `sourceLabel` stay real via `requireActual`, since `DetectedActivityCard`
+// (rendered when the mock below returns something) calls them directly.
+jest.mock('@/lib/detectedActivity', () => ({
+  ...jest.requireActual('@/lib/detectedActivity'),
+  readRecentDetections: () => Promise.resolve([]),
+  upsertDetectedActivities: () => Promise.resolve(),
+  dismissDetection: () => Promise.resolve(),
+  logDetectionAsSession: () => Promise.resolve(),
 }));
 
 const mockListPlannedBetween = jest.fn(

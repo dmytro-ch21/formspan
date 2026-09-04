@@ -21,7 +21,13 @@
  * check, BEFORE any `require` — that is what this suite verifies.
  */
 
-import { isHealthConnectSupported, sourceFromDataOrigin, heartRateSampleID, vo2MaxSampleID } from '../healthConnect';
+import {
+  isHealthConnectSupported,
+  queryOtherExerciseSessions,
+  sourceFromDataOrigin,
+  heartRateSampleID,
+  vo2MaxSampleID,
+} from '../healthConnect';
 import { Platform } from 'react-native';
 
 describe('isHealthConnectSupported — the module-scope platform guard', () => {
@@ -32,6 +38,19 @@ describe('isHealthConnectSupported — the module-scope platform guard', () => {
     // file safe here.
     expect(Platform.OS).toBe('ios');
     expect(await isHealthConnectSupported()).toBe(false);
+  });
+});
+
+/**
+ * N479/#824 — same "resolves to empty, never throws" contract as
+ * `queryHeartRateSamples`/`queryVo2MaxReadings`, exercised the same way: this
+ * suite's platform makes `ensureInitialized()` false before any native call.
+ */
+describe('queryOtherExerciseSessions', () => {
+  it('resolves to an empty array when Health Connect is unavailable', async () => {
+    await expect(
+      queryOtherExerciseSessions('2026-08-29T00:00:00.000Z', '2026-09-01T00:00:00.000Z'),
+    ).resolves.toEqual([]);
   });
 });
 

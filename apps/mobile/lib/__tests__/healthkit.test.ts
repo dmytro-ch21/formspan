@@ -26,6 +26,7 @@ import {
   mapWorkoutToRunningDetail,
   metersFromQuantity,
   queryHeartRateSamples,
+  queryOtherWorkouts,
   queryVO2MaxSamples,
   type HealthKitRunningWorkout,
 } from '../healthkit';
@@ -180,5 +181,15 @@ describe('queryHeartRateSamples / queryVO2MaxSamples', () => {
       queryHeartRateSamples(new Date('2026-09-01T07:00:00Z'), new Date('2026-09-01T07:30:00Z')),
     ).resolves.toEqual([]);
     await expect(queryVO2MaxSamples(new Date('2026-06-01T00:00:00Z'))).resolves.toEqual([]);
+  });
+});
+
+/**
+ * N479/#824 — `queryOtherWorkouts` is the third (and, so far, last) native
+ * call surface in this file, same reasoning as the describe block above.
+ */
+describe('queryOtherWorkouts', () => {
+  it('resolves to an empty array when no HealthKit module is linked', async () => {
+    await expect(queryOtherWorkouts(new Date('2026-08-29T00:00:00Z'))).resolves.toEqual([]);
   });
 });
