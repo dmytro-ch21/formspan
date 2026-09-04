@@ -245,7 +245,12 @@ describe('the typed-routes wiring', () => {
   });
 
   it('has typed routes switched on in the app config', () => {
-    const app = JSON.parse(readFileSync(join(MOBILE, 'app.json'), 'utf8'));
+    // app.config.js (not app.json, as of N482/#829) exports a function
+    // rather than a JSON literal — call it the same way Expo CLI does to
+    // resolve the actual config object.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const resolveConfig = require(join(MOBILE, 'app.config.js'));
+    const app = resolveConfig({ config: {} });
     expect(app.expo.experiments.typedRoutes).toBe(true);
   });
 });

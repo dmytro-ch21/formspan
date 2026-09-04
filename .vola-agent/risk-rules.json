@@ -48,7 +48,7 @@
     {
       "risk": "medium",
       "reason": "native dependency / app config — permission traps and stale-binary hazards only surface in a built binary",
-      "paths": ["apps/mobile/app.json", "apps/mobile/package.json"]
+      "paths": ["apps/mobile/app.config.js", "apps/mobile/package.json"]
     }
   ]
 }

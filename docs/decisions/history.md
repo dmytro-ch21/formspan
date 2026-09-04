@@ -54956,6 +54956,98 @@ version of this calibration ("your RPE-6 sessions consistently run low," the
 design doc's own phrasing) — this ticket only compares one session at a time,
 per its own acceptance criteria.
 
+## 2026-09-04 — N482 (#829): Android Google Maps API key plumbing for react-native-maps
+
+Follow-up from N459 (#770, added `react-native-maps` with no Android key) and
+N475 (#820, stood up an Android build baseline and re-surfaced the gap as this
+ticket). `react-native-maps`' Android config plugin
+(`plugin/build/android.js`, `withMapsAndroid` — read directly from the
+installed package, not assumed from docs) writes
+`com.google.android.geo.API_KEY` into `AndroidManifest.xml` when its
+`androidGoogleMapsApiKey` prop is truthy and removes it otherwise: there is no
+free/keyless tier the way iOS gets with Apple Maps (confirmed the same way —
+`ios.js`'s `withMapsIOS` only touches `Info.plist`'s `GMSApiKey` when
+`iosGoogleMapsApiKey` is set, and VOLA's plugin entry has never set it, so iOS
+stays on Apple Maps by omission, not by a separate flag).
+
+**This ticket is the plumbing, not the key.** No Google Cloud Console access
+exists in this environment, so no real credential was created — exactly the
+outcome the ticket's own text anticipated ("this ticket is the actual key
+acquisition and wiring" was aspirational; what's deliverable here is
+"wired to read one, correctly, the moment it exists").
+
+**`apps/mobile/app.json` → `apps/mobile/app.config.js`.** Static JSON has no
+way to read `process.env`, and the plugin prop has to be resolved at
+config-evaluation time (this file runs as Node during `expo prebuild`/`eas
+build`) rather than baked in as a literal — a literal would mean a real key
+committed to a public repo. `app.config.js` is a straight port of the old
+`expo` object (verified with `pnpm --dir apps/mobile exec expo config --type
+public` before and after — identical output for every field except the one
+that changed) with one addition: `"react-native-maps"` changed from a bare
+string plugin entry to `["react-native-maps", { androidGoogleMapsApiKey:
+process.env.ANDROID_GOOGLE_MAPS_API_KEY }]`. Confirmed both branches by
+running `expo config` with the env var unset (comes back `undefined`, which
+`withMapsAndroid` treats exactly like the old string-entry form — removes the
+manifest meta-data, current behavior preserved) and set to a throwaway value
+(comes back verbatim in the resolved plugin props).
+
+**Not `EXPO_PUBLIC_ANDROID_GOOGLE_MAPS_API_KEY`, deliberately.** That prefix
+means "inline into the client JS bundle" (`apps/web`'s `NEXT_PUBLIC_*`
+convention, mirrored here) — this key is never read by app code, only by
+`app.config.js` itself while it evaluates. The Expo CLI loads `.env`/
+`.env.local` into `process.env` for config evaluation regardless of the
+`EXPO_PUBLIC_` prefix, so a plain `ANDROID_GOOGLE_MAPS_API_KEY` works and,
+unlike a prefixed one, never ships inside the JS bundle. (It still ends up
+readable in the built `AndroidManifest.xml` either way — that's why the
+Google Cloud Console step below is "restrict the key to this package + SHA-1"
+rather than "keep it secret".)
+
+**`apps/mobile/eas.json` was deliberately left untouched.** The ticket's "what
+this touches" list named it, but the repo already has a precedent for exactly
+this shape of secret — `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` is documented in
+`.env.example` as an `eas env:create` secret, not an `eas.json` `env` block —
+and a Google Maps key fits the same reasoning (per-environment, never
+committed, doesn't need to vary the *build command*, only the *config
+inputs*). Registering the real value is one more `eas env:create` call away
+once a key exists; no `eas.json` change is needed to support it.
+
+**What a human still has to do, precisely, to make Android maps render real
+tiles** (recorded here and in `apps/mobile/.env.example`, since neither this
+session nor any future one can do it without Google Cloud Console access):
+
+1. In Google Cloud Console: create a project (or reuse one) with billing
+   enabled, enable the "Maps SDK for Android" API, then create an API key and
+   restrict it — Application restrictions → Android apps → package name
+   `com.vola.fitness` + this app's SHA-1 signing certificate(s) (both the
+   debug keystore, for local/EAS development builds, and the eventual release
+   keystore), API restrictions → Maps SDK for Android only.
+2. `eas env:create --name ANDROID_GOOGLE_MAPS_API_KEY --value <key> --environment development --environment preview --environment production --visibility secret` — registers it for EAS cloud builds.
+3. For local `expo prebuild`/`eas build --local`: put the same value in
+   `apps/mobile/.env.local` (gitignored, never committed) as
+   `ANDROID_GOOGLE_MAPS_API_KEY=<key>`.
+4. **NEEDS HUMAN EVIDENCE, per the ticket's own acceptance criteria** — build
+   for Android (`pnpm --dir apps/mobile run build:android`, per N475) with the
+   key registered, install it on a device/emulator, and confirm the
+   running-tracking map renders real tiles rather than a blank/grey surface.
+
+**Verified in this session, all without an Android SDK/device (same
+constraint N475 hit — see that entry):** `expo config --type public`
+resolving identically to the old `app.json` for every field but the changed
+plugin entry; the plugin prop flowing through with the env var unset
+(`undefined`, matching prior no-key behavior) and set (the literal value);
+`node --check apps/mobile/app.config.js` for syntax; and — reading
+`react-native-maps@1.27.2`'s actual installed plugin source rather than
+trusting the issue's paraphrase of it — that the mechanism really is
+`androidGoogleMapsApiKey` on the plugin's own props, not `android.config
+.googleMaps.apiKey` (an Expo-level config key that exists for a different,
+older integration path and is not what this version of `react-native-maps`
+reads).
+
+**Open**: the actual Google Cloud project/key (needs the user, per above); the
+device-rendered-tiles confirmation this ticket cannot produce; and — same gap
+N475 left — no `preview`/`production` Android EAS profile or Play Store
+distribution exists yet, so this key only matters for `development`-profile
+builds until that lands.
 
 ## Open items / known gaps as of this entry
 

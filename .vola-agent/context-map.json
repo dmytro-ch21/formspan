@@ -68,7 +68,7 @@
       "gates": ["mobile", "offline-sync"]
     },
     {
-      "paths": ["apps/mobile/app.json", "apps/mobile/package.json"],
+      "paths": ["apps/mobile/app.config.js", "apps/mobile/package.json"],
       "docs": ["docs/testing/device-checks.md"],
       "traps": [],
       "gates": ["mobile", "mobile-native"]
