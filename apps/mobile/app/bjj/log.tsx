@@ -8,6 +8,7 @@ import {
   View as RNView,
 } from 'react-native';
 
+import { EndTimeCorrection } from '@/components/EndTimeCorrection';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -62,6 +63,15 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * same RPE bars, same two buttons doing the same two things. The fastest
  * valid log is still whatever it was — see the ticket's own before/after
  * tap count in the PR description before touching this file again.
+ *
+ * **N487 (#848) added `EndTimeCorrection`, and it is additive by the same
+ * test.** No `Pressable` in the fast path changed shape or moved; the new
+ * row reads as a fact until tapped, same as the focus reminder N185
+ * describes above. It exists because `ended_at` here used to be "duration
+ * minutes before whenever Log it was tapped" — right if you log right after
+ * class, wrong by however late you actually logged it — and N476/N477
+ * already join a session's HR data to that window, so a late log was
+ * silently reading the athlete's couch instead of the mat.
  */
 
 /** Mat-time presets, in minutes. A class is an hour; the rest are shorter. */
@@ -107,6 +117,18 @@ export default function LogBjjScreen() {
   const [draft, setDraft] = useState<Draft>(() => defaultDraft('class'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * N487/#848: a real end time, set only when the athlete corrects it.
+   *
+   * `null` means "use the computed default" — the exact expression `commit`
+   * already used before this ticket touched the file, so an athlete who
+   * never opens the correction sheet gets a byte-identical `ended_at` to
+   * before. Set, it wins outright: the athlete looked at the computed
+   * default and said it was wrong, so the duration preset above no longer
+   * gets a vote on `ended_at` — see `commit`, where `startedAt` is still
+   * derived from it.
+   */
+  const [endOverride, setEndOverride] = useState<Date | null>(null);
 
   /** The session this screen already created, so a retry reuses it. */
   const createdRef = useRef<string | null>(null);
@@ -220,7 +242,13 @@ export default function LogBjjScreen() {
         // before this ticket touched the file. Backfilling moves the
         // CALENDAR DAY only — `backdatedTimestamp` keeps the time of day the
         // athlete is filling this in at, same as logging it live would.
-        const endBase = date ? backdatedTimestamp(date, new Date()) : new Date();
+        //
+        // N487/#848: `endOverride` takes precedence when set. This is the
+        // whole fix — N476/N477 already join a session's HR data to
+        // `started_at`..`ended_at`, and without a real end time that window
+        // is "duration minutes before whenever Log it was tapped", which for
+        // a class logged hours late is the athlete's couch, not the mat.
+        const endBase = endOverride ?? (date ? backdatedTimestamp(date, new Date()) : new Date());
         const startedAt = new Date(endBase.getTime() - draft.durationMinutes * 60_000);
         const session = await startLocalSession(userId, {
           sport: 'bjj',
@@ -414,6 +442,20 @@ export default function LogBjjScreen() {
             );
           })}
         </ScrollView>
+
+        {/* N487/#848: the correction, not the default. Reads as a fact
+            ("Ended at 8:42 PM") until tapped — costs nothing on the
+            three-tap floor the file header describes, because nothing here
+            is required and the default is exactly what `commit` already
+            computed before this ticket existed. Only worth touching when the
+            class ended well before "now", which is exactly the case that
+            leaves the HR join (N476/N477) reading the athlete's couch. */}
+        <EndTimeCorrection
+          value={endOverride ?? (date ? backdatedTimestamp(date, new Date()) : new Date())}
+          now={() => (date ? backdatedTimestamp(date, new Date()) : new Date())}
+          onChange={setEndOverride}
+          testID="bjj-log-end-time"
+        />
 
         {/* 4. Rounds — the sparring volume inside that mat time. */}
         <RNView style={styles.labelRow}>

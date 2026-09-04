@@ -55178,6 +55178,120 @@ client — this ticket only makes the backend able to tell the two provenances
 apart once something starts sending them.
 
 
+## 2026-09-04 — N487: a real end time for BJJ sessions, so the HR window is real too (#848)
+
+N476/N477 (merged 2026-09-02) already join a session's Apple HealthKit
+heart-rate samples to `started_at`..`ended_at` — sport-agnostic, and already
+wired for BJJ. But BJJ's two ways to close out a session never captured a
+real end time:
+
+- The post-hoc log screen (`app/bjj/log.tsx`) computed `ended_at` as
+  whatever moment "Log it" was tapped, and `started_at` as that minus the
+  chosen duration preset. Log a 19:00–20:00 class at 21:30 and the HR window
+  queried is 20:30–21:30 — the athlete's couch, not the mat.
+- The live-session Finish flow (`app/bjj/session/[id].tsx`) had the same
+  gap: `finishLocalSession(userId, id)`, no third argument, always real
+  "now" — the recovery path for an app-tracked session the athlete forgot to
+  close, finished hours later at whatever time that happens.
+
+Both defaults are right most of the time — an athlete who logs right after
+class needs nothing corrected — so this is additive, not a new required
+step, matching the BJJ logging-speed floor (`vola-athlete-ux`: "lightweight
+and optional, a three-tap floor").
+
+**`EndTimeCorrection`** (`components/EndTimeCorrection.tsx`) is one shared
+component, used from both screens. Collapsed it reads as a fact ("Ended at
+8:42 PM") — a `Pressable` row with no effect on the fast path's shape or tap
+count. Tapping it opens a sheet, same shape as the reschedule sheet already
+in `bjj/session/[id].tsx` (a `Modal` `pageSheet`, deliberately not a native
+date-picker dependency — this app has none, and one for a single optional
+correction isn't worth a prebuild for every device):
+
+- Quick offset chips (`Just now`/`30m ago`/`1h ago`/`2h ago`/`3h ago`/`4h
+  ago`) — one tap, done, computed against the real "now" captured the
+  MOMENT the sheet opens (not a live value, and not the field's current
+  value) so a session already corrected once doesn't compound a second
+  offset against the first correction instead of restating it against the
+  real world.
+- A `−15m`/`+15m` nudge pair against a local draft, committed only on
+  `Save`, for anything the chips don't land on exactly.
+
+Both screens wire the same shape: a `Date | null` override state, `null`
+meaning "use whatever the screen already computed before this ticket" — so
+an athlete who never opens the sheet gets byte-identical `started_at`/
+`ended_at` to before. `log.tsx`'s `commit()` derives `started_at` from the
+override minus the duration preset (still the preset's job) rather than
+duplicating the preset as a second end-time input; `session/[id].tsx`'s
+`finishNow()` passes the override straight to `finishLocalSession`'s
+existing optional `endedAt` parameter, unchanged since N434.
+
+**Both backend endpoints already accepted this — zero backend or contract
+changes.** `POST /v1/sessions` already takes `started_at`/`ended_at`,
+`POST /v1/sessions/{id}/finish` already takes an optional `ended_at`. The
+whole gap was the mobile UI never offering a way to set either to anything
+but "now" or "duration before now".
+
+**Testing**: `components/__tests__/endTimeCorrection.test.tsx` covers the
+component's own arithmetic in isolation (offsets computed against captured
+"now", never against the field's current value; nudges staying a discardable
+draft until Save; the sheet reseeding on each open) — mutation-verified by
+swapping the offset chips' reference from `now` to `value` and confirming
+the suite goes red on real assertion failures, not a compile error, then
+restoring and re-running green. `__tests__/app/bjjLogScreen.test.tsx` (new)
+and three added tests in `__tests__/app/bjjSessionScreen.test.tsx` cover the
+wiring — the actual `started_at`/`ended_at` sent to `startLocalSession`/
+`finishLocalSession` — for both the untouched fast path and a corrected
+one, also mutation-verified by reverting each screen's override wiring and
+confirming the new tests catch it. One test-only gotcha worth recording:
+under `jest.useFakeTimers()`, React Testing Library's `waitFor`/`findBy*`
+advance the mocked clock by their own poll interval while they wait, so an
+assertion computed from a literal "now" set in `beforeEach` can drift by
+that interval if any `findBy*`/`waitFor` runs beforehand — the fix is
+reading the fake clock back at the point the component itself would read
+it, not re-deriving it from the original literal.
+
+**NEEDS HUMAN EVIDENCE (unmet at merge, per the ticket's acceptance
+criteria)**: logging a BJJ class with the corrected end-time input a few
+hours after it actually happened, confirming the HR data synced afterward
+reflects the real class window rather than the time of logging. This needs
+a real device with real HealthKit workout/HR data and cannot be produced
+from a simulator or a unit test — flagged to the user as the outstanding
+checklist item.
+
+**`frontend-reviewer` caught a real gap before this went ready for review:
+nothing floored the live-session Finish flow's corrected end time against
+the session's own `started_at`.** A mis-tapped chip or nudge (e.g. "4h ago"
+on a session that started 40 minutes earlier) produced a negative duration
+that `minutesBetween` (`bjj/session/[id].tsx`) silently reads as zero, and
+that bad `ended_at` still reached the backend and fed the exact HR join
+this ticket exists to fix — actively worse than the pre-ticket behaviour,
+which always had `ended_at >= started_at` by construction ("now" cannot
+precede a session already in progress). `EndTimeCorrection` gained an
+optional `notBefore` prop, passed as `session.started_at` only from the
+Finish call site (the post-hoc log screen needs none — its `started_at` is
+derived FROM the chosen end time, so ordering there is structurally safe by
+construction): a chip that would cross the floor is disabled outright
+rather than silently clamped on tap (so the chip's label and its effect
+never disagree), the `−15m` nudge stops advancing at the floor, and `Save`
+clamps defensively even if a value somehow arrived below it already —
+three independent layers because the review's own point was that the value
+reaching the backend, not merely the UI's apparent state, is what feeds the
+HR join. Six new tests exercise the floor directly (a below-floor chip
+disabled and inert, an on-floor chip still enabled, repeated nudges never
+crossing it, `Save` clamping a value seeded invalid, the "later" nudge
+never disabled, and no floor at all behaving exactly as before), each
+mutation-verified independently — disabling the `disabled` computation and
+no-opping the `clamp` function separately, confirming each has its own
+test rather than one guard's outcome silently covering for the other.
+
+The reviewer's second finding — the quick-offset chips only reach 4 hours
+and the fine-tune nudge is ±15 minutes, so correcting a session left open
+overnight would take many taps — was left as a documented gap
+(`docs/testing/functional-scenarios.md`) rather than built now: the
+ticket's own scenario is finishing a forgotten app-tracked session hours
+late, not a full day, and the nudge path still reaches any exact time
+given enough taps.
+
 ## Open items / known gaps as of this entry
 
 
