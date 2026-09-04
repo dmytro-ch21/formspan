@@ -44,6 +44,7 @@ function formatClock(d: Date): string {
 export function EndTimeCorrection({
   value,
   now,
+  notBefore,
   onChange,
   testID = 'end-time',
 }: {
@@ -62,6 +63,20 @@ export function EndTimeCorrection({
    * the athlete's thumb between opening the sheet and tapping a chip.
    */
   now: () => Date;
+  /**
+   * A floor the corrected end time may never fall below — the live-session
+   * Finish flow passes the session's own `started_at` (N487 review finding):
+   * without it, a mis-tapped "4h ago" on a session that started 40 minutes
+   * ago produces a negative duration `minutesBetween` (`bjj/session/[id].tsx`)
+   * silently clamps to zero rather than rejecting, and that bad `ended_at`
+   * still reaches the backend and feeds the exact HR join this component
+   * exists to fix — worse than the pre-ticket behaviour, which always had
+   * `ended_at >= started_at` by construction ("now" can't be earlier than a
+   * session already in progress). The post-hoc log screen has no equivalent
+   * floor: `started_at` there is DERIVED from the chosen end time, so
+   * ordering is structurally safe and it passes nothing.
+   */
+  notBefore?: Date;
   onChange: (d: Date) => void;
   testID?: string;
 }) {
@@ -80,17 +95,22 @@ export function EndTimeCorrection({
     setOpen(true);
   }
 
+  /** Never below `notBefore` — the floor `applyOffset`/`nudge`/`save` all share. */
+  function clamp(d: Date): Date {
+    return notBefore && d.getTime() < notBefore.getTime() ? notBefore : d;
+  }
+
   function applyOffset(min: number) {
-    onChange(new Date(openedAt.getTime() - min * 60_000));
+    onChange(clamp(new Date(openedAt.getTime() - min * 60_000)));
     setOpen(false);
   }
 
   function nudge(minutes: number) {
-    setDraft((d) => new Date(d.getTime() + minutes * 60_000));
+    setDraft((d) => clamp(new Date(d.getTime() + minutes * 60_000)));
   }
 
   function save() {
-    onChange(draft);
+    onChange(clamp(draft));
     setOpen(false);
   }
 
@@ -135,30 +155,53 @@ export function EndTimeCorrection({
 
           <Text style={styles.sectionLabel}>How long ago</Text>
           <RNView style={styles.chips}>
-            {QUICK_OFFSETS_MIN.map((min) => (
-              <Pressable
-                key={min}
-                onPress={() => applyOffset(min)}
-                style={styles.chip}
-                accessibilityRole="button"
-                testID={`${testID}-offset-${min}`}
-              >
-                <Text style={styles.chipText}>{formatOffset(min)}</Text>
-              </Pressable>
-            ))}
+            {QUICK_OFFSETS_MIN.map((min) => {
+              // Disabled rather than silently clamped-on-tap: a chip that
+              // reads "4h ago" but actually lands on `notBefore` when tapped
+              // would show the athlete one time and record another.
+              const disabled =
+                notBefore != null &&
+                new Date(openedAt.getTime() - min * 60_000).getTime() < notBefore.getTime();
+              return (
+                <Pressable
+                  key={min}
+                  onPress={() => applyOffset(min)}
+                  disabled={disabled}
+                  style={[styles.chip, disabled && styles.chipDisabled]}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled }}
+                  testID={`${testID}-offset-${min}`}
+                >
+                  <Text style={[styles.chipText, disabled && styles.chipTextDisabled]}>
+                    {formatOffset(min)}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </RNView>
+          {notBefore != null && (
+            <Text style={styles.floorNote}>Can’t be before this session started.</Text>
+          )}
 
           <Text style={styles.sectionLabel}>Or fine-tune the exact time</Text>
           <RNView style={styles.exactRow}>
-            <Pressable
-              onPress={() => nudge(-15)}
-              style={styles.nudgeBtn}
-              accessibilityRole="button"
-              accessibilityLabel="15 minutes earlier"
-              testID={`${testID}-nudge-back`}
-            >
-              <Text style={styles.nudgeSign}>−15m</Text>
-            </Pressable>
+            {(() => {
+              const atFloor =
+                notBefore != null && draft.getTime() - 15 * 60_000 < notBefore.getTime();
+              return (
+                <Pressable
+                  onPress={() => nudge(-15)}
+                  disabled={atFloor}
+                  style={[styles.nudgeBtn, atFloor && styles.nudgeBtnDisabled]}
+                  accessibilityRole="button"
+                  accessibilityLabel="15 minutes earlier"
+                  accessibilityState={{ disabled: atFloor }}
+                  testID={`${testID}-nudge-back`}
+                >
+                  <Text style={[styles.nudgeSign, atFloor && styles.nudgeSignDisabled]}>−15m</Text>
+                </Pressable>
+              );
+            })()}
             <Text style={styles.exactValue} testID={`${testID}-draft-value`}>
               {formatClock(draft)}
             </Text>
@@ -233,6 +276,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipText: { color: vola.text, fontSize: 13, fontWeight: '600' },
+  // A chip that would land before `notBefore` — opacity only, same 0.4-0.5
+  // range every other disabled control in this app uses (e.g. `log.tsx`'s
+  // `styles.disabled`), never a colour swap that would need a second theme
+  // check.
+  chipDisabled: { opacity: 0.4 },
+  chipTextDisabled: { color: vola.textDim },
+  floorNote: { color: vola.textDim, fontSize: 11, marginBottom: 4, marginTop: -4 },
 
   exactRow: {
     flexDirection: 'row',
@@ -250,7 +300,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  nudgeBtnDisabled: { opacity: 0.4 },
   nudgeSign: { fontSize: 15, fontWeight: '700', color: vola.text },
+  nudgeSignDisabled: { color: vola.textDim },
   exactValue: { fontSize: 22, fontWeight: '800', color: vola.text, fontVariant: ['tabular-nums'] },
 
   save: { borderRadius: 12, paddingVertical: 16, alignItems: 'center' },

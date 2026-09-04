@@ -55258,6 +55258,40 @@ a real device with real HealthKit workout/HR data and cannot be produced
 from a simulator or a unit test — flagged to the user as the outstanding
 checklist item.
 
+**`frontend-reviewer` caught a real gap before this went ready for review:
+nothing floored the live-session Finish flow's corrected end time against
+the session's own `started_at`.** A mis-tapped chip or nudge (e.g. "4h ago"
+on a session that started 40 minutes earlier) produced a negative duration
+that `minutesBetween` (`bjj/session/[id].tsx`) silently reads as zero, and
+that bad `ended_at` still reached the backend and fed the exact HR join
+this ticket exists to fix — actively worse than the pre-ticket behaviour,
+which always had `ended_at >= started_at` by construction ("now" cannot
+precede a session already in progress). `EndTimeCorrection` gained an
+optional `notBefore` prop, passed as `session.started_at` only from the
+Finish call site (the post-hoc log screen needs none — its `started_at` is
+derived FROM the chosen end time, so ordering there is structurally safe by
+construction): a chip that would cross the floor is disabled outright
+rather than silently clamped on tap (so the chip's label and its effect
+never disagree), the `−15m` nudge stops advancing at the floor, and `Save`
+clamps defensively even if a value somehow arrived below it already —
+three independent layers because the review's own point was that the value
+reaching the backend, not merely the UI's apparent state, is what feeds the
+HR join. Six new tests exercise the floor directly (a below-floor chip
+disabled and inert, an on-floor chip still enabled, repeated nudges never
+crossing it, `Save` clamping a value seeded invalid, the "later" nudge
+never disabled, and no floor at all behaving exactly as before), each
+mutation-verified independently — disabling the `disabled` computation and
+no-opping the `clamp` function separately, confirming each has its own
+test rather than one guard's outcome silently covering for the other.
+
+The reviewer's second finding — the quick-offset chips only reach 4 hours
+and the fine-tune nudge is ±15 minutes, so correcting a session left open
+overnight would take many taps — was left as a documented gap
+(`docs/testing/functional-scenarios.md`) rather than built now: the
+ticket's own scenario is finishing a forgotten app-tracked session hours
+late, not a full day, and the nudge path still reaches any exact time
+given enough taps.
+
 ## Open items / known gaps as of this entry
 
 

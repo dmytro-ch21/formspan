@@ -18569,10 +18569,31 @@ default it to "now" or "duration before now").
 - **Changing the duration preset after correcting the end time** re-derives
   `started_at` from the corrected end, not from "now" — the correction
   isn't silently discarded by a later preset tap.
-- Picking an end time that would put `started_at` before the session
-  actually existed (an implausibly long duration against an early
-  correction) is not specially guarded here — same as the existing
-  duration-preset math, which never validated this either.
+- **Live-session Finish: the corrected end time cannot be set before the
+  session's own `started_at`.** A quick-offset chip that would land before
+  it (e.g. tapping "4h ago" on a session that started 40 minutes ago) is
+  disabled and does nothing when tapped; the `−15m` fine-tune nudge stops
+  advancing once it reaches `started_at` rather than going past it; and
+  `Save` clamps to `started_at` as a last-resort floor even if a value
+  somehow arrived below it already. Without this, a mis-tap would produce a
+  negative duration that the screen's own `minutesBetween` silently reads as
+  zero, and the bad `ended_at` would still reach the backend and feed the
+  exact HR join this ticket exists to fix — worse than the pre-ticket
+  behaviour, which always had `ended_at >= started_at` by construction
+  ("now" cannot be earlier than a session already in progress).
+- **Post-hoc log has no equivalent floor, and needs none.** `started_at`
+  there is DERIVED from the chosen end time (end minus the duration preset),
+  so no correction can ever produce an inverted order — the structural
+  safety net the live-Finish path lacks by construction, since its
+  `started_at` is fixed the moment the session started.
+- **Known gap, not a defect:** the quick-offset chips only reach 4 hours ago,
+  and the fine-tune nudge is ±15 minutes — correcting a session left
+  open overnight (an all-night gap between the live-session start and
+  finishing it the next day) would take many nudge taps. Flagged in review
+  (N487) as worth extending later if it comes up in practice; not built now
+  because the ticket's own scenario (finishing an app-tracked session "late")
+  reads as hours, not a full day, and the fine-tune path still reaches any
+  exact time given enough taps.
 
 ### NEEDS HUMAN EVIDENCE
 

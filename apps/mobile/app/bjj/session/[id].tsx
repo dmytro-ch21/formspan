@@ -846,10 +846,20 @@ export default function BjjSessionScreen() {
               two separate gestures, so a mis-tap on the sheet can never also
               close the session. Defaults to real "now"; only worth touching
               when this app-tracked session is being closed out well after
-              training actually stopped. */}
+              training actually stopped.
+
+              `notBefore={session.started_at}` — review finding (N487):
+              without a floor, a mis-tapped "4h ago" on a session that
+              started 40 minutes ago produces a negative duration that
+              `minutesBetween` below silently reads as zero, and that bad
+              `ended_at` still reaches the backend and feeds the exact HR
+              join this ticket exists to fix. `log.tsx` needs no equivalent
+              — its `started_at` is DERIVED from the chosen end time, so
+              ordering there is structurally safe. */}
           <EndTimeCorrection
             value={finishEndOverride ?? new Date()}
             now={() => new Date()}
+            notBefore={new Date(session.started_at)}
             onChange={setFinishEndOverride}
             testID="bjj-session-finish-end-time"
           />

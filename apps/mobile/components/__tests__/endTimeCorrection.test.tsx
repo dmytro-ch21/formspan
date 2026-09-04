@@ -108,3 +108,93 @@ describe('fine-tune nudges', () => {
     expect(screen.getByTestId('et-draft-value')).toHaveTextContent('2:00 PM');
   });
 });
+
+/**
+ * N487 review finding: on the live-session Finish flow, nothing stopped a
+ * mis-tapped chip/nudge from landing `ended_at` before `session.started_at`
+ * — a negative duration `minutesBetween` (`bjj/session/[id].tsx`) silently
+ * reads as zero, and the bad value still reached the backend and fed the
+ * exact HR join this ticket exists to fix. `notBefore` is the floor;
+ * `session/[id].tsx` passes the session's own `started_at`.
+ *
+ * `NOW` is 21:30; `FLOOR` is 21:00 (30 minutes before it) throughout.
+ */
+describe('a floor via notBefore', () => {
+  const FLOOR = new Date(2026, 7, 20, 21, 0, 0);
+
+  it('disables a chip that would land before the floor, and it does nothing when tapped', () => {
+    render(
+      <EndTimeCorrection value={NOW} now={() => NOW} notBefore={FLOOR} onChange={onChange} testID="et" />,
+    );
+    fireEvent.press(screen.getByTestId('et-row'));
+
+    // "1h ago" = 20:30, before the 21:00 floor.
+    const hourAgo = screen.getByTestId('et-offset-60');
+    expect(hourAgo.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+    fireEvent.press(hourAgo);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('leaves a chip that lands exactly on the floor enabled', () => {
+    render(
+      <EndTimeCorrection value={NOW} now={() => NOW} notBefore={FLOOR} onChange={onChange} testID="et" />,
+    );
+    fireEvent.press(screen.getByTestId('et-row'));
+
+    // "30m ago" = 21:00, exactly the floor — not BEFORE it.
+    const halfHourAgo = screen.getByTestId('et-offset-30');
+    expect(halfHourAgo.props.accessibilityState?.disabled).not.toBe(true);
+    fireEvent.press(halfHourAgo);
+    expect(onChange).toHaveBeenCalledWith(FLOOR);
+  });
+
+  it('nudging earlier never crosses the floor, no matter how many taps', () => {
+    render(
+      <EndTimeCorrection value={NOW} now={() => NOW} notBefore={FLOOR} onChange={onChange} testID="et" />,
+    );
+    fireEvent.press(screen.getByTestId('et-row'));
+
+    // Five taps of -15m from 21:30 would reach 20:15 unclamped — well past
+    // the 21:00 floor.
+    for (let i = 0; i < 5; i++) {
+      fireEvent.press(screen.getByTestId('et-nudge-back'));
+    }
+    expect(screen.getByTestId('et-draft-value')).toHaveTextContent('9:00 PM');
+
+    fireEvent.press(screen.getByTestId('et-save'));
+    expect(onChange).toHaveBeenCalledWith(FLOOR);
+  });
+
+  it('save clamps even a value seeded below the floor (the caller already had an invalid one)', () => {
+    const belowFloor = new Date(2026, 7, 20, 20, 0, 0); // 20:00, before the 21:00 floor
+    render(
+      <EndTimeCorrection
+        value={belowFloor}
+        now={() => NOW}
+        notBefore={FLOOR}
+        onChange={onChange}
+        testID="et"
+      />,
+    );
+    fireEvent.press(screen.getByTestId('et-row'));
+    // No nudge at all — Save alone must still clamp.
+    fireEvent.press(screen.getByTestId('et-save'));
+    expect(onChange).toHaveBeenCalledWith(FLOOR);
+  });
+
+  it('never disables the "later" nudge — only earlier can cross a floor', () => {
+    render(
+      <EndTimeCorrection value={NOW} now={() => NOW} notBefore={FLOOR} onChange={onChange} testID="et" />,
+    );
+    fireEvent.press(screen.getByTestId('et-row'));
+    const forward = screen.getByTestId('et-nudge-forward');
+    expect(forward.props.accessibilityState?.disabled).not.toBe(true);
+  });
+
+  it('with no notBefore prop, nothing is disabled and offsets are never clamped', () => {
+    render(<EndTimeCorrection value={NOW} now={() => NOW} onChange={onChange} testID="et" />);
+    fireEvent.press(screen.getByTestId('et-row'));
+    fireEvent.press(screen.getByTestId('et-offset-240')); // 4h ago — well past FLOOR, but no floor set
+    expect(onChange).toHaveBeenCalledWith(new Date(NOW.getTime() - 240 * 60_000));
+  });
+});
