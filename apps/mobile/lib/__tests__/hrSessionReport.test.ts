@@ -157,7 +157,7 @@ describe('buildHRSessionReport — zone colours reuse existing semantic tokens',
   });
 
   test('the ramp is the same one already used for BJJ RPE — zone colours are not a second system', () => {
-    // Mirrors `rpeColor()` in `app/bjj/log.tsx`: green -> rpeModerate -> warn
+    // Mirrors `rpeColour()` in `app/bjj/log.tsx`: green -> rpeModerate -> warn
     // -> danger, ascending. Asserted here so the two ramps cannot silently
     // diverge — this test breaks if either file's colour choice changes
     // without the other being reconsidered.

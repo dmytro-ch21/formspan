@@ -55355,7 +55355,7 @@ evidence or nothing" rule as everywhere else in this file.
 
 **Zone colour: reused, not invented.** The ticket asked explicitly for a check
 before picking one. Nothing in the repo already colours HR zones — but
-`rpeColor()` in `app/bjj/log.tsx` already colours the BJJ RPE selector on
+`rpeColour()` in `app/bjj/log.tsx` already colours the BJJ RPE selector on
 exactly this kind of ordinal "how hard" scale: `vola.green` → `vola.
 rpeModerate` → `vola.warn` → `vola.danger`, ascending. An HR zone is the same
 question answered by a sensor instead of a self-report, so the five zones
@@ -55364,7 +55364,7 @@ app's existing "didn't register as an answer" neutral) for zone 1 — below 60%
 of HRmax is resting/warm-up territory, not the bottom rung of an effort
 ladder, so it does not get a "hot" colour. Every value is an already-validated
 semantic token (`scripts/validate_palette.mjs` already contrast-checks
-`green`/`rpeModerate`/`warn`/`danger` individually, and `rpeColor()` already
+`green`/`rpeModerate`/`warn`/`danger` individually, and `rpeColour()` already
 proves three of the four work together); nothing here is a new hex value, so
 `check:palette` needed no new assertion — a redundant "these equal themselves"
 check would test nothing a mutation could break. Each zone row also carries
@@ -55389,7 +55389,7 @@ all three states, the sample-count boundary exactly at the threshold, the
 percentage arithmetic (including an all-zero edge case with a real non-null
 TRIMP of exactly 0), that the effectiveness verdict comes from the real
 `sessionEffectivenessSummary` rather than a reimplementation, and that the
-zone colours are the literal same four tokens `rpeColor()` uses, in the same
+zone colours are the literal same four tokens `rpeColour()` uses, in the same
 order — a guard against the two ramps silently diverging.
 `apps/mobile/components/__tests__/HRSessionReport.test.tsx` (8 cases) — what
 each state SAYS on screen (the `TrendCard` test file's own split between

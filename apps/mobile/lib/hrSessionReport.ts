@@ -124,7 +124,7 @@ const ZONE_LABELS: Record<number, string> = {
  * -ri "zone" assets/brand apps/mobile` before this file existed turns up
  * nothing but this ticket's own data types). What DOES already exist is a
  * four-step "how hard" ramp for exactly this kind of ordinal effort scale —
- * `rpeColor()` in `apps/mobile/app/bjj/log.tsx`, which colours the BJJ RPE
+ * `rpeColour()` in `apps/mobile/app/bjj/log.tsx`, which colours the BJJ RPE
  * selector `vola.green` (1-4) → `vola.rpeModerate` (5-6) → `vola.warn` (7-8)
  * → `vola.danger` (9-10). An HR zone IS the same question — "how hard was
  * this" — answered from a sensor instead of a self-report, so reusing that
@@ -142,10 +142,10 @@ const ZONE_LABELS: Record<number, string> = {
  * **Why this needed no new palette validation**: every value here is already
  * an established semantic token — `green`/`rpeModerate`/`warn`/`danger` are
  * already contrast-checked individually in `scripts/validate_palette.mjs`,
- * and reused together is exactly what `rpeColor()` already does with three of
+ * and reused together is exactly what `rpeColour()` already does with three of
  * the four. `textDim` is a base text token, not a status colour. Nothing here
  * is a new hex value, so there is nothing for `check:palette` to gain by
- * asserting — the four hot steps are already covered by the guard `rpeColor`
+ * asserting — the four hot steps are already covered by the guard `rpeColour`
  * depends on, and adding a redundant assertion of "these are the same four
  * values" would test that a constant equals itself.
  */

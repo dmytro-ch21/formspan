@@ -18643,7 +18643,7 @@ screens.
   an error state or a "not available" placeholder.
 - Zone colours match, in order, `vola.textDim` (zone 1) →
   `vola.green` → `vola.rpeModerate` → `vola.warn` → `vola.danger` (zones
-  2–5) — the same ramp `rpeColor()` uses for the BJJ RPE selector in
+  2–5) — the same ramp `rpeColour()` uses for the BJJ RPE selector in
   `app/bjj/log.tsx`, so "how hard" reads as one idea across the app.
 
 ### Edge cases & errors

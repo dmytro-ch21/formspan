@@ -345,7 +345,13 @@ export default function BjjSessionScreen() {
     // No synchronous reset here on purpose (react-hooks/set-state-in-effect):
     // `hrMetrics` already starts `null`, and nothing on this screen ever
     // un-ends a session for the same `id`, so there is no path that leaves a
-    // stale value behind for this to clear.
+    // stale value behind for this to clear. This reasons about `id` staying
+    // fixed for the component instance's lifetime — true today (nothing
+    // navigates from this screen to itself with a different `id`), but if a
+    // future "next/previous session" control ever does, React Navigation
+    // would reuse this instance across ids without unmounting it, and this
+    // effect would need an explicit reset back to `null`/`false` before the
+    // fetch for the new `id` starts.
     if (!id || !session?.ended_at) return;
     let cancelled = false;
     getSessionMetrics(getToken, id)
