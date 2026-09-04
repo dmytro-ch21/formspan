@@ -368,6 +368,19 @@ describe('what each athlete sees', () => {
   });
 });
 
+// N489/#850 — a summary row, not a computed figure: matches the "no section
+// here computes its own figures locally" doc comment, so this is checked
+// like the other static rows (Weight trend, Position map) rather than by
+// feeding it any load data of its own.
+describe('training load row', () => {
+  it('offers a way into the cross-sport training-load trend, inside the training section', async () => {
+    render(<ProgressScreen />);
+    await answerEverything();
+    const training = screen.getByTestId('progress-section-training');
+    expect(within(training).getByTestId('progress-training-load')).toBeTruthy();
+  });
+});
+
 describe('what moved here from You', () => {
   it('renders the training summary and the records list', async () => {
     render(<ProgressScreen />);

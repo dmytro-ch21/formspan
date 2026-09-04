@@ -2004,6 +2004,30 @@ components:
             bumps whenever the formula or zone boundaries change, so a
             client can tell a stale computation apart from a fresh one.
 
+    SessionLoad:
+      type: object
+      required: [session_id, sport, started_at, trimp]
+      description: >
+        One session's contribution to the cross-session training-load trend
+        — N489/#850. A narrow projection of SessionMetrics joined with the
+        owning session's sport/started_at; trimp is never null here — a
+        session with no computed metrics, or with hr_source 'none' (no HR
+        evidence at all), is excluded from the list entirely rather than
+        reported as zero load.
+      properties:
+        session_id: { type: string, readOnly: true }
+        sport:
+          type: string
+          enum: [strength, running, bjj]
+          description: >
+            TRIMP is computed identically regardless of sport (trimp.go), so
+            this list is genuinely cross-sport — a client draws one trend
+            from it rather than three.
+        started_at: { type: string, format: date-time }
+        trimp:
+          type: number
+          format: double
+
     Error:
       type: object
       required: [error]
@@ -9299,6 +9323,57 @@ paths:
                   metrics: { $ref: "#/components/schemas/SessionMetrics" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /biometric/sessions/load:
+    get:
+      summary: List the caller's own sessions with a computed training load in a date range
+      operationId: listBiometricSessionLoad
+      description: >
+        N489/#850 — the Progress-tab cross-session TRIMP trend. One query
+        across sessions/session_metrics rather than a per-session fetch loop:
+        see biometric.Repository.ListSessionLoad's doc comment for the full
+        N+1-vs-batch reasoning. Spans all three sports (strength, running,
+        bjj) in one list, since TRIMP is computed identically regardless of
+        sport.
+
+
+        A session with no computed metrics yet, or with hr_source 'none' (no
+        heart-rate evidence at all), is excluded from the result — never
+        reported as zero load.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          description: The [from, to] range must not exceed 1200 days.
+      responses:
+        "200":
+          description: >
+            The caller's own sessions with a computed trimp, ascending by
+            started_at, capped at 5,000 rows — the 1100-day window bounds
+            TIME, not row count, the same distinction ListSamples' own 200
+            response draws about its 400-day/20,000-row pair. Narrow
+            `from`/`to` if the cap is hit; results are oldest-first so
+            nothing recent is silently dropped in its place.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/SessionLoad" }
+        "400":
+          description: from/to not RFC3339, to before from, or a range over 1200 days.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /workouts:
     get:

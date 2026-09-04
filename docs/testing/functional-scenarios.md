@@ -18713,3 +18713,63 @@ screens.
   session on a physical screen, and the `ScrollView` added to running's
   finished branch behaving correctly at accessibility text sizes — nothing
   in this repo's suite renders layout/colour on a real screen.
+
+## N489 — Progress tab: a training-load/HR trend row, aggregating across sessions and sports (`backend/internal/modules/biometric` — `ListSessionLoad`/`GET /v1/biometric/sessions/load`, `apps/mobile/app/(tabs)/progress.tsx`, `apps/mobile/app/trainingLoad/trend.tsx`)
+
+The cross-session rollup on top of N476/N477's per-session TRIMP — see the
+N489/#850 history entry for the N+1-vs-batch-endpoint reasoning and why this
+sits on Progress rather than beside VO2max on You.
+
+### Happy path
+
+- **Progress tab → training section:** a "Training load" row appears
+  between the training calendar and the position map, for every athlete
+  regardless of which sports are enabled — tapping it opens
+  `/trainingLoad/trend`.
+- **Trend screen, real data across sports:** with computed session metrics
+  for at least one BJJ, one strength and one running session, all three
+  contribute to the same trend line — the delta figure and the chart both
+  reflect load from every sport, not one at a time.
+- **Two sessions in one day:** an AM lift and a PM roll on the same calendar
+  day appear as ONE entry in the "TRAINING DAYS" list, its TRIMP the sum of
+  both — not two overlapping points on the chart.
+- **Preset ranges (`1W 1M 3M 6M 1Y All`):** switching the chip re-slices the
+  already-fetched history and redraws — no new network request per tap
+  (mirrors `app/records/[exerciseId]/trend.tsx`'s own approach).
+- **A genuine rest week, after real training history exists:** the trailing
+  7-day sum for that week is 0 and renders as a real point on the line — not
+  as "no data" — since the athlete's history clearly extends before it.
+
+### Edge cases & errors
+
+- **A session with `hr_source: 'none'`** (no wearable, or HR never synced)
+  is absent from both the row's destination screen and the underlying
+  `GET /v1/biometric/sessions/load` response — never rendered as a zero-load
+  day. The same is true for a session nobody has called `ComputeMetrics` for
+  yet (the common, non-blocking state per design doc §6.4).
+- **A brand-new account with zero computed sessions ever:** the trend screen
+  states plainly that no training load has been computed yet (mentioning
+  that heart-rate data — HealthKit/Health Connect — is what's missing),
+  distinct from a failed fetch.
+- **A failed fetch** (offline, server error) reads "Couldn't load your
+  training load trend" — never the empty-history copy; the codebase's most
+  repeated defect (CLAUDE.md's "Verify that a check can fail").
+- **A preset window with real history further back but nothing inside it**
+  (e.g. picking `1W` after a month off) says "Nothing in this range… try a
+  wider range" rather than claiming no history exists at all.
+- **`GET /v1/biometric/sessions/load` — auth/validation:** missing/malformed
+  `from` or `to` → 400 `invalid_input`; `to` before `from` → 400; a range
+  over 1100 days → 400; no bearer token → 401. A response never includes
+  another user's sessions (cross-user isolation, exercised directly against
+  Postgres in `postgres_test.go`).
+- **Deleting a session** whose metrics had contributed to the trend removes
+  it from a subsequent fetch (the composite FK cascade already covers this
+  — `session_metrics` rows die with their session).
+
+### Needs a device
+
+- The empty-account and real-multi-sport-data scenarios above are both
+  reachable in the simulator with seeded/mocked data, but the end-to-end
+  claim — a real Apple Watch/Health Connect HR sync feeding a real BJJ,
+  strength and running session each, then the trend screen showing a
+  believable weekly figure across all three — has not been run on a device.

@@ -126,6 +126,61 @@ func TestListSamples_RejectsRangeOverTheLimit(t *testing.T) {
 	}
 }
 
+func listSessionLoadResponse(t *testing.T, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	h := NewHandler(nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/biometric/sessions/load?"+query, nil)
+	rec := httptest.NewRecorder()
+	h.ListSessionLoad(rec, req)
+	return rec
+}
+
+func TestListSessionLoad_RejectsBadFrom(t *testing.T) {
+	rec := listSessionLoadResponse(t, "from=nope&to=2026-09-02T00:00:00Z")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestListSessionLoad_RejectsBadTo(t *testing.T) {
+	rec := listSessionLoadResponse(t, "from=2026-09-01T00:00:00Z&to=nope")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestListSessionLoad_RejectsToBeforeFrom(t *testing.T) {
+	rec := listSessionLoadResponse(t, "from=2026-09-02T00:00:00Z&to=2026-09-01T00:00:00Z")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestListSessionLoad_RejectsRangeOverTheLimit(t *testing.T) {
+	rec := listSessionLoadResponse(t, "from=2020-01-01T00:00:00Z&to=2026-09-01T00:00:00Z")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestListSessionLoad_ValidRangeReachesTheRepository(t *testing.T) {
+	// Mirrors TestComputeMetrics_ValidBodyReachesTheRepository's technique: a
+	// nil repository dereferenced past validation panics, which proves the
+	// guards above (and not some unrelated bug) are what stop the invalid
+	// cases.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a valid list-session-load request should reach the repository")
+		}
+	}()
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/biometric/sessions/load?from=2026-09-01T00:00:00Z&to=2026-09-02T00:00:00Z", nil)
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{UserID: "user_x"}))
+	h := NewHandler(nil)
+	rec := httptest.NewRecorder()
+	h.ListSessionLoad(rec, req)
+}
+
 func computeMetricsResponse(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	h := NewHandler(nil)

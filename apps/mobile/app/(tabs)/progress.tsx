@@ -377,6 +377,29 @@ export default function ProgressScreen() {
           <TrainingHistory />
 
           {/*
+            Training load, N489/#850 — a link, not a second chart. The trend
+            itself (a 7-day rolling TRIMP total, cross-sport) lives at
+            `/trainingLoad/trend`, following the same "summary row here, the
+            actual reading lives on its own screen" shape as Weight trend
+            below and Position map two rows down. This Row fetches and
+            computes nothing itself — same posture as every other row on this
+            screen.
+
+            Unconditional, like the nutrition links further down: it needs no
+            module gate, since TRIMP is computed identically for every sport
+            this app has (strength, running, bjj) and the destination itself
+            already says plainly when there is nothing to show yet, rather
+            than this row silently vanishing for an athlete who has no
+            heart-rate data synced yet.
+          */}
+          <Row
+            title="Training load"
+            note="A weekly TRIMP trend across BJJ, strength and running sessions with HR data."
+            onPress={() => router.push('/trainingLoad/trend')}
+            testID="progress-training-load"
+          />
+
+          {/*
             The position map, moved off You.
 
             Gated on the CAPABILITY rather than on `key === 'bjj'`, and it

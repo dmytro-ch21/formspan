@@ -389,6 +389,45 @@ type SessionMetrics struct {
 	RuleVersion int `json:"rule_version"`
 }
 
+// MaxSessionLoadRows bounds one ListSessionLoad call — the row-count ceiling
+// `docs/architecture/api-conventions.md`'s conditional-GET section requires
+// of every list endpoint, independent of maxSessionLoadRangeDays' TIME cap
+// (handler.go): every response passes through apihttp's ETag hashing, which
+// buffers the whole body to hash it, so peak memory is only bounded when
+// every list has a row ceiling of its own — the exact property that section
+// names two endpoints (`activity.ListByUser`, `workout.List`) for lacking
+// before it was added there. `ListSamples`' MaxSamplesPerListQuery is the
+// direct precedent in this same package. 5000 is generous headroom over any
+// realistic training history — training five times a week for a decade is
+// under 2,700 sessions with a computed load — and results are returned
+// oldest-first with a deterministic `(started_at, id)` tiebreak, so a caller
+// that hits the cap narrows `from`/`to` rather than losing recent data
+// silently.
+const MaxSessionLoadRows = 5000
+
+// SessionLoad is one session's contribution to a cross-session training-load
+// trend — N489/#850. Deliberately a NARROW projection of SessionMetrics
+// joined with the owning session's sport/started_at, not the full
+// SessionMetrics row: the trend this feeds (Progress tab, all three sports)
+// needs exactly "when, how much, which sport", and returning the whole row
+// (time_in_zones, hr_max_bpm, …) per session would be work the caller never
+// uses, multiplied by however many sessions fall in the window.
+type SessionLoad struct {
+	SessionID string `json:"session_id"`
+	// Sport is the owning session's sport ('strength' | 'running' | 'bjj') —
+	// what makes this trend legitimately CROSS-SPORT rather than three
+	// separate ones: TRIMP is computed identically regardless of sport (see
+	// trimp.go), so one query already spans all three.
+	Sport     string    `json:"sport"`
+	StartedAt time.Time `json:"started_at"`
+	// TRIMP is never nil here — see ListSessionLoad's doc comment: a session
+	// whose metrics have TRIMP nil (no samples, or no HRmax to classify
+	// against) is excluded from the result entirely rather than surfaced as
+	// a zero, which is the same "absent, not zero" stance SessionMetrics.TRIMP
+	// itself takes.
+	TRIMP float64 `json:"trimp"`
+}
+
 // Repository is the persistence port for this module.
 type Repository interface {
 	// PutSamples stores a batch of raw readings, idempotently — a retried
@@ -431,4 +470,25 @@ type Repository interface {
 	// doc §6.4: "session_metrics being absent is a normal state, not an
 	// error"), not a fault.
 	GetSessionMetrics(ctx context.Context, userID, sessionID string) (SessionMetrics, error)
+
+	// ListSessionLoad returns the caller's own sessions with a COMPUTED
+	// TRIMP (i.e. session_metrics.trimp IS NOT NULL) whose started_at falls
+	// in [from, to], ascending — N489/#850, the Progress-tab cross-session
+	// load trend.
+	//
+	// A JOIN, not N calls to GetSessionMetrics: the trend this feeds asks
+	// for up to a year (or more) of sessions in one screen load, and one
+	// query bounded by an index beats a per-session round trip whose count
+	// scales with how often the athlete trains — see this ticket's history
+	// entry for the full reasoning on why N+1 was rejected here specifically
+	// (unlike, say, a single session detail screen, which only ever needs
+	// one row and is exactly what GetSessionMetrics already serves).
+	//
+	// A session with NO computed metrics (never enriched) or with
+	// hr_source='none' (no HR evidence at all) is excluded from the result
+	// rather than reported as zero load — trimp is nil in both cases (see
+	// SessionMetrics.TRIMP's doc comment and Compute in trimp.go), so
+	// filtering on "trimp IS NOT NULL" is the same honesty rule already
+	// enforced at computation time, applied again at the read.
+	ListSessionLoad(ctx context.Context, userID string, from, to time.Time) ([]SessionLoad, error)
 }

@@ -390,6 +390,54 @@ func (r *PostgresRepository) GetSessionMetrics(
 	return m, nil
 }
 
+// ListSessionLoad returns the caller's own sessions with a computed TRIMP in
+// [from, to], ascending by started_at, capped at MaxSessionLoadRows — see
+// the Repository interface's doc comment for why this is one JOIN rather
+// than N calls to GetSessionMetrics, and MaxSessionLoadRows' own doc comment
+// for why a query with no row ceiling of its own is unsafe here regardless
+// of the date-range cap (handler.go's maxSessionLoadRangeDays bounds TIME,
+// not ROW COUNT — the identical distinction ListSamples' own doc comment
+// draws about MaxSamplesPerListQuery).
+//
+// `trimp IS NOT NULL` is the whole of the "exclude hr_source='none' /
+// never-enriched sessions honestly" rule: Compute (trimp.go) only ever
+// writes a non-nil trimp when real samples were classified against a real
+// HRmax, so this single predicate already encodes the same gate
+// SessionMetrics.TRIMP's own doc comment describes — a second, redundant
+// hr_source check would just be re-deriving what trimp's nullness already
+// says.
+func (r *PostgresRepository) ListSessionLoad(
+	ctx context.Context, userID string, from, to time.Time,
+) ([]SessionLoad, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.id, s.sport, s.started_at, m.trimp
+		FROM sessions s
+		JOIN session_metrics m ON m.session_id = s.id
+		WHERE s.user_id = $1 AND m.user_id = $1
+			AND m.trimp IS NOT NULL
+			AND s.started_at >= $2 AND s.started_at <= $3
+		ORDER BY s.started_at, s.id
+		LIMIT $4`,
+		userID, from, to, MaxSessionLoadRows)
+	if err != nil {
+		return nil, fmt.Errorf("biometric: list session load: %w", err)
+	}
+	defer rows.Close()
+
+	out := []SessionLoad{}
+	for rows.Next() {
+		var l SessionLoad
+		if err := rows.Scan(&l.SessionID, &l.Sport, &l.StartedAt, &l.TRIMP); err != nil {
+			return nil, fmt.Errorf("biometric: scan session load: %w", err)
+		}
+		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("biometric: list session load rows: %w", err)
+	}
+	return out, nil
+}
+
 // scanner is the slice of pgx.Row/pgx.Rows this file's scan functions need,
 // matching running's own.
 type scanner interface {
