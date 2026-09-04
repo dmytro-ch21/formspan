@@ -15,7 +15,13 @@ import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { addDays, dayString, monthGrid, weekDays as calendarWeekDays } from '@/lib/calendar';
+import {
+  addDays,
+  dayString,
+  finishTimestampFor,
+  monthGrid,
+  weekDays as calendarWeekDays,
+} from '@/lib/calendar';
 import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import {
   getDetail,
@@ -405,10 +411,27 @@ export default function BjjSessionScreen() {
     // an unhandled rejection and, to the athlete, a button that silently did
     // nothing. The screen has an error state; it should use it.
     try {
-      // `undefined` when the athlete never opened the correction sheet —
-      // `finishLocalSession` stamps real "now", byte-identical to before
-      // this ticket touched the file.
-      await finishLocalSession(userId, id, finishEndOverride?.toISOString());
+      // N492 follow-up to N487: when the athlete never opened the correction
+      // sheet, this used to always pass `undefined` — real "now", regardless
+      // of what day the session is dated to. That is the N434 bug back
+      // again, on this screen only: a session rescheduled to a past day (the
+      // month-grid sheet above, `commitReschedule`) and then finished today
+      // got `ended_at` stamped with today's real timestamp, a multi-day
+      // "duration" the elapsed Stat and history both read literally.
+      // `finishTimestampFor` is the same mapping the strength screen
+      // (`app/session/[id].tsx`) already applies — it returns `undefined`
+      // (real "now") when the session's day IS today, so the ordinary path
+      // is unchanged; it only maps onto the session's own day when it isn't.
+      // `session!` — same non-null assertion the strength screen's own
+      // finish handler uses for the same reason: `finishNow` is only ever
+      // reachable from `HoldToConfirm`, which this screen renders solely
+      // inside the `!session.ended_at` branch below, so `session` is always
+      // populated by the time a press can fire it. TS cannot see that across
+      // the closure boundary.
+      const endedAt = finishEndOverride
+        ? finishEndOverride.toISOString()
+        : finishTimestampFor(new Date(session!.started_at), new Date());
+      await finishLocalSession(userId, id, endedAt);
       await load();
       requestSync('bjj-session-finished');
       /*

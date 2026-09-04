@@ -8,6 +8,7 @@ import {
   readLocalSession,
   type LocalSession,
 } from '@/lib/sessionStore';
+import { dayString } from '@/lib/calendar';
 import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
 import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
 import { playSound } from '@/lib/sounds';
@@ -368,7 +369,20 @@ describe('finishing with a corrected end time', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date(2026, 7, 20, 21, 30, 0)); // 21:30 local
     (readLocalSession as jest.Mock).mockImplementation(() =>
-      deferred({ ...mockSession, ended_at: null }),
+      deferred({
+        ...mockSession,
+        // N492: SAME day as the fake clock above, deliberately — this
+        // describe block is the same-day case, and the backdated case has
+        // its own describe block below. Before N492 the day never mattered
+        // (the fallback was unconditional `undefined`), so this fixture
+        // could get away with a `started_at` on a different day than the
+        // fake clock — it just happened to still assert `undefined`. Once
+        // the fallback started reading the day, that mismatch would have
+        // made this test fail for the wrong reason: not "the fast path
+        // broke" but "this was never the fast path".
+        started_at: new Date(2026, 7, 20, 19, 0, 0).toISOString(),
+        ended_at: null,
+      }),
     );
     (finishLocalSession as jest.Mock).mockClear();
   });
@@ -382,9 +396,10 @@ describe('finishing with a corrected end time', () => {
     fireEvent.press(finish);
 
     await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
-    // `undefined` — the exact call this screen made before this ticket
-    // touched it. `finishLocalSession` itself is what stamps real "now"
-    // when its third argument is absent (see `lib/sessionStore.ts`).
+    // `undefined` — the session started TODAY, so `finishTimestampFor`
+    // itself returns `undefined` (see `lib/calendar.ts`) and
+    // `finishLocalSession` stamps real "now". Byte-identical outcome to
+    // before N492 touched this file, for the case N492 doesn't change.
     expect(finishLocalSession).toHaveBeenCalledWith('u1', 's1', undefined);
   });
 
@@ -413,6 +428,57 @@ describe('finishing with a corrected end time', () => {
   });
 });
 
+/*
+ * N492: the fast path above only proves the SAME-DAY case — `mockSession`'s
+ * `started_at` and the fake clock both sit on 2026-08-04. That is exactly the
+ * case that hid this bug: `finishNow` used to pass `undefined` unconditionally
+ * whenever no correction was opened, which happens to be correct on a same-day
+ * finish and wrong on a backdated one, so nothing above would have caught it.
+ *
+ * This is the N434 bug, on this screen. A session rescheduled to a past day
+ * (the month-grid sheet earlier in this file, `commitReschedule`) and then
+ * finished today with no correction must still get `ended_at` on ITS day, not
+ * the real day it was closed out — otherwise the elapsed Stat, `history`'s
+ * totals and the reflection screen all read a multi-day "duration" for a
+ * session that took minutes. `finishTimestampFor` (`lib/calendar.ts`) is the
+ * same mapping the strength screen's own finish handler already applies; this
+ * is the wiring test proving the BJJ screen now uses it too.
+ */
+describe('finishing a session backdated to a past day', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    // Real "now" is Thursday the 27th real time — three days after the
+    // session's own (backdated) Monday.
+    jest.setSystemTime(new Date(2026, 7, 27, 20, 3, 0));
+    (readLocalSession as jest.Mock).mockImplementation(() =>
+      deferred({
+        ...mockSession,
+        started_at: new Date(2026, 7, 24, 19, 45, 0).toISOString(), // Monday
+        ended_at: null,
+      }),
+    );
+    (finishLocalSession as jest.Mock).mockClear();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("lands ended_at on the session's own day, not the real day it was finished", async () => {
+    render(<BjjSessionScreen />);
+    const finish = await screen.findByTestId('bjj-session-finish');
+    fireEvent.press(finish);
+
+    await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
+
+    const [userArg, idArg, endedAt] = (finishLocalSession as jest.Mock).mock.calls[0];
+    expect(userArg).toBe('u1');
+    expect(idArg).toBe('s1');
+    // Not `undefined` — that was the bug: real "now" reaching the backend
+    // three days after the session it belongs to.
+    expect(endedAt).toBeDefined();
+    expect(dayString(new Date(endedAt))).toBe('2026-08-24');
+  });
+});
 
 /*
  * A milestone reached on the mat.
