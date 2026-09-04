@@ -18407,3 +18407,68 @@ it on a screen yet.
   — the same discipline N480/#825 establishes for raw HR data on that
   screen).
 - No web-side equivalent — `apps/web` has no biometric data at all yet.
+
+## N482 — Android Google Maps API key for `react-native-maps` (`apps/mobile/app.config.js`, `apps/mobile/eas.json`, EAS env secrets)
+
+Config plumbing only — no new screen. These scenarios cover the
+`ANDROID_GOOGLE_MAPS_API_KEY` wiring itself and extend N459's scenarios above
+(same running-tracking `MapView`, the other platform).
+
+### Happy path
+
+- With `ANDROID_GOOGLE_MAPS_API_KEY` set (locally via `.env.local`, or via an
+  `eas env:create`d EAS secret for a cloud build), `expo config --type
+  public` (or a real `expo prebuild`/`eas build`) resolves the
+  `react-native-maps` plugin entry with a non-empty `androidGoogleMapsApiKey`,
+  and the generated `AndroidManifest.xml` carries a `com.google.android.geo
+  .API_KEY` meta-data item with that value.
+- On a real Android device/emulator with a valid, correctly-restricted key:
+  the running-tracking `MapView` renders real Google Maps tiles (not a
+  blank/grey surface), centered on the granted location, matching what N459's
+  scenarios already describe for the iOS/Apple Maps equivalent.
+- iOS is unaffected — no `iosGoogleMapsApiKey` is set anywhere in
+  `app.config.js`, so iOS continues to render Apple Maps tiles with no Google
+  branding, exactly as N459 verified.
+
+### Edge cases and errors
+
+- `ANDROID_GOOGLE_MAPS_API_KEY` unset (the default in a fresh checkout):
+  confirm the app still builds and installs — `withMapsAndroid` removes the
+  manifest meta-data rather than erroring — and that the running map screen
+  degrades to blank/grey tiles rather than crashing. This is the expected
+  state until a human completes the Google Cloud Console + `eas env:create`
+  steps in `apps/mobile/.env.example`; it must never read as a build failure.
+- A key that exists but is **unrestricted or restricted to the wrong
+  package/SHA-1**: Google's own Maps SDK shows a "For development purposes
+  only" watermark or an error tile rather than a clean map — distinct from
+  the blank/grey "no key at all" state, and worth telling apart when
+  triaging a report that "the map looks wrong."
+- A key valid for Android but with billing disabled on its Google Cloud
+  project: confirm this reads as a Google-side map-loading failure on the
+  running screen, not as a crash — same "explained degraded state, never a
+  silent hang" discipline N459 established for the location-permission path.
+
+### Auth/security and scope
+
+- The key is never present in `apps/mobile/.env.example`'s committed template
+  (only a commented-out placeholder) and never appears in `app.json`/
+  `app.config.js` as a literal — grep the diff of any future PR touching
+  `app.config.js` for a literal `AIza...`-shaped string, which would mean a
+  real key got committed rather than read from the environment.
+- Confirm the registered EAS secret uses `--visibility secret` (keeps it out
+  of `eas env:list` output) — this does not make the key itself secret once
+  built into an APK (Android manifest keys are always extractable), so the
+  real protection is the Google Cloud Console package-name + SHA-1
+  restriction, not the EAS visibility flag. A scenario worth re-running after
+  the real key is issued: confirm the restriction actually rejects a request
+  carrying a different package name (e.g. via `curl` against the Maps SDK
+  with a forged `X-Android-Package`/`X-Android-Cert` header), not just that
+  it happens to work from the real app.
+
+### Needs a device
+
+- Every "renders real tiles" scenario above — this is exactly the ticket's
+  own `NEEDS HUMAN EVIDENCE` acceptance criterion, and nothing in this
+  sandboxed environment (no Android SDK/emulator, no Google Cloud Console
+  access) can produce it. See the N482 history.md entry for the precise
+  human steps this is gated on.

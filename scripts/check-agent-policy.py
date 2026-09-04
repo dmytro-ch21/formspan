@@ -343,7 +343,7 @@ def self_test() -> list[str]:
         ):
             (tmp_root / rel).mkdir(parents=True, exist_ok=True)
         (tmp_root / "apps/mobile/eas.json").write_text("{}")
-        (tmp_root / "apps/mobile/app.json").write_text("{}")
+        (tmp_root / "apps/mobile/app.config.js").write_text("{}")
         (tmp_root / "apps/mobile/package.json").write_text("{}")
         for rel in (
             "apps/mobile/lib/db.ts",

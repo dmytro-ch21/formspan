@@ -81,18 +81,23 @@ pnpm --dir apps/mobile run ios    # builds, installs and launches; ~10 min cold,
 ```
 
 Once it is installed, `pnpm run dev:mobile` is the daily loop. `apps/mobile/ios`
-and `apps/mobile/android` are generated (CNG) and gitignored — `app.json` plus
-the dependency list is the source of truth, and `pnpm --dir apps/mobile run
-prebuild` regenerates them from scratch.
+and `apps/mobile/android` are generated (CNG) and gitignored — `app.config.js`
+plus the dependency list is the source of truth, and `pnpm --dir apps/mobile
+run prebuild` regenerates them from scratch. `app.config.js` (not
+`app.json`, as of N482/#829) reads `ANDROID_GOOGLE_MAPS_API_KEY` from the
+environment at config-evaluation time — see `apps/mobile/.env.example` for
+what it's for and how to get a real value.
 
 **Android** has a `development` EAS build profile as of N475 (#820) —
 `pnpm --dir apps/mobile run build:android` (`eas build --platform android
 --profile development`) produces an installable `.apk`. This is a baseline
 only: no `preview`/`production` Android profile and no Play Store
-distribution exist yet, and the running-tracking map will not render tiles on
-Android until a Google Maps API key is wired up (tracked as N482, #829) —
-`react-native-maps` has no free/keyless tier on Android the way it does on
-iOS.
+distribution exist yet. The running-tracking map's Android *plumbing* landed
+in N482 (#829) — `app.config.js` wires `ANDROID_GOOGLE_MAPS_API_KEY` into
+`react-native-maps`' config plugin — but no real key has been issued yet
+(needs a Google Cloud Console project + billing + an EAS secret, none of
+which an agent can create), so the map still renders blank/grey tiles on
+Android until a human does that one-time setup.
 
 Then open http://localhost:3000 (web) or http://localhost:3001 (admin). Each app needs its own `.env.local` (copy from `.env.example`) — the admin console additionally needs `ADMIN_USER_IDS` set to your Clerk user ID, matching the same var in `backend/.env`, before `/users` will let you in (find your ID via `GET /v1/me` or the Clerk dashboard).
 
