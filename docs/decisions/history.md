@@ -55648,6 +55648,144 @@ PR opened.**
   matching the daily-summed reading model the rest of this file already uses.
 
 
+## 2026-09-04 — N493 part 1: sync-failed dead end, Food's day pill matched to Today's, Food's stray Share button, Library sheet tokens (#858)
+
+Ten UI issues came in from a live device session, filed as one ticket
+(#858) per the user's own instruction — this is the first of what that
+issue's own body already flagged as likely more than one PR. Four items
+land here; the rest are scoped but deliberately not rushed, for reasons
+below.
+
+**Shipped:**
+
+1. **The "Sync failed" chip could lead to a screen that said nothing was
+   wrong.** `SyncChip.tsx`'s `chipFor` shows the red "Sync failed" state for
+   ANY `lastError` — transient or permanent — and routes a tap to `/sync`.
+   That screen, by design (its own doc comment: "Only permanent refusals
+   are listed"), only ever lists permanent ones. A transient failure that
+   kept failing — retried automatically, never listed — used to fall
+   straight through to "Nothing is stuck": a fully reassuring screen
+   directly under a red alarm chip, disagreeing with itself. Fixed by
+   adding a third state to that screen — `rows.length === 0 &&
+   state.lastError` — that surfaces the raw error and says plainly that
+   nothing needs the athlete's input yet, rather than claiming nothing is
+   wrong. Doesn't touch what gets listed or retried, only what's said when
+   there's an active error and an empty list.
+
+2. **Food's day pill showed a raw `YYYY-MM-DD` string on any day but
+   today, where Today's showed a real formatted date.** Both screens
+   render `PeriodSwitcher`, so this read as one broken component when it
+   was actually two independently-written label computations — Today's
+   own inline `toLocaleDateString` formatting, and Food's, which had no
+   equivalent step and fell straight through to `on` (the machine date
+   key) whenever `isToday` was false. Fixed by extracting the shared
+   logic into `dayPillLabel` in `lib/calendar.ts` — the same file whose
+   own doc comment already tells this story once, for `startOfWeek`
+   ("there were four... three places to forget") — and pointing both
+   screens at it. `FRI, AUG 28` now renders identically on both tabs;
+   `2026-08-28` never renders on either.
+
+3. **Food's day-level "Share" button — removed.** Reported as "weird and
+   not sure what it applies to." `ShareToFriend` itself is fine and stays
+   everywhere else it's mounted (a saved food, a specific entry, a recipe,
+   a workout — sharing one concrete thing someone asked to share); this
+   was the one call site sharing an entire day's log from a large
+   standalone button between the daily target and the meal list, with no
+   obvious referent. The underlying share mechanism (`nutrition_day`
+   CopyTo) is untouched — this only removes the one confusing entry point
+   to it. (Items 4/8 below name where sharing SHOULD live instead — behind
+   a per-item menu, not as ambient chrome on a whole tab.)
+
+4. **Library's "More from your library" sheet — colors converted to
+   tokens, though this may not be the actual reported bug.** Read the
+   values before touching anything: `rgba(23,30,43,0.93)` is `vola.
+   surfaceRaised` (`#171E2B`) at 93% opacity, pixel-for-pixel — not a wrong
+   color, a correct one written as a literal. Converted both this and the
+   backdrop's `rgba(4,6,10,0.62)` to `withAlpha(vola.surfaceRaised, 0.93)`
+   / `withAlpha(vola.bg, 0.62)` — `lib/palette.ts`'s own doc comment
+   already names this exact class of hand-computed scrim and asks that a
+   third one not appear; this was, in fact, a third one. Purely a hygiene
+   fix — the sheet background is now bit-for-bit unchanged. The backdrop
+   is NOT a small shift, contrary to an earlier draft of this entry:
+   `rgba(4,6,10,…)` → `rgba(8,11,18,…)` is roughly double each channel —
+   still visually near-black behind a modal, but a real change, not a
+   rounding difference, so it deserves its own look on device (deriving
+   from the real `bg` token rather than an unlabelled darker guess is
+   still the right call; the magnitude just needs saying honestly).
+   **Left open**: if the
+   colors genuinely look "way off" on device rather than merely
+   translucent, this fix will not have addressed it — the values already
+   matched the dark palette before this PR, so the report may describe a
+   live rendering issue (LinearGradient/Modal interaction, a specific iOS
+   version) this session could not reproduce statically. Needs a
+   screenshot of the actual broken state to diagnose further if it
+   persists.
+
+**Investigated, no code change**: the barcode-scan Amount editor's
+keyboard-covers-Done complaint (item 7) already has a documented,
+device-verified fix in `AmountSheet.tsx` (`KeyboardAwareFooter`, not a raw
+`KeyboardAvoidingView` — its own doc comment: "found in review, from a
+device"). Could not reproduce a regression from source; flagged for the
+user to re-check on a fresh build before assuming it's still broken.
+
+**Deliberately not attempted in this PR — surfaced, not silently
+decided:**
+
+- **Item 1's header-scroll "inconsistency" turned out to be neither
+  inconsistent nor accidental.** `ScreenHeader.tsx`'s own doc comment
+  (verified line-by-line against every current caller) already states a
+  real rule — three arrangements, each screen opted in for a stated
+  reason (W10's own bug, the boundary a screen's content actually scrolls
+  under). Unifying it into one behavior would mean reverting reasoned,
+  already-shipped fixes, not fixing a bug. What's real and separate: the
+  per-screen uppercase title label ("LIBRARY", "FOOD") the user explicitly
+  says they don't like — that's a genuine design call (`ScreenHeader`'s
+  own doc comment defends it as the orientation cue pairing with the
+  underline one row down), not a bug, and removing it app-wide needs a
+  decision, not a guess.
+- **Item 9 (drag-to-reorder sets) asks for something this codebase
+  explicitly rejected, on record, for a stated ergonomic reason.**
+  `session/[id].tsx`'s own comment on its arrow-button reordering: "a
+  long-press-and-drag is a poor bet with one hand and a bar to get back
+  to, and it fights the scroll view" — which is this project's own
+  mobile-first, one-handed-logging principle applied to exactly this
+  control. Building it anyway is possible, but it reverses a documented
+  decision rather than fixing an oversight, and that's worth a decision
+  from the user rather than a session quietly picking a side.
+- **Items 4/8 (a universal 3-dot item-actions menu replacing three
+  current removal mechanisms — `SwipeToDelete`, raw `onLongPress`,
+  `HoldToConfirm` — across every screen that has one) is a real,
+  substantial design-system rollout**, not a bug fix: at least
+  `MealCard`, session sets, recipe ingredients, `WeekPlanner`, BJJ
+  reflection entries and curriculum items would all need to move to the
+  same pattern. `curriculum/[id].tsx`'s existing "•••" `Alert.alert` menu
+  is the closest existing template but isn't itself the target shape (a
+  native alert, not a custom sheet). Scoped for a follow-up PR rather than
+  attempted piecemeal here.
+- **Item 10 (chevron/date-arrow modernization + haptics)** is real polish
+  work — `expo-haptics` is already a dependency, already used elsewhere
+  (`HoldToConfirm`, `session/[id].tsx`), so this is additive rather than a
+  new subsystem, but chevron sizing/color already varies 10–16px and
+  several colors app-wide (not introduced by this ticket), so doing this
+  right also means picking one canonical disclosure-chevron spec rather
+  than adding a third or fourth variant. Deferred alongside 4/8.
+
+**Testing**: `syncScreenTransient.test.tsx` (new, 3 cases, mutation-
+verified — reverting the added branch turned the relevant assertion red).
+`foodInitialDay.test.tsx`/`foodDayJump.test.tsx` updated for the new
+formatted-label assertions (mutation-verified: breaking `dayPillLabel`
+turned 8 assertions red across both files and `todayScreen.test.tsx`,
+confirming the shared function is genuinely shared, not two functions
+that happen to agree today). Full mobile suite: 274 suites / 4365 tests
+green. `lint:mobile`/`typecheck:mobile` clean — one real snag along the
+way: introducing a second top-level `new Date()`-derived binding in
+`food.tsx` made the React Compiler bail on preserving three existing
+`useCallback`/`useMemo`s elsewhere in the same component
+(`react-hooks/preserve-manual-memoization`, 4 errors) even though nothing
+in those hooks referenced the new binding — worked around by deriving the
+pill's `Date` from the already-existing `on` string inline at the call
+site instead of introducing a new top-level variable.
+
 ## Open items / known gaps as of this entry
 
 

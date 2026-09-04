@@ -36,6 +36,27 @@ export function dayString(d: Date): string {
 }
 
 /**
+ * The day-stepper pill's label: `TODAY` on today, the weekday/date otherwise
+ * — `FRI, SEP 4` (locale-aware; `toLocaleDateString` under the hood, so this
+ * reads correctly wherever the device is set).
+ *
+ * N493 — Today's own `PeriodSwitcher` computed this inline; Food's built a
+ * second version that fell straight through to the raw `YYYY-MM-DD` string
+ * on any day but today, because it had no equivalent `Date`-formatting step
+ * at all — the two pills read as two different components even though both
+ * render `PeriodSwitcher`. Same shape of bug this file's own doc comment
+ * already names for `startOfWeek`: one function, not one written twice
+ * (and, this time, once not written at all).
+ */
+export function dayPillLabel(viewDay: Date, isToday: boolean): string {
+  return isToday
+    ? 'TODAY'
+    : viewDay
+        .toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+        .toUpperCase();
+}
+
+/**
  * `2026-08-19` → `19 Aug`, for an axis tick.
  *
  * Parsed as UTC and formatted as UTC, matching how a `YYYY-MM-DD` is STORED —

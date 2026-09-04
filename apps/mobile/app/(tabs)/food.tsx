@@ -48,7 +48,6 @@ import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-
 import { Text, View } from '@/components/Themed';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
-import { ShareToFriend } from '@/components/ShareToFriend';
 import { MealCard } from '@/components/food/MealCard';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { TargetRow } from '@/components/food/TargetRow';
@@ -60,6 +59,7 @@ import {
   addDays,
   addMonths,
   dayOffsetFor,
+  dayPillLabel,
   dayString,
   monthGrid,
   startOfMonth,
@@ -322,18 +322,6 @@ export default function FoodScreen() {
   const entries = eaten.state === 'ready' ? eaten.rows : [];
   const slots = bySlot(entries);
 
-  // N116/#505 — "a day's log" is sent from the day it names, coarser than
-  // the entry/food screens' own per-row sync check: it names the whole day
-  // by DATE (`nutrition_day`'s resourceID, see nutrition/share.go), so the
-  // server-side copy reflects whatever this device has already pushed for
-  // `on`, up to and including entries this exact load has not caught up
-  // with yet. Nothing to send on an empty or not-yet-loaded day.
-  const blockedFromSharingDay =
-    eaten.state !== 'ready'
-      ? 'Loading…'
-      : entries.length === 0
-        ? 'Nothing logged this day to share.'
-        : null;
   const view: TargetView = dated.on === on ? dated.view : { state: 'checking' };
   // The target each `MealCard` divides for its own "available" figure.
   //
@@ -478,7 +466,7 @@ export default function FoodScreen() {
 
         <RNView style={styles.body}>
           <PeriodSwitcher
-            label={isToday ? 'Today' : on}
+            label={dayPillLabel(new Date(`${on}T12:00:00`), isToday)}
             onPrev={() => setDay(dayOffset - 1)}
             onNext={() => setDay(dayOffset + 1)}
             // N81/#415: this used to jump straight back to today and only when
@@ -525,21 +513,6 @@ export default function FoodScreen() {
               view={view}
               showTarget={false}
               testID="food-remaining"
-            />
-          </RNView>
-
-          {/* N116/#505 — sends what was EATEN this day, never the target row
-              or a body weight above it: `nutrition_day`'s CopyTo (see
-              nutrition/share.go) reads only nutrition_entries. Accepting
-              lands as the receiver's own saved meal, exactly like N115's
-              combine screen. */}
-          <RNView style={styles.shareDayRow}>
-            <ShareToFriend
-              resourceType="nutrition_day"
-              resourceId={on}
-              disabled={blockedFromSharingDay !== null}
-              disabledReason={blockedFromSharingDay ?? undefined}
-              testID="food-share-day-open"
             />
           </RNView>
 
@@ -825,7 +798,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  shareDayRow: { alignItems: 'center' },
   slotsAbsent: { fontSize: 13, color: vola.textMuted, marginTop: 18 },
   // One gap between the four `MealCard`s — the card itself owns everything
   // inside it now (N124/N113); this screen only stacks them.

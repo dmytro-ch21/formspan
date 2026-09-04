@@ -119,8 +119,25 @@ export default function SyncScreen() {
 
         {rows === null ? (
           <ActivityIndicator accessibilityLabel="Loading" style={styles.spinner} />
+        ) : rows.length === 0 && state.lastError ? (
+          // N493 — the chip that sends an athlete here reads `lastError` for
+          // ANY failure (see `SyncChip.tsx`'s `chipFor`), but this list is
+          // deliberately scoped to PERMANENT ones only (this file's own doc
+          // comment above). A transient failure — retried automatically,
+          // never listed here — used to fall through to "Nothing is stuck":
+          // a reassuring screen directly under a red "Sync failed" chip,
+          // with no visible connection between the two. Surfacing the raw
+          // error here closes that gap without changing what gets listed or
+          // retried.
+          <View style={styles.empty} testID="sync-transient-error">
+            <Text style={styles.emptyTitle}>Still trying</Text>
+            <Text style={styles.emptyBody}>{state.lastError}</Text>
+            <Text style={styles.emptyBody}>
+              Nothing here needs your input yet — this keeps retrying on its own.
+            </Text>
+          </View>
         ) : rows.length === 0 ? (
-          <View style={styles.empty}>
+          <View style={styles.empty} testID="sync-nothing-stuck">
             <Text style={styles.emptyTitle}>Nothing is stuck</Text>
             <Text style={styles.emptyBody}>
               Anything still waiting will go out on its own when you have signal.

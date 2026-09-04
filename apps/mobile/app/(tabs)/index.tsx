@@ -34,7 +34,7 @@ import {
 import { parseRings, type RingKey, DEFAULT_RINGS } from '@/lib/macroRings';
 import { TrackerList } from '@/components/TrackerList';
 import { vola } from '@/constants/Colors';
-import { addDays, dayString, weekDays } from '@/lib/calendar';
+import { addDays, dayPillLabel, dayString, weekDays } from '@/lib/calendar';
 import { fetchThemes, type Theme } from '@/lib/themes';
 import { formatElapsed } from '@/lib/rest';
 import type { Session } from '@/lib/sessions';
@@ -268,11 +268,7 @@ export default function TodayScreen() {
   const isToday = dayOffset === 0;
   const isPast = dayOffset < 0;
   /** "TODAY" when it is; the weekday and date otherwise. */
-  const dayLabel = isToday
-    ? 'TODAY'
-    : viewDay
-        .toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-        .toUpperCase();
+  const dayLabel = dayPillLabel(viewDay, isToday);
 
   /**
    * The plan, the session list and the workout cache — one read each, three
