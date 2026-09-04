@@ -194,8 +194,18 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
     const { rerender } = render(<CheckinScreen />);
     await waitFor(() => expect(screen.getByTestId('checkin-weight')).toBeTruthy());
 
+    // Open the girths section too — the ticket's own bug-2 narrative is a
+    // GIRTH ("type 33 meaning inches"), not the weight field. Covering only
+    // weight here left the girth-discard loop (a separate line in `load()`)
+    // unpinned: a targeted mutation that no-ops just that loop still left
+    // every test in this file green.
+    fireEvent.press(screen.getByTestId('checkin-girths-toggle'));
+    await waitFor(() => expect(screen.getByTestId('checkin-waist_cm')).toBeTruthy());
+
     fireEvent.changeText(screen.getByTestId('checkin-weight'), '33');
     expect(screen.getByTestId('checkin-weight').props.value).toBe('33');
+    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '33');
+    expect(screen.getByTestId('checkin-waist_cm').props.value).toBe('33');
 
     mockUnits = 'metric';
     await act(async () => {
@@ -204,14 +214,24 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
 
     // Discarded, not silently kept — an untouched field means nothing typed.
     await waitFor(() => expect(screen.getByTestId('checkin-weight').props.value).toBe(''));
+    expect(screen.getByTestId('checkin-waist_cm').props.value).toBe('');
 
     fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
-    // The bug: 33 (meant as pounds) stored as 33 kilograms.
+    // The bug: 33 (meant as pounds, or inches) stored as 33 kilograms/cm.
     expect(payload().weight_kg).toBeUndefined();
+    expect(payload().waist_cm).toBeUndefined();
   });
 
   it('on a day that already has a check-in — same behaviour, not a special case', async () => {
+    // NOTE for whoever mutation-tests this file: this test is a CONSISTENCY
+    // document, not an independent guard on the discard block above. Even
+    // with the discard code deleted outright, the pre-existing today-exists
+    // refill (which was already correct before N125) still turns "999" back
+    // into "80" on its own, so this test cannot tell the discard block apart
+    // from its absence. The test above ("on a day with no check-in yet") is
+    // the one that actually breaks if the discard is removed or gutted —
+    // mutate that code path and confirm THAT test red, not this one.
     mockUnits = 'imperial';
     const { rerender } = render(<CheckinScreen />);
     await waitFor(() => expect(screen.getByTestId('checkin-weight')).toBeTruthy());
