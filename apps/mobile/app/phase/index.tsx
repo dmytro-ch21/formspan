@@ -37,6 +37,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Text } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -65,6 +66,18 @@ export default function PhaseScreen() {
   const [problem, setProblem] = useState('');
 
   const today = dayString(new Date());
+
+  // N484 (#835) added `ScreenHeader`'s `leading` slot for exactly this: this
+  // screen is pushed (from `goals.tsx`/`you.tsx`, both tabs), `headerShown` is
+  // false below, and until now the only exit was a `Pressable` at the very
+  // bottom of the form — under the keyboard while typing a target weight/date,
+  // and below the fold on a small device. Same `router.canGoBack()` guard as
+  // `library.tsx`'s own back button, for the same reason: always pushed here,
+  // but a fallback keeps this from throwing on a deep link.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [router]);
 
   const refresh = useCallback(() => {
     let alive = true;
@@ -153,7 +166,21 @@ export default function PhaseScreen() {
           draws its own ScreenHeader, and without suppressing the native
           stack header too, both stack, reading as a dead gap at the top. */}
       <Stack.Screen options={{ title: 'Phase', headerShown: false }} />
-      <ScreenHeader title="Phase" />
+      <ScreenHeader
+        title="Phase"
+        leading={
+          <Pressable
+            onPress={goBack}
+            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            testID="phase-back"
+          >
+            <Icon name="back" size={20} color={vola.text} />
+          </Pressable>
+        }
+      />
 
       <KeyboardAwareScrollView
         contentContainerStyle={styles.body}
@@ -273,15 +300,6 @@ export default function PhaseScreen() {
             {problem}
           </Text>
         ) : null}
-
-        <Pressable
-          onPress={() => router.back()}
-          style={styles.back}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Text style={styles.secondaryText}>Back</Text>
-        </Pressable>
       </KeyboardAwareScrollView>
     </View>
   );
@@ -357,5 +375,17 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   secondaryText: { fontSize: 13, color: vola.textMuted, fontWeight: '600' },
-  back: { alignSelf: 'flex-start', paddingVertical: 14 },
+  // Same shape as `library.tsx`'s own `leading` back button (N484) — passed
+  // into `ScreenHeader`'s `titleWrap` rather than sitting at the bottom of
+  // the form, so it's reachable at the top-left regardless of keyboard or
+  // scroll position.
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: vola.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonPressed: { opacity: 0.6 },
 });
