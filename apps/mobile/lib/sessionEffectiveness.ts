@@ -43,6 +43,21 @@ import { describeRPE, MAX_RPE } from './bjjSession';
  * backend had no HRmax to classify zones against — see `Compute` in
  * `trimp.go`), `session_rpe` is a real 1-10 report, and the HR evidence
  * behind it is not vanishingly thin (`MIN_ZONE_MINUTES_FOR_CALIBRATION`).
+ *
+ * ## A contract the caller owns, not this function
+ *
+ * This takes an already-resolved `SessionMetrics`-shaped object, not a
+ * `Reading<SessionMetrics>` (see `lib/progress.ts`'s doc comment on why that
+ * union exists at all): a caller must only invoke this once its own read of
+ * the session's metrics — however it fetches them — has settled to a real
+ * answer. Calling it against a placeholder or zero-valued object while that
+ * fetch is still in flight would read as `null` ("insufficient evidence" — a
+ * legitimate answer this function really does return) rather than "not
+ * answered yet", which is exactly the ambiguity `progress.ts`'s `checking`
+ * state exists to keep apart from `empty`. No caller exists yet to get this
+ * wrong; whichever one wires this in first should keep the distinction on
+ * its own side, the way `whatChanged` keeps it before ever calling
+ * `freshRecords`/`nutritionWeek`.
  */
 
 /** Mirrors `bjj_session_details.session_rpe`'s own CHECK constraint. */

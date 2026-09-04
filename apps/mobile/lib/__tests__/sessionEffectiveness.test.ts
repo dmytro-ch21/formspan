@@ -103,15 +103,15 @@ describe('sessionEffectivenessSummary — calibration direction', () => {
   const hrImplied = 6;
 
   test.each([
-    { rpe: 1, direction: 'felt_easier' as const },
-    { rpe: 3, direction: 'felt_easier' as const },
-    { rpe: hrImplied - CALIBRATION_DELTA_THRESHOLD, direction: 'felt_easier' as const }, // 4: boundary, inclusive
-    { rpe: hrImplied - CALIBRATION_DELTA_THRESHOLD + 1, direction: 'aligned' as const }, // 5: just inside the noise band
-    { rpe: hrImplied, direction: 'aligned' as const }, // 6: exact match
-    { rpe: hrImplied + CALIBRATION_DELTA_THRESHOLD - 1, direction: 'aligned' as const }, // 7: just inside the noise band
-    { rpe: hrImplied + CALIBRATION_DELTA_THRESHOLD, direction: 'felt_harder' as const }, // 8: boundary, inclusive
-    { rpe: 10, direction: 'felt_harder' as const },
-  ])('RPE $rpe against HR-implied $hrImplied classifies as $direction', ({ rpe, direction }) => {
+    { rpe: 1, hrImplied, direction: 'felt_easier' as const },
+    { rpe: 3, hrImplied, direction: 'felt_easier' as const },
+    { rpe: hrImplied - CALIBRATION_DELTA_THRESHOLD, hrImplied, direction: 'felt_easier' as const }, // 4: boundary, inclusive
+    { rpe: hrImplied - CALIBRATION_DELTA_THRESHOLD + 1, hrImplied, direction: 'aligned' as const }, // 5: just inside the noise band
+    { rpe: hrImplied, hrImplied, direction: 'aligned' as const }, // 6: exact match
+    { rpe: hrImplied + CALIBRATION_DELTA_THRESHOLD - 1, hrImplied, direction: 'aligned' as const }, // 7: just inside the noise band
+    { rpe: hrImplied + CALIBRATION_DELTA_THRESHOLD, hrImplied, direction: 'felt_harder' as const }, // 8: boundary, inclusive
+    { rpe: 10, hrImplied, direction: 'felt_harder' as const },
+  ])('RPE $rpe against HR-implied $hrImplied classifies as $direction', ({ rpe, hrImplied, direction }) => {
     const summary = sessionEffectivenessSummary(m, rpe) as SessionEffectivenessSummary;
     expect(summary).not.toBeNull();
     expect(summary.direction).toBe(direction);
