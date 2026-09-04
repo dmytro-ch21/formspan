@@ -18270,3 +18270,76 @@ deciding whether any of this reaches the screen, covered directly by
   inherited entirely from `GET /v1/biometric/sessions/{id}/metrics`'s
   existing ownership check (N476/#821); this ticket adds no new endpoint
   and no new authorization surface.
+
+## N479 — Today screen: surface detected activity with its source (`apps/mobile/lib/detectedActivity.ts`, `apps/mobile/lib/useDetectedActivity.ts`, `apps/mobile/components/today/DetectedActivityCard.tsx`, `apps/mobile/lib/healthkit.ts`, `apps/mobile/lib/healthConnect.ts`, `apps/mobile/lib/healthkitSync.ts`, `apps/mobile/lib/healthConnectSync.ts`, `apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/app/settings.tsx`)
+
+Rides the same HealthKit/Health Connect grant N465/N477/N478 already ask
+for — no new consent screen — to notice a walk or hike neither platform's
+existing running-import (N465) nor biometric enrichment (N477/N478) would
+otherwise surface, and offer it on Today as something to log or dismiss.
+
+### Happy path
+
+- With a real walk or hike recorded on an Apple Watch (or another wearable
+  writing to Apple Health/Health Connect) and never logged in VOLA by hand,
+  open Today within the `DETECTED_ACTIVITY_WINDOW_DAYS` (3-day) window: a
+  card appears reading the activity type (Walk/Hike), its duration (and
+  distance where the platform reports one), and its source — "via Apple
+  Health" on iOS, "via Google Health" on Android.
+- Tap **Log** on the card: it disappears immediately (optimistic), and a
+  real finished session (`sport: running`, named for the activity type)
+  appears in Training History with the detected duration/distance recorded
+  against it.
+- Tap **Dismiss** on the card: it disappears immediately and does not
+  reappear on a later foreground return, even though the same workout is
+  still sitting in HealthKit/Health Connect and gets re-detected on the next
+  sync pass.
+- A walk that was already logged by hand (any sport, not necessarily
+  "running") before this feature ever saw it: no card ever appears for it —
+  no duplicate-noise regression.
+- No detected activity in the window: no card, no section header, no empty
+  state — Today looks exactly as it did before this ticket for an athlete
+  with nothing to review.
+
+### Edge cases & errors
+
+- A walk left neither logged nor dismissed: the card stops appearing once
+  its detection ages past the 3-day display window on its own — no
+  dismissal is required for it to stop being asked about, and nothing about
+  this accumulates indefinitely across days.
+- The athlete's HealthKit/Health Connect toggle (Settings → Integrations) is
+  off: no detection pass runs at all, and no card ever appears — this
+  feature is strictly opt-in, riding the same toggle as running
+  import/biometric enrichment, never a separate one.
+- A device/build with no HealthKit module linked, or an Android device with
+  no Health Connect provider: the detection query returns nothing (same
+  "no module, no data" posture every other read in this feature takes) —
+  no crash, no error surfaced to the athlete.
+- Logging a detected activity and then deleting the resulting session: the
+  original walk becomes detectable again on the next sync pass — this is
+  the intended behaviour (see `lib/detectedActivity.ts`'s own doc comment on
+  why "already logged" is a read-time cross-reference, never a stored
+  flag), not a bug to special-case around.
+- Two overlapping workouts from different sources (e.g. a phone-GPS run
+  logged by hand at the same time HealthKit also recorded a walk from a
+  paired watch): the overlap check is against the SESSION's window, any
+  sport, so the second is correctly treated as already covered.
+
+### Auth/security
+
+- Detection is READ-ONLY on both platforms — no new write permission is
+  requested on either toggle, and `lib/detectedActivity.ts` never calls any
+  network endpoint; "Log it" writes only to this device's own local SQLite,
+  same offline-first posture as every other session-logging path in this
+  app.
+- The local `detected_activities` ledger is scoped per `user_id`, matching
+  every other on-device table — a shared device signing in as a second
+  athlete never sees the first athlete's detected (or dismissed) activity.
+
+### Needs a device
+
+- A real Apple Watch/Android wearable walk actually appearing on Today,
+  tagged with the correct platform source, within the display window — the
+  native `queryOtherWorkouts`/`queryOtherExerciseSessions` call is, per this
+  feature's own native/pure split, the one piece no test in this repo's
+  suite can reach.

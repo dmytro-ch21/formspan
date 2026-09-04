@@ -292,8 +292,11 @@ export default function SettingsScreen() {
                 // asks for read access to everything this app will ever read
                 // in one consent screen (see READ_TYPES in lib/healthkit.ts).
                 // Splitting this into two toggles would ask the athlete to
-                // consent to the same underlying grant twice.
-                "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history. Heart rate from any finished session, and your VO2max trend, are read the same way — VOLA never writes anything back to Health. Turning this on asks for Health access."
+                // consent to the same underlying grant twice. N479/#824
+                // widened it again the same way: a walk or hike Apple Health
+                // notices shows up on Today so it can be logged or skipped,
+                // using the SAME workout read access already granted above.
+                "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history. Heart rate from any finished session, and your VO2max trend, are read the same way. Other activity, like a walk or hike, appears on Today so you can log it or skip it — VOLA never writes anything back to Health. Turning this on asks for Health access."
               : 'Not available on this device.'
           }
           value={healthKitImport}
@@ -347,10 +350,15 @@ export default function SettingsScreen() {
             profile-level trend only — see `lib/healthConnectSync.ts`. */}
         {Platform.OS === 'android' && (
           <Toggle
-            label="Read heart rate from Health Connect"
+            label="Sync with Health Connect"
             hint={
               healthConnectSupported
-                ? "Heart rate and VO2max recorded by your watch or fitness app, via Android's Health Connect, enrich your session history with load and heart-rate zones — VOLA only reads, and never writes anything back. Only the last 30 days of history are readable by default. Turning this on asks for Health Connect access."
+                ? // N479/#824 widened this the same way N477/#822 widened the
+                  // HealthKit toggle above — one consent screen already covers
+                  // `ExerciseSession` alongside heart rate and VO2max (see
+                  // READ_RECORD_TYPES in lib/healthConnect.ts), so a second
+                  // toggle would ask for the same grant twice.
+                  "Heart rate and VO2max recorded by your watch or fitness app, via Android's Health Connect, enrich your session history with load and heart-rate zones. Other activity, like a walk or hike, appears on Today so you can log it or skip it — VOLA only reads, and never writes anything back. Only the last 30 days of history are readable by default. Turning this on asks for Health Connect access."
                 : 'Not available on this device.'
             }
             value={healthConnectImport}

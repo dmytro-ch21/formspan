@@ -52,6 +52,17 @@ type NativeVo2MaxRecord = {
   readonly vo2MillilitersPerMinuteKilogram: number;
 };
 
+/** One `ExerciseSessionRecord` reduced to what this app reads (N479/#824).
+ *  Field names match `react-native-health-connect`'s own type (v4.1.3,
+ *  `src/types/records.types.ts`) — `exerciseType` is a plain number keyed
+ *  against that package's `ExerciseType` constant, per its own doc comment. */
+type NativeExerciseSessionRecord = {
+  readonly metadata?: { readonly id?: string; readonly dataOrigin?: string };
+  readonly startTime: string;
+  readonly endTime: string;
+  readonly exerciseType: number;
+};
+
 type ReadRecordsOptions = {
   timeRangeFilter: { operator: 'between'; startTime: string; endTime: string };
 };
@@ -66,7 +77,7 @@ type HealthConnectModule = {
    *  specific shape it asked for by `recordType`, rather than this type
    *  trying to encode the real package's generic/overloaded signature. */
   readRecords: (
-    recordType: 'HeartRate' | 'Vo2Max',
+    recordType: 'HeartRate' | 'Vo2Max' | 'ExerciseSession',
     options: ReadRecordsOptions,
   ) => Promise<{ records: unknown[] }>;
 };
@@ -94,9 +105,15 @@ function load(): HealthConnectModule | null {
 
 const hc = load();
 
-/** The two record types this feature reads. Literals, not an imported
- *  `RecordType` value, for the same reason as `SDK_AVAILABLE`. */
-const READ_RECORD_TYPES = ['HeartRate', 'Vo2Max'] as const;
+/** The record types this feature reads. Literals, not an imported
+ *  `RecordType` value, for the same reason as `SDK_AVAILABLE`.
+ *
+ * `ExerciseSession` joined N477/#822's original two for N479/#824 — same
+ * "ask for everything up front" reasoning `healthkit.ts`'s `READ_TYPES` doc
+ * comment gives: Health Connect shows one consent screen regardless, so an
+ * athlete who already granted heart rate never sees a second prompt when
+ * walk/hike detection shipped after it. */
+const READ_RECORD_TYPES = ['HeartRate', 'Vo2Max', 'ExerciseSession'] as const;
 
 let sdkChecked = false;
 let sdkAvailable = false;
@@ -277,6 +294,94 @@ export async function queryVo2MaxReadings(since: string, until: string): Promise
       vo2MillilitersPerMinuteKilogram: record.vo2MillilitersPerMinuteKilogram,
       dataOrigin: record.metadata?.dataOrigin ?? null,
     });
+  }
+  return out;
+}
+
+/**
+ * -----------------------------------------------------------------------
+ * N479/#824 — activity Health Connect noticed that VOLA never asked about
+ * -----------------------------------------------------------------------
+ *
+ * The Android sibling of `healthkit.ts`'s "other workouts" section — same
+ * split, same reasoning: this and the two `query*` functions above are the
+ * only code in this file that touches the native module, so this is the
+ * only thing device evidence has to cover for this ticket on Android;
+ * `lib/detectedActivity.ts`'s filtering is pure and already unit tested.
+ */
+
+/** `ExerciseType.WALKING` / `.HIKING` — verified against the installed
+ *  package's `src/constants.ts` (79 and 37 respectively), the same way
+ *  `SDK_AVAILABLE` above was. Health Connect's own `ExerciseSessionRecord`
+ *  carries a numeric `exerciseType`, not an enum value, so these stay plain
+ *  numbers for the identical reason. */
+const OTHER_EXERCISE_TYPE_CODES = { walking: 79, hiking: 37 } as const;
+
+/** Matches `healthkit.ts`'s own type of the same name — the two platforms'
+ *  native boundaries converge on one shared vocabulary before anything
+ *  downstream (`lib/detectedActivity.ts`) has to care which produced it. */
+export type DetectedActivityType = 'walking' | 'hiking';
+
+function otherExerciseTypeFromCode(code: number): DetectedActivityType | null {
+  if (code === OTHER_EXERCISE_TYPE_CODES.walking) return 'walking';
+  if (code === OTHER_EXERCISE_TYPE_CODES.hiking) return 'hiking';
+  return null;
+}
+
+/** One walking/hiking exercise session, reduced to plain data. No distance —
+ *  Health Connect reports that as a separate `DistanceRecord`, and joining
+ *  the two by time is real added complexity this ticket's scope does not
+ *  need: the Today card reads fine with just how long the activity was. */
+export type HealthConnectOtherWorkout = {
+  id: string;
+  type: DetectedActivityType;
+  /** RFC3339 */
+  startDate: string;
+  /** RFC3339 */
+  endDate: string;
+  durationSeconds: number;
+};
+
+/**
+ * Read this device's recent walking/hiking exercise sessions from Health
+ * Connect, for the `[since, until]` window — the Android counterpart to
+ * `healthkit.ts`'s `queryOtherWorkouts`.
+ *
+ * Same "return `[]`, never throw" posture as `queryHeartRateSamples` above,
+ * for the same reasons. Defensively re-checks `exerciseType` per record
+ * rather than trusting `readRecords('ExerciseSession', ...)` to have filtered
+ * by type at all — this package's `ReadRecordsOptions` has no type-narrowing
+ * filter the way HealthKit's `queryWorkoutSamples` does, so every session of
+ * every kind comes back and this function is the only place that narrows it.
+ */
+export async function queryOtherExerciseSessions(
+  since: string,
+  until: string,
+): Promise<HealthConnectOtherWorkout[]> {
+  if (!(await ensureInitialized())) return [];
+  let records: NativeExerciseSessionRecord[];
+  try {
+    const result = await hc!.readRecords('ExerciseSession', {
+      timeRangeFilter: { operator: 'between', startTime: since, endTime: until },
+    });
+    records = result.records as NativeExerciseSessionRecord[];
+  } catch {
+    return [];
+  }
+
+  const out: HealthConnectOtherWorkout[] = [];
+  for (const record of records) {
+    const recordID = record.metadata?.id;
+    if (!recordID) continue; // no id, no stable id to key the ledger on — skip rather than guess
+    const type = otherExerciseTypeFromCode(record.exerciseType);
+    if (!type) continue;
+    const durationSeconds = Math.max(
+      0,
+      Math.round(
+        (new Date(record.endTime).getTime() - new Date(record.startTime).getTime()) / 1000,
+      ),
+    );
+    out.push({ id: recordID, type, startDate: record.startTime, endDate: record.endTime, durationSeconds });
   }
   return out;
 }

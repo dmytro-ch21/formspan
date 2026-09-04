@@ -1,10 +1,12 @@
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { getDb, withTransaction } from './db';
+import { upsertDetectedActivities, DETECTED_ACTIVITY_WINDOW_DAYS } from './detectedActivity';
 import {
   filterNewWorkouts,
   isHealthKitSupported,
   mapWorkoutToRunningDetail,
+  queryOtherWorkouts,
   queryRunningWorkouts,
   requestHealthKitReadAuthorization,
 } from './healthkit';
@@ -19,6 +21,13 @@ import { request as requestSync } from './sync';
  * dedup ledger, and WHEN a pass runs. `lib/healthkit.ts` is the native
  * boundary and the pure mapping; this file is what decides to call it and
  * what to do with what it returns.
+ *
+ * **N479/#824 rides the same pass.** `detectOtherHealthKitActivity` below
+ * runs alongside the running import on every trigger this file already has
+ * (sign-in, foreground, the settings toggle) rather than getting its own
+ * `AppState` listener and mutex — the ticket's own instruction is to respect
+ * this existing pattern, not add a second copy of it for one more kind of
+ * activity.
  *
  * ## Foreground/launch, not a true background task — and why
  *
@@ -93,6 +102,35 @@ async function recordHealthKitImport(userID: string, uuid: string, sessionID: st
 }
 
 /**
+ * N479/#824: record other HealthKit-noticed activity (a walk, a hike) that
+ * has no matching VOLA session, for Today's own "detected but not logged"
+ * card. Unlike the running import below, this never creates a session on
+ * its own — it only writes to the `detected_activities` ledger, so tapping
+ * "Log it" on the resulting card (`lib/detectedActivity.ts`'s
+ * `logDetectionAsSession`) is what actually commits it. Bounded to the same
+ * trailing window the card is willing to display
+ * (`DETECTED_ACTIVITY_WINDOW_DAYS`) — there is no reason to fetch, store or
+ * dedup a workout old enough to never be shown.
+ */
+async function detectOtherHealthKitActivity(userID: string): Promise<void> {
+  const since = new Date(Date.now() - DETECTED_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const workouts = await queryOtherWorkouts(since);
+  if (workouts.length === 0) return;
+  await upsertDetectedActivities(
+    userID,
+    'healthkit',
+    workouts.map((w) => ({
+      id: w.uuid,
+      type: w.type,
+      startDate: w.startDate,
+      endDate: w.endDate,
+      durationSeconds: w.durationSeconds,
+      distanceMeters: w.distanceMeters,
+    })),
+  );
+}
+
+/**
  * One import pass: ask HealthKit for running workouts, skip the ones this
  * device already has, create a local session for each new one, and hand the
  * result to the ordinary sync outbox.
@@ -118,6 +156,21 @@ export async function importHealthKitRuns(userID: string): Promise<{ imported: n
   // Safe on every pass, not only the first — see requestHealthKitReadAuthorization's
   // own doc comment for why this never re-prompts once answered.
   await requestHealthKitReadAuthorization();
+
+  // N479/#824: notice other activity (a walk, a hike) for Today's own card —
+  // best-effort and never allowed to fail the running import this function
+  // exists for. Uses the SAME toggle as running import rather than a new
+  // one: `HKWorkoutTypeIdentifier` is already in `READ_TYPES`, so there is
+  // no new permission to ask for, and a second toggle would ask for consent
+  // to a grant the athlete already gave. See `app/settings.tsx`'s "Sync with
+  // Apple Health" hint, which N477 already widened once for the identical
+  // reason.
+  try {
+    await detectOtherHealthKitActivity(userID);
+  } catch {
+    // Nothing here is the athlete's to fix — the next foreground pass tries
+    // again, same posture as every other catch in this file.
+  }
 
   // The ledger is read BEFORE the HealthKit query and passed straight into
   // it, so `queryRunningWorkouts` can skip the per-workout route fetch

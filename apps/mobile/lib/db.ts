@@ -632,6 +632,38 @@ const CREATE_HEALTH_CONNECT_ENRICHMENT = `
 `;
 
 /**
+ * N479 — the same-device ledger of platform-detected activity (a walk, a
+ * hike) that has no matching VOLA session yet, for Today's own "detected but
+ * not logged" card. Unlike `CREATE_HEALTHKIT_IMPORTS`, a row here is NOT
+ * evidence a session exists — see `lib/detectedActivity.ts`'s own doc
+ * comment: whether it is still worth a card is decided by cross-referencing
+ * `local_sessions` at READ time (`isAlreadyLogged`), not by anything written
+ * here, because a session can be logged (or deleted) well after this row was
+ * recorded and the card has to react either way.
+ *
+ * `dismissed_at` is this table's only mutable column, and it is what makes a
+ * dismissal permanent — an athlete who taps "not now" on a walk must not see
+ * it resurface on the next foreground pass just because the ledger row is
+ * still there. `INSERT OR IGNORE` (see `upsertDetectedActivities`) is what
+ * keeps a re-detected row from clobbering an existing dismissal.
+ */
+const CREATE_DETECTED_ACTIVITIES = `
+  CREATE TABLE IF NOT EXISTS detected_activities (
+    user_id TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    type TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    distance_m REAL,
+    dismissed_at TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, external_id)
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -660,7 +692,7 @@ const CREATE_HEALTH_CONNECT_ENRICHMENT = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 35;
+const SCHEMA_VERSION = 36;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -679,7 +711,8 @@ type LocalTable =
   | 'tracker_entries'
   | 'healthkit_imports'
   | 'biometric_hr_synced'
-  | 'health_connect_enrichment';
+  | 'health_connect_enrichment'
+  | 'detected_activities';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -763,6 +796,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_HEALTHKIT_IMPORTS);
   await db.execAsync(CREATE_BIOMETRIC_HR_SYNCED);
   await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
+  await db.execAsync(CREATE_DETECTED_ACTIVITIES);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -1319,6 +1353,15 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // this is a retry ledger rather than a dedup table like
     // healthkit_imports/biometric_hr_synced above.
     await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
+  }
+
+  if (current < 36) {
+    // N479: see CREATE_DETECTED_ACTIVITIES's own doc comment.
+    await db.execAsync(CREATE_DETECTED_ACTIVITIES);
+    await db.execAsync(
+      `CREATE INDEX IF NOT EXISTS detected_activities_user_started_idx
+         ON detected_activities (user_id, started_at DESC);`,
+    );
   }
 
   // The day query the card runs on every render of Today.

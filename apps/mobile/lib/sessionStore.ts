@@ -463,6 +463,34 @@ export async function sessionsNeedingBiometricSync(
   );
 }
 
+/**
+ * Every non-deleted local session started on or after `sinceISO`, newest
+ * first — N479/#824's "has the athlete already logged this?" read for
+ * `lib/detectedActivity.ts`'s `isAlreadyLogged`.
+ *
+ * Deliberately not scoped to `ended_at IS NOT NULL` in the SQL itself (unlike
+ * `sessionsNeedingBiometricSync` above) — the pure overlap check reads
+ * `endedAt` and treats a still-running session (`null`) as not yet a match,
+ * so filtering it out here would be the same decision made twice in two
+ * places, one of which could drift.
+ */
+export async function sessionsSince(
+  userID: string,
+  sinceISO: string,
+): Promise<Pick<LocalSession, 'id' | 'started_at' | 'ended_at'>[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ id: string; started_at: string; ended_at: string | null }>(
+    `SELECT id, started_at, ended_at
+       FROM local_sessions
+      WHERE user_id = ?
+        AND deleted_at IS NULL
+        AND started_at >= ?
+      ORDER BY started_at DESC`,
+    userID,
+    sinceISO,
+  );
+}
+
 /** Every local edit lands here: write, mark dirty, return. */
 export async function saveLocalSets(
   userID: string,

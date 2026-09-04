@@ -54725,6 +54725,112 @@ N477/N478 already write, and their own device evidence is what backs the
 data actually reaching this screen). `frontend-reviewer` reviewed the diff
 against design intent from `health-integration-design.md` §5.5.
 
+## 2026-09-03 — N479: Today surfaces platform-detected activity VOLA never logged (#824)
+
+**What.** A walk or hike HealthKit/Health Connect noticed but VOLA has no
+session for now gets its own card on Today, tagged "via Apple Health" / "via
+Google Health", with two explicit buttons — Log or Dismiss — no third,
+implicit outcome. Generalises the source-badge idea from
+`app/running/[id].tsx`'s "Imported from Apple Health" (N465, deliberately the
+only place a run's source is shown) onto a genuinely different concept:
+that badge documents something ALREADY logged; this documents something
+NEVER logged, so it needed its own component (`DetectedActivityCard`)
+rather than a mode of `UpNextCard`, whose own `past`/`pastLabel` state means
+"planned and missed", not "never planned, just noticed" — forcing the two
+together would have made one prop mean two things depending on its
+neighbours.
+
+**Detection, not import.** N465's `healthkitSync.ts` already imports running
+workouts outright, silently, because a run is unambiguous. A walk is not —
+plenty of walks are errands, not training — so this ticket adds a *second*,
+non-committal path: `lib/healthkit.ts`'s new `queryOtherWorkouts` (walking =
+`WorkoutActivityType.walking`/52, hiking = `.hiking`/24, verified against the
+installed `@kingstinct/react-native-healthkit@14.1.0` types the same way
+`RUNNING_ACTIVITY_TYPE` was) and `lib/healthConnect.ts`'s new
+`queryOtherExerciseSessions` (`ExerciseType.WALKING`/79, `.HIKING`/37,
+verified against the installed `react-native-health-connect@4.1.3`
+constants) only ever WRITE to a new local ledger
+(`detected_activities`, schema v36) — nothing is created as a session until
+the athlete taps Log.
+
+**Why "already logged" is never a stored flag.** `lib/detectedActivity.ts`'s
+`isAlreadyLogged` cross-references `local_sessions` fresh on every read
+(`sessionStore.ts`'s new `sessionsSince`) rather than trusting anything
+written at detection time — a detected workout and a hand-logged session for
+the same time window can arrive in either order, and a stored "handled" flag
+would go stale the moment the OTHER side of that relationship changed with
+nothing left to correct it. Tapping "Log it" therefore writes no ledger flag
+at all: `logDetectionAsSession` creates a real `sport: 'running'` session
+(the only VOLA sport with distance-based semantics — there is no `walking`
+module) whose window overlaps the detection's own by construction, so the
+very next read hides the card via the SAME overlap check, with nothing extra
+to track. Deleting that session later correctly makes the walk detectable
+again. Dismissal is the one thing genuinely stored (`dismissed_at`), because
+it is a fact about the athlete's decision, not something derivable from
+`local_sessions`.
+
+**Clutter is bounded by TIME, not by an ever-growing dismiss list.**
+`DETECTED_ACTIVITY_WINDOW_DAYS = 3` bounds both the sync query and the
+display read — a walk nobody acts on for three days simply stops being
+asked about, no dismissal required. This is the ticket's own "must not
+silently accumulate" criterion, answered structurally rather than by relying
+on the athlete to clear every card.
+
+**Rides the existing foreground/sign-in sync, doesn't invent a third one.**
+`detectOtherHealthKitActivity`/`detectOtherHealthConnectActivity` run inside
+`healthkitSync.ts`'s `importHealthKitRuns` and `healthConnectSync.ts`'s
+`syncHealthConnectBiometrics` respectively — the SAME `AppState`
+listener/mutex each file already has for N465/N477/N478 — rather than a
+third orchestrator. Both are best-effort (wrapped in their own try/catch)
+and must never fail the pass they ride inside.
+
+**Same toggle, widened again — no second consent screen.** iOS needed no new
+HealthKit permission at all (`HKWorkoutTypeIdentifier` already covers every
+activity type); Android's `READ_RECORD_TYPES` gained `ExerciseSession`
+alongside `HeartRate`/`Vo2Max`. Both settings toggles' copy was widened to
+say so (`app/settings.tsx`) — the third time the iOS toggle has grown this
+way (N465 → N477 → N479), and the Android toggle's LABEL changed from "Read
+heart rate from Health Connect" to "Sync with Health Connect" to stop
+undersaying what it now covers.
+
+**Placement: between blocks 1 and 2, not a seventh numbered block.** Today's
+own doc comment (`app/(tabs)/index.tsx`) already fixes six blocks in one
+order (N179); a detected-but-unlogged activity is closer to block 1's "act
+now" territory than to anything analytical below it, so it renders
+immediately under the lead card, absent entirely when there is nothing to
+show — the same "nothing here claims an absence it has not checked"
+discipline the rest of the screen already follows.
+
+**Two explicit buttons, never a giant tappable card.** Unlike `UpNextCard`'s
+whole-row `onOpen`, `DetectedActivityCard` has no review screen to open —
+"Log" commits a real session outright — so a single large tap target risked
+creating data from an accidental touch, which is the "no silent clutter"
+criterion pointed the other way. Two ordinary sibling `Pressable`s also
+sidesteps the nested-Pressable VoiceOver bug this same screen's suggestion
+dismiss glyph already had to be fixed for once.
+
+**Testing.** `lib/__tests__/detectedActivity.test.ts` — pure
+`windowsOverlap`/`isAlreadyLogged`/`visibleDetections` (dedup and
+already-logged filtering), plus a real-SQLite fixture suite for
+`upsertDetectedActivities`/`readRecentDetections`/`dismissDetection`
+(dismiss persistence and its own INSERT-OR-IGNORE-preserves-dismissal
+mutation-verified: swapping it for an `ON CONFLICT DO UPDATE` that blanks
+`dismissed_at` turned exactly the two dismissal tests red) and
+`logDetectionAsSession` (session creation, and that the resulting session
+hides the detection with no separate flag — mutation-verified by breaking
+`windowsOverlap` and watching five tests go red as real assertion failures).
+Three `schema.test.ts` migration tests follow the v35 tables' own pattern.
+`__tests__/app/todayScreen.test.tsx` gained a wholesale mock of
+`@/lib/detectedActivity` (matching its existing `@/lib/sessionStore` mock)
+so this screen's render suite stays a test of THIS screen, not of SQLite.
+
+**Open — NEEDS HUMAN EVIDENCE**: nothing here was seen on a real device. A
+real walk (Apple Watch or an Android wearable) needs to actually surface on
+Today, tagged with the right source, and both Log and Dismiss need to be
+confirmed on-device — the native `queryOtherWorkouts`/`queryOtherExerciseSessions`
+call is, per this feature's own split, the one piece no test in this
+environment can reach.
+
 ## Open items / known gaps as of this entry
 
 

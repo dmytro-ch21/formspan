@@ -12,9 +12,11 @@ import {
   type BiometricSampleInput,
 } from './biometricApi';
 import { getDb } from './db';
+import { upsertDetectedActivities, DETECTED_ACTIVITY_WINDOW_DAYS } from './detectedActivity';
 import {
   isHealthConnectSupported,
   queryHeartRateSamples,
+  queryOtherExerciseSessions,
   queryVo2MaxReadings,
   requestHealthConnectReadAuthorization,
   sourceFromDataOrigin,
@@ -46,6 +48,13 @@ import type { TokenGetter } from './useAuthToken';
  * genuinely fails rather than "succeeding locally" the way a HealthKit
  * import does; the next foreground return with connectivity tries again,
  * same as any other network call in this app.
+ *
+ * **N479/#824 rides the same pass**, and unlike the heart-rate half above IS
+ * local-only — `detectOtherHealthConnectActivity` below writes to the
+ * `detected_activities` ledger, never the network, so it "succeeds locally"
+ * offline exactly the way `healthkitSync.ts`'s running import does. Added to
+ * this existing trigger rather than a new orchestrator, per the ticket's own
+ * instruction to respect the pattern already established here.
  */
 
 /** Whether this device has Health Connect biometric reading turned on. Off
@@ -175,6 +184,38 @@ async function importVo2Max(getToken: TokenGetter, now: Date): Promise<void> {
 }
 
 /**
+ * N479/#824: record other Health Connect-noticed activity (a walk, a hike)
+ * with no matching VOLA session, for Today's own "detected but not logged"
+ * card — the Android counterpart to `healthkitSync.ts`'s
+ * `detectOtherHealthKitActivity`. Never creates a session itself; see that
+ * function's own doc comment for why. Uses the SAME toggle as heart-rate
+ * enrichment (`ExerciseSession` joined `READ_RECORD_TYPES` in
+ * `lib/healthConnect.ts`) rather than a new one, for the identical
+ * one-consent-screen reasoning.
+ */
+async function detectOtherHealthConnectActivity(userID: string, now: Date): Promise<void> {
+  const sinceISO = new Date(
+    now.getTime() - DETECTED_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const sessions = await queryOtherExerciseSessions(sinceISO, now.toISOString());
+  if (sessions.length === 0) return;
+  await upsertDetectedActivities(
+    userID,
+    'health_connect',
+    sessions.map((s) => ({
+      id: s.id,
+      type: s.type,
+      startDate: s.startDate,
+      endDate: s.endDate,
+      durationSeconds: s.durationSeconds,
+      // Health Connect distance is a separate record this ticket's scope
+      // does not join — see `queryOtherExerciseSessions`'s own doc comment.
+      distanceMeters: null,
+    })),
+  );
+}
+
+/**
  * One enrichment pass: for every locally-known finished session worth
  * asking about (`selectEnrichmentCandidates` — never one past the 30-day
  * history wall, and never one already holding real evidence), read heart
@@ -228,6 +269,16 @@ export async function syncHealthConnectBiometrics(
   await requestHealthConnectReadAuthorization();
 
   const now = new Date();
+
+  // N479/#824: best-effort, never allowed to fail the heart-rate enrichment
+  // this function exists for — same posture as every other catch in this
+  // file's loop below.
+  try {
+    await detectOtherHealthConnectActivity(userID, now);
+  } catch {
+    // The next foreground pass tries again.
+  }
+
   const [candidates, ledger] = await Promise.all([candidateSessions(userID, now), readLedger(userID)]);
   const toEnrich = selectEnrichmentCandidates(candidates, ledger, now);
 

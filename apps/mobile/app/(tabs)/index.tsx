@@ -23,6 +23,7 @@ import { SectionHeader } from '@/components/ui/Section';
 import { WeekStrip } from '@/components/today/WeekStrip';
 import { MomentumCard } from '@/components/today/MomentumCard';
 import { UpNextCard } from '@/components/today/UpNextCard';
+import { DetectedActivityCard } from '@/components/today/DetectedActivityCard';
 import { ProgressCard } from '@/components/today/ProgressCard';
 import {
   LoggingCard,
@@ -71,6 +72,7 @@ import {
   type TodayLead,
 } from '@/lib/todayBoard';
 import { useTodayBoard } from '@/lib/useTodayBoard';
+import { useDetectedActivity } from '@/lib/useDetectedActivity';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
@@ -148,6 +150,14 @@ function todayLabel(now: Date): string {
  * 5. **INSIGHT** — at most one interpretation, and only when evidence exists.
  * 6. **CURRENT FOCUS** — the week's theme, if one is set.
  *
+ * **N479/#824 adds one card BETWEEN 1 and 2, not a seventh numbered block.**
+ * A detected-but-unlogged activity (a walk or hike the platform health store
+ * noticed) is neither "act now" nor "is asked of you" nor "is true about
+ * you" — it is closer to block 1's own territory (something to act on right
+ * now) than to anything below it, so it sits immediately under the lead
+ * card rather than earning a new position in the hierarchy this comment
+ * otherwise describes as fixed. See `DetectedActivityBlock` below.
+ *
  * **N107 took the roadmap out of block 6.** It used to hold either the offer
  * to start one or a progress line for one already underway; both are gone —
  * the offer moved to Goals, and the progress line is not replaced here at
@@ -216,6 +226,19 @@ export default function TodayScreen() {
   // "N waiting to sync" straight through the successful sync this very focus
   // triggered, and keep showing it until the next focus.
   const { pending: pendingSessions, deferred } = useSyncState();
+  // Destructured, not held as one object, so `refreshDetected`'s stable
+  // identity (memoized inside the hook on `userID` alone) can sit in a
+  // `useCallback` dependency array below without dragging `detectedItems`
+  // in with it — `detectedItems` gets a new array reference on every
+  // refresh, and a dependency array following THAT would re-run the
+  // focus effect it lives in on every refresh while the screen stays
+  // focused, not just on the next focus.
+  const {
+    items: detectedItems,
+    refresh: refreshDetected,
+    logIt: logDetectedActivity,
+    dismiss: dismissDetectedActivity,
+  } = useDetectedActivity(userId ?? null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
@@ -770,10 +793,15 @@ export default function TodayScreen() {
       refreshRoadmaps();
       // Settings can have changed any of these while this screen sat mounted.
       const stop = readSuggestionPrefs();
+      // N479/#824: the foreground/sign-in sync passes in healthkitSync.ts /
+      // healthConnectSync.ts write the ledger this reads — a focus return is
+      // exactly when that ledger is most likely to have moved.
+      const stopDetected = refreshDetected();
       return () => {
         stopFood?.();
         stopSummary?.();
         stop?.();
+        stopDetected?.();
       };
     }, [
       refreshFunnel,
@@ -782,6 +810,7 @@ export default function TodayScreen() {
       refreshCheckins,
       refreshFoodWeek,
       refreshSummary,
+      refreshDetected,
     ]),
   );
 
@@ -1090,6 +1119,30 @@ export default function TodayScreen() {
             >
               <Text style={styles.startText}>Choose what you train</Text>
             </Pressable>
+          )}
+
+          {/* N479/#824 — sits between blocks 1 and 2; see this screen's own
+              doc comment above for why it is not a seventh numbered block.
+              Absent entirely when there is nothing detected, dismissed or
+              already logged — same "nothing here claims an absence it has
+              not checked" discipline as the rest of this screen. */}
+          {detectedItems.length > 0 && (
+            <View style={styles.section} testID="today-detected-activity">
+              <SectionHeader label="Detected" />
+              {detectedItems.map((item) => (
+                <DetectedActivityCard
+                  key={item.id}
+                  type={item.type}
+                  source={item.source}
+                  durationSeconds={item.durationSeconds}
+                  distanceMeters={item.distanceMeters}
+                  units={units}
+                  onLog={() => logDetectedActivity(item)}
+                  onDismiss={() => dismissDetectedActivity(item)}
+                  testID={`today-detected-${item.id}`}
+                />
+              ))}
+            </View>
           )}
 
           {/* ── 2. LATER ──────────────────────────────────────────────────
