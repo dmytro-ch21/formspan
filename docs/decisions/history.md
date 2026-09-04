@@ -55292,6 +55292,128 @@ ticket's own scenario is finishing a forgotten app-tracked session hours
 late, not a full day, and the nudge path still reaches any exact time
 given enough taps.
 
+## 2026-09-04 — A real per-session HR report: TRIMP and zones rendered for the first time (N488/#849)
+
+The "wiring" half of N488. N476/N477 already compute `avg_hr_bpm`, `max_hr_bpm`,
+`trimp` and `time_in_zones` per session (`GET /v1/biometric/sessions/{id}/
+metrics`); N481/#826 already computes a deterministic RPE-calibration verdict
+(`sessionEffectiveness.ts`); N480/#825 already renders two lines of it on the
+BJJ session screen. None of TRIMP, the zone breakdown or the effectiveness
+verdict had ever appeared on a screen before this ticket — #826's own history
+entry names wiring as a deliberate scope cut, "left to #825 or a follow-up."
+
+**One component, three screens.** `apps/mobile/lib/hrSessionReport.ts` is a
+pure view-model — `buildHRSessionReport(metrics, sessionRPE)` — and
+`apps/mobile/components/HRSessionReport.tsx` renders whatever it returns,
+wired unchanged into `app/bjj/session/[id].tsx` (replacing N480's two-line
+corroboration rather than sitting beside it), `app/session/[id].tsx`
+(strength) and `app/running/[id].tsx`, each after that screen's own primary
+`StatRow`. Same shape `lib/trendSeries.ts`/`TrendCard` already establish for
+this codebase: the screen owns fetching, the lib file owns deciding what the
+data means, the component only renders the answer.
+
+**Three states, told apart on purpose — not two.** A session can have real HR
+evidence and still not support a trustworthy TRIMP/zone breakdown, for two
+different reasons this file keeps separate rather than collapsing into one
+grey area:
+
+- `sparse_samples` — below the same `HR_LIMITED_SAMPLE_THRESHOLD` (12 readings)
+  N480 already established for BJJ's corroboration line, reused rather than
+  reinvented. The backend's `ZoneBreakdown` (`trimp.go`) attributes each
+  inter-sample gap to the first sample's zone and skips anything over six
+  minutes entirely, so two samples an hour apart on an hour-long session
+  produce `time_in_zones` summing to a few minutes out of sixty — real
+  arithmetic, and rendering it as "how this session went" would silently
+  claim six covered minutes represent the other fifty-four.
+- `no_hrmax` — `SessionMetrics.trimp` is `null` even with real samples,
+  because the backend's `Compute` leaves TRIMP/zones unset whenever there was
+  no HRmax to classify a zone against (most commonly: no date of birth on the
+  profile, so `hrMaxFromDateOfBirth` in `lib/biometric.ts` returned `null`).
+  Avg/max HR need no ceiling and are still real; TRIMP and zones are not
+  computable at all, a different honest answer from "not enough of them,"
+  with copy that points at fixing it (add a date of birth) rather than at
+  waiting for more readings.
+
+Both `limited` reasons still show whatever real evidence exists (avg/max HR,
+sample count) rather than nothing — the ticket's "no misleading zeroed report"
+cuts against a blank screen exactly as much as a fabricated one. `unavailable`
+covers `hr_source: 'none'` and "not computed yet" alike, and is told apart
+from "still fetching" by a `hrLoaded` flag each screen tracks itself — `null`
+metrics means both, and rendering the honest-empty card mid-fetch would be the
+exact "an in-flight load is not an empty answer" bug `TrendCard`'s own tests
+already guard one screen over.
+
+**The effectiveness verdict is optional evidence, not optional plumbing.**
+`sessionRPE` is `null` for strength and running today — neither sport captures
+a single session-level RPE (strength has per-SET RPE only; running has none).
+`buildHRSessionReport` does not invent one from `hardest_rpe` or similar —
+that is a real design decision belonging to whichever ticket adds
+strength/running session reflection, not a side effect of wiring up an HR
+report. `sessionEffectivenessSummary` already returns `null` for a `null`
+RPE, so the card simply does not render for those two sports, the same "real
+evidence or nothing" rule as everywhere else in this file.
+
+**Zone colour: reused, not invented.** The ticket asked explicitly for a check
+before picking one. Nothing in the repo already colours HR zones — but
+`rpeColour()` in `app/bjj/log.tsx` already colours the BJJ RPE selector on
+exactly this kind of ordinal "how hard" scale: `vola.green` → `vola.
+rpeModerate` → `vola.warn` → `vola.danger`, ascending. An HR zone is the same
+question answered by a sensor instead of a self-report, so the five zones
+reuse that four-step ramp verbatim for zones 2–5 and add `vola.textDim` (this
+app's existing "didn't register as an answer" neutral) for zone 1 — below 60%
+of HRmax is resting/warm-up territory, not the bottom rung of an effort
+ladder, so it does not get a "hot" colour. Every value is an already-validated
+semantic token (`scripts/validate_palette.mjs` already contrast-checks
+`green`/`rpeModerate`/`warn`/`danger` individually, and `rpeColour()` already
+proves three of the four work together); nothing here is a new hex value, so
+`check:palette` needed no new assertion — a redundant "these equal themselves"
+check would test nothing a mutation could break. Each zone row also carries
+its own label and number (redundant encoding), so the ramp degrades the same
+way the rest of the app's status colours already do under the monochrome
+accessibility theme.
+
+**Reused UI, not new chrome.** `Stat`/`StatRow` for avg/max HR and training
+load, `SectionHeader`/`InfoMark` for the "Heart rate" label and its
+TRIMP/zone explanation sheet — no new primitives, matching the ticket's own
+"nicely integrate with current reports and stats."
+
+**Running's finished branch had no `ScrollView` at all** — distance/time/pace
+plus two rows fit a screen without one. Adding a variably-tall HR report
+(stats, up to five zone rows, an effectiveness card) could overflow that fixed
+layout on a small device or at accessibility text sizes, so this ticket wraps
+the branch's content in one. Nothing else about that branch's layout changed.
+
+**Tests**: `apps/mobile/lib/__tests__/hrSessionReport.test.ts` (17 cases) —
+all three states, the sample-count boundary exactly at the threshold, the
+`no_hrmax`-vs-`sparse_samples` precedence when both could apply, the zone
+percentage arithmetic (including an all-zero edge case with a real non-null
+TRIMP of exactly 0), that the effectiveness verdict comes from the real
+`sessionEffectivenessSummary` rather than a reimplementation, and that the
+zone colours are the literal same four tokens `rpeColour()` uses, in the same
+order — a guard against the two ramps silently diverging.
+`apps/mobile/components/__tests__/HRSessionReport.test.tsx` (8 cases) — what
+each state SAYS on screen (the `TrendCard` test file's own split between
+"data is shaped correctly" and "the component doesn't flatten it back into
+the wrong sentence"), including that a custom `testID` namespaces every
+child so the same component cannot collide across the three screens it now
+renders on. `pnpm --filter mobile test -- hrSessionReport HRSessionReport`:
+23/23 green. `pnpm run typecheck:mobile` and `pnpm run lint:mobile` both
+clean on every touched file.
+
+`docs/testing/functional-scenarios.md` gained scenarios for all three session
+screens' HR report (happy path, the honest no-data state, the sparse-sample
+state, the no-HRmax state).
+
+**Open**: N489 (#850, the Progress-tab rollup across sessions) and N490/N491
+(#851/#852, per-exercise and drill-vs-roll HR — new schema, explicitly out of
+scope here) are unstarted, per the ticket's own scope line. No device
+verification yet that the zone-colour ramp reads correctly against a real
+5-zone session on a physical screen, or that the `ScrollView` added to
+running's finished branch behaves correctly with the keyboard/safe-area
+insets other screens' `KeyboardAwareScrollView` already handles — this branch
+has no keyboard interaction, so a plain `ScrollView` was judged sufficient,
+but that judgment is unverified on a device.
+
 ## Open items / known gaps as of this entry
 
 

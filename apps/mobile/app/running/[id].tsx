@@ -2,14 +2,16 @@ import { useAuth } from '@clerk/clerk-expo';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { HRSessionReport } from '@/components/HRSessionReport';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { Stat, StatRow } from '@/components/ui/Stat';
+import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import { vola } from '@/constants/Colors';
 import {
   averagePaceSecPerKm,
@@ -39,6 +41,7 @@ import {
 import { request as requestSync } from '@/lib/sync';
 import { formatElapsed } from '@/lib/rest';
 import { formatDistance, formatPace } from '@/lib/units';
+import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 import { announce } from '@/lib/voice';
 import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
@@ -471,6 +474,37 @@ export default function RunningSessionScreen() {
     announcedSplitsRef.current = splits.length;
   }, [status, splits]);
 
+  // HR report (N488/#849) — same shape as BJJ and strength's own reads.
+  // `status === 'finished'` is this screen's stand-in for "the session has an
+  // `ended_at`" (the load effect above sets it from exactly that, and does
+  // not keep the session object itself in state to check directly). `hrLoaded`
+  // stays separate from `hrMetrics` because `null` means both "haven't asked
+  // yet" and "asked, and there is genuinely nothing" — see the BJJ screen's
+  // own comment on this exact distinction.
+  const getToken = useAuthToken();
+  const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  const [hrLoaded, setHrLoaded] = useState(false);
+  useEffect(() => {
+    if (!id || status !== 'finished') return;
+    let cancelled = false;
+    getSessionMetrics(getToken, id)
+      .then((m) => {
+        if (!cancelled) {
+          setHrMetrics(m);
+          setHrLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHrMetrics(null);
+          setHrLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, status, getToken]);
+
   async function pause() {
     if (status !== 'tracking' || !resumedAtRef.current) return;
     elapsedMsRef.current += Date.now() - resumedAtRef.current;
@@ -604,48 +638,63 @@ export default function RunningSessionScreen() {
     return (
       <View style={styles.container} testID="running-finished">
         <Stack.Screen options={{ title: sessionName }} />
-        {/* N465: the only place a run's source is shown — see the ticket's
-            "visually distinguishable" criterion. Phone-GPS and manual runs
-            show nothing here; a badge on every run would be noise for the
-            common case this screen exists to serve. */}
-        {source === 'healthkit' && (
-          <View style={styles.sourceBadge} testID="running-source-healthkit">
-            <Icon name="check" size={12} color={vola.textMuted} />
-            <Text style={styles.sourceBadgeText}>Imported from Apple Health</Text>
-          </View>
-        )}
-        <StatRow>
-          <Stat label="distance" value={formatDistance(distanceMeters, units)} icon="running" />
-          <Stat label="time" value={formatElapsed(elapsedSeconds)} />
-          <Stat label="pace" value={formatPace(paceSecPerKm, units)} />
-        </StatRow>
-        {/* N463: "is my distance climbing over the last few weeks" — reachable
-            from every run, not only the one just finished, since this same
-            branch renders whenever a past run is reopened from Training
-            History (`sessionHref` in `lib/startSession.ts`). See
-            `lib/runningTrend.ts` for the full carve-out argument. */}
-        <Pressable
-          onPress={() => router.push('/running/trend')}
-          style={({ pressed }) => [styles.trendRow, pressed && styles.trendRowPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Distance over time"
-          accessibilityHint="Your run distance, charted over time"
-          testID="running-trend-link"
-        >
-          <View style={styles.trendRowText}>
-            <Text style={styles.trendRowTitle}>Distance over time</Text>
-            <Text style={styles.trendRowNote}>Every run, session by session.</Text>
-          </View>
-          <Icon name="chevron" size={16} color={vola.textMuted} />
-        </Pressable>
-        <Pressable
-          style={styles.primary}
-          onPress={() => router.replace('/(tabs)')}
-          accessibilityRole="button"
-          testID="running-done"
-        >
-          <Text style={styles.primaryText}>Done</Text>
-        </Pressable>
+        {/* N488/#849 added the HR report below the stat row, which can now
+            run taller than a fixed screen on a small device or at
+            accessibility text sizes — this branch had no scroll container at
+            all before, because distance/time/pace plus two rows fit without
+            one. A `ScrollView` costs nothing when the content already fits. */}
+        <ScrollView contentContainerStyle={styles.finishedScroll}>
+          {/* N465: the only place a run's source is shown — see the ticket's
+              "visually distinguishable" criterion. Phone-GPS and manual runs
+              show nothing here; a badge on every run would be noise for the
+              common case this screen exists to serve. */}
+          {source === 'healthkit' && (
+            <View style={styles.sourceBadge} testID="running-source-healthkit">
+              <Icon name="check" size={12} color={vola.textMuted} />
+              <Text style={styles.sourceBadgeText}>Imported from Apple Health</Text>
+            </View>
+          )}
+          <StatRow>
+            <Stat label="distance" value={formatDistance(distanceMeters, units)} icon="running" />
+            <Stat label="time" value={formatElapsed(elapsedSeconds)} />
+            <Stat label="pace" value={formatPace(paceSecPerKm, units)} />
+          </StatRow>
+
+          {/* N488/#849 — the same HR report BJJ and strength show, reused
+              unchanged. Running has no single session-level RPE either (no
+              reflection captured for this sport at all today), so
+              `sessionRPE` is `null` and the effectiveness card does not
+              render; see `lib/hrSessionReport.ts`'s doc comment. */}
+          {hrLoaded && <HRSessionReport metrics={hrMetrics} sessionRPE={null} testID="running-hr" />}
+
+          {/* N463: "is my distance climbing over the last few weeks" — reachable
+              from every run, not only the one just finished, since this same
+              branch renders whenever a past run is reopened from Training
+              History (`sessionHref` in `lib/startSession.ts`). See
+              `lib/runningTrend.ts` for the full carve-out argument. */}
+          <Pressable
+            onPress={() => router.push('/running/trend')}
+            style={({ pressed }) => [styles.trendRow, pressed && styles.trendRowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Distance over time"
+            accessibilityHint="Your run distance, charted over time"
+            testID="running-trend-link"
+          >
+            <View style={styles.trendRowText}>
+              <Text style={styles.trendRowTitle}>Distance over time</Text>
+              <Text style={styles.trendRowNote}>Every run, session by session.</Text>
+            </View>
+            <Icon name="chevron" size={16} color={vola.textMuted} />
+          </Pressable>
+          <Pressable
+            style={styles.primary}
+            onPress={() => router.replace('/(tabs)')}
+            accessibilityRole="button"
+            testID="running-done"
+          >
+            <Text style={styles.primaryText}>Done</Text>
+          </Pressable>
+        </ScrollView>
       </View>
     );
   }
@@ -744,6 +793,7 @@ export default function RunningSessionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  finishedScroll: { flexGrow: 1, paddingBottom: 24 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   map: { flex: 1 },
   marker: {

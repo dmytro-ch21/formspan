@@ -395,6 +395,11 @@ export function describeRPE(rpe: number): string {
  * That is what "sparse" looks like for THIS sport specifically, so a count in
  * that range is exactly the case §5.5 warns about — real evidence, but not
  * enough of it to lean on.
+ *
+ * Not BJJ-specific in what it measures (sample density, not anything about
+ * grappling), so N488/#849's cross-sport `lib/hrSessionReport.ts` reuses it
+ * (as `HR_REPORT_MIN_SAMPLES`) rather than picking a second number for the
+ * same question on strength/running.
  */
 export const HR_LIMITED_SAMPLE_THRESHOLD = 12;
 

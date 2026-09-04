@@ -14,8 +14,10 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { useCountdown } from '@/components/Countdown';
 import { TIMER_BAR_SPACE, TimerSurface } from '@/components/Timer';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
+import { HRSessionReport } from '@/components/HRSessionReport';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
+import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import {
   recordsFromSession,
   summariseSession,
@@ -822,6 +824,37 @@ export default function SessionScreen() {
   // Leaving the screen must not drop the last edit.
   useEffect(() => () => void flush(), [flush]);
 
+  // HR report (N488/#849) — best-effort and non-blocking, same shape as the
+  // BJJ screen's own read (`bjj/session/[id].tsx`). A session that never
+  // ended has no window to have computed metrics from, so this doesn't even
+  // ask; a finished one may still have nothing (no wearable, offline, or the
+  // watch hasn't synced yet — normal per design doc §6.4). `hrLoaded` is kept
+  // separate from `hrMetrics` because `null` means both "haven't asked yet"
+  // and "asked, and there is genuinely nothing" — see the BJJ screen's own
+  // comment on this exact distinction.
+  const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  const [hrLoaded, setHrLoaded] = useState(false);
+  useEffect(() => {
+    if (!id || !session?.ended_at) return;
+    let cancelled = false;
+    getSessionMetrics(getToken, id)
+      .then((m) => {
+        if (!cancelled) {
+          setHrMetrics(m);
+          setHrLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHrMetrics(null);
+          setHrLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, session?.ended_at, getToken]);
+
   /**
    * Open the exercise picker, having settled pending writes.
    *
@@ -1438,6 +1471,15 @@ export default function SessionScreen() {
               />
             )}
           </StatRow>
+        )}
+
+        {/* N488/#849 — the same HR report BJJ and running show, reused
+            unchanged. Strength has no single session-level RPE (per-set RPE
+            only — `lib/sessions.ts`), so `sessionRPE` is `null` and the
+            effectiveness card simply does not render here; see
+            `lib/hrSessionReport.ts`'s doc comment. */}
+        {finished && hrLoaded && (
+          <HRSessionReport metrics={hrMetrics} sessionRPE={null} testID="session-hr" />
         )}
 
         {error && (

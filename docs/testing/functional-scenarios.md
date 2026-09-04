@@ -18268,6 +18268,14 @@ confusing — Health Connect's 30-day default history wall.
 
 ## N480 — BJJ: heart rate as corroboration for session RPE, never a replacement (`apps/mobile/app/bjj/session/[id].tsx`, `apps/mobile/lib/bjjSession.ts`'s `hrCorroboration`, `GET /v1/biometric/sessions/{id}/metrics` via `apps/mobile/lib/biometric.ts`)
 
+**Superseded on screen by N488/#849**, which replaces the two-line block this
+section describes with the fuller `<HRSessionReport>` (see that section
+below) — `hrCorroboration` itself is untouched and still covered by
+`bjjHrCorroboration.test.ts`, it is simply no longer called from this screen.
+Scenarios below describe the behavior as it shipped in N480 and as
+`hrCorroboration` still behaves as a function; for what the BJJ screen
+actually shows today, see N488's scenarios.
+
 The display half of N476–N478's biometric module, specifically for BJJ's
 purely-retrospective session review screen. Design doc §5.5: optical wrist HR
 is unreliable under grip, flexion and contact — "grappling is the pathological
@@ -18447,13 +18455,11 @@ it on a screen yet.
 
 ### Not yet covered (recorded as an open gap, not silently skipped)
 
-- Nothing renders this summary on any screen yet (deliberately out of this
-  ticket's scope — see the history entry on why, and the concurrent BJJ HR
-  ticket it would otherwise collide with). Once wired onto
-  `apps/mobile/app/bjj/session/[id].tsx`, add a scenario for the visual
-  framing (secondary to `session_rpe`, never presented as more authoritative
-  — the same discipline N480/#825 establishes for raw HR data on that
-  screen).
+- **Wired onto a screen by N488/#849** (see that section below) — the "not
+  rendered anywhere" gap this note originally recorded is closed for BJJ,
+  strength and running. This section's own scenarios stay as the record of
+  the deterministic function itself; N488's scenarios cover the visual
+  framing on screen.
 - No web-side equivalent — `apps/web` has no biometric data at all yet.
 
 ## N482 — Android Google Maps API key for `react-native-maps` (`apps/mobile/app.config.js`, `apps/mobile/eas.json`, EAS env secrets)
@@ -18604,3 +18610,97 @@ default it to "now" or "duration before now").
   whatever the device's HR happened to read at the time of logging. This
   needs a real device with real HealthKit workout/HR data; no test or
   simulator can produce it.
+
+## N488 — a real per-session HR report: TRIMP, zones, effectiveness (`apps/mobile/lib/hrSessionReport.ts`, `apps/mobile/components/HRSessionReport.tsx`, wired into `apps/mobile/app/bjj/session/[id].tsx`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/app/running/[id].tsx`)
+
+The wiring half of the HR biometric work: N476/N477 compute the numbers,
+N481 computes the effectiveness verdict, and until this ticket none of
+TRIMP, the zone breakdown or that verdict had ever appeared on a screen. One
+component (`<HRSessionReport>`), backed by one pure view-model
+(`buildHRSessionReport`), reused unchanged on all three session-detail
+screens.
+
+### Happy path
+
+- Finish a BJJ, strength or running session with a dense HR reading behind
+  it (`hr_source` not `'none'`, `sample_count` at or above
+  `HR_REPORT_MIN_SAMPLES` — 12, the same threshold N480 already used — and a
+  real `trimp`): the session-detail screen shows a "HEART RATE" section with
+  Avg HR, Max HR and Training load (TRIMP, rounded) in a stat row, followed
+  by all five zones (Z1–Z5, each labelled "Very light" through "Max
+  effort"), each row showing a coloured bar proportional to its share of
+  zone-attributed minutes, the zone's minutes, and its percentage.
+- Tapping the ⓘ beside "HEART RATE" opens a sheet explaining TRIMP and the
+  five zones in plain language.
+- On a BJJ session with a real `session_rpe` recorded, the report also shows
+  an effectiveness card (from `sessionEffectivenessSummary`) with a headline
+  ("This felt harder/easier than your heart rate suggests" or "Your effort
+  rating matches your heart rate") and a supporting sentence — the exact
+  same verdict N481's own tests already cover, now visible.
+- On strength and running (no single session-level RPE captured for either
+  sport today), the same report renders avg/max HR, TRIMP and the zone
+  breakdown, with no effectiveness card — verify its absence is silent, not
+  an error state or a "not available" placeholder.
+- Zone colours match, in order, `vola.textDim` (zone 1) →
+  `vola.green` → `vola.rpeModerate` → `vola.warn` → `vola.danger` (zones
+  2–5) — the same ramp `rpeColour()` uses for the BJJ RPE selector in
+  `app/bjj/log.tsx`, so "how hard" reads as one idea across the app.
+
+### Edge cases & errors
+
+- **`hr_source: 'none'`, or no `session_metrics` row at all**: the report
+  shows a "No heart-rate data for this session" card with a heart icon —
+  never a zeroed stat row, never a blank space with nothing explaining it.
+  Applies identically on all three screens.
+- **The metrics fetch is still in flight**: no report renders at all yet
+  (neither the honest-empty card nor a stat row) — each screen tracks its
+  own `hrLoaded` flag precisely so a brief loading window cannot flash the
+  "no data" card for a session that turns out to have real data a moment
+  later. This is the exact "an in-flight load is not an empty answer" bug
+  `TrendCard`'s own tests already guard elsewhere in this app.
+- **Sparse samples** (`sample_count` below `HR_REPORT_MIN_SAMPLES`): the
+  report shows Avg/Max HR only, with "Only N reading(s) — not enough to show
+  training load or heart-rate zones" — no TRIMP figure, no zone bars, no
+  effectiveness card, regardless of what the raw numbers say. Verify the
+  boundary is exact (N-1 reads "limited", N reads the full report, given a
+  real `trimp`).
+- **No HRmax on the profile** (`trimp` is `null` despite real samples and a
+  healthy sample count — see `Compute` in `trimp.go`): the report shows
+  Avg/Max HR only, with "Add your date of birth in your profile to unlock
+  training load and zone breakdown" — a different message from the
+  sparse-sample case, pointing at the actual fix rather than "wait for more
+  readings."
+- **A real `trimp` but zero minutes attributed to any zone** (every
+  inter-sample gap fell outside the backend's six-minute attribution
+  window): the report shows Avg/Max/Training-load stats but replaces the
+  zone bars with "Not enough continuous readings to break this down by
+  zone" rather than five empty bars.
+- **A session that hasn't ended yet**: no metrics fetch is attempted on any
+  of the three screens (nothing to enrich from an open-ended window).
+- **Offline / the metrics fetch fails**: same as "not yet computed" on
+  every screen — no error surfaced, no retry storm; `getSessionMetrics`
+  already turns a 404 into `null` and any other failure is swallowed the
+  same best-effort way each screen's other non-critical fetches already
+  are.
+- **Reopening a past BJJ session that N480 previously showed the two-line
+  corroboration on**: now shows the fuller report instead, never both at
+  once.
+
+### Auth/security
+
+- The HR figures shown are only ever the signed-in athlete's own —
+  inherited entirely from `GET /v1/biometric/sessions/{id}/metrics`'s
+  existing ownership check (N476/#821); this ticket adds no new endpoint and
+  no new authorization surface.
+
+### Not yet covered (recorded as an open gap, not silently skipped)
+
+- Per-exercise HR (strength) and drill-vs-roll HR (BJJ) — explicitly out of
+  this ticket's scope, filed separately as N490/#851 and N491/#852 (new
+  schema required).
+- A cross-session rollup on the Progress tab — N489/#850, a separate ticket
+  by design (this one reports on a single session, not a trend across many).
+- **Needs a device**: the zone-colour ramp read against a real 5-zone
+  session on a physical screen, and the `ScrollView` added to running's
+  finished branch behaving correctly at accessibility text sizes — nothing
+  in this repo's suite renders layout/colour on a real screen.
