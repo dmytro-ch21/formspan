@@ -12048,17 +12048,25 @@ screenshot as "a huge gap... leaving the top of the screen useless."
   VoiceOver — by `frontend-reviewer` and `ac-verifier` independently
   against the first version of this fix, which hid the native header
   without replacing what it removed.
-- Push into a Phase screen: one "Phase" header, not two. Phase keeps its
-  own pre-existing in-page "Back" text button (bottom of the form) — it
-  never relied on the native header for navigation, so no equivalent
-  addition was needed there.
+- Push into a Phase screen: one "Phase" header, not two.
+- **UPDATE (2026-09-03, follow-up fix):** the paragraph above used to say
+  Phase kept its own pre-existing in-page "Back" text button (bottom of the
+  form) and needed no equivalent top-left addition. That was wrong on its
+  own terms — the bottom button sat under the keyboard while typing a
+  target weight/date, and below the fold on a small device, so the
+  top-left corner had no exit at all. `frontend-reviewer` flagged it as a
+  [suggestion] during this same N484 review but it was left out of that PR
+  to stay in scope. Phase now draws the identical `leading` back button
+  Library does (`testID="phase-back"`, `accessibilityLabel="Back"`,
+  `router.canGoBack()` guarded the same way), and the redundant bottom
+  "Back" button is gone — one exit, always reachable, not two.
 
 ### Edge cases & errors
 
 - **Tap the back button with nothing to go back to** (a deep link straight
-  onto `/library`, say): falls back to the home route rather than throwing
-  — `router.canGoBack()` guards it, same pattern `curriculum/[id].tsx`'s
-  own back control already uses.
+  onto `/library`, or `/phase`, say): falls back to the home route rather
+  than throwing — `router.canGoBack()` guards it, same pattern
+  `curriculum/[id].tsx`'s own back control already uses.
 
 ### Regression trap
 
