@@ -54824,6 +54824,29 @@ Three `schema.test.ts` migration tests follow the v35 tables' own pattern.
 `@/lib/detectedActivity` (matching its existing `@/lib/sessionStore` mock)
 so this screen's render suite stays a test of THIS screen, not of SQLite.
 
+**Two blocking bugs found by `frontend-reviewer` before this PR opened, both
+fixed and mutation-verified.** First: `logDetectionAsSession` wrote
+`session_sets` but not `running_json`, so `app/running/[id].tsx`'s
+finished-session branch — which reads distance/time/pace ONLY from
+`readLocalRunningDetail`, never from `session_sets` — showed a logged walk
+as zeroed-out everything the moment the athlete opened it, even though
+Training History (which reads `session_sets` directly) showed it correctly.
+Fixed by also calling `saveLocalRunningDetail`, mirroring
+`healthkitSync.ts`'s `importHealthKitRuns` exactly — with `source: 'manual'`,
+not `'healthkit'`, since `running.Source` is a backend-validated three-value
+enum with no Health-Connect equivalent, and `'healthkit'` specifically means
+"imported automatically, without you doing anything" (N465's badge), which
+isn't true here on either platform — the athlete tapped Log. Second:
+`useDetectedActivity.ts`'s `logIt` had no `.catch()` on its write, unlike
+`dismiss` three lines below — so a failed session write left the card gone
+from `items` with nothing created, a silent failure on the ticket's primary
+action. Fixed asymmetrically from `dismiss` on purpose: a lost dismissal is
+harmless (the card reappears, re-dismissable) so it stays silent, but a lost
+Log now puts the item BACK into `items`, because the athlete believing a
+walk is logged when it isn't is worse than the card reappearing. Both fixes
+mutation-verified the same way as the rest of this feature (reverting each
+turns exactly the tests written for it red, restoring turns them green).
+
 **Open — NEEDS HUMAN EVIDENCE**: nothing here was seen on a real device. A
 real walk (Apple Watch or an Android wearable) needs to actually surface on
 Today, tagged with the right source, and both Log and Dismiss need to be

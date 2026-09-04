@@ -1,7 +1,7 @@
 import { getDb, withTransaction } from './db';
-import { RUN_EXERCISE_ID } from './running';
+import { averagePaceSecPerKm, emptyDetail, RUN_EXERCISE_ID } from './running';
 import { emptySet } from './sessions';
-import { saveLocalSets, startLocalSession } from './sessionStore';
+import { saveLocalRunningDetail, saveLocalSets, startLocalSession } from './sessionStore';
 import { request as requestSync } from './sync';
 
 /**
@@ -239,6 +239,29 @@ export async function dismissDetection(userID: string, externalID: string): Prom
  * generic "Run" a live-tracked run gets, so Training History reads "Walk",
  * not a run that never happened.
  *
+ * **Writes `running_json` too, not just `session_sets`** — found in review
+ * (N479/#824): `app/running/[id].tsx`'s finished-session branch reads
+ * distance/time/pace ONLY from `readLocalRunningDetail` (`running_json`),
+ * never from `session_sets`, so a session created without it opened to
+ * zeroed-out everything even though Training History (which reads
+ * `session_sets` directly) showed it correctly. Mirrors
+ * `healthkitSync.ts`'s `importHealthKitRuns`, the only other writer of a
+ * `running` session, which makes the identical `saveLocalRunningDetail`
+ * call for the identical reason.
+ *
+ * `source: 'manual'`, not `'healthkit'`/a Health-Connect equivalent —
+ * `running.Source` is a backend-validated enum
+ * (`backend/internal/modules/running/running.go`) of exactly `phone_gps` /
+ * `healthkit` / `manual`, with no fourth value for Android; sending
+ * anything else is rejected outright by the server. `'healthkit'` on this
+ * app's own running-import screen specifically means "imported
+ * automatically, without you doing anything" (N465's badge), which is not
+ * true here even on iOS — the athlete tapped Log. `'manual'`'s own doc
+ * comment ("distance and duration typed in after the fact, with no track at
+ * all") describes this case exactly, and is the one value valid on BOTH
+ * platforms, so logging a detected walk reads the same way regardless of
+ * which store it came from.
+ *
  * Deliberately does NOT write a `dismissed_at` or any other "handled" marker
  * to `detected_activities` — the session this creates overlaps the
  * detection's own window by construction, so the very next
@@ -247,10 +270,10 @@ export async function dismissDetection(userID: string, externalID: string): Prom
  * becoming detectable again is the correct behaviour, not a bug to guard
  * against: it is once again true that nothing logs it.
  *
- * Both writes happen in one transaction — same reasoning as
- * `healthkitSync.ts`'s `importHealthKitRuns`: a failure between them must
- * not leave a session with no working-volume row for the personal-record
- * pipeline to find.
+ * All three writes happen in one transaction — same reasoning as
+ * `healthkitSync.ts`'s `importHealthKitRuns`: a failure partway through must
+ * not leave a session with a working-volume row but no running detail, or
+ * vice versa.
  */
 export async function logDetectionAsSession(userID: string, workout: DetectedWorkout): Promise<void> {
   const db = await getDb();
@@ -260,6 +283,16 @@ export async function logDetectionAsSession(userID: string, workout: DetectedWor
       name: activityTypeLabel(workout.type),
       started_at: workout.startDate,
       ended_at: workout.endDate,
+    });
+    await saveLocalRunningDetail(userID, session.id, {
+      ...emptyDetail(session.id),
+      distance_m: workout.distanceMeters,
+      duration_seconds: workout.durationSeconds,
+      avg_pace_sec_per_km:
+        workout.distanceMeters != null
+          ? averagePaceSecPerKm(workout.distanceMeters, workout.durationSeconds)
+          : null,
+      source: 'manual',
     });
     await saveLocalSets(userID, session.id, [
       {

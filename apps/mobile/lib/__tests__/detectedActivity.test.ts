@@ -25,7 +25,13 @@ import {
   type DetectedWorkout,
   type ExistingSessionWindow,
 } from '../detectedActivity';
-import { deleteLocalSession, listLocalSessions, sessionsSince, startLocalSession } from '../sessionStore';
+import {
+  deleteLocalSession,
+  listLocalSessions,
+  readLocalRunningDetail,
+  sessionsSince,
+  startLocalSession,
+} from '../sessionStore';
 
 let mockFixture: FixtureDb;
 jest.mock('../db', () => {
@@ -271,6 +277,36 @@ describe('logDetectionAsSession', () => {
     expect(sessions[0].sets[0].seconds).toBe(1920);
     expect(sessions[0].sets[0].completed).toBe(true);
     expect(mockRequestSync).toHaveBeenCalledWith('detected-activity-logged');
+  });
+
+  // N479/#824, found in review: `app/running/[id].tsx`'s finished-session
+  // branch reads distance/time/pace ONLY from `running_json`
+  // (`readLocalRunningDetail`), never from `session_sets` — a session
+  // created without it opened to zeroed-out everything even though
+  // Training History (which reads `session_sets` directly) showed it fine.
+  it('also writes running_json, so the session screen itself (not just Training History) shows real numbers', async () => {
+    const w = workout({ distanceMeters: 2400, durationSeconds: 1920 });
+    await logDetectionAsSession(USER, w);
+    const sessions = await listLocalSessions(USER);
+    const detail = await readLocalRunningDetail(USER, sessions[0].id);
+    expect(detail).not.toBeNull();
+    expect(detail?.distance_m).toBe(2400);
+    expect(detail?.duration_seconds).toBe(1920);
+    expect(detail?.avg_pace_sec_per_km).toBeCloseTo(1920 / (2400 / 1000));
+    // Never 'healthkit': that value specifically claims "imported
+    // automatically, without you doing anything" (N465's badge), which
+    // isn't true here — the athlete tapped Log. And `running.Source` on the
+    // backend has no Health-Connect equivalent to claim on Android either.
+    expect(detail?.source).toBe('manual');
+  });
+
+  it('writes a null pace (never a divide-by-zero) when the platform reported no distance', async () => {
+    const w = workout({ distanceMeters: null });
+    await logDetectionAsSession(USER, w);
+    const sessions = await listLocalSessions(USER);
+    const detail = await readLocalRunningDetail(USER, sessions[0].id);
+    expect(detail?.distance_m).toBeNull();
+    expect(detail?.avg_pace_sec_per_km).toBeNull();
   });
 
   it('the resulting session then hides the detection via isAlreadyLogged (no separate flag needed)', async () => {
