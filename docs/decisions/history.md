@@ -55474,6 +55474,29 @@ a past check-in with girths, saved untouched, then read back in metric with
 the centimetres confirmed unchanged — needs a device/Simulator run this branch
 could not perform. Handed to the user as a checklist alongside the PR.
 
+**Picked up and finished by a later session, before the branch was ever
+pushed.** The commit above landed with one file — the girth-coverage
+extension to `checkinSaveDrift.test.tsx` — still uncommitted, and the branch
+31 commits behind `main`, in a worktree nobody had touched since. Rebased
+clean (the branch and `main`'s own N471/#801 both touch `load()`, in
+non-overlapping parts of the function — confirmed by `/pre-merge` review that
+the two guards genuinely coexist rather than merely compiling together).
+
+`frontend-reviewer` on `/pre-merge` found one real gap in bug 2's fix: the
+discard ran only after `load()`'s fetch resolved *successfully*, so flipping
+units with an unsaved draft and then hitting a **failed** reload (offline, a
+timeout) left the stale-unit digits on screen under the wrong label for as
+long as the network stayed down — the exact reinterpretation this ticket
+exists to prevent, reachable through a door bug 2's fix hadn't covered.
+Closed by moving the discard to run BEFORE the fetch rather than after it —
+it reads only the ref and the unit this render already captured, nothing
+from the response, so gating it on success was never necessary. Verified
+safe under N471's out-of-order-response guard: the discard now compares
+against the ref's value at the moment each call *starts* (synchronous,
+therefore correctly ordered) rather than at whichever response happens to
+resolve first. A new test (`discards even when the reload after the flip
+fails`) pins it, mutation-verified the same way as the original two guards.
+
 ## Open items / known gaps as of this entry
 
 

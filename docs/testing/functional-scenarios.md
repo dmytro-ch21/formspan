@@ -1186,6 +1186,7 @@ regression test is the only thing pinning it.
 - **The same mechanism, and the same fix, covers weight** — not just the nine girths N112 added.
 - **Flipping the unit preference with an unsaved draft discards it, never reinterprets it.** On a day with **no** check-in yet: type a girth or weight, switch the account's unit system (in Profile), come back — the draft is cleared, not silently kept and saved under the new unit's meaning. A typed `33` (meant as inches) must never be stored as `33` centimetres.
 - **The same discard behaviour holds on a day that already HAS a check-in** — the two cases must not disagree. An in-progress unsaved edit there is likewise discarded (and immediately replaced by the day's own stored values, correctly re-expressed in the new unit) rather than resaved as the stale digits.
+- **The discard fires even when the reload after the flip FAILS** (offline, a timeout) — it does not wait on a successful fetch. Type a girth, flip units, then go offline before coming back to the screen: the field must still be empty, not showing the stale digits under the new unit's label for as long as the network stays down.
 - Both guards are covered by `checkinSaveDrift.test.tsx`, mutation-verified (each guard reverted independently, its test confirmed red for the right reason, then restored).
 
 **Progress photo (`addPhoto`, same screen).**

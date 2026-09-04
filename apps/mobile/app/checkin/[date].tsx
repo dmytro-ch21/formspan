@@ -122,6 +122,55 @@ export default function CheckinScreen() {
     if (!date) return;
     loadSeqRef.current += 1;
     const mySeq = loadSeqRef.current;
+
+    if (fill) {
+      /*
+       * A draft's digits mean something only together with the unit system
+       * they were typed under. If the account-wide unit preference has
+       * moved since this draft was last (re)built, the draft is stale — the
+       * athlete flipped units (in Profile) with unsaved numbers still
+       * sitting on this screen. Reinterpreting those digits under the new
+       * unit would silently turn a typed "33" (inches) into a stored 33cm,
+       * so the chosen behaviour is DISCARD, never reinterpret (N125, #519).
+       *
+       * On a day that already has a check-in this is invisible: the refill
+       * below (once the fetch resolves) repopulates every numeric field
+       * from the stored centimetres/kilograms, correctly converted to the
+       * new unit, so it reads as "re-expressed" even though what actually
+       * happened is discard-then-refill-from-truth. On a day with none,
+       * there is no stored truth to refill from, so the field is simply
+       * left empty — exactly what a first-ever visit already looks like.
+       * That symmetry is what makes the two cases consistent, which the
+       * ticket requires.
+       *
+       * Deliberately run BEFORE the network call below, not after it
+       * resolves — this reads only `draftUnitsRef` and the `units` this
+       * closure already captured, nothing from the response. Gating it on
+       * a successful fetch (the original shape) left the exact
+       * reinterpretation this ticket exists to prevent reachable through a
+       * failed load: flip units offline, come back to a load that then
+       * fails, and the stale-unit digits stayed on screen under the wrong
+       * label for as long as the network stayed down. Running it here
+       * closes that door regardless of what the fetch below does. It is
+       * also safe under N471's out-of-order-response race (`loadSeqRef`)
+       * — see that guard's own comment — because this only ever compares
+       * against the ref's *current* value at the moment each call actually
+       * starts running, which is synchronous and therefore ordered
+       * correctly even when the two calls' network responses come back out
+       * of order.
+       */
+      if (draftUnitsRef.current != null && draftUnitsRef.current !== units) {
+        setDraft((d) => {
+          const next = { ...d };
+          delete next.weight_kg;
+          for (const s of GIRTH_SITES) delete next[s.key];
+          return next;
+        });
+        setTouched({});
+      }
+      draftUnitsRef.current = units;
+    }
+
     try {
       const [list, p] = await Promise.all([
         listCheckins(getToken, { from: date, to: date }),
@@ -135,37 +184,6 @@ export default function CheckinScreen() {
       const today = list[0] ?? null;
       setCheckin(today);
       setProfile(p);
-
-      if (fill) {
-        /*
-         * A draft's digits mean something only together with the unit system
-         * they were typed under. If the account-wide unit preference has
-         * moved since this draft was last (re)built, the draft is stale — the
-         * athlete flipped units (in Profile) with unsaved numbers still
-         * sitting on this screen. Reinterpreting those digits under the new
-         * unit would silently turn a typed "33" (inches) into a stored 33cm,
-         * so the chosen behaviour is DISCARD, never reinterpret (N125, #519).
-         *
-         * On a day that already has a check-in this is invisible: the refill
-         * immediately below repopulates every numeric field from the stored
-         * centimetres/kilograms, correctly converted to the new unit, so it
-         * reads as "re-expressed" even though what actually happened is
-         * discard-then-refill-from-truth. On a day with none, there is no
-         * stored truth to refill from, so the field is simply left empty —
-         * exactly what a first-ever visit already looks like. That symmetry
-         * is what makes the two cases consistent, which the ticket requires.
-         */
-        if (draftUnitsRef.current != null && draftUnitsRef.current !== units) {
-          setDraft((d) => {
-            const next = { ...d };
-            delete next.weight_kg;
-            for (const s of GIRTH_SITES) delete next[s.key];
-            return next;
-          });
-          setTouched({});
-        }
-        draftUnitsRef.current = units;
-      }
 
       if (today && fill) {
         const next: Record<string, string> = {};

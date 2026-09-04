@@ -223,6 +223,34 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
     expect(payload().waist_cm).toBeUndefined();
   });
 
+  it('discards even when the reload after the flip fails — the discard does not wait on the network', async () => {
+    // Frontend review on this ticket: the first version of this fix ran the
+    // discard only after `load`'s fetch resolved successfully, so a flip
+    // followed by a FAILED reload (offline, timeout) left the stale-unit
+    // digits on screen under the wrong label for as long as the network
+    // stayed down — the exact bug-2 reinterpretation, reachable through a
+    // door the original fix didn't cover. The discard now runs before the
+    // fetch, reading only the ref and the unit this render captured, so it
+    // cannot be skipped by the fetch failing.
+    mockUnits = 'imperial';
+    (listCheckins as jest.Mock).mockResolvedValueOnce([]);
+    const { rerender } = render(<CheckinScreen />);
+    await waitFor(() => expect(screen.getByTestId('checkin-weight')).toBeTruthy());
+
+    fireEvent.changeText(screen.getByTestId('checkin-weight'), '33');
+    expect(screen.getByTestId('checkin-weight').props.value).toBe('33');
+
+    mockUnits = 'metric';
+    (listCheckins as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+    await act(async () => {
+      rerender(<CheckinScreen />);
+    });
+
+    // Discarded despite the reload failing — never left at '33' under the
+    // new unit's label, which is what saving it would reinterpret as 33kg.
+    await waitFor(() => expect(screen.getByTestId('checkin-weight').props.value).toBe(''));
+  });
+
   it('on a day that already has a check-in — same behaviour, not a special case', async () => {
     // NOTE for whoever mutation-tests this file: this test is a CONSISTENCY
     // document, not an independent guard on the discard block above. Even
