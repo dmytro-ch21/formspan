@@ -56873,6 +56873,114 @@ between `headerInList` and `ScreenHeader`'s own `wrap` style is a magic-number
 coupling with no compiler-enforced link, which a future padding change to
 `ScreenHeader` could silently break. Neither blocks this fix.
 
+## 2026-09-05 — N506: the running detail screen's layout and its "0 yd" distance (#883)
+
+Two real, distinct bugs on the running session detail screen
+(`app/running/[id].tsx`), both reported by the user from a real device
+screenshot of a HealthKit-imported run reopened from the failed-sync list on
+the Sync screen — "The screen when we open a hr that failed to run is all
+crouded and not clear."
+
+### Bug 1: `finishedScroll` had no padding or gap, so every child supplied its
+own inset and they disagreed
+
+`finishedScroll` (the finished branch's `ScrollView` content container) was
+`{ flexGrow: 1, paddingBottom: 24 }` — no `padding`, `paddingHorizontal` or
+`gap` at all. Its children each carried their own: the source badge was
+self-centered, `StatRow` and `HRSessionReport` are both written full-bleed by
+design (assuming a padded parent — true on both their other two consumers,
+BJJ and strength), and the trend row and Done button each hand-rolled
+`marginHorizontal: 16`. Two adjacent pairs (badge→`StatRow`, and
+`trendRow`→Done) sat at a literal 0px gap, since nothing supplied vertical
+spacing between them either.
+
+Fixed by giving `finishedScroll` one uniform `padding: 20, gap: 16,
+paddingBottom: 48` — the same shape as BJJ's `body: { padding: 20, ... }`
+(`bjj/session/[id].tsx`) and strength's `scroll: { padding: 16, gap: 14, ...
+}` (`session/[id].tsx`), both read as the precedent this ticket named. Every
+child's now-redundant `marginHorizontal`/`marginTop`/`marginBottom` was
+removed rather than left to stack on top of the new `gap` — doubling exactly
+the spacing the fix exists to correct. `container` gained
+`backgroundColor: vola.bg`, matching BJJ's. The live-tracking branch (a
+separate render path lower in the same file, its own `MapView` + bottom
+`sheet`) shares `container` but not `finishedScroll`, and was read in full to
+confirm neither change touches it — `sheet` keeps its own
+`vola.surface`/padding/gap untouched.
+
+### Bug 2: distance was re-derived from the GPS route, ignoring the stored
+value — a fabricated "0 yd" next to an honest "—"
+
+The finished branch read back `route_points`, `duration_seconds` and `source`
+from the saved `SessionDetail`, but never `distance_m` or
+`avg_pace_sec_per_km` — instead recomputing both from `points` via
+`trackDistanceMeters`/`averagePaceSecPerKm`, the same functions the LIVE
+in-progress branch legitimately needs (a still-tracking run has no stored
+value yet). For a HealthKit import with no recorded route — "common for one
+logged by hand in the Health app rather than tracked live", per
+`queryRunningWorkouts`'s own doc comment in `lib/healthkit.ts` — this
+silently produced a confident "0 yd" distance sitting directly above an
+honest "—" pace (`formatPace` already guards `secPerKm <= 0`; `formatDistance`
+only guards `null`, and `0` is not `null`).
+
+Traced every path that WRITES `distance_m` before touching the read side, per
+the ticket's own instruction, to answer "is a re-derivation ever more current
+than the stored value for a finished run":
+
+- `finish()` (this same screen, `phone_gps`/manual runs) computes
+  `distance_m` from the exact `route_points` it saves alongside it, in the
+  same call — re-deriving on read-back gives the identical number, never a
+  better one.
+- `mapWorkoutToRunningDetail` (`lib/healthkit.ts`) stores
+  `metersFromQuantity(w.totalDistance) ?? (route.length >= 2 ?
+  trackDistanceMeters(route) : null)` — HealthKit's own reported total is
+  already preferred over a route-derived figure at IMPORT time, for a stated
+  reason (a watch's GPS/accelerometer fusion beats reconstructing distance
+  from however densely this app's own route query returned points). A
+  route-less import's `distance_m` is the ONLY real number that exists for it.
+
+So the stored value is never staler than a fresh re-derivation for any
+FINISHED run, on either origin — the answer the ticket asked for. Added two
+pure functions to `lib/running.ts`, `displayDistanceMeters`/
+`displayPaceSecPerKm`, that prefer the stored `distance_m`/
+`avg_pace_sec_per_km` whenever present, fall back to the track only when
+nothing was stored at all, and return `null` — never a fabricated `0` —
+when neither exists, so `formatDistance`/`formatPace` render the same honest
+`'—'` state `HRSessionReport`'s own no-data discipline (N488/#849) already
+uses. The screen now keeps the full read-back `SessionDetail` in a new
+`finishedDetail` state (alongside, not replacing, `points`/`elapsedSeconds` —
+neither of those changed) and computes `finishedDistanceM`/
+`finishedPaceSecPerKm` from it via `useMemo`, used ONLY by the finished
+branch's `StatRow`. The live branch keeps computing its own
+`distanceMeters`/`paceSecPerKm` from `points` exactly as before — untouched,
+confirmed by reading every call site of both before editing either.
+
+### Testing
+
+`lib/__tests__/running.test.ts` gained ten new cases across
+`displayDistanceMeters`/`displayPaceSecPerKm`: stored-preferred-over-a-present-
+disagreeing-route (proves precedence, not just fallback), the exact reported
+bug (stored distance, empty route → the stored value, not 0), fallback to the
+track when nothing was stored, `null` (not `0`) when neither exists, a
+single-point track treated the same as an empty one, and the matching set for
+pace including "distance resolves but duration is missing → `null`".
+Mutation-verified both guards directly: reversed `displayDistanceMeters`'s
+precedence (route-first) and reversed `displayPaceSecPerKm`'s (derive-first),
+confirmed each caught with a real assertion failure
+(`Expected: 5000, Received: 2000...`; `Expected: 300, Received: 1999.8`), then
+restored and re-ran to confirm 30/30 green again — never trusted a grep of the
+restored file, per this repo's own "verify by re-running" rule.
+
+Full `pnpm run test:mobile` (273 suites, 4403 tests) green; the
+`goalsScreen.test.tsx` `act()`-wrapping console warnings on unrelated tests
+are the pre-existing flake N500/N502 already flagged, not a regression here.
+`pnpm run lint:mobile` held at exactly 50 warnings / 0 errors — this session's
+ratchet ceiling on `main` — with no new warning introduced.
+`pnpm run typecheck:mobile` clean.
+
+### Open
+
+None new.
+
 ## Open items / known gaps as of this entry
 
 

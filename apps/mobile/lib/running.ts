@@ -166,6 +166,71 @@ export function averagePaceSecPerKm(distanceM: number, durationSeconds: number):
   return durationSeconds / (distanceM / 1000);
 }
 
+/* ---------------------------------------------------------------------------
+ * Finished-run read-back (N506/#883).
+ *
+ * `finish()` (in the screen itself) computes `distance_m` from the very same
+ * `route_points` it saves alongside it, and `mapWorkoutToRunningDetail`
+ * (`lib/healthkit.ts`) stores HealthKit's own reported total whenever one
+ * exists — preferring it over a route-derived figure precisely because a
+ * watch's GPS/accelerometer fusion is ordinarily better than reconstructing
+ * distance from however densely this app's own route query happened to
+ * return points. So `distance_m`, once saved, is never LESS accurate than
+ * re-deriving from `route_points` on every path that writes it:
+ *
+ *   - phone_gps: the two numbers are the same value, computed once, at finish.
+ *   - healthkit (with a route): `distance_m` is HealthKit's own total, and is
+ *     the authoritative figure `mapWorkoutToRunningDetail` chose over the
+ *     route on purpose.
+ *   - healthkit (no route — "common for one logged by hand in the Health app
+ *     rather than tracked live", per `queryRunningWorkouts`'s own doc):
+ *     `route_points` is empty, so re-deriving gives a fabricated 0 — the exact
+ *     bug this ticket exists to fix. `distance_m` is the ONLY real number.
+ *
+ * A re-derivation is therefore never MORE current than the stored value for a
+ * FINISHED run (unlike a live, still-tracking one, which has no stored value
+ * yet and must derive from the in-progress track — these two functions are
+ * for the read-back branch only, and the live screen keeps computing its own
+ * `distanceMeters`/`paceSecPerKm` from `points` exactly as before). The stored
+ * value is preferred whenever present; the track is only a fallback for a
+ * session saved before `distance_m` existed, or for the API's own draft rows.
+ */
+
+/**
+ * The distance to render for a finished run, preferring the stored value —
+ * see the block comment above for why it's always at least as accurate as a
+ * fresh re-derivation. Falls back to the track only when nothing was stored
+ * at all, and returns `null` (never a fabricated `0`) when neither exists —
+ * `formatDistance` already renders `null` as an honest `'—'`.
+ */
+export function displayDistanceMeters(
+  detail: Pick<SessionDetail, 'distance_m' | 'route_points'>,
+): number | null {
+  if (detail.distance_m != null) return detail.distance_m;
+  if (detail.route_points.length >= 2) return trackDistanceMeters(detail.route_points);
+  return null;
+}
+
+/**
+ * The pace to render for a finished run — same precedence as
+ * `displayDistanceMeters`, and for the same reason: a stored
+ * `avg_pace_sec_per_km` is never staler than one re-derived here. Falls back
+ * to deriving from `displayDistanceMeters` and `duration_seconds` (itself
+ * already guarding a non-positive distance or duration back to `null`), and
+ * `formatPace` renders that `null` as `'—'` exactly as it does today.
+ */
+export function displayPaceSecPerKm(
+  detail: Pick<
+    SessionDetail,
+    'avg_pace_sec_per_km' | 'distance_m' | 'route_points' | 'duration_seconds'
+  >,
+): number | null {
+  if (detail.avg_pace_sec_per_km != null) return detail.avg_pace_sec_per_km;
+  const distance = displayDistanceMeters(detail);
+  if (distance == null || detail.duration_seconds == null) return null;
+  return averagePaceSecPerKm(distance, detail.duration_seconds);
+}
+
 /**
  * Total climb, in metres — the sum of positive elevation deltas between
  * consecutive points.

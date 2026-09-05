@@ -1,12 +1,15 @@
 import {
   averagePaceSecPerKm,
   DEFAULT_SPLIT_METERS,
+  displayDistanceMeters,
+  displayPaceSecPerKm,
   elevationGainMeters,
   haversineMeters,
   splitsFromTrack,
   trackDistanceMeters,
   trackDurationSeconds,
   type RoutePoint,
+  type SessionDetail,
 } from '../running';
 
 /**
@@ -229,5 +232,132 @@ describe('splitsFromTrack', () => {
     expect(splits).toHaveLength(1);
     expect(splits[0].duration_seconds).toBe(1);
     expect(splits[0].duration_seconds).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * N506/#883 — the finished-run read-back stat that was showing a fabricated
+ * "0 yd" for a HealthKit import with a real stored distance but no route.
+ *
+ * `displayDistanceMeters`/`displayPaceSecPerKm` are only ever called from the
+ * FINISHED branch of `app/running/[id].tsx` — a still-tracking run has no
+ * stored `distance_m`/`avg_pace_sec_per_km` yet and keeps deriving from its
+ * live `points`, untouched by either of these.
+ */
+describe('displayDistanceMeters', () => {
+  const track = meridianTrack(3, 2000 / 2 / meridianMetersPerDegree(), 60); // 2 legs, 1000m each
+
+  it('prefers the stored distance_m even when a route is also present and disagrees', () => {
+    // The route below would derive to ~2000m — proves precedence, not just
+    // "falls back when the other is absent".
+    const detail: Pick<SessionDetail, 'distance_m' | 'route_points'> = {
+      distance_m: 5000,
+      route_points: track,
+    };
+    expect(displayDistanceMeters(detail)).toBe(5000);
+  });
+
+  it('returns the stored distance_m for a HealthKit import with NO route at all', () => {
+    // The exact reported bug: a route-less HealthKit import previously
+    // re-derived to trackDistanceMeters([]) === 0 and rendered a confident
+    // "0 yd" instead of the real stored value.
+    const detail: Pick<SessionDetail, 'distance_m' | 'route_points'> = {
+      distance_m: 4828, // 3 miles, HealthKit-reported
+      route_points: [],
+    };
+    expect(displayDistanceMeters(detail)).toBe(4828);
+  });
+
+  it('falls back to the track when distance_m was never stored', () => {
+    const detail: Pick<SessionDetail, 'distance_m' | 'route_points'> = {
+      distance_m: null,
+      route_points: track,
+    };
+    expect(displayDistanceMeters(detail)).toBeCloseTo(2000, 3);
+  });
+
+  it('returns null — never a fabricated 0 — when neither a stored value nor a derivable route exists', () => {
+    const detail: Pick<SessionDetail, 'distance_m' | 'route_points'> = {
+      distance_m: null,
+      route_points: [],
+    };
+    expect(displayDistanceMeters(detail)).toBeNull();
+  });
+
+  it('treats a single-point track (nothing to derive a distance from) the same as an empty one', () => {
+    const detail: Pick<SessionDetail, 'distance_m' | 'route_points'> = {
+      distance_m: null,
+      route_points: [track[0]],
+    };
+    expect(displayDistanceMeters(detail)).toBeNull();
+  });
+});
+
+describe('displayPaceSecPerKm', () => {
+  const track = meridianTrack(3, 2000 / 2 / meridianMetersPerDegree(), 60); // 2 legs, 1000m each, 120s
+
+  it('prefers the stored avg_pace_sec_per_km even when distance/duration would derive a different figure', () => {
+    const detail: Pick<
+      SessionDetail,
+      'avg_pace_sec_per_km' | 'distance_m' | 'route_points' | 'duration_seconds'
+    > = {
+      avg_pace_sec_per_km: 300,
+      distance_m: 5000,
+      route_points: track,
+      duration_seconds: 9999,
+    };
+    expect(displayPaceSecPerKm(detail)).toBe(300);
+  });
+
+  it('derives from the resolved distance and duration when no pace was stored', () => {
+    const detail: Pick<
+      SessionDetail,
+      'avg_pace_sec_per_km' | 'distance_m' | 'route_points' | 'duration_seconds'
+    > = {
+      avg_pace_sec_per_km: null,
+      distance_m: 1000,
+      route_points: [],
+      duration_seconds: 300,
+    };
+    expect(displayPaceSecPerKm(detail)).toBe(300); // 300s per 1000m = 300s/km
+  });
+
+  it('derives from a track-derived distance when distance_m was never stored either', () => {
+    const detail: Pick<
+      SessionDetail,
+      'avg_pace_sec_per_km' | 'distance_m' | 'route_points' | 'duration_seconds'
+    > = {
+      avg_pace_sec_per_km: null,
+      distance_m: null,
+      route_points: track,
+      duration_seconds: 240,
+    };
+    expect(displayPaceSecPerKm(detail)).toBeCloseTo(120, 3); // 240s / 2km
+  });
+
+  it('returns null — never a divide-by-zero artifact — when no distance can be resolved at all', () => {
+    const detail: Pick<
+      SessionDetail,
+      'avg_pace_sec_per_km' | 'distance_m' | 'route_points' | 'duration_seconds'
+    > = {
+      avg_pace_sec_per_km: null,
+      distance_m: null,
+      route_points: [],
+      duration_seconds: 300,
+    };
+    expect(displayPaceSecPerKm(detail)).toBeNull();
+  });
+
+  it('returns null when a distance resolves but duration_seconds is missing', () => {
+    const detail: Pick<
+      SessionDetail,
+      'avg_pace_sec_per_km' | 'distance_m' | 'route_points' | 'duration_seconds'
+    > = {
+      avg_pace_sec_per_km: null,
+      distance_m: 1000,
+      route_points: [],
+      duration_seconds: null,
+    };
+    expect(displayPaceSecPerKm(detail)).toBeNull();
   });
 });
