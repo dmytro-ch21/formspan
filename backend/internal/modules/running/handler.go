@@ -3,6 +3,7 @@ package running
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -103,8 +104,27 @@ func (req sessionDetailRequest) toDetail(sessionID string) (SessionDetail, error
 func (h *Handler) PutDetail(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
+	// Read once, then decode — the same split biometric.PutSamples makes and
+	// for the identical reason (N502/#873, mirrored here): http.MaxBytesReader's
+	// failure and a genuinely malformed body are different problems, and a
+	// single json.NewDecoder(MaxBytesReader(...)).Decode call reports both as
+	// "invalid JSON body". A full-track GPS run pushing close to or over
+	// maxDetailBody got a message with nothing to act on, when the actual
+	// answer ("that request is too large") was knowable server-side.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDetailBody))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			apihttp.WriteError(w, http.StatusRequestEntityTooLarge, apihttp.CodeInvalidInput,
+				"that request is too large")
+			return
+		}
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+
 	var req sessionDetailRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxDetailBody)).Decode(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
