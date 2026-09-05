@@ -56239,6 +56239,71 @@ swipe/hold-to-delete affordances, plus folding customization there), not a
 small patch.
 
 
+## 2026-09-05 — N499: starting a planned strength session no longer asks the athlete to reselect the template (#870)
+
+Reported directly by the user: schedule a specific template ("leg day") for
+the week, and when the day comes and you tap "start today's session", the
+screen asks what intent (Normal/Light/Deload) — N474's picker — and then
+makes you find and re-tap the same template again from a full list of every
+workout you own, indistinguishable from the rest. *"I dont want this if i
+already planned what i want to do why i have to rechoose now again?"*
+
+**Root cause, verified against the code before building anything (per the
+ticket's own instruction not to take the trace on faith):** the planned
+template genuinely reaches `session/start.tsx` correctly —
+`plannedWorkoutId` is read from the `?workout=` query param `startSession.ts`
+builds off `PlannedSession.workoutId` — but N474's auto-start skip
+(`if (... || sport === 'strength') return;`, added so the intent picker
+could ever be touched for a planned Light/Deload day) was the ENTIRE
+handling `plannedWorkoutId` got. Once skipped, nothing else in the file read
+it again: the planned workout just sat as one more untagged row in the
+generic "From a workout" chooser, exactly like the reference case
+`workout/[id].tsx` was already built to avoid (N474's own inline
+intent-picker-plus-one-tap-start pattern, kept off `/session/start` there
+specifically to avoid costing that extra re-selection tap).
+
+**The fix is not re-enabling auto-start** — that would reintroduce the bug
+N474 fixed (the picker becoming unreachable). It gives the resolved
+`plannedWorkout` a distinct render path instead of a skip-and-forget: when
+`plannedWorkoutId` resolves against the loaded list, the screen renders one
+prominent "Start `<name>`" card (2pt accent border, filled "Start" pill
+where the generic row has a passive chevron) directly below the SAME intent
+picker that already existed, and the generic "From a workout" list is
+suppressed entirely for that render — it remains only as the fall-through
+when there is no `plannedWorkoutId` at all, or when it resolves to nothing
+(a plan can outlive the template it points at; no foreign key, by design).
+Tapping the card calls the same `begin()` the generic list always called,
+with the already-selected `intent` — one tap, no navigation, no re-pick.
+
+A single `plannedWorkout` value (`workouts.find(...) ?? null`, gated behind
+`plannedWorkoutId`) now backs both the auto-start-skip effect and the
+render, replacing the effect's own inline `.find()` — one place decides
+"does today's plan still point at something real" rather than two that
+could disagree.
+
+**N474's regression test is unmodified, not just re-passing by luck.** Its
+assertions were on the `start-workout-w1` testID and `Start ${name}`
+accessibility label already used by the generic row; the new primary card
+reuses BOTH verbatim, so the existing test's queries still find the right
+element without being told anything moved. Four new tests were added
+alongside it: the planned template renders as the distinct card with
+`Today's plan` and the generic chooser/other workouts absent; tapping it
+starts the session with the selected intent (`light`, chosen via the
+existing pills) and the right `workout_id` in one action, no push/replace
+detour; an ad-hoc session with no `workout` param still renders the full,
+unchanged chooser; and a `workout=` pointing at nothing real still falls
+through to the chooser rather than showing a broken "Today's plan" card.
+Mutation-verified: forcing the `plannedWorkout` branch condition to `false`
+sent the "distinct primary action" test red as a real assertion failure
+(not a compile error), confirming the guard is actually exercised; restoring
+it and re-running (not grepping) confirmed green again, 6/6.
+
+**Open**: NEEDS HUMAN EVIDENCE — nobody has scheduled a real leg day on a
+device, closed the app, come back the next day, and confirmed the card reads
+as obviously primary (not just structurally distinct) next to the intent
+pills above it.
+
+
 ## Open items / known gaps as of this entry
 
 
