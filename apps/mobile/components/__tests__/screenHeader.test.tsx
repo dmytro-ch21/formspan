@@ -174,27 +174,30 @@ describe('the header itself', () => {
 });
 
 /**
- * N493 — the screen-name text and its accent dot are gone; VoiceOver alone
- * still gets told which screen this is, via an invisible marker rather than
- * visible text. User-reported: "Screens have additional view name in left
- * corner that I don't like."
+ * N503 — the screen-name text is back (reverses the visible-text half of
+ * N493's invisible-marker change), on direct user instruction: "we need to
+ * make it back the top screen left side the name of the page we are and the
+ * ability to make changes there when needed." The screen name is visible
+ * text again, and that same `Text` node — not a separate marker — is what
+ * VoiceOver announces.
  */
-describe('the screen name is spoken, not shown (N493)', () => {
-  it('renders no visible text for the title', () => {
+describe('the screen name is shown again (N503, reverses part of N493)', () => {
+  it('renders the title as visible text', () => {
     render(<ScreenHeader title="Library" />);
-    // Sighted: nothing says "Library" anywhere in the header's own text —
-    // the wordmark says "VOLA", not the screen name.
-    expect(screen.queryByText('Library')).toBeNull();
-    expect(screen.queryByText('LIBRARY')).toBeNull();
+    expect(screen.getByText('Library')).toBeTruthy();
   });
 
-  it('still tells VoiceOver which screen this is', () => {
+  it('tells VoiceOver which screen this is via the visible text itself, not a separate marker', () => {
     render(<ScreenHeader title="Library" />);
-    const marker = screen.getByLabelText('Library');
-    expect(marker).toBeTruthy();
+    const label = screen.getByLabelText('Library');
+    expect(label).toBeTruthy();
     // Not just a label — the "header" role is what makes VoiceOver treat this
     // as a landmark rather than plain unstructured text.
-    expect(marker.props.accessibilityRole).toBe('header');
+    expect(label.props.accessibilityRole).toBe('header');
+    // Exactly one node carries this label — if a leftover invisible marker
+    // existed alongside the visible text, VoiceOver would announce "Library"
+    // twice on entering the screen.
+    expect(screen.getAllByLabelText('Library')).toHaveLength(1);
   });
 
   it("leading's own control is announced separately, not swallowed into the header label", () => {

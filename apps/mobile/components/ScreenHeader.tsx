@@ -4,7 +4,7 @@ import { StyleSheet, View as RNView, type LayoutChangeEvent } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SyncChip } from '@/components/SyncChip';
-import { View } from '@/components/Themed';
+import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 
 /**
@@ -195,32 +195,48 @@ import { vola } from '@/constants/Colors';
  * under. It still says the region below scrolls, and it becomes load-bearing the
  * moment that screen has one more row than fits.
  *
- * ## The screen-name label is gone (N493)
+ * ## The screen-name label is back (N503, reverses part of N493)
  *
- * This header used to print the screen's own name — "LIBRARY", "FOOD" — as
- * visible text beside an accent-coloured dot, defended (see the JSX below,
- * before this note) as pairing with the tab bar's underline one row down to
- * answer "where am I" from either end of the screen. User-reported directly:
- * "Screens have additional view name in left corner that I don't like."
+ * N493 removed the visible screen-name text (and the accent dot beside it),
+ * replacing both with a 1x1 invisible `accessible` marker that kept only the
+ * VoiceOver announcement — user-reported directly: "Screens have additional
+ * view name in left corner that I don't like." N503 reverses the visible-text
+ * half of that, on direct instruction from the user: *"we need to make it
+ * back the top screen left side the name of the page we are and the ability
+ * to make changes there when needed"*. The screen name is visible text again,
+ * left-aligned beside `leading` in `titleWrap`.
  *
- * Removed both the text AND the dot, not just the text — a lone dot with no
- * word beside it reads as a stray mark, not a deliberate design element,
- * and half-removing it would have looked like a bug rather than a choice.
- * The wordmark now has the whole row to centre in, which is a genuine side
- * effect worth knowing: `left` (fed to `wordmarkFits`) shrinks to whatever
- * `leading` alone contributes — 0 on every screen that doesn't pass one —
- * so the wordmark should now show reliably everywhere it used to sometimes
- * hide for width reasons.
+ * **The dot is NOT restored.** N493 removed the text and the accent-coloured
+ * dot together (a lone dot with no word beside it reads as a stray mark, not
+ * a deliberate design element); N503's brief and acceptance criteria are
+ * about the *text* specifically, so only the text comes back. Bringing the
+ * dot back would also mean re-importing `useAccent`, which N493 dropped —
+ * a real, separate change nobody has asked for here.
  *
- * **VoiceOver still gets the screen name.** Sighted orientation was always
- * the tab bar's job as much as this header's (five of the eight callers ARE
- * tab screens); the two that are not (`library`, `phase`) still have no tab
- * bar to lean on, so removing the ONLY visual cue for a screen-reader user
- * too would be a real accessibility regression, not merely a visual
- * simplification. `titleWrap` itself now carries `accessibilityRole=
- * "header"` and `accessibilityLabel={title}` — nothing sighted, but VoiceOver
- * still announces "Library, header" on entering that screen, same as it
- * always could via the text this replaces.
+ * **The accessibility marker is gone, not duplicated.** The visible `<Text>`
+ * itself now carries `accessibilityRole="header"` and `accessibilityLabel=
+ * {title}` — the same two props the invisible 1x1 marker carried — so it
+ * subsumes the marker's job directly rather than sitting beside it. The
+ * marker (and its style) is deleted; keeping both would announce the screen
+ * name to VoiceOver twice.
+ *
+ * **The "ability to make changes there when needed" is the existing `leading`
+ * prop (N484), not a new mechanism.** `leading` already renders inside this
+ * same measured `titleWrap`, before the title text, and both current
+ * consumers (`library.tsx`'s and `phase/index.tsx`'s back buttons) already
+ * work through it — see the prop's own doc comment below. N503 confirmed
+ * `leading` is sufficient rather than building a second slot.
+ *
+ * **Restoring visible text needed no new layout logic.** `wordmarkFits`
+ * already measures `left` from `titleWrap`'s real rendered width via
+ * `onLeftLayout` — it was already accounting for `leading`'s width when N493
+ * shrank the marker to 1x1, so a wider `left` from real title text just flows
+ * through the same arithmetic unchanged. The longest title actually used in
+ * the app is `"Your target"` (`goals.tsx`) — a short 15pt/700/uppercase run,
+ * nowhere near wide enough on its own to threaten the 88pt wordmark's
+ * clearance on any screen that didn't already have a wide `action`/`leading`
+ * cluster (`you.tsx` is the one screen that does, and it already hides the
+ * wordmark today for that reason, independent of the title).
  */
 
 /** The artwork's width, and the clearance it needs on each side. */
@@ -274,17 +290,23 @@ export function ScreenHeader({
   /**
    * N484 — an optional control BEFORE the title, inside the same measured
    * `titleWrap` the wordmark's fit arithmetic already reads `left` from.
-   * The only caller today is `library.tsx`'s own back button: this screen
-   * is pushed (not a tab), so unlike every other `ScreenHeader` caller it
-   * has no native header supplying one. Deliberately part of `titleWrap`
-   * rather than a sibling absolutely positioned against `insets.top` —
-   * that was the first version of this fix, and it overlaid the title
-   * text rather than making room for it, because nothing told
-   * `wordmarkFits` the left edge had grown. Putting it inside the
-   * MEASURED box means `onLeftLayout` sees the true left extent
-   * automatically, the same way it already does for the title and the
-   * dot beside it — no new arithmetic, no magic number tied to this
-   * header's own padding.
+   * The original caller was `library.tsx`'s own back button: that screen is
+   * pushed (not a tab), so unlike every other `ScreenHeader` caller it has no
+   * native header supplying one. F32 (#844) gave `phase/index.tsx` — the
+   * other pushed, no-native-header route — the same back button through
+   * this same prop, so there are now two consumers, both back buttons.
+   * Deliberately part of `titleWrap` rather than a sibling absolutely
+   * positioned against `insets.top` — that was the first version of this
+   * fix, and it overlaid the title text rather than making room for it,
+   * because nothing told `wordmarkFits` the left edge had grown. Putting it
+   * inside the MEASURED box means `onLeftLayout` sees the true left extent
+   * automatically, the same way it already does for the title beside it —
+   * no new arithmetic, no magic number tied to this header's own padding.
+   *
+   * N503 confirmed this prop is also the mechanism for "the ability to make
+   * changes there when needed" (the user's own words) — a general
+   * left-side customization slot, not a second one built alongside the
+   * restored title text below.
    */
   leading?: React.ReactNode;
   action?: React.ReactNode;
@@ -328,27 +350,21 @@ export function ScreenHeader({
       testID="screen-header"
     >
       <View style={styles.row} onLayout={onRowLayout} testID="screen-header-row">
-        {/* N493 — no visible text or dot here any more (see the doc comment
-            above, "The screen-name label is gone"). `accessibilityRole=
-            "header"` + `accessibilityLabel={title}` on this wrapper is what
-            keeps VoiceOver announcing the screen name, since nothing sighted
-            does that job for `library`/`phase` any more (they have no tab
-            bar to lean on). `leading`, when present, is still a real,
-            interactive child (Library's back button) — it must stay outside
-            this label so VoiceOver still finds and announces IT separately,
-            not swallowed into one "Library, header" announcement. */}
+        {/* N503 — visible text is back (see the doc comment above, "The
+            screen-name label is back"), reversing the invisible-marker half
+            of N493. The `Text` itself now carries `accessibilityRole="header"`
+            and `accessibilityLabel={title}` — the same two props the deleted
+            1x1 marker carried — so it does VoiceOver's job directly; no
+            separate accessibility-only node needed any more. `leading`, when
+            present, stays a real, interactive sibling (the library/phase back
+            buttons) rendered BEFORE the title, outside the `Text` node, so
+            VoiceOver still finds and announces it separately rather than
+            folding into one "Library, header" announcement. */}
         <RNView style={styles.titleWrap} onLayout={onLeftLayout}>
           {leading}
-          {/* A REAL, if tiny, frame — a zero-size `accessible` view has
-              nothing for VoiceOver to land on and gets skipped entirely in
-              linear navigation, which would silently undo the whole point
-              of keeping this label. 1x1 is enough; nobody needs to SEE it. */}
-          <RNView
-            style={styles.titleAccessibilityMarker}
-            accessible
-            accessibilityRole="header"
-            accessibilityLabel={title}
-          />
+          <Text style={styles.title} accessibilityRole="header" accessibilityLabel={title}>
+            {title}
+          </Text>
         </RNView>
         {/* CONDITIONAL RENDER, not `opacity: 0`. The node below carries
             `accessibilityRole="header"` and the label "VOLA", so hiding it by
@@ -437,10 +453,17 @@ const styles = StyleSheet.create({
   // put the chip in the middle of the row. The free space now sits entirely
   // between the title and this group.
   rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  // N493 — 1x1, not 0x0: an `accessible` view with no real frame is skipped
-  // entirely by VoiceOver's linear navigation, which would silently drop
-  // the screen-name announcement this exists to keep. Visually nothing.
-  titleAccessibilityMarker: { width: 1, height: 1 },
+  // N503 — restored from before N493 (see git history on this file around
+  // the N493 commit). No accent dot alongside it any more — see the doc
+  // comment above, "The dot is NOT restored" — and no separate accessibility
+  // marker either: this `Text` carries `accessibilityRole="header"` itself.
+  title: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: vola.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
 });
 
 /**

@@ -56427,6 +56427,80 @@ VO₂max toggle are both judgment calls recorded above rather than measured
 against real usage — revisit if either produces a fresh complaint.
 
 
+## 2026-09-05 — N503: the screen title is visible again — reverses part of N493 (#874)
+
+Direct user instruction, quoted in full because the wording is the whole
+ticket: *"nah actually we need to make it back the top screen left side the
+name of the page we are and the ability to make changes there when needed."*
+N493 (#863, landed the previous day) had replaced `ScreenHeader`'s visible
+screen-name text with a 1x1 invisible `accessible` marker, keeping only the
+VoiceOver announcement — reversing that visible-text half is this ticket.
+
+**What came back, precisely.** `titleWrap` renders a real `<Text>` again,
+after `leading` and before the wordmark's absolute-positioned slot — same
+place, same `styles.title` (15pt/700/uppercase/1pt tracking/`textMuted`)
+pulled straight from git history on this file around the N493 commit rather
+than reinvented. **The accent dot beside the old text is NOT back** — N493
+removed the text and the dot together as one visual element, the ticket's
+brief and acceptance criteria are about the text specifically, and bringing
+the dot back would mean re-importing `useAccent`, a separate change nobody
+asked for here. The invisible 1x1 marker is deleted outright rather than kept
+alongside the visible text: the `<Text>` itself now carries
+`accessibilityRole="header"` and `accessibilityLabel={title}` — the same two
+props the marker carried — so it does VoiceOver's job directly. Keeping both
+would have announced the screen name twice; a mutation test (re-adding a
+duplicate marker node, confirming `screenHeader.test.tsx`'s new
+"exactly one label" assertion goes red as a real test failure, then reverting
+and confirming green again by re-running) proved that guard actually catches
+the regression it exists for.
+
+**No new layout mechanism, on purpose.** `wordmarkFits`'s width arithmetic
+(`onLeftLayout`/`leftWidth`) already measured `titleWrap`'s real rendered
+width — it was already accounting for `leading`'s width the whole time N493's
+1x1 marker made that measurement trivially small, so swapping real text back
+in exercises the exact same, unmodified code path. Checked against the
+longest `title` actually used anywhere in the app (`"Your target"`,
+`goals.tsx`) alongside every other screen's `leading`/`action` combination;
+nothing changes the wordmark's fit/hide behavior on any of the eight callers.
+The full `screenHeader.test.tsx` suite (wordmark-fit geometry table
+included) was re-run, not just the three tests that changed, and stayed
+green.
+
+**"The ability to make changes there when needed" is the existing `leading`
+prop (N484), confirmed sufficient rather than built anew.** Every
+`<ScreenHeader` call site in the app was read to check this: `leading` is
+used by `library.tsx`'s back button, as the ticket's own text expected, but
+also — a real gap in the ticket's own description, since F32 (#844) landed
+the day before N493 — by `phase/index.tsx`'s back button. Both are simple
+back-navigation controls and both already work correctly through `leading`
+today; nothing about either call site needed `leading` to do more than it
+already does (a single node, rendered before the title, inside the same
+measured box). No second customization mechanism was built.
+
+**Doc comments updated, not left describing behavior that no longer
+exists.** The "## The screen-name label is gone (N493)" section became
+"## The screen-name label is back (N503, reverses part of N493)", explaining
+what came back, what didn't (the dot), and why the marker was deleted rather
+than duplicated. The `leading` prop's own doc comment now names both current
+call sites instead of the stale "library.tsx's own back button" line. The
+inline JSX comment above `titleWrap` was rewritten to describe the restored
+`<Text>`, not the marker it replaced.
+
+`screenHeader.test.tsx`'s "the screen name is spoken, not shown (N493)"
+`describe` block was renamed and rewritten to assert visible text renders
+(`getByText`) rather than only an accessibility label, plus the new
+exactly-one-label regression guard described above; the `leading`-announced-
+separately test was kept as-is since that behavior is unchanged.
+`docs/testing/functional-scenarios.md`'s N493 scenario line was updated to
+match — the screen name is asserted as visible again, not merely spoken.
+
+**Open**: N498 (#869, the Plan/Progress header-unification ticket) was filed
+reasoning partly from "the title is gone now" — this entry removes that
+premise. N498 is deliberately still queued rather than dispatched, sequenced
+to build on top of this change; its own actual scope (scroll behavior,
+hairline, padding) never depended on title visibility, so nothing here should
+need reconciling beyond a routine rebase when it starts.
+
 ## Open items / known gaps as of this entry
 
 
