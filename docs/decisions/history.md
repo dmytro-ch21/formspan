@@ -56501,6 +56501,74 @@ to build on top of this change; its own actual scope (scroll behavior,
 hairline, padding) never depended on title visibility, so nothing here should
 need reconciling beyond a routine rebase when it starts.
 
+## 2026-09-05 — N500: every food-logging confirm lands on the food log, not wherever it was pushed from (#871)
+
+Reported by the user: *"When Logging food and we click log it after scan code
+or describe it, should land me on the see todays food page..."* Traced to
+five confirm/log call sites, all ending in a bare `router.back()`:
+`app/food/scan.tsx`'s barcode confirm, `app/food/describe.tsx`'s per-row log
+and its compiled-into-one-meal log (N472), and `app/food/add.tsx`'s saved-food
+`log()` and catalog `logCatalog()`. `router.back()` returns to whatever pushed
+the current screen, which for scan and describe is the search screen
+(`/food/add`) one level short of the food log, and for `add.tsx` itself
+depends on entry point — the Food tab (`app/(tabs)/food.tsx:599`) lands
+correctly by coincidence, but Today's `momentumLogFoodHref` (N430/#692) pushes
+`add` directly, so `back()` from there lands on Today instead of the food log.
+Scan and describe never reached the food log at all, regardless of entry
+point.
+
+**The fix**: all five now call `router.dismissTo(momentumOpenFoodHref(date))`
+instead of `router.back()`, where `date` is the same `eaten_on` the entry was
+just logged under (`params.date ?? todayString()`, already computed on every
+one of these screens) — so a backdated log lands on that day's view, not
+always literal today. `momentumOpenFoodHref` (`lib/todayBoard.ts`, N430/#692)
+already existed and builds `/food?date=<day>`; nothing had called it from a
+logging confirm before this.
+
+`dismissTo` rather than `back`/`replace`: Expo Router 57 (installed, `~57.0.11`)
+ships `router.dismissTo(href)` for exactly this "jump to an existing screen and
+drop everything pushed after it" shape — confirmed from the installed
+package's own type declaration ("Dismisses screens until the provided href is
+reached. If the href is not found, it will instead replace the current screen
+with the provided href.") and its runtime (`linkTo(..., { event: 'POP_TO' })`
+in `expo-router/build/global-state/router.js`). The Food tab lives inside the
+`(tabs)` group and is present in navigation state from app launch (tab
+navigators don't lazy-drop unmounted tabs out of state, only out of render),
+so the "pop to an existing screen" branch is what actually fires for every
+realistic entry point (Food tab, Today, or a fresh cold-start into `add`) — the
+replace fallback exists only for a stack shape this app doesn't currently
+build. This is also already the pattern this codebase's own route-literal
+guard (`lib/__tests__/routes.test.ts`) recognizes: its `NAVIGATION_START` regex
+already matched `router.dismissTo(...)` before this change, meaning the test
+author anticipated this call shape without anyone having used it yet.
+
+`app/(tabs)/food.tsx` already handled `?date=` correctly (verified before
+writing anything, per the ticket's own instruction) — N430/#692 built that
+handling for Today's "See logged food" link, including the re-seed-on-a-second-
+deep-link case (`appliedDateParam`), so this fix needed no changes there.
+
+**Tests**: `describeCompile.test.tsx`'s two `mockBack` assertions (the only
+existing assertions on the old `router.back()`) became `mockDismissTo`
+assertions against the resolved href. Every other test file exercising one of
+the five call sites (`scanScreen`, `scanNoCamera`, `describeQuota`,
+`describePhoto`, `describeBarcode`, `describeReuse`, `addFoodCatalog`) had its
+`useRouter` mock extended with a `dismissTo` stub — without it, calling the new
+code against the old mock shape throws `dismissTo is not a function`, which is
+exactly the kind of apparatus break "Verify that a check can fail" warns about
+rather than a red assertion. New assertions were added at the two call sites
+that previously had zero coverage of their navigation target at all
+(`scanScreen.test.tsx`'s confirm test, `addFoodCatalog.test.tsx`'s catalog-row
+and a new saved-food-row test), plus one dedicated backdated-date case in
+`describeBarcode.test.tsx` asserting the href carries a date distinct from the
+suite's real clock, not a hardcoded "today". Mutation-verified `scanScreen`'s
+new assertion directly: reverted the fix to `router.back()`, confirmed the
+test failed as a real assertion failure (not a crash), restored, confirmed
+green again by re-running.
+
+**Open**: the reviewer subagents' full findings are captured in the PR itself;
+nothing outstanding here beyond what CI and `/pre-merge` already gate on.
+
+
 ## Open items / known gaps as of this entry
 
 

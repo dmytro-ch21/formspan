@@ -77,6 +77,7 @@ import {
 } from '@/lib/foodQuantity';
 import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/nutrition';
 import { request as requestSync } from '@/lib/sync';
+import { momentumOpenFoodHref } from '@/lib/todayBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -401,7 +402,11 @@ export default function ScanBarcodeScreen() {
         source_food_id: null,
       });
       requestSync('barcode scanned');
-      router.back();
+      // N500/#871 — land on the food log for `date` (the day this was logged
+      // for, not necessarily real today) rather than back to the search
+      // screen this was pushed from. `dismissTo` pops the search/scan
+      // screens this flow pushed along the way.
+      router.dismissTo(momentumOpenFoodHref(date));
     } catch (err) {
       setSaveError(
         `${err instanceof Error && err.message ? err.message : 'That could not be saved.'} Nothing was logged.`,

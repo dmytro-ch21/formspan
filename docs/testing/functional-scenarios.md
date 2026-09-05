@@ -19015,3 +19015,43 @@ failed pass now leaves a debug-visible trace instead of none at all.
   another user" response, are untouched by the size-wall fix or the
   chunking (each chunk is still a normal authenticated request under the
   same user).
+
+## N500 — food-logging confirms land on the food log, not wherever they were pushed from (`apps/mobile/app/food/scan.tsx`, `apps/mobile/app/food/describe.tsx`, `apps/mobile/app/food/add.tsx`, `apps/mobile/lib/todayBoard.ts`'s `momentumOpenFoodHref`)
+
+Five confirm/log actions now navigate straight to the food log for the date
+being logged (`/food?date=<day>`) instead of `router.back()`-ing to wherever
+the flow happened to be pushed from.
+
+- **Barcode scan** (`app/food/scan.tsx`): search for a food → scan a barcode →
+  confirm the draft ("Log it") → lands on the Food tab/day view for today,
+  showing the just-logged entry, with the search and scan screens popped off
+  the stack (back-navigating from the food log does not return to either).
+- **Describe a meal, per row** (`app/food/describe.tsx`): describe a meal that
+  drafts multiple items → tap Log without compiling → lands on the food log
+  for the date being logged, all logged rows visible.
+- **Describe a meal, compiled into one** (`app/food/describe.tsx`, N472):
+  describe a multi-item meal → toggle "compile into one meal" → tap Log →
+  lands on the food log for the date being logged, showing the one combined
+  entry.
+- **Search/saved-food log** (`app/food/add.tsx`): from the Food tab, tap "Log
+  food" → tap a row from "Recent"/search results → lands on the food log —
+  same behavior as before this fix (this path already landed correctly by
+  coincidence), now on the SAME route for the reason below rather than by
+  accident.
+- **Catalog log** (`app/food/add.tsx`): same entry, log a catalog (not saved)
+  row via either the quantity sheet or the quick-add `+` → lands on the food
+  log identically.
+- **Entry-point consistency (the actual regression)**: reach `add.tsx` from
+  **Today** instead of the Food tab (Today → "Log food" card) and log any
+  food (saved, catalog, scan, or describe reached from there) — must land on
+  the food log exactly as it does from the Food tab, not back on Today. Before
+  this fix this was the one path where a search/saved-food log's `back()`
+  landed somewhere other than the food log.
+- **Backdated entry**: from the food log, step to a PAST day, log food for
+  that day through any of the five flows above — must land on THAT day's food
+  view (`/food?date=<past day>`), not on real today.
+- **Back-navigation after landing**: from the food log after any of the five
+  flows, press the hardware/gesture back — should not return to the
+  scan/describe/search screen that was just popped (regression check for
+  `dismissTo` actually dropping the intermediate stack entries, not merely
+  navigating past them).
