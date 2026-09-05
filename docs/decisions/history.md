@@ -57093,6 +57093,174 @@ contract update, exactly the manual-discipline gap
 response to that route, in the same style N502 already used for
 `/biometric/samples` — `pnpm run lint:openapi` re-validated clean.
 
+## 2026-09-05 — N508: spacing, typography and card tokens land — mobile finally imports the scale it declared (#885)
+
+`assets/brand/design-tokens.json` had declared a spacing/radius scale since
+the brand kit existed, and `apps/mobile` never imported it. Colour got
+tokenized by hand into `constants/Colors.ts`; spacing and typography were
+written down once (spacing) or never (typography) and then every screen
+picked its own numbers. Measured: 1,969 spacing literals across `app/` +
+`components/`, 54% off the declared scale — and the two values the app
+actually converged on by hand, a 20pt screen gutter and a 14pt card padding,
+were not even on it. Typography had no scale anywhere: 27 distinct `fontSize`
+values across 1,256 sites, 11–16 all in heavy simultaneous use, one site at
+`fontSize: 12.5`. This is the foundation N444, N498 and N506 were each
+independently patching symptoms of — this ticket is the fix those symptoms
+were pointing at.
+
+**What landed:**
+
+- `apps/mobile/constants/Spacing.ts` and `Typography.ts`, siblings to
+  `Colors.ts` in naming and doc-comment density, plus a new
+  `apps/mobile/constants/Card.ts` for the settled card surface.
+- `assets/brand/design-tokens.json`'s `spacing`/`radius` scales widened
+  rather than the app's real usage forced to fit the old, coarser ones.
+  Recorded as the working assumption in the ticket, confirmed by measuring
+  actual usage on the six converted screens: 822 sites app-wide already used
+  2, 6, 10, 14 or 20, none of which `[4, 8, 12, 16, 24, 32, 48, 64]` admitted.
+  New scale: `spacing: [2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 48, 64]` (a
+  2pt step through the low range, coarsening back to the original step past
+  24) and `radius: [8, 12, 14, 16, 24]` (14 added — it was already the de
+  facto card radius at 112 sites, including `Stat.tsx`'s own card row).
+  `Spacing.ts` does not restate these numbers: `scripts/generate_design_tokens.mjs`
+  (mirroring `generate_icons.mjs`'s existing pattern) turns the JSON into
+  `apps/mobile/constants/designTokens.generated.ts`, gated by a new
+  `check:design-tokens` link in `verify` (same local-only wiring `check:icons`
+  already has — neither runs as its own CI job step, an existing asymmetry
+  this ticket didn't introduce). A direct JSON import from `apps/mobile` was
+  rejected: `assets/brand/` sits outside the app and nothing widens Metro's
+  watch roots to reach it, and a generated file is resolved exactly like
+  every other local import.
+- A from-scratch typography scale — nothing existed to adopt. Seven roles
+  (not the ticket's rough sketch of six, which bundled "eyebrow/caption" as
+  one ~11pt role): `eyebrow` (11/700/tracking 1.2, uppercase group labels),
+  `caption` (12/600, small non-label text), `meta` (13/400, row meta —
+  distinct from `caption` because real usage put real weight on both 12 and
+  13 separately), `body` (14/400, default reading text), `emphasis`
+  (15/600, row/card titles — the single most common size measured, which
+  tracks: it's what a card's own title renders at), `title` (20/800, screen
+  headlines) and `display` (28/800, hero figures). Weights are 400/600/700/800
+  throughout — the ones the app had already converged on, per the ticket's
+  own instruction not to invent a fifth.
+- `components/ui/Section.tsx` and `components/ui/Stat.tsx`'s eyebrow labels
+  fixed to agree: they were `{11, 700, tracking 1.2}` and `{11, 600, tracking
+  0.8}` respectively for the identical role. `Section.tsx`'s wins — its own
+  comment already called it the house style three older screens had
+  converged on independently — and both components now spread
+  `Typography.eyebrow`.
+- The card border settled to `vola.line` (219 pre-ticket sites) over
+  `vola.lineSoft` (50 sites) for the same visual object. `lineSoft` keeps its
+  other job — plain content dividers/rules that aren't a card's own edge
+  (e.g. `session/[id].tsx`'s `finishSection` hairline) stay on it
+  deliberately, recorded at each site that matters.
+- The glass-card material: NOT `expo-blur`. `BjjRankHeader.tsx` and
+  `library.tsx`'s facet sheet had already solved this exact problem before
+  this ticket — a `BlurView` samples what's actually behind it, and behind a
+  card here is this app's own flat, near-solid `vola.surface`, so blurring it
+  costs a native compositing pass to blur almost nothing. Both existing
+  treatments use a `LinearGradient` wash instead (a lit top-left corner
+  fading to nothing), and `components/ui/CardGlass.tsx` generalises that
+  exact recipe for a card with no single accent to tint it with (three fixed
+  low-alpha whites rather than a belt's or accent's tone). This is a
+  different MATERIAL layered on N444's flat/no-shadow ruling, not a reversal
+  of it — nothing here adds elevation. `N504` (peer, in-flight) hands its own
+  Liquid Glass treatment to the native `UITabBarController` rather than
+  building a custom blur mechanism, so there was no existing blur choice to
+  share — the two features share the same *vocabulary* (translucency, a lit
+  edge) rather than one mechanism, which is what the ticket's coordination
+  note actually asked to check for.
+- Six screens converted, per the ticket's explicit scope (not a full
+  migration — ~130 files remain, filed as follow-up batches, see below):
+  `components/ScreenHeader.tsx`, `app/(tabs)/workouts.tsx`,
+  `app/(tabs)/progress.tsx`, `app/running/[id].tsx`,
+  `app/bjj/session/[id].tsx`, `app/session/[id].tsx`. Each now shares
+  `Spacing.gutter` (20) for its screen edge and `Radius.card`/`Card.base` for
+  its primary card — this is the actual fix behind N498 (#869, Plan/Progress)
+  and the running-screen gutter this ticket's own audit found disagreeing
+  with BJJ (20) and Strength (16, also fixed here: `session/[id].tsx`'s
+  `scroll` container moves from a flat `padding: 16` to `paddingHorizontal:
+  Spacing.gutter` / `paddingTop: Spacing.lg`, and `running/[id].tsx`'s
+  `trendRow`/`primary` move from `marginHorizontal: 16` to `Spacing.gutter`).
+  Verifiable by grep for `Spacing.gutter`/`Radius.card`/`Card.base` across
+  the five screen files, not by eyeballing.
+- One documented exception: `session/[id].tsx`'s `group` style (the
+  per-exercise card) does NOT take `Card.base` or the glass wash. Its own
+  long-standing comment already explains why it has no fill — the done-row
+  tint is solved against `surface`, and a fill on the card itself measurably
+  costs contrast margin the tuning was held to. `Radius.card` was still safe
+  to apply (a corner radius carries none of that math), so its own radius
+  moved from 16 to 14 to match every other converted screen's card, and the
+  fill exemption stands untouched. `session/[id].tsx`'s `guided` banner
+  (already filled) took the glass wash instead, as this screen's example.
+  `app/(tabs)/workouts.tsx`'s `curriculaOff` similarly keeps its own smaller
+  radius (`Radius.md`, not `Radius.card`) rather than being forced onto the
+  card token — a deliberate exception, not a miss.
+- A handful of sites converged a couple of points for consistency rather
+  than staying their own one-off — recorded here since a diff of these files
+  reads as pure token substitution otherwise, and these are not that:
+  - `bjj/session/[id].tsx`'s `statValue`, 26 → `Typography.display`'s 28.
+  - `progress.tsx`'s `off`/`soonNote`, lineHeight 19 → `meta`'s 18 (corrected
+    from an earlier draft of this entry that misnamed the second site as
+    `rowNote` — `rowNote`'s lineHeight was already 18, a no-op; `soonNote`'s
+    was the one that actually changed).
+  - `components/ui/Stat.tsx`'s `badge.marginBottom`, 7 → `Spacing.sm`'s 8 —
+    found by `frontend-reviewer`, not disclosed in the original diff. A 1pt
+    shift on a 34px circular badge's bottom margin; kept at 8 rather than
+    left as an un-tokenized `7` with no step on the new scale that close.
+  - `running/[id].tsx`'s `trendRow.paddingHorizontal`, 16 → `Spacing.cardPadding`'s
+    14 — also found by `frontend-reviewer`. This one is the intended fix,
+    not just a nearby convergence: `trendRow` is this screen's designated
+    primary card (it carries `Card.base` and the glass wash), so its inner
+    padding SHOULD land on the same 14pt every other card in the app uses,
+    not stay at its own pre-existing 16. Omitted from the original list by
+    oversight, not by design — corrected here.
+- An ESLint guard (`apps/mobile/eslint.config.mjs`), scoped to exactly the
+  eight converted files (an allowlist, not a directory glob — the other
+  ~130 files still mint bare literals on purpose, and widening the rule ahead
+  of converting a file would just be new warnings with nothing to fix them
+  with). Flags a bare numeric literal on a `padding*`/`margin*`/`gap*`/
+  `borderRadius*`/`fontSize` property ONLY when the value exactly matches a
+  named token — an off-scale one-off (`paddingHorizontal: 18`, `fontSize:
+  17`) is deliberately NOT flagged, since forcing every existing off-scale
+  literal onto the scale was the app-wide-migration-in-one-PR this ticket
+  explicitly declined to do. Mutation-verified: reintroduced `paddingHorizontal:
+  20` in `progress.tsx`, confirmed `eslint` fails on it with the rule's own
+  message, restored, confirmed clean by re-running (not by grepping).
+  **A real bug was caught by this mutation pass, not staged**: the three
+  `[id].tsx` route files' `files` glob entries were unescaped
+  (`app/running/[id].tsx`), and square brackets are a minimatch CHARACTER
+  CLASS, not a literal filename match — `minimatch('app/running/[id].tsx',
+  'app/running/[id].tsx')` measured `false`. The rule had silently never
+  applied to any of the three dynamic-route screens until the glob entries
+  were escaped (`app/running/\\[id\\].tsx`), which is also how five more bare
+  `marginTop: 2` sites were found and converted (`Spacing.xxs`) across
+  `workouts.tsx`, `bjj/session/[id].tsx` and `session/[id].tsx` — the guard
+  working correctly is what caught the drift, not manual review.
+- `pnpm run lint:mobile` still reports exactly 50/50 warnings (the existing
+  ratchet ceiling, zero headroom per the ticket's own note) — this PR added
+  zero new warnings and zero new errors. `typecheck:mobile` and `test:mobile`
+  (273 suites, 4393 tests) both pass unchanged; no test in this repo asserts
+  on a style literal for any of the six converted screens, so none needed
+  updating from a literal-value assertion to a token-reference one.
+
+**Explicitly out of scope, filed as follow-up batches**: the remaining ~130
+files (`app/food/*`, `app/bjj/*` beyond the session screen, `app/curriculum/*`,
+most of `components/*`) — per N444's own precedent (incremental migration,
+not one giant PR), each future batch converts a directory and widens
+`N508_CONVERTED_FILES` in `eslint.config.mjs` to match. `apps/web` is
+untouched — its own visual style predates the design system entirely (see
+the `vola-design-system` skill's "known asymmetry" note) and reconciling that
+is separate, larger work.
+
+**NEEDS HUMAN EVIDENCE**, unresolved by this entry: the glass-card treatment
+seen on a real device and confirmed to read as "glassy" per the user's own
+intent rather than merely "still flat." The acceptance criterion asks for
+this across light/dark and two accent themes; `constants/Colors.ts` already
+records that mobile is dark-only by design ("`light` and `dark` are
+intentionally identical"), so the light-mode half of that check does not
+apply here — the device check is dark mode, at least two of the six
+`accents` in `Colors.ts` (the default `green` plus one more).
+
 ## Open items / known gaps as of this entry
 
 

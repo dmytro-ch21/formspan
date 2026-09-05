@@ -64,9 +64,12 @@ import {
 import { parseMaster, parseIdSet, suggestionsAllowed } from '@/lib/suggestion';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
+import { CardGlass } from '@/components/ui/CardGlass';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import {
@@ -1509,6 +1512,9 @@ export default function SessionScreen() {
             accessibilityLabel="Run this whole workout hands free, with spoken cues"
             testID="run-session"
           >
+            {/* N508 — the glass wash, first so the icon/text paint over it.
+                See `CardGlass`'s own doc comment for the material. */}
+            <CardGlass />
             <Icon name="play" size={15} color={accent.ink} strokeWidth={2.2} />
             <View style={styles.guidedBody}>
               <Text style={[styles.guidedTitle, { color: accent.ink }]}>Guided workout</Text>
@@ -3050,8 +3056,18 @@ const MEASURE_KEY: Record<Measure, keyof LoggedSet> = {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  scroll: { padding: 16, gap: 14, paddingBottom: 48 },
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
+  // N508 — horizontal padding moves from its own 16 to `Spacing.gutter` (20):
+  // Strength was the other screen (alongside Running, before that ticket)
+  // disagreeing with Plan/Progress/BJJ's 20pt gutter. Vertical top padding
+  // stays 16 (`Spacing.lg`) — only the acceptance criterion's shared GUTTER
+  // moves, not this screen's own top clearance.
+  scroll: {
+    paddingHorizontal: Spacing.gutter,
+    paddingTop: Spacing.lg,
+    gap: Spacing.cardPadding,
+    paddingBottom: Spacing.xxxl,
+  },
   /**
    * One exercise, as a card.
    *
@@ -3068,7 +3084,7 @@ const styles = StyleSheet.create({
    * to the same session.
    */
   group: {
-    gap: 8,
+    gap: Spacing.sm,
     // A border and padding, and deliberately NO fill.
     //
     // The first version filled the card with `surface` and stepped the set
@@ -3083,11 +3099,18 @@ const styles = StyleSheet.create({
     //
     // So the boundary is a line, not a ground, and every figure recorded in
     // `Colors.ts` stays true. `line` rather than `lineSoft` because this sits
-    // on the page rather than on a card.
+    // on the page rather than on a card. **N508 does not add `Card.base` or
+    // the glass wash here** — both bundle a `backgroundColor`, and the whole
+    // point of this comment is that a fill on this box costs real contrast
+    // margin. `Radius.card` is safe to take (a corner radius carries none of
+    // that math): it moves this card's radius from its own 16 to the 14 every
+    // other converted screen's primary card now shares, which is this
+    // ticket's actual acceptance criterion — the fill exemption is unrelated
+    // to the radius one.
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: Radius.card,
+    padding: Spacing.md,
   },
   // Wraps rather than overflows: the header carries the name plus up to four
   // per-set chips (rest, mode, duration unit, weight unit — "run" joins them
@@ -3103,8 +3126,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     flexWrap: 'wrap',
-    rowGap: 8,
-    columnGap: 10,
+    rowGap: Spacing.sm,
+    columnGap: Spacing.smPlus,
   },
   groupName: { flex: 1, minWidth: 140, fontSize: 16, fontWeight: '700' },
   // The structural row below the name: reorder, swap, remove. Left-aligned
@@ -3114,70 +3137,79 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    rowGap: 4,
-    columnGap: 14,
+    rowGap: Spacing.xs,
+    columnGap: Spacing.cardPadding,
   },
   // `textMuted`, matching Rest/Time/the unit chips — see the `groupActions`
   // comment at the call site for why this is no longer `accent.ink`.
   swapText: {
+    ...Typography.meta,
     fontWeight: '600',
-    fontSize: 13,
     color: vola.textMuted,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xs,
   },
   restChip: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 999,
-    paddingHorizontal: 12,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.md,
     minHeight: 32,
     justifyContent: 'center',
   },
-  restChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  restChipText: { ...Typography.caption, fontWeight: '700', color: vola.textMuted },
   unitChip: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 999,
-    paddingHorizontal: 10,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.smPlus,
     minHeight: 32,
     justifyContent: 'center',
   },
-  unitChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  unitChipText: { ...Typography.caption, fontWeight: '700', color: vola.textMuted },
   modeChip: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     paddingHorizontal: 11,
     minHeight: 32,
     justifyContent: 'center',
   },
-  modeChipText: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  modeChipText: { ...Typography.caption, fontWeight: '700', color: vola.textMuted },
   runChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     paddingHorizontal: 11,
     minHeight: 32,
   },
-  runChipText: { fontSize: 12, fontWeight: '700' },
+  runChipText: { ...Typography.caption, fontWeight: '700' },
+  // The one glass card on this screen — `group`'s own comment explains why
+  // IT stays fill-less; this banner already had a fill, so it's the one that
+  // takes the wash (`<CardGlass />` at its JSX call site). Radius unified to
+  // `Radius.card` (was its own 16). Border colour stays the accent override
+  // at the call site (`{ borderColor: accent.accent }`, applied after this
+  // base style so it still wins) — deliberately NOT the settled `vola.line`,
+  // since this banner marks itself as the active guidance, not a generic
+  // card.
   guided: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginHorizontal: 16,
-    marginBottom: 14,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.cardPadding,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.cardPadding,
     backgroundColor: vola.surface,
+    overflow: 'hidden',
   },
   guidedBody: { flex: 1, backgroundColor: 'transparent' },
-  guidedTitle: { fontSize: 15, fontWeight: '700' },
-  guidedSub: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+  guidedTitle: { ...Typography.emphasis, fontWeight: '700' },
+  guidedSub: { ...Typography.caption, color: vola.textMuted, marginTop: Spacing.xxs },
   moveChip: {
     minWidth: 30,
     height: 30,
@@ -3192,18 +3224,18 @@ const styles = StyleSheet.create({
   // announcing itself as unavailable. It also keeps the header geometry the
   // same down the whole screen.
   moveChipOff: { opacity: 0.35 },
-  moveChipText: { fontSize: 15, fontWeight: '700', color: vola.textMuted },
+  moveChipText: { ...Typography.emphasis, fontWeight: '700', color: vola.textMuted },
   // `danger`, not `textDim`: textDim measured 3.96:1 on the screen background
   // at 13px (needs 4.5), and this control is destructive, so the colour should
   // say so. Padded to a 44pt target rather than relying on hitSlop alone.
   removeGroupText: {
-    fontSize: 13,
+    ...Typography.meta,
     fontWeight: '600',
     color: vola.danger,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xs,
   },
-  setRow: { backgroundColor: vola.surface, borderRadius: 12 },
+  setRow: { backgroundColor: vola.surface, borderRadius: Radius.md },
   // The whole row, not just the tick: a column of rows is scanned by shape
   // and colour, and a 20px checkmark is not what the eye lands on.
   setRowDone: { backgroundColor: vola.setDone },
@@ -3212,16 +3244,16 @@ const styles = StyleSheet.create({
   setOrdinalDone: { color: vola.textMuted },
   // Same 2.51:1 on the done tint that moved the ordinal.
   disclosureDone: { color: vola.textMuted },
-  setHead: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
+  setHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
   setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
-  setBadge: { color: vola.lime, fontSize: 11, fontWeight: '700' },
-  setSummary: { flex: 1, fontSize: 15 },
+  setBadge: { color: vola.lime, fontSize: Typography.eyebrow.fontSize, fontWeight: '700' },
+  setSummary: { flex: 1, fontSize: Typography.emphasis.fontSize },
   // Same disc as the tick beside it — two controls of equal weight on one
   // row, sized for a thumb rather than a cursor.
   play: {
     width: 34,
     height: 34,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     borderWidth: 1.5,
     borderColor: vola.line,
     alignItems: 'center',
@@ -3230,27 +3262,27 @@ const styles = StyleSheet.create({
   tick: {
     width: 34,
     height: 34,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     borderWidth: 1.5,
     borderColor: vola.line,
     alignItems: 'center',
     justifyContent: 'center',
   },
   tickDone: { backgroundColor: vola.lime, borderColor: vola.lime },
-  tickMark: { color: vola.textDim, fontWeight: '800', fontSize: 15 },
+  tickMark: { color: vola.textDim, fontWeight: '800', fontSize: Typography.emphasis.fontSize },
   tickMarkDone: { color: vola.navy },
   disclosure: { color: vola.textDim, width: 16, textAlign: 'center' },
-  setEditor: { padding: 12, paddingTop: 0, gap: 12 },
-  fieldRow: { flexDirection: 'row', gap: 10 },
-  field: { flex: 1, gap: 4 },
-  fieldLabel: { fontSize: 12, color: vola.textMuted },
-  fieldHint: { color: vola.textDim, fontSize: 11 },
+  setEditor: { padding: Spacing.md, paddingTop: 0, gap: Spacing.md },
+  fieldRow: { flexDirection: 'row', gap: Spacing.smPlus },
+  field: { flex: 1, gap: Spacing.xs },
+  fieldLabel: { ...Typography.caption, color: vola.textMuted },
+  fieldHint: { color: vola.textDim, fontSize: Typography.eyebrow.fontSize },
   fieldInput: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.smPlus,
+    paddingVertical: Spacing.smPlus,
     fontSize: 17,
     color: vola.text,
     backgroundColor: vola.bg,
@@ -3262,30 +3294,33 @@ const styles = StyleSheet.create({
   timedField: { flex: 1 },
   // Two short answers on one line. `alignItems: 'flex-start'` so a control
   // without a sibling does not stretch to a height it has no content for.
-  selects: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  selects: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.smPlus },
   hintRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+    gap: Spacing.smPlus,
     backgroundColor: vola.surfaceRaised,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.smPlus,
+    paddingHorizontal: Spacing.md,
   },
-  hintBody: { flex: 1, gap: 2 },
-  hintPhaseRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  hintDot: { width: 7, height: 7, borderRadius: 999 },
+  hintBody: { flex: 1, gap: Spacing.xxs },
+  hintPhaseRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xsPlus },
+  hintDot: { width: 7, height: 7, borderRadius: Radius.pill },
   hintPhase: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6, color: vola.text },
-  hintPips: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 },
-  hintPip: { width: 6, height: 6, borderRadius: 999 },
+  hintPips: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: Spacing.xxs },
+  hintPip: { width: 6, height: 6, borderRadius: Radius.pill },
   hintRangeText: { fontSize: 10, color: vola.textMuted, fontVariant: ['tabular-nums'] },
   hintTarget: {
-    fontSize: 20,
-    fontWeight: '800',
+    ...Typography.title,
     color: vola.text,
     fontVariant: ['tabular-nums'],
   },
-  hintLast: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  hintLast: {
+    fontSize: Typography.caption.fontSize,
+    color: vola.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
   /*
     The colour is set EXPLICITLY, and it has to be.
 
@@ -3304,20 +3339,30 @@ const styles = StyleSheet.create({
     values `RecordsCard` uses, so the two screens teach one convention.
   */
   hintReported: { color: vola.textMuted, fontStyle: 'italic' },
-  hintReason: { fontSize: 12, color: vola.textMuted },
+  // `fontSize`-only (not the full `caption` role) on these three: `caption`
+  // bundles a 600 weight, and each of these is deliberately the LOW end of
+  // this card's hierarchy — see the comment above and N191's own note below.
+  // Bolding them would work against the exact hierarchy those comments argue
+  // for.
+  hintReason: { fontSize: Typography.caption.fontSize, color: vola.textMuted },
   // N191's in-session note — deliberately NOT `hintReason`'s muted tone. It's
   // an FYI the standing prescription above hasn't seen, and reads as one:
   // `vola.text`, the app's primary colour (already load-bearing elsewhere
   // in this file), rather than a second muted line easy to skim past.
-  hintInSession: { fontSize: 12, color: vola.text, fontStyle: 'italic', marginTop: 2 },
+  hintInSession: {
+    fontSize: Typography.caption.fontSize,
+    color: vola.text,
+    fontStyle: 'italic',
+    marginTop: Spacing.xxs,
+  },
   hintApply: {
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.smPlus,
+    paddingHorizontal: Spacing.cardPadding,
     minHeight: 44,
     justifyContent: 'center',
   },
-  hintApplyText: { color: vola.navy, fontWeight: '700', fontSize: 14 },
+  hintApplyText: { ...Typography.body, color: vola.navy, fontWeight: '700' },
   /*
     Both buttons share the row EVENLY (`flex: 1` on each), rather than each
     shrink-wrapping its own two words. Sized by their labels, "+ Set" and
@@ -3326,7 +3371,7 @@ const styles = StyleSheet.create({
     which is what they are. Even halves, or one full-width button when the drop
     is not offered, is the only arrangement that says that.
   */
-  addRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  addRow: { flexDirection: 'row', alignItems: 'stretch', gap: Spacing.sm },
   // Indented and rule-marked, so a drop reads as hanging off the row above
   // rather than sitting beside it. The accent is deliberately NOT used: a drop
   // is not an achievement, and this app reserves the accent for what was
@@ -3335,7 +3380,7 @@ const styles = StyleSheet.create({
     marginLeft: 22,
     borderLeftWidth: 2,
     borderLeftColor: vola.line,
-    paddingLeft: 8,
+    paddingLeft: Spacing.sm,
   },
   addSet: {
     flex: 1,
@@ -3352,24 +3397,24 @@ const styles = StyleSheet.create({
     */
     borderColor: vola.line,
     backgroundColor: vola.surface,
-    borderRadius: 12,
+    borderRadius: Radius.md,
     // 44 is the floor, not the target: these are pressed with a thumb, standing
     // up, between sets.
     minHeight: 44,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addSetText: { fontWeight: '700', fontSize: 14 },
+  addSetText: { ...Typography.body, fontWeight: '700' },
   primary: {
     backgroundColor: vola.surfaceRaised,
-    borderRadius: 12,
-    paddingVertical: 16,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: Spacing.sm,
   },
-  primaryText: { fontWeight: '700', fontSize: 15 },
+  primaryText: { ...Typography.emphasis, fontWeight: '700' },
   // N445 — `finish` sits in ordinary scroll content now, not a pinned
   // `KeyboardAwareFooter` sibling (see that block's own comment for why the
   // footer was reverted). `finishSection` is the content-block equivalent of
@@ -3380,30 +3425,40 @@ const styles = StyleSheet.create({
   // this is one more scrollable item, not a screen-edge control, so the
   // scroll view's own `contentContainerStyle` padding is what clears the
   // home indicator, exactly as it does for every other item in this list.
+  //
+  // `borderTopColor: vola.lineSoft` is untouched by N508's border-colour
+  // settlement — that settlement is specifically about a CARD's own edge;
+  // this is a plain content divider, the role `lineSoft` keeps everywhere
+  // else in this app.
   finishSection: {
-    marginTop: 20,
-    paddingTop: 10,
+    marginTop: Spacing.gutter,
+    paddingTop: Spacing.smPlus,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: vola.lineSoft,
   },
   finish: {
-    borderRadius: 12,
-    paddingVertical: 16,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
   },
   finishText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
-  empty: { alignItems: 'center', gap: 6, paddingVertical: 24 },
+  empty: { alignItems: 'center', gap: Spacing.xsPlus, paddingVertical: Spacing.xl },
   emptyTitle: { fontSize: 16, fontWeight: '600' },
-  muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
-  share: { marginTop: 12 },
+  muted: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
+  share: { marginTop: Spacing.md },
   // N435 — "Done editing" reuses `primary`'s shape but marks itself as the
   // active state with an accent border, the same way `guided`'s border does.
   // A filled accent background would compete with Finish for the one loud
   // control on this screen; a border says "you are here" without it.
   correctToggle: { backgroundColor: 'transparent', borderWidth: 1 },
-  error: { color: vola.danger, fontSize: 14 },
-  deleteButton: { alignItems: 'center', paddingVertical: 16, marginTop: 8 },
+  error: { ...Typography.body, color: vola.danger },
+  deleteButton: { alignItems: 'center', paddingVertical: Spacing.lg, marginTop: Spacing.sm },
   deleteText: { color: vola.danger, fontWeight: '600' },
-  removeButton: { alignSelf: 'flex-start', paddingVertical: 12, minHeight: 44, justifyContent: 'center' },
-  removeText: { color: vola.danger, fontWeight: '600', fontSize: 13 },
+  removeButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: Spacing.md,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  removeText: { ...Typography.meta, fontWeight: '600', color: vola.danger },
 });

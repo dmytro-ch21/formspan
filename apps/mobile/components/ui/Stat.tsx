@@ -4,6 +4,9 @@ import { StyleSheet, View as RNView } from 'react-native';
 import { Text, View } from '@/components/Themed';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Card } from '@/constants/Card';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 
 /**
  * A number, with its units set smaller than its digits.
@@ -232,28 +235,27 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 7,
+    marginBottom: Spacing.sm,
   },
+  // The house eyebrow treatment (N508) — this used to be its own literal,
+  // {11, weight 600, tracking 0.8}, one of the two eyebrow labels the ticket
+  // found disagreeing with each other. `Section.tsx`'s version wins; see
+  // `Typography.ts`'s own note on why.
   label: {
-    fontSize: 11,
+    ...Typography.eyebrow,
     color: vola.textDim,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontWeight: '600',
   },
-  delta: { fontSize: 11, color: vola.textMuted, marginTop: 1 },
+  delta: { fontSize: Typography.eyebrow.fontSize, color: vola.textMuted, marginTop: 1 },
 
   row: {
     flexDirection: 'row',
-    backgroundColor: vola.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: vola.lineSoft,
-    paddingVertical: 14,
+    ...Card.base,
+    paddingVertical: Spacing.cardPadding,
   },
-  slot: { flex: 1, paddingHorizontal: 14, justifyContent: 'center' },
+  slot: { flex: 1, paddingHorizontal: Spacing.cardPadding, justifyContent: 'center' },
   // Four columns need the 12pt back that padding was taking.
-  slotTight: { paddingHorizontal: 8 },
+  slotTight: { paddingHorizontal: Spacing.sm },
   divider: {
     position: 'absolute',
     left: 0,

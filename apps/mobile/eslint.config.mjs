@@ -18,6 +18,77 @@ import expo from "eslint-config-expo/flat.js";
  * rules match this runtime rather than a hand-assembled set that drifts from
  * what Expo ships.
  */
+/**
+ * N508 — the spacing/radius/fontSize scales, restated as ESLint selectors.
+ *
+ * Computed here (a plain `.mjs`, so this runs as ordinary JS at config-load
+ * time) rather than hand-typed as N separate `no-restricted-syntax` entries,
+ * one per number — the numbers themselves are the same ones
+ * `constants/Spacing.ts`/`constants/Typography.ts` name, restated here only
+ * because ESLint's `no-restricted-syntax` takes a static selector string, not
+ * an imported constant.
+ *
+ * Deliberately an exact-value match, not "any bare numeric literal on these
+ * properties". Forcing every existing off-scale literal (`paddingHorizontal:
+ * 18`, `fontSize: 17`) onto the scale was explicitly rejected for this ticket
+ * — see `Spacing.ts`'s own doc comment on why the scale was widened to fit
+ * real usage rather than the reverse. A literal that already equals a named
+ * token's value is what the acceptance criteria call "restating a token as a
+ * new literal"; an off-scale one-off is neither on the scale nor pretending
+ * to be, so it isn't the drift this guards against.
+ */
+const SPACING_PROP_PATTERN =
+  "(padding|paddingHorizontal|paddingVertical|paddingTop|paddingBottom|paddingLeft|paddingRight|margin|marginHorizontal|marginVertical|marginTop|marginBottom|marginLeft|marginRight|gap|rowGap|columnGap)";
+const SPACING_SCALE_VALUES = [2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 48, 64];
+const RADIUS_PROP_PATTERN =
+  "(borderRadius|borderTopLeftRadius|borderTopRightRadius|borderBottomLeftRadius|borderBottomRightRadius)";
+const RADIUS_SCALE_VALUES = [8, 12, 14, 16, 24, 999];
+// The seven sizes `constants/Typography.ts`'s roles actually use — NOT every
+// fontSize this app has ever shipped. 16/17/18 etc. stay unrestricted: 16
+// alone has 8 real sites in just the six converted screens (measured in
+// `Typography.ts`'s own doc comment) that aren't the same role as `emphasis`
+// (15) or `title` (20) — folding it into either would be a value change no
+// screen asked for, not a token substitution.
+const FONT_SIZE_SCALE_VALUES = [11, 12, 13, 14, 15, 20, 28];
+
+const spacingSelector = SPACING_SCALE_VALUES.map(
+  (v) => `Property[key.name=/^${SPACING_PROP_PATTERN}$/] > Literal[value=${v}]`,
+).join(", ");
+const radiusSelector = RADIUS_SCALE_VALUES.map(
+  (v) => `Property[key.name=/^${RADIUS_PROP_PATTERN}$/] > Literal[value=${v}]`,
+).join(", ");
+const fontSizeSelector = FONT_SIZE_SCALE_VALUES.map(
+  (v) => `Property[key.name='fontSize'] > Literal[value=${v}]`,
+).join(", ");
+
+/**
+ * The eight files N508 actually converted. An ALLOWLIST, not a directory
+ * glob — ~130 files in this app still mint bare spacing/fontSize literals on
+ * purpose (this is the foundational PR, not the full app-wide migration; see
+ * this ticket's `docs/decisions/history.md` entry for the follow-up-batch
+ * plan), and widening this rule ahead of actually converting a file would be
+ * a wall of new warnings with no token reference to fix them with — exactly
+ * the trap this session's mobile lint ratchet has zero headroom for.
+ */
+// Square brackets are ESCAPED (`\\[id\\]`, not `[id]`) — a bare `[id]` is a
+// glob CHARACTER CLASS to minimatch (the matcher flat config's `files` uses
+// under the hood), meaning "the character i or d", not the literal dynamic-
+// route filename. Verified directly: `minimatch('app/running/[id].tsx',
+// 'app/running/[id].tsx')` is `false`; the escaped pattern is `true`. Without
+// this escaping, this whole rule silently never applied to any of the three
+// `[id].tsx` routes below — parens in `(tabs)` don't need the same treatment,
+// since plain (non-extglob) minimatch treats `(`/`)` as ordinary characters.
+const N508_CONVERTED_FILES = [
+  "components/ui/Section.tsx",
+  "components/ui/Stat.tsx",
+  "components/ScreenHeader.tsx",
+  "app/(tabs)/workouts.tsx",
+  "app/(tabs)/progress.tsx",
+  "app/running/\\[id\\].tsx",
+  "app/bjj/session/\\[id\\].tsx",
+  "app/session/\\[id\\].tsx",
+];
+
 export default defineConfig([
   ...expo,
   globalIgnores([".expo/**", "dist/**", "node_modules/**", "ios/**", "android/**"]),
@@ -90,6 +161,32 @@ export default defineConfig([
           selector: "ObjectPattern > Property[key.name='withTransactionAsync']",
           message:
             "Use withTransaction(db, fn) from lib/db.ts. Destructuring withTransactionAsync off the database escapes the queue that keeps transactions from destroying each other — see the comment there.",
+        },
+      ],
+    },
+  },
+  {
+    // N508 — see the constants and comment above this file's `export
+    // default` for the full argument. Scoped to exactly the eight files this
+    // ticket converted; widen this list as future migration batches land.
+    files: N508_CONVERTED_FILES,
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: spacingSelector,
+          message:
+            "This value is on constants/Spacing.ts's scale — reference Spacing.* instead of restating the number. See Spacing.ts for the name.",
+        },
+        {
+          selector: radiusSelector,
+          message:
+            "This value is on constants/Spacing.ts's Radius scale — reference Radius.* (or Card.base) instead of restating the number.",
+        },
+        {
+          selector: fontSizeSelector,
+          message:
+            "This fontSize matches a constants/Typography.ts role — reference Typography.<role>.fontSize (or spread the role) instead of restating the number.",
         },
       ],
     },

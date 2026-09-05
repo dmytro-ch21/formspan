@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SyncChip } from '@/components/SyncChip';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 
 /**
  * The top of every tab screen: the wordmark, then the screen's name.
@@ -419,7 +421,9 @@ export function ScreenHeader({
 }
 
 const styles = StyleSheet.create({
-  wrap: { paddingHorizontal: 20, paddingBottom: 10 },
+  // The screen gutter (N508) — the 20pt inset every tab already agreed on
+  // by hand; see `Spacing.gutter`'s own comment.
+  wrap: { paddingHorizontal: Spacing.gutter, paddingBottom: Spacing.smPlus },
   // The top of the scrolling region, when this header is what content passes
   // under — see the three arrangements in the W10 note at the top.
   // `lineBoundary` (F20/#496) is the tab bar's own `borderTopColor` too, so on
@@ -453,23 +457,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: Spacing.md,
     minHeight: 28,
   },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  // The chip and the screen's own control, as one flow child. 12pt is `row`'s
-  // own gap, carried over — though as siblings under `space-between` they
-  // actually got MORE than that, since the surplus was split around the chip.
-  // That surplus was the fault, not a baseline worth preserving: it is what
-  // put the chip in the middle of the row. The free space now sits entirely
-  // between the title and this group.
-  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  // The chip and the screen's own control, as one flow child. `Spacing.md` is
+  // `row`'s own gap, carried over — though as siblings under `space-between`
+  // they actually got MORE than that, since the surplus was split around the
+  // chip. That surplus was the fault, not a baseline worth preserving: it is
+  // what put the chip in the middle of the row. The free space now sits
+  // entirely between the title and this group.
+  rightCluster: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   // N503 — restored from before N493 (see git history on this file around
   // the N493 commit). No accent dot alongside it any more — see the doc
   // comment above, "The dot is NOT restored" — and no separate accessibility
   // marker either: this `Text` carries `accessibilityRole="header"` itself.
+  //
+  // This is the screen's own identity mark, not the `Typography.eyebrow`
+  // label-over-a-group role — see `Typography.ts`'s note on why the two stay
+  // distinct. It borrows `emphasis`'s size/line-height (the nearest role) and
+  // states its own uppercase/tracking/weight, which `emphasis` doesn't carry.
   title: {
-    fontSize: 15,
+    fontSize: Typography.emphasis.fontSize,
+    lineHeight: Typography.emphasis.lineHeight,
     fontWeight: '700',
     color: vola.textMuted,
     textTransform: 'uppercase',

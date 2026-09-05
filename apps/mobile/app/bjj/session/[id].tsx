@@ -10,10 +10,14 @@ import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
 import { Icon } from '@/components/ui/Icon';
+import { CardGlass } from '@/components/ui/CardGlass';
 import { worthCelebrating, type SessionSummary } from '@/lib/celebration';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Card } from '@/constants/Card';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   addDays,
@@ -1156,6 +1160,9 @@ export default function BjjSessionScreen() {
 function Stat({ value, unit }: { value: string; unit: string }) {
   return (
     <RNView style={styles.stat}>
+      {/* N508 — the glass wash, first so the figure paints over it. See
+          `CardGlass`'s own doc comment for the material. */}
+      <CardGlass />
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statUnit}>{unit}</Text>
     </RNView>
@@ -1173,17 +1180,23 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: vola.bg },
-  body: { padding: 20, paddingBottom: 48, gap: 4 },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
+  body: { padding: Spacing.gutter, paddingBottom: Spacing.xxxl, gap: Spacing.xs },
+  centre: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xxl,
+    gap: Spacing.sm,
+  },
   centreTitle: { fontSize: 18, fontWeight: '700', color: vola.text, textAlign: 'center' },
-  centreMuted: { fontSize: 14, color: vola.textMuted, textAlign: 'center' },
+  centreMuted: { ...Typography.body, color: vola.textMuted, textAlign: 'center' },
 
-  title: { fontSize: 28, fontWeight: '800', color: vola.text },
-  renameHint: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
-  when: { fontSize: 14, color: vola.textMuted },
-  whenPress: { marginBottom: 16 },
+  title: { ...Typography.display, color: vola.text },
+  renameHint: { ...Typography.caption, color: vola.textMuted, marginTop: Spacing.xxs },
+  when: { ...Typography.body, color: vola.textMuted },
+  whenPress: { marginBottom: Spacing.lg },
 
-  renameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  renameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   renameInput: {
     flex: 1,
     fontSize: 22,
@@ -1191,63 +1204,70 @@ const styles = StyleSheet.create({
     color: vola.text,
     borderBottomWidth: 2,
     borderBottomColor: vola.accent,
-    paddingVertical: 6,
+    paddingVertical: Spacing.xsPlus,
     minHeight: 44,
   },
   renameAction: { fontSize: 16, fontWeight: '700' },
 
-  stats: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  stats: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.md },
   // Deliberately NOT a `stat` tile. The measurements above are boxed and
   // centred; this is a labelled line, so the difference is visible before any
   // of the words are read.
-  reported: { marginBottom: 12, gap: 2 },
+  reported: { marginBottom: Spacing.md, gap: Spacing.xxs },
   reportedLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
-  reportedValue: { fontSize: 14, color: vola.textMuted, fontStyle: 'italic' },
+  reportedValue: { ...Typography.body, color: vola.textMuted, fontStyle: 'italic' },
   // N480/#825's dedicated `hr`/`hrLabel`/`hrValue`/`hrCaption` styles lived
   // here — removed by N488/#849, which replaced the two-line corroboration
   // they drew with `<HRSessionReport>` (its own component, its own styles).
+  //
+  // N508 — this is the primary card on this screen, so it now takes
+  // `Card.base` (the settled border colour included, where before this box
+  // had no border at all) plus the glass wash (`<CardGlass />` at its JSX
+  // call site).
   stat: {
     flex: 1,
-    backgroundColor: vola.surface,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    gap: 2,
+    ...Card.base,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.md,
+    gap: Spacing.xxs,
+    overflow: 'hidden',
   },
-  statValue: { fontSize: 26, fontWeight: '800', color: vola.text },
-  statUnit: { fontSize: 12, color: vola.textMuted },
+  // 26 converges to `Typography.display` (28) — the nearest hero-figure role,
+  // and the only fontSize-28 site this ticket's audit found outside a role.
+  statValue: { ...Typography.display, color: vola.text },
+  statUnit: { ...Typography.caption, color: vola.textMuted },
 
-  summary: { fontSize: 15, color: vola.text, marginBottom: 8 },
+  summary: { fontSize: Typography.emphasis.fontSize, color: vola.text, marginBottom: Spacing.sm },
 
-  section: { marginTop: 20, gap: 10 },
+  section: { marginTop: Spacing.gutter, gap: Spacing.smPlus },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: Typography.caption.fontSize,
     fontWeight: '700',
     letterSpacing: 1,
     color: vola.textMuted,
     textTransform: 'uppercase',
   },
 
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   chip: {
     backgroundColor: vola.surface,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.sm,
   },
-  chipText: { fontSize: 14, color: vola.text },
+  chipText: { ...Typography.body, color: vola.text },
   // The funnel numbers under the technique name. Muted by default because
   // the technique is what the eye is scanning for; `landed` picks up the
   // scored accent so the good half is findable at a glance.
-  chipFunnel: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+  chipFunnel: { ...Typography.caption, color: vola.textMuted, marginTop: Spacing.xxs },
 
-  liveRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
-  liveLabel: { flex: 1, fontSize: 15, color: vola.text },
+  liveRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.xsPlus },
+  liveLabel: { flex: 1, fontSize: Typography.emphasis.fontSize, color: vola.text },
   liveNum: { width: 56, textAlign: 'center', fontSize: 17, fontWeight: '700' },
   liveHead: {
     width: 56,
     textAlign: 'center',
-    fontSize: 11,
+    fontSize: Typography.eyebrow.fontSize,
     letterSpacing: 1,
     color: vola.textMuted,
     textTransform: 'uppercase',
@@ -1255,13 +1275,13 @@ const styles = StyleSheet.create({
   scored: { color: vola.lime },
   conceded: { color: vola.warn },
 
-  note: { fontSize: 15, lineHeight: 22, color: vola.text },
+  note: { fontSize: Typography.emphasis.fontSize, lineHeight: 22, color: vola.text },
 
   cta: {
     marginTop: 28,
     backgroundColor: vola.surface,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
     minHeight: 44,
     justifyContent: 'center',
@@ -1271,14 +1291,14 @@ const styles = StyleSheet.create({
   // button that stands where Finish stood.
   share: { marginTop: 28 },
   destructive: {
-    marginTop: 12,
-    paddingVertical: 16,
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
     minHeight: 44,
     justifyContent: 'center',
   },
-  destructiveText: { fontSize: 15, fontWeight: '600', color: vola.danger },
-  footnote: { fontSize: 13, color: vola.textMuted, marginTop: 12, lineHeight: 19 },
+  destructiveText: { ...Typography.emphasis, color: vola.danger },
+  footnote: { ...Typography.meta, color: vola.textMuted, marginTop: Spacing.md, lineHeight: 19 },
 
   // The reschedule sheet — same shape as `TrainingCalendar`'s own month
   // sheet (`components/TrainingCalendar.tsx`), deliberately: an athlete who
@@ -1288,32 +1308,32 @@ const styles = StyleSheet.create({
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 20,
+    gap: Spacing.cardPadding,
+    paddingHorizontal: Spacing.gutter,
     paddingTop: 18,
-    paddingBottom: 14,
+    paddingBottom: Spacing.cardPadding,
   },
   sheetTitle: { fontSize: 18, fontWeight: '800', color: vola.text },
   sheetClose: { marginLeft: 'auto' },
-  close: { fontWeight: '700', fontSize: 15 },
-  sheetBody: { paddingHorizontal: 16, paddingBottom: 44, gap: 4 },
+  close: { ...Typography.emphasis, fontWeight: '700' },
+  sheetBody: { paddingHorizontal: Spacing.lg, paddingBottom: 44, gap: Spacing.xs },
 
-  quickRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  quickRow: { flexDirection: 'row', gap: Spacing.smPlus, marginBottom: Spacing.lg },
   quickChip: {
     flex: 1,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    borderRadius: Radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  quickChipText: { fontSize: 15, fontWeight: '700', color: vola.text },
+  quickChipText: { ...Typography.emphasis, fontWeight: '700', color: vola.text },
 
-  reschedulingError: { color: vola.danger, fontSize: 13, marginBottom: 12 },
+  reschedulingError: { ...Typography.meta, color: vola.danger, marginBottom: Spacing.md },
 
-  gridHead: { flexDirection: 'row', marginBottom: 6 },
+  gridHead: { flexDirection: 'row', marginBottom: Spacing.xsPlus },
   gridHeadCell: {
     flex: 1,
     textAlign: 'center',
@@ -1322,12 +1342,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     color: vola.textDim,
   },
-  gridRow: { flexDirection: 'row', marginBottom: 4 },
-  gridCell: { flex: 1, alignItems: 'center', paddingVertical: 4 },
+  gridRow: { flexDirection: 'row', marginBottom: Spacing.xs },
+  gridCell: { flex: 1, alignItems: 'center', paddingVertical: Spacing.xs },
   gridDate: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   gridDateSelected: { borderWidth: 1, borderColor: vola.line, backgroundColor: vola.surface },
   gridDateToday: { borderWidth: 0 },
-  gridDateText: { fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'], color: vola.text },
+  gridDateText: { ...Typography.emphasis, fontVariant: ['tabular-nums'], color: vola.text },
   gridDateDim: { color: vola.textDim, opacity: 0.5 },
   gridDateTextSelected: { fontWeight: '800' },
   // Colour comes from the same `accent.on` the background is set against —
