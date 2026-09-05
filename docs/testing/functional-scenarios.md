@@ -18891,3 +18891,39 @@ them.
   capability the ask is being treated as already covering.
 - Confirm no set-level drag handle or press-and-hold reorder gesture was
   added anywhere in session logging.
+
+## N486 — location-permission dialog no longer loops on a fresh run start (`apps/mobile/app/running/[id].tsx`, `apps/mobile/lib/runningLocationPermission.ts`)
+
+Fixed #841: the location-permission request had no per-mount latch, so
+anything that made the mount effect run more than once (React Strict Mode's
+dev-only double-invoke, confirmed elsewhere in this codebase) could queue a
+second system alert directly behind whatever the athlete tapped on the
+first. `acquireLocationPermissionOnce` now guarantees the OS is asked at
+most once per screen mount.
+
+- Happy path: sign in, start a run for the first time on a device that has
+  never answered VOLA's location prompt. The system dialog appears exactly
+  once. Tap "Allow While Using App" — tracking starts, the dialog never
+  reappears for the rest of the session or on returning to this screen
+  later (permission already granted).
+- "Allow Once": tracking starts for this run. Relaunching the app and
+  starting a NEW run may legitimately re-prompt (that is iOS's own "Allow
+  Once" contract, not a bug) — confirm it prompts once per that relaunch,
+  not repeatedly within it.
+- "Don't Allow": the screen shows "Location access needed" with an "Open
+  Settings" button — no further system dialog appears on this screen for
+  the rest of the app session, including navigating away and back to a
+  running session.
+- Regression check for the original bug: dismiss the dialog with any of the
+  three choices and confirm it does NOT reappear immediately afterward. If
+  reproducing on a debug dev-client build (Strict Mode active), this is the
+  scenario most likely to have shown two dialogs back-to-back before this
+  fix.
+- Confirm the dialog does not appear at all before sign-in, or anywhere
+  other than opening a running/GPS session — `!id || !userId` gates the
+  entire load effect this permission check lives inside.
+- NEEDS HUMAN EVIDENCE: a fresh Simulator install (delete the app first) or
+  real device, confirming the loop is gone and specifically noting whether
+  the dialog was ever seen before Sign-in independent of opening a running
+  screen (the original report's exact circumstance, which static analysis
+  could not reproduce from the code as it stands).
