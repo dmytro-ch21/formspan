@@ -82,6 +82,7 @@ import {
   type Meal,
 } from '@/lib/nutrition';
 import { request } from '@/lib/sync';
+import { momentumOpenFoodHref } from '@/lib/todayBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
@@ -358,7 +359,13 @@ export default function AddFoodScreen() {
       // one reads it locally. Awaiting a push would put the network back
       // between the tap and the number moving.
       request('food logged');
-      router.back();
+      // N500/#871 — land on the food log for the day just logged, not
+      // wherever this screen happened to be pushed from. `add.tsx` is
+      // reached both from the Food tab (where `router.back()` landed here
+      // by coincidence) and from Today (where it landed on Today instead) —
+      // `dismissTo` pops every screen this flow pushed and lands on the
+      // SAME route either way, matching `date` rather than always "today".
+      router.dismissTo(momentumOpenFoodHref(date));
     },
     [userId, date, meal, router],
   );
@@ -404,7 +411,9 @@ export default function AddFoodScreen() {
       });
       try {
         request('catalog food logged');
-        router.back();
+        // N500/#871 — see the doc comment on `log` above; same fix, same
+        // reason, for the catalog path.
+        router.dismissTo(momentumOpenFoodHref(date));
       } finally {
         setPickBusy(false);
       }

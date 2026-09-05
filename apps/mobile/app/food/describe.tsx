@@ -63,6 +63,7 @@ import {
   type Meal,
 } from '@/lib/nutrition';
 import { request as requestSync } from '@/lib/sync';
+import { momentumOpenFoodHref } from '@/lib/todayBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
 
 export default function DescribeMealScreen() {
@@ -196,8 +197,8 @@ export default function DescribeMealScreen() {
    *
    * The race that opens: tap Log, then Work it out while the loop is in
    * flight. `receive` replaces `rows` with a fresh draft while `logAll`
-   * iterates its tap-time copy, `router.back()` then pops the screen out from
-   * under the new estimate — a quota unit spent on nothing — and if the save
+   * iterates its tap-time copy, `router.dismissTo(...)` then pops the screen
+   * out from under the new estimate — a quota unit spent on nothing — and if the save
    * fails partway the error's "The items still listed were not logged" is
    * describing a draft those items were never part of. Same class as the
    * Remove-during-save race, one control further up. Raised in review.
@@ -385,8 +386,8 @@ export default function DescribeMealScreen() {
     // **`locked`, not `saving`** — the mirror of the race the `locked`
     // docstring above describes, which that guard did NOT close. Tap "Estimate
     // it again" and then Log while the request is in flight: this loop logs the
-    // STALE reused draft from its own closure, `router.back()` pops the screen,
-    // and the fresh estimate lands on nothing — one allowance slice spent for a
+    // STALE reused draft from its own closure, `router.dismissTo(...)` pops the
+    // screen, and the fresh estimate lands on nothing — one allowance slice spent for a
     // draft nobody ever sees. Raised in review.
     //
     // **The DEFENCE that is pinned is the button's own `disabled={locked}`**,
@@ -503,7 +504,10 @@ export default function DescribeMealScreen() {
           // would be reporting a failure the athlete cannot act on.
         });
       }
-      router.back();
+      // N500/#871 — land on the food log for `date`, not back to the search
+      // screen this was pushed from. `dismissTo` pops the search/describe
+      // screens along the way.
+      router.dismissTo(momentumOpenFoodHref(date));
     } catch (err) {
       // Silent failure here would leave the athlete unable to tell what was
       // logged and what was not.
@@ -588,7 +592,9 @@ export default function DescribeMealScreen() {
       });
       setRows([]);
       requestSync('meal estimated');
-      router.back();
+      // N500/#871 — see the doc comment on `logAll` above; same fix, same
+      // reason, for the compiled-into-one-meal path.
+      router.dismissTo(momentumOpenFoodHref(date));
     } catch (err) {
       // The rows are still on screen either way (nothing was dropped, unlike
       // `logAll`'s land-as-you-go loop) — a retry re-sends the same combined

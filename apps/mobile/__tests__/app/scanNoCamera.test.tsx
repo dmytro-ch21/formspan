@@ -69,7 +69,7 @@ jest.mock('expo-router', () => ({
   __esModule: true,
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => ({ meal: 'lunch', date: '2026-08-19' }),
-  useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: mockReplace }),
+  useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: mockReplace, dismissTo: jest.fn() }),
   Stack: { Screen: () => null },
 }));
 

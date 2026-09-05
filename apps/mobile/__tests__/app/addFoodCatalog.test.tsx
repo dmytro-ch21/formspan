@@ -48,12 +48,13 @@ jest.mock('@/lib/foodLog', () => ({
 
 jest.mock('@/lib/sync', () => ({ request: jest.fn() }));
 
+const mockDismissTo = jest.fn();
 jest.mock('expo-router', () => ({
   __esModule: true,
   // `KeyboardAwareScrollView` uses this.
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => ({ meal: 'lunch', date: '2026-08-19' }),
-  useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, back: jest.fn(), replace: jest.fn(), dismissTo: mockDismissTo }),
   Stack: { Screen: () => null },
 }));
 
@@ -82,6 +83,7 @@ function answer(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.useFakeTimers();
   mockPush.mockReset();
+  mockDismissTo.mockReset();
   mockLocalFoods.mockReset().mockResolvedValue([]);
   mockLogFood.mockReset().mockResolvedValue('entry-1');
   mockSearchCatalog.mockReset().mockResolvedValue(answer());
@@ -159,6 +161,31 @@ it('logs a catalog row without claiming it as a saved food', async () => {
   // `source_food_id` is a foreign key into the athlete's OWN saved foods. A
   // catalog id is a different id space; writing it there would dangle.
   expect(entry.source_food_id).toBeNull();
+  // N500/#871 — lands on the food log for the date being logged, consistently,
+  // regardless of whether this screen was reached from the Food tab or Today.
+  expect(mockDismissTo).toHaveBeenCalledWith('/food?date=2026-08-19');
+});
+
+/**
+ * N500/#871 — the OTHER of the two ways this screen logs an entry: tapping a
+ * ROW FROM THE ATHLETE'S OWN LIST (the two-tap repeat, not the catalog).
+ * `log()` is a separate function from `logCatalog()` (see its own doc
+ * comment) and had its own `router.back()` to fix.
+ */
+it('logs a saved food and lands on the food log for the date being logged', async () => {
+  mockLocalFoods.mockResolvedValue([
+    { id: 'mine-1', kind: 'food', name: 'Oats, rolled', brand: '', serving_label: '40 g',
+      serving_grams: 40, kcal: 150, protein_g: 5, carb_g: 26, fat_g: 3, fibre_g: 4 },
+  ]);
+  await search('oats');
+  await waitFor(() => expect(screen.getByTestId('add-food-mine-1')).toBeTruthy());
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('add-food-mine-1'));
+  });
+  await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
+  const entry = mockLogFood.mock.calls[0][1];
+  expect(entry.source_food_id).toBe('mine-1');
+  expect(mockDismissTo).toHaveBeenCalledWith('/food?date=2026-08-19');
 });
 
 /**

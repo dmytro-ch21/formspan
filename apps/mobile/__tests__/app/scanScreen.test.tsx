@@ -82,6 +82,7 @@ jest.mock('@/lib/foodLog', () => ({ logFood: (...a: unknown[]) => mockLogFood(..
 
 const mockReplace = jest.fn();
 const mockBack = jest.fn();
+const mockDismissTo = jest.fn();
 jest.mock('expo-router', () => ({
   __esModule: true,
   // `KeyboardAwareScrollView` uses this. Keyed on the callback, matching the
@@ -89,7 +90,7 @@ jest.mock('expo-router', () => ({
   // never re-measure.
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => ({ meal: 'lunch', date: '2026-08-19' }),
-  useRouter: () => ({ push: jest.fn(), back: mockBack, replace: mockReplace }),
+  useRouter: () => ({ push: jest.fn(), back: mockBack, replace: mockReplace, dismissTo: mockDismissTo }),
   Stack: { Screen: () => null },
 }));
 
@@ -120,6 +121,7 @@ beforeEach(() => {
   mockLogFood.mockReset().mockResolvedValue('entry-1');
   mockReplace.mockReset();
   mockBack.mockReset();
+  mockDismissTo.mockReset();
 });
 
 async function scan(code = CODE) {
@@ -183,6 +185,9 @@ describe('a resolved barcode', () => {
     // A scanned product is not one of the athlete's own saved foods, so the
     // provenance FK must stay null rather than pointing at a cache row.
     expect(entry.source_food_id).toBeNull();
+    // N500/#871 — lands on the food log for the date being logged, not back
+    // on the search screen this was pushed from.
+    expect(mockDismissTo).toHaveBeenCalledWith('/food?date=2026-08-19');
   });
 
   /**

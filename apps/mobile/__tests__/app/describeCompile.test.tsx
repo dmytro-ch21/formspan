@@ -40,14 +40,19 @@ jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-image-manipulator', () => ({ SaveFormat: { JPEG: 'jpeg' } }));
 
 const mockUseEffect = useEffect;
-const mockBack = jest.fn();
+const mockDismissTo = jest.fn();
 
 let mockParams: Record<string, string> = {};
 jest.mock('expo-router', () => ({
   __esModule: true,
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => mockParams,
-  useRouter: () => ({ push: jest.fn(), back: () => mockBack(), replace: jest.fn() }),
+  useRouter: () => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    replace: jest.fn(),
+    dismissTo: (...a: unknown[]) => mockDismissTo(...a),
+  }),
   Stack: { Screen: () => null },
 }));
 
@@ -86,7 +91,7 @@ beforeEach(() => {
   mockLogFood.mockReset().mockResolvedValue('entry-1');
   mockSaveFood.mockReset().mockResolvedValue('food-new');
   mockRequestSync.mockReset();
-  mockBack.mockReset();
+  mockDismissTo.mockReset();
 });
 
 async function describeOnce(res = response()) {
@@ -184,7 +189,9 @@ describe('compiling into one meal', () => {
     expect(saved.kcal).toBe(295);
 
     expect(mockRequestSync).toHaveBeenCalled();
-    expect(mockBack).toHaveBeenCalled();
+    // N500/#871 — lands on the food log for the date being logged (from
+    // `mockParams.date`, seeded in `beforeEach`), not merely "back".
+    expect(mockDismissTo).toHaveBeenCalledWith('/food?date=2026-08-19');
   });
 
   it('reflects a hand-edited field, not the original estimate', async () => {
@@ -243,7 +250,7 @@ describe('compiling into one meal', () => {
     expect(screen.queryByTestId('describe-remove-1')).toBeTruthy();
     expect(screen.queryByTestId('describe-remove-2')).toBeTruthy();
     expect(mockRequestSync).not.toHaveBeenCalled();
-    expect(mockBack).not.toHaveBeenCalled();
+    expect(mockDismissTo).not.toHaveBeenCalled();
   });
 
   it('a retry after a failed log reuses the same saved-food id, rather than minting a duplicate', async () => {

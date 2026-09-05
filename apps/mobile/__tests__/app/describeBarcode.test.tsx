@@ -70,6 +70,7 @@ jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-image-manipulator', () => ({ SaveFormat: { JPEG: 'jpeg' } }));
 
 let mockParams: Record<string, string> = {};
+const mockDismissTo = jest.fn();
 jest.mock('expo-router', () => ({
   __esModule: true,
   // Keyed on the callback, matching the shared setup's mock — something in
@@ -77,7 +78,12 @@ jest.mock('expo-router', () => ({
   // can never reload.
   useFocusEffect: (cb: () => void) => mockUseEffect(() => cb(), [cb]),
   useLocalSearchParams: () => mockParams,
-  useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    replace: jest.fn(),
+    dismissTo: (...a: unknown[]) => mockDismissTo(...a),
+  }),
   Stack: { Screen: () => null },
 }));
 
@@ -123,6 +129,7 @@ beforeEach(() => {
   mockRemember.mockReset().mockResolvedValue(undefined);
   mockLogFood.mockReset().mockResolvedValue('entry-1');
   mockSaveFood.mockReset().mockResolvedValue('food-1');
+  mockDismissTo.mockReset();
 });
 
 it('learns the packet when the draft is a single item', async () => {
@@ -250,4 +257,20 @@ it('shows no barcode note when there was no barcode', async () => {
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
   expect(screen.queryByTestId('describe-barcode-note')).toBeNull();
+});
+
+/**
+ * N500/#871 — a per-row log lands on the food log for the day being logged,
+ * not back on the search screen this was pushed from, and not always "today"
+ * — a backdated entry (a date in the past, distinct from the suite's real
+ * clock) lands on THAT day's view.
+ */
+it('lands on that day\'s food log, not always today, once logged', async () => {
+  mockParams = { meal: 'breakfast', date: '2026-07-04' };
+  mockDescribe.mockResolvedValue(estimate([item()]));
+
+  await draftAndLog();
+
+  await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
+  expect(mockDismissTo).toHaveBeenCalledWith('/food?date=2026-07-04');
 });
