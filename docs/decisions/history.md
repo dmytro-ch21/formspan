@@ -56569,6 +56569,114 @@ green again by re-running.
 nothing outstanding here beyond what CI and `/pre-merge` already gate on.
 
 
+## 2026-09-05 — N501: the caffeine tracker was fully built and off by default — default it on, fix two accuracy bugs (#872)
+
+Reported directly, twice: *"Caffeine tracking - no sign of it and it should be
+connected"* and *"Coffee, if i drink one cup it should automatically add to
+the tracker of coffee."* Investigated before writing anything, and the
+mechanism (N468/#792, N431/#806) was already correct end to end —
+`syncFoodCaffeine` in `foodLog.ts` runs on every food log/edit, finds the
+athlete's caffeine tracker by `preset === 'caffeine'`, and posts a cited mg
+figure. **The bug was reachability, not logic**: `presets.go`'s caffeine
+preset shipped `Default: false`, so `EnsureDefaults` never provisioned one for
+anybody, and the only way to get one was Food → Manage trackers → Track
+something new → Caffeine — three deliberate taps nothing on Food or Today
+ever hinted at. For every athlete who never found that path, the tracker
+simply did not exist.
+
+**Fix 1: `Default: true`.** The reasoning that kept coffee (N77) off
+by default — "an unremovable counter handed to somebody who quit is not
+neutral" — does not transfer to caffeine: unlike a coffee count, caffeine's
+whole value is the arithmetic already running over food an athlete logs
+anyway, so off-by-default made the linkage itself unreachable rather than
+merely one preference away.
+
+**Confirmed safe against re-adding a tracker an athlete deliberately turned
+off, using a mechanism that already existed rather than a new one.**
+`EnsureDefaults` inserts under the deterministic `PresetID(userID, "caffeine")`
+with a bare `ON CONFLICT DO NOTHING` (no arbiter): an **archived** row (the
+default, reversible DELETE) still holds that primary key, so the insert
+collides and does nothing — exactly how an athlete who archives water today
+is already respected. A **destroyed** (permanently purged) row is a different
+story going forward: `Destroy` already refuses any preset
+`provisioningWouldRecreate` reports true for, with "…is set up for you
+automatically and would come back — stop tracking it instead" — and flipping
+`Default: true` now brings caffeine under that same refusal. The one gap this
+does not close is retroactive: an athlete who opted into caffeine via
+`AddPreset` and purged it back when caffeine was still `Default: false` (so
+the refusal did not yet apply) would have a genuinely gone row, and
+`EnsureDefaults` would provision a fresh one since there is nothing left to
+collide with — `Destroy` has no tombstone, by design, since it is the one
+path in the module that is allowed to lose data. **Corrected during
+backend-reviewer's N501 pass**: a first draft of this reasoning cited N468
+(2026-09-02) as the feature that made opting in possible and concluded the
+window was effectively zero — wrong feature. `git log` shows the caffeine
+preset itself, reachable via `AddPreset` exactly like coffee, shipped in
+N431/#699 on 2026-08-28; N468 only added the food-to-caffeine auto-link on
+top of an already-reachable tracker. The real window is 2026-08-28 →
+2026-09-05, about eight days, not three. Accepted anyway on a narrower
+ground: there is no production Postgres yet (only `staging` is live — see
+CLAUDE.md's Railway note), so the exposure is bounded to whoever used
+staging/dev in that window, not real athlete data. A one-off check of
+staging's `daily_trackers` for an orphaned caffeine purge is worth doing
+before this reaches it, but is not a reason to hold the default-provisioning
+fix, and a tombstone-free `Destroy` cannot detect the sequence after the
+fact regardless. Two new backend tests pin this (`TestCaffeineIsProvisionedByDefault`,
+`TestCaffeineProvisionsAndRespectsBeingTurnedOff` in
+`internal/modules/tracker/postgres_test.go`) — the latter mutation-verified by
+flipping the flag back to `false` and confirming both go red as real test
+failures, then restoring and re-confirming green.
+
+**Fix 2: the grams-basis over-counting in `foodCaffeine.ts`'s
+`caffeineMgForFoodEntry`.** Already named as unsolved in that file's own
+header (frontend-reviewer, N468 review): a catalog/barcode entry is logged on
+a per-100g basis (`scripts/import_usda_foods.py` sets every imported row's
+`serving_label` to the literal `"100 g"`), so `servings` there is
+`grams / 100` — a fractional nutrition-label count, not a "how many cups"
+count `caffeineMgForFoodEntry` was built to scale. 240 g of catalog "Coffee"
+(one real cup) computed `servings = 2.4` and reported `round(95 * 2.4) = 228`
+mg instead of the ~95 mg a cup actually is. Fixed by having
+`caffeineMgForFoodEntry` accept the entry's `servingLabel` and, when
+`foodQuantity.ts`'s `gramsBasisFromLabel` recognises it as an honest gram
+weight, reconstruct the actual grams logged (`servings * basis`) and scale
+each keyword group's reference mg figure by `grams / referenceGrams` instead
+— the real weight of the serving the mg figure was originally cited for (a
+240 g cup, a 30 g espresso shot, a 60 g energy-shot bottle; each group in
+`GROUPS` now carries its own `referenceGrams`, derived from the same Mayo
+Clinic serving sizes the mg figures themselves already cite). A
+`servingLabel` that does not parse as a gram weight (a typed-servings "1 cup",
+an AI-described "1 latte", or no label at all) falls back to the original
+drink-count scaling unchanged, since that was always the right model for
+that case. `foodLog.ts`'s one call site now passes `input.serving_label`
+through. Existing `foodLog.test.ts` caffeine-dual-write tests used `meal()`'s
+generic `serving_label: '100 g'` default for unrelated reasons and were
+silently exercising the (now-corrected) grams path — refactored to a local
+`drink()` helper (`serving_label: '1 cup'`) so they keep testing what they
+always meant to (the dual-write plumbing), and one new end-to-end test
+(`a catalog entry logged BY WEIGHT posts a realistic single-cup dose…`) now
+covers the grams-basis path itself against real SQLite. Mutation-verified in
+`foodCaffeine.test.ts` by neutralising the grams-basis branch and confirming
+three tests reproduce the exact original bug numbers (240 g of coffee back to
+228 mg), then restoring and re-confirming green.
+
+**Fix 3: the negation gap in the name matcher.** `decaf` was the only
+exclusion `caffeineMgForFoodName` made; "Cola, without caffeine",
+"Pepsi, caffeine-free" and USDA's own "Beverages, …, no caffeine" phrasing all
+matched their keyword group at full strength, because nothing read past the
+keyword to a negation sitting right next to it. Added `NEGATED_CAFFEINE =
+/\b(?:no|without)\s+caffeine\b|\bcaffeine[\s-]free\b/`, checked the same place
+`decaf` already is, in a new shared `matchGroup` lookup both
+`caffeineMgForFoodName` and `caffeineMgForFoodEntry` now call through. Pinned
+against being too broad too — "Cola, with caffeine" still matches — so the
+guard cannot regress into a bare "mentions the word caffeine" exclusion.
+Mutation-verified the same way as fix 2 (disabling the check reproduces the
+un-excluded match as a real test failure).
+
+No backend contract or migration changes — this is a preset-literal flip plus
+mobile-only logic, so no OpenAPI or schema entry is needed.
+`docs/testing/functional-scenarios.md` gained a caffeine-tracker section
+covering the new default-on behavior and both accuracy fixes.
+
 ## Open items / known gaps as of this entry
 
 

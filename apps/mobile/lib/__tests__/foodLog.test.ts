@@ -872,9 +872,22 @@ const caffeineWire = (over: Partial<Record<string, unknown>> = {}) => ({
  * isolation; this is the dual-write mechanics, against real SQLite.
  */
 describe('N468/#792: a caffeinated food automatically posts to the caffeine tracker', () => {
+  /**
+   * A directly-tapped drink log, not a weighed one -- `serving_label` is a
+   * real "how many" unit ("1 cup"), not a gram weight, so `servings` here
+   * is a drink count and the mg figures below (95, 126, 190...) are the
+   * plain `mgPerServing * servings` this suite is actually exercising (the
+   * dual-write mechanics). `meal()`'s own default `serving_label: '100 g'`
+   * is a gram weight as of N501/#872 and would route these through the
+   * grams-basis scaling `foodCaffeine.test.ts` covers in isolation.
+   */
+  function drink(over: Partial<Parameters<typeof logFood>[1]> = {}) {
+    return meal({ serving_label: '1 cup', ...over });
+  }
+
   it('logs a paired caffeine entry when the athlete has a caffeine tracker', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    await logFood(USER, meal({ name: 'Latte' }));
+    await logFood(USER, drink({ name: 'Latte' }));
 
     const entries = await localTrackerEntries(USER, TODAY);
     expect(entries).toHaveLength(1);
@@ -884,7 +897,7 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
 
   it('scales the mg figure by how many servings were logged', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    await logFood(USER, meal({ name: 'Espresso', servings: 2 }));
+    await logFood(USER, drink({ name: 'Espresso', servings: 2 }));
 
     const entries = await localTrackerEntries(USER, TODAY);
     expect(entries[0].amount).toBe(126); // 63 mg * 2
@@ -892,30 +905,30 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
 
   it('posts nothing when the food is not recognised as caffeinated', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    await logFood(USER, meal({ name: 'Chicken thigh' }));
+    await logFood(USER, drink({ name: 'Chicken thigh' }));
     expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
   });
 
   it('posts nothing when the athlete has no caffeine tracker — exactly as before this ticket', async () => {
-    await logFood(USER, meal({ name: 'Latte' }));
+    await logFood(USER, drink({ name: 'Latte' }));
     expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
   });
 
   it('a food-caused entry is refused/removed only alongside the food — editing the food to a non-caffeinated name removes it', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    const id = await logFood(USER, meal({ name: 'Latte' }));
+    const id = await logFood(USER, drink({ name: 'Latte' }));
     expect(await localTrackerEntries(USER, TODAY)).toHaveLength(1);
 
-    await editEntry(USER, id, meal({ name: 'Decaf Latte' }));
+    await editEntry(USER, id, drink({ name: 'Decaf Latte' }));
     expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
   });
 
   it('editing servings updates the caffeine total to match, not leaving the old figure stranded', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    const id = await logFood(USER, meal({ name: 'Latte', servings: 1 }));
+    const id = await logFood(USER, drink({ name: 'Latte', servings: 1 }));
     expect((await localTrackerEntries(USER, TODAY))[0].amount).toBe(95);
 
-    await editEntry(USER, id, meal({ name: 'Latte', servings: 2 }));
+    await editEntry(USER, id, drink({ name: 'Latte', servings: 2 }));
     const entries = await localTrackerEntries(USER, TODAY);
     expect(entries).toHaveLength(1); // the stale one was superseded, not left beside the new one
     expect(entries[0].amount).toBe(190);
@@ -923,11 +936,11 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
 
   it('an edit that changes nothing about the caffeine figure does not churn the entry', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    const id = await logFood(USER, meal({ name: 'Latte' }));
+    const id = await logFood(USER, drink({ name: 'Latte' }));
     const before = (await localTrackerEntries(USER, TODAY))[0].id;
 
     // Editing only the note, say — the mg figure is unchanged.
-    await editEntry(USER, id, meal({ name: 'Latte' }));
+    await editEntry(USER, id, drink({ name: 'Latte' }));
     const after = await localTrackerEntries(USER, TODAY);
     expect(after).toHaveLength(1);
     expect(after[0].id).toBe(before); // same row, not tombstoned and recreated
@@ -935,7 +948,7 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
 
   it('removing the food removes the caffeine entry it caused', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    const id = await logFood(USER, meal({ name: 'Latte' }));
+    const id = await logFood(USER, drink({ name: 'Latte' }));
     expect(await localTrackerEntries(USER, TODAY)).toHaveLength(1);
 
     await removeEntry(USER, id);
@@ -944,7 +957,7 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
 
   it('does not touch a manually-tapped caffeine entry that merely shares a day', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
-    const id = await logFood(USER, meal({ name: 'Latte' }));
+    const id = await logFood(USER, drink({ name: 'Latte' }));
     // A manual tap the athlete made themselves, unrelated to any food.
     await db.runAsync(
       `INSERT INTO tracker_entries (id, tracker_id, user_id, logged_on, logged_at, amount, updated_at, dirty, remote)
@@ -973,7 +986,7 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
     // This device's copy of a server-known food entry — inserted the way a
     // real pull would (dirty=0, remote=1), not via logFood.
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal({ name: 'Latte' }), id: 'srv-food-1', source_food_id: null, category: null, notes: '' },
+      { ...drink({ name: 'Latte' }), id: 'srv-food-1', source_food_id: null, category: null, notes: '' },
     ]);
     // Its caffeine entry, as if an earlier `logFood`/`editEntry` on some
     // device had already run `syncFoodCaffeineEntry` for it.
@@ -999,10 +1012,29 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
   it('a pull that drops an UNCAFFEINATED food touches no tracker row at all', async () => {
     await cacheTrackers(USER, [caffeineWire()]);
     await cacheEntries(USER, TODAY, TODAY, [
-      { ...meal({ name: 'Chicken thigh' }), id: 'srv-food-2', source_food_id: null, category: null, notes: '' },
+      { ...drink({ name: 'Chicken thigh' }), id: 'srv-food-2', source_food_id: null, category: null, notes: '' },
     ]);
     await cacheEntries(USER, TODAY, TODAY, []);
     expect(await localEntries(USER, TODAY)).toHaveLength(0);
     expect(await localTrackerEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  /**
+   * N501/#872, end to end against real SQLite — the grams-basis fix, not just
+   * `drink()`'s drink-count path every other test in this block exercises.
+   * `meal()`'s own default `serving_label: '100 g'` is exactly what a
+   * catalog/barcode entry logged by weight carries (`food/add.tsx`'s
+   * `logCatalog` sets `servings: servingsForGrams(food, grams)` against it —
+   * see `foodQuantity.ts`), so this is the shape the bug report ("if i drink
+   * one cup it should automatically add") actually arrives in.
+   */
+  it('a catalog entry logged BY WEIGHT posts a realistic single-cup dose, not a grams-inflated one', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    // 240 g of catalog "Coffee" (100 g basis) is one real cup: servings=2.4.
+    await logFood(USER, meal({ name: 'Coffee', servings: 2.4, serving_label: '100 g' }));
+
+    const entries = await localTrackerEntries(USER, TODAY);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].amount).toBe(95); // NOT round(95 * 2.4) = 228
   });
 });

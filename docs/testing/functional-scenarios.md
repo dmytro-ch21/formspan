@@ -19055,3 +19055,65 @@ the flow happened to be pushed from.
   scan/describe/search screen that was just popped (regression check for
   `dismissTo` actually dropping the intermediate stack entries, not merely
   navigating past them).
+
+## N501 — caffeine tracker default-on, plus two accuracy fixes (`backend/internal/modules/tracker/presets.go`, `apps/mobile/lib/foodCaffeine.ts`, `apps/mobile/lib/foodLog.ts`)
+
+### Happy path
+
+- A brand-new athlete signup, or any existing athlete who has never touched
+  trackers at all: the first `GET /v1/trackers` (or the first app launch
+  that lists trackers) provisions a caffeine card alongside water — no
+  Manage-trackers detour, no "Track something new" tap required.
+- The provisioned caffeine tracker reads unit `mg`, a 400 mg reference
+  target, and a 16:00 cutoff line — unchanged from N431's original preset,
+  just reachable without opting in.
+- Log a cup of coffee via search (typed servings, e.g. "Latte" x1), by
+  barcode, or via a described meal: the caffeine card's total updates
+  automatically with a plausible single-serving figure (around the cited
+  ~95 mg for a brewed coffee/latte-family drink), not a servings-inflated
+  one.
+- Log the SAME coffee by weight instead (the catalog's grams control, or a
+  barcode scan's grams entry) at a realistic single-cup weight (~240 g): the
+  posted mg is the same realistic single-cup figure as the typed-servings
+  case above, not a multiple of it.
+- A catalog food whose name explicitly says "no caffeine", "without
+  caffeine", or "caffeine-free" (e.g. "Cola, without caffeine"): logging it
+  posts nothing to the caffeine tracker, the same as an already-recognised
+  "decaf" item.
+
+### Edge cases & errors
+
+- An athlete who previously opted into the caffeine preset by hand (via
+  "Track something new" → Caffeine) and later stopped tracking it (the
+  default, reversible remove): this ticket's default-flip does not bring it
+  back — the card stays absent on every subsequent list/login, on this
+  device and any other signed into the same account.
+- An athlete who had already turned caffeine tracking fully off before this
+  shipped and now attempts to permanently delete it again: the destructive
+  ("purge forever") action from the archived-trackers screen is refused,
+  with a message pointing at "stop tracking it instead" — the same
+  protection water already has, now extended to caffeine.
+- A catalog food logged by weight at a SMALL gram quantity (well under one
+  reference serving, e.g. a 30 g splash of coffee): the posted mg scales
+  down proportionally rather than jumping straight to a full-serving figure
+  or to zero.
+- An espresso-family drink logged by weight at its own realistic serving
+  size (~30 g, one shot): the posted mg reads as one full shot's figure, not
+  a fraction of a full brewed cup's — confirms each drink category scales
+  against its own realistic serving weight, not one shared assumption.
+- A food whose name merely contains "caffeine" in a non-negated, positive
+  sense (e.g. "Cola, with caffeine") is unaffected by the new negation
+  guard and still posts its ordinary figure — the guard excludes only an
+  explicit negation, not any mention of the word.
+- A food logged with a typed-servings count and a non-gram serving label
+  (e.g. "2 lattes", serving label "1 cup"): unaffected by the grams-basis
+  fix — still scales linearly by servings exactly as before this ticket.
+
+### Auth/security
+
+- No new endpoint or auth surface. The preset-default flip changes what
+  `EnsureDefaults` (already scoped to the calling athlete's own `user_id`)
+  auto-provisions; the caffeine-matcher fixes are pure client-side
+  arithmetic over the athlete's own already-scoped food entries. The
+  existing `Destroy` refusal for a `Default: true` preset (already covering
+  water) now also covers caffeine, with no new authorization logic.

@@ -513,6 +513,100 @@ func TestCoffeeProvisionsAsACountWithNoCeiling(t *testing.T) {
 	}
 }
 
+// Caffeine is provisioned by default, as of N501/#872 — the mirror image of
+// the coffee guard above, and pinned the same way: flipping this back to
+// `false` should fail loud here rather than silently reopening the ticket
+// ("no sign of it and it should be connected") the flip exists to close. See
+// presets.go's own note on the caffeine literal before reverting this.
+func TestCaffeineIsProvisionedByDefault(t *testing.T) {
+	found := false
+	for _, p := range Presets() {
+		if p.Key == "caffeine" {
+			found = true
+			if !p.Default {
+				t.Fatal("caffeine is Default: false — an athlete who never opens " +
+					"trackers manually has no caffeine tracker, which is the bug N501 fixed")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no caffeine preset — this test is asserting about a preset that does not exist")
+	}
+	// The apparatus: the flag alone proves nothing unless DefaultsFor actually
+	// carries it through to what an athlete gets provisioned.
+	carried := false
+	for _, n := range DefaultsFor(userA) {
+		if n.Preset == "caffeine" {
+			carried = true
+		}
+	}
+	if !carried {
+		t.Fatal("caffeine.Default is true but DefaultsFor does not carry it — " +
+			"EnsureDefaults would never provision it")
+	}
+}
+
+// A fresh athlete gets a working caffeine tracker with no manual setup, and —
+// the acceptance criterion this test exists to pin — an athlete who has
+// already stopped tracking caffeine does not have it silently handed back by
+// this ticket's own default-flip. Mirrors
+// TestEnsureDefaultsIsIdempotentAndSurvivesArchiving (water) and
+// TestOnlyAPresetProvisioningWouldRecreateIsUndeletable (the destroy refusal),
+// specialised to caffeine because those two are the load-bearing mechanism
+// this ticket relies on rather than builds — see presets.go's note on
+// `Default: true` for why nothing new was needed to make it safe.
+func TestCaffeineProvisionsAndRespectsBeingTurnedOff(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+	user := userA + "_caffeine"
+
+	if err := repo.EnsureDefaults(ctx, user, DefaultsFor(user)); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	id := PresetID(user, "caffeine")
+	tr, err := repo.getOwned(ctx, user, id)
+	if err != nil {
+		t.Fatalf("a fresh athlete has no caffeine tracker after EnsureDefaults: %v", err)
+	}
+	if tr.Unit != "mg" || tr.Target == nil || *tr.Target != 400 {
+		t.Fatalf("caffeine provisioned as unit=%q target=%v, want mg / 400", tr.Unit, tr.Target)
+	}
+	if tr.CutoffMinutes == nil || *tr.CutoffMinutes != 960 {
+		t.Fatalf("caffeine's cutoff is %v, want 960 (16:00)", tr.CutoffMinutes)
+	}
+
+	// The athlete stops tracking it — the safe, reversible, default DELETE.
+	if err := repo.Archive(ctx, user, id); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	// A later provisioning pass (a re-login, a second device listing first)
+	// must not bring it back — this is the acceptance criterion itself.
+	if err := repo.EnsureDefaults(ctx, user, DefaultsFor(user)); err != nil {
+		t.Fatalf("re-provision after archiving: %v", err)
+	}
+	live, err := repo.List(ctx, user)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, t2 := range live {
+		if t2.ID == id {
+			t.Fatal("an athlete who archived their caffeine tracker had it silently " +
+				"re-added by the default-flip's next provisioning pass")
+		}
+	}
+
+	// And the destructive path is refused outright, same as water's — an
+	// athlete cannot permanently purge a tracker that the very next
+	// EnsureDefaults would hand straight back.
+	if err := repo.Destroy(ctx, user, id); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("destroying the (archived) caffeine tracker gave %v, want ErrInvalidInput — "+
+			"provisioning would just hand it back on the next list", err)
+	}
+	if _, err := repo.getOwned(ctx, user, id); err != nil {
+		t.Fatalf("the refused destroy removed it anyway: %v", err)
+	}
+}
+
 // EVERY preset provisions exactly once and coexists with the others — a sweep
 // over all of them, not just the defaults.
 //
