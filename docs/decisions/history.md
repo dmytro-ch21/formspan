@@ -56677,6 +56677,166 @@ mobile-only logic, so no OpenAPI or schema entry is needed.
 `docs/testing/functional-scenarios.md` gained a caffeine-tracker section
 covering the new default-on behavior and both accuracy fixes.
 
+## 2026-09-05 — N498: Plan and Progress's headers stop freezing in place (#869)
+
+**The report**: *"The heDER IN PLAN and PROGRESS are way different from other
+screens where is consistency?"* Investigated and confirmed by reading the code
+before N503 landed, and re-verified against `ScreenHeader.tsx` afterward per
+that entry's own note — N503's title restoration touched the component but not
+the three properties this ticket is actually about, so nothing here needed to
+change on account of it.
+
+**Three separate, measured divergences**, all in how Plan (`workouts.tsx`) and
+Progress (`progress.tsx`) used `ScreenHeader` relative to the other three
+on-bar tabs:
+
+1. On every screen but these two, `ScreenHeader` renders **inside** the
+   scrolling container as its first child, so it scrolls away with the rest of
+   the content. On Plan and Progress it rendered as a **sibling above** the
+   scroller, so it stayed pinned in place while everything else scrolled
+   under it — the one behavioral difference an athlete would actually notice
+   moving between tabs.
+2. Progress additionally left `contentScrollsUnder` at its default `true`,
+   drawing the W10/F20 boundary hairline (`vola.lineBoundary`) under the
+   header — the rule that marks "content passes under this fixed edge." Once
+   the header itself scrolls away, nothing passes under it any more, so the
+   rule became a stray line with no boundary to mark.
+3. Plan's list content sat at 16pt of horizontal padding while its header (and
+   every other screen's) sits at 20pt — a plain 4pt misalignment with no
+   comment defending it as deliberate.
+
+A previous session (see this file's much earlier entry on the pinned-vs-
+scrolling split) had deliberately examined and kept this split, reasoning at
+the time that Plan/Progress's headers carried more content that arguably
+justified staying visible. The user's own review of the current app reversed
+that judgement directly: unify all five tabs to the same scroll-away
+behavior, no exceptions kept for content weight.
+
+### What changed
+
+**Progress** (`app/(tabs)/progress.tsx`): `ScreenHeader` moved from a sibling
+of the `ScrollView` to its first child, with `contentScrollsUnder={false}`
+added. The `ScrollView`'s `contentContainerStyle` split in two — `scroll`
+(just the bottom clearance) wraps everything, and a new inner `body` View
+(the old style, renamed, still carrying `paddingHorizontal: 20`) wraps
+everything *except* the header — matching the exact pattern `index.tsx`,
+`food.tsx` and `you.tsx` already used. This was the simplest of the three
+screens to fix: it was already a single `ScrollView`, and its content padding
+already matched the header's.
+
+**Plan** (`app/(tabs)/workouts.tsx`): more involved, because Plan is a
+`FlatList`, not a `ScrollView`, and its header used to sit above BOTH a
+pinned scope tab strip (`My workouts` / `VOLA Workouts`) AND a loading-spinner
+branch that replaced the whole list while the first fetch was in flight.
+"Move the header inside the scrolling content" for a `FlatList` means moving
+it into `ListHeaderComponent` — but `ListHeaderComponent` only renders once
+the `FlatList` itself is mounted, and the old code swapped the entire
+`FlatList` out for a sibling `ActivityIndicator` during that first load. Left
+alone, that would have made the header (and the scope strip) disappear
+entirely during the very first load on a cold start, which is worse than
+today's pinned-but-consistent chrome.
+
+So the restructuring went further than the header alone:
+
+- The `FlatList` is now **always** mounted; the loading spinner moved from a
+  sibling ternary into `ListEmptyComponent` (shown when `loading && !everLoaded`,
+  ahead of the existing empty-state message). This is what keeps the header
+  and scope strip visible immediately, the same way `ScrollView` always
+  mounts on the other four tabs regardless of what their bodies are still
+  loading.
+- `ScreenHeader` and the scope tab strip both moved into `ListHeaderComponent`,
+  rendered unconditionally (not gated on `scope === 'mine'` the way the week
+  planner content below them still is) — the title and the tab control belong
+  to the screen, not to one scope of it.
+- Switching scope now clears `workouts` to `[]` in the same state update as
+  `setLoading(true)`/`setEverLoaded(false)`. This wasn't needed before: the old
+  code unmounted the whole list in favor of the spinner on every scope switch,
+  which incidentally masked any stale data. With the list always mounted now,
+  omitting this would have flashed the OTHER scope's rows under the new
+  column layout for a frame on every switch — a regression this refactor would
+  have introduced, not fixed, if left out. Caught by tracing the render, not
+  by a failing test; the existing `workoutsScreen.test.tsx` suite (which
+  presses the scope tabs directly) stayed green either way, because it only
+  asserts the eventual state, not the transient frame.
+- **A real, deliberate UX trade**: the scope tab strip is no longer pinned.
+  Switching between `My workouts` and `VOLA Workouts` while scrolled down now
+  needs scrolling back to the top first. This falls directly out of "none
+  pinned" — there is no longer any fixed chrome above Plan's list at all, so
+  there is nowhere for a persistent tab control to live. Recorded here rather
+  than silently accepted: it is a real, if minor, behavior change an athlete
+  will notice, weighed against full consistency across all five tabs.
+
+**Padding decision**: chose to bring Plan's content padding **up to 20pt**
+to match the header, rather than pulling the header down to 16pt. Nothing in
+the codebase defended 16pt as a deliberate density choice for Plan
+specifically — it was a plain, undocumented `padding: 16` on the list's
+`contentContainerStyle`, and every other screen (including Progress, which
+already matched) uses 20pt. Pulling the header down to 16pt instead would
+have made Plan's header narrower than the other four tabs' — trading one
+inconsistency for another, worse one. Since the header itself sits inside
+`ListHeaderComponent` now, it would have been double-padded by the list's own
+20pt (`20` container + `20` from `ScreenHeader`'s own `wrap` style = 40pt) —
+fixed with a small `marginHorizontal: -20` wrapper around just the header row,
+documented at both the style and the call site. The scope strip's own
+`marginHorizontal: 16` was dropped entirely (it now inherits the list's 20pt
+directly), and the week planner's `planHeader` block gained an explicit
+`marginTop: 16` to restore the vertical gap that used to come from the list's
+own top padding, back when the planner was the very first thing inside it.
+
+### F20/F21 boundary-rule re-verification
+
+Re-read `ScreenHeader.tsx`'s own three-arrangement doc comment (the header IS
+the boundary / the header scrolls away / the header sits above other fixed
+chrome) before touching either screen, per this ticket's own instructions.
+Both screens moved arrangements:
+
+- **Progress**: arrangement 1 (header IS the boundary, drawing
+  `vola.lineBoundary`) → arrangement 2 (scrolls away, draws nothing). This is
+  the *removal* the ticket asked for, not a new gap — arrangement 2 never
+  needs a rule, because nothing is ever pinned above the content for it to
+  mark a boundary against.
+- **Plan**: arrangement 3 (header pinned above the scope strip, which owned
+  the boundary and drew its own — weaker, `vola.line` — hairline) →
+  arrangement 2 (both header and strip scroll away, drawing nothing). The
+  strip's hairline is still there, visually, but it is now purely decorative
+  — a divider between the tab control and the content below it — not a
+  scroll boundary, since nothing passes under it any more. `Colors.ts`'s
+  `lineBoundary` comment, which had specifically named Plan's scope strip as
+  "a fourth boundary of this exact shape, deliberately left uncovered by
+  F20/F21," was updated to say the boundary no longer exists to be covered,
+  rather than leaving a stale pointer at a problem this ticket dissolved.
+
+`ScreenHeader.tsx`'s own doc comment (the arrangement list, the "six of eight
+callers opt out" count, the `goals`/`progress` under-the-tab-bar note) and
+`screenHeader.test.tsx`'s two comment blocks describing the same arrangements
+were all updated to match — this is exactly the class of drift the ticket's
+own investigation was triggered by, so leaving any of them stale would have
+reproduced the problem this ticket exists to fix, one level up.
+
+### Testing
+
+`workoutsScreen.test.tsx` (8 tests, all pressing the scope tabs or asserting
+render content) and `progressScreen.test.tsx` (16 tests) both passed unchanged
+against the restructured screens — the render-tree changes did not require
+updating either suite's assertions, since both test what's on screen rather
+than the tree shape. `screenHeader.test.tsx`'s own two arrangement-drawing
+tests (31 tests in that file total) were left logically unchanged — they test
+`ScreenHeader`'s own prop-driven behavior directly, not which screen passes
+which prop — and only their comment blocks needed updating. Full
+`pnpm run test:mobile` (273 suites, 4382 tests) run afterward, all green; the
+`goalsScreen.test.tsx` `act()`-wrapping console warnings on unrelated tests
+are the N500-flagged pre-existing flake, not a regression from this diff.
+`pnpm run lint:mobile` stayed at exactly 50 warnings / 0 errors (this
+session's ratchet ceiling on `main`) — the one warning inside
+`workouts.tsx` (a `set-state-in-effect` in `NewWorkoutSheet`, unrelated code)
+was confirmed pre-existing by diffing against the same lint run on the
+pre-change file. `pnpm run typecheck:mobile` clean.
+
+### Open
+
+None new. This closes out the scroll-behavior half of #869 the same way N503
+closed out the title-visibility half.
+
 ## Open items / known gaps as of this entry
 
 

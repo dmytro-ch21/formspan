@@ -99,30 +99,38 @@ import { vola } from '@/constants/Colors';
  * exist and only the first says yes:
  *
  *  - **The header IS the boundary** — a sibling directly above the scroller, so
- *    content passes under the header itself. `goals`, `phase`, `progress`
- *    (added by N176/#602, after this note was first written — corrected by
- *    F20/#496's review rather than left to drift again). These draw it.
- *    `phase` sits outside `(tabs)`, so unlike `goals`/`progress` it has no tab
- *    bar beneath it to match; the rule still marks a real boundary there.
- *  - **The header scrolls away** — rendered INSIDE the scroll view as its first
- *    child, so nothing ever passes under it. `index` (Today), `food`, `you`.
+ *    content passes under the header itself. `goals`, `phase`. `phase` sits
+ *    outside `(tabs)`, so unlike `goals` it has no tab bar beneath it to
+ *    match; the rule still marks a real boundary there.
+ *  - **The header scrolls away** — rendered INSIDE the scroll view (or, for
+ *    `workouts`, inside the `FlatList`'s `ListHeaderComponent`) as its first
+ *    child, so nothing ever passes under it. `index` (Today), `food`, `you`,
+ *    and — as of N498/#869 — `progress` and `workouts` (Plan) too. Both used
+ *    to be in one of the other two arrangements below; see that ticket's
+ *    history entry for why they moved: an athlete could not tell why two of
+ *    the five on-bar tabs froze their header in place while scrolling and the
+ *    other three did not, and nothing about either screen's content actually
+ *    needed it pinned.
  *  - **The header sits above OTHER fixed chrome, which owns the boundary** —
- *    `workouts` has a scope tab strip between the header and its list, and that
- *    strip already draws `borderBottomWidth: hairlineWidth` in `vola.line`
- *    (1.38:1 against `bg` — the same shortfall F20 fixed here, left open on
- *    that strip; see F20's history entry); `library` has a search field and
- *    filter chips. In both, content scrolls under the chrome, not under the
- *    header.
+ *    `library` has a search field and filter chips, and content scrolls under
+ *    that, not under the header. `workouts` used to be here too, with a scope
+ *    tab strip between the header and its list that drew
+ *    `borderBottomWidth: hairlineWidth` in `vola.line` (1.38:1 against `bg` —
+ *    the same shortfall F20 fixed here, left open on that strip; see F20's
+ *    history entry) — N498/#869 moved that strip inside the scrolling list
+ *    alongside the header, so nothing is pinned above `workouts` any more and
+ *    the strip's hairline is now purely decorative, not a scroll boundary.
  *
  * **An earlier version of this note got that wrong**, and it is worth leaving
  * the correction visible rather than quietly fixing it: it said four screens
  * pin the header and therefore four have content passing underneath. The first
  * half was true and the second did not follow, so the rule would have put a
- * SECOND hairline about 40pt above `workouts`'s existing one — the stacked
- * seams this component's own history records eliminating — while on `library`
- * it would have marked the header/search boundary, where nothing scrolls, and
- * left the real clip edge below the chips exactly as bg-on-bg as before. Caught
- * in review, not by any test. See the note in `docs/decisions/history.md`.
+ * SECOND hairline about 40pt above `workouts`'s then-existing one — the
+ * stacked seams this component's own history records eliminating — while on
+ * `library` it would have marked the header/search boundary, where nothing
+ * scrolls, and left the real clip edge below the chips exactly as bg-on-bg as
+ * before. Caught in review, not by any test. See the note in
+ * `docs/decisions/history.md`.
  *
  * ## What the bug was
  *
@@ -152,10 +160,12 @@ import { vola } from '@/constants/Colors';
  * seam.
  *
  * `lineBoundary` matches the tab bar's own `borderTopColor` in
- * `app/(tabs)/_layout.tsx`, so on `goals` and `progress` — the two screens
- * that draw this rule AND sit under the tab bar — the scrolling region is
- * bounded by the same weight of rule at both ends. `phase` draws the same
- * rule outside the tab layout, where there is no second edge to match.
+ * `app/(tabs)/_layout.tsx`, so on `goals` — which draws this rule AND sits
+ * under the tab bar — the scrolling region is bounded by the same weight of
+ * rule at both ends. (`progress` used to be a second such screen; N498/#869
+ * moved its header into the scrolling arrangement instead, so it no longer
+ * draws this rule at all.) `phase` draws the same rule outside the tab
+ * layout, where there is no second edge to match.
  *
  * **Resolved by F20 (#496): this used to be `lineSoft`, at 1.23:1 against
  * `vola.bg` — under the 3:1 WCAG 1.4.11 non-text floor, and weakest exactly
@@ -182,7 +192,8 @@ import { vola } from '@/constants/Colors';
  *
  * ## Default ON, opt out with `contentScrollsUnder={false}`
  *
- * Five of eight callers opt out, which looks backwards until you compare the
+ * Six of eight callers opt out (was five before N498/#869 moved `progress` in
+ * with them), which looks backwards until you compare the
  * two failure directions. A **missing** edge where content scrolls under the
  * header is the reported bug: invisible in code review, invisible to every
  * test, and found only when somebody reports it from a device. A **surplus**

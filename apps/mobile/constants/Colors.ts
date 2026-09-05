@@ -73,17 +73,21 @@ const palette = {
    * and F21 extended to the third. Nothing else changes; the app's visual
    * character is untouched everywhere `lineSoft` still renders.
    *
-   * **A fourth boundary of this exact shape exists and is deliberately left
-   * alone here.** `workouts.tsx`'s `scopeRow` — the tab strip #484 already
-   * names as owning Plan's scroll boundary in place of the header — draws its
-   * own rule in `line` (1.38:1 against `bg`, also under 3:1). It was found
-   * during F20's review, not by that issue, and #496's acceptance criteria
-   * named only the header/tab-bar pair, so fixing it there was scope that
-   * ticket was not asked to cover — and F21, which was asked to cover a
-   * specific boundary of its own (Library's), did not extend to this one
-   * either. Recorded rather than silently left, per this file's own habit of
-   * naming what it is not fixing: see F20's entry in `docs/decisions/
-   * history.md` for the pointer to file it separately.
+   * **A fourth boundary of this exact shape used to exist here, and N498/#869
+   * dissolved it rather than fixing its contrast.** `workouts.tsx`'s
+   * `scopeRow` — the tab strip #484 named as owning Plan's scroll boundary in
+   * place of the header — drew its own rule in `line` (1.38:1 against `bg`,
+   * also under 3:1). It was found during F20's review, not by that issue, and
+   * #496's acceptance criteria named only the header/tab-bar pair, so fixing
+   * it there was scope that ticket was not asked to cover — and F21, which
+   * was asked to cover a specific boundary of its own (Library's), did not
+   * extend to this one either. N498 moved that tab strip inside the same
+   * scrolling list as the header, so nothing is pinned above Plan's content
+   * any more and the strip's rule no longer marks a boundary anything passes
+   * under — it is decoration now, same as any other divider in `line`, not a
+   * fourth site this token should have covered. See F20's entry in
+   * `docs/decisions/history.md` for the original finding and N498's entry for
+   * how it was resolved.
    *
    * **3.11:1 against `bg`** (`#5A606A`, the same value #484's own note
    * estimated), asserted by `scripts/validate_palette.mjs`. It is the
