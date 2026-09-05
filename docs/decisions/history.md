@@ -56239,6 +56239,89 @@ swipe/hold-to-delete affordances, plus folding customization there), not a
 small patch.
 
 
+### 2026-09-04 — N486/#841: the location-permission dialog looping regardless of the choice tapped
+
+Found by an agent verifying N484 (#838) on a freshly built dev-client
+install — iOS's "Allow 'VOLA' to use your location?" dialog appeared at
+Sign-in and reappeared immediately after every dismissal, blocking
+automated verification of anything past that screen.
+
+**Exhaustive root-cause pass first.** Grepped every call site of
+`requestForegroundPermissionsAsync`/`requestPermissionsAsync`/
+`getForegroundPermissionsAsync` and every importer of `expo-location` and
+`react-native-maps` across `apps/mobile`. There is exactly ONE place this
+app ever asks for location: `app/running/[id].tsx`'s mount effect, and it
+is correctly gated behind `if (!id || !userId) return` — it structurally
+cannot run for a signed-out athlete or without a running session already
+created, and nothing else in the tree (the three foreground sync
+orchestrators wired in `app/_layout.tsx`, HealthKit's workout-route read
+type, `<MapView>` in `components/SessionCelebration.tsx`) touches
+location or fires before `isSignedIn`. So the trigger point named in the
+ticket's own candidate list — "a global early provider requesting location
+unconditionally" — is not what this codebase does today; the one call site
+is already scoped to exactly the moment it should be (a signed-in athlete
+opening a GPS-tracked run), which answers the acceptance criterion asking
+to confirm and, if wrong, move the trigger.
+
+**What was actually wrong: no per-mount memory of having already asked.**
+The effect trusted `expo-location`'s own `canAskAgain` flag as its only
+guard:
+
+```
+const perm = await Location.getForegroundPermissionsAsync();
+if (!perm.granted && perm.canAskAgain) {
+  await Location.requestForegroundPermissionsAsync();
+}
+```
+
+correct against one call, not against a second one landing before the
+first resolves. This codebase already has two comments on record
+(`components/nutrition/MacroDonut.tsx`, `lib/useTodayBoard.ts`) describing
+React Strict Mode double-invoking an effect's mount in development (mount →
+cleanup → mount again, same refs) — exactly the environment a freshly
+built dev-client install runs in, and exactly the "effect whose dependency
+array re-fires the request every render" / "a permission-check ref that
+never gets set after the first request" shapes the ticket named as likely
+mechanisms. Two invocations racing the same two `await`s each independently
+see `canAskAgain: true` (neither has landed yet) and each calls
+`requestForegroundPermissionsAsync()`, queuing a second system alert
+directly behind whatever the athlete tapped on the first — which reads
+exactly like "dismissing it does not clear it."
+
+**Fix**: pulled the permission acquisition out of the component into a pure
+function, `lib/runningLocationPermission.ts`'s `acquireLocationPermissionOnce`,
+driven by a `PermissionLatch` the screen creates once per mount
+(`useRef(freshPermissionLatch())`). The latch is set `true` SYNCHRONOUSLY
+before the first `await` — the ordering, not merely the flag's existence,
+is what makes two overlapping calls on the same latch resolve to exactly
+one real `requestForegroundPermissionsAsync()` call; a version that set the
+flag after the first `await` would still race. `app/running/[id].tsx`'s
+effect now calls this instead of `expo-location` directly.
+
+Pure-logic fixture test in `lib/__tests__/runningLocationPermission.test.ts`
+(6 cases: requests when ungranted, never requests once already granted,
+never requests once permanently denied, does not re-request on a second
+sequential call, only ever issues one request across two `Promise.all`-
+overlapped calls, and a fresh latch for a new mount asks independently) —
+no React, no native module, the same shape `runningAutoPause.ts` uses.
+Mutation-verified: moving the `latch.requested = true` line to after the
+first `await` (the exact bug) turns the "two overlapping calls" test red as
+a genuine assertion failure, confirmed by re-running (not by grepping),
+then restored and confirmed green again by re-running.
+
+**Left open, honestly**: this fix makes the one confirmed location-request
+path in the app robust against re-entrant calls, and the acceptance
+criteria's own framing (a global early provider, or a dependency-array
+re-fire) is answered by "there wasn't one; here is the actual gap." What
+static analysis could not settle is whether the dialog genuinely appeared
+before ANY sign-in state existed on the device that reported it, since
+`app/running/[id].tsx`'s `!userId` guard makes that path unreachable as the
+code stands — carried forward as the `NEEDS HUMAN EVIDENCE` criterion: a
+fresh Simulator install (delete the app first) confirming the dialog no
+longer loops when starting a run, and specifically noting whether it was
+ever seen before Sign-in independent of any running screen.
+
+
 ## Open items / known gaps as of this entry
 
 

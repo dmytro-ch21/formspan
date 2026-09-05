@@ -30,6 +30,11 @@ import {
   nextAutoPauseState,
   type AutoPauseState,
 } from '@/lib/runningAutoPause';
+import {
+  acquireLocationPermissionOnce,
+  freshPermissionLatch,
+  type PermissionLatch,
+} from '@/lib/runningLocationPermission';
 import { emptySet } from '@/lib/sessions';
 import {
   finishLocalSession,
@@ -141,6 +146,10 @@ export default function RunningSessionScreen() {
   const pointsRef = useRef<RoutePoint[]>([]);
   // Guards against a slow permission/load sequence outliving an unmount.
   const mountedRef = useRef(true);
+  // N486/#841: one latch per mount, so the location-permission request
+  // below can never be re-issued to the OS a second time within the same
+  // mount — see `lib/runningLocationPermission.ts`'s doc comment.
+  const permissionLatchRef = useRef<PermissionLatch>(freshPermissionLatch());
   // How many splits have already been announced — see the effect below. Null
   // means "not yet baselined": the value `announce`d splits are compared
   // against, established the moment tracking (re)starts so a resumed run's
@@ -279,12 +288,14 @@ export default function RunningSessionScreen() {
           1000;
       }
 
-      const perm = await Location.getForegroundPermissionsAsync();
-      let granted = perm.granted;
-      if (!granted && perm.canAskAgain) {
-        const requested = await Location.requestForegroundPermissionsAsync();
-        granted = requested.granted;
-      }
+      // N486/#841: routed through a per-mount latch rather than calling
+      // `expo-location` directly — see `lib/runningLocationPermission.ts`'s
+      // doc comment for the bug this fixes (a second invocation of this
+      // effect body, from Strict Mode's dev-only double-invoke or any other
+      // cause, asked the OS a second time before the first request had
+      // resolved, queuing a second system alert immediately behind
+      // whichever choice the athlete tapped on the first).
+      const { granted } = await acquireLocationPermissionOnce(permissionLatchRef.current, Location);
       if (cancelled || !mountedRef.current) return;
       if (!granted) {
         setStatus('permission-denied');
