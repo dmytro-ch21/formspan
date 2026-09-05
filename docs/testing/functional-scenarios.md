@@ -18851,3 +18851,43 @@ request shape, but nothing here has confirmed against the live staging
 backend that a real foreground sync pass now succeeds end-to-end where it
 previously 400'd. Existing N477/N478 device-verification gaps (noted in
 their own sections above) still apply unchanged.
+
+## N493 part 2 — the screen-name label is gone from `ScreenHeader` (`apps/mobile/components/ScreenHeader.tsx`)
+
+The visible screen-name text and its accent dot are removed; the screen name
+is still exposed to VoiceOver via an invisible marker.
+
+- On any screen, sighted: no text naming the current screen appears next to
+  the wordmark (e.g. no "Library", "Food", "Progress" label, and no colored
+  dot next to where it used to sit) — the header shows only the `VOLA`
+  wordmark (when it fits) plus the sync chip/actions cluster.
+- With VoiceOver on, swipe to the header on any screen: it is still announced
+  as a header carrying that screen's name (e.g. "Library, header"), even
+  though nothing is drawn for it.
+- On `library` and `phase` (the two pushed, tab-bar-less routes with a back
+  button in `leading`): with VoiceOver on, the back button and the header's
+  own name announce as two SEPARATE stops, not folded into one — swiping past
+  the back button lands on it alone ("Back, button"), and swiping again lands
+  on the header name alone.
+- Regression check: nothing else that used to read the header's title text
+  (there is no other consumer — the removed `<Text>` was never queried by
+  anything but a human eye) breaks; wordmark-fit behavior (`wordmarkFits`,
+  N-whatever's own geometry) is unchanged by the extra breathing room this
+  frees up, since fewer siblings now compete for the same measured row.
+
+## N493 part 2 — drag-to-reorder for sets: declined, not built (`apps/mobile` session logging)
+
+No code change; recorded so the ask isn't silently dropped from #858. Manual
+set reordering doesn't correspond to anything editable today (sets are a log
+of what happened, in the order it happened) — what already exists is
+arrow-button reordering for the EXERCISE GROUP order within a session. If a
+future ticket revisits this, the acceptance criteria should say explicitly
+which of the two ("reorder sets within an exercise" vs. "improve exercise-
+group reordering's affordance") it means, since the original ask conflated
+them.
+
+- Confirm the exercise-group arrow-reorder still works unchanged (up/down
+  arrows move a whole exercise's position in the session) — this is the
+  capability the ask is being treated as already covering.
+- Confirm no set-level drag handle or press-and-hold reorder gesture was
+  added anywhere in session logging.

@@ -56193,6 +56193,52 @@ goes green on GitHub's actual runner, not just measured locally on this one
 host's Colima config.
 
 
+## 2026-09-04 — N493 part 2: the per-screen name label is gone from `ScreenHeader`, and drag-to-reorder for sets is declined (#858)
+
+Continuation of N493 part 1 (#861, entry above) — item 1's last remaining
+piece, and a ruling on item 9.
+
+**Item 1, the title label.** `ScreenHeader` drew the screen's name as visible
+text next to an accent-colored dot ("Screens have additional view name in
+left corner that I don't like" — the user's own words). Both are gone now:
+the `<Text>{title}</Text>` and the dot are replaced by a single 1×1
+`accessible` marker view carrying `accessibilityRole="header"` and
+`accessibilityLabel={title}` — so sighted users see nothing where the label
+was (more room for the wordmark to fit reliably), and VoiceOver still gets
+told which screen it's on, which matters most on `library`/`phase` — the two
+pushed routes with no tab bar to orient by otherwise. A genuinely zero-size
+`accessible` view is skipped entirely by VoiceOver's linear navigation, which
+is why the marker keeps a real (if invisible) 1×1 frame rather than
+collapsing to nothing. `leading` (Library's back button, N484) stays a
+sibling of the marker rather than a child of it, so VoiceOver announces the
+back button on its own rather than folding it into one "Library, header"
+blob — mutation-verified: removing `accessibilityLabel={title}` sent the two
+new tests asserting it red, restoring it turned them green again. Full mobile
+suite re-run clean after the change: 273 suites, 4362 tests.
+
+**Item 9, drag-to-reorder for sets, is declined, not deferred.** The user's
+ask was tap-hold-and-drag to reorder "sets… which reorganizes the order of
+execution." Nothing in the session logging screens lets an athlete reorder
+individual *sets within an exercise* today — sets are logged in the order
+performed and that order is the record of what happened, not an editable
+list. What already has manual reordering is the *exercise group* order
+within a session, via arrow buttons — and CLAUDE.md's own session-flow rule
+is explicit that mobile logging is "done standing up, one-handed, with 20
+seconds between sets," which a press-and-hold drag gesture is a worse fit for
+than a single tap, not a better one. Building drag-and-drop here would
+reverse a documented ergonomics decision for a capability that doesn't
+correspond to anything currently editable. Treating this as answered by the
+existing arrow-based exercise-group reorder, and declining to add drag
+gestures to set logging — recorded here rather than silently dropped from
+#858, which stays open for items 4/8 (universal three-dot item menu) and 10
+(chevron/date-nav polish + haptics), both unstarted.
+
+**Open**: items 4/8 and 10 on #858, both unstarted — 4/8 is a real
+design-system rollout (a shared three-dot menu replacing today's mixed
+swipe/hold-to-delete affordances, plus folding customization there), not a
+small patch.
+
+
 ## Open items / known gaps as of this entry
 
 

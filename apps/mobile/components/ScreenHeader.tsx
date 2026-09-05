@@ -4,9 +4,8 @@ import { StyleSheet, View as RNView, type LayoutChangeEvent } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SyncChip } from '@/components/SyncChip';
-import { Text, View } from '@/components/Themed';
+import { View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { useAccent } from '@/lib/AccentProvider';
 
 /**
  * The top of every tab screen: the wordmark, then the screen's name.
@@ -195,6 +194,33 @@ import { useAccent } from '@/lib/AccentProvider';
  * than the viewport, the rule marks a boundary nothing is currently passing
  * under. It still says the region below scrolls, and it becomes load-bearing the
  * moment that screen has one more row than fits.
+ *
+ * ## The screen-name label is gone (N493)
+ *
+ * This header used to print the screen's own name — "LIBRARY", "FOOD" — as
+ * visible text beside an accent-coloured dot, defended (see the JSX below,
+ * before this note) as pairing with the tab bar's underline one row down to
+ * answer "where am I" from either end of the screen. User-reported directly:
+ * "Screens have additional view name in left corner that I don't like."
+ *
+ * Removed both the text AND the dot, not just the text — a lone dot with no
+ * word beside it reads as a stray mark, not a deliberate design element,
+ * and half-removing it would have looked like a bug rather than a choice.
+ * The wordmark now has the whole row to centre in, which is a genuine side
+ * effect worth knowing: `left` (fed to `wordmarkFits`) shrinks to whatever
+ * `leading` alone contributes — 0 on every screen that doesn't pass one —
+ * so the wordmark should now show reliably everywhere it used to sometimes
+ * hide for width reasons.
+ *
+ * **VoiceOver still gets the screen name.** Sighted orientation was always
+ * the tab bar's job as much as this header's (five of the eight callers ARE
+ * tab screens); the two that are not (`library`, `phase`) still have no tab
+ * bar to lean on, so removing the ONLY visual cue for a screen-reader user
+ * too would be a real accessibility regression, not merely a visual
+ * simplification. `titleWrap` itself now carries `accessibilityRole=
+ * "header"` and `accessibilityLabel={title}` — nothing sighted, but VoiceOver
+ * still announces "Library, header" on entering that screen, same as it
+ * always could via the text this replaces.
  */
 
 /** The artwork's width, and the clearance it needs on each side. */
@@ -277,7 +303,6 @@ export function ScreenHeader({
   contentScrollsUnder?: boolean;
 }) {
   const insets = useSafeAreaInsets();
-  const accent = useAccent();
 
   const [rowWidth, onRowLayout] = useMeasuredWidth();
   const [leftWidth, onLeftLayout] = useMeasuredWidth();
@@ -303,18 +328,26 @@ export function ScreenHeader({
       testID="screen-header"
     >
       <View style={styles.row} onLayout={onRowLayout} testID="screen-header-row">
+        {/* N493 — no visible text or dot here any more (see the doc comment
+            above, "The screen-name label is gone"). `accessibilityRole=
+            "header"` + `accessibilityLabel={title}` on this wrapper is what
+            keeps VoiceOver announcing the screen name, since nothing sighted
+            does that job for `library`/`phase` any more (they have no tab
+            bar to lean on). `leading`, when present, is still a real,
+            interactive child (Library's back button) — it must stay outside
+            this label so VoiceOver still finds and announces IT separately,
+            not swallowed into one "Library, header" announcement. */}
         <RNView style={styles.titleWrap} onLayout={onLeftLayout}>
           {leading}
-          <Text style={styles.title}>{title}</Text>
-          {/* A dot, not a word. It marks the current screen in the accent the
-              athlete chose, which is the same job the tab bar's underline does
-              one row down — the pair is what makes "where am I" answerable from
-              either end of the screen. Hidden from assistive tech: it repeats
-              the title it sits beside. */}
+          {/* A REAL, if tiny, frame — a zero-size `accessible` view has
+              nothing for VoiceOver to land on and gets skipped entirely in
+              linear navigation, which would silently undo the whole point
+              of keeping this label. 1x1 is enough; nobody needs to SEE it. */}
           <RNView
-            style={[styles.dot, { backgroundColor: accent.accent }]}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
+            style={styles.titleAccessibilityMarker}
+            accessible
+            accessibilityRole="header"
+            accessibilityLabel={title}
           />
         </RNView>
         {/* CONDITIONAL RENDER, not `opacity: 0`. The node below carries
@@ -404,14 +437,10 @@ const styles = StyleSheet.create({
   // put the chip in the middle of the row. The free space now sits entirely
   // between the title and this group.
   rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  title: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: vola.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  dot: { width: 6, height: 6, borderRadius: 3 },
+  // N493 — 1x1, not 0x0: an `accessible` view with no real frame is skipped
+  // entirely by VoiceOver's linear navigation, which would silently drop
+  // the screen-name announcement this exists to keep. Visually nothing.
+  titleAccessibilityMarker: { width: 1, height: 1 },
 });
 
 /**
