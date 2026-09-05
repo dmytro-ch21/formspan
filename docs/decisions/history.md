@@ -57196,10 +57196,24 @@ were pointing at.
   radius (`Radius.md`, not `Radius.card`) rather than being forced onto the
   card token — a deliberate exception, not a miss.
 - A handful of sites converged a couple of points for consistency rather
-  than staying their own one-off (`bjj/session/[id].tsx`'s `statValue`, 26 →
-  `Typography.display`'s 28; `progress.tsx`'s `off`/`rowNote`, lineHeight 19
-  → `meta`'s 18) — recorded here since a diff of these files reads as pure
-  token substitution otherwise, and these two sites are not that.
+  than staying their own one-off — recorded here since a diff of these files
+  reads as pure token substitution otherwise, and these are not that:
+  - `bjj/session/[id].tsx`'s `statValue`, 26 → `Typography.display`'s 28.
+  - `progress.tsx`'s `off`/`soonNote`, lineHeight 19 → `meta`'s 18 (corrected
+    from an earlier draft of this entry that misnamed the second site as
+    `rowNote` — `rowNote`'s lineHeight was already 18, a no-op; `soonNote`'s
+    was the one that actually changed).
+  - `components/ui/Stat.tsx`'s `badge.marginBottom`, 7 → `Spacing.sm`'s 8 —
+    found by `frontend-reviewer`, not disclosed in the original diff. A 1pt
+    shift on a 34px circular badge's bottom margin; kept at 8 rather than
+    left as an un-tokenized `7` with no step on the new scale that close.
+  - `running/[id].tsx`'s `trendRow.paddingHorizontal`, 16 → `Spacing.cardPadding`'s
+    14 — also found by `frontend-reviewer`. This one is the intended fix,
+    not just a nearby convergence: `trendRow` is this screen's designated
+    primary card (it carries `Card.base` and the glass wash), so its inner
+    padding SHOULD land on the same 14pt every other card in the app uses,
+    not stay at its own pre-existing 16. Omitted from the original list by
+    oversight, not by design — corrected here.
 - An ESLint guard (`apps/mobile/eslint.config.mjs`), scoped to exactly the
   eight converted files (an allowlist, not a directory glob — the other
   ~130 files still mint bare literals on purpose, and widening the rule ahead

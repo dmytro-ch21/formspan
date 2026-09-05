@@ -44,9 +44,11 @@ const RADIUS_PROP_PATTERN =
   "(borderRadius|borderTopLeftRadius|borderTopRightRadius|borderBottomLeftRadius|borderBottomRightRadius)";
 const RADIUS_SCALE_VALUES = [8, 12, 14, 16, 24, 999];
 // The seven sizes `constants/Typography.ts`'s roles actually use — NOT every
-// fontSize this app has ever shipped. 16/17/18 etc. stay unrestricted; see
-// `Typography.ts`'s own note on why 16 in particular was left a legitimate
-// exception rather than folded into `emphasis`.
+// fontSize this app has ever shipped. 16/17/18 etc. stay unrestricted: 16
+// alone has 8 real sites in just the six converted screens (measured in
+// `Typography.ts`'s own doc comment) that aren't the same role as `emphasis`
+// (15) or `title` (20) — folding it into either would be a value change no
+// screen asked for, not a token substitution.
 const FONT_SIZE_SCALE_VALUES = [11, 12, 13, 14, 15, 20, 28];
 
 const spacingSelector = SPACING_SCALE_VALUES.map(
