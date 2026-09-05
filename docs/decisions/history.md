@@ -57085,6 +57085,13 @@ rather than staying stuck forever. The stuck-row-heals mechanism is proven
 against a real SQLite fixture and the exact code path a device retry takes,
 but a fixture is not a device.
 
+**Review fold-in**: `backend-reviewer` caught that `PutDetail`'s new 413 on
+`PUT /running/sessions/{sessionID}` shipped with no matching entry in
+`contracts/public.openapi.yaml` — real, newly-client-visible behavior with no
+contract update, exactly the manual-discipline gap
+`docs/architecture/api-conventions.md` names. Fixed by adding a `"413"`
+response to that route, in the same style N502 already used for
+`/biometric/samples` — `pnpm run lint:openapi` re-validated clean.
 
 ## Open items / known gaps as of this entry
 
