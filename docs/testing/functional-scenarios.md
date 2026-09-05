@@ -19193,3 +19193,78 @@ render path in the same file) is untouched by either change.
 
 - No new endpoint or auth surface — both fixes are local-read and pure
   layout/display changes over data this screen already had access to.
+
+## N507 — a fractional `distance_m` permanently stuck a run's sync, on all three running-flavoured write paths (`apps/mobile/lib/healthkitSync.ts`, `apps/mobile/lib/detectedActivity.ts`, `apps/mobile/app/running/[id].tsx`, `apps/mobile/lib/sessions.ts`'s `roundDistanceM`/`repairSet`, `POST /v1/sessions`, `PUT /v1/sessions/{id}/sets`, `PUT /v1/running/sessions/{id}`, #884)
+
+`Set.distance_m` (`session_sets`) is `*int` on the wire; a fractional
+distance from a real GPS track or a HealthKit-reported workout used to fail
+to decode server-side into a generic, permanent "invalid JSON body" 400 —
+the exact stuck rows the user's Sync-screen screenshot showed. Fixed by
+rounding at write time (one shared `roundDistanceM` helper, not three
+inline `Math.round`s) AND at read time (`repairSet`, so an already-stuck row
+heals on its own next retry). `running/handler.go`'s `PutDetail` also picked
+up N502's oversized-body-vs-malformed-JSON fix.
+
+### Happy path
+
+- Import a HealthKit run whose watch-reported distance is genuinely
+  fractional (e.g. matching a real Apple Watch export, not a round number) —
+  syncs successfully, no "invalid JSON body" anywhere on the Sync screen.
+  Training History shows the distance rounded to the nearest metre.
+- Track a live phone-GPS run to Finish where the haversine-summed distance
+  happens to be fractional (the overwhelmingly common case) — Finish
+  succeeds, the session syncs, and Training History's distance is a whole
+  number of metres.
+- Tap "Log it" on a Today "detected activity" card (a walk/hike) whose
+  platform-reported distance is fractional — the resulting session syncs
+  successfully, same rounding.
+- A whole-number distance (the case every pre-fix fixture happened to test,
+  e.g. `2011` metres exactly) continues to sync and display unaffected —
+  confirms the rounding doesn't regress the common case it was blind to.
+
+### Edge cases & errors
+
+- **NEEDS HUMAN EVIDENCE**: on a real device, with the app's fix installed,
+  sync a run and confirm any run that was PREVIOUSLY stuck on that device's
+  Sync screen as "Run / Session / invalid JSON body" (from before this
+  fix — a genuinely reproduced pre-fix stuck row, not a synthetic one)
+  actually clears — either automatically on the next background sync, or via
+  the screen's own "Try again" — rather than remaining stuck forever. This
+  is the reported symptom; everything else here is the mechanism.
+- A run whose distance rounds to zero or a negative value (e.g. a HealthKit
+  workout reporting 0.3 m, or a GPS track with a single point) stores/syncs
+  `distance_m: null`, not `0` — matches the app's existing "zero is not a
+  distance" rule for every other measure, and must not read as "no distance
+  recorded" differently from a genuinely absent one.
+- A pre-existing session already stuck in the local outbox with a fractional
+  `distance_m` (simulate by writing one directly to `local_sessions.sets_json`
+  on a test device/build, bypassing the app's own now-fixed write paths) —
+  the next sync attempt (background pass or "Try again") sends it rounded
+  and the row goes clean, with no manual repair action needed from the
+  athlete.
+- `POST /v1/sessions` or `PUT /v1/sessions/{id}/sets` with a fractional
+  `distance_m` still reaches the server (e.g. from an unpatched build, or a
+  non-VOLA client) — returns 400 `invalid_input` with a message naming
+  `distance_m` specifically ("must be a whole number of metres, not a
+  fraction"), never the generic "invalid JSON body" a truly malformed body
+  gets. A `distance_m` of exactly `0` (not fractional, just non-positive) is
+  unaffected — still the existing "distance must be greater than 0"
+  per-set message.
+- `PUT /v1/running/sessions/{id}` (the running module's own detail, distinct
+  from `session_sets`) continues to accept a fractional `distance_m` — that
+  field is `*float64` server-side and was never actually part of this bug,
+  despite sharing a write site with the fix above; a regression here (an
+  int-typed rejection) would be a NEW bug this ticket's own test pins
+  against.
+- `PUT /v1/running/sessions/{id}` with a body over the 4 MiB cap: returns
+  413 with a message distinct from "invalid JSON body" (mirrors N502's
+  `biometric` fix) — confirms the oversized-vs-malformed conflation is fixed
+  here too, independently of the distance-rounding fix.
+
+### Auth/security
+
+- No new endpoint or auth surface. The rounding is pure client-side
+  arithmetic over the athlete's own locally-tracked run; the backend's
+  decode-error message change names only the field, never any internal
+  detail; `PutDetail`'s size-wall fix mirrors an already-shipped pattern
+  with the same claims-derived `user_id` scoping untouched.

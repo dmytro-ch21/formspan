@@ -3,6 +3,7 @@ import {
   pendingSuggestableIndices,
   repairSet,
   reorderGroups,
+  roundDistanceM,
   sessionActiveSeconds,
   sessionDistanceMeters,
   type LoggedSet,
@@ -292,6 +293,32 @@ describe('repairSet', () => {
     expect(out).toMatchObject({ reps: 5, weight_kg: null, seconds: null, distance_m: null });
   });
 
+  /*
+   * N507/#884 — `distance_m` is `*int` on the wire (unlike `weight_kg`, a
+   * `*float64`), so a fractional value from a GPS haversine sum or a
+   * HealthKit `HKQuantity.doubleValue` fails to DECODE server-side rather
+   * than being refused by validation — collapsed into the same generic
+   * "invalid JSON body" every malformed request gets, and permanently
+   * stuck on the Sync screen. This is `repairSet`'s half of the fix: it is
+   * the ONE gate every stored session's sets go through before either the
+   * screen or a push sees them (`parseSets` in `sessionStore.ts`), so
+   * rounding here — not just at each write site — is what heals a run
+   * ALREADY stuck on-device with a fractional value from before this
+   * shipped, the next time anything touches it.
+   */
+  it('rounds a fractional distance to the nearest whole metre, matching the *int wire type', () => {
+    expect(repairSet(set('run', { distance_m: 2011.4523 })).distance_m).toBe(2011);
+    expect(repairSet(set('run', { distance_m: 2011.5 })).distance_m).toBe(2012);
+    // A whole number already — the common case, and the reason every mobile
+    // fixture happened to miss this bug (JSON.stringify(2011.0) === "2011").
+    expect(repairSet(set('run', { distance_m: 2011 })).distance_m).toBe(2011);
+  });
+
+  it('rounds a fractional distance down to zero into null, not 0 — zero is not data here either', () => {
+    expect(repairSet(set('run', { distance_m: 0.4 })).distance_m).toBeNull();
+    expect(repairSet(set('run', { distance_m: -0.4 })).distance_m).toBeNull();
+  });
+
   it('keeps 0 RIR, which is a real answer', () => {
     // Nothing left in the tank. The server takes 0-20, so nulling this would be
     // deleting data to fix a different bug.
@@ -369,5 +396,34 @@ describe('repairSet', () => {
     // Sent on every push, so inventing the field would start claiming "none
     // were assisted" about sets nobody recorded that for.
     expect('assisted_reps' in repairSet(set('squat', { reps: 0 }))).toBe(false);
+  });
+});
+
+/*
+ * `roundDistanceM` — the one shared mechanism behind ALL of N507/#884's fix,
+ * per this ticket's own acceptance criterion: `healthkitSync.ts`,
+ * `detectedActivity.ts` and `app/running/[id].tsx`'s finish handler all call
+ * this rather than each rolling its own `Math.round`, and `repairSet` above
+ * calls it too, which is what heals an already-stuck on-device row. See its
+ * own doc comment in `sessions.ts` for the full argument.
+ */
+describe('roundDistanceM', () => {
+  it('rounds to the nearest whole metre', () => {
+    expect(roundDistanceM(2011.4523)).toBe(2011);
+    expect(roundDistanceM(2011.5)).toBe(2012);
+    expect(roundDistanceM(2011)).toBe(2011);
+  });
+
+  it('treats null, undefined and non-finite input as no distance', () => {
+    expect(roundDistanceM(null)).toBeNull();
+    expect(roundDistanceM(undefined)).toBeNull();
+    expect(roundDistanceM(NaN)).toBeNull();
+    expect(roundDistanceM(Infinity)).toBeNull();
+  });
+
+  it('rounds a value that rounds to zero or below into null — zero is not a distance', () => {
+    expect(roundDistanceM(0.4)).toBeNull();
+    expect(roundDistanceM(0)).toBeNull();
+    expect(roundDistanceM(-5)).toBeNull();
   });
 });

@@ -56981,6 +56981,118 @@ ratchet ceiling on `main` — with no new warning introduced.
 
 None new.
 
+## 2026-09-05 — N507: a fractional distance_m permanently stuck almost every GPS/HealthKit run (#884)
+
+The user reported "we have sync failure" with a screenshot: the Sync screen
+showing 12 items waiting, several "Run / Session / invalid JSON body" rows
+stuck permanently, "Try again" doing nothing. High-confidence (~90%) root
+cause, investigated directly against the real payload path rather than
+guessed, and severe: **this affected essentially every GPS-tracked or
+HealthKit-imported run whose distance wasn't a whole number of metres — i.e.
+almost all of them.**
+
+**The bug.** `session.Set.DistanceM` is `*int` on the wire
+(`distance_m INTEGER` in `backend/migrations/000010_create_sessions.up.sql`),
+but three mobile write paths sent it as a raw float, unrounded: a
+HealthKit-imported run's watch-reported distance (`healthkitSync.ts`, sourced
+from `HKQuantity.doubleValue(for: .meter())`, essentially never a whole
+number), a "detected activity" logged from Today's card
+(`detectedActivity.ts`, same shape), and a live phone-GPS run's finish
+distance (`app/running/[id].tsx`'s `trackDistanceMeters`, a haversine sum,
+also always fractional). Go's `encoding/json` refuses to decode a float into
+an `int` field at all — `UnmarshalTypeError` — before this app's own
+`validateSets` ever runs, and `session/handler.go`'s `Create`/`ReplaceSets`
+each collapsed every decode error into the same generic "invalid JSON body"
+400. A 400 classifies permanent, so the outbox correctly stopped retrying a
+request that could never succeed as sent — the fix has to be on the data,
+matching the mobile-fixture-blind-spot pattern this bug shares with N502:
+`JSON.stringify(2011.0)` emits `2011`, so every existing test fixture on all
+three write paths happened to use round metres and never exercised the
+failure at all.
+
+**The fix, one shared mechanism.** New `roundDistanceM` in `lib/sessions.ts`,
+next to `repairSet`: rounds to the nearest whole metre, and applies the
+existing "zero is not data" rule (a value that rounds to zero or below
+becomes `null`, matching `repairSet`'s other measures) rather than a plain
+`Math.round`. All three write paths call it at the point they build the
+outbound payload (`healthkitSync.ts:229`, `detectedActivity.ts:300`,
+`app/running/[id].tsx:551` and `:573`) instead of four independent inline
+`Math.round` calls — a fifth write path added later imports the one function
+rather than re-deriving the rule.
+
+**The harder half of the ticket: already-stuck rows.** Rounding only new
+writes would have fixed nothing already sitting in `local_sessions` with a
+fractional `distance_m` from before this shipped — those rows are stuck
+*right now*, which is what the user actually reported. Investigated
+`sessionStore.ts` directly rather than assumed: `parseSets` is the ONE gate
+every stored session's sets go through before either the screen or a push
+sees them (its own doc comment says so), calling `repairSet` fresh from the
+row's `sets_json` on every read — and `pushSession`/`pushRow` call
+`parseSets` fresh from disk on every retry, never from a cached in-memory
+copy. So `roundDistanceM` was also wired into `repairSet` itself (replacing
+the plain bounds-check `measure()` call for `distance_m` specifically), which
+means an already-stuck row heals the very next time anything touches it — an
+ordinary background sync, or the Sync screen's own "Try again" — with **no
+separate migration or repair pass needed**. Proven directly in
+`distanceRounding.test.ts`: a row's `sets_json` is written with a raw
+fractional value (bypassing every write-time fix on purpose, to test the
+repair path in isolation), then `pushSession` sends a rounded integer and the
+row goes clean.
+
+**Backend bonus, same known pattern as N502.** `running/handler.go`'s
+`PutDetail` had the identical `MaxBytesError`-conflated-with-malformed-JSON
+defect N502 already fixed in `biometric/handler.go` — mirrored here exactly
+(`io.ReadAll(http.MaxBytesReader(...))`, `errors.As` against
+`*http.MaxBytesError`, 413 with a distinct message). Note this endpoint's own
+`distance_m` (the running module's `SessionDetail.DistanceM`) is a
+`*float64`, not an `*int` — it was never actually part of N507's bug, despite
+`app/running/[id].tsx:551` also being one of the ticket's three cited write
+sites — rounded there anyway for consistency with the `session_sets` value
+computed from the same run, and a new `TestPutDetail_FractionalDistanceDecodesCleanly`
+pins that this endpoint has always accepted a fractional distance and must
+keep doing so.
+
+**Backend decision, stated per the ticket's own ask: reject with an
+actionable message, not silent rounding.** `session/handler.go`'s `Create`
+and `ReplaceSets` now detect a `*json.UnmarshalTypeError` whose `Field` ends
+in `distance_m` (`encoding/json` reports the stable path `"sets.distance_m"`
+for a slice-of-structs field, regardless of which set in the body triggered
+it) and return "sets[].distance_m must be a whole number of metres, not a
+fraction" instead of the generic message — still a 400, still refused, but
+actionable. Chosen over quietly rounding server-side: the mobile fix above is
+what actually unblocks the athlete, and a server that silently accepts and
+rounds a fraction would hide a client bug rather than surface one, the same
+stance `validateSets` already takes on a zero weight or an out-of-range RPE
+rather than clamping either.
+
+**Tests, all mutation-verified** (baseline green, reverted the fix, confirmed
+each guard fails as a real test failure — not a compile error — restored,
+confirmed green again): `sessions.test.ts` (`roundDistanceM` directly, and
+`repairSet`'s use of it), `healthkitSync.test.ts` and `detectedActivity.test.ts`
+(each write path rounds in `session_sets`, against a real SQLite fixture),
+new `distanceRounding.test.ts` (the stuck-row-heals-without-migration case,
+and that a stuck row also reads correctly on-screen, not only on push), and
+backend `session/handler_test.go` (`TestSetValidation_FractionalDistanceMIsActionableNotGeneric`,
+`TestSetValidation_WholeNumberDistanceDecodesCleanly`,
+`TestSetValidation_RejectsNonPositiveDistance`) and a new
+`running/handler_test.go` (the `PutDetail` validation-only suite this module
+never had, including the 413 mirror).
+
+**Open**: NEEDS HUMAN EVIDENCE — a real device needs to sync a run under this
+fix and confirm the previously-stuck "Run / Session / invalid JSON body" rows
+on the Sync screen actually clear, either automatically or via "Try again",
+rather than staying stuck forever. The stuck-row-heals mechanism is proven
+against a real SQLite fixture and the exact code path a device retry takes,
+but a fixture is not a device.
+
+**Review fold-in**: `backend-reviewer` caught that `PutDetail`'s new 413 on
+`PUT /running/sessions/{sessionID}` shipped with no matching entry in
+`contracts/public.openapi.yaml` — real, newly-client-visible behavior with no
+contract update, exactly the manual-discipline gap
+`docs/architecture/api-conventions.md` names. Fixed by adding a `"413"`
+response to that route, in the same style N502 already used for
+`/biometric/samples` — `pnpm run lint:openapi` re-validated clean.
+
 ## Open items / known gaps as of this entry
 
 

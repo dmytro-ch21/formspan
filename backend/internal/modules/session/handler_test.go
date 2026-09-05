@@ -147,6 +147,93 @@ func TestGripRefusal_NamesTheOffendingSet(t *testing.T) {
 	}
 }
 
+// N507/#884 — the round-trip test that would have caught the bug directly:
+// `Set.DistanceM` is `*int` on the wire, so a fractional distance — exactly
+// what an un-rounded GPS haversine sum or a HealthKit `HKQuantity` looks
+// like — fails to DECODE, before `validateSets` ever runs. The old code
+// collapsed that `json.UnmarshalTypeError` into the same generic
+// "invalid JSON body" every malformed request gets, which is what made every
+// "Run / Session / invalid JSON body" row on the Sync screen indistinguishable
+// from a truly corrupt payload.
+//
+// This asserts the DECISION this ticket made instead of silently rounding
+// server-side (see `distanceMDecodeMessage`'s own doc comment for why): the
+// request is still refused — `distance_m` is documented as a whole number of
+// metres — but with a message that names the field, so it is actionable
+// rather than generic. The mobile-side fix (rounding before it ever sends
+// this) is what actually unblocks the athlete; this is the backend's half of
+// "not silently misbehaving" for any client that still gets it wrong.
+func TestSetValidation_FractionalDistanceMIsActionableNotGeneric(t *testing.T) {
+	// 2011.4523 — a genuinely fractional value, matching the ticket's own
+	// example of a real HealthKit/GPS-derived distance.
+	fractionalDistanceSet := `{"exercise_id":"run","distance_m":2011.4523,"completed":true}`
+	for _, tc := range []struct {
+		name string
+		rec  *httptest.ResponseRecorder
+	}{
+		{"create", createResponse(t, createBody(fractionalDistanceSet))},
+		{"replace sets", replaceSetsResponse(t, setsBody(fractionalDistanceSet))},
+	} {
+		if tc.rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400, got %d: %s", tc.name, tc.rec.Code, tc.rec.Body.String())
+		}
+		var out struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(tc.rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%s: body is not the error contract: %q", tc.name, tc.rec.Body.String())
+		}
+		if out.Error.Code != "invalid_input" {
+			t.Errorf("%s: code = %q, want invalid_input", tc.name, out.Error.Code)
+		}
+		if out.Error.Message == "invalid JSON body" {
+			t.Errorf("%s: message = %q — this is the exact bug: a fractional distance_m "+
+				"must not read the same as a genuinely malformed body (N507/#884)",
+				tc.name, out.Error.Message)
+		}
+		if !strings.Contains(out.Error.Message, "distance_m") {
+			t.Errorf("%s: message = %q, want it to name distance_m so the caller "+
+				"knows what to fix", tc.name, out.Error.Message)
+		}
+	}
+}
+
+// The companion case: a WHOLE-NUMBER distance (what `JSON.stringify(2011.0)`
+// actually emits — `2011`, no decimal point — which is exactly why every
+// mobile test fixture happened to miss N507 in the first place) must decode
+// cleanly and reach ordinary set validation, not get caught by an
+// over-broad guard on the `distance_m` field. Paired with a bad grip
+// elsewhere in the body so a 400 that reaches `validateSets` is
+// distinguishable from one that never left the decoder.
+func TestSetValidation_WholeNumberDistanceDecodesCleanly(t *testing.T) {
+	set := `{"exercise_id":"bench-press","reps":5,"grip":"banana","distance_m":2011}`
+	rec := createResponse(t, createBody(set))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if code := responseErrorCode(t, rec); code != "invalid_grip" {
+		t.Errorf("want invalid_grip (proving the whole-number distance decoded "+
+			"cleanly and the request reached validateSets), got %q", code)
+	}
+}
+
+// A negative or zero distance_m decodes fine (it IS an int) and must still be
+// refused by validateSets with its own per-set message — this guard is
+// unrelated to N507's decode-time failure and must keep working alongside it.
+func TestSetValidation_RejectsNonPositiveDistance(t *testing.T) {
+	set := `{"exercise_id":"run","distance_m":0,"completed":true}`
+	rec := createResponse(t, createBody(set))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if code := responseErrorCode(t, rec); code != "invalid_input" {
+		t.Errorf("want invalid_input, got %q", code)
+	}
+}
+
 // The sentinel chain the message change must not cost. `writeErr` routes on
 // these, so a `gripError` that stopped satisfying either would keep its tidy
 // sentence and silently lose the code the client acts on.

@@ -9081,6 +9081,16 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: >
+            Body over 4 MiB — told apart from 400 on purpose (N507/#884,
+            mirroring N502/#873's identical fix for /biometric/samples): a
+            dense multi-hour GPS route can produce a body this large
+            honestly, and folding it into 400 "invalid JSON body" gave a
+            client author nothing to act on.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     get:
       summary: Read a running session's detail
       operationId: getRunningSessionDetail

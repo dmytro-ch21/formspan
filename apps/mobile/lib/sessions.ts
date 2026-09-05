@@ -1531,6 +1531,44 @@ export function emptyDropSet(from: LoggedSet, position: number): LoggedSet {
 }
 
 /**
+ * Round a distance in metres to the nearest whole metre — the shape the wire
+ * actually requires. `Set.distance_m` is `*int` on the backend
+ * (`backend/internal/modules/session/session.go`, `distance_m INTEGER` in
+ * `backend/migrations/000010_create_sessions.up.sql`), so a fractional value
+ * — a haversine sum, a HealthKit `HKQuantity.doubleValue`, anything derived
+ * from a real GPS or watch measurement — is essentially never a whole number
+ * and Go's `encoding/json` refuses to decode a float into an `int` field at
+ * all: `UnmarshalTypeError`, collapsed by the handler into a generic
+ * `"invalid JSON body"` 400 (N507/#884) before this app's own set validation
+ * ever runs. Unlike a genuinely unstorable measure (see `repairSet` below),
+ * this is a REPRESENTABLE value the server would happily take — it just has
+ * to arrive as an integer, so rounding (not nulling) is the correct repair.
+ *
+ * **The one shared mechanism for all three running write paths**
+ * (`healthkitSync.ts`, `detectedActivity.ts`, `app/running/[id].tsx`'s finish
+ * handler) — matching the `Math.round(...)` precedent the manual strength
+ * editor already uses (`app/session/[id].tsx`) — rather than four independent
+ * inline `Math.round` calls that a fifth write path could fail to copy.
+ *
+ * **Also the fix for a run already stuck on-device with a fractional value
+ * from before this shipped.** `repairSet` below calls this on every read, and
+ * `parseSets` (`sessionStore.ts`) is the ONE gate every stored session goes
+ * through before either the screen or a push sees it — so a `session_sets`
+ * row already sitting in `local_sessions` with e.g. `2011.4523` heals on the
+ * very next retry, with no separate migration needed. See `parseSets`'s own
+ * doc comment for why that gate is where a repair belongs.
+ *
+ * Applies the same "zero is not data" rule `repairSet` uses for every other
+ * measure: a distance that rounds to zero or below is not a valid distance,
+ * so it becomes `null` rather than `0`.
+ */
+export function roundDistanceM(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  const rounded = Math.round(v);
+  return rounded > 0 ? rounded : null;
+}
+
+/**
  * Drop every measure the server will refuse, turning it back into "not
  * recorded".
  *
@@ -1561,6 +1599,12 @@ export function emptyDropSet(from: LoggedSet, position: number): LoggedSet {
  * Applied where the row is READ rather than where it is typed, and that is
  * deliberate: nulling on input would wipe the field the instant someone typed
  * the `0` of `0.5`, making a decimal weight impossible to enter.
+ *
+ * `distance_m` goes through `roundDistanceM` rather than the plain `measure`
+ * every other field uses — see that function's own doc comment for why a
+ * fractional distance is a ROUNDING problem, not a nulling one, and why
+ * running that repair here (not just at each write site) is what heals a run
+ * already stuck on-device with a fractional value from before N507.
  */
 export function repairSet<T extends LoggedSet>(set: T): T {
   const measure = (v: number | null): number | null =>
@@ -1643,7 +1687,7 @@ export function repairSet<T extends LoggedSet>(set: T): T {
     reps,
     weight_kg: measure(set.weight_kg),
     seconds: measure(set.seconds),
-    distance_m: measure(set.distance_m),
+    distance_m: roundDistanceM(set.distance_m),
     // Range-checked rather than sign-checked, because both ends are refused
     // and an out-of-range effort is as unstorable as a zero one.
     rir: set.rir != null && Number.isFinite(set.rir) && set.rir >= 0 && set.rir <= 20

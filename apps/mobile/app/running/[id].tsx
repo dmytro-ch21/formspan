@@ -32,7 +32,7 @@ import {
   nextAutoPauseState,
   type AutoPauseState,
 } from '@/lib/runningAutoPause';
-import { emptySet } from '@/lib/sessions';
+import { emptySet, roundDistanceM } from '@/lib/sessions';
 import {
   finishLocalSession,
   readLocalRunningDetail,
@@ -575,7 +575,13 @@ export default function RunningSessionScreen() {
       ...emptyDetail(id),
       route_points: finalPoints,
       splits: finalSplits,
-      distance_m: finalDistance || null,
+      // N507/#884: rounded at the point the outbound payload is built, same
+      // as the `session_sets` distance below — the haversine sum in
+      // `finalDistance` is kept full-precision for `finalPace` above, only
+      // the value actually sent is rounded. See `roundDistanceM`'s doc
+      // comment for why this is a shared mechanism, not an inline
+      // `Math.round`.
+      distance_m: roundDistanceM(finalDistance),
       duration_seconds: finalDuration,
       elevation_gain_m: finalElevationGain || null,
       avg_pace_sec_per_km: finalPace,
@@ -597,7 +603,11 @@ export default function RunningSessionScreen() {
       await saveLocalSets(userId, id, [
         {
           ...emptySet(RUN_EXERCISE_ID, 0),
-          distance_m: finalDistance || null,
+          // N507/#884: `Set.distance_m` is `*int` on the wire — a fractional
+          // haversine sum was decoded as a JSON type error and collapsed
+          // into a permanent "invalid JSON body" 400. See
+          // `roundDistanceM`'s doc comment.
+          distance_m: roundDistanceM(finalDistance),
           seconds: finalDuration || null,
           completed: true,
         },

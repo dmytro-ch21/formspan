@@ -1,6 +1,6 @@
 import { getDb, withTransaction } from './db';
 import { averagePaceSecPerKm, emptyDetail, RUN_EXERCISE_ID } from './running';
-import { emptySet } from './sessions';
+import { emptySet, roundDistanceM } from './sessions';
 import { saveLocalRunningDetail, saveLocalSets, startLocalSession } from './sessionStore';
 import { request as requestSync } from './sync';
 
@@ -297,7 +297,9 @@ export async function logDetectionAsSession(userID: string, workout: DetectedWor
     await saveLocalSets(userID, session.id, [
       {
         ...emptySet(RUN_EXERCISE_ID, 0),
-        distance_m: workout.distanceMeters,
+        // N507/#884: `Set.distance_m` is `*int` on the wire — see
+        // `roundDistanceM`'s own doc comment.
+        distance_m: roundDistanceM(workout.distanceMeters),
         seconds: workout.durationSeconds || null,
         completed: true,
       },

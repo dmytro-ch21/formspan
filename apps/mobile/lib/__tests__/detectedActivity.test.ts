@@ -279,6 +279,20 @@ describe('logDetectionAsSession', () => {
     expect(mockRequestSync).toHaveBeenCalledWith('detected-activity-logged');
   });
 
+  // N507/#884: `Set.distance_m` (session_sets, what this asserts) is `*int`
+  // on the wire, unlike the running module's own `distance_m` (a
+  // `*float64`, see the test right below this one) — a fractional
+  // platform-reported distance used to fail to decode server-side as a
+  // generic, permanent "invalid JSON body" 400. Every existing fixture in
+  // this file happened to use a round number (2400), which is exactly why
+  // this bug shipped unnoticed — `JSON.stringify(2400.0) === "2400"`.
+  it('rounds a fractional platform-reported distance to a whole metre in session_sets', async () => {
+    await logDetectionAsSession(USER, workout({ distanceMeters: 2011.4523 }));
+    const sessions = await listLocalSessions(USER);
+    expect(sessions[0].sets[0].distance_m).toBe(2011);
+    expect(Number.isInteger(sessions[0].sets[0].distance_m as number)).toBe(true);
+  });
+
   // N479/#824, found in review: `app/running/[id].tsx`'s finished-session
   // branch reads distance/time/pace ONLY from `running_json`
   // (`readLocalRunningDetail`), never from `session_sets` — a session

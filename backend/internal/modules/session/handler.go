@@ -71,6 +71,40 @@ const maxSets = 500
 // with the comp team", short enough that the column is not an essay field.
 const maxNameLen = 120
 
+// distanceMDecodeMessage names N507/#884's exact trigger: `Set.DistanceM` is
+// `*int` (matching `distance_m INTEGER` in
+// backend/migrations/000010_create_sessions.up.sql), so a fractional
+// distance — a haversine sum, a HealthKit `HKQuantity.doubleValue`, anything
+// derived from a real GPS or watch measurement — fails to decode at all.
+// `encoding/json` refuses the type mismatch (`UnmarshalTypeError`) before
+// `validateSets` ever runs, and the decoder that catches it could only ever
+// report ONE error for the whole body, so this never competes with a
+// concurrent grip/RPE failure the way `validateSets`'s per-set messages do.
+//
+// Told apart from every other decode failure deliberately: the mobile app
+// now rounds before it ever sends this (see `roundDistanceM` in
+// `apps/mobile/lib/sessions.ts`), so reaching this case server-side means
+// either an older build still in the field or a non-VOLA client — either
+// way, "invalid JSON body" gives them nothing to act on, and this does.
+// Chosen over silently rounding server-side: `distance_m` is documented as a
+// whole number of metres on the wire (`contracts/public.openapi.yaml`), and
+// a server that quietly accepts and rounds a fraction would hide a client
+// bug instead of surfacing one — the same reasoning `validateSets` already
+// applies to a zero weight/RPE-out-of-range rather than silently clamping
+// it.
+//
+// `Field` is the full dotted path `encoding/json` reports for the offending
+// value inside a slice of structs — "sets.distance_m" here, for a set at any
+// position — never "sets[2].distance_m", so a suffix match is both correct
+// and stable across which set in the body triggered it.
+func distanceMDecodeMessage(err error) (string, bool) {
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && strings.HasSuffix(typeErr.Field, "distance_m") {
+		return "sets[].distance_m must be a whole number of metres, not a fraction", true
+	}
+	return "", false
+}
+
 func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -599,6 +633,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if msg, ok := distanceMDecodeMessage(err); ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, msg)
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}
@@ -663,6 +701,10 @@ func (h *Handler) ReplaceSets(w http.ResponseWriter, r *http.Request) {
 
 	var req replaceSetsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if msg, ok := distanceMDecodeMessage(err); ok {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, msg)
+			return
+		}
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}

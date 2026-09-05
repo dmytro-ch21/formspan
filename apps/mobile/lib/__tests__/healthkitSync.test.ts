@@ -29,7 +29,7 @@ import {
   readHealthKitImportEnabled,
   writeHealthKitImportEnabled,
 } from '../healthkitSync';
-import { listLocalSessions, readLocalRunningDetail } from '../sessionStore';
+import { listLocalSessions, readLocalRunningDetail, readLocalSession } from '../sessionStore';
 
 let mockFixture: FixtureDb;
 jest.mock('../db', () => {
@@ -152,6 +152,27 @@ describe('importHealthKitRuns', () => {
 
     expect(await importedHealthKitUUIDs(USER)).toEqual(new Set(['hk-a']));
     expect(mockRequestSync).toHaveBeenCalledWith('healthkit-import');
+  });
+
+  // N507/#884: `Set.distance_m` (session_sets, what this asserts) is `*int`
+  // on the wire, unlike the running module's own `distance_m` above (a
+  // `*float64`) — a fractional watch-reported distance, essentially every
+  // real one (`HKQuantity.doubleValue(for: .meter())`), used to fail to
+  // decode server-side as a generic, permanent "invalid JSON body" 400 —
+  // exactly the stuck "Run / Session / invalid JSON body" rows the Sync
+  // screen showed. Every existing fixture in this file (this suite
+  // included, before this test) used a round number, which is precisely how
+  // the bug shipped unnoticed: `JSON.stringify(5000.0) === "5000"`.
+  it('rounds a fractional watch-reported distance to a whole metre in session_sets', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    mockWorkouts = [workout({ uuid: 'hk-frac', distanceMeters: 2011.4523 })];
+
+    await importHealthKitRuns(USER);
+
+    const sessions = await listLocalSessions(USER);
+    const session = await readLocalSession(USER, sessions[0].id);
+    expect(session?.sets[0].distance_m).toBe(2011);
+    expect(Number.isInteger(session?.sets[0].distance_m as number)).toBe(true);
   });
 
   it('re-running import does not duplicate an already-imported run', async () => {
