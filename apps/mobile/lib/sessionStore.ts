@@ -442,10 +442,21 @@ export async function trainingSince(
  * the ledger consistent with a contiguous prefix" reasoning — a device
  * catching up on months of unsynced sessions should not spend one
  * foreground pass working backward from the newest.
+ *
+ * `notOlderThanISO` (N502/#873) additionally floors the walk in TIME, not
+ * just per-pass count: without it, an account with a long training history
+ * that only just turned the HealthKit toggle on walks EVERY session it has
+ * ever logged, oldest first, `limit` at a time, forever advancing toward the
+ * present — including sessions that predate any wearable by years, which can
+ * never gain HR evidence no matter how many passes run. `biometricSync.ts`
+ * passes `SESSION_BACKFILL_FLOOR_DAYS` here; optional (default: no floor)
+ * only so the existing fixture tests that call this with two arguments stay
+ * meaningful — every production caller supplies it.
  */
 export async function sessionsNeedingBiometricSync(
   userID: string,
   limit: number,
+  notOlderThanISO?: string,
 ): Promise<Pick<LocalSession, 'id' | 'started_at' | 'ended_at'>[]> {
   const db = await getDb();
   return db.getAllAsync<{ id: string; started_at: string; ended_at: string }>(
@@ -456,9 +467,12 @@ export async function sessionsNeedingBiometricSync(
         AND s.deleted_at IS NULL
         AND s.ended_at IS NOT NULL
         AND b.session_id IS NULL
+        AND (? IS NULL OR s.ended_at >= ?)
       ORDER BY s.ended_at ASC
       LIMIT ?`,
     userID,
+    notOlderThanISO ?? null,
+    notOlderThanISO ?? null,
     limit,
   );
 }

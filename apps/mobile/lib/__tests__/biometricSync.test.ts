@@ -12,7 +12,7 @@
 
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 import type { HealthKitQuantitySample } from '../healthkit';
-import { syncBiometricEnrichment } from '../biometricSync';
+import { readBiometricSyncFailureCount, syncBiometricEnrichment } from '../biometricSync';
 import { writeHealthKitImportEnabled } from '../healthkitSync';
 import { finishLocalSession, sessionsNeedingBiometricSync, startLocalSession } from '../sessionStore';
 
@@ -205,6 +205,75 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     await syncBiometricEnrichment(USER, getToken);
 
     expect(await sessionsNeedingBiometricSync('another_user', 10)).toHaveLength(0);
+  });
+});
+
+describe('syncBiometricEnrichment — session backfill time floor (N502/#873)', () => {
+  it('never offers a session that ended more than SESSION_BACKFILL_FLOOR_DAYS ago', async () => {
+    mockHRSamples = [hrSample()];
+    const longAgo = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000);
+    const startedAt = new Date(longAgo.getTime() - 30 * 60 * 1000).toISOString();
+    await finishedSession({ started_at: startedAt, ended_at: longAgo.toISOString() });
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockComputeMetrics).not.toHaveBeenCalled();
+    // Not merely deferred to a later pass — a session this old is never a
+    // candidate at all, unlike the "no date of birth" case above which
+    // leaves the session pending for next time.
+    expect(await sessionsNeedingBiometricSync(USER, 10)).toHaveLength(1);
+  });
+
+  it('still offers a session well within the floor', async () => {
+    mockHRSamples = [hrSample()];
+    const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    const startedAt = new Date(recent.getTime() - 30 * 60 * 1000).toISOString();
+    await finishedSession({ started_at: startedAt, ended_at: recent.toISOString() });
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('syncBiometricEnrichment — the debug-accessible failure count (N502/#873)', () => {
+  it('starts at zero for an account that has never synced', async () => {
+    expect(await readBiometricSyncFailureCount(USER)).toBe(0);
+  });
+
+  it('a failed session compute increments the count', async () => {
+    mockHRSamples = [hrSample()];
+    mockComputeMetrics.mockRejectedValueOnce(new Error('offline'));
+    await finishedSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(await readBiometricSyncFailureCount(USER)).toBe(1);
+  });
+
+  it('a failed VO2max upload increments the count', async () => {
+    mockVO2MaxSamples = [
+      { uuid: 'vo2-1', value: 50, unit: 'ml/(kg*min)', measuredAt: '2026-08-01T00:00:00.000Z', sourceName: 'Watch', sourceBundleId: 'com.apple.health.watch' },
+    ];
+    mockPutSamples.mockRejectedValueOnce(new Error('offline'));
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(await readBiometricSyncFailureCount(USER)).toBe(1);
+  });
+
+  it('resets to zero once a subsequent pass completes with no failures', async () => {
+    mockHRSamples = [hrSample()];
+    mockComputeMetrics.mockRejectedValueOnce(new Error('offline'));
+    await finishedSession();
+    await syncBiometricEnrichment(USER, getToken);
+    expect(await readBiometricSyncFailureCount(USER)).toBe(1);
+
+    // The session is still pending (its ledger row was never written), so
+    // the next pass retries it — this time it succeeds.
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(await readBiometricSyncFailureCount(USER)).toBe(0);
   });
 });
 

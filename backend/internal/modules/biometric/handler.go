@@ -3,6 +3,7 @@ package biometric
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,8 +79,29 @@ const maxSamplesBody = 4 << 20
 func (h *Handler) PutSamples(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
+	// Read once, then decode — the same split health/handler.go's Report
+	// makes and for the identical reason: http.MaxBytesReader's failure and a
+	// genuinely malformed body are different problems, and the old code
+	// (a single json.NewDecoder(MaxBytesReader(...)).Decode call) reported
+	// both as "invalid JSON body". A dense Apple Watch session — continuous
+	// per-second HR, or a long/backfilled one — routinely produces a batch
+	// close to or over maxSamplesBody; that client got a message with
+	// nothing to act on, when the actual answer ("split the batch") was
+	// knowable server-side. See N502/#873.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSamplesBody))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			apihttp.WriteError(w, http.StatusRequestEntityTooLarge, apihttp.CodeInvalidInput,
+				"that batch is too large — split it into smaller requests")
+			return
+		}
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		return
+	}
+
 	var req putSamplesRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSamplesBody)).Decode(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
 		return
 	}

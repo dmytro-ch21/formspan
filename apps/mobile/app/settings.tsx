@@ -16,7 +16,7 @@ import {
   triggerHealthKitImportNow,
   writeHealthKitImportEnabled,
 } from '@/lib/healthkitSync';
-import { triggerBiometricSyncNow } from '@/lib/biometricSync';
+import { readBiometricSyncFailureCount, triggerBiometricSyncNow } from '@/lib/biometricSync';
 import { isHealthConnectSupported } from '@/lib/healthConnect';
 import {
   readHealthConnectImportEnabled,
@@ -75,6 +75,19 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (userId) readHealthKitImportEnabled(userId).then(setHealthKitImport).catch(() => {});
   }, [userId]);
+
+  // N502/#873: the minimal visible signal for a biometric-sync pass that
+  // failed — previously invisible end to end (see biometricSync.ts's doc
+  // comment). Re-read on every focus, not just on mount: the pass this
+  // counts runs on foreground return, which is exactly what happens right
+  // before an athlete who suspects something is wrong opens this screen.
+  const [biometricSyncFailures, setBiometricSyncFailures] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      readBiometricSyncFailureCount(userId).then(setBiometricSyncFailures).catch(() => {});
+    }, [userId]),
+  );
 
   // N478: the Android equivalent, one row down. Unlike `healthKitSupported`
   // above, `isHealthConnectSupported` is ASYNC — it asks the Health Connect
@@ -296,7 +309,15 @@ export default function SettingsScreen() {
                 // widened it again the same way: a walk or hike Apple Health
                 // notices shows up on Today so it can be logged or skipped,
                 // using the SAME workout read access already granted above.
-                "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history. Heart rate from any finished session, and your VO2max trend, are read the same way. Other activity, like a walk or hike, appears on Today so you can log it or skip it — VOLA never writes anything back to Health. Turning this on asks for Health access."
+                "Runs recorded on your Apple Watch, or logged directly in the Health app, appear in your training history. Heart rate from any finished session, and your VO2max trend, are read the same way. Other activity, like a walk or hike, appears on Today so you can log it or skip it — VOLA never writes anything back to Health. Turning this on asks for Health access." +
+                // N502/#873: the one visible signal for a genuine sync
+                // failure, appended rather than a separate row — it's about
+                // THIS toggle's own sync pass, and silent otherwise (0 shows
+                // nothing at all, matching SyncChip's "silent when there is
+                // nothing to say" stance).
+                (biometricSyncFailures > 0
+                  ? ` Health sync had ${biometricSyncFailures} issue${biometricSyncFailures === 1 ? '' : 's'} on its last pass — this usually resolves itself; if it keeps happening, try again with a better connection.`
+                  : '')
               : 'Not available on this device.'
           }
           value={healthKitImport}

@@ -18,13 +18,16 @@ import {
   HEALTH_CONNECT_HISTORY_WALL_DAYS,
   RETRY_COOLDOWN_HOURS,
   RETRY_WINDOW_DAYS,
+  SAMPLES_PER_SYNC_REQUEST,
   ageInYears,
+  chunkSamples,
   classifyHealthKitSource,
   heartRateSamplesInWindow,
   hrMaxFromDateOfBirth,
   isWithinHealthConnectHistoryWall,
   needsEnrichmentAttempt,
   planHRSync,
+  putBiometricSamples,
   selectEnrichmentCandidates,
   sessionHRWindow,
   toBiometricSample,
@@ -33,6 +36,9 @@ import {
   type EnrichmentLedgerEntry,
   type RawQuantitySample,
 } from '../biometric';
+
+const mockApi = jest.fn();
+jest.mock('../apiRequest', () => ({ apiRequest: (...a: unknown[]) => mockApi(...a) }));
 
 function raw(overrides: Partial<RawQuantitySample> = {}): RawQuantitySample {
   return {
@@ -343,5 +349,102 @@ describe('selectEnrichmentCandidates', () => {
     const excluded = session({ id: 'excluded', endedAt: null });
     const b = session({ id: 'b', startedAt: '2026-09-10T07:00:00.000Z' });
     expect(selectEnrichmentCandidates([a, excluded, b], new Map(), now)).toEqual([a, b]);
+  });
+});
+
+describe('chunkSamples (N502/#873)', () => {
+  it('returns zero chunks for an empty input', () => {
+    expect(chunkSamples([], 5)).toEqual([]);
+  });
+
+  it('returns one chunk when everything fits', () => {
+    expect(chunkSamples([1, 2, 3], 5)).toEqual([[1, 2, 3]]);
+  });
+
+  it('splits into chunks of exactly `size`, with the remainder in the last one', () => {
+    expect(chunkSamples([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('preserves order across chunks', () => {
+    const items = Array.from({ length: 10 }, (_, i) => i);
+    expect(chunkSamples(items, 3).flat()).toEqual(items);
+  });
+
+  it('treats a non-positive size as 1 rather than looping forever', () => {
+    expect(chunkSamples([1, 2], 0)).toEqual([[1], [2]]);
+    expect(chunkSamples([1, 2], -5)).toEqual([[1], [2]]);
+  });
+});
+
+describe('putBiometricSamples (N502/#873)', () => {
+  const getToken = async () => 'test-token';
+
+  function sample(id: string): BiometricSample {
+    return {
+      id,
+      metric_type: 'heart_rate',
+      source: 'apple_watch',
+      source_platform: 'healthkit',
+      value: 150,
+      unit: 'bpm',
+      measured_at: '2026-09-01T07:15:00.000Z',
+    };
+  }
+
+  beforeEach(() => mockApi.mockReset());
+
+  it('never calls the API for an empty batch', async () => {
+    const result = await putBiometricSamples(getToken, []);
+    expect(mockApi).not.toHaveBeenCalled();
+    expect(result).toEqual({ samples: [] });
+  });
+
+  it('sends a batch at or under the chunk size in a single request', async () => {
+    const samples = Array.from({ length: SAMPLES_PER_SYNC_REQUEST }, (_, i) => sample(`s${i}`));
+    mockApi.mockResolvedValueOnce({ samples });
+
+    await putBiometricSamples(getToken, samples);
+
+    expect(mockApi).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(mockApi.mock.calls[0][2].body as string);
+    expect(body.samples).toHaveLength(SAMPLES_PER_SYNC_REQUEST);
+  });
+
+  it('splits a batch over the chunk size into multiple requests, each within the cap', async () => {
+    const total = SAMPLES_PER_SYNC_REQUEST + 1;
+    const samples = Array.from({ length: total }, (_, i) => sample(`s${i}`));
+    mockApi.mockImplementation((_token: unknown, _path: unknown, init: RequestInit) => {
+      const sent = JSON.parse(init.body as string).samples;
+      return Promise.resolve({ samples: sent });
+    });
+
+    const result = await putBiometricSamples(getToken, samples);
+
+    expect(mockApi).toHaveBeenCalledTimes(2);
+    for (const call of mockApi.mock.calls) {
+      const body = JSON.parse(call[2].body as string);
+      expect(body.samples.length).toBeLessThanOrEqual(SAMPLES_PER_SYNC_REQUEST);
+    }
+    // Every sample still makes it through, merged back into one result.
+    expect(result.samples).toHaveLength(total);
+  });
+
+  it('every request goes to the same endpoint with the same method', async () => {
+    const samples = Array.from({ length: SAMPLES_PER_SYNC_REQUEST * 2 }, (_, i) => sample(`s${i}`));
+    mockApi.mockResolvedValue({ samples: [] });
+
+    await putBiometricSamples(getToken, samples);
+
+    for (const call of mockApi.mock.calls) {
+      expect(call[1]).toBe('/biometric/samples');
+      expect((call[2] as RequestInit).method).toBe('POST');
+    }
+  });
+
+  it('propagates a rejection from any chunk rather than swallowing it', async () => {
+    const samples = Array.from({ length: SAMPLES_PER_SYNC_REQUEST + 1 }, (_, i) => sample(`s${i}`));
+    mockApi.mockRejectedValueOnce(new Error('offline'));
+
+    await expect(putBiometricSamples(getToken, samples)).rejects.toThrow('offline');
   });
 });

@@ -56304,6 +56304,129 @@ as obviously primary (not just structurally distinct) next to the intent
 pills above it.
 
 
+## 2026-09-05 — N502: the biometric-sync size wall, chunked uploads, and a bounded backfill (#873)
+
+The user reported "12 failed due to invalid JSON" from Apple Health sync,
+and asked that sync be scoped to session windows. Neither half of that
+report could be verified literally — **there is no UI anywhere in the app
+today showing a biometric-sync failure count** (`settings.tsx`'s toggle has
+no status; `sync.tsx`'s outbox is sessions/workouts/plans/food/trackers,
+never biometric; `biometricSync.ts` swallowed every error silently by
+design). So the exact "12 failed" screen is still unconfirmed — see the
+NEEDS HUMAN EVIDENCE criterion on #873 — but the investigation found a real,
+traceable bug behind it and fixed that.
+
+**The real bug: a request-size limit was reported as "invalid JSON".**
+`biometric/handler.go`'s `PutSamples` ran `json.NewDecoder(MaxBytesReader(...))
+.Decode(...)` in one step, so a body over the 4 MiB cap and a genuinely
+malformed body produced the identical `invalid_input`/"invalid JSON body"
+response. `health/handler.go`'s `Report` had already hit and fixed this
+exact conflation (entry from N-earlier, `errors.As` against
+`*http.MaxBytesError`) — `biometric` never got the same fix. Mirrored here:
+`PutSamples` now reads the body with `io.ReadAll(http.MaxBytesReader(...))`
+first, detects `*http.MaxBytesError` distinctly, and returns 413 with a
+message that says what to do about it ("split it into smaller requests")
+instead of the generic 400. New test
+`TestPutSamples_OversizedBodyIs413NotAConfusing400` pins this,
+mutation-verified (reverting the `errors.As` branch turns it red: 400
+instead of 413).
+
+**Why this was reachable in practice.** `queryHeartRateSamples`'s native
+query ceiling (`QUANTITY_QUERY_LIMIT` in `healthkit.ts`) is 20,000 — double
+the backend's `MaxSamplesPerRequest` (10,000) — and the mobile client never
+chunked a sync payload: `putBiometricSamples` posted one request per call,
+whatever its size. A dense Apple Watch session (continuous per-second HR
+over a long or backfilled workout) could land a single request right at, or
+over, the size wall.
+
+**The client fix: `putBiometricSamples` now chunks every call**, splitting
+`samples` into `SAMPLES_PER_SYNC_REQUEST` (2,000)-sized requests and
+issuing them sequentially, merging the results. 2,000 keeps roughly a 5x
+margin under the row cap and a 10x margin under the body-size cap even if
+real samples run well over the backend's own ~200-byte/row estimate.
+Sequential rather than parallel, deliberately — this is a background
+enrichment pass with no latency budget (`biometricSync.ts`'s own doc
+comment on why there's no retry ladder), so there's nothing to gain from
+concurrency and something to lose (needless simultaneous load on a pass
+this module otherwise goes out of its way to keep gentle). Idempotent both
+within and across chunks (`id`-keyed, `ON CONFLICT DO NOTHING` server-side),
+so a chunk that lands and then a later one fails costs nothing on retry —
+the whole batch just gets re-offered next pass. New pure test `chunkSamples`
+(empty → 0 chunks, exact-multiple and remainder splits, order preservation,
+non-positive size treated as 1) plus `putBiometricSamples` tests against a
+mocked `apiRequest` (single chunk for an at-cap batch, multiple requests for
+an over-cap batch, every request going to the same endpoint, and a
+rejection propagating rather than being swallowed) — mutation-verified by
+reverting `chunkSamples` to "one chunk always" and confirming three tests go
+red.
+
+**VO₂max gets the same fix "for free", and a documented decision on the
+toggle question.** Since VO₂max samples flow through the same
+`putBiometricSamples`, its 90-day first-run backfill is now chunked
+identically without `syncVO2Max` needing any chunking logic of its own —
+satisfying the ticket's "at minimum, chunk it" with the one change already
+made. The ticket also asked whether VO₂max should get its own opt-in toggle,
+distinct from session HR sync, given it's a fundamentally different kind of
+sync (continuous trend vs. session-windowed). Decision, documented in
+`biometricSync.ts`'s own doc comment: **no, keep the one shared toggle.**
+HealthKit's consent screen already grants workouts, heart rate and VO₂max
+together in one prompt (N477/#822's original reasoning); a second app-level
+toggle would gate this app's own code, not narrow what HealthKit hands
+over, and the actual complaint traced to a sync that failed outright, not to
+an athlete objecting to VO₂max being read at all. Revisitable if a future
+report is genuinely about the trend itself rather than about a failure.
+
+**Session backfill now has a time floor.** `sessionsNeedingBiometricSync`
+had a per-pass row cap (`MAX_SESSIONS_PER_PASS` = 20) but no floor in time —
+an account with years of logged sessions that only just turned the
+HealthKit toggle on would walk every session ever logged, oldest first, 20
+per foreground return, including sessions from years before any wearable
+existed, which can never gain HR evidence no matter how many passes run.
+Added `SESSION_BACKFILL_FLOOR_DAYS = 180` (six months) in `biometricSync.ts`,
+threaded through as an optional `notOlderThanISO` parameter on
+`sessionsNeedingBiometricSync` (optional so the existing two-argument
+fixture-test call sites stay valid; every production caller supplies it).
+180, not `VO2MAX_BACKFILL_DAYS`'s 90 — a deliberately different number for a
+deliberately different reason, documented at the constant: VO₂max's 90 days
+IS the intended answer for a trend metric, while a session backfill's floor
+is purely about bounding how much pre-wearable history is worth walking
+through. New tests confirm a session past the floor is never offered at all
+(not merely deferred, unlike the existing "no date of birth" case) and a
+recent one still is; mutation-verified (dropping the floor argument turns
+the "never offered" test red).
+
+**Minimal visible signal for a genuine failure**, satisfying the ticket's
+fifth ask: a new device-local pref (`PREF_BIOMETRIC_SYNC_FAILURE_COUNT`)
+resets to 0 at the start of every pass and increments on each failure
+within it — a rejected session compute, or a rejected VO₂max upload — via
+`recordBiometricSyncFailure`, read back by `readBiometricSyncFailureCount`.
+Settings' existing "Sync with Apple Health" toggle now appends
+`"Health sync had N issue(s) on its last pass…"` to its hint only when the
+count is nonzero (re-read on every screen focus, matching when the pass
+itself runs), silent otherwise — the same "silent when there is nothing to
+say" posture `SyncChip` already takes. This is deliberately NOT a lifetime
+tally: a pass that completes clean clears whatever a prior pass left
+behind, so the number always answers "is something wrong right now", not
+"how many things have ever gone wrong on this phone". New tests: starts at
+0 for a fresh account, increments on a failed HR compute, increments on a
+failed VO₂max upload, and resets to 0 once a retried pass succeeds;
+mutation-verified (removing the `recordBiometricSyncFailure` call in the HR
+path turns its test red).
+
+`contracts/public.openapi.yaml`'s `/biometric/samples` POST gained a 413
+response entry, matching the pattern already documented on
+`/sequences`/`/classplans`; validated with `pnpm run lint:openapi`.
+
+**Open**: NEEDS HUMAN EVIDENCE — the exact screen or notification the user
+saw "12 failed due to invalid JSON" on is still unconfirmed; nothing in the
+current app surfaces a biometric-sync failure count anywhere except the new
+Settings hint this ticket adds, so either the user was describing a
+different (possibly now-fixed, possibly unrelated) surface, or a build
+predating this fix. The 180-day session-backfill floor and the shared
+VO₂max toggle are both judgment calls recorded above rather than measured
+against real usage — revisit if either produces a fresh complaint.
+
+
 ## Open items / known gaps as of this entry
 
 
