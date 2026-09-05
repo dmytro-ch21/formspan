@@ -82,6 +82,17 @@ export default function StartSessionScreen() {
 
   const label = labelFor(modules, sport) || 'Session';
 
+  // The one template Plan pointed at, once the list it lives in has loaded —
+  // reused by the auto-start effect below AND by the render, so there is one
+  // place deciding "does today's plan still name something real", not two
+  // that could disagree. `null` while `plannedWorkoutId` is absent OR while
+  // it matches nothing in the loaded list are the same value on purpose: the
+  // render below gates on `loading` first, so a plan that resolves is never
+  // shown as unplanned for one frame while the list is still in flight.
+  const plannedWorkout = plannedWorkoutId
+    ? (workouts.find((w) => w.id === plannedWorkoutId) ?? null)
+    : null;
+
   const load = useCallback(async () => {
     if (!sport || !userId) return;
     // Cache first so the list renders with no signal, then refresh it.
@@ -129,18 +140,27 @@ export default function StartSessionScreen() {
    * unreachable from the flow it exists for: a planned Light or Deload day
    * could never be marked as one. Every other sport has no picker and keeps
    * the original one-tap auto-start unchanged.
+   *
+   * **N499 — skipping auto-start is not the same as skipping the template.**
+   * The render below still gives `plannedWorkout` a distinct, one-tap "Start
+   * <name>" card above the generic chooser, so the athlete never has to
+   * re-find and re-select the workout Plan already named — they choose an
+   * intent (or leave it on Normal) and tap once. Before this, the skip above
+   * left `plannedWorkoutId` referenced nowhere else in the file: the template
+   * just sat as one more undifferentiated row in the full "From a workout"
+   * list, indistinguishable from every other one — which is what N499/#870
+   * reported.
    */
   const autoStarted = useRef(false);
   useEffect(() => {
     if (autoStarted.current || loading || !plannedWorkoutId || sport === 'strength') return;
-    const planned = workouts.find((w) => w.id === plannedWorkoutId);
-    if (!planned) return;
+    if (!plannedWorkout) return;
     autoStarted.current = true;
-    begin(planned);
+    begin(plannedWorkout);
     // `begin` is redeclared every render and is not a dependency worth
     // stabilising here — the ref is what makes this run once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, plannedWorkoutId, workouts, sport]);
+  }, [loading, plannedWorkoutId, plannedWorkout, sport]);
 
   async function begin(workout: Workout | null) {
     if (starting || !sport || !userId) return;
@@ -296,6 +316,78 @@ export default function StartSessionScreen() {
               <Text style={styles.secondaryText}>Create a workout</Text>
             </Pressable>
           </View>
+        ) : sport === 'strength' && plannedWorkout ? (
+          // N499/#870: Plan already named this template — asking again by
+          // burying it in the same list as every other workout is the bug.
+          // One prominent, one-tap card, with the intent picker already on
+          // screen above it, and NOT the generic chooser below: that chooser
+          // is the fall-through for when a plan points at nothing real (the
+          // `?? null` above), not a second way to start THIS session.
+          //
+          // `sport === 'strength'` here mirrors the intent picker's own gate
+          // just above, rather than relying on auto-start's timing to keep
+          // this branch from ever being reached for BJJ/running: effects run
+          // AFTER paint, so a planned non-strength session would otherwise
+          // render this card for one frame before auto-start's effect fires
+          // and navigates away.
+          <>
+            <Text style={styles.sectionLabel}>{"Today's plan"}</Text>
+            <Pressable
+              style={[
+                styles.plannedCard,
+                { borderColor: accent.accent },
+                starting && styles.disabled,
+              ]}
+              onPress={() => begin(plannedWorkout)}
+              disabled={starting}
+              accessibilityRole="button"
+              accessibilityLabel={`Start ${plannedWorkout.name}`}
+              accessibilityState={{ busy: starting, disabled: starting }}
+              testID={`start-workout-${plannedWorkout.id}`}
+            >
+              <View
+                style={[
+                  styles.cardRule,
+                  { backgroundColor: sportColor(plannedWorkout.sport) ?? accent.accent },
+                ]}
+              />
+              {sportIcon(plannedWorkout.sport) && (
+                <View
+                  style={[
+                    styles.cardBadge,
+                    {
+                      backgroundColor: sportTint(
+                        sportColor(plannedWorkout.sport) ?? accent.accent,
+                      ),
+                    },
+                  ]}
+                >
+                  <Icon
+                    name={sportIcon(plannedWorkout.sport)!}
+                    size={18}
+                    color={sportColor(plannedWorkout.sport) ?? accent.accent}
+                  />
+                </View>
+              )}
+              <View style={styles.cardBody}>
+                <Text style={styles.cardTitle}>{plannedWorkout.name}</Text>
+                <Text style={styles.muted}>
+                  {plannedWorkout.items.length}{' '}
+                  {plannedWorkout.items.length === 1 ? 'exercise' : 'exercises'}
+                  {plannedWorkout.items[0]
+                    ? ` · ${summariseTargets(plannedWorkout.items[0], units)}`
+                    : ''}
+                </Text>
+              </View>
+              {starting ? (
+                <ActivityIndicator color={accent.accent} />
+              ) : (
+                <View style={[styles.startPill, { backgroundColor: accent.accent }]}>
+                  <Text style={[styles.startPillText, { color: accent.on }]}>Start</Text>
+                </View>
+              )}
+            </Pressable>
+          </>
         ) : (
           <>
             <Text style={styles.sectionLabel}>From a workout</Text>
@@ -417,6 +509,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 12,
   },
+  // N499: the same card, made unmistakably the primary action rather than
+  // one row among many — a 2pt accent border where the generic row uses a
+  // hairline, and a filled "Start" pill standing in for the passive chevron.
+  // Same geometry (`cardRule`/`cardBadge`/`cardBody`) so it still reads as
+  // the same kind of object as the Plan tab's template card, just singled
+  // out.
+  plannedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderRadius: 14,
+    backgroundColor: vola.surface,
+    overflow: 'hidden',
+    paddingRight: 12,
+  },
+  startPill: {
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startPillText: { fontWeight: '700', fontSize: 14 },
   // `paddingLeft` matches Plan's 14 and also covers the case `sport.ts` says is
   // legitimate — an unknown discipline draws no disc, and the title would
   // otherwise sit hard against the rule.

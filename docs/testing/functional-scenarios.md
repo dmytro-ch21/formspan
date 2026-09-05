@@ -18891,3 +18891,63 @@ them.
   capability the ask is being treated as already covering.
 - Confirm no set-level drag handle or press-and-hold reorder gesture was
   added anywhere in session logging.
+
+## N499 — starting a planned strength session keeps the template instead of forcing reselection (`apps/mobile/app/session/start.tsx`)
+
+The planned template Plan already named reaches `/session/start` correctly;
+this ticket is about what the screen does with it once it's there. The
+generic "From a workout" chooser and the Normal/Light/Deload picker
+(N474) both still exist — the fix is that a resolved planned template now
+renders as a distinct, one-tap "Start `<name>`" card instead of one
+undifferentiated row in that chooser.
+
+### Happy path
+
+- Plan a specific strength template for today (e.g. "Leg Day"), then from
+  Today's plan card tap "start today's session": the screen shows the
+  Normal/Light/Deload picker (unchanged from N474) and, directly below it,
+  a single prominent "Start Leg Day" card with an accent border and a
+  filled "Start" pill — NOT the generic "From a workout" list, and no other
+  workout of that sport is shown at all.
+- With the picker still on Normal, tap the "Start Leg Day" card: the
+  created session's `workout_id` is the planned template's id, its `intent`
+  is `normal`, and it opens the live set logger already filled in from the
+  template — no intermediate chooser screen, no second tap on the template.
+- Same, but tap "Light" (or "Deload") before tapping the card: the created
+  session's `intent` reflects the choice, `workout_id` is unchanged from the
+  Normal case — the intent and the template are independent, selectable in
+  either order, in one visit to the screen.
+- "Or start an empty session" remains available below the planned card —
+  choosing it still creates a template-less session, same as before this
+  ticket touched the screen.
+
+### Edge cases & errors
+
+- Delete (or never create) the template a plan points at, then open its
+  "start today's session": the screen falls back to the ordinary "From a
+  workout" chooser (every other workout of that sport, tappable) rather than
+  showing a broken or empty "Today's plan" card — a plan can outlive the
+  template it names; there is no foreign key, by design.
+- Start a strength session with NO plan for today (ad-hoc, Train tab or an
+  unplanned day): the full "From a workout" chooser renders exactly as
+  before this ticket — every workout of that sport listed, none singled out,
+  "Today's plan" heading absent.
+- Offline: the planned card still renders and starts a session with no
+  signal (workouts come from the local cache first), and the created
+  session syncs later like any other locally-started one.
+- A planned BJJ or running session: still auto-starts immediately with no
+  picker and no card shown at all (N474's per-sport gate is unchanged) —
+  this ticket only changes what strength does once auto-start is skipped.
+- The screen is reached mid-load (cached workouts already in state, network
+  refresh still in flight) and the planned id is in the cached list: the
+  card must not flash as "not found" and fall to the generic chooser for one
+  frame before the network response confirms it — the loading spinner covers
+  this window instead.
+
+### Auth/security
+
+- No new surface: the planned card starts a session through the same
+  `startLocalSession`/`POST /v1/sessions` path the generic chooser and the
+  BJJ/running auto-start already use, so existing ownership/authorization
+  coverage on session creation and on `GET /v1/workouts` (which the id must
+  resolve against) applies unchanged.
