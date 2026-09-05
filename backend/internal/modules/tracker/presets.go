@@ -154,13 +154,68 @@ var presets = []Preset{
 	// cutoff field is editable, and an athlete with a different bedtime sets
 	// their own number the same way they would retype the 400 mg limit.
 	//
-	// `Default: false`, same reasoning as coffee's: an unremovable caffeine
-	// counter handed to somebody who has quit, or never drank it, is not a
-	// neutral thing to do. Reachable exactly the way coffee is — the "Ready to
-	// go" list `app/trackers/new.tsx` already renders from `NonDefaultPresets`.
+	// `Default: true` as of N501/#872. Reversed from N431's original `false`:
+	// the reasoning that kept coffee off ("an unremovable counter handed to
+	// somebody who quit is not neutral") does not transfer here, because
+	// caffeine is not opt-in by taste the way coffee is — it is arithmetic
+	// over whatever the athlete already logs as food, off by default meant
+	// the whole feature (N468's food-to-caffeine link) was unreachable for
+	// every athlete who never found Food -> Manage trackers -> Track
+	// something new -> Caffeine, which in practice was everyone. Reported
+	// directly: "no sign of it and it should be connected."
+	//
+	// **This is safe against re-adding a tracker someone deliberately turned
+	// off, and the mechanism is not new — it is the same one water (also
+	// `Default: true`) already relies on.** `EnsureDefaults` inserts under
+	// the deterministic `PresetID(userID, "caffeine")` with a bare
+	// `ON CONFLICT DO NOTHING` (no arbiter — see that method's own comment),
+	// so:
+	//
+	//   - **Archived** (the DELETE-without-`purge`, i.e. the safe/default
+	//     stop-tracking path): the row still exists at that id, archived_at
+	//     set. The INSERT collides on the PRIMARY KEY and does nothing — the
+	//     athlete stays without an active caffeine card, exactly like an
+	//     athlete who archives water today.
+	//   - **Destroyed** (`purge=true`, permanent): `Destroy` already refuses
+	//     this outright for any preset `provisioningWouldRecreate` reports
+	//     true for — see that method's own comment — with the message "…is
+	//     set up for you automatically and would come back — stop tracking
+	//     it instead". Once this flips to `Default: true`, that refusal now
+	//     covers caffeine too, going forward.
+	//   - The one gap this does NOT close: an athlete who opted into caffeine
+	//     via `AddPreset` before this shipped and used `purge=true` on it
+	//     back when `Destroy` still allowed that (caffeine was `Default:
+	//     false` then, so `provisioningWouldRecreate` said no) would have
+	//     that row and its entries already gone. `EnsureDefaults` would then
+	//     provision a fresh one, because there is nothing left for the
+	//     `ON CONFLICT` to collide with — there is no tombstone for a
+	//     genuinely destroyed row, by design (`Destroy`'s own doc: "this is
+	//     the one path in the module that loses data").
+	//
+	//     **Get the window right rather than minimise it: it is real and it
+	//     is ~8 days, not "no real window."** backend-reviewer, N501 review:
+	//     an earlier draft of this comment cited N468 (2026-09-02) as "the
+	//     feature that made opting in possible at all" and concluded there
+	//     had been no time for the sequence to occur. That is the wrong
+	//     feature — `git log` shows the caffeine PRESET itself, reachable
+	//     through `AddPreset` exactly like coffee, shipped in N431/#699
+	//     (2026-08-28); N468 only added the food-to-caffeine auto-link on
+	//     top of an already-reachable tracker. The honest window is
+	//     2026-08-28 → 2026-09-05 (~8 days), during which any athlete who
+	//     opted in and then permanently purged it would hit exactly this
+	//     gap. Accepted anyway, for a narrower reason than "it can't have
+	//     happened": there is no production Postgres yet (see CLAUDE.md's
+	//     Railway note — only `staging` is live), so the realistic exposure
+	//     is bounded to whoever has used the staging/dev environment in that
+	//     window, not any real athlete's data. Worth a one-off check of
+	//     `staging`'s `daily_trackers` for a caffeine preset row with no
+	//     corresponding live/archived instance before this ships there, but
+	//     not a reason to hold the default-provisioning fix itself, and not
+	//     something a tombstone-free `Destroy` can be made to detect after
+	//     the fact.
 	{
 		Key:     "caffeine",
-		Default: false,
+		Default: true,
 		Fields: New{
 			Preset:        "caffeine",
 			Name:          "Caffeine",

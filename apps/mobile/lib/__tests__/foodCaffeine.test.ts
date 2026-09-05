@@ -52,6 +52,29 @@ describe('caffeineMgForFoodName', () => {
     expect(caffeineMgForFoodName('Decaffeinated Latte')).toBeNull();
   });
 
+  /**
+   * N501/#872: "no caffeine" / "without caffeine" / "caffeine-free" got the
+   * same treatment `decaf` already had, and this is the reported gap —
+   * "Beverages, carbonated, lemon-lime soda, no caffeine" and USDA's own
+   * "Cola, without caffeine" phrasing matched their keyword group at FULL
+   * strength before this fix, because nothing here read past the keyword to
+   * the negation sitting right next to it.
+   */
+  it('excludes "no caffeine" / "without caffeine" / "caffeine-free" phrasing, the same way decaf is excluded', () => {
+    expect(caffeineMgForFoodName('Cola, without caffeine')).toBeNull();
+    expect(caffeineMgForFoodName('Pepsi, caffeine-free')).toBeNull();
+    expect(caffeineMgForFoodName('Beverages, carbonated, lemon-lime soda, no caffeine')).toBeNull();
+    expect(caffeineMgForFoodName('Tea, herbal, no caffeine')).toBeNull();
+    expect(caffeineMgForFoodName('Coffee, caffeine free')).toBeNull();
+  });
+
+  it('still matches an ordinary caffeinated drink that merely mentions caffeine positively', () => {
+    // The negation guard must not become a bare "contains the word caffeine"
+    // exclusion — that would blank out a name that cites its OWN caffeine
+    // content rather than denying it.
+    expect(caffeineMgForFoodName('Cola, with caffeine')).toBe(33);
+  });
+
   it('is null for an ordinary food this heuristic does not recognise — no invented figure', () => {
     expect(caffeineMgForFoodName('Chicken Thigh')).toBeNull();
     expect(caffeineMgForFoodName('Oats')).toBeNull();
@@ -86,6 +109,51 @@ describe('caffeineMgForFoodEntry', () => {
 
   it('is null when the name is not recognised, regardless of servings', () => {
     expect(caffeineMgForFoodEntry({ name: 'Oats', servings: 3 })).toBeNull();
+  });
+
+  it('falls back to drink-count scaling when servingLabel is a non-gram label', () => {
+    expect(caffeineMgForFoodEntry({ name: 'Latte', servings: 2, servingLabel: '1 cup' })).toBe(190);
+  });
+
+  /**
+   * The grams-basis bug this ticket fixes — N501/#872, reported directly:
+   * "Coffee, if i drink one cup it should automatically add to the tracker
+   * of coffee." A catalog/barcode row is logged on a per-100g basis (every
+   * USDA-imported row's `serving_label` is the literal "100 g" —
+   * `scripts/import_usda_foods.py`), so 240 g of "Coffee" — one real cup —
+   * used to compute `servings = 2.4` against that 100 g basis and report
+   * round(95 * 2.4) = 228 mg. It should report ~95 mg, the cited figure for
+   * one actual cup.
+   */
+  describe('a catalog/barcode entry logged by weight (a gram-basis servingLabel)', () => {
+    it('computes mg from the actual grams logged against the reference serving weight, not servings × mgPerServing', () => {
+      // 240 g at a 100 g basis is servings=2.4 — the exact shape of the bug.
+      expect(
+        caffeineMgForFoodEntry({ name: 'Coffee', servings: 2.4, servingLabel: '100 g' }),
+      ).toBe(95); // NOT round(95 * 2.4) = 228
+    });
+
+    it('scales linearly below one reference serving', () => {
+      // 30 g at a 100 g basis is servings=0.3 — 30/240 of a cup.
+      expect(
+        caffeineMgForFoodEntry({ name: 'Coffee', servings: 0.3, servingLabel: '100 g' }),
+      ).toBe(12); // round(95 * 30/240)
+    });
+
+    it("uses the matched group's OWN reference weight — an espresso shot is not scaled like a cup", () => {
+      // 30 g at a 100 g basis is servings=0.3, and 30 g IS one real espresso
+      // shot — so this should read as exactly one shot's 63 mg, not a
+      // fraction of it the way the coffee-family case above does.
+      expect(
+        caffeineMgForFoodEntry({ name: 'Espresso', servings: 0.3, servingLabel: '100 g' }),
+      ).toBe(63);
+    });
+
+    it('is null when the grams-basis servingLabel is honoured but the name is unrecognised', () => {
+      expect(
+        caffeineMgForFoodEntry({ name: 'Oats', servings: 2.4, servingLabel: '100 g' }),
+      ).toBeNull();
+    });
   });
 });
 

@@ -281,7 +281,11 @@ async function syncFoodCaffeine(userId: string, foodEntryId: string, input: NewE
     const view = await localTrackers(userId);
     if (view.state !== 'ready') return; // never fetched — nothing to sync against yet
     const caffeineTracker = view.trackers.find((t) => t.preset === 'caffeine') ?? null;
-    const mg = caffeineMgForFoodEntry({ name: input.name, servings: input.servings });
+    const mg = caffeineMgForFoodEntry({
+      name: input.name,
+      servings: input.servings,
+      servingLabel: input.serving_label,
+    });
     await syncFoodCaffeineEntry(userId, foodEntryId, caffeineTracker, mg, input.eaten_on);
   } catch {
     // See the doc comment above — this must never be why a food write fails.

@@ -47,15 +47,26 @@
  *   contributes nothing — silently, exactly like `coffeeCaffeine.ts`'s
  *   `other` bucket, which "posts no invented number" for the identical
  *   reason. No figure is invented for a category this file cannot cite.
- * - **The servings scaling assumes a drink-count basis** (`caffeineMgForFoodEntry`
- *   multiplies the per-serving figure by `entry.servings`), which is right
- *   for "2 lattes" but wrong for a catalog/barcode row logged on a
+ * - **The servings scaling assumed a drink-count basis** (`caffeineMgForFoodEntry`
+ *   multiplied the per-serving figure by `entry.servings`), which is right
+ *   for "2 lattes" but was wrong for a catalog/barcode row logged on a
  *   per-100g basis — a 330 ml energy drink logged as "3.3 servings of
- *   100 g" would post 3.3× its real caffeine, because `servings` there
- *   counts grams-of-hundred, not drinks. **frontend-reviewer, N468
- *   review** — not solved here (this file has no reliable way to tell a
- *   drink-count `serving_label` from a weight-basis one), named so the next
- *   reader does not assume the scaling is always right.
+ *   100 g" posted 3.3× its real caffeine, because `servings` there counts
+ *   grams-of-hundred, not drinks. **frontend-reviewer, N468 review**, fixed
+ *   by N501/#872: `caffeineMgForFoodEntry` now takes the entry's
+ *   `servingLabel` too and, when {@link gramsBasisFromLabel} recognises it as
+ *   an honest gram weight (every USDA-imported catalog row's is — see
+ *   `scripts/import_usda_foods.py`, which sets it to the literal `"100 g"`
+ *   for every row it writes), reconstructs the actual grams logged
+ *   (`servings * basis`) and scales each group's reference figure by
+ *   `grams / referenceGrams` instead — the real weight of the serving the
+ *   mg figure was cited for (a 240 g cup, a 30 g espresso shot; see each
+ *   group's own comment), not the catalog's 100 g nutrition-label basis.
+ *   240 g of catalog "coffee" (a real single cup) now posts ~95 mg, not the
+ *   ~228 mg `mgPerServing * (240/100)` produced. A `servingLabel` that does
+ *   not parse as a gram weight (a real "1 cup" typed-servings entry, an
+ *   AI-described "1 latte") falls back to the original drink-count scaling,
+ *   which was always right for that case.
  *
  * ## Every mg figure is cited, not invented
  *
@@ -72,9 +83,18 @@
  * can or cup.
  */
 
+import { gramsBasisFromLabel } from './foodQuantity';
+
 /** One keyword group: every phrase in `words` posts the same mg per serving. */
 type FoodCaffeineGroup = {
   mgPerServing: number;
+  /**
+   * The gram weight of the ONE serving `mgPerServing` was cited for — see
+   * the file header's "servings scaling" note. Used only for a grams-basis
+   * entry (`caffeineMgForFoodEntry` detects one via {@link gramsBasisFromLabel});
+   * a drink-count entry never reads this field.
+   */
+  referenceGrams: number;
   /** Matched as a whole word/phrase — see `containsPhrase` below. */
   words: readonly string[];
 };
@@ -84,22 +104,37 @@ type FoodCaffeineGroup = {
  * first: "energy shot" before the broader "energy drink", "espresso"
  * (63 mg) before the broader coffee family (95 mg) so an actual espresso
  * is not counted as a full brewed cup.
+ *
+ * `referenceGrams` is the standard fl-oz-to-gram conversion for the same
+ * serving size Mayo Clinic (or, for energy drinks/shots/cola, this file's own
+ * header) cites the mg figure for — a beverage is mostly water, so 1 fl oz is
+ * treated as ~30 g. Espresso's 1 fl oz shot is 30 g; every 8 fl oz serving
+ * (coffee, tea, energy drink, cola) is 240 g; the 2 fl oz energy shot is 60 g.
  */
 const GROUPS: readonly FoodCaffeineGroup[] = [
-  { mgPerServing: 200, words: ['energy shot', '5 hour energy', '5-hour energy'] },
+  {
+    mgPerServing: 200,
+    referenceGrams: 60, // 2 fl oz
+    words: ['energy shot', '5 hour energy', '5-hour energy'],
+  },
   // frontend-reviewer, N468 review: a bare 'monster' matched "Monster
   // Burger" as readily as an actual energy drink — broader than any of
   // this group's other phrases need to be, and the easiest of the accepted
   // false positives to just not have. 'monster energy' alone still catches
   // the brand by name.
-  { mgPerServing: 79, words: ['energy drink', 'red bull', 'monster energy'] },
-  { mgPerServing: 63, words: ['espresso', 'macchiato', 'ristretto'] },
+  {
+    mgPerServing: 79,
+    referenceGrams: 240, // 8 fl oz
+    words: ['energy drink', 'red bull', 'monster energy'],
+  },
+  { mgPerServing: 63, referenceGrams: 30, words: ['espresso', 'macchiato', 'ristretto'] }, // 1 fl oz
   {
     mgPerServing: 95,
+    referenceGrams: 240, // 8 fl oz
     words: ['coffee', 'latte', 'cappuccino', 'americano', 'mocha', 'cold brew'],
   },
-  { mgPerServing: 47, words: ['tea', 'chai'] },
-  { mgPerServing: 33, words: ['cola', 'coke', 'pepsi'] },
+  { mgPerServing: 47, referenceGrams: 240, words: ['tea', 'chai'] }, // 8 fl oz
+  { mgPerServing: 33, referenceGrams: 240, words: ['cola', 'coke', 'pepsi'] }, // 8 fl oz
 ];
 
 /** Escapes a phrase for use inside a `RegExp`. */
@@ -113,38 +148,78 @@ function containsPhrase(haystack: string, phrase: string): boolean {
 }
 
 /**
- * The reference mg for ONE serving of a food, from its name alone — or
- * `null` when nothing here recognises it. See the file header for what this
- * does and does not catch.
+ * A name-negated-caffeine phrase — "no caffeine", "without caffeine",
+ * "caffeine-free"/"caffeine free" — the SAME exclusion `decaf` already gets,
+ * extended to the phrasing USDA soda/tea rows use instead of "decaf"
+ * ("Beverages, cola, without caffeine"; "Tea, herbal, no caffeine"). N501/#872:
+ * before this, "Cola, without caffeine" matched the `cola` group at full
+ * strength, because nothing here read past the keyword to the negation next
+ * to it.
  */
-export function caffeineMgForFoodName(name: string): number | null {
+const NEGATED_CAFFEINE = /\b(?:no|without)\s+caffeine\b|\bcaffeine[\s-]free\b/;
+
+/** The matched group for a food name, or `null` — the shared lookup both exports below use. */
+function matchGroup(name: string): FoodCaffeineGroup | null {
   const n = name.toLowerCase();
   // Mayo's own table puts decaf at 1-2 mg — negligible next to the whole-mg
   // rounding every figure here already does, and "decaf latte" would
   // otherwise match the coffee family at full strength.
   if (/\bdecaf(feinated)?\b/.test(n)) return null;
+  if (NEGATED_CAFFEINE.test(n)) return null;
   for (const g of GROUPS) {
-    if (g.words.some((w) => containsPhrase(n, w))) return g.mgPerServing;
+    if (g.words.some((w) => containsPhrase(n, w))) return g;
   }
   return null;
 }
 
 /**
- * The mg a logged food ENTRY is worth — the per-serving figure above, scaled
- * by how many servings were actually logged, matching how every other macro
- * on an `Entry` already scales with `servings` (see `scale()`/`rescale()` in
- * `nutrition.ts`). Rounded to a whole mg, matching the whole-number figures
- * this file and `coffeeCaffeine.ts` both cite — a fraction of a milligram is
- * false precision for a name-matched estimate.
+ * The reference mg for ONE serving of a food, from its name alone — or
+ * `null` when nothing here recognises it. See the file header for what this
+ * does and does not catch.
+ */
+export function caffeineMgForFoodName(name: string): number | null {
+  return matchGroup(name)?.mgPerServing ?? null;
+}
+
+/**
+ * The mg a logged food ENTRY is worth.
+ *
+ * **Two scaling bases, chosen by what `servingLabel` actually says — N501/#872.**
+ * A typed-servings or AI-described entry (`servingLabel` like "1 cup", "1 latte",
+ * or omitted) has a real drink-count `servings` — "2 lattes" — and this scales
+ * the per-serving figure by it directly, matching how every other macro on an
+ * `Entry` already scales with `servings` (see `scale()`/`rescale()` in
+ * `nutrition.ts`). A catalog/barcode entry logged BY WEIGHT carries a
+ * `servingLabel` {@link gramsBasisFromLabel} recognises as an honest gram
+ * weight (every USDA-imported row's is the literal `"100 g"`), which means
+ * `servings` there is `grams / basis` — a fraction of a nutrition-label
+ * serving, not a drink count — so this instead reconstructs the actual grams
+ * logged and scales the group's reference figure by `grams / referenceGrams`,
+ * the real weight of the serving the mg figure was cited for. Without this
+ * split, 240 g of catalog "coffee" (~one real cup) computed `servings = 2.4`
+ * against the 100 g label basis and posted ~228 mg instead of ~95.
+ *
+ * Rounded to a whole mg either way, matching the whole-number figures this
+ * file and `coffeeCaffeine.ts` both cite — a fraction of a milligram is false
+ * precision for a name-matched estimate.
  *
  * `null` when the name is not recognised, or when `servings` is zero or
  * negative (nothing was actually logged to scale).
  */
-export function caffeineMgForFoodEntry(entry: { name: string; servings: number }): number | null {
+export function caffeineMgForFoodEntry(entry: {
+  name: string;
+  servings: number;
+  servingLabel?: string;
+}): number | null {
   if (entry.servings <= 0) return null;
-  const per = caffeineMgForFoodName(entry.name);
-  if (per == null) return null;
-  return Math.round(per * entry.servings);
+  const group = matchGroup(entry.name);
+  if (group == null) return null;
+  const basis = entry.servingLabel != null ? gramsBasisFromLabel(entry.servingLabel) : null;
+  if (basis != null) {
+    const grams = entry.servings * basis;
+    return Math.round((group.mgPerServing * grams) / group.referenceGrams);
+  }
+  return Math.round(group.mgPerServing * entry.servings);
 }
 
 /**
