@@ -18852,28 +18852,39 @@ backend that a real foreground sync pass now succeeds end-to-end where it
 previously 400'd. Existing N477/N478 device-verification gaps (noted in
 their own sections above) still apply unchanged.
 
-## N493 part 2 — the screen-name label is gone from `ScreenHeader` (`apps/mobile/components/ScreenHeader.tsx`)
+## N493 part 2 — the screen-name label is gone from `ScreenHeader` — REVERSED by N503 (`apps/mobile/components/ScreenHeader.tsx`)
 
-The visible screen-name text and its accent dot are removed; the screen name
-is still exposed to VoiceOver via an invisible marker.
+**Superseded by N503 (#874, 2026-09-05).** N493 removed the visible
+screen-name text and its accent dot, leaving only an invisible marker for
+VoiceOver. The user then asked for the visible text back — the dot stays
+gone, and the invisible marker is deleted (the restored text carries the
+same accessibility role/label directly, so nothing announces twice). The
+scenarios below are rewritten to describe the current, restored behavior;
+do not test for "no visible text" any more.
 
-- On any screen, sighted: no text naming the current screen appears next to
-  the wordmark (e.g. no "Library", "Food", "Progress" label, and no colored
-  dot next to where it used to sit) — the header shows only the `VOLA`
-  wordmark (when it fits) plus the sync chip/actions cluster.
-- With VoiceOver on, swipe to the header on any screen: it is still announced
-  as a header carrying that screen's name (e.g. "Library, header"), even
-  though nothing is drawn for it.
+- On any screen, sighted: the current screen's name DOES appear as visible
+  text in the top-left of the header (e.g. "Library", "Food", "Progress"),
+  beside `leading` when one is present (the back button on `library`/`phase`)
+  and before the centred `VOLA` wordmark (when the wordmark fits) — no accent
+  dot next to it.
+- With VoiceOver on, swipe to the header on any screen: it announces as a
+  header carrying that screen's name (e.g. "Library, header"), announced
+  exactly ONCE per screen — not twice (which a leftover invisible marker
+  alongside the visible text would cause).
 - On `library` and `phase` (the two pushed, tab-bar-less routes with a back
   button in `leading`): with VoiceOver on, the back button and the header's
   own name announce as two SEPARATE stops, not folded into one — swiping past
   the back button lands on it alone ("Back, button"), and swiping again lands
   on the header name alone.
-- Regression check: nothing else that used to read the header's title text
-  (there is no other consumer — the removed `<Text>` was never queried by
-  anything but a human eye) breaks; wordmark-fit behavior (`wordmarkFits`,
-  N-whatever's own geometry) is unchanged by the extra breathing room this
-  frees up, since fewer siblings now compete for the same measured row.
+- Regression check: wordmark-fit behavior (`wordmarkFits`'s geometry table in
+  `screenHeader.test.tsx`) is unchanged with real title-text width restored —
+  spot-check the longest title in the app (`"Your target"` on `goals.tsx`)
+  and the widest `action`/`leading` combination (`you.tsx`'s three-control
+  cluster) still hide/show the wordmark exactly as they did before N503.
+- **NEEDS HUMAN EVIDENCE**: a real device or Simulator screenshot on each of
+  the eight `ScreenHeader` callers, confirming the restored title text reads
+  cleanly (not clipped, not colliding with `leading` or the wordmark) at
+  default and at larger accessibility text sizes.
 
 ## N493 part 2 — drag-to-reorder for sets: declined, not built (`apps/mobile` session logging)
 
