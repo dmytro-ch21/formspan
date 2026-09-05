@@ -520,21 +520,76 @@ export function selectEnrichmentCandidates<S extends EnrichmentCandidate>(
   });
 }
 
+// --- chunking large sync batches (N502/#873) -------------------------------
+
+/**
+ * How many samples one `PutSamples` request carries at most.
+ *
+ * Comfortably under both backend ceilings on `/v1/biometric/samples`
+ * (`MaxSamplesPerRequest` = 10,000 rows; `maxSamplesBody` = 4 MiB, at the
+ * backend's own ~200-bytes/row estimate — `handler.go`), with margin rather
+ * than a tight fit against either: a dense Apple Watch session (continuous
+ * per-second HR over a long or backfilled workout — `queryHeartRateSamples`'s
+ * own native-query ceiling, `QUANTITY_QUERY_LIMIT` in `healthkit.ts`, is
+ * 20,000, double the backend's row cap) or a first-run VO₂max backfill can
+ * otherwise land a single request right at the size wall. That used to come
+ * back as an indistinguishable "invalid JSON body" (fixed server-side above,
+ * N502/#873) with nothing for the client to do about it — chunking here is
+ * the actual fix: a batch this large now goes out as several requests that
+ * each stay well clear of either cap, rather than one that can fail outright.
+ * 2,000 keeps a 5x margin under the row cap and roughly a 10x margin under
+ * the body-size cap even if real samples run well over the ~200-byte
+ * estimate.
+ */
+export const SAMPLES_PER_SYNC_REQUEST = 2000;
+
+/**
+ * Split `items` into chunks of at most `size`, preserving order. Pure — the
+ * piece of the chunking this ticket's own text asks to be pure-logic tested,
+ * same posture as every other decision in this file. An empty `items` yields
+ * zero chunks, matching `putBiometricSamples` never actually being called
+ * with one (see its own doc comment) rather than sending an empty request.
+ */
+export function chunkSamples<T>(items: readonly T[], size: number): T[][] {
+  const step = Math.max(size, 1);
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += step) {
+    chunks.push(items.slice(i, i + step));
+  }
+  return chunks;
+}
+
 // --- the API client ---------------------------------------------------
 
 /**
- * Store a batch of raw readings — `POST /v1/biometric/samples`. Idempotent
- * on `id` (see `toBiometricSample`'s doc comment); never called with an
- * empty array, matching the endpoint's own refusal (`handler.go`).
+ * Store a batch of raw readings — `POST /v1/biometric/samples`, one request
+ * per `SAMPLES_PER_SYNC_REQUEST`-sized chunk (N502/#873; see that constant's
+ * doc comment for why). Idempotent on `id` (see `toBiometricSample`'s doc
+ * comment) both within and across chunks, so a chunk that partially lands and
+ * then fails costs nothing on retry; never called with an empty array,
+ * matching the endpoint's own refusal (`handler.go`) — an empty `samples`
+ * produces zero chunks and this makes no network call at all.
+ *
+ * Sequential, not parallel, deliberately: this is a background enrichment
+ * pass with no latency budget (`biometricSync.ts`'s own doc comment), so
+ * there is nothing to gain from concurrency and something to lose — a burst
+ * of parallel requests would be needless simultaneous load on exactly the
+ * kind of pass this module goes out of its way to keep gentle (no retry
+ * ladder, foreground-triggered only).
  */
-export function putBiometricSamples(
+export async function putBiometricSamples(
   getToken: TokenGetter,
   samples: BiometricSample[],
 ): Promise<{ samples: BiometricSample[] }> {
-  return apiRequest(getToken, '/biometric/samples', {
-    method: 'POST',
-    body: JSON.stringify({ samples }),
-  });
+  const saved: BiometricSample[] = [];
+  for (const chunk of chunkSamples(samples, SAMPLES_PER_SYNC_REQUEST)) {
+    const res = await apiRequest<{ samples: BiometricSample[] }>(getToken, '/biometric/samples', {
+      method: 'POST',
+      body: JSON.stringify({ samples: chunk }),
+    });
+    saved.push(...res.samples);
+  }
+  return { samples: saved };
 }
 
 /**

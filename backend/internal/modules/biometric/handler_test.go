@@ -69,6 +69,32 @@ func TestPutSamples_RejectsUnknownMetricType(t *testing.T) {
 	}
 }
 
+func TestPutSamples_OversizedBodyIs413NotAConfusing400(t *testing.T) {
+	// N502/#873: a request body over maxSamplesBody used to come back as the
+	// same "invalid JSON body" a genuinely malformed body gets — a dense
+	// Apple Watch session's sync had nothing to act on. Told apart now: a
+	// too-large body is 413, distinguishable from 400 on the wire.
+	body := `{"samples":[{"id":"` + strings.Repeat("x", maxSamplesBody+1) +
+		`","metric_type":"heart_rate","source":"apple_watch",` +
+		`"source_platform":"healthkit","value":150,"unit":"bpm","measured_at":"2026-09-01T10:00:00Z"}]}`
+	rec := putSamplesResponse(t, body)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", rec.Code)
+	}
+	var out struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Error.Message == "invalid JSON body" {
+		t.Errorf("message = %q, want a distinct oversized-body message, not the malformed-JSON one", out.Error.Message)
+	}
+}
+
 func TestPutSamples_RejectsBatchOverTheLimit(t *testing.T) {
 	// One well-formed sample, repeated past MaxSamplesPerRequest, as a
 	// single JSON array literal built at test time.

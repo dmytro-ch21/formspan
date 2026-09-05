@@ -18951,3 +18951,56 @@ undifferentiated row in that chooser.
   BJJ/running auto-start already use, so existing ownership/authorization
   coverage on session creation and on `GET /v1/workouts` (which the id must
   resolve against) applies unchanged.
+
+## N502 — the biometric-sync size wall: distinct 413, client-side chunking, a bounded backfill, a failure signal (`POST /v1/biometric/samples`, `apps/mobile/lib/biometric.ts`, `apps/mobile/lib/biometricSync.ts`, `apps/mobile/lib/sessionStore.ts`, `apps/mobile/app/settings.tsx`, #873)
+
+Backend: an oversized `PutSamples` body is now told apart from a genuinely
+malformed one. Client: `putBiometricSamples` chunks every call rather than
+sending one request per sync; the session backfill has a time floor; a
+failed pass now leaves a debug-visible trace instead of none at all.
+
+- `POST /v1/biometric/samples` with a body over 4 MiB (a JSON array of
+  well-formed samples padded to exceed the cap) returns 413, with an error
+  message distinct from — and more actionable than — the "invalid JSON
+  body" a genuinely malformed body still returns at 400. Both are
+  `invalid_input` on the wire; the distinguishing signal is the status code
+  and the message text.
+- `POST /v1/biometric/samples` with more than `MaxSamplesPerRequest` (10,000)
+  well-formed samples in a body still under 4 MiB continues to return the
+  existing 400 "samples must not exceed 10000 per request" — confirms the
+  row-count guard and the new size guard are independent and neither
+  regressed the other.
+- On a device with a very dense finished session (a long or backfilled
+  workout producing well over `SAMPLES_PER_SYNC_REQUEST` HR samples): the
+  sync pass succeeds via multiple `PutSamples` requests rather than failing
+  outright — inspect network calls (or the request count via a debug proxy)
+  to confirm more than one POST for a single session's upload, each within
+  the backend's caps.
+- A first-run VO2max backfill (a device with 90 days of daily VO2max
+  readings, never synced before) succeeds the same way — confirms VO2max's
+  upload goes through the same chunked path as session HR, with no VO2max-
+  specific chunking logic needed.
+- **NEEDS HUMAN EVIDENCE**: confirm on a real device with a genuinely dense
+  Watch session (not a synthetic fixture) that the sync pass that used to
+  fail with "invalid JSON body" now succeeds, chunked, without the athlete
+  seeing an error.
+- An account with sessions logged more than `SESSION_BACKFILL_FLOOR_DAYS`
+  (180 days) ago, turning the HealthKit toggle on for the first time: those
+  old sessions are never offered for enrichment at all (confirm via
+  `sessionsNeedingBiometricSync` never returning them, not merely deferring
+  them) — sessions within the floor are still backfilled normally, oldest
+  first, `MAX_SESSIONS_PER_PASS` (20) at a time.
+- Trigger a biometric-sync failure (airplane mode mid-pass, or a mocked
+  network failure in a debug build) — Settings' "Sync with Apple Health"
+  toggle shows an appended hint naming how many issues the last pass hit;
+  a subsequent clean pass clears it back to no message.
+- Regression: heart-rate sync remains strictly session-windowed — a
+  session's HR read window is still exactly `[started_at, ended_at]`
+  (`sessionHRWindow`), completely unaffected by any of the chunking or
+  backfill-floor changes above. No behavior change here; call out explicitly
+  in any manual pass since this ticket's own text raised the question.
+- Auth/security: unaffected by this ticket — `PutSamples`'s existing
+  claims-derived `user_id` scoping, and the 409 "sample id belongs to
+  another user" response, are untouched by the size-wall fix or the
+  chunking (each chunk is still a normal authenticated request under the
+  same user).

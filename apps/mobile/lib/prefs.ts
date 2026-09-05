@@ -425,6 +425,25 @@ export const PREF_HEALTHKIT_IMPORT = 'healthkit_import_enabled';
 export const PREF_VO2MAX_LAST_SYNCED_AT = 'biometric_vo2max_last_synced_at';
 
 /**
+ * How many biometric-sync failures the most recent pass (or the one
+ * currently running) hit — N502/#873's minimal visible signal for a class of
+ * failure that was previously invisible end to end: `biometricSync.ts`
+ * swallows every individual error by design (see that file's doc comment on
+ * why no retry ladder is needed), which is the right retry posture but left
+ * NOTHING for the athlete, or a future debugging session, to see when a
+ * pass kept failing. Reset to `'0'` at the start of every pass and
+ * incremented on each failure within it — see
+ * `biometricSync.ts`'s `recordBiometricSyncFailure`/
+ * `readBiometricSyncFailureCount`.
+ *
+ * Device-local and never `owed`, same reasoning as
+ * {@link PREF_VO2MAX_LAST_SYNCED_AT} — a count of how a PARTICULAR device's
+ * last sync pass went is not a fact the account should carry to another
+ * device.
+ */
+export const PREF_BIOMETRIC_SYNC_FAILURE_COUNT = 'biometric_sync_failure_count';
+
+/**
  * The Android equivalent of {@link PREF_HEALTHKIT_IMPORT} (N478) — `'1'`
  * while heart-rate/VO2max reading from Health Connect is turned on. Same
  * default-off, device-local, never-`owed` reasoning: whether THIS PHONE may

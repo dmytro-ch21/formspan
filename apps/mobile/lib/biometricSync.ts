@@ -12,7 +12,12 @@ import { getDb } from './db';
 import { isHealthKitSupported, queryHeartRateSamples, queryVO2MaxSamples } from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
 import { getProfile } from './profile';
-import { PREF_VO2MAX_LAST_SYNCED_AT, readPref, writePref } from './prefs';
+import {
+  PREF_BIOMETRIC_SYNC_FAILURE_COUNT,
+  PREF_VO2MAX_LAST_SYNCED_AT,
+  readPref,
+  writePref,
+} from './prefs';
 import { sessionsNeedingBiometricSync } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
 
@@ -67,6 +72,44 @@ import type { TokenGetter } from './useAuthToken';
  * dependency (`./biometric`, this file's import above) rather than the
  * orchestrators themselves, which is the boundary this ticket actually
  * found duplicated.
+ *
+ * ## N502/#873 — the size wall, and the VO₂max-toggle question it raised
+ *
+ * A user report of "12 failed due to invalid JSON" traced to a real bug: a
+ * dense session's HR upload, or a first-run VO₂max backfill, could land a
+ * single `putBiometricSamples` request right at the backend's 4 MiB/10,000-row
+ * ceiling, which came back as an error indistinguishable from a genuinely
+ * malformed body (fixed in `biometric/handler.go`). The actual client-side
+ * fix is `putBiometricSamples` itself now chunking every call into
+ * `SAMPLES_PER_SYNC_REQUEST`-sized requests (see that constant's doc
+ * comment in `./biometric`) — which covers session HR and VO₂max identically,
+ * since both go through the same function, without either caller here
+ * needing its own chunking logic.
+ *
+ * **Decision: VO₂max sync keeps the ONE shared HealthKit toggle, not a
+ * second one of its own.** Considered and rejected, for two reasons:
+ *
+ * 1. The permission grant is already shared and already all-or-nothing —
+ *    the Settings toggle's own hint text is explicit that turning it on
+ *    "asks for Health access" to workouts, heart rate AND VO₂max in the
+ *    SAME consent screen (N477/#822's reasoning, still true). A second
+ *    app-level toggle would not narrow what HealthKit itself hands over; it
+ *    would only gate whether this app's own code reads a category it
+ *    already has permission to read, which is a real difference in behavior
+ *    (an athlete who wants session HR without a VO₂max trend) but a fairly
+ *    narrow, mostly-hypothetical control to add UI for.
+ * 2. The actual complaint traced to a bug, not a preference: nothing in the
+ *    issue's evidence suggests an athlete objecting to VO₂max being synced
+ *    AT ALL — the evidence is a sync that failed outright with an unhelpful
+ *    error. Chunking removes the failure mode; adding a toggle would not
+ *    have, since the request was failing on size, not on the athlete's
+ *    consent.
+ *
+ * This is revisitable if a future report is actually about VO₂max's
+ * always-on nature rather than about a sync that fails — at which point a
+ * second toggle sharing the one permission grant (rather than a second
+ * HealthKit consent prompt) is the shape it should take, exactly as this
+ * reasoning describes.
  */
 
 // --- identity, mirroring lib/sync.ts's `creds` shape ----------------------
@@ -110,6 +153,31 @@ export function triggerBiometricSyncNow(userID: string, getToken: TokenGetter): 
  *  partial pass still advances the ledger for whatever it did process. */
 const MAX_SESSIONS_PER_PASS = 20;
 
+/**
+ * How far back the session backfill walks on an account with a long history
+ * — N502/#873.
+ *
+ * Before this, `sessionsNeedingBiometricSync` had a per-pass count floor
+ * (`MAX_SESSIONS_PER_PASS`) but no floor in TIME: turning the HealthKit
+ * toggle on for the first time on an account with years of logged sessions
+ * walked every one of them, oldest first, twenty per foreground return,
+ * with no way to ever reach the recent ones sooner. A session from a year
+ * before the athlete owned a wearable can never gain real HR evidence no
+ * matter how many passes run, so spending passes on it delays the sessions
+ * that actually CAN be enriched.
+ *
+ * 180 days (roughly six months), not `VO2MAX_BACKFILL_DAYS`'s 90 — a
+ * deliberately different number for a deliberately different reason. VO₂max
+ * is a trend metric where "the last 90 days" is itself the intended answer
+ * (design doc §3). A session is a specific, already-logged fact whose value
+ * doesn't diminish with age the same way — the cost being bounded here is
+ * purely "how much pre-wearable history is worth walking through", not "how
+ * far back is this data still meaningful". Six months gives a full backlog
+ * from a recently-adopted watch room to catch up without the pass ever
+ * reaching back through years of sessions that predate one.
+ */
+const SESSION_BACKFILL_FLOOR_DAYS = 180;
+
 /** First-run VO₂max backfill window, when this device has never synced one
  *  before. Bounded rather than the full 400-day list-endpoint ceiling
  *  (`contracts/public.openapi.yaml`'s `maxListRangeDays`) — VO₂max is a
@@ -147,16 +215,63 @@ export async function syncBiometricEnrichment(userID: string, getToken: TokenGet
   if (!isHealthKitSupported()) return;
   if (!(await readHealthKitImportEnabled(userID))) return;
 
+  // Reset at the start of every pass, not decremented on success — this is
+  // "how many things failed in the pass currently running/most recently
+  // run", not a lifetime tally. A pass that completes clean clears whatever
+  // a prior pass left behind; one that fails again leaves the count from
+  // THIS pass standing for Settings to show. See `recordBiometricSyncFailure`
+  // and PREF_BIOMETRIC_SYNC_FAILURE_COUNT's doc comment (N502/#873) — this
+  // is the "some visible signal" this ticket's acceptance criteria ask for:
+  // before this, every failure here was fully invisible (per-session
+  // `catch { continue }` below, and this whole pass swallowed by `runPass`).
+  await writePref(userID, PREF_BIOMETRIC_SYNC_FAILURE_COUNT, '0');
+
   // Independent chains, same reasoning as `app/(tabs)/you.tsx`'s focus
   // effect: a slow or failing VO₂max read must not block session
   // enrichment, and vice versa.
   await Promise.allSettled([syncSessionWindows(userID, getToken), syncVO2Max(userID, getToken)]);
 }
 
+/**
+ * Bumps the debug-accessible failure counter Settings reads
+ * (`readBiometricSyncFailureCount`) — N502/#873's minimal visible signal.
+ * Called from both chains below on any failure that would otherwise be
+ * fully silent (a rejected upload/compute call, a rejected VO₂max pass).
+ * Best-effort: a failure to record a failure is not itself worth failing
+ * the pass over, so this never throws.
+ *
+ * Read-then-write, not atomic — the two chains this is called from run
+ * concurrently via `Promise.allSettled`, so a failure in each at the exact
+ * same moment could theoretically interleave and lose one increment. Left
+ * as-is deliberately: this counter is a "did last pass have zero problems or
+ * not" debug signal, not a precise metric anything depends on, and the two
+ * chains failing in the same instant is itself a rare double-failure. Worth
+ * revisiting only if this ever needs to be an exact count.
+ */
+async function recordBiometricSyncFailure(userID: string): Promise<void> {
+  try {
+    const current = await readBiometricSyncFailureCount(userID);
+    await writePref(userID, PREF_BIOMETRIC_SYNC_FAILURE_COUNT, String(current + 1));
+  } catch {
+    // A SQLite write failing here is not this pass's problem to surface.
+  }
+}
+
+/** How many biometric-sync failures the most recent pass (or the one
+ *  currently running) hit — 0 once a pass completes with none. Read by
+ *  `app/settings.tsx` to show a minimal, debug-accessible signal where
+ *  previously a failing pass produced nothing visible at all. */
+export async function readBiometricSyncFailureCount(userID: string): Promise<number> {
+  const raw = await readPref(userID, PREF_BIOMETRIC_SYNC_FAILURE_COUNT);
+  const n = raw == null ? 0 : parseInt(raw, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // --- session heart-rate windows (design doc §2) ---------------------------
 
 async function syncSessionWindows(userID: string, getToken: TokenGetter): Promise<void> {
-  const pending = await sessionsNeedingBiometricSync(userID, MAX_SESSIONS_PER_PASS);
+  const floor = new Date(Date.now() - SESSION_BACKFILL_FLOOR_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const pending = await sessionsNeedingBiometricSync(userID, MAX_SESSIONS_PER_PASS, floor);
   if (pending.length === 0) return;
 
   // Fetched once per pass, not once per session — a session's own HRmax
@@ -197,6 +312,7 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
       // it — see this file's doc comment on why no backoff ladder is
       // needed. Continue to the next session rather than aborting the
       // whole batch on one failure.
+      await recordBiometricSyncFailure(userID);
       continue;
     }
     await recordBiometricHRSync(userID, session.id);
@@ -225,7 +341,19 @@ async function syncVO2Max(userID: string, getToken: TokenGetter): Promise<void> 
   if (raw.length === 0) return;
 
   const samples = raw.map((s) => toBiometricSample(s, 'vo2_max', 'healthkit'));
-  await putBiometricSamples(getToken, samples);
+  try {
+    // putBiometricSamples chunks internally (N502/#873) — a 90-day
+    // first-run backfill can no longer land as one oversized request; see
+    // that function's own doc comment in `./biometric`.
+    await putBiometricSamples(getToken, samples);
+  } catch {
+    // Same "leave state exactly as it was, the next pass retries from the
+    // same high-water mark" posture as syncSessionWindows's per-session
+    // catch — the mark below is only ever advanced past what was actually
+    // confirmed uploaded.
+    await recordBiometricSyncFailure(userID);
+    return;
+  }
 
   // The high-water mark advances to the NEWEST sample actually offered —
   // reading `measured_at` back off what was just uploaded (rather than

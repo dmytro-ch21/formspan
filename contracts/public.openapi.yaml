@@ -9188,6 +9188,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: >
+            Body over 4 MiB — told apart from 400 on purpose (N502/#873): a
+            dense wearable session or a large first-run backfill can produce a
+            batch this large honestly, and the old behavior (folding this into
+            400 "invalid JSON body") gave a client author nothing to act on.
+            The fix on the client side is to split the batch into smaller
+            requests, which `putBiometricSamples` in `apps/mobile/lib/biometric.ts`
+            now does unconditionally.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     get:
       summary: List the caller's own samples of one metric type in a time range
       operationId: listBiometricSamples
