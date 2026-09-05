@@ -174,6 +174,47 @@ describe('the header itself', () => {
 });
 
 /**
+ * N493 — the screen-name text and its accent dot are gone; VoiceOver alone
+ * still gets told which screen this is, via an invisible marker rather than
+ * visible text. User-reported: "Screens have additional view name in left
+ * corner that I don't like."
+ */
+describe('the screen name is spoken, not shown (N493)', () => {
+  it('renders no visible text for the title', () => {
+    render(<ScreenHeader title="Library" />);
+    // Sighted: nothing says "Library" anywhere in the header's own text —
+    // the wordmark says "VOLA", not the screen name.
+    expect(screen.queryByText('Library')).toBeNull();
+    expect(screen.queryByText('LIBRARY')).toBeNull();
+  });
+
+  it('still tells VoiceOver which screen this is', () => {
+    render(<ScreenHeader title="Library" />);
+    const marker = screen.getByLabelText('Library');
+    expect(marker).toBeTruthy();
+    // Not just a label — the "header" role is what makes VoiceOver treat this
+    // as a landmark rather than plain unstructured text.
+    expect(marker.props.accessibilityRole).toBe('header');
+  });
+
+  it("leading's own control is announced separately, not swallowed into the header label", () => {
+    // Library's back button (N484/#835) is a real, interactive `leading`
+    // child — if it landed INSIDE the accessible header node instead of
+    // beside it, VoiceOver would announce one "Library, header" blob and
+    // the button itself would stop being independently focusable/tappable.
+    render(
+      <ScreenHeader
+        title="Library"
+        leading={<RNView testID="probe-back" accessibilityLabel="Back" accessibilityRole="button" />}
+      />,
+    );
+    expect(screen.getByTestId('probe-back')).toBeTruthy();
+    expect(screen.getByLabelText('Back')).toBeTruthy();
+    expect(screen.getByLabelText('Library')).toBeTruthy();
+  });
+});
+
+/**
  * W10 — the rule marks the top of the scrolling region, and nothing else.
  *
  * The bug: `View` from `Themed` paints no background, so this header is
