@@ -287,137 +287,158 @@ export default function WorkoutsScreen() {
 
   return (
     <View style={styles.container} testID="workouts-screen">
-      {/* "Plan", not "Workouts": this screen is now the week's plan *and* the
-          templates it draws from, and the tab bar has always called it Plan. */}
-      {/* No bottom rule: the scope strip below owns this boundary and already
-          draws one (`scopeRow`, `borderBottomColor: vola.line`). Content scrolls
-          under THAT, not under the header — a rule here would be a second seam
-          ~40pt above the first, which is the stacked-seams pattern this header
-          exists to have removed. Raised in review on the W10 PR. */}
-      <ScreenHeader title="Plan" contentScrollsUnder={false} />
-      {/*
-        A tab strip with an underline, not two filled buttons.
+      <KeyboardAwareFlatList
+        /*
+          Keyed on scope, and that is not cosmetic: React Native throws
+          "Changing numColumns on the fly is not supported" — the tab strip
+          switches between one and two columns, so the list has to be a new
+          list rather than the same one reconfigured.
+        */
+        key={scope}
+        numColumns={scope === 'public' ? 2 : 1}
+        columnWrapperStyle={scope === 'public' ? styles.tileRow : undefined}
+        data={workouts}
+        keyExtractor={(w) => w.id}
+        contentContainerStyle={[styles.list, listPad]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load();
+            }}
+          />
+        }
+        // Inside the list rather than pinned above it — the header AND the
+        // scope strip both live here now (N498), so the planner scrolls
+        // away and the templates get the full screen when you are browsing
+        // them, and the screen title behaves the same as Today/Food/You's
+        // instead of freezing in place while the list scrolls under it.
+        // Always rendered (not gated on `scope === 'mine'` the way the
+        // planner content below still is) — both the title and the tab
+        // strip belong to the SCREEN, not to one scope of it, and pinning
+        // that decision to `mine` would make them vanish on `public`, which
+        // is where an athlete taps to get back is if they landed here from
+        // a link.
+        ListHeaderComponent={
+          <View>
+            {/* `marginHorizontal: -20` cancels `styles.list`'s own 20pt
+                horizontal padding for JUST this row — `ScreenHeader`
+                already carries its own 20pt (`ScreenHeader.tsx`'s `wrap`
+                style), so left un-cancelled here it would sit 40pt in
+                instead of 20, out of step with the tab strip and every card
+                below it. See N498's history entry for the full padding
+                reconciliation (this screen's content used to sit at 16pt
+                against the header's 20). */}
+            <View style={styles.headerInList}>
+              {/* Scrolls away with the rest of the plan now, matching
+                  Today/Food/You — see `ScreenHeader`'s own doc comment on
+                  the three header/scroll arrangements. No bottom rule:
+                  nothing is pinned above this list any more (the scope
+                  strip moved in here too, just below), so there is no
+                  boundary for content to pass under. */}
+              <ScreenHeader title="Plan" contentScrollsUnder={false} />
+            </View>
+            {/*
+              A tab strip with an underline, not two filled buttons.
 
-        It used to be a pair of full-width pills whose selected half took the
-        accent as a solid fill — the same weight, colour and footprint as the
-        screen's primary action, sitting directly above it. Two accent slabs,
-        neither reading as more important than the other. Switching between two
-        views of one list is navigation, not an action, so the accent is left to
-        mean "this button does something".
+              It used to be a pair of full-width pills whose selected half took the
+              accent as a solid fill — the same weight, colour and footprint as the
+              screen's primary action, sitting directly above it. Two accent slabs,
+              neither reading as more important than the other. Switching between two
+              views of one list is navigation, not an action, so the accent is left to
+              mean "this button does something".
 
-        **An underline rather than the raised thumb this first became.** That
-        version put `accent.ink` on `surfaceRaised`, and review measured the
-        blue theme at 4.37:1 — under the 4.5 the palette rule requires, on the
-        one surface `validate_palette.mjs` never checks (it asserts ink against
-        `surface` only, so the gate was green and blind). The label now sits on
-        the page ground, where the existing assertion already covers it: blue,
-        the worst case, is 5.15:1.
+              **An underline rather than the raised thumb this first became.** That
+              version put `accent.ink` on `surfaceRaised`, and review measured the
+              blue theme at 4.37:1 — under the 4.5 the palette rule requires, on the
+              one surface `validate_palette.mjs` never checks (it asserts ink against
+              `surface` only, so the gate was green and blind). The label now sits on
+              the page ground, where the existing assertion already covers it: blue,
+              the worst case, is 5.15:1.
 
-        The bar also fixes what the thumb never did. `surfaceRaised` on
-        `surface` is a 1.09:1 step — invisible — so "which one is selected" was
-        carried by hue alone, and inverted on the blue and purple themes where
-        the selected label is *darker* than the unselected one. A bar that is
-        present or absent is not a colour at all, and as a non-text indicator it
-        clears 3:1 on every theme (purple, the worst, at 3.92).
-      */}
-      <View style={styles.scopeRow}>
-        {SCOPES.map((s) => {
-          const active = scope === s.key;
-          return (
-            <Pressable
-              key={s.key}
-              onPress={() => {
-                setScope(s.key);
-                setLoading(true);
-                // `everLoaded` means "has THIS scope loaded", not "has the
-                // screen ever loaded" — so a switch resets it and you get the
-                // spinner. Left true, the spinner is skipped and the OTHER
-                // scope's workouts render in the new scope's layout until the
-                // fetch lands: your own templates appear for a beat as VOLA
-                // Workout tiles, which reads as a data bug rather than a
-                // pending request. Clearing `workouts` instead would swap that
-                // for a false "No VOLA Workouts yet".
-                setEverLoaded(false);
-              }}
-              style={[
-                styles.scopeTab,
-                active && [styles.scopeTabActive, { borderBottomColor: accent.accent }],
-              ]}
-              // `button`, not `tab`. RN maps "tab" to UIAccessibilityTraitNone
-              // on iOS — there is no per-tab trait — so VoiceOver would lose
-              // "button" and gain nothing, and outside a `tablist` Android
-              // still cannot say "1 of 2". `selected` below is what actually
-              // carries the state, on both platforms. Matches the app's other
-              // segmented control in `components/TrainingSummary.tsx`.
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              // The laid-out row is ~38.7pt (20 padding + 2 border + a 16.7pt
-              // line box at 14pt) — NOT the 34 an earlier version of this
-              // comment claimed by counting `fontSize` as the line box. With
-              // `paddingVertical: 12` it is ~42.7, and the slop above it lands
-              // in the strip's own margin, which nothing else claims. The slop
-              // BELOW would fall inside the FlatList's frame and lose the
-              // hit-test to it, so the target is bought by padding rather than
-              // by depending on sibling order.
-              hitSlop={{ top: 6, bottom: 6 }}
-              testID={`workouts-scope-${s.key}`}
-            >
-              <Text
-                style={[
-                  styles.scopeText,
-                  // `ink`, not `accent` — the palette defines `ink` as the
-                  // accent used as TEXT, and they differ on purple precisely
-                  // because the fill fails as type at 3.64:1.
-                  active && [styles.scopeTextActive, { color: accent.ink }],
-                ]}
-              >
-                {s.label}
+              The bar also fixes what the thumb never did. `surfaceRaised` on
+              `surface` is a 1.09:1 step — invisible — so "which one is selected" was
+              carried by hue alone, and inverted on the blue and purple themes where
+              the selected label is *darker* than the unselected one. A bar that is
+              present or absent is not a colour at all, and as a non-text indicator it
+              clears 3:1 on every theme (purple, the worst, at 3.92).
+            */}
+            <View style={styles.scopeRow}>
+              {SCOPES.map((s) => {
+                const active = scope === s.key;
+                return (
+                  <Pressable
+                    key={s.key}
+                    onPress={() => {
+                      setScope(s.key);
+                      setLoading(true);
+                      // `everLoaded` means "has THIS scope loaded", not "has the
+                      // screen ever loaded" — so a switch resets it and you get the
+                      // spinner.
+                      setEverLoaded(false);
+                      // Cleared here (N498), unlike before: this list no longer
+                      // unmounts in favour of a sibling spinner while loading (see
+                      // `ListEmptyComponent` below), so without this the OTHER
+                      // scope's still-mounted rows would flash under the new
+                      // scope's column layout for a frame — worse than the "VOLA
+                      // Workout tiles under your own name" glitch the old comment
+                      // here warned about, not better.
+                      setWorkouts([]);
+                    }}
+                    style={[
+                      styles.scopeTab,
+                      active && [styles.scopeTabActive, { borderBottomColor: accent.accent }],
+                    ]}
+                    // `button`, not `tab`. RN maps "tab" to UIAccessibilityTraitNone
+                    // on iOS — there is no per-tab trait — so VoiceOver would lose
+                    // "button" and gain nothing, and outside a `tablist` Android
+                    // still cannot say "1 of 2". `selected` below is what actually
+                    // carries the state, on both platforms. Matches the app's other
+                    // segmented control in `components/TrainingSummary.tsx`.
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    // The laid-out row is ~38.7pt (20 padding + 2 border + a 16.7pt
+                    // line box at 14pt) — NOT the 34 an earlier version of this
+                    // comment claimed by counting `fontSize` as the line box. With
+                    // `paddingVertical: 12` it is ~42.7, and the slop above it lands
+                    // in the strip's own margin, which nothing else claims. The slop
+                    // BELOW would fall inside the FlatList's frame and lose the
+                    // hit-test to it, so the target is bought by padding rather than
+                    // by depending on sibling order.
+                    hitSlop={{ top: 6, bottom: 6 }}
+                    testID={`workouts-scope-${s.key}`}
+                  >
+                    <Text
+                      style={[
+                        styles.scopeText,
+                        // `ink`, not `accent` — the palette defines `ink` as the
+                        // accent used as TEXT, and they differ on purple precisely
+                        // because the fill fails as type at 3.64:1.
+                        active && [styles.scopeTextActive, { color: accent.ink }],
+                      ]}
+                    >
+                      {s.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {/* Below the header and the scope strip, same relative position
+                as before N498 moved both of those into this list — an error
+                here is content-area feedback, not chrome, and it needs the
+                20pt inherited from `styles.list`'s own `paddingHorizontal`
+                (not a second one of its own — see `styles.error`'s comment)
+                rather than sitting flush against the safe-area-padded header
+                above it. */}
+            {error && (
+              <Text style={styles.error} accessibilityLiveRegion="polite" testID="workouts-error">
+                {error}
               </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {error && (
-        <Text style={styles.error} accessibilityLiveRegion="polite" testID="workouts-error">
-          {error}
-        </Text>
-      )}
-
-      {loading && !everLoaded ? (
-        <ActivityIndicator style={styles.loader} accessibilityLabel="Loading workouts" />
-      ) : (
-        <KeyboardAwareFlatList
-          /*
-            Keyed on scope, and that is not cosmetic: React Native throws
-            "Changing numColumns on the fly is not supported" — the tab strip
-            switches between one and two columns, so the list has to be a new
-            list rather than the same one reconfigured.
-          */
-          key={scope}
-          numColumns={scope === 'public' ? 2 : 1}
-          columnWrapperStyle={scope === 'public' ? styles.tileRow : undefined}
-          data={workouts}
-          keyExtractor={(w) => w.id}
-          contentContainerStyle={[styles.list, listPad]}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load();
-              }}
-            />
-          }
-          // Inside the list rather than pinned above it, so the planner
-          // scrolls away and the templates get the full screen when you are
-          // browsing them. The Library's permanently-pinned ~300pt header is
-          // the counter-example this avoids.
-          //
-          // `mine` only: the public tab is a browse surface over other
-          // people's templates, and your own week has no business on it.
-          ListHeaderComponent={
-            scope === 'mine' ? (
+            )}
+            {/* `mine` only: the public tab is a browse surface over other
+                people's templates, and your own week has no business on it. */}
+            {scope === 'mine' && (
               <View style={styles.planHeader}>
                 <WeekPlanner userId={userId ?? null} modules={modules} />
                 {/* Directly under the week, because it is the week's
@@ -460,132 +481,139 @@ export default function WorkoutsScreen() {
                 )}
                 <SectionHeader label="Templates" />
               </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            error || !everLoaded ? null : (
-              <View style={styles.empty}>
-                <Text style={styles.emptyTitle}>
-                  {scope === 'mine' ? 'No workouts yet' : 'No VOLA Workouts yet'}
-                </Text>
-                <Text style={styles.muted}>
-                  {scope === 'mine'
-                    ? 'Build a template once, then reuse it every session.'
-                    : 'Ready-made plans you can copy and make your own.'}
-                </Text>
-              </View>
-            )
-          }
-          renderItem={({ item }) =>
-            /*
-              Two different cards, not one card bending.
+            )}
+          </View>
+        }
+        ListEmptyComponent={
+          // The spinner used to be a sibling that replaced this whole list
+          // while `loading`; now that the title and tab strip live INSIDE
+          // the list (so they can scroll away like every other tab's), the
+          // list has to stay mounted throughout so they stay visible during
+          // the very first load too — so the spinner moves here instead.
+          loading && !everLoaded ? (
+            <ActivityIndicator style={styles.loader} accessibilityLabel="Loading workouts" />
+          ) : error || !everLoaded ? null : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyTitle}>
+                {scope === 'mine' ? 'No workouts yet' : 'No VOLA Workouts yet'}
+              </Text>
+              <Text style={styles.muted}>
+                {scope === 'mine'
+                  ? 'Build a template once, then reuse it every session.'
+                  : 'Ready-made plans you can copy and make your own.'}
+              </Text>
+            </View>
+          )
+        }
+        renderItem={({ item }) =>
+          /*
+            Two different cards, not one card bending.
 
-              A VOLA Workout is something you are BROWSING — seventeen names
-              you do not know — so it gets a square tile with artwork, laid out
-              two to a row and scanned by picture. Your own workouts are a list
-              you already know by name, so they stay a row: denser, and the
-              artwork would be decoration over information you do not need.
-            */
-            scope === 'public' ? (
-              <Link href={`/workout/${item.id}`} asChild>
-                <Pressable
-                  style={styles.tile}
-                  accessibilityRole="button"
-                  // The sport is dropped — the tile does not show it, and the
-                  // label should describe what is there. The GOAL is added
-                  // back, because the tile does show it: as the glyph, which
-                  // the hero is `accessible={false}` for. Without this line a
-                  // screen reader is the one reader who cannot tell a
-                  // powerlifting plan from a conditioning one.
-                  accessibilityLabel={[
-                    item.name,
-                    GOALS.find((g) => g.key === item.goal)?.label,
-                    countLabel(item.items.length),
-                    item.owner_user_id === null ? undefined : 'community plan',
-                  ]
-                    .filter(Boolean)
-                    .join(', ')}
-                  testID={`workout-${item.id}`}
-                >
-                  <PlanHero id={item.id} goal={item.goal} />
-                  <View style={styles.tileBody}>
-                    <Text style={styles.tileName} numberOfLines={2}>
-                      {item.name}
-                    </Text>
-                    {/* Who wrote it, on the tile rather than one tap in.
-                        This shelf is called VOLA Workouts and most of it is
-                        ours, but it also carries whatever anyone has published
-                        — so an unmarked tile would put the brand's name on a
-                        stranger's plan. Marking the exception rather than the
-                        rule: seventeen "by VOLA" labels would be noise. */}
-                    <Text style={styles.tileMeta} numberOfLines={1}>
-                      {item.owner_user_id === null
-                        ? countLabel(item.items.length)
-                        : `Community · ${countLabel(item.items.length)}`}
-                    </Text>
-                  </View>
-                </Pressable>
-              </Link>
-            ) : (
+            A VOLA Workout is something you are BROWSING — seventeen names
+            you do not know — so it gets a square tile with artwork, laid out
+            two to a row and scanned by picture. Your own workouts are a list
+            you already know by name, so they stay a row: denser, and the
+            artwork would be decoration over information you do not need.
+          */
+          scope === 'public' ? (
             <Link href={`/workout/${item.id}`} asChild>
               <Pressable
-                style={styles.card}
+                style={styles.tile}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.name}, ${item.sport}, ${countLabel(item.items.length)}`}
+                // The sport is dropped — the tile does not show it, and the
+                // label should describe what is there. The GOAL is added
+                // back, because the tile does show it: as the glyph, which
+                // the hero is `accessible={false}` for. Without this line a
+                // screen reader is the one reader who cannot tell a
+                // powerlifting plan from a conditioning one.
+                accessibilityLabel={[
+                  item.name,
+                  GOALS.find((g) => g.key === item.goal)?.label,
+                  countLabel(item.items.length),
+                  item.owner_user_id === null ? undefined : 'community plan',
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
                 testID={`workout-${item.id}`}
               >
-                {/* The same two marks the Today screen's session rows use — a
-                    rule down the edge and a tinted disc — so a template and the
-                    session it becomes read as the same discipline. */}
-                <View
-                  style={[
-                    styles.cardRule,
-                    { backgroundColor: sportColor(item.sport) ?? accent.accent },
-                  ]}
-                />
-                {sportIcon(item.sport) && (
-                  <View
-                    style={[
-                      styles.cardBadge,
-                      { backgroundColor: sportTint(sportColor(item.sport) ?? accent.accent) },
-                    ]}
-                  >
-                    <Icon
-                      name={sportIcon(item.sport)!}
-                      size={18}
-                      color={sportColor(item.sport) ?? accent.accent}
-                    />
-                  </View>
-                )}
-
-                <View style={styles.cardBody}>
-                  <View style={styles.cardHead}>
-                    <Text style={styles.cardTitle}>{item.name}</Text>
-                    {item.visibility === 'public' && (
-                      <Text
-                        style={[styles.badge, { color: accent.ink }]}
-                        testID={`workout-${item.id}-public`}
-                      >
-                        Public
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={styles.cardMeta}>
-                    {labelFor(modules, item.sport)}
-                    {item.goal ? ` · ${GOALS.find((g) => g.key === item.goal)?.label}` : ''}
-                    {` · ${countLabel(item.items.length)}`}
+                <PlanHero id={item.id} goal={item.goal} />
+                <View style={styles.tileBody}>
+                  <Text style={styles.tileName} numberOfLines={2}>
+                    {item.name}
                   </Text>
-                  {/* No "VOLA template" line here any more. This card only
-                      renders under `mine`, whose filter is `owner_user_id =
-                      $1` — so the null-owner branch it was gated on could
-                      never be true, and it named the shelf by its old name. */}
+                  {/* Who wrote it, on the tile rather than one tap in.
+                      This shelf is called VOLA Workouts and most of it is
+                      ours, but it also carries whatever anyone has published
+                      — so an unmarked tile would put the brand's name on a
+                      stranger's plan. Marking the exception rather than the
+                      rule: seventeen "by VOLA" labels would be noise. */}
+                  <Text style={styles.tileMeta} numberOfLines={1}>
+                    {item.owner_user_id === null
+                      ? countLabel(item.items.length)
+                      : `Community · ${countLabel(item.items.length)}`}
+                  </Text>
                 </View>
               </Pressable>
             </Link>
-            )
-          }
-        />
-      )}
+          ) : (
+          <Link href={`/workout/${item.id}`} asChild>
+            <Pressable
+              style={styles.card}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.name}, ${item.sport}, ${countLabel(item.items.length)}`}
+              testID={`workout-${item.id}`}
+            >
+              {/* The same two marks the Today screen's session rows use — a
+                  rule down the edge and a tinted disc — so a template and the
+                  session it becomes read as the same discipline. */}
+              <View
+                style={[
+                  styles.cardRule,
+                  { backgroundColor: sportColor(item.sport) ?? accent.accent },
+                ]}
+              />
+              {sportIcon(item.sport) && (
+                <View
+                  style={[
+                    styles.cardBadge,
+                    { backgroundColor: sportTint(sportColor(item.sport) ?? accent.accent) },
+                  ]}
+                >
+                  <Icon
+                    name={sportIcon(item.sport)!}
+                    size={18}
+                    color={sportColor(item.sport) ?? accent.accent}
+                  />
+                </View>
+              )}
+
+              <View style={styles.cardBody}>
+                <View style={styles.cardHead}>
+                  <Text style={styles.cardTitle}>{item.name}</Text>
+                  {item.visibility === 'public' && (
+                    <Text
+                      style={[styles.badge, { color: accent.ink }]}
+                      testID={`workout-${item.id}-public`}
+                    >
+                      Public
+                    </Text>
+                  )}
+                </View>
+                <Text style={styles.cardMeta}>
+                  {labelFor(modules, item.sport)}
+                  {item.goal ? ` · ${GOALS.find((g) => g.key === item.goal)?.label}` : ''}
+                  {` · ${countLabel(item.items.length)}`}
+                </Text>
+                {/* No "VOLA template" line here any more. This card only
+                    renders under `mine`, whose filter is `owner_user_id =
+                    $1` — so the null-owner branch it was gated on could
+                    never be true, and it named the shelf by its old name. */}
+              </View>
+            </Pressable>
+          </Link>
+          )
+        }
+      />
 
       {scope === 'mine' && (
         <Pressable
@@ -1041,11 +1069,21 @@ const styles = StyleSheet.create({
   nextDashedText: { fontSize: 13, lineHeight: 19, color: vola.textMuted },
 
   container: { flex: 1 },
+  // N498 — cancels `list`'s own `paddingHorizontal: 20` for just the header
+  // row: `ScreenHeader` already carries that same 20pt itself, so nested
+  // inside the list's padding unchanged it would land at 40pt instead of the
+  // 20pt every other tab's header sits at.
+  headerInList: { marginHorizontal: -20 },
   // A tab strip: a hairline under the whole row, and a 2pt accent bar under
   // whichever segment is selected. No fill on either.
+  //
+  // No `marginHorizontal` of its own any more (N498) — it used to be the
+  // strip's sole inset, back when it rendered as a sibling outside the list
+  // entirely; now that it's the list's own `ListHeaderComponent`, `list`'s
+  // `paddingHorizontal: 20` already places it exactly where the header and
+  // every card below it sit.
   scopeRow: {
     flexDirection: 'row',
-    marginHorizontal: 16,
     marginTop: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: vola.line,
@@ -1067,10 +1105,20 @@ const styles = StyleSheet.create({
   // `paddingBottom` is applied at the call site, from the live font scale —
   // TAB_BAR_CLEARANCE alone left the last row under the New workout pill, which
   // is what put it on top of the planner's hint line.
-  list: { padding: 16, gap: 12 },
+  //
+  // `paddingHorizontal: 20` (N498, was 16) — matches `ScreenHeader`'s own
+  // horizontal padding and every other tab's content inset, now that the
+  // header and the scope strip both render inside this same list instead of
+  // above it. See `headerInList` above for how the header itself opts back
+  // out of this padding rather than sitting 40pt in.
+  list: { paddingHorizontal: 20, gap: 12 },
   // The list's own `gap` doesn't apply between a header and the first row, so
   // the spacing below the planner is the header's to own.
-  planHeader: { gap: 18, marginBottom: 4 },
+  //
+  // `marginTop: 16` (N498) restores the gap that used to come from `list`'s
+  // own top padding, back when the planner was the very first thing inside
+  // it — the scope strip now sits between the top of the list and this block.
+  planHeader: { gap: 18, marginTop: 16, marginBottom: 4 },
   tileRow: { gap: 12 },
   tile: {
     // `flex: 1` inside a two-column wrapper, so the pair share the row evenly
@@ -1125,7 +1173,11 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: 6, paddingTop: 48, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 17, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
-  error: { color: vola.danger, fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
+  // No `paddingHorizontal` of its own (N498, was 16) — it now renders inside
+  // `ListHeaderComponent`, inside `styles.list`'s own 20pt content padding,
+  // the same one every card below it sits at. A second value here would
+  // stack on top of that 20, same trap `headerInList`'s own comment names.
+  error: { color: vola.danger, fontSize: 14, paddingTop: 10 },
   // A compact pill in the corner, not a full-width slab.
   //
   // It was `left: 16, right: 16` with 16pt of vertical padding — an accent bar

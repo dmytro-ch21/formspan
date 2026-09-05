@@ -330,3 +330,35 @@ it('says "1 exercise" on a one-movement plan', async () => {
 
   expect(await screen.findByText('1 exercise')).toBeTruthy();
 });
+
+/**
+ * N498 moved `ScreenHeader` from a pinned sibling into the FlatList's own
+ * `ListHeaderComponent`, so it scrolls away like every other tab. A first
+ * pass at that left the error banner behind as a sibling ABOVE the list —
+ * which put it above the (now list-internal) header too, flush against the
+ * screen's top edge with none of `ScreenHeader`'s safe-area padding. Fixed
+ * by moving the banner into `ListHeaderComponent`, below the header and the
+ * scope strip — this pins the fix, not just the presence of the text.
+ */
+it('renders the error banner below the header, not flush against the safe area', async () => {
+  mockCachedWorkouts.mockResolvedValue([]);
+  mockListWorkouts.mockRejectedValue(new Error('offline'));
+
+  render(<WorkoutsScreen />);
+
+  await screen.findByTestId('workouts-error');
+
+  const order: string[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    const n = node as { props?: { testID?: string }; children?: unknown[] };
+    if (n.props?.testID) order.push(n.props.testID);
+    n.children?.forEach(walk);
+  };
+  walk(screen.toJSON());
+
+  const headerIndex = order.indexOf('screen-header');
+  const errorIndex = order.indexOf('workouts-error');
+  expect(headerIndex).toBeGreaterThanOrEqual(0);
+  expect(errorIndex).toBeGreaterThan(headerIndex);
+});

@@ -227,16 +227,17 @@ describe('the screen name is shown again (N503, reverses part of N493)', () => {
  * reported from a device as "scrolls on and on until the content disappears".
  *
  * **The predicate is not "is the header fixed?"** Eight callers, three
- * arrangements: the header IS the boundary (`goals`, `phase`, `progress` —
- * the last added by N176/#602 after this note was first written, and this
- * count corrected by F20/#496's review rather than left stale again); the
- * header scrolls away inside the scroll view (`index`, `food`, `you`); the
+ * arrangements: the header IS the boundary (`goals`, `phase` — `progress` was
+ * a third member of this arrangement from N176/#602 until N498/#869 moved it,
+ * and `workouts` (Plan) into the "scrolls away" arrangement below instead, so
+ * neither pins a header above its content any more); the header scrolls away
+ * inside the scroll view (`index`, `food`, `you`, `progress`, `workouts`); the
  * header is pinned above OTHER fixed chrome that owns the boundary
- * (`workouts`'s scope strip, which already draws its own rule; `library`'s
- * search and chips). Only the first draws. The first version of this fix
- * conflated the first and third and would have put a second seam 40pt above
- * an existing one — review caught it, this suite did not, which is why the
- * third arrangement is named here.
+ * (`library`'s search and chips — `workouts`'s scope strip used to be here
+ * too, until N498 moved it in with the header). Only the first draws. The
+ * first version of this fix conflated the first and third and would have put
+ * a second seam 40pt above an existing one — review caught it, this suite did
+ * not, which is why the third arrangement is named here.
  *
  * **What this test can and cannot prove.** It pins the decision, and either
  * mutation turns one arm red. It cannot prove the rule is VISIBLE, that it
@@ -280,8 +281,9 @@ describe('the edge at the top of the scrolling region', () => {
 
   it('draws none when nothing scrolls under the header', () => {
     // Two different reasons, one flag: the header scrolls away (`index`,
-    // `food`, `you`), or fixed chrome below owns the boundary (`workouts`,
-    // `library`). A rule in either case is a seam across nothing.
+    // `food`, `you`, `progress`, `workouts` — the last two as of N498/#869),
+    // or fixed chrome below owns the boundary (`library`). A rule in either
+    // case is a seam across nothing.
     render(<ScreenHeader title="Today" contentScrollsUnder={false} />);
     const header = screen.getByTestId('screen-header');
     expect(header).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });

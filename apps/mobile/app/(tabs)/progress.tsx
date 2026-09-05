@@ -338,178 +338,185 @@ export default function ProgressScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Progress" />
-      <ScrollView contentContainerStyle={styles.body} testID="progress-screen">
-        {/* 1 — recent context. */}
-        <SectionHeader label="This week" />
-        <ThisWeek
-          week={weekReading}
-          nutrition={nutritionReading}
-          modules={modules}
-          units={units}
-          unitsReady={unitsReady}
-        />
-
-        {/* 2 — the interpretation, above every chart on this screen. */}
-        <SectionHeader label="What changed" />
-        <View style={styles.section} testID="progress-section-changed">
-          <WhatChanged view={changes} testID="what-changed" />
-        </View>
-
-        {/* 3 — the drill-down. */}
-        <View style={styles.section} testID="progress-section-training">
-          {/* Brings its own section header and its own span control. */}
-          <TrainingSummary getToken={getToken} units={units} />
-          <RecordsCard records={recordsReading} names={names} units={units} />
-
-          {/*
-            The training calendar, rehomed from Today by N179 — which days were
-            planned, which were met, and the way into a past session by date.
-            `TrainingSummary` above says WHICH DAYS; this says which days were
-            asked for. It reads local SQLite, so it is also the block that still
-            answers when the summary above cannot reach the network.
-
-            Deliberately the ONLY one of Today's three analytical blocks that
-            landed here: `WeekReview` is already drawn by `ThisWeek`, and
-            `TrendStrip`'s weekly bars are already drawn by `TrainingSummary`.
-            See the component's own note.
-          */}
-          <TrainingHistory />
-
-          {/*
-            Training load, N489/#850 — a link, not a second chart. The trend
-            itself (a 7-day rolling TRIMP total, cross-sport) lives at
-            `/trainingLoad/trend`, following the same "summary row here, the
-            actual reading lives on its own screen" shape as Weight trend
-            below and Position map two rows down. This Row fetches and
-            computes nothing itself — same posture as every other row on this
-            screen.
-
-            Unconditional, like the nutrition links further down: it needs no
-            module gate, since TRIMP is computed identically for every sport
-            this app has (strength, running, bjj) and the destination itself
-            already says plainly when there is nothing to show yet, rather
-            than this row silently vanishing for an athlete who has no
-            heart-rate data synced yet.
-          */}
-          <Row
-            title="Training load"
-            note="A weekly TRIMP trend across BJJ, strength and running sessions with HR data."
-            onPress={() => router.push('/trainingLoad/trend')}
-            testID="progress-training-load"
+      <ScrollView contentContainerStyle={styles.scroll} testID="progress-screen">
+        {/* Inside the ScrollView, so it scrolls away with the content and
+            nothing passes under it — no bottom rule. See `ScreenHeader`, and
+            N498: this used to be a pinned sibling above the ScrollView with
+            `contentScrollsUnder` left at its default `true`, which drew a
+            hairline nothing else on this tab bar's four siblings draws. */}
+        <ScreenHeader title="Progress" contentScrollsUnder={false} />
+        <View style={styles.body}>
+          {/* 1 — recent context. */}
+          <SectionHeader label="This week" />
+          <ThisWeek
+            week={weekReading}
+            nutrition={nutritionReading}
+            modules={modules}
+            units={units}
+            unitsReady={unitsReady}
           />
 
-          {/*
-            The position map, moved off You.
+          {/* 2 — the interpretation, above every chart on this screen. */}
+          <SectionHeader label="What changed" />
+          <View style={styles.section} testID="progress-section-changed">
+            <WhatChanged view={changes} testID="what-changed" />
+          </View>
 
-            Gated on the CAPABILITY rather than on `key === 'bjj'`, and it
-            renders an explanation rather than nothing when the discipline is
-            off — N61, in the one form that has actually bitten this app: an
-            athlete cannot tell "turned off" from "not built" from "broken",
-            and went looking for the belt roadmaps on a real phone and
-            reported them missing. Nothing at all is drawn while the module
-            list is still loading, because an empty list is an unanswered
-            question rather than a "no".
-          */}
-          {modulesReady && bjj && (
+          {/* 3 — the drill-down. */}
+          <View style={styles.section} testID="progress-section-training">
+            {/* Brings its own section header and its own span control. */}
+            <TrainingSummary getToken={getToken} units={units} />
+            <RecordsCard records={recordsReading} names={names} units={units} />
+
+            {/*
+              The training calendar, rehomed from Today by N179 — which days were
+              planned, which were met, and the way into a past session by date.
+              `TrainingSummary` above says WHICH DAYS; this says which days were
+              asked for. It reads local SQLite, so it is also the block that still
+              answers when the summary above cannot reach the network.
+
+              Deliberately the ONLY one of Today's three analytical blocks that
+              landed here: `WeekReview` is already drawn by `ThisWeek`, and
+              `TrendStrip`'s weekly bars are already drawn by `TrainingSummary`.
+              See the component's own note.
+            */}
+            <TrainingHistory />
+
+            {/*
+              Training load, N489/#850 — a link, not a second chart. The trend
+              itself (a 7-day rolling TRIMP total, cross-sport) lives at
+              `/trainingLoad/trend`, following the same "summary row here, the
+              actual reading lives on its own screen" shape as Weight trend
+              below and Position map two rows down. This Row fetches and
+              computes nothing itself — same posture as every other row on this
+              screen.
+
+              Unconditional, like the nutrition links further down: it needs no
+              module gate, since TRIMP is computed identically for every sport
+              this app has (strength, running, bjj) and the destination itself
+              already says plainly when there is nothing to show yet, rather
+              than this row silently vanishing for an athlete who has no
+              heart-rate data synced yet.
+            */}
             <Row
-              title="Position map"
-              note="Where you score, and where you get stuck."
-              onPress={() => router.push('/bjj/positions')}
-              testID="progress-bjj-positions"
+              title="Training load"
+              note="A weekly TRIMP trend across BJJ, strength and running sessions with HR data."
+              onPress={() => router.push('/trainingLoad/trend')}
+              testID="progress-training-load"
             />
-          )}
-          {/* N84, row 10 of the phone-impossible audit: the technique funnel
-              as a browsable surface, not just the Today card's abbreviated
-              slice. A list, not a chart — see `app/bjj/proficiency.tsx`'s own
-              note on why the carve-out does not apply to it. */}
-          {modulesReady && bjj && (
+
+            {/*
+              The position map, moved off You.
+
+              Gated on the CAPABILITY rather than on `key === 'bjj'`, and it
+              renders an explanation rather than nothing when the discipline is
+              off — N61, in the one form that has actually bitten this app: an
+              athlete cannot tell "turned off" from "not built" from "broken",
+              and went looking for the belt roadmaps on a real phone and
+              reported them missing. Nothing at all is drawn while the module
+              list is still loading, because an empty list is an unanswered
+              question rather than a "no".
+            */}
+            {modulesReady && bjj && (
+              <Row
+                title="Position map"
+                note="Where you score, and where you get stuck."
+                onPress={() => router.push('/bjj/positions')}
+                testID="progress-bjj-positions"
+              />
+            )}
+            {/* N84, row 10 of the phone-impossible audit: the technique funnel
+                as a browsable surface, not just the Today card's abbreviated
+                slice. A list, not a chart — see `app/bjj/proficiency.tsx`'s own
+                note on why the carve-out does not apply to it. */}
+            {modulesReady && bjj && (
+              <Row
+                title="Technique funnel"
+                note="What you've drilled, what you've tried live, and what's working."
+                onPress={() => router.push('/bjj/proficiency')}
+                testID="progress-bjj-proficiency"
+              />
+            )}
+            {modulesReady && !bjj && bjjOff && (
+              <Text style={styles.off} testID="progress-bjj-off">
+                {bjjOff.label} is turned off, so its position map is not shown. Turn it back on
+                under {MODULE_TOGGLE_LOCATION} in your profile.
+              </Text>
+            )}
+          </View>
+
+          {/* 4 — body. */}
+          <SectionHeader label="Body" />
+          <View style={styles.section} testID="progress-section-body">
+            {/*
+              A LINK, not a second copy of the chart.
+              `app/goals/trend.tsx` is the weight trend — axes, projection, the
+              entries behind it — and drawing a rival here would give the app two
+              weight-trend views that can disagree, which is the specific failure
+              this ticket's own test steps call out.
+            */}
             <Row
-              title="Technique funnel"
-              note="What you've drilled, what you've tried live, and what's working."
-              onPress={() => router.push('/bjj/proficiency')}
-              testID="progress-bjj-proficiency"
+              title="Weight trend"
+              note="The line, the projection and the entries behind it."
+              onPress={() => router.push('/goals/trend')}
+              testID="progress-weight-trend"
             />
-          )}
-          {modulesReady && !bjj && bjjOff && (
-            <Text style={styles.off} testID="progress-bjj-off">
-              {bjjOff.label} is turned off, so its position map is not shown. Turn it back on
-              under {MODULE_TOGGLE_LOCATION} in your profile.
-            </Text>
-          )}
-        </View>
+            <Row
+              title="Check-ins"
+              note="Weight and girths, day by day."
+              onPress={() => router.push(`/checkin/${dayString(now)}`)}
+              testID="progress-checkin"
+            />
+          </View>
 
-        {/* 4 — body. */}
-        <SectionHeader label="Body" />
-        <View style={styles.section} testID="progress-section-body">
-          {/*
-            A LINK, not a second copy of the chart.
-            `app/goals/trend.tsx` is the weight trend — axes, projection, the
-            entries behind it — and drawing a rival here would give the app two
-            weight-trend views that can disagree, which is the specific failure
-            this ticket's own test steps call out.
-          */}
-          <Row
-            title="Weight trend"
-            note="The line, the projection and the entries behind it."
-            onPress={() => router.push('/goals/trend')}
-            testID="progress-weight-trend"
-          />
-          <Row
-            title="Check-ins"
-            note="Weight and girths, day by day."
-            onPress={() => router.push(`/checkin/${dayString(now)}`)}
-            testID="progress-checkin"
-          />
-        </View>
+          {/* 5 — nutrition. */}
+          <SectionHeader label="Nutrition" />
+          <View style={styles.section} testID="progress-section-nutrition">
+            {/*
+              Unconditional, and that is deliberate. The destination explains
+              itself when nutrition is off — `ModuleOffNotice` is the whole
+              screen there — and hiding the link is what leaves an athlete unable
+              to reach the explanation. #370's finding, applied here.
+            */}
+            <Row
+              title="Targets and adherence"
+              note="What you are eating to, and why that number."
+              onPress={() => router.push('/(tabs)/goals')}
+              testID="progress-nutrition"
+            />
+            {/* N84, row 6 of the phone-impossible audit: the reduced phone form
+                of `/dashboard/nutrition` — one metric (mean kcal against
+                target), not web's three-way join. See `lib/nutritionTrend.ts`. */}
+            <Row
+              title="Eating vs. target"
+              note="Your logged intake against what you're eating to, over time."
+              onPress={() => router.push('/goals/nutritionTrend')}
+              testID="progress-nutrition-trend"
+            />
+          </View>
 
-        {/* 5 — nutrition. */}
-        <SectionHeader label="Nutrition" />
-        <View style={styles.section} testID="progress-section-nutrition">
-          {/*
-            Unconditional, and that is deliberate. The destination explains
-            itself when nutrition is off — `ModuleOffNotice` is the whole
-            screen there — and hiding the link is what leaves an athlete unable
-            to reach the explanation. #370's finding, applied here.
-          */}
-          <Row
-            title="Targets and adherence"
-            note="What you are eating to, and why that number."
-            onPress={() => router.push('/(tabs)/goals')}
-            testID="progress-nutrition"
-          />
-          {/* N84, row 6 of the phone-impossible audit: the reduced phone form
-              of `/dashboard/nutrition` — one metric (mean kcal against
-              target), not web's three-way join. See `lib/nutritionTrend.ts`. */}
-          <Row
-            title="Eating vs. target"
-            note="Your logged intake against what you're eating to, over time."
-            onPress={() => router.push('/goals/nutritionTrend')}
-            testID="progress-nutrition-trend"
-          />
-        </View>
-
-        {/* 6 — goals. */}
-        <SectionHeader label="Goals" />
-        <View style={styles.section} testID="progress-section-goals">
-          <Row
-            title="Target history"
-            note="Every target you have set, and what each day was measured against."
-            onPress={() => router.push('/goals/history')}
-            testID="progress-goal-history"
-          />
-          {/*
-            Dashed, per #468: a placeholder standing WHERE content would stand
-            is dashed; one standing beside content is a card. This one stands
-            where a list of achievements would stand, so it is dashed — and it
-            says what is missing rather than leaving a heading over one row.
-          */}
-          <View style={styles.soon} testID="progress-goals-soon">
-            <Text style={styles.soonTitle}>Achievements are not here yet</Text>
-            <Text style={styles.soonNote}>
-              The firsts you earn on the mat — first submission, first podium — are recorded and
-              shown on the session that earned them. A list of them lives here next.
-            </Text>
+          {/* 6 — goals. */}
+          <SectionHeader label="Goals" />
+          <View style={styles.section} testID="progress-section-goals">
+            <Row
+              title="Target history"
+              note="Every target you have set, and what each day was measured against."
+              onPress={() => router.push('/goals/history')}
+              testID="progress-goal-history"
+            />
+            {/*
+              Dashed, per #468: a placeholder standing WHERE content would stand
+              is dashed; one standing beside content is a card. This one stands
+              where a list of achievements would stand, so it is dashed — and it
+              says what is missing rather than leaving a heading over one row.
+            */}
+            <View style={styles.soon} testID="progress-goals-soon">
+              <Text style={styles.soonTitle}>Achievements are not here yet</Text>
+              <Text style={styles.soonNote}>
+                The firsts you earn on the mat — first submission, first podium — are recorded and
+                shown on the session that earned them. A list of them lives here next.
+              </Text>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -569,7 +576,11 @@ function Row({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
-  body: { paddingHorizontal: 20, paddingBottom: TAB_BAR_CLEARANCE, gap: 12 },
+  // No horizontal padding here — `ScreenHeader` carries its own (20, matching
+  // `body` below) and sits as this ScrollView's first child, outside `body`,
+  // so it isn't double-padded by wrapping inside it. See N498.
+  scroll: { paddingBottom: TAB_BAR_CLEARANCE },
+  body: { paddingHorizontal: 20, gap: 12 },
   section: { gap: 10, backgroundColor: 'transparent' },
 
   row: {

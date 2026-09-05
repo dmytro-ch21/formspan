@@ -5435,6 +5435,14 @@ carries a rename made without signal.
 The scope switch and the New workout button. Mostly visual, but one of these is
 a real layout guarantee rather than a preference.
 
+**N498/#869 moved the scope control (and the screen's title) off the top of
+the screen and into the scrolling list itself** — see the W10 section above.
+Before, both sat in a fixed strip above the list and stayed on screen at every
+scroll position; now they scroll away with the week planner and templates, the
+same as every other on-bar tab's header. That is a deliberate trade for
+consistency across the app, not an accident: switching scope now needs
+scrolling back to the top first if you have scrolled down.
+
 ### Happy path
 
 - The scope control shows both segments under one hairline; the selected one
@@ -5444,6 +5452,10 @@ a real layout guarantee rather than a preference.
   returning to the tab.
 - `New workout` opens the create sheet, and a workout created there appears in
   the list without a manual refresh.
+- Switching scope while scrolled down does not flash the OTHER scope's rows
+  under the new column layout — the list clears to its loading state first
+  (N498; before, this was masked by the whole list being replaced by a
+  sibling spinner, which is no longer how loading is drawn here).
 
 ### Edge cases & errors
 
@@ -13373,24 +13385,38 @@ The scroll extent was measured as exact in every state, so **nothing here is
 about how far the screen scrolls.**
 
 **The predicate is not "is the header fixed?"** Three arrangements exist across
-the seven callers, and only the first draws a rule:
+the eight callers, and only the first draws a rule:
 
 | screen | arrangement | rule under the header? |
 |---|---|---|
 | `Goals`, `Phase` | header sits directly on the scroller | **yes** |
-| `Today`, `Food`, `You` | header is inside the scroll view and scrolls away | no |
-| `Plan` | scope tab strip below owns the boundary and draws its own rule | no |
+| `Today`, `Food`, `You`, `Plan`, `Progress` | header is inside the scroll view (or, for `Plan`, the `FlatList`'s `ListHeaderComponent`) and scrolls away | no |
 | `Library` | search field and chips below sit between header and list — the fixed chrome block draws its own rule instead (F21/#497) | no |
+
+**N498/#869 moved `Plan` and `Progress` into the "scrolls away" row.** Both
+used to freeze the header in place while their content scrolled under it —
+`Plan` above a pinned scope tab strip that drew its own (separate, dimmer)
+rule, `Progress` with no fixed chrome below it at all, so it drew W10's own
+rule directly. Neither behaviour is reachable any more: the header (and, on
+`Plan`, the scope strip alongside it) scrolls away on both screens now, same
+as `Today`/`Food`/`You`, and neither draws a hairline.
 
 ### Happy path
 
 1. **`Goals` and `Phase`.** Scroll. Content must meet a visible full-width rule
    under the title and pass under it — never dissolve into the background.
-2. **`Today`, `Food`, `You`.** No rule under the header: it scrolls away with
-   the content and nothing passes beneath it.
-3. **`Plan`.** Exactly **one** rule in the fixed chrome — the scope strip's.
-   A second hairline ~40pt above it, under the header, is the regression this
-   scenario exists to catch.
+2. **`Today`, `Food`, `You`, `Plan`, `Progress`.** No rule under the header: it
+   scrolls away with the content and nothing passes beneath it. On `Plan`,
+   this includes the scope tab strip (`My workouts` / `VOLA Workouts`), which
+   moved in alongside the header (N498) and is no longer reachable without
+   scrolling back to the top — confirm that is an intentional trade rather
+   than an oversight if you find it surprising on a device pass.
+3. **`Plan`'s content padding matches its header's.** Before N498, the list's
+   own padding (16pt) fell 4pt short of `ScreenHeader`'s (20pt), so template
+   cards and the week planner sat measurably out of step with the title and
+   wordmark above them. Confirm the templates list, the week planner, and the
+   scope tab strip's own horizontal inset all line up with the title text at
+   every scroll position.
 4. **`Library`.** No rule under the header — content does not scroll under it,
    so nothing should draw there. **The clip edge below the search field and
    filter chips is F21 (#497)'s own scenario, below**; it is a real boundary of
