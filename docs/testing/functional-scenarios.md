@@ -19268,3 +19268,62 @@ up N502's oversized-body-vs-malformed-JSON fix.
   decode-error message change names only the field, never any internal
   detail; `PutDetail`'s size-wall fix mirrors an already-shipped pattern
   with the same claims-derived `user_id` scoping untouched.
+
+## N508 — spacing/typography/card design tokens (`apps/mobile/constants/Spacing.ts`, `Typography.ts`, `Card.ts`, `components/ui/CardGlass.tsx`; converted: `components/ScreenHeader.tsx`, `components/ui/Section.tsx`, `components/ui/Stat.tsx`, `app/(tabs)/workouts.tsx`, `app/(tabs)/progress.tsx`, `app/running/[id].tsx`, `app/bjj/session/[id].tsx`, `app/session/[id].tsx`)
+
+This is a token/styling refactor with no new endpoint, no new user-facing
+copy, and no changed control flow — the six converted screens do the same
+things they did before, laid out with named values instead of restated
+literals. Most of what would normally go here is therefore either already
+covered by the existing screen tests (which assert structure/behavior, not
+style values, and passed unchanged) or is a device-only visual check, not a
+Playwright/functional scenario.
+
+### What's testable (structural, not visual)
+
+- Plan (`workouts.tsx`), Progress, BJJ session, Strength session and Running
+  detail all render their existing content and controls unchanged — no
+  button, field or navigation target moved, appeared, or disappeared.
+  (Covered by each screen's existing `__tests__` suite; none needed a
+  literal-value assertion changed to a token-reference one, because none
+  asserted on a style literal to begin with.)
+- The ESLint guard itself is a repo-level check, not a functional scenario —
+  see this ticket's `docs/decisions/history.md` entry for its mutation-test
+  evidence (including a real escaping bug the mutation pass caught in the
+  three `[id].tsx` route globs).
+- `scripts/generate_design_tokens.mjs --check` catches a hand-edited
+  `assets/brand/design-tokens.json` whose generated file was not
+  regenerated — same shape as the existing `check:icons` drift check.
+
+### Device-only (not reachable by any automated suite in this repo)
+
+- **NEEDS HUMAN EVIDENCE** (tracked on issue #885): the glass-card treatment
+  — the `CardGlass` wash on Plan's "My workouts" row, Progress's
+  module-toggle row, BJJ's boxed stat, Running's "Distance over time" row,
+  and Strength's guided-workout banner — actually reads as "glassy" on a
+  real device, not merely "still flat." Check in dark mode (this app is
+  dark-only on mobile by design) across at least two accent themes.
+- The unified 20pt screen gutter and 14pt card radius on Running and
+  Strength specifically (previously 16pt on both, and 0 on Running before
+  N506) should be visually indistinguishable in *feel* from Plan/BJJ's
+  existing 20pt/14pt — i.e. this should read as "was always this way," not
+  as a visible jump. Worth a side-by-side screenshot across all five
+  screens on one device.
+- The typography scale's new `lineHeight`/`letterSpacing` values (added to
+  several sites that previously had neither, per this ticket's own
+  documented policy — see `Typography.ts`) should not introduce any visible
+  text clipping or an unexpected extra line, especially on the longer
+  strings this app already flags as edge cases (a long exercise name like
+  "Barbell Bulgarian Split Squat" in `session/[id].tsx`'s `groupName`, or a
+  long BJJ session title).
+- Accessibility text-size scaling (Dynamic Type / large fonts) against the
+  new `Typography` roles — none of the six screens' existing tests render at
+  a non-default font scale, and this ticket didn't add one; a manual check
+  at the largest supported size on at least the Plan and Strength screens
+  (the two with the densest card content) would catch a role whose
+  `lineHeight` is too tight for its own `fontSize` once the OS scales it.
+
+### Auth/security
+
+None — no new endpoint, no new client permission, no data-shape change. This
+ticket touches presentation only.

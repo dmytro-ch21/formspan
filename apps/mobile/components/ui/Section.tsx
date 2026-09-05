@@ -2,6 +2,8 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { Icon } from '@/components/ui/Icon';
 import { useAccent } from '@/lib/AccentProvider';
 
@@ -79,22 +81,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: Spacing.md,
     minHeight: 20,
   },
   // `flexShrink` on the wrapper rather than the text: an uppercase tracked
   // label at accessibility sizes is wider than the row, and without this the
   // trailing badge is pushed off the right edge instead of the label wrapping.
-  labelWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  labelWrap: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xsPlus, flexShrink: 1 },
+  // The house eyebrow treatment — see Typography.ts's own note on why this
+  // is the version `Stat.tsx`'s once-divergent copy now matches.
   label: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
+    ...Typography.eyebrow,
     color: vola.textDim,
     flexShrink: 1,
   },
-  action: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xxs },
   // Colour is set inline, from the chosen accent — this is a way out of the
-  // section, and the accent is what marks "act here" everywhere else.
-  actionText: { fontSize: 13, fontWeight: '700' },
+  // section, and the accent is what marks "act here" everywhere else. Bold
+  // rather than `Typography.meta`'s regular weight, since this is a link.
+  actionText: { fontSize: Typography.meta.fontSize, fontWeight: '700' },
 });

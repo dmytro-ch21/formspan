@@ -11,8 +11,12 @@ import { ThisWeek } from '@/components/progress/ThisWeek';
 import { WhatChanged } from '@/components/progress/WhatChanged';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
+import { CardGlass } from '@/components/ui/CardGlass';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
+import { Card } from '@/constants/Card';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { shiftDate, trendWeight } from '@/lib/anthropometry';
 import { listCheckins, type Checkin } from '@/lib/body';
 import { dayString, weekDays } from '@/lib/calendar';
@@ -565,6 +569,9 @@ function Row({
       accessibilityHint={note}
       testID={testID}
     >
+      {/* N508 — the glass wash, first so the text/chevron paint over it. See
+          `CardGlass`'s own doc comment for the material. */}
+      <CardGlass />
       <View style={styles.rowText}>
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowNote}>{note}</Text>
@@ -576,39 +583,44 @@ function Row({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
-  // No horizontal padding here — `ScreenHeader` carries its own (20, matching
-  // `body` below) and sits as this ScrollView's first child, outside `body`,
-  // so it isn't double-padded by wrapping inside it. See N498.
+  // No horizontal padding here — `ScreenHeader` carries its own
+  // (`Spacing.gutter`, matching `body` below) and sits as this ScrollView's
+  // first child, outside `body`, so it isn't double-padded by wrapping
+  // inside it. See N498.
   scroll: { paddingBottom: TAB_BAR_CLEARANCE },
-  body: { paddingHorizontal: 20, gap: 12 },
-  section: { gap: 10, backgroundColor: 'transparent' },
+  body: { paddingHorizontal: Spacing.gutter, gap: Spacing.md },
+  section: { gap: Spacing.smPlus, backgroundColor: 'transparent' },
 
+  // A module-toggle row — this screen's primary card, so it takes `Card.base`
+  // (settled border colour and the shared `Radius.card`, was its own 16)
+  // plus the glass wash (`<CardGlass />` at its JSX call site).
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 16,
+    gap: Spacing.md,
+    paddingVertical: Spacing.lg,
     paddingHorizontal: 18,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: vola.lineSoft,
-    backgroundColor: vola.surface,
+    ...Card.base,
+    overflow: 'hidden',
   },
   rowPressed: { opacity: 0.85 },
   rowText: { flex: 1, gap: 3, backgroundColor: 'transparent' },
-  rowTitle: { fontSize: 15, fontWeight: '700' },
+  rowTitle: { ...Typography.emphasis, fontWeight: '700' },
   // textMuted, not textDim — textDim is 3.96:1 on `bg`, under AA at this size.
-  rowNote: { color: vola.textMuted, fontSize: 13, lineHeight: 18 },
-  off: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+  rowNote: { ...Typography.meta, color: vola.textMuted },
+  off: { ...Typography.meta, color: vola.textMuted },
 
+  // A dashed placeholder, not a filled card — no `Card.base` here (no fill),
+  // just the shared `Radius.card` so its corners still match every other
+  // box on the screen.
   soon: {
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: vola.lineSoft,
-    borderRadius: 16,
-    padding: 20,
-    gap: 6,
+    borderColor: vola.line,
+    borderRadius: Radius.card,
+    padding: Spacing.gutter,
+    gap: Spacing.xsPlus,
   },
-  soonTitle: { fontSize: 15, fontWeight: '700' },
-  soonNote: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+  soonTitle: { ...Typography.emphasis, fontWeight: '700' },
+  soonNote: { ...Typography.meta, color: vola.textMuted },
 });

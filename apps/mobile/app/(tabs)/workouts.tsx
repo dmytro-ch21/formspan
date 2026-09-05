@@ -44,8 +44,12 @@ import {
 } from '@/lib/workouts';
 import { vola } from '@/constants/Colors';
 import { Icon } from '@/components/ui/Icon';
+import { CardGlass } from '@/components/ui/CardGlass';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
+import { Card } from '@/constants/Card';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 
 /**
  * "1 exercise", not "1 exercises".
@@ -563,6 +567,9 @@ export default function WorkoutsScreen() {
               accessibilityLabel={`${item.name}, ${item.sport}, ${countLabel(item.items.length)}`}
               testID={`workout-${item.id}`}
             >
+              {/* N508 — the glass wash, first so everything else paints over
+                  it. See `CardGlass`'s own doc comment for the material. */}
+              <CardGlass />
               {/* The same two marks the Today screen's session rows use — a
                   rule down the edge and a tinted disc — so a template and the
                   session it becomes read as the same discipline. */}
@@ -1015,42 +1022,48 @@ export function Chip({
 
 const styles = StyleSheet.create({
   // The Roadmaps strip's off-state. Shaped like a card rather than a bare
-  // line so it reads as the thing that would be there, not as an error.
+  // line so it reads as the thing that would be there, not as an error. Not
+  // `Card.base`: this box keeps its own, smaller radius (`Radius.md`, not
+  // `Radius.card`) on purpose — see the strip's own history for why.
   curriculaOff: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 14,
-    borderRadius: 12,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+    padding: Spacing.cardPadding,
+    borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
   curriculaOffPressed: { opacity: 0.6 },
-  curriculaOffTitle: { fontSize: 14, fontWeight: '600', color: vola.text },
+  curriculaOffTitle: { ...Typography.body, fontWeight: '600', color: vola.text },
   // textMuted, not textDim: at 12pt this is small text and textDim measures
   // 3.96:1 on the card, below AA.
-  curriculaOffNote: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+  curriculaOffNote: { ...Typography.caption, color: vola.textMuted, marginTop: Spacing.xxs },
 
   // The "Beyond this week" block. No horizontal margin of its own: the plan
   // header renders inside the list's `contentContainerStyle`, which already
-  // pads 16, and this block lines up with the `Templates` heading below it
-  // rather than with the roadmaps card, which adds a second inset.
-  nextSection: { gap: 10 },
+  // pads `Spacing.lg`, and this block lines up with the `Templates` heading
+  // below it rather than with the roadmaps card, which adds a second inset.
+  nextSection: { gap: Spacing.smPlus },
   nextRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
-    borderColor: vola.lineSoft,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    // N508 — settled to `line`, the card border colour every screen this
+    // ticket converts now shares (was `lineSoft`).
+    borderColor: vola.line,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.md,
   },
   nextDisc: {
     width: 28,
     height: 28,
-    borderRadius: 14,
+    // Circular (half the disc's own width) — coincidentally the card radius
+    // number, not a reference to the card token.
+    borderRadius: Radius.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1058,33 +1071,34 @@ const styles = StyleSheet.create({
   nextTitle: { fontSize: 16, fontWeight: '700' },
   // textMuted rather than textDim: at 12pt this is small text, and textDim
   // measures 3.96:1 on `bg`, below AA's 4.5:1.
-  nextWhen: { fontSize: 12, color: vola.textMuted },
+  nextWhen: { fontSize: Typography.caption.fontSize, color: vola.textMuted },
   nextDashed: {
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: vola.lineSoft,
-    borderRadius: 14,
-    padding: 16,
+    borderColor: vola.line,
+    borderRadius: Radius.card,
+    padding: Spacing.lg,
   },
-  nextDashedText: { fontSize: 13, lineHeight: 19, color: vola.textMuted },
+  nextDashedText: { ...Typography.meta, color: vola.textMuted },
 
   container: { flex: 1 },
-  // N498 — cancels `list`'s own `paddingHorizontal: 20` for just the header
-  // row: `ScreenHeader` already carries that same 20pt itself, so nested
-  // inside the list's padding unchanged it would land at 40pt instead of the
-  // 20pt every other tab's header sits at.
-  headerInList: { marginHorizontal: -20 },
+  // N498 — cancels `list`'s own `paddingHorizontal: Spacing.gutter` for just
+  // the header row: `ScreenHeader` already carries that same gutter itself,
+  // so nested inside the list's padding unchanged it would land at double
+  // the gutter instead of the one every other tab's header sits at. MUST
+  // track `list.paddingHorizontal` below — see that style's own comment.
+  headerInList: { marginHorizontal: -Spacing.gutter },
   // A tab strip: a hairline under the whole row, and a 2pt accent bar under
   // whichever segment is selected. No fill on either.
   //
   // No `marginHorizontal` of its own any more (N498) — it used to be the
   // strip's sole inset, back when it rendered as a sibling outside the list
   // entirely; now that it's the list's own `ListHeaderComponent`, `list`'s
-  // `paddingHorizontal: 20` already places it exactly where the header and
-  // every card below it sit.
+  // `paddingHorizontal: Spacing.gutter` already places it exactly where the
+  // header and every card below it sit.
   scopeRow: {
     flexDirection: 'row',
-    marginTop: 8,
+    marginTop: Spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: vola.line,
   },
@@ -1092,34 +1106,35 @@ const styles = StyleSheet.create({
   // 2pt taller than the other and the labels shift when you switch.
   scopeTab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: Spacing.md,
     alignItems: 'center',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
   // Colour set inline, from the accent.
   scopeTabActive: {},
-  scopeText: { fontSize: 14, fontWeight: '600', color: vola.textMuted },
+  scopeText: { ...Typography.body, fontWeight: '600', color: vola.textMuted },
   scopeTextActive: { fontWeight: '700' },
-  loader: { marginTop: 32 },
+  loader: { marginTop: Spacing.xxl },
   // `paddingBottom` is applied at the call site, from the live font scale —
   // TAB_BAR_CLEARANCE alone left the last row under the New workout pill, which
   // is what put it on top of the planner's hint line.
   //
-  // `paddingHorizontal: 20` (N498, was 16) — matches `ScreenHeader`'s own
-  // horizontal padding and every other tab's content inset, now that the
-  // header and the scope strip both render inside this same list instead of
-  // above it. See `headerInList` above for how the header itself opts back
-  // out of this padding rather than sitting 40pt in.
-  list: { paddingHorizontal: 20, gap: 12 },
+  // `paddingHorizontal: Spacing.gutter` (N498, was 16) — matches
+  // `ScreenHeader`'s own horizontal padding and every other tab's content
+  // inset, now that the header and the scope strip both render inside this
+  // same list instead of above it. See `headerInList` above for how the
+  // header itself opts back out of this padding rather than sitting in twice.
+  list: { paddingHorizontal: Spacing.gutter, gap: Spacing.md },
   // The list's own `gap` doesn't apply between a header and the first row, so
   // the spacing below the planner is the header's to own.
   //
-  // `marginTop: 16` (N498) restores the gap that used to come from `list`'s
-  // own top padding, back when the planner was the very first thing inside
-  // it — the scope strip now sits between the top of the list and this block.
-  planHeader: { gap: 18, marginTop: 16, marginBottom: 4 },
-  tileRow: { gap: 12 },
+  // `marginTop: Spacing.lg` (N498) restores the gap that used to come from
+  // `list`'s own top padding, back when the planner was the very first thing
+  // inside it — the scope strip now sits between the top of the list and
+  // this block.
+  planHeader: { gap: 18, marginTop: Spacing.lg, marginBottom: Spacing.xs },
+  tileRow: { gap: Spacing.md },
   tile: {
     // `flex: 1` inside a two-column wrapper, so the pair share the row evenly
     // whatever the names do. A fixed width would break at large text sizes.
@@ -1130,54 +1145,63 @@ const styles = StyleSheet.create({
     // athlete sees it on first open. (A lone tile lands 6pt wider than a
     // paired one, half the row gap it no longer shares. Imperceptible.)
     maxWidth: '50%',
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 14,
-    backgroundColor: vola.surface,
+    ...Card.base,
     overflow: 'hidden',
   },
-  tileBody: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 10, gap: 2 },
-  tileName: { fontSize: 14, fontWeight: '700', lineHeight: 18 },
-  tileMeta: { fontSize: 11, color: vola.textDim },
+  tileBody: {
+    paddingHorizontal: Spacing.smPlus,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.smPlus,
+    gap: Spacing.xxs,
+  },
+  tileName: { ...Typography.body, fontWeight: '700', lineHeight: 18 },
+  // Plain small meta text, not the uppercase `eyebrow` role — only its
+  // fontSize is shared.
+  tileMeta: { fontSize: Typography.eyebrow.fontSize, color: vola.textDim },
+  // The primary card on this screen's "My workouts" scope — `Card.base` plus
+  // the glass wash (`<CardGlass />` at its JSX call site, first child so it
+  // paints under the rule/badge/body).
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 14,
-    backgroundColor: vola.surface,
+    ...Card.base,
     overflow: 'hidden',
   },
   cardRule: { width: 3, alignSelf: 'stretch' },
   cardBadge: {
     width: 40,
     height: 40,
+    // Circular (half the badge's own width) — not a card-token reference.
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 12,
+    marginLeft: Spacing.md,
   },
-  cardBody: { flex: 1, padding: 14, gap: 4 },
+  cardBody: { flex: 1, padding: Spacing.cardPadding, gap: Spacing.xs },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cardTitle: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
-  cardMeta: { fontSize: 13, color: vola.textMuted, textTransform: 'capitalize' },
+  cardMeta: { ...Typography.meta, color: vola.textMuted, textTransform: 'capitalize' },
   badge: {
-    fontSize: 11,
-    fontWeight: '700',
+    ...Typography.eyebrow,
     backgroundColor: vola.surfaceRaised,
-    paddingHorizontal: 8,
+    paddingHorizontal: Spacing.sm,
     paddingVertical: 3,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     overflow: 'hidden',
   },
-  empty: { alignItems: 'center', gap: 6, paddingTop: 48, paddingHorizontal: 24 },
+  empty: {
+    alignItems: 'center',
+    gap: Spacing.xsPlus,
+    paddingTop: Spacing.xxxl,
+    paddingHorizontal: Spacing.xl,
+  },
   emptyTitle: { fontSize: 17, fontWeight: '600' },
-  muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
+  muted: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
   // No `paddingHorizontal` of its own (N498, was 16) — it now renders inside
-  // `ListHeaderComponent`, inside `styles.list`'s own 20pt content padding,
+  // `ListHeaderComponent`, inside `styles.list`'s own gutter content padding,
   // the same one every card below it sits at. A second value here would
-  // stack on top of that 20, same trap `headerInList`'s own comment names.
-  error: { color: vola.danger, fontSize: 14, paddingTop: 10 },
+  // stack on top of that, same trap `headerInList`'s own comment names.
+  error: { ...Typography.body, color: vola.danger, paddingTop: Spacing.smPlus },
   // A compact pill in the corner, not a full-width slab.
   //
   // It was `left: 16, right: 16` with 16pt of vertical padding — an accent bar
@@ -1193,9 +1217,9 @@ const styles = StyleSheet.create({
     bottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    paddingVertical: 12,
+    gap: Spacing.sm,
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.md,
     paddingHorizontal: 18,
     // NO GLOW (N108/N444, #741). This used to bloom the accent colour behind
     // the pill on the "flat pill can't separate from scrolling content"
@@ -1211,16 +1235,21 @@ const styles = StyleSheet.create({
   // No `color` here: the call site always sets it from `accent.on`, and a
   // default that is never used is a wrong-colour bug waiting for the first
   // caller who renders this without one.
-  fabText: { fontWeight: '700', fontSize: 15 },
+  fabText: { ...Typography.emphasis, fontWeight: '700' },
 
   // A Modal renders outside the navigator, so nothing paints behind it —
   // this is the one place a screen-level container has to set its own
   // background. Without it the sheet falls through to iOS's default
   // white and the near-white body text disappears into it.
-  sheet: { flex: 1, paddingHorizontal: 20, paddingTop: 20, backgroundColor: vola.bg },
+  sheet: {
+    flex: 1,
+    paddingHorizontal: Spacing.gutter,
+    paddingTop: Spacing.gutter,
+    backgroundColor: vola.bg,
+  },
   // The gap moved here from `sheet` with the content: it belongs to the
   // scrolling body now, not to the fixed shell holding the header.
-  sheetBody: { gap: 12, paddingTop: 12, paddingBottom: 24 },
+  sheetBody: { gap: Spacing.md, paddingTop: Spacing.md, paddingBottom: Spacing.xl },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sheetTitle: { fontSize: 17, fontWeight: '700' },
   link: { fontSize: 16, fontWeight: '600' },
@@ -1229,37 +1258,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.md,
     fontSize: 16,
     color: vola.text,
     backgroundColor: vola.surface,
-    marginTop: 8,
+    marginTop: Spacing.sm,
   },
-  label: { fontSize: 15, fontWeight: '600', marginTop: 8 },
-  hint: { fontSize: 12, color: vola.textMuted },
-  chips: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  label: { ...Typography.emphasis, marginTop: Spacing.sm },
+  hint: { ...Typography.caption, color: vola.textMuted },
+  chips: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
   chip: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.cardPadding,
   },
   chipActive: {},
-  chipText: { fontSize: 14, fontWeight: '600' },
+  chipText: { ...Typography.body, fontWeight: '600' },
   chipTextActive: {},
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.lg },
   toggleBody: { flex: 1 },
   switch: {
     width: 50,
     height: 30,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     backgroundColor: vola.line,
     padding: 3,
     justifyContent: 'center',
   },
   switchOn: {},
-  knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
+  knob: { width: 24, height: 24, borderRadius: Radius.pill, backgroundColor: vola.surface },
   knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
 });

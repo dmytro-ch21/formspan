@@ -10,9 +10,13 @@ import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { HRSessionReport } from '@/components/HRSessionReport';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
+import { CardGlass } from '@/components/ui/CardGlass';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import { vola } from '@/constants/Colors';
+import { Card } from '@/constants/Card';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import {
   averagePaceSecPerKm,
   displayDistanceMeters,
@@ -717,6 +721,9 @@ export default function RunningSessionScreen() {
             accessibilityHint="Your run distance, charted over time"
             testID="running-trend-link"
           >
+            {/* N508 — the glass wash, first so the row's text/chevron paint
+                over it. See `CardGlass`'s own doc comment for the material. */}
+            <CardGlass />
             <View style={styles.trendRowText}>
               <Text style={styles.trendRowTitle}>Distance over time</Text>
               <Text style={styles.trendRowNote}>Every run, session by session.</Text>
@@ -838,14 +845,20 @@ const styles = StyleSheet.create({
   // what used to be each child's own `marginTop`/`marginHorizontal` (see
   // `sourceBadge`, `trendRow`, `primary` below) — a fixed gap plus a
   // per-child margin would have doubled the space between exactly the pairs
-  // this ticket found colliding at 0px.
-  finishedScroll: { flexGrow: 1, padding: 20, gap: 16, paddingBottom: 48 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
+  // this ticket found colliding at 0px. N508 restates the same three raw
+  // numbers as tokens (`gutter`, `lg`, `xxxl`) without reopening the fix.
+  finishedScroll: {
+    flexGrow: 1,
+    padding: Spacing.gutter,
+    gap: Spacing.lg,
+    paddingBottom: Spacing.xxxl,
+  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md, padding: Spacing.xl },
   map: { flex: 1 },
   marker: {
     width: 16,
     height: 16,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     backgroundColor: vola.lime,
     borderWidth: 2,
     borderColor: vola.bg,
@@ -857,29 +870,32 @@ const styles = StyleSheet.create({
     right: 12,
     backgroundColor: vola.warn,
     borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
   },
-  signalBannerText: { color: vola.bg, fontWeight: '700', fontSize: 13, textAlign: 'center' },
+  signalBannerText: { ...Typography.meta, color: vola.bg, fontWeight: '700', textAlign: 'center' },
+  // N508 — `paddingHorizontal` matches `Spacing.gutter` rather than staying
+  // its own 16, so this sheet's content lines up with every other screen's
+  // gutter now that Running shares the same token.
   sheet: {
     backgroundColor: vola.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingTop: 16,
-    paddingHorizontal: 16,
-    gap: 12,
+    paddingTop: Spacing.lg,
+    paddingHorizontal: Spacing.gutter,
+    gap: Spacing.md,
   },
-  splits: { maxHeight: 120, gap: 2 },
+  splits: { maxHeight: 120, gap: Spacing.xxs },
   splitRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingVertical: Spacing.xsPlus,
     borderBottomWidth: 1,
     borderBottomColor: vola.line,
   },
-  splitLabel: { color: vola.textMuted, fontSize: 13 },
-  splitValue: { fontWeight: '600', fontSize: 13 },
-  controls: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  splitLabel: { ...Typography.meta, color: vola.textMuted },
+  splitValue: { ...Typography.meta, fontWeight: '600' },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.xs },
   // 64pt — well past the 44pt minimum touch target, on the assumption this is
   // tapped mid-stride with an unsteady hand, not carefully at a bench.
   control: {
@@ -903,67 +919,70 @@ const styles = StyleSheet.create({
   },
   finishText: { color: vola.bg },
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
-  muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
-  errorText: { color: vola.danger, fontSize: 15, textAlign: 'center' },
-  // N506/#883: `marginTop`/`marginHorizontal` used to carry this row's
+  muted: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
+  errorText: { fontSize: Typography.emphasis.fontSize, color: vola.danger, textAlign: 'center' },
+  // N506/#883: `marginTop`/`marginHorizontal` used to carry `sourceBadge`'s
   // spacing single-handedly (`finishedScroll` had no `gap` at all) — both are
   // gone now that the parent's `gap` does it, so this only sets its own
-  // shape.
+  // shape. N508 restates the raw numbers as tokens without reopening that.
   sourceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: Spacing.xsPlus,
     alignSelf: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+    paddingVertical: Spacing.xsPlus,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
     borderWidth: 1,
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  sourceBadgeText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
+  sourceBadgeText: { ...Typography.caption, color: vola.textMuted },
   // N506/#883: see `sourceBadge` above — `marginHorizontal`/`marginTop` are
   // gone for the same reason (the parent's `padding`+`gap` now supplies
   // both), which is also what fixed this row previously colliding with
-  // `HRSessionReport` at a 0px gap.
+  // `HRSessionReport` at a 0px gap. N508 additionally makes this the
+  // primary card on the screen — `Card.base` plus the glass wash
+  // (`<CardGlass />` at its JSX call site), with `cardPadding` for its own
+  // inner padding — but does NOT reintroduce a `marginHorizontal`/`marginTop`
+  // on top of that: `finishedScroll`'s own gutter and gap already place it.
   trendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: vola.line,
-    backgroundColor: vola.surface,
+    gap: Spacing.md,
+    paddingVertical: Spacing.cardPadding,
+    paddingHorizontal: Spacing.cardPadding,
+    ...Card.base,
+    overflow: 'hidden',
   },
   trendRowPressed: { opacity: 0.85 },
-  trendRowText: { flex: 1, gap: 2 },
-  trendRowTitle: { fontSize: 15, fontWeight: '700' },
-  trendRowNote: { color: vola.textMuted, fontSize: 13 },
+  trendRowText: { flex: 1, gap: Spacing.xxs },
+  trendRowTitle: { ...Typography.emphasis, fontWeight: '700' },
+  trendRowNote: { ...Typography.meta, color: vola.textMuted },
   secondary: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 54,
   },
-  secondaryText: { fontWeight: '700', fontSize: 15 },
+  secondaryText: { ...Typography.emphasis, fontWeight: '700' },
   // N506/#883: `marginHorizontal`/`marginBottom` are gone for the same
   // reason as `sourceBadge`/`trendRow` above — `finishedScroll`'s own
   // `padding`+`gap`+`paddingBottom` now supply all three, and this is the
   // only place this style is used (the "Open Settings" button on the
-  // permission-denied branch is `secondary`, a different style).
+  // permission-denied branch is `secondary`, a different style). Same for
+  // `primary` below.
   primary: {
     backgroundColor: vola.lime,
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 54,
   },
-  primaryText: { fontWeight: '700', fontSize: 15, color: vola.bg },
+  primaryText: { ...Typography.emphasis, fontWeight: '700', color: vola.bg },
 });
