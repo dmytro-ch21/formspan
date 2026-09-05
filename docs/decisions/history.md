@@ -56837,6 +56837,42 @@ pre-change file. `pnpm run typecheck:mobile` clean.
 None new. This closes out the scroll-behavior half of #869 the same way N503
 closed out the title-visibility half.
 
+### Follow-up: a real safe-area regression, caught by `frontend-reviewer`
+
+The pass above left `workouts.tsx`'s error banner (`{error && <Text ... />}`)
+as a sibling directly above the `KeyboardAwareFlatList`, unchanged from before
+this ticket touched the file. That was correct before N498 — `ScreenHeader`
+was a sibling above it too, so the banner still rendered below the
+safe-area-padded header. Once `ScreenHeader` moved INTO the list's own
+`ListHeaderComponent`, the still-external banner ended up rendering ABOVE it
+instead — flush against the top of the screen, with none of `ScreenHeader`'s
+`insets.top` padding, and ahead of the title rather than below it.
+
+Fixed by moving the error `<Text>` into `ListHeaderComponent`, directly below
+the scope strip — its old relative position, just inside the list now instead
+of outside it. Its own `paddingHorizontal: 16` was dropped too: inside the
+list it already sits at the 20pt `styles.list` gives every other row, and a
+second value on top of that would have reproduced the exact padding-stacking
+bug this ticket's own `headerInList` fix (above) exists to avoid.
+
+Added `'renders the error banner below the header, not flush against the
+safe area'` to `workoutsScreen.test.tsx` — asserts `screen-header`'s position
+in the rendered tree comes before `workouts-error`'s, not just that both
+exist. Mutation-verified: reverted the fix, confirmed the test fails with a
+real assertion error (`Expected: > 2, Received: 1`), restored, confirmed
+green again (24/24 across `workoutsScreen.test.tsx` +
+`screenHeader.test.tsx`).
+
+Two more `frontend-reviewer` findings, both `[suggestion]`, left as-is:
+`ScreenHeader`/the scope strip now remount on every scope switch (previously
+true siblings outside the `key={scope}`-remounted list, now inside it) —
+judged low-risk since `SyncChip` re-subscribes cheaply and `showWordmark`
+defaults true pre-measurement, but genuinely untested for VoiceOver focus
+continuity on a real device; and the `-20`/`20` padding-cancellation pairing
+between `headerInList` and `ScreenHeader`'s own `wrap` style is a magic-number
+coupling with no compiler-enforced link, which a future padding change to
+`ScreenHeader` could silently break. Neither blocks this fix.
+
 ## Open items / known gaps as of this entry
 
 

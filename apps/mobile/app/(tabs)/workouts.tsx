@@ -287,12 +287,6 @@ export default function WorkoutsScreen() {
 
   return (
     <View style={styles.container} testID="workouts-screen">
-      {error && (
-        <Text style={styles.error} accessibilityLiveRegion="polite" testID="workouts-error">
-          {error}
-        </Text>
-      )}
-
       <KeyboardAwareFlatList
         /*
           Keyed on scope, and that is not cosmetic: React Native throws
@@ -430,6 +424,18 @@ export default function WorkoutsScreen() {
                 );
               })}
             </View>
+            {/* Below the header and the scope strip, same relative position
+                as before N498 moved both of those into this list — an error
+                here is content-area feedback, not chrome, and it needs the
+                20pt inherited from `styles.list`'s own `paddingHorizontal`
+                (not a second one of its own — see `styles.error`'s comment)
+                rather than sitting flush against the safe-area-padded header
+                above it. */}
+            {error && (
+              <Text style={styles.error} accessibilityLiveRegion="polite" testID="workouts-error">
+                {error}
+              </Text>
+            )}
             {/* `mine` only: the public tab is a browse surface over other
                 people's templates, and your own week has no business on it. */}
             {scope === 'mine' && (
@@ -1167,7 +1173,11 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: 6, paddingTop: 48, paddingHorizontal: 24 },
   emptyTitle: { fontSize: 17, fontWeight: '600' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
-  error: { color: vola.danger, fontSize: 14, paddingHorizontal: 16, paddingTop: 10 },
+  // No `paddingHorizontal` of its own (N498, was 16) — it now renders inside
+  // `ListHeaderComponent`, inside `styles.list`'s own 20pt content padding,
+  // the same one every card below it sits at. A second value here would
+  // stack on top of that 20, same trap `headerInList`'s own comment names.
+  error: { color: vola.danger, fontSize: 14, paddingTop: 10 },
   // A compact pill in the corner, not a full-width slab.
   //
   // It was `left: 16, right: 16` with 16pt of vertical padding — an accent bar
