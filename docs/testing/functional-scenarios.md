@@ -19143,3 +19143,53 @@ the flow happened to be pushed from.
   arithmetic over the athlete's own already-scoped food entries. The
   existing `Destroy` refusal for a `Default: true` preset (already covering
   water) now also covers caffeine, with no new authorization logic.
+
+## N506 — the finished running screen's layout and its "0 yd" distance (`apps/mobile/app/running/[id].tsx`, `apps/mobile/lib/running.ts`, #883)
+
+No new endpoint or route — a layout fix to the finished-run branch of the
+existing running detail screen (`app/running/[id].tsx`), plus a read-back
+fix so it prefers a run's stored `distance_m`/`avg_pace_sec_per_km` over a
+re-derivation from `route_points`. The live-tracking branch (a separate
+render path in the same file) is untouched by either change.
+
+- Open a finished run whose source is `phone_gps` or `manual` (any run
+  tracked live by this device, or Training History's own manually-logged
+  entry) — the source badge, the distance/time/pace `StatRow`, the HR
+  report, "Distance over time" and the Done button all read with a single
+  consistent side margin and visible vertical spacing between every pair —
+  no card touches the screen edge, and no two elements sit flush against
+  each other.
+- Open a finished run imported from Apple Health that DOES carry a GPS
+  route (`source: 'healthkit'`) — same layout check as above, plus the
+  "Imported from Apple Health" badge renders above the stat row with
+  visible spacing on both sides of it.
+- **Open a finished run imported from Apple Health with NO recorded
+  route** (logged by hand in the Health app, or a watch workout with route
+  access denied) but a real HealthKit-reported total distance — the
+  distance stat shows that real figure (e.g. "3.1 mi"), not "0 yd". This is
+  the exact reported bug: `route_points` empty, `distance_m` a real stored
+  number, and the finished screen previously ignored the stored value and
+  re-derived from the (empty) track.
+- A run with genuinely no distance data at all — neither a stored
+  `distance_m` nor a route to derive one from (a malformed or very old
+  local row) — shows `—` for distance, the same honest missing-state
+  `formatDistance` already renders for `null`, never a fabricated `0`. Pace
+  shows `—` too in this case.
+- A locally-tracked (`phone_gps`) run reopened after finishing: the
+  distance/pace shown match what `finish()` originally computed and saved
+  — confirms the stored-value read-back agrees with (not merely doesn't
+  contradict) a live-derived figure for the common case, since both are the
+  same number by construction.
+- Regression: the LIVE in-progress tracking screen (still `status ===
+  'tracking'`/`'paused'`) is unaffected — its own distance/pace continue to
+  update in real time from the GPS track as points arrive, since a
+  still-running session has no stored `distance_m` yet to prefer.
+- **NEEDS HUMAN EVIDENCE**: reopen a real route-less HealthKit import on a
+  device and confirm the distance reads correctly instead of "0 yd", and
+  that the finished screen no longer looks crowded at default and larger
+  Dynamic Type sizes.
+
+### Auth/security
+
+- No new endpoint or auth surface — both fixes are local-read and pure
+  layout/display changes over data this screen already had access to.

@@ -15,6 +15,8 @@ import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import { vola } from '@/constants/Colors';
 import {
   averagePaceSecPerKm,
+  displayDistanceMeters,
+  displayPaceSecPerKm,
   elevationGainMeters,
   emptyDetail,
   RUN_EXERCISE_ID,
@@ -131,6 +133,16 @@ export default function RunningSessionScreen() {
   // already-finished branch below, where reopening a HealthKit import from
   // Training History reads back whatever source it was saved with.
   const [source, setSource] = useState<RunningDetail['source']>('phone_gps');
+  // N506/#883: the full read-back detail for an already-finished run, kept
+  // alongside `points`/`elapsedSeconds` rather than folded into them —
+  // `displayDistanceMeters`/`displayPaceSecPerKm` need `distance_m` and
+  // `avg_pace_sec_per_km` too, and those have no other home in this screen's
+  // state (the live-tracking branch below has no use for either, since a
+  // still-running session has no stored value yet). `null` until the
+  // finished-load path below populates it; stays `null` for a session that
+  // finishes VIA this screen (`finish()` navigates away immediately rather
+  // than re-rendering the finished branch off freshly-computed local state).
+  const [finishedDetail, setFinishedDetail] = useState<RunningDetail | null>(null);
 
   const mapRef = useRef<MapView | null>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
@@ -189,6 +201,20 @@ export default function RunningSessionScreen() {
   const paceSecPerKm = useMemo(
     () => averagePaceSecPerKm(distanceMeters, elapsedSeconds),
     [distanceMeters, elapsedSeconds],
+  );
+  // N506/#883: the FINISHED branch's own distance/pace — deliberately not
+  // `distanceMeters`/`paceSecPerKm` above, which re-derive from the live
+  // `points`/`elapsedSeconds` state and fabricate a "0 yd" for a HealthKit
+  // import with a real stored distance but no route. See
+  // `displayDistanceMeters`'s doc comment in `lib/running.ts` for why the
+  // stored value is always preferred once one exists.
+  const finishedDistanceM = useMemo(
+    () => (finishedDetail ? displayDistanceMeters(finishedDetail) : null),
+    [finishedDetail],
+  );
+  const finishedPaceSecPerKm = useMemo(
+    () => (finishedDetail ? displayPaceSecPerKm(finishedDetail) : null),
+    [finishedDetail],
   );
 
   /**
@@ -250,6 +276,7 @@ export default function RunningSessionScreen() {
           pointsRef.current = existing.route_points;
           if (existing.duration_seconds != null) setElapsedSeconds(existing.duration_seconds);
           setSource(existing.source);
+          setFinishedDetail(existing);
         }
         setStatus('finished');
         return;
@@ -655,9 +682,9 @@ export default function RunningSessionScreen() {
             </View>
           )}
           <StatRow>
-            <Stat label="distance" value={formatDistance(distanceMeters, units)} icon="running" />
+            <Stat label="distance" value={formatDistance(finishedDistanceM, units)} icon="running" />
             <Stat label="time" value={formatElapsed(elapsedSeconds)} />
-            <Stat label="pace" value={formatPace(paceSecPerKm, units)} />
+            <Stat label="pace" value={formatPace(finishedPaceSecPerKm, units)} />
           </StatRow>
 
           {/* N488/#849 — the same HR report BJJ and strength show, reused
@@ -792,8 +819,17 @@ export default function RunningSessionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  finishedScroll: { flexGrow: 1, paddingBottom: 24 },
+  container: { flex: 1, backgroundColor: vola.bg },
+  // N506/#883: one uniform inset for every child, matching BJJ's
+  // (`bjj/session/[id].tsx`) and strength's (`session/[id].tsx`) own
+  // `padding`+`gap` convention — `HRSessionReport` and `StatRow` are both
+  // written full-bleed on purpose, assuming a padded parent, and this was
+  // the only one of their three consumers not providing one. `gap` replaces
+  // what used to be each child's own `marginTop`/`marginHorizontal` (see
+  // `sourceBadge`, `trendRow`, `primary` below) — a fixed gap plus a
+  // per-child margin would have doubled the space between exactly the pairs
+  // this ticket found colliding at 0px.
+  finishedScroll: { flexGrow: 1, padding: 20, gap: 16, paddingBottom: 48 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   map: { flex: 1 },
   marker: {
@@ -859,12 +895,15 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
   errorText: { color: vola.danger, fontSize: 15, textAlign: 'center' },
+  // N506/#883: `marginTop`/`marginHorizontal` used to carry this row's
+  // spacing single-handedly (`finishedScroll` had no `gap` at all) — both are
+  // gone now that the parent's `gap` does it, so this only sets its own
+  // shape.
   sourceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'center',
-    marginTop: 12,
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 999,
@@ -873,12 +912,14 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
   },
   sourceBadgeText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
+  // N506/#883: see `sourceBadge` above — `marginHorizontal`/`marginTop` are
+  // gone for the same reason (the parent's `padding`+`gap` now supplies
+  // both), which is also what fixed this row previously colliding with
+  // `HRSessionReport` at a 0px gap.
   trendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginHorizontal: 16,
-    marginTop: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 14,
@@ -901,6 +942,11 @@ const styles = StyleSheet.create({
     minHeight: 54,
   },
   secondaryText: { fontWeight: '700', fontSize: 15 },
+  // N506/#883: `marginHorizontal`/`marginBottom` are gone for the same
+  // reason as `sourceBadge`/`trendRow` above — `finishedScroll`'s own
+  // `padding`+`gap`+`paddingBottom` now supply all three, and this is the
+  // only place this style is used (the "Open Settings" button on the
+  // permission-denied branch is `secondary`, a different style).
   primary: {
     backgroundColor: vola.lime,
     borderRadius: 14,
@@ -908,8 +954,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 54,
-    marginHorizontal: 16,
-    marginBottom: 24,
   },
   primaryText: { fontWeight: '700', fontSize: 15, color: vola.bg },
 });
