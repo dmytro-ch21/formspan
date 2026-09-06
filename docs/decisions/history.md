@@ -58588,7 +58588,7 @@ exactly as it does today. Denormalising evidence to outlive the catalog
 row solves a problem retiring does not have to create — the row isn't
 going anywhere.
 
-**What changed, concretely (migration 000094):**
+**What changed, concretely (migration 000095):**
 
 1. `techniques.status` gains `retired`. `technique_revisions.action` gains
    `retire` and `reactivate` so the audit trail names which happened,
@@ -58688,7 +58688,7 @@ reverse does not exist and was not introduced):
   orphaning the tag and cascading away the item. That is the literal
   "must fail against main today" the acceptance criteria asked for,
   measured rather than assumed. **Mutation check, performed by hand**: with
-  000094 applied, manually reverting *only* the two `ALTER TABLE`
+  000095 applied, manually reverting *only* the two `ALTER TABLE`
   statements (back to `SET NULL`/`CASCADE`, leaving the status column and
   Go code untouched) and re-running — the test goes red again, on the same
   assertion, for the same reason; restoring the constraints and re-running
@@ -59564,6 +59564,14 @@ planning attempt itself (`` `${pendingPick.day}-${pendingPick.sport}` ``, or
 Re-ran the full relevant mobile test suite (152 tests across
 `plan.test.ts`/`planTime.test.ts`/`todayScreen.test.tsx`/`schema.test.ts`)
 and the full `pnpm run verify` chain — both green — after the fix.
+
+**Migration-number collision, caught and resolved (F23/#523).** This
+branch and N126/#520 (entry immediately above) independently claimed
+`000094` against the identical `origin/main` base — invisible in either
+branch's own diff, exactly as this repo's "claim at rebase time" rule
+warns about. N126 merged first (#909); this branch's migration is
+renumbered to `000095` at rebase time, with every code comment and
+history.md reference to the old number updated to match.
 
 
 ## Open items / known gaps as of this entry

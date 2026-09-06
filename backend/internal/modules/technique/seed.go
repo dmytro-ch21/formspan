@@ -86,7 +86,7 @@ func RulesetSeedData() ([]Ruleset, error) {
 //
 // StatusRetired was added for F23/#523: a technique that is no longer taught
 // but has real evidence against it (a curriculum item, a session tag) — see
-// migration 000094 and content_postgres.go's Retire/Reactivate for the full
+// migration 000095 and content_postgres.go's Retire/Reactivate for the full
 // reasoning. It is deliberately a THIRD state and not a repurposing of draft:
 // draft means "never shown to an athlete yet", retired means the opposite —
 // "was shown, was trained, and the catalog says so no longer" — and the two

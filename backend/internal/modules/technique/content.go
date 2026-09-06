@@ -80,7 +80,7 @@ type Revision struct {
 // history as a story, not so fine that adding a verb needs a migration.
 //
 // ActionRetire/ActionReactivate were added for F23/#523, alongside migration
-// 000094's widened technique_revisions_action_known CHECK.
+// 000095's widened technique_revisions_action_known CHECK.
 const (
 	ActionCreate     = "create"
 	ActionUpdate     = "update"
@@ -123,7 +123,7 @@ type ContentRepository interface {
 	// RetireTechnique marks a published technique 'retired': no longer
 	// recommended or taggable-through-search, but never deleted and never
 	// unlinked from anything that already references it (F23/#523 — see
-	// migration 000094).
+	// migration 000095).
 	//
 	// WHERE status = 'published', matching Publish's own guard: retiring an
 	// id that is not currently published is ErrNotFound rather than a silent

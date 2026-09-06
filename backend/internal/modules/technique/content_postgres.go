@@ -195,7 +195,7 @@ func (r *PostgresRepository) Publish(ctx context.Context, id, actor string) (Tec
 // curriculum_items.technique_id are never read by this statement, let alone
 // written. A retired technique is still the row every existing tag and every
 // existing roadmap item points at — see postgres.go's Get, which is the read
-// path that has to keep resolving it, and migration 000094 for why the two
+// path that has to keep resolving it, and migration 000095 for why the two
 // foreign keys no longer need a SET NULL or a CASCADE to protect that: a real
 // DELETE of a referenced row is refused outright now, and this path never
 // attempts one.

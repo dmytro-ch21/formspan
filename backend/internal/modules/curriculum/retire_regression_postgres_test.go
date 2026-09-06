@@ -15,7 +15,7 @@ import (
 // F23/#523: retiring a technique from the library was silently voiding every
 // athlete's evidence for it and dropping it from every roadmap, with no error
 // anywhere. This file is the regression coverage — see docs/decisions/
-// history.md for the full trace and migration 000094 for the schema fix.
+// history.md for the full trace and migration 000095 for the schema fix.
 //
 // It lives in `curriculum`, not `technique`, because the bug is cross-module
 // by nature (a technique referenced from BOTH curriculum_items and
@@ -38,7 +38,7 @@ import (
 // MUTATION CHECK (performed by hand, per CLAUDE.md's "verify a check can
 // fail" — recorded in the PR description / history entry rather than
 // automated, since it means literally reverting a migration): revert
-// 000094's two `ALTER TABLE ... ADD CONSTRAINT ... ON DELETE RESTRICT`
+// 000095's two `ALTER TABLE ... ADD CONSTRAINT ... ON DELETE RESTRICT`
 // statements back to their original SET NULL / CASCADE and re-run this test
 // against a database migrated with that reverted file. `pool.Exec` at step 3
 // then returns nil instead of a foreign-key-violation error, `wantErr` below
