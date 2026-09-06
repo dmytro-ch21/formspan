@@ -7,9 +7,9 @@ import { HRTimelineChart } from '@/components/ui/HRTimelineChart';
 import { SectionHeader } from '@/components/ui/Section';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
-import { buildHRSessionReport, type HRZoneRow } from '@/lib/hrSessionReport';
+import { buildHRSessionReport, type HRExerciseRow, type HRZoneRow } from '@/lib/hrSessionReport';
 import type { HRTimelinePoint } from '@/lib/hrTimeline';
-import type { SessionMetrics } from '@/lib/biometric';
+import type { ExerciseHR, SessionMetrics } from '@/lib/biometric';
 
 /**
  * The per-session heart-rate report — N488/#849. One component, reused
@@ -36,11 +36,20 @@ import type { SessionMetrics } from '@/lib/biometric';
  * case, so it is additive exactly the way `sessionRPE` was. See
  * `lib/hrTimeline.ts`'s doc comment for why this renders the raw shape
  * rather than a classified drill/roll boundary.
+ *
+ * `exerciseHR`/`exerciseNames` (N490/#851) are optional, strength-only
+ * additions: BJJ and running have no per-exercise concept, so their call
+ * sites simply omit both and get no breakdown section, rather than this
+ * component branching on sport itself. Independent of `hrTimeline` above —
+ * one caller (BJJ) can pass a timeline with no exercise breakdown, another
+ * (strength) the reverse, and both can pass neither.
  */
 export function HRSessionReport({
   metrics,
   sessionRPE = null,
   hrTimeline,
+  exerciseHR = null,
+  exerciseNames = {},
   testID = 'hr-session-report',
 }: {
   metrics: SessionMetrics | null;
@@ -52,9 +61,19 @@ export function HRSessionReport({
    *  caller (`buildHRTimeline`). Omit, or pass `[]`, to render no timeline —
    *  the ordinary case for every screen except BJJ's today. */
   hrTimeline?: HRTimelinePoint[];
+  /** The per-exercise breakdown (N490/#851) — `null` for sports with no
+   *  per-exercise concept (BJJ, running). */
+  exerciseHR?: Pick<ExerciseHR, 'exercise_id' | 'avg_hr_bpm' | 'max_hr_bpm' | 'sample_count'>[] | null;
+  /** exercise_id -> display name, for labelling `exerciseHR` rows. Falls
+   *  back to the raw id for an exercise the caller's own catalog read
+   *  hasn't resolved yet — the same raw-id fallback this app's
+   *  `exerciseName = exercise?.name ?? set.exercise_id` idiom already uses
+   *  elsewhere for the identical reason (NOT `withExerciseNames`, which
+   *  falls back to `null` instead). */
+  exerciseNames?: Record<string, string>;
   testID?: string;
 }) {
-  const report = buildHRSessionReport(metrics, sessionRPE);
+  const report = buildHRSessionReport(metrics, sessionRPE, exerciseHR, exerciseNames);
 
   if (report.state === 'unavailable') {
     return (
@@ -106,6 +125,11 @@ export function HRSessionReport({
             body={[
               'TRIMP (training impulse) weighs every minute of this session by how hard your heart rate says it was — more minutes, or a higher zone, both push it up. It is a load number, not a grade: there is no target to hit.',
               'The five zones are bands of your estimated max heart rate — zone 1 (very light) through zone 5 (max effort). The breakdown below is minutes spent in each, only counting stretches with a real reading close enough together to trust.',
+              ...(report.perExercise.length > 0
+                ? [
+                    "By exercise, further down, is a rougher read on the same evidence — each exercise's window is a few minutes at most, so its reading count is often low. Read it as a direction (this movement ran hotter than that one), not a precise figure.",
+                  ]
+                : []),
             ]}
             testID={`${testID}-info`}
           />
@@ -146,6 +170,21 @@ export function HRSessionReport({
         </Text>
       )}
 
+      {report.perExercise.length > 0 && (
+        // N490/#851 — the per-exercise breakdown, strength-only today (the
+        // caller is what decides that, by whether it passes `exerciseHR`
+        // at all — see this component's own doc comment). Its own card,
+        // matching the zones section's shape, rather than folded into
+        // `hrStats`: this is per-EXERCISE evidence, a different question
+        // from the whole-session average/max sitting above it.
+        <RNView style={styles.zones} testID={`${testID}-by-exercise`}>
+          <Text style={styles.byExerciseLabel}>By exercise</Text>
+          {report.perExercise.map((ex) => (
+            <ExerciseHRRow key={ex.exerciseId} row={ex} testID={`${testID}-exercise-${ex.exerciseId}`} />
+          ))}
+        </RNView>
+      )}
+
       {report.effectiveness && (
         <RNView style={styles.effectiveness} testID={`${testID}-effectiveness`}>
           <Text style={styles.effectivenessHeadline}>{report.effectiveness.headline}</Text>
@@ -167,6 +206,25 @@ function ZoneRow({ row, testID }: { row: HRZoneRow; testID: string }) {
         <RNView style={[styles.zoneBarFill, { width: `${row.pct}%`, backgroundColor: row.color }]} />
       </RNView>
       <Text style={styles.zoneMinutes}>{row.minutes >= 1 ? `${Math.round(row.minutes)}m` : '<1m'}</Text>
+    </RNView>
+  );
+}
+
+function ExerciseHRRow({ row, testID }: { row: HRExerciseRow; testID: string }) {
+  return (
+    <RNView style={styles.exerciseRow} testID={testID}>
+      <Text style={styles.exerciseName} numberOfLines={1}>
+        {row.exerciseName}
+      </Text>
+      <Text style={styles.exerciseFigures}>
+        {row.avgHR} avg · {row.maxHR} max bpm
+      </Text>
+      {/* An exercise's own window is short, so its sample count is often
+          in the single digits — shown rather than hidden, the same
+          honesty role sample_count already plays at the session level. */}
+      <Text style={styles.exerciseSampleCount}>
+        {row.sampleCount} reading{row.sampleCount === 1 ? '' : 's'}
+      </Text>
     </RNView>
   );
 }
@@ -230,4 +288,14 @@ const styles = StyleSheet.create({
   effectiveness: { paddingHorizontal: 2, gap: 2 },
   effectivenessHeadline: { fontSize: 13, fontWeight: '700', color: vola.text },
   effectivenessDetail: { fontSize: 12, color: vola.textMuted, lineHeight: 18 },
+
+  byExerciseLabel: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
+  exerciseRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  exerciseName: { flex: 1, fontSize: 13, color: vola.text },
+  exerciseFigures: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+    color: vola.textMuted,
+  },
+  exerciseSampleCount: { width: 62, textAlign: 'right', fontSize: 11, color: vola.textDim },
 });

@@ -19640,3 +19640,82 @@ names a workout containing the requested exercise.
   rather than leaking that workout's protocol data.
 - No PII or secret is added by any new field here — every value is a
   training-protocol number or enum.
+## N490 — strength: per-exercise heart rate, backed by real per-set completion timing (`backend/internal/modules/session` — `session_sets.performed_at`, `backend/internal/modules/biometric` — `ExerciseHR`/`ListExerciseHR`/`GET /v1/biometric/sessions/{id}/exercise-hr`, `apps/mobile/lib/sessions.ts`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/lib/hrSessionReport.ts`, `apps/mobile/components/HRSessionReport.tsx`)
+
+The schema half N488 explicitly deferred: a session's whole-session HR
+report (N488/#849) now grows a per-exercise breakdown for strength,
+built on a new `performed_at` timestamp captured live at the moment each
+set is ticked done — not derived from when the session happens to be saved.
+
+### Happy path
+
+- Log a strength session on mobile, ticking each set done as you go (or
+  running a work countdown to completion) rather than backfilling
+  everything at once. Finish the session.
+- On the session-detail screen, once the whole-session HR report renders
+  as `'full'` (real samples, a real HRmax, at or above the sample
+  threshold — same gate N488 already established), a "By exercise" card
+  appears beneath the zone breakdown, listing each exercise in the order
+  it was trained, each row showing avg/max bpm and how many readings that
+  figure is built from (e.g. "3 readings").
+- A heavier compound movement (e.g. back squat) reads a visibly higher
+  avg HR than a lighter accessory movement (e.g. lateral raise) logged
+  later in the same session with genuine rest between them.
+- Tapping the same ⓘ next to "HEART RATE" now includes one more sentence
+  explaining the per-exercise breakdown is a rougher read on the same
+  evidence.
+- BJJ and running session-detail screens are unaffected — they never pass
+  per-exercise data to `<HRSessionReport>`, and render exactly as N488
+  already specified, with no "By exercise" section at all.
+
+### Edge cases & errors
+
+- **Un-ticking a set, then re-ticking it later**: the set's `performed_at`
+  is refreshed to the second tick's real time, not the first — a
+  correction means the earlier claim is gone, not stacked.
+- **A set logged before this shipped, or entered as a reflection well
+  after training** (no live tick ever happened): that set contributes
+  nothing to any exercise's window — `performed_at` stays `null` forever
+  for those rows, and the backend excludes an exercise with no timestamped
+  completed set from the breakdown entirely, rather than showing it at
+  zero.
+- **An exercise whose derived time window happens to contain zero
+  heart-rate samples** (a quiet gap in Watch sampling): that exercise is
+  simply absent from the "By exercise" list — never a 0 bpm row.
+- **The whole-session report is `'limited'` or `'unavailable'`** (sparse
+  samples, no HRmax, no HR evidence at all): NO "By exercise" section
+  renders, even if per-exercise data would otherwise exist — a
+  per-exercise slice of evidence that didn't clear the whole-session bar
+  must not appear to be more trustworthy than the session-level numbers
+  it was built from.
+- **Swapping an exercise mid-session**: the old exercise's completed sets
+  keep their real `performed_at` and still contribute to ITS window; the
+  new exercise starts with `completed: false` and no `performed_at`, same
+  as any freshly added set.
+- **A session with only one set of some exercise**: that exercise still
+  gets a real (non-zero-width) window and, if a sample falls in it, a row
+  in the breakdown — a single-set exercise is not silently dropped for
+  lacking a second timestamp to bound a range with.
+- **The exercise-HR fetch fails, or the session hasn't ended**: no
+  breakdown section renders; the rest of the HR report (avg/max, TRIMP,
+  zones) is unaffected — best-effort, matching every other non-critical
+  fetch on this screen.
+
+### Auth/security
+
+- `GET /v1/biometric/sessions/{id}/exercise-hr` inherits the same
+  ownership check as every other session/biometric endpoint: another
+  user's session id answers 404, indistinguishable from a nonexistent
+  one.
+
+### Not yet covered (recorded as an open gap, not silently skipped)
+
+- **NEEDS HUMAN EVIDENCE**: log a real strength session with distinct rest
+  periods between exercises on a physical device with a real Apple Watch,
+  and confirm the per-exercise breakdown plausibly tracks real intensity
+  differences (a heavy compound reading higher than an accessory
+  movement) rather than a flat, uniform number across every exercise. No
+  test in this repo's suite can verify a real wearable's actual sampling
+  behavior during an actual workout.
+- BJJ's equivalent (drill-vs-roll HR segmentation) is a separate ticket,
+  N491/#852, with its own schema questions.

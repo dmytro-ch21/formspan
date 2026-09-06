@@ -2028,6 +2028,38 @@ components:
           type: number
           format: double
 
+    ExerciseHR:
+      type: object
+      required: [exercise_id, avg_hr_bpm, max_hr_bpm, sample_count]
+      description: >
+        One exercise's heart-rate readout within a single session — N490/#851,
+        extending SessionMetrics' whole-session numbers to the granularity a
+        strength athlete actually asked for ("what was my heart rate on
+        squats, versus lateral raises"). Computed live from whichever
+        `session_sets.performed_at` values exist for that exercise — see
+        `GET /biometric/sessions/{sessionID}/exercise-hr`'s own description
+        for the join-granularity decision (per exercise, not per set) and why.
+
+
+        Never reported at 0 for a genuinely absent reading: an exercise with
+        no completed set carrying a real `performed_at`, or whose derived
+        window contains zero heart_rate samples, is excluded from the list
+        entirely — the same "absent, not zero" stance `SessionMetrics.trimp`
+        already takes.
+      properties:
+        exercise_id: { type: string, readOnly: true }
+        avg_hr_bpm: { type: integer }
+        max_hr_bpm: { type: integer }
+        sample_count:
+          type: integer
+          description: >
+            How many heart_rate samples this exercise's window was computed
+            from — often small, since an exercise's own window is a few
+            minutes at most. A client should read a low count as low
+            confidence rather than hide the row outright, the same honesty
+            role `SessionMetrics.sample_count` already plays at the whole-
+            session level.
+
     Error:
       type: object
       required: [error]
@@ -3834,6 +3866,31 @@ components:
             Defaults to `false` when omitted on write — a set the client
             didn't explicitly mark done is treated as planned, not
             performed.
+        performed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            The real moment this set was actually completed — N490/#851 —
+            stamped by the client the instant it ticks the set done, never
+            derived from when the session happened to be saved.
+
+
+            That distinction matters because `created_at` cannot serve it:
+            this API replaces a session's whole set list on every save
+            (`PUT .../sets`), so a stored `created_at` always reads as "the
+            last time this session was saved", identical across every set in
+            it — worthless for anything that needs to know WHEN a set
+            happened relative to another.
+
+
+            NULL is UNRECORDED, and stays that way for a great many rows —
+            every set logged before this field existed, and any set entered
+            as a reflection well after training rather than ticked live. A
+            reader deriving a per-exercise heart-rate window
+            (`GET .../exercise-hr`) simply excludes a set with no
+            `performed_at`, the same "absent, not zero" stance this API
+            already takes on `SessionMetrics`' own figures.
 
     Session:
       type: object
@@ -9431,6 +9488,68 @@ paths:
                 required: [metrics]
                 properties:
                   metrics: { $ref: "#/components/schemas/SessionMetrics" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /biometric/sessions/{sessionID}/exercise-hr:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: List one avg/max heart-rate readout per exercise within a session
+      operationId: listBiometricExerciseHR
+      description: >
+        N490/#851 — the per-exercise HR breakdown a strength athlete asked
+        for on top of N488's whole-session report. Computed LIVE on every
+        call, unlike `.../metrics`: nothing here is persisted, so there is
+        no separate compute-then-read pair of endpoints for it.
+
+
+        **Join granularity: per exercise, not per set.** Every
+        `session_sets` row sharing one `exercise_id` is grouped into a
+        single time window (from its earliest completed set's
+        `performed_at`, widened backward to cover that set's own working
+        time, through its latest), rather than reading each set's own gap to
+        its neighbours — a single set's own window is routinely shorter than
+        a real wearable's background sampling interval and would contain
+        zero evidence far more often than an exercise's whole block does.
+        See `biometric.exerciseHRWindow` (`trimp.go`) for the exact rule and
+        the full reasoning, and this ticket's history entry for the
+        decision record.
+
+
+        Requires the session to have ended, for the same reason
+        `POST .../metrics` does: an in-progress session's latest exercise has
+        an open-ended window.
+
+
+        An exercise with no completed set carrying a real `performed_at`
+        (never ticked live, or logged before N490 shipped), or whose window
+        contains zero heart_rate samples, is excluded from the result
+        entirely rather than reported as zero — see `ExerciseHR`'s own
+        description.
+      responses:
+        "200":
+          description: >
+            The caller's own exercises for this session with at least one
+            HR sample in their derived window, in the order the athlete
+            trained them.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exercises]
+                properties:
+                  exercises:
+                    type: array
+                    items: { $ref: "#/components/schemas/ExerciseHR" }
+        "400":
+          description: The session has no ended_at yet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 

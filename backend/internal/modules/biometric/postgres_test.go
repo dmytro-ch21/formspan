@@ -1028,3 +1028,215 @@ func TestGetSessionMetrics_NoneComputedYetIsNotFound(t *testing.T) {
 		t.Fatalf("get with nothing computed gave %v, want ErrNotFound", err)
 	}
 }
+
+// --- ListExerciseHR (N490/#851) ---------------------------------------------
+
+// seedExercise writes a minimal, owned catalog row this file's ListExerciseHR
+// tests reference by exercise_id — session_sets.exercise_id is a NOT NULL FK,
+// so a fixture set needs a real one behind it. ON CONFLICT DO NOTHING because
+// several tests reuse the same handful of ids.
+func seedExercise(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO exercises (id, name, sport, movement_pattern, load_type, status)
+		VALUES ($1, $1, 'strength', 'squat', 'weight_reps', 'published')
+		ON CONFLICT (id) DO NOTHING`, id); err != nil {
+		t.Fatalf("seed exercise %s: %v", id, err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM exercises WHERE id = $1`, id); err != nil {
+			t.Logf("cleanup exercise %s: %v", id, err)
+		}
+	})
+}
+
+type fixtureSet struct {
+	ExerciseID  string
+	Position    int
+	Completed   bool
+	PerformedAt *time.Time
+}
+
+// seedSets writes session_sets rows straight to the table — the domain
+// helper (session.ReplaceSets) lives in a different package, and this file
+// only needs to express raw states, several of which (an uncompleted set
+// carrying a stale performed_at) that helper would never itself produce.
+//
+// Registers the session_sets cleanup AFTER each exercise's own cleanup, so
+// under LIFO the sets are gone before their exercise's delete runs — the
+// FK would otherwise refuse it.
+func seedSets(t *testing.T, pool *pgxpool.Pool, userID, sessionID string, sets []fixtureSet) {
+	t.Helper()
+	ctx := context.Background()
+	for _, s := range sets {
+		seedExercise(t, pool, s.ExerciseID)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO session_sets (session_id, user_id, exercise_id, position, set_type, completed, performed_at)
+			VALUES ($1, $2, $3, $4, 'working', $5, $6)`,
+			sessionID, userID, s.ExerciseID, s.Position, s.Completed, s.PerformedAt); err != nil {
+			t.Fatalf("seed set %+v: %v", s, err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM session_sets WHERE session_id = $1`, sessionID); err != nil {
+			t.Logf("cleanup session_sets for %s: %v", sessionID, err)
+		}
+	})
+}
+
+func at(base time.Time, minutes float64) *time.Time {
+	tm := base.Add(time.Duration(minutes * float64(time.Minute)))
+	return &tm
+}
+
+// TestListExerciseHR_HeavierCompoundReadsHigherThanAccessory is the
+// automatable half of this ticket's own acceptance criterion — the human
+// device check confirms the SAME shape against a real wearable, this
+// confirms the arithmetic and windowing that shape depends on: two
+// exercises' sets, completed at genuinely different times, read back with
+// genuinely different heart rates, in the order they were trained.
+func TestListExerciseHR_HeavierCompoundReadsHigherThanAccessory(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-exhr-happy", "user_bio_exhr_happy"
+	const exSquat, exLateral = "bio_fx_ex_squat", "bio_fx_ex_lateral"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	seedSession(t, pool, id, user, start, end)
+	cleanupSamples(t, pool, user)
+
+	// Squats: three sets completed at +5/+8/+11 minutes. Their window is
+	// [start (clamped), +11] — the lookback from +5 would reach before the
+	// session began, so it clamps to the session's own start.
+	// Lateral raises: two sets completed at +20/+22 minutes — window
+	// [+14, +22], with no overlap with the squats' window.
+	seedSets(t, pool, user, id, []fixtureSet{
+		{ExerciseID: exSquat, Position: 0, Completed: true, PerformedAt: at(start, 5)},
+		{ExerciseID: exSquat, Position: 1, Completed: true, PerformedAt: at(start, 8)},
+		{ExerciseID: exSquat, Position: 2, Completed: true, PerformedAt: at(start, 11)},
+		{ExerciseID: exLateral, Position: 3, Completed: true, PerformedAt: at(start, 20)},
+		{ExerciseID: exLateral, Position: 4, Completed: true, PerformedAt: at(start, 22)},
+	})
+
+	if _, err := repo.PutSamples(ctx, user, []Sample{
+		hrSample("exhr-sq-1", *at(start, 2), 170),
+		hrSample("exhr-sq-2", *at(start, 6), 175),
+		hrSample("exhr-sq-3", *at(start, 10), 165),
+		hrSample("exhr-lat-1", *at(start, 15), 115),
+		hrSample("exhr-lat-2", *at(start, 18), 120),
+		hrSample("exhr-lat-3", *at(start, 21), 110),
+	}); err != nil {
+		t.Fatalf("seed samples: %v", err)
+	}
+
+	got, err := repo.ListExerciseHR(ctx, user, id)
+	if err != nil {
+		t.Fatalf("list exercise hr: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d exercises, want 2: %+v", len(got), got)
+	}
+	// Trained-order, not alphabetical (bio_fx_ex_lateral < bio_fx_ex_squat
+	// lexically, so this also proves the ORDER BY MIN(position) is doing
+	// something rather than agreeing with a coincidence).
+	if got[0].ExerciseID != exSquat || got[1].ExerciseID != exLateral {
+		t.Fatalf("wrong order: %+v", got)
+	}
+	if got[0].AvgHRBPM != 170 || got[0].MaxHRBPM != 175 || got[0].SampleCount != 3 {
+		t.Errorf("squats = %+v, want avg=170 max=175 count=3", got[0])
+	}
+	if got[1].AvgHRBPM != 115 || got[1].MaxHRBPM != 120 || got[1].SampleCount != 3 {
+		t.Errorf("laterals = %+v, want avg=115 max=120 count=3", got[1])
+	}
+	if got[0].AvgHRBPM <= got[1].AvgHRBPM {
+		t.Fatalf("the heavy compound (squats, avg=%d) did not read higher than the accessory "+
+			"movement (laterals, avg=%d) — this is the exact intensity signal the ticket exists to surface",
+			got[0].AvgHRBPM, got[1].AvgHRBPM)
+	}
+}
+
+// Three ways an exercise can have NOTHING honest to report, all excluded
+// entirely rather than shown at zero.
+func TestListExerciseHR_ExcludesExercisesWithNoHonestWindowOrEvidence(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-exhr-excl", "user_bio_exhr_excl"
+	const exNoTimestamp, exUncompleted, exEmptyWindow, exReal = "bio_fx_ex_notime", "bio_fx_ex_undone", "bio_fx_ex_empty", "bio_fx_ex_real"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	seedSession(t, pool, id, user, start, end)
+	cleanupSamples(t, pool, user)
+
+	seedSets(t, pool, user, id, []fixtureSet{
+		// Completed, but never ticked live (or logged before N490 shipped)
+		// — no performed_at to build a window from at all.
+		{ExerciseID: exNoTimestamp, Position: 0, Completed: true, PerformedAt: nil},
+		// Carries a performed_at, but completed is false — an un-ticked
+		// correction must not anchor a window off a stale timestamp.
+		{ExerciseID: exUncompleted, Position: 1, Completed: false, PerformedAt: at(start, 5)},
+		// A real, honestly-timestamped completed set, but its derived
+		// window contains zero heart_rate samples.
+		{ExerciseID: exEmptyWindow, Position: 2, Completed: true, PerformedAt: at(start, 29)},
+		// The control: a real window with a real sample, so this test
+		// cannot pass by the query returning nothing at all.
+		{ExerciseID: exReal, Position: 3, Completed: true, PerformedAt: at(start, 10)},
+	})
+	if _, err := repo.PutSamples(ctx, user, []Sample{
+		hrSample("exhr-excl-real", *at(start, 9), 140),
+		// Deliberately placed INSIDE exUncompleted's own derived window
+		// ([start, +5min], from its lone performed_at at +5min) — so this
+		// exercise is excluded because it is not `completed`, not merely
+		// because its window happens to be empty. Without this sample, a
+		// query that forgot the `completed` filter entirely would still
+		// pass this test by accident, since the window would have nothing
+		// in it either way.
+		hrSample("exhr-excl-uncompleted-decoy", *at(start, 2), 130),
+	}); err != nil {
+		t.Fatalf("seed samples: %v", err)
+	}
+
+	got, err := repo.ListExerciseHR(ctx, user, id)
+	if err != nil {
+		t.Fatalf("list exercise hr: %v", err)
+	}
+	if len(got) != 1 || got[0].ExerciseID != exReal {
+		t.Fatalf("got %+v, want exactly [%s]", got, exReal)
+	}
+}
+
+func TestListExerciseHR_SessionNotEndedIsInvalidInput(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-exhr-inprogress", "user_bio_exhr_inprogress"
+	seedInProgressSession(t, pool, id, user, time.Now().UTC())
+
+	if _, err := repo.ListExerciseHR(ctx, user, id); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("list against an in-progress session gave %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestListExerciseHR_UnknownSessionIsNotFound(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.ListExerciseHR(ctx, "user_bio_exhr_ghost", "ses-does-not-exist"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("list against a missing session gave %v, want ErrNotFound", err)
+	}
+}
+
+// Cross-user: the same non-disclosure stance ComputeSessionMetrics already
+// takes — another user's session must read as not-found, never as an
+// empty-but-real list.
+func TestListExerciseHR_CannotBeListedForAnotherUsersSession(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, owner, attacker = "ses-bio-exhr-owner", "user_bio_exhr_owner", "user_bio_exhr_attacker"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, owner, start, start.Add(time.Hour))
+
+	if _, err := repo.ListExerciseHR(ctx, attacker, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("listing against another user's session gave %v, want ErrNotFound", err)
+	}
+}

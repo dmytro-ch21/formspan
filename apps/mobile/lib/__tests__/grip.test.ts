@@ -169,6 +169,23 @@ describe('what a new set inherits', () => {
     // change when you strip the plates.
     expect(emptyDropSet(set(), 2).grip).toBe('neutral');
   });
+
+  // N490/#851 — unlike grip, performed_at is NEVER carried forward, from a
+  // recorded set or an unrecorded one alike: a new row has not been
+  // completed yet, whatever the row it was copied from once recorded, and
+  // it must not inherit a timestamp describing when THAT set happened.
+  it('never carries performed_at forward, even from a set that has one', () => {
+    const from = set({ performed_at: '2026-09-01T10:00:00.000Z' });
+    expect(emptySet('dumbbell-bench-press', 2, from).performed_at).toBeNull();
+  });
+
+  it('starts with no performed_at when there is no previous set', () => {
+    expect(emptySet('dumbbell-bench-press', 1).performed_at).toBeNull();
+  });
+
+  it('a drop set also starts with no performed_at, same as any other new set', () => {
+    expect(emptyDropSet(set({ performed_at: '2026-09-01T10:00:00.000Z' }), 2).performed_at).toBeNull();
+  });
 });
 
 describe('what a swap must throw away', () => {
@@ -192,6 +209,22 @@ describe('what a swap must throw away', () => {
     const [swapped] = swapExercise([set()], 'dumbbell-bench-press', legPress, 'weight_reps');
     expect(swapped.reps).toBe(10);
     expect(swapped.grip).toBeNull();
+  });
+
+  // N490/#851 — the old set's performed_at described the OLD movement's
+  // completion moment. A swap is a different exercise (and swapExercise
+  // always resets `completed` to false alongside it), so a surviving
+  // timestamp would misrepresent when the new, never-yet-performed exercise
+  // happened.
+  it('clears performed_at on swap, same as grip', () => {
+    const [swapped] = swapExercise(
+      [set({ performed_at: '2026-09-01T10:00:00.000Z' })],
+      'dumbbell-bench-press',
+      legPress,
+      'weight_reps',
+    );
+    expect(swapped.performed_at).toBeNull();
+    expect(swapped.completed).toBe(false);
   });
 });
 

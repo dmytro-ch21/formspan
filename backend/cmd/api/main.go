@@ -607,6 +607,11 @@ func main() {
 	mux.Handle("GET /v1/biometric/samples", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ListSamples)))
 	mux.Handle("POST /v1/biometric/sessions/{sessionID}/metrics", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ComputeMetrics)))
 	mux.Handle("GET /v1/biometric/sessions/{sessionID}/metrics", verifier.RequireAuth(http.HandlerFunc(biometricHandler.GetMetrics)))
+	// N490/#851 — the per-exercise HR breakdown within one session. A
+	// sibling of .../metrics rather than a query param on it: this is a
+	// live-computed list with its own shape (ExerciseHR, not
+	// SessionMetrics), not a variant reading of the same resource.
+	mux.Handle("GET /v1/biometric/sessions/{sessionID}/exercise-hr", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ListExerciseHR)))
 	// N489/#850 — the cross-session training-load trend (Progress tab): every
 	// one of the caller's own sessions with a computed TRIMP in a date range,
 	// across all three sports. A literal 3-segment path ("sessions/load"), not

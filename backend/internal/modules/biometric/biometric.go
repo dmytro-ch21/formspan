@@ -428,6 +428,31 @@ type SessionLoad struct {
 	TRIMP float64 `json:"trimp"`
 }
 
+// ExerciseHR is one exercise's heart-rate readout within a single session —
+// N490/#851, extending SessionMetrics' whole-session numbers to the
+// granularity a strength athlete actually asked for ("what was my heart
+// rate on squats, versus lateral raises"). See ListExerciseHR and
+// exerciseHRWindow (trimp.go) for the join-granularity decision this type's
+// existence rests on.
+//
+// Deliberately narrow, matching SessionLoad's own stance: no time_in_zones,
+// no TRIMP, no hr_max provenance — a per-exercise breakdown is read
+// alongside the session's own SessionMetrics card, not instead of it, so it
+// only needs to carry what that card cannot already show.
+type ExerciseHR struct {
+	ExerciseID string `json:"exercise_id"`
+	// AvgHRBPM and MaxHRBPM are never both zero-with-real-meaning here: a
+	// row with SampleCount 0 is excluded from ListExerciseHR's result
+	// entirely rather than reported with these at zero — the same
+	// "absent, not zero" stance SessionMetrics.TRIMP already takes.
+	AvgHRBPM int `json:"avg_hr_bpm"`
+	MaxHRBPM int `json:"max_hr_bpm"`
+	// SampleCount is the honesty figure a client needs to decide how much to
+	// trust a single-digit sample average — mirrors SessionMetrics.SampleCount
+	// for the same reason.
+	SampleCount int `json:"sample_count"`
+}
+
 // Repository is the persistence port for this module.
 type Repository interface {
 	// PutSamples stores a batch of raw readings, idempotently — a retried
@@ -491,4 +516,32 @@ type Repository interface {
 	// filtering on "trimp IS NOT NULL" is the same honesty rule already
 	// enforced at computation time, applied again at the read.
 	ListSessionLoad(ctx context.Context, userID string, from, to time.Time) ([]SessionLoad, error)
+
+	// ListExerciseHR computes, live, one avg/max HR readout per exercise
+	// within a session the caller owns — N490/#851. Nothing here is
+	// persisted the way SessionMetrics is: each call re-derives its answer
+	// from whatever session_sets.performed_at values and heart_rate samples
+	// currently exist, which is cheap enough at session-detail scale (a
+	// session holds at most maxSets sets, so at most a few dozen distinct
+	// exercises) and, unlike SessionMetrics, has no "recompute" verb to keep
+	// in sync with a stored row.
+	//
+	// Requires the session to have ended, exactly like ComputeSessionMetrics
+	// and for a related but distinct reason: an in-progress session's
+	// LATEST exercise has an open-ended window (its last set's window only
+	// extends to "so far"), and reporting that exercise's HR as final would
+	// be the same false-confidence mistake SessionMetrics.TRIMP already
+	// refuses for a session with no ended_at.
+	//
+	// An exercise with no completed set carrying a real PerformedAt (never
+	// ticked live, or logged before N490 shipped) is excluded from the
+	// result entirely — no window exists to derive one from, and the same
+	// is true of an exercise whose window contains zero heart_rate samples.
+	// Both are the "absent, not zero" stance ExerciseHR's own doc comment
+	// describes, not partial results.
+	//
+	// See exerciseHRWindow (trimp.go) for the per-exercise join-granularity
+	// decision and its reasoning, and this ticket's history entry for the
+	// fuller account.
+	ListExerciseHR(ctx context.Context, userID, sessionID string) ([]ExerciseHR, error)
 }

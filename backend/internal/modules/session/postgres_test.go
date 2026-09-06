@@ -562,6 +562,77 @@ func TestReplaceSets_AndFinish(t *testing.T) {
 	}
 }
 
+// TestPerformedAt_RoundTripsAndIsNotDerivedFromSaveTime is N490/#851's
+// regression for the exact failure `created_at` had: `ReplaceSets` deletes
+// and reinserts every row on every save, so any timestamp this package
+// itself assigned at write time would be identical across a whole session's
+// sets, and would not reflect when a set was actually performed. This
+// asserts the opposite property — the client's own claimed PerformedAt
+// values survive completely untouched through a wholesale ReplaceSets, kept
+// distinct from one another and distinct from "now" (the moment this test
+// calls ReplaceSets).
+func TestPerformedAt_RoundTripsAndIsNotDerivedFromSaveTime(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanup(t, pool, "ses-performed-at")
+
+	// Two performed_at values, both well in the past relative to "now" (the
+	// moment ReplaceSets actually runs below) and distinct from each other —
+	// if the server ever derived this from save time, both would collapse to
+	// the same "now", which is exactly the created_at bug this field exists
+	// to fix.
+	first := time.Now().UTC().Add(-45 * time.Minute).Truncate(time.Second)
+	second := time.Now().UTC().Add(-40 * time.Minute).Truncate(time.Second)
+
+	if _, err := repo.Create(ctx, strengthSession("ses-performed-at", "user_a", []Set{
+		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true, PerformedAt: &first},
+	})); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A second set logged later, saved via the wholesale ReplaceSets path —
+	// the exact mechanism that destroyed created_at's usefulness as a
+	// "performed at" signal.
+	updated, err := repo.ReplaceSets(ctx, "user_a", "ses-performed-at", []Set{
+		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: true, PerformedAt: &first},
+		{ExerciseID: exSquat, Reps: ptrInt(3), WeightKg: ptrF(140), Completed: true, PerformedAt: &second},
+	})
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if len(updated.Sets) != 2 {
+		t.Fatalf("expected 2 sets, got %d", len(updated.Sets))
+	}
+
+	got0, got1 := updated.Sets[0].PerformedAt, updated.Sets[1].PerformedAt
+	if got0 == nil || !got0.Equal(first) {
+		t.Errorf("set 0 PerformedAt = %v, want %v", got0, first)
+	}
+	if got1 == nil || !got1.Equal(second) {
+		t.Errorf("set 1 PerformedAt = %v, want %v", got1, second)
+	}
+	if got0 != nil && got1 != nil && got0.Equal(*got1) {
+		t.Fatal("both sets share one PerformedAt — looks derived from a single save time, not two real moments")
+	}
+	saveTime := time.Now().UTC()
+	if got0 != nil && got0.After(saveTime.Add(-time.Minute)) {
+		t.Errorf("PerformedAt reads as close to save time (%v), not the claimed moment (%v) — "+
+			"looks derived from when ReplaceSets ran rather than passed through", got0, first)
+	}
+
+	// A set with no claimed PerformedAt stays nil — nothing invents one on
+	// its behalf.
+	updated2, err := repo.ReplaceSets(ctx, "user_a", "ses-performed-at", []Set{
+		{ExerciseID: exBench, Reps: ptrInt(5), WeightKg: ptrF(100), Completed: false},
+	})
+	if err != nil {
+		t.Fatalf("replace with unrecorded performed_at: %v", err)
+	}
+	if updated2.Sets[0].PerformedAt != nil {
+		t.Errorf("expected nil PerformedAt for a set that never claimed one, got %v", updated2.Sets[0].PerformedAt)
+	}
+}
+
 // Deleting a template must not erase the sessions performed against it —
 // history outlives the plan.
 func TestDeletingWorkout_KeepsSessionHistory(t *testing.T) {

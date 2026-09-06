@@ -314,4 +314,50 @@ func TestCompute_RecordsEstimatedSourceDistinctlyFromObserved(t *testing.T) {
 	}
 }
 
+// N490/#851's join-granularity decision, pure and table-driven — no
+// database needed to exercise the rule itself, only ListExerciseHR's own
+// use of it.
+func TestExerciseHRWindow(t *testing.T) {
+	sessionStart := t0(0)
+
+	t.Run("widens the start backward by the gap-attribution tolerance", func(t *testing.T) {
+		minAt := t0(20 * 60) // 20 minutes into the session
+		maxAt := t0(25 * 60)
+		start, end := exerciseHRWindow(minAt, maxAt, sessionStart)
+		wantStart := minAt.Add(-maxSampleGapForZoneAttribution)
+		if !start.Equal(wantStart) {
+			t.Errorf("start = %v, want %v", start, wantStart)
+		}
+		if !end.Equal(maxAt) {
+			t.Errorf("end = %v, want maxAt %v", end, maxAt)
+		}
+	})
+
+	t.Run("never reaches before the session's own start", func(t *testing.T) {
+		// minAt is only 2 minutes into the session — a full 6-minute lookback
+		// would land before started_at, which must be clamped rather than
+		// reaching into a time the session had not begun.
+		minAt := t0(2 * 60)
+		maxAt := t0(3 * 60)
+		start, end := exerciseHRWindow(minAt, maxAt, sessionStart)
+		if !start.Equal(sessionStart) {
+			t.Errorf("start = %v, want it clamped to sessionStart %v", start, sessionStart)
+		}
+		if !end.Equal(maxAt) {
+			t.Errorf("end = %v, want maxAt %v", end, maxAt)
+		}
+	})
+
+	t.Run("a single-set exercise (minAt == maxAt) still gets a real window, not a zero-width one", func(t *testing.T) {
+		at := t0(30 * 60)
+		start, end := exerciseHRWindow(at, at, sessionStart)
+		if !end.After(start) {
+			t.Fatalf("window has no width: start=%v end=%v", start, end)
+		}
+		if end.Sub(start) != maxSampleGapForZoneAttribution {
+			t.Errorf("window width = %v, want exactly the lookback %v", end.Sub(start), maxSampleGapForZoneAttribution)
+		}
+	})
+}
+
 func almostEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }

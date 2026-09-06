@@ -17,7 +17,7 @@ import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { HRSessionReport } from '@/components/HRSessionReport';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
-import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
+import { getSessionMetrics, listExerciseHR, type ExerciseHR, type SessionMetrics } from '@/lib/biometric';
 import {
   recordsFromSession,
   summariseSession,
@@ -860,6 +860,25 @@ export default function SessionScreen() {
     };
   }, [id, session?.ended_at, getToken]);
 
+  // Per-exercise HR breakdown (N490/#851) — fetched alongside the
+  // whole-session metrics above, behind the same `session.ended_at` gate,
+  // and equally best-effort: `listExerciseHR` already resolves `[]` on any
+  // error, so there is nothing here to distinguish "not asked yet" from
+  // "asked, got nothing" the way `hrLoaded` does for the session-level
+  // fetch — an empty array renders identically either way (no breakdown
+  // section), which is the right answer for both.
+  const [exerciseHR, setExerciseHR] = useState<ExerciseHR[]>([]);
+  useEffect(() => {
+    if (!id || !session?.ended_at) return;
+    let cancelled = false;
+    listExerciseHR(getToken, id).then((rows) => {
+      if (!cancelled) setExerciseHR(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, session?.ended_at, getToken]);
+
   /**
    * Open the exercise picker, having settled pending writes.
    *
@@ -956,10 +975,20 @@ export default function SessionScreen() {
    *
    * Un-ticking never starts rest, and stays possible: mis-taps happen
    * mid-set, and an un-undoable checkbox is worse than none.
+   *
+   * **This is also the live capture point for `performed_at` (N490/#851)**
+   * — stamped with `new Date().toISOString()` at the exact moment the tap
+   * lands, never derived later from when the session happens to be saved.
+   * Un-ticking clears it back to `null`: a correction means the set is no
+   * longer claiming to have happened, and a stale timestamp surviving on an
+   * un-done set would be a lie about when something occurred that, as far
+   * as the athlete now says, didn't.
    */
   function toggleDone(index: number, exerciseID: string) {
     const now = !sets[index].completed;
-    const marked = sets.map((s, i) => (i === index ? { ...s, completed: now } : s));
+    const marked = sets.map((s, i) =>
+      i === index ? { ...s, completed: now, performed_at: now ? new Date().toISOString() : null } : s,
+    );
     // Marking done is the moment the numbers are final — and it is a tap the
     // athlete already makes, so prefill costs no new interaction. Un-ticking
     // fills nothing: that is a correction, not a confirmation.
@@ -1199,7 +1228,15 @@ export default function SessionScreen() {
     const keepsElapsed = elapsedBelongsInSeconds(loadTypeOf(exerciseID));
     const written = sets.map((s, i) =>
       i === index
-        ? { ...s, ...(keepsElapsed ? { seconds } : {}), completed: tick || s.completed }
+        ? {
+            ...s,
+            ...(keepsElapsed ? { seconds } : {}),
+            completed: tick || s.completed,
+            // Same live-capture rule as `toggleDone` (N490/#851): stamped
+            // only on the transition into done, never when stopping early
+            // leaves `completed` as it was.
+            ...(tick ? { performed_at: new Date().toISOString() } : {}),
+          }
         : s,
     );
     const next = tick
@@ -1482,9 +1519,27 @@ export default function SessionScreen() {
             unchanged. Strength has no single session-level RPE (per-set RPE
             only — `lib/sessions.ts`), so `sessionRPE` is `null` and the
             effectiveness card simply does not render here; see
-            `lib/hrSessionReport.ts`'s doc comment. */}
+            `lib/hrSessionReport.ts`'s doc comment.
+
+            `exerciseHR`/`exerciseNames` (N490/#851) are strength-only —
+            BJJ/running never pass them, so they get no breakdown section.
+            Names are resolved from `catalog` at render, the same raw-id
+            fallback this file's own `exerciseName` below already uses
+            (`exercise?.name ?? set.exercise_id`) for the identical
+            "catalog arrives on its own schedule" reason — NOT
+            `withExerciseNames` above, which falls back to `null` instead;
+            review fold-in fixed this comment to cite the actual matching
+            precedent. */}
         {finished && hrLoaded && (
-          <HRSessionReport metrics={hrMetrics} sessionRPE={null} testID="session-hr" />
+          <HRSessionReport
+            metrics={hrMetrics}
+            sessionRPE={null}
+            exerciseHR={exerciseHR}
+            exerciseNames={Object.fromEntries(
+              exerciseHR.map((e) => [e.exercise_id, catalog.get(e.exercise_id)?.name ?? e.exercise_id]),
+            )}
+            testID="session-hr"
+          />
         )}
 
         {error && (

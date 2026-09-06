@@ -6,9 +6,11 @@ import {
   roundDistanceM,
   sessionActiveSeconds,
   sessionDistanceMeters,
+  setsFromWorkout,
   type LoggedSet,
   type Measure,
 } from '../sessions';
+import type { WorkoutItem } from '../workouts';
 
 /**
  * The pure set transforms behind in-session editing.
@@ -68,6 +70,32 @@ describe('sessionDistanceMeters', () => {
 
   it('returns 0 for an empty set list', () => {
     expect(sessionDistanceMeters([])).toBe(0);
+  });
+});
+
+// N490/#851 — a template's rows have never been performed, so nothing here
+// may claim a completion time on their behalf. Only live ticking
+// (`toggleDone`/`recordTimedSet` in the session screen) may ever write a
+// real `performed_at`.
+describe('setsFromWorkout', () => {
+  const item = (over: Partial<WorkoutItem> = {}): WorkoutItem => ({
+    exercise_id: 'back-squat',
+    position: 0,
+    target_sets: 1,
+    target_reps: 5,
+    target_weight_kg: 100,
+    target_seconds: null,
+    target_distance_m: null,
+    notes: '',
+    ...over,
+  });
+
+  it('every row starts with performed_at null, not omitted or inherited from the template', () => {
+    const sets = setsFromWorkout([item({ target_sets: 3 })]);
+    expect(sets).toHaveLength(3);
+    for (const s of sets) {
+      expect(s.performed_at).toBeNull();
+    }
   });
 });
 

@@ -461,7 +461,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 	rows, err := r.pool.Query(ctx, `
 		SELECT ss.session_id, ss.exercise_id, ss.position, ss.set_type, ss.reps, ss.weight_kg,
 		       ss.seconds, ss.distance_m, ss.rir, ss.rpe, ss.notes, ss.completed, ss.assisted_reps,
-		       ss.grip,
+		       ss.grip, ss.performed_at,
 		       COALESCE(e.implements, 1)
 		FROM session_sets ss
 		LEFT JOIN exercises e ON e.id = ss.exercise_id
@@ -480,7 +480,7 @@ func (r *PostgresRepository) attachSets(ctx context.Context, sessions []Session,
 		)
 		if err := rows.Scan(&sessionID, &st.ExerciseID, &st.Position, &st.SetType,
 			&st.Reps, &st.WeightKg, &st.Seconds, &st.DistanceM,
-			&st.RIR, &st.RPE, &st.Notes, &st.Completed, &st.AssistedReps, &st.Grip,
+			&st.RIR, &st.RPE, &st.Notes, &st.Completed, &st.AssistedReps, &st.Grip, &st.PerformedAt,
 			&st.LoadFactor); err != nil {
 			return fmt.Errorf("session: scan set: %w", err)
 		}
@@ -876,10 +876,11 @@ func insertSets(ctx context.Context, tx pgx.Tx, sessionID, userID string, sets [
 		batch.Queue(`
 			INSERT INTO session_sets (
 				session_id, user_id, exercise_id, position, set_type, reps, weight_kg,
-				seconds, distance_m, rir, rpe, notes, completed, assisted_reps, grip
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+				seconds, distance_m, rir, rpe, notes, completed, assisted_reps, grip, performed_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			sessionID, userID, s.ExerciseID, i, st, s.Reps, s.WeightKg,
-			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed, s.AssistedReps, s.Grip)
+			s.Seconds, s.DistanceM, s.RIR, s.RPE, s.Notes, s.Completed, s.AssistedReps, s.Grip,
+			s.PerformedAt)
 	}
 	results := tx.SendBatch(ctx, batch)
 	for i := range sets {

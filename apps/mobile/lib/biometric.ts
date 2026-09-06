@@ -707,3 +707,54 @@ export async function listSessionLoad(
   );
   return res.sessions;
 }
+
+/**
+ * One exercise's heart-rate readout within a single session — N490/#851,
+ * extending the whole-session `SessionMetrics` numbers to the granularity a
+ * strength athlete actually asked for ("what was my heart rate on squats,
+ * versus lateral raises"). Mirrors `biometric.ExerciseHR` on the backend.
+ *
+ * Never reported at 0 for a genuinely absent reading: an exercise with no
+ * completed set carrying a real `performed_at`, or whose derived time
+ * window contains zero heart_rate samples, is excluded from the list
+ * entirely by the server rather than shown at zero — the same "absent, not
+ * zero" stance `SessionMetrics.trimp` already takes.
+ */
+export type ExerciseHR = {
+  exercise_id: string;
+  avg_hr_bpm: number;
+  max_hr_bpm: number;
+  /** Often small — an exercise's own window is a few minutes at most. Read
+   *  a low count as low confidence rather than treat the row as absent. */
+  sample_count: number;
+};
+
+/**
+ * List one avg/max heart-rate readout per exercise within a session — `GET
+ * /v1/biometric/sessions/{id}/exercise-hr`. What `HRSessionReport` renders
+ * as its per-exercise breakdown once the whole-session report is itself
+ * `'full'` — see `lib/hrSessionReport.ts`'s doc comment for why a sparser
+ * per-exercise view is never shown on top of a session-level report that
+ * did not itself clear the sample/HRmax bar.
+ *
+ * `[]` on any error — including a session that has not ended, which the
+ * caller should not be able to trigger anyway, since this is only ever
+ * fetched alongside `getSessionMetrics` behind the same `session.ended_at`
+ * gate. Best-effort and non-blocking, matching `getSessionMetrics`'s own
+ * "the HR report is enrichment, not the record" posture — a screen that
+ * cannot show a per-exercise breakdown must still show everything else.
+ */
+export async function listExerciseHR(
+  getToken: TokenGetter,
+  sessionID: string,
+): Promise<ExerciseHR[]> {
+  try {
+    const res = await apiRequest<{ exercises: ExerciseHR[] }>(
+      getToken,
+      `/biometric/sessions/${sessionID}/exercise-hr`,
+    );
+    return res.exercises;
+  } catch {
+    return [];
+  }
+}

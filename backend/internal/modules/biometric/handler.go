@@ -322,6 +322,23 @@ func (h *Handler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"metrics": m})
 }
 
+// ListExerciseHR serves the per-exercise heart-rate breakdown within a
+// session — N490/#851. Unlike GetMetrics/ComputeMetrics this has no
+// separate compute-then-read split: nothing here is persisted, so every GET
+// derives a fresh answer from whatever session_sets.performed_at and
+// biometric_samples rows exist right now. See
+// Repository.ListExerciseHR's doc comment for the full contract.
+func (h *Handler) ListExerciseHR(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	exercises, err := h.repo.ListExerciseHR(r.Context(), claims.UserID, r.PathValue("sessionID"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"exercises": exercises})
+}
+
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
