@@ -662,6 +662,18 @@ export function WeekPlanner({
       />
 
       <PlanTimeSheet
+        // Found in review (frontend-reviewer): PlanTimeSheet is mounted
+        // once, permanently, so its own `hour24`/`minute` useState
+        // initializers only ever run on the FIRST open — the custom
+        // stepper otherwise carries whatever an athlete last dialed on a
+        // DIFFERENT day's planning attempt into this one, silently. Same
+        // "local draft state needs a real remount, not just a prop
+        // change" hazard `WeekThemeRow` above already documents and
+        // avoids with `key={weekStartKey}` — applied here the same way,
+        // keyed on the planning attempt itself so every new pick starts
+        // the stepper fresh. `'closed'` is an arbitrary stable key for
+        // the unmounted-most-of-the-time case; nothing reads it.
+        key={pendingPick ? `${pendingPick.day}-${pendingPick.sport}` : 'closed'}
         visible={pendingPick !== null}
         title={
           pendingPick

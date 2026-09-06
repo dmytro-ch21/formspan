@@ -122,9 +122,12 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, rng Range)
 	// Ordered by time_of_day_minutes within a day (N126/#520) — a two-a-day
 	// with times set now reads in the order the athlete will actually meet
 	// them, which `created_at` (the order they were PLANNED in) cannot
-	// promise. NULLS LAST: an untimed plan carries no claim about when in the
-	// day it falls, so it renders after every plan that does rather than
-	// sorting to the front as Postgres's default would.
+	// promise. `NULLS LAST` is Postgres's own default for ASC (kept explicit
+	// here for readability, not because leaving it off would change the
+	// result — found in review, backend-reviewer, correcting an earlier
+	// version of this comment that claimed otherwise): an untimed plan
+	// carries no claim about when in the day it falls, so it renders after
+	// every plan that does.
 	//
 	// created_at is the tiebreak for two plans that share a time (or share
 	// having none) — preserving the original "insertion order within a day"

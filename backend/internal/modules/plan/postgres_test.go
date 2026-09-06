@@ -908,10 +908,14 @@ func TestTimeOfDayMinutesRejectsOutOfRange(t *testing.T) {
 }
 
 // The ordering half of N126's acceptance criteria: two sessions on the same
-// day sort by time_of_day_minutes, untimed last. Deleting `ORDER BY
-// time_of_day_minutes` (or the `NULLS LAST`) from List's query makes this
-// fail — that is the point of asserting the order rather than only the
-// membership, per the mandatory-coverage rule in the vola-testing skill.
+// day sort by time_of_day_minutes, untimed last. Deleting the
+// `time_of_day_minutes ASC NULLS LAST` term from List's ORDER BY entirely
+// makes this fail — that is the point of asserting the order rather than
+// only the membership, per the mandatory-coverage rule in the vola-testing
+// skill. (Deleting just the `NULLS LAST` keyword alone would NOT: Postgres's
+// default null-ordering for ASC is already NULLS LAST — found in review,
+// backend-reviewer, correcting an inaccurate claim this comment used to
+// make. The keyword stays for readability, not because it changes behavior.)
 func TestListOrdersSameDayByTimeOfDay(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()

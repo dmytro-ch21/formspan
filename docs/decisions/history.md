@@ -59329,6 +59329,30 @@ remove only, never in-place edit; and web's own add form is likewise
 create-only, matching its existing pattern. Widening either to a real edit
 flow is separate work.
 
+**Review fold-in.** `ac-verifier`: 6 MET, 1 correctly `NEEDS HUMAN EVIDENCE`
+(already properly marked). `backend-reviewer`: 0 blocking, two suggestions
+folded in — a doc comment on `List`'s `ORDER BY` and the matching test
+comment both claimed removing just the `NULLS LAST` keyword (as opposed to
+the whole `time_of_day_minutes ASC NULLS LAST` term) would change the sort,
+which is false: Postgres's own default null-ordering for `ASC` is already
+`NULLS LAST`. Corrected both comments to say so, without touching the SQL
+itself (the explicit keyword stays, for readability). `frontend-reviewer`
+found one real `[blocking]` bug: `PlanTimeSheet` is mounted once,
+permanently, in `WeekPlanner.tsx` (`visible` toggles, the component never
+unmounts), so its `hour24`/`minute` `useState` initializers — seeded from
+`initialMinutes` — only ever run on the FIRST open. Planning a session with
+the custom stepper, then planning a DIFFERENT day/sport later in the same
+screen session, silently carried the earlier pick's hour/minute into the
+new sheet instead of resetting to the 9:00 AM default. This is the exact
+"local draft state needs a real remount, not a prop change" hazard the same
+file's `WeekThemeRow` usage already documents and avoids with
+`key={weekStartKey}` — fixed the same way, keying `PlanTimeSheet` on the
+planning attempt itself (`` `${pendingPick.day}-${pendingPick.sport}` ``, or
+`'closed'` when no pick is pending) so a new attempt always starts fresh.
+Re-ran the full relevant mobile test suite (152 tests across
+`plan.test.ts`/`planTime.test.ts`/`todayScreen.test.tsx`/`schema.test.ts`)
+and the full `pnpm run verify` chain — both green — after the fix.
+
 
 ## Open items / known gaps as of this entry
 
