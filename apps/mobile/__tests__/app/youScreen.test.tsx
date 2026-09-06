@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { fireEvent, act, configure, render, screen, waitFor, within } from '@testing-library/react-native';
 
-import YouScreen, { badgeText, phaseValue, rowLabelFor } from '../../app/(tabs)/you';
+import YouScreen, { badgeText, friendCountLabel, phaseValue, rowLabelFor } from '../../app/(tabs)/you';
 import type { Phase } from '@/lib/body';
 
 /**
@@ -55,9 +55,15 @@ jest.mock('@/lib/body', () => ({
   listPhases: (...a: unknown[]) => mockPhases(...a),
 }));
 
+// The friend count behind the header's `/friends` entry point (N509) — a
+// SEPARATE mock target from `getPendingCounts` above, on the real module's own
+// `FriendCard[]` shape, so a test can set how many friends this account has
+// without touching the unrelated pending-request counts.
+const mockListFriends = jest.fn((..._a: unknown[]): Promise<unknown[]> => Promise.resolve([]));
 jest.mock('@/lib/friends', () => ({
   ...jest.requireActual('@/lib/friends'),
   getPendingCounts: (...a: unknown[]) => mockCounts(...a),
+  listFriends: (...a: unknown[]) => mockListFriends(...a),
 }));
 
 // Mutable so a test can turn a discipline ON. The factory is evaluated once,
@@ -136,6 +142,7 @@ jest.mock('expo-router', () => ({
 beforeEach(() => {
   mockGetProfile.mockReset().mockResolvedValue({ display_name: 'Rhonda', unit_system: 'metric' });
   mockCounts.mockReset().mockResolvedValue({});
+  mockListFriends.mockReset().mockResolvedValue([]);
   // Reset too, or a future test added ABOVE the throwing-cue one could satisfy
   // its `toHaveBeenCalledWith` with somebody else's chime. No test can fire the
   // cue today, which is exactly when this is cheap to add.
@@ -286,6 +293,99 @@ describe('what the Phase row says', () => {
     const sports = screen.getByTestId('you-sports');
     expect(phase.props.accessibilityHint).not.toBe(sports.props.accessibilityHint);
     expect(sports.props.accessibilityHint).toContain('sport');
+  });
+});
+
+/**
+ * N509 — the header's friends entry point.
+ *
+ * Same two-piece shape as the Phase row above (`friendCountLabel` mirrors
+ * `phaseValue`), so the tests mirror that file's structure: the pure helper
+ * on its own, then the same three outcomes through the screen. The property
+ * most worth pinning is the one a first-load test cannot see — a failed
+ * count must leave `'—'` rather than claiming zero.
+ */
+describe('what the friends pill says', () => {
+  it('withholds until the server has answered, and does not guess', () => {
+    expect(friendCountLabel(null, false)).toBe('—');
+    expect(friendCountLabel(3, false)).toBe('—');
+  });
+
+  it('says "No friends yet" only once the server has confirmed zero', () => {
+    expect(friendCountLabel(0, true)).toBe('No friends yet');
+  });
+
+  it('counts friends, singular and plural', () => {
+    expect(friendCountLabel(1, true)).toBe('1 Friend');
+    expect(friendCountLabel(4, true)).toBe('4 Friends');
+  });
+});
+
+describe('the friends entry point', () => {
+  it('shows the confirmed count and opens /friends', async () => {
+    mockListFriends.mockResolvedValue([
+      { username: 'a', display_name: null, since: '2026-01-01' },
+      { username: 'b', display_name: null, since: '2026-01-02' },
+    ]);
+    render(<YouScreen />);
+
+    const chip = await screen.findByTestId('you-friends');
+    await waitFor(() => expect(chip.props.accessibilityValue?.text).toBe('2 Friends'));
+    fireEvent.press(chip);
+    expect(mockPush).toHaveBeenCalledWith('/friends');
+  });
+
+  it('keeps the last known count when a refresh fails', async () => {
+    // The same rule the phase and waiting-counts chains already carry: a dead
+    // spot must not tell an athlete their friend list emptied.
+    mockListFriends.mockResolvedValue([{ username: 'a', display_name: null, since: '2026-01-01' }]);
+    render(<YouScreen />);
+    const chip = await screen.findByTestId('you-friends');
+    await waitFor(() => expect(chip.props.accessibilityValue?.text).toBe('1 Friend'));
+
+    mockListFriends.mockRejectedValue(new Error('Network request failed'));
+    await act(async () => {
+      refocus();
+    });
+
+    expect(screen.getByTestId('you-friends').props.accessibilityValue?.text).toBe('1 Friend');
+  });
+});
+
+/**
+ * N509 — the masthead's avatar.
+ *
+ * `Avatar` already carries its own coverage (`components/__tests__/Avatar.test.tsx`)
+ * for the photo/monogram/failed-load behaviour itself; what is worth pinning
+ * HERE is the WIRING — that this screen actually hands it the profile's own
+ * `avatar_url` and `username`, not that the component works in isolation.
+ */
+describe('the masthead avatar', () => {
+  it('falls back to the monogram when no avatar has been uploaded', async () => {
+    // `Avatar` hides both its own renders from assistive tech (the athlete's
+    // name is read right beside it), so — same as the belt render and every
+    // badge in this file — the query needs `includeHiddenElements`.
+    mockGetProfile.mockResolvedValue({ display_name: 'Rhonda', username: 'rhonda', unit_system: 'metric' });
+    render(<YouScreen />);
+
+    expect(
+      await screen.findByTestId('avatar-monogram', { includeHiddenElements: true }),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('avatar-photo', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('shows the uploaded photo once the profile carries one', async () => {
+    mockGetProfile.mockResolvedValue({
+      display_name: 'Rhonda',
+      username: 'rhonda',
+      unit_system: 'metric',
+      avatar_url: 'https://example.com/rhonda.jpg',
+    });
+    render(<YouScreen />);
+
+    expect(
+      await screen.findByTestId('avatar-photo', { includeHiddenElements: true }),
+    ).toBeTruthy();
   });
 });
 

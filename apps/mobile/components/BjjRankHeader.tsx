@@ -70,11 +70,19 @@ export function BjjRankHeader({ getToken }: { getToken: TokenGetter }) {
     );
   }
 
-  // BJJ is on but no rank has been recorded. A masthead here would be the
-  // loudest thing on the screen saying nothing, so this is the quiet invitation
-  // the old card was — and it lives HERE rather than as a second component,
-  // because two components each fetching `/bjj/standing` is two requests for
-  // one fact, and they can disagree while one is in flight.
+  // BJJ is on but no rank has been recorded. A full masthead here would be
+  // the loudest thing on the screen saying nothing — but a blank text row
+  // said even less: it is the one place on the You/Profile screen where "no
+  // data yet" showed a generic icon-and-text state instead of VOLA's own
+  // belt/rank language (N509, #886). Everyone starts at white, so a white
+  // belt — at rest, no stripes, no colour of its own — IS the honest empty
+  // state for a rank: not a placeholder standing in for the real thing, but
+  // the real first rung of the same progression the masthead below draws
+  // once a promotion exists.
+  //
+  // Lives HERE rather than as a second component, because two components
+  // each fetching `/bjj/standing` is two requests for one fact, and they can
+  // disagree while one is in flight.
   if (standing.current === null) {
     return (
       <Pressable
@@ -82,11 +90,35 @@ export function BjjRankHeader({ getToken }: { getToken: TokenGetter }) {
         accessibilityRole="button"
         accessibilityLabel="Add your first promotion"
         testID="bjj-rank-empty"
-        style={({ pressed }) => [styles.placeholder, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.emptyCard, pressed && styles.pressed]}
       >
-        <Text style={styles.muted}>
-          No rank recorded yet — tap to add your first promotion.
-        </Text>
+        {/* Hidden from assistive tech, like every decorative render in this
+            app (see `Icon`'s own doc comment) — the Pressable's own
+            `accessibilityLabel` above already says what tapping this does,
+            and a belt photograph beside it would only repeat "image" with
+            nothing useful to add. */}
+        <RNView
+          style={styles.emptyBeltWrap}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          {/* No `activeBeltAccent` tint, unlike the real masthead below — a
+              colour here would assert a rank nobody has recorded. White is
+              not a placeholder colour standing in for "none"; it is the
+              actual first belt, rendered at rest. */}
+          <BeltPhoto
+            belt="white"
+            stripes={0}
+            degree={0}
+            width={EMPTY_BELT_WIDTH}
+            label="White belt"
+          />
+        </RNView>
+        <RNView style={styles.emptyText}>
+          <Text style={styles.eyebrow}>YOUR RANK</Text>
+          <Text style={styles.name}>No rank yet</Text>
+          <Text style={styles.muted}>Tap to add your first promotion.</Text>
+        </RNView>
       </Pressable>
     );
   }
@@ -243,6 +275,15 @@ export function BjjRankHeader({ getToken }: { getToken: TokenGetter }) {
  */
 const BELT_WIDTH = 215;
 
+/**
+ * The empty state's own belt width (N509) — deliberately smaller than
+ * {@link BELT_WIDTH}. This card has nothing to report yet, and a full-size
+ * belt would make the emptiest state on the screen the loudest thing on it;
+ * a quieter render beside the text is the honest proportion for "you have
+ * not started".
+ */
+const EMPTY_BELT_WIDTH = 110;
+
 /** Black-belt degrees read as ordinals; nobody says "3 degree". */
 const ORDINAL: Record<number, string> = {
   1: '1st', 2: '2nd', 3: '3rd', 4: '4th', 5: '5th', 6: '6th',
@@ -267,6 +308,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
+
+  /**
+   * The belt-themed "no rank yet" card (N509) — a sibling of `card` below
+   * rather than a reuse of it: same glass recipe (translucent fill, a soft
+   * border, clipped corners) so the two states of this one component read as
+   * the same object, but laid out as an icon-and-text row rather than the
+   * full masthead, since there is no belt story to tell yet — no academy, no
+   * award date, no time at rank.
+   */
+  emptyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: 'rgba(23,30,43,0.72)',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    overflow: 'hidden',
+  },
+  // Dimmed, not full brightness — this belt is a picture of the first rung,
+  // not a photograph of THIS athlete's rank, and the reduced opacity is what
+  // keeps that distinction visible at a glance.
+  emptyBeltWrap: { opacity: 0.55 },
+  emptyText: { flex: 1, gap: 2 },
+
   card: {
     // Translucent over the app's ground rather than a solid panel: the wash and
     // the lit edge only read as glass if some of what is behind shows through.
