@@ -3606,7 +3606,7 @@ components:
         Adherence is a query over both resources, computed by a client when
         asked; how a client chooses to match the two is its own decision and
         is not part of this contract.
-      required: [id, user_id, day, sport, workout_id, class_plan_id, notes, created_at, updated_at]
+      required: [id, user_id, day, sport, workout_id, class_plan_id, time_of_day_minutes, notes, created_at, updated_at]
       properties:
         id: { type: string }
         user_id: { type: string }
@@ -3622,6 +3622,28 @@ components:
         sport:
           type: string
           enum: [strength, running, bjj]
+        time_of_day_minutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1439
+          description: >
+            When on `day` this is planned for, as minutes since LOCAL
+            midnight — wall-clock, with no timezone attached, e.g. `1140` for
+            7:00 PM. The athlete's own local time on the day in question,
+            never converted through any zone (matching `day` itself), and
+            never a Postgres/RFC3339 timestamp — the identical representation
+            `daily_trackers.cutoff_minutes` already uses for the same category
+            of value (a bare clock reading with no zone), chosen for the
+            identical reason: nothing here knows what zone the athlete is in
+            when they read it back, so a zoned type would invite a naive
+            comparison against `now()` in UTC.
+
+            `null` means no time was given — a real, permanent state, not a
+            default of midnight. Every plan that existed before this field was
+            added has this value, and it renders as "day only" forever rather
+            than a guessed time.
+          example: 1140
         workout_id:
           type: string
           nullable: true
@@ -9839,7 +9861,11 @@ paths:
           example: "2026-08-09"
       responses:
         "200":
-          description: The caller's plans, oldest first; insertion order within a day.
+          description: >
+            The caller's plans, oldest day first. Within a day, ordered by
+            `time_of_day_minutes` ascending with untimed plans last, then
+            insertion order for anything that ties (same time, or both
+            untimed).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PlanList" }
@@ -9887,6 +9913,15 @@ paths:
                     Schedule this day from a coach's class plan instead of a
                     workout template. Mutually exclusive with `workout_id` —
                     sending both is a 400.
+                time_of_day_minutes:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  maximum: 1439
+                  description: >
+                    Omit or null to plan the day with no specific time — see
+                    the `Plan` schema's own description of this field for the
+                    representation and its timezone semantics.
                 notes: { type: string, maxLength: 500 }
       responses:
         "201":
@@ -9898,7 +9933,8 @@ paths:
           description: >
             A missing id, a `day` that is not a calendar date, an unknown
             sport, an unknown workout, an unknown class plan, both a
-            `workout_id` and a `class_plan_id` at once, or notes over 500
+            `workout_id` and a `class_plan_id` at once, a
+            `time_of_day_minutes` outside 0–1439, or notes over 500
             characters.
           content:
             application/json:
@@ -9915,15 +9951,18 @@ paths:
       summary: Change a planned session
       operationId: updatePlan
       description: >
-        Partial — omitted fields are left alone. `workout_id` and
-        `class_plan_id` are each three-state: omit to leave it, send an id to
-        set it, and send an explicit `null` to clear it so the day becomes a
-        bare discipline. Without that distinction, clearing one would be
+        Partial — omitted fields are left alone. `workout_id`,
+        `class_plan_id` and `time_of_day_minutes` are each three-state: omit
+        to leave it, send a value to set it, and send an explicit `null` to
+        clear it. For `time_of_day_minutes`, clearing means "back to day
+        only". Without that distinction, clearing one would be
         indistinguishable from not mentioning it.
 
-        The two are mutually exclusive on the resulting row, not merely
-        within one request body: setting one while the other is already
-        present on the plan is a 400, exactly as sending both at once is.
+        `workout_id` and `class_plan_id` are mutually exclusive on the
+        resulting row, not merely within one request body: setting one while
+        the other is already present on the plan is a 400, exactly as sending
+        both at once is. `time_of_day_minutes` has no such relationship to
+        either.
       parameters:
         - name: planID
           in: path
@@ -9940,6 +9979,11 @@ paths:
                 sport: { type: string, enum: [strength, running, bjj] }
                 workout_id: { type: string, nullable: true }
                 class_plan_id: { type: string, nullable: true }
+                time_of_day_minutes:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  maximum: 1439
                 notes: { type: string, maxLength: 500 }
       responses:
         "200":

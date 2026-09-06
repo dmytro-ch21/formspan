@@ -72,7 +72,7 @@ function session(
 
 function plan(day: string, sport: string): PlannedSession {
   seq += 1;
-  return { id: `p${seq}`, day, sport, workoutId: null, classPlanId: null, notes: '' };
+  return { id: `p${seq}`, day, sport, workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' };
 }
 
 /** Mid-week, so nothing here depends on "now" being a boundary. */

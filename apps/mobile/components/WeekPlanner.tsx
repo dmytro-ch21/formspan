@@ -17,6 +17,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
+import { PlanTimeSheet } from '@/components/ui/PlanTimeSheet';
 import { WeekStepper, weekStepperDayState, type WeekStepperDay } from '@/components/ui/WeekStepper';
 import { vola } from '@/constants/Colors';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
@@ -37,6 +38,7 @@ import {
   unplanSession,
   type PlannedSession,
 } from '@/lib/plan';
+import { formatPlanTime } from '@/lib/planTime';
 import { cachedWorkouts } from '@/lib/sessionStore';
 import {
   cleanThemeTitle,
@@ -145,6 +147,14 @@ export function WeekPlanner({
   // The day being planned, or null when the sheet is closed. Holding the day
   // here rather than a boolean is what lets one sheet serve all seven rows.
   const [planning, setPlanning] = useState<string | null>(null);
+  // N126/#520: the discipline/template choice from PickSessionSheet, held
+  // just long enough to ask the one remaining optional question — a time —
+  // before actually writing the plan. Null closes PlanTimeSheet.
+  const [pendingPick, setPendingPick] = useState<{
+    day: string;
+    sport: string;
+    workoutId: string | null;
+  } | null>(null);
   // Any day inside the week the rows are showing. Separate from `now`, which
   // stays the real today — `isPast` and the today marker are claims about the
   // actual date and must not move when you navigate away from this week.
@@ -288,10 +298,15 @@ export function WeekPlanner({
     refresh();
   }, [refresh, reloadAt, lastSyncAt]);
 
-  async function add(day: string, sport: string, workoutId: string | null) {
+  async function add(
+    day: string,
+    sport: string,
+    workoutId: string | null,
+    timeOfDayMinutes: number | null = null,
+  ) {
     if (!userId) return;
     try {
-      await planSession(userId, day, sport, workoutId);
+      await planSession(userId, day, sport, workoutId, '', timeOfDayMinutes);
       await refresh();
       // Local write first, then ask the orchestrator — it decides whether now
       // is a moment worth a run. The row is already on screen either way, so
@@ -543,7 +558,9 @@ export function WeekPlanner({
                     }
                     onLongPress={() => confirmRemove(p)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${name || labelFor(modules, p.sport)}, planned.${
+                    accessibilityLabel={`${name || labelFor(modules, p.sport)}, planned${
+                      formatPlanTime(p.timeOfDayMinutes) ? ` for ${formatPlanTime(p.timeOfDayMinutes)}` : ''
+                    }.${
                       opensWorkout ? ' Opens the workout.' : opensClass ? ' Starts the class.' : ''
                     } Long press to remove.`}
                     testID={`plan-entry-${p.id}`}
@@ -579,7 +596,12 @@ export function WeekPlanner({
                           { color: sportColor(p.sport) ?? vola.textDim },
                         ]}
                       >
+                        {/* N126/#520: appended only when a time was actually
+                            given — an untimed plan says just the discipline,
+                            which is the honest, permanent state every plan
+                            made before this field existed is in. */}
                         {labelFor(modules, p.sport).toUpperCase()}
+                        {formatPlanTime(p.timeOfDayMinutes) ? ` · ${formatPlanTime(p.timeOfDayMinutes)}` : ''}
                       </Text>
                       <Text style={styles.entryTitle} numberOfLines={1}>
                         {/* Falls back to the discipline when the plan names a
@@ -630,7 +652,28 @@ export function WeekPlanner({
         onPick={(pick) => {
           const day = planning;
           setPlanning(null);
-          if (day) add(day, pick.sport, pick.workoutId);
+          // N126/#520: don't write the plan yet — ask the one remaining
+          // optional question (a time) first. PlanTimeSheet's own "No
+          // specific time" row is the fast path back to today's behavior in
+          // one more tap, so this never lengthens the common case into
+          // something slower than it was.
+          if (day) setPendingPick({ day, sport: pick.sport, workoutId: pick.workoutId });
+        }}
+      />
+
+      <PlanTimeSheet
+        visible={pendingPick !== null}
+        title={
+          pendingPick
+            ? `What time is ${labelFor(modules, pendingPick.sport)}?`
+            : 'What time?'
+        }
+        initialMinutes={null}
+        onClose={() => setPendingPick(null)}
+        onPick={(minutes) => {
+          const pick = pendingPick;
+          setPendingPick(null);
+          if (pick) add(pick.day, pick.sport, pick.workoutId, minutes);
         }}
       />
 

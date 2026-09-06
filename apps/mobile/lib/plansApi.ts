@@ -28,6 +28,12 @@ export type RemotePlan = {
    * reads it back on a pull. See `lib/plan.ts`'s `CREATE_PLANNED` comment.
    */
   class_plan_id: string | null;
+  /**
+   * N126/#520: minutes since local midnight, wall-clock, no timezone — see
+   * `lib/plan.ts`'s `PlannedSession.timeOfDayMinutes` for the full contract.
+   * `null` means no time was given.
+   */
+  time_of_day_minutes: number | null;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -99,6 +105,7 @@ export async function createPlan(
     day: string;
     sport: string;
     workout_id: string | null;
+    time_of_day_minutes: number | null;
     notes: string;
   },
 ): Promise<RemotePlan> {
@@ -118,7 +125,13 @@ export async function createPlan(
 export async function updatePlan(
   getToken: TokenGetter,
   id: string,
-  input: { day: string; sport: string; workout_id: string | null; notes: string },
+  input: {
+    day: string;
+    sport: string;
+    workout_id: string | null;
+    time_of_day_minutes: number | null;
+    notes: string;
+  },
 ): Promise<RemotePlan> {
   return request<RemotePlan>(getToken, `/plans/${encodeURIComponent(id)}`, {
     method: 'PATCH',

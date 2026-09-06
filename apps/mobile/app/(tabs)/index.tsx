@@ -63,6 +63,7 @@ import {
 import { restLine } from '@/lib/trend';
 import { enabledSports, labelFor, logsAfterwards, type Module } from '@/lib/modules';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
+import { formatPlanTime } from '@/lib/planTime';
 import type { PlannedOffer, Source } from '@/lib/trainBoard';
 import {
   momentumDayKey,
@@ -1772,12 +1773,24 @@ function LeadBlock({
     return (
       <View style={styles.section}>
         <SectionHeader label="Up next" />
-        {value.plans.map((p) => (
+        {value.plans.map((p) => {
+          // N126/#520: `UP NEXT — Today • 7:00 PM` when a time was actually
+          // given; `UP NEXT — Today` (day only) when it was not. The absent
+          // case is not a placeholder — every plan made before this field
+          // existed is in it permanently, and it must keep reading as a
+          // complete, honest sentence rather than a stub waiting on data.
+          const planTime = formatPlanTime(p.timeOfDayMinutes);
+          const when = planTime
+            ? `${isToday ? 'Today' : dayLabel} • ${planTime}`
+            : isToday
+              ? 'Today'
+              : dayLabel;
+          return (
           <UpNextCard
             key={p.id}
             sport={p.sport}
             title={p.workoutName ?? `${labelFor(modules, p.sport)} session`}
-            when={isToday ? 'Today' : dayLabel}
+            when={when}
             // #447: the roadmap's current focus and up to two things worth
             // trying, beneath the Log button — BJJ only, since that is the
             // only discipline with a roadmap or a suggestion tier at all, and
@@ -1814,6 +1827,10 @@ function LeadBlock({
                   } ${p.workoutName ?? `${labelFor(modules, p.sport)} session`}, planned for ${
                     isToday ? 'today' : dayLabel.toLowerCase()
                   }${
+                    // N126/#520: said only when a time was actually given —
+                    // same rule as the card's own `when` text.
+                    planTime ? ` at ${planTime}` : ''
+                  }${
                     // Explicit accessibilityLabel replaces UpNextCard's own
                     // default (which appends `hint` for us) — so the hint has
                     // to be repeated here, or a screen-reader user loses the
@@ -1825,7 +1842,8 @@ function LeadBlock({
             }
             testID={`today-plan-${p.id}`}
           />
-        ))}
+          );
+        })}
       </View>
     );
   }

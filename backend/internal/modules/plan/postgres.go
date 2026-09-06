@@ -59,6 +59,10 @@ func translatePgError(err error) error {
 		if strings.Contains(pgErr.ConstraintName, "one_template_kind") {
 			return fmt.Errorf("%w: a plan may reference a workout or a class plan, not both", ErrInvalidInput)
 		}
+		if strings.Contains(pgErr.ConstraintName, "time_of_day_minutes") {
+			return fmt.Errorf("%w: time_of_day_minutes must be between 0 and %d, or null",
+				ErrInvalidInput, MaxTimeOfDayMinutes)
+		}
 		return ErrInvalidInput
 	case "23503": // foreign_key_violation — workout_id and class_plan_id are the two FKs.
 		if strings.Contains(pgErr.ConstraintName, "class_plan") {
@@ -77,12 +81,13 @@ func translatePgError(err error) error {
 // some zone, and every one of those conversions is a chance to move the plan
 // onto the previous day. The database already knows the calendar date; asking
 // for it as text is asking it not to help.
-const selectColumns = `id, user_id, to_char(day, 'YYYY-MM-DD'), sport, workout_id, class_plan_id, notes, created_at, updated_at`
+const selectColumns = `id, user_id, to_char(day, 'YYYY-MM-DD'), sport, workout_id, class_plan_id, time_of_day_minutes, notes, created_at, updated_at`
 
 func scanPlan(row pgx.Row) (*Plan, error) {
 	var p Plan
 	if err := row.Scan(
-		&p.ID, &p.UserID, &p.Day, &p.Sport, &p.WorkoutID, &p.ClassPlanID, &p.Notes, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.UserID, &p.Day, &p.Sport, &p.WorkoutID, &p.ClassPlanID, &p.TimeOfDayMinutes,
+		&p.Notes, &p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -114,20 +119,25 @@ func (r *PostgresRepository) List(ctx context.Context, userID string, rng Range)
 		return nil, fmt.Errorf("%w: range must be %d days or fewer", ErrInvalidInput, maxRangeDays)
 	}
 
-	// Ordered by created_at within a day so a two-a-day keeps the order it was
-	// planned in — the clients render the list top to bottom and would
-	// otherwise shuffle the morning and evening sessions between reads.
+	// Ordered by time_of_day_minutes within a day (N126/#520) — a two-a-day
+	// with times set now reads in the order the athlete will actually meet
+	// them, which `created_at` (the order they were PLANNED in) cannot
+	// promise. NULLS LAST: an untimed plan carries no claim about when in the
+	// day it falls, so it renders after every plan that does rather than
+	// sorting to the front as Postgres's default would.
 	//
-	// `id` is the tiebreak, and it is not decoration: `created_at` defaults to
-	// `now()`, which is TRANSACTION time, so two plans pushed in one sync batch
-	// share it exactly and the order becomes whatever the plan node returns.
-	// `api-conventions.md` requires a tiebreak on every ordered list for this
-	// reason — never the timestamp alone.
+	// created_at is the tiebreak for two plans that share a time (or share
+	// having none) — preserving the original "insertion order within a day"
+	// behavior for everything this column cannot distinguish. `id` remains
+	// the final tiebreak beneath that, for the reason already given: two
+	// plans pushed in one sync batch can share created_at exactly, since it
+	// is TRANSACTION time. `api-conventions.md` requires a tiebreak on every
+	// ordered list for this reason — never a timestamp alone.
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+selectColumns+`
 		  FROM plans
 		 WHERE user_id = $1 AND day >= $2 AND day <= $3
-		 ORDER BY day ASC, created_at ASC, id ASC
+		 ORDER BY day ASC, time_of_day_minutes ASC NULLS LAST, created_at ASC, id ASC
 		 LIMIT $4`,
 		userID, from, to, maxPlans,
 	)
@@ -300,10 +310,10 @@ func (r *PostgresRepository) Create(ctx context.Context, userID string, in NewPl
 	}
 
 	p, err := scanPlan(tx.QueryRow(ctx, `
-		INSERT INTO plans (id, user_id, day, sport, workout_id, class_plan_id, notes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO plans (id, user_id, day, sport, workout_id, class_plan_id, time_of_day_minutes, notes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+selectColumns,
-		in.ID, userID, day, in.Sport, in.WorkoutID, in.ClassPlanID, in.Notes,
+		in.ID, userID, day, in.Sport, in.WorkoutID, in.ClassPlanID, in.TimeOfDayMinutes, in.Notes,
 	))
 	if err != nil {
 		return nil, translatePgError(err)
@@ -337,6 +347,8 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in P
 	workoutID := in.WorkoutID.Value
 	setClassPlan := in.ClassPlanID.Present
 	classPlanID := in.ClassPlanID.Value
+	setTimeOfDay := in.TimeOfDayMinutes.Present
+	timeOfDayMinutes := in.TimeOfDayMinutes.Value
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -412,15 +424,17 @@ func (r *PostgresRepository) Update(ctx context.Context, userID, id string, in P
 
 	p, err := scanPlan(tx.QueryRow(ctx, `
 		UPDATE plans
-		   SET day           = COALESCE($3, day),
-		       sport         = COALESCE($4, sport),
-		       workout_id    = CASE WHEN $5 THEN $6 ELSE workout_id END,
-		       class_plan_id = CASE WHEN $7 THEN $8 ELSE class_plan_id END,
-		       notes         = COALESCE($9, notes),
-		       updated_at    = now()
+		   SET day                  = COALESCE($3, day),
+		       sport                = COALESCE($4, sport),
+		       workout_id           = CASE WHEN $5 THEN $6 ELSE workout_id END,
+		       class_plan_id        = CASE WHEN $7 THEN $8 ELSE class_plan_id END,
+		       time_of_day_minutes  = CASE WHEN $9 THEN $10 ELSE time_of_day_minutes END,
+		       notes                = COALESCE($11, notes),
+		       updated_at           = now()
 		 WHERE id = $1 AND user_id = $2
 		 RETURNING `+selectColumns,
-		id, userID, day, in.Sport, setWorkout, workoutID, setClassPlan, classPlanID, in.Notes,
+		id, userID, day, in.Sport, setWorkout, workoutID, setClassPlan, classPlanID,
+		setTimeOfDay, timeOfDayMinutes, in.Notes,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

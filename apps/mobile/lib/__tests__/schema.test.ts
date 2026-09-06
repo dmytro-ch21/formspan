@@ -13,7 +13,7 @@ import { migratedFixture, openFixture } from './support/sqlite';
 it('a fresh install ends up at the current schema version', async () => {
   const db = await migratedFixture();
   const row = db.raw.prepare('PRAGMA user_version').get() as { user_version: number };
-  expect(row.user_version).toBe(37);
+  expect(row.user_version).toBe(38);
 });
 
 it('a fresh install has the sequences outbox', async () => {
@@ -122,7 +122,7 @@ it('re-running migrate on the SAME database is idempotent', async () => {
   db.raw.exec('PRAGMA user_version = 0');
 
   await expect(migrate(db as never)).resolves.toBeUndefined();
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('upgrades a v6-shaped database by adding the column', async () => {
@@ -156,7 +156,7 @@ it('upgrades a v6-shaped database by adding the column', async () => {
   const cols = (db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toContain('deleted_at');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('upgrades a v7-shaped database by adding the ownership columns', async () => {
@@ -177,7 +177,7 @@ it('upgrades a v7-shaped database by adding the ownership columns', async () => 
   const cols = (db.raw.prepare('PRAGMA table_info(workout_cache)').all() as { name: string }[])
     .map((c) => c.name);
   expect(cols).toEqual(expect.arrayContaining(['owner_user_id', 'visibility']));
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('an upgraded row is backfilled as owned by the athlete it is filed under', async () => {
@@ -331,7 +331,7 @@ it('upgrading a v15-shaped database does not mark every cached name as owed', as
     .prepare(`SELECT name_dirty FROM workout_cache WHERE id = 'w1'`)
     .get() as { name_dirty: number };
   expect(row.name_dirty).toBe(0);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('a fresh install has the food log', async () => {
@@ -411,7 +411,7 @@ it('upgrades a v17-shaped database by adding the food log', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -436,7 +436,7 @@ it('upgrades a v18-shaped database by adding the target cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -457,7 +457,7 @@ it('upgrades a v19-shaped database by adding the barcode cache', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
   const tables = (
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
@@ -543,7 +543,7 @@ it('a device already stamped 21 gains foods.source', async () => {
     (c) => c.name,
   );
   expect(cols).toContain('source');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the source migration is not an error', async () => {
@@ -582,7 +582,7 @@ it('a device already stamped 23 gains the recipe columns', async () => {
   );
   expect(cols).toContain('yield_servings');
   expect(cols).toContain('items');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('backfills a pre-existing food with an empty ingredient list, not a null', async () => {
@@ -655,7 +655,7 @@ it('a device already stamped 24 gains the N52 label macros on all three tables',
     );
     for (const c of N52_COLS) expect(cols).toContain(c);
   }
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N52 label-macro migration is not an error', async () => {
@@ -693,7 +693,7 @@ it('a device already stamped 25 gains the packet-serving columns on barcode_cach
     db.raw.prepare('PRAGMA table_info(barcode_cache)').all() as { name: string }[]
   ).map((c) => c.name);
   for (const c of N117_COLS) expect(cols).toContain(c);
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N117 packet-serving migration is not an error', async () => {
@@ -785,7 +785,7 @@ it('upgrades a pre-N78 database by adding the tracker columns', async () => {
 
   await migrate(db as never);
 
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
   const cols = (
     db.raw.prepare('PRAGMA table_info(daily_trackers)').all() as { name: string }[]
   ).map((c) => c.name);
@@ -826,7 +826,7 @@ it('a device already stamped 26 gains cutoff_minutes on daily_trackers (N431)', 
     db.raw.prepare('PRAGMA table_info(daily_trackers)').all() as { name: string }[]
   ).map((c) => c.name);
   expect(cols).toContain('cutoff_minutes');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 
   // No backfill to check — unlike count_noun above, NULL ("no cutoff
   // configured") is exactly the right value for every row that predates the
@@ -870,7 +870,7 @@ it('a device already stamped 27 gains started_at_dirty on local_sessions (N436)'
     db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[]
   ).map((c) => c.name);
   expect(cols).toContain('started_at_dirty');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 
   // No backfill to check: an existing row has never had a LOCAL date
   // correction pending, so 0 ("nothing owed") is exactly right, not a
@@ -915,7 +915,7 @@ it('a device already stamped 28 gains class_plan_id on planned_sessions (N442)',
     db.raw.prepare('PRAGMA table_info(planned_sessions)').all() as { name: string }[]
   ).map((c) => c.name);
   expect(cols).toContain('class_plan_id');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 
   // No backfill to check, and deliberately so: this app never WRITES the
   // column (see CREATE_PLANNED's own comment), so an existing row simply has
@@ -961,7 +961,7 @@ it('a device already stamped 29 gains category on food_entries (N124/N113)', asy
     db.raw.prepare('PRAGMA table_info(food_entries)').all() as { name: string }[]
   ).map((c) => c.name);
   expect(cols).toContain('category');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 
   // No backfill, and deliberately so — an existing entry predates the column
   // entirely and genuinely has no category to give it. NULL is the honest
@@ -1017,7 +1017,7 @@ it('a device already stamped 30 gains running_json on local_sessions (N460)', as
     db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[]
   ).map((c) => c.name);
   expect(cols).toContain('running_json');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N460 running_json migration is not an error', async () => {
@@ -1061,7 +1061,7 @@ it('a device already stamped 31 gains the healthkit_imports table (N465)', async
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
   expect(tables).toContain('healthkit_imports');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N465 healthkit_imports migration is not an error', async () => {
@@ -1113,7 +1113,7 @@ it('a device already stamped 32 gains intent on local_sessions, backfilled to no
     db.raw.prepare('PRAGMA table_info(local_sessions)').all() as { name: string }[]
   ).map((c) => c.name);
   expect(cols).toContain('intent');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 
   // A row that existed before the column did is backfilled, not left NULL —
   // it really was a normal session, there is nothing else it could have
@@ -1168,7 +1168,7 @@ it('a device already stamped 33 gains the biometric_hr_synced table (N477)', asy
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
   expect(tables).toContain('biometric_hr_synced');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N477 biometric_hr_synced migration is not an error', async () => {
@@ -1213,7 +1213,7 @@ it('a device already stamped 34 gains the health_connect_enrichment table (N478)
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
   expect(tables).toContain('health_connect_enrichment');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N478 health_connect_enrichment migration is not an error', async () => {
@@ -1269,7 +1269,7 @@ it('a device already stamped 35 gains the detected_activities table (N479)', asy
     db.raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
   ).map((t) => t.name);
   expect(tables).toContain('detected_activities');
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 });
 
 it('re-running the N479 detected_activities migration is not an error', async () => {
@@ -1316,7 +1316,7 @@ it('a device already stamped 36 gains hr_source/attempted_at, and existing rows 
   expect(cols).toEqual(
     expect.arrayContaining(['user_id', 'session_id', 'synced_at', 'hr_source', 'attempted_at']),
   );
-  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 37 });
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
 
   // The pre-existing row backfills to 'none' (see CREATE_BIOMETRIC_HR_SYNCED's
   // and the v37 migration block's own doc comments on why 'none', not
@@ -1327,6 +1327,46 @@ it('a device already stamped 36 gains hr_source/attempted_at, and existing rows 
     .get('s1') as { hr_source: string; attempted_at: string };
   expect(row.hr_source).toBe('none');
   expect(row.attempted_at).toBe('2026-08-01T00:00:00.000Z');
+});
+
+it('a device already stamped 37 gains time_of_day_minutes (N126/#520)', async () => {
+  // Every dev machine and every installed build predating this ticket is
+  // stamped 37, and `migrate()` returns early at `current >= SCHEMA_VERSION`
+  // — reverting SCHEMA_VERSION to 37 is what this catches. Without this
+  // column, every sync-pull writing a server-set time would throw with "no
+  // column named time_of_day_minutes", and every local plan write would be
+  // the same "day only" it already was.
+  const db = await migratedFixture();
+  db.raw.exec(
+    `INSERT INTO planned_sessions
+       (id, user_id, day, sport, workout_id, notes, created_at, updated_at, dirty, remote)
+     VALUES ('p1', 'u1', '2026-08-05', 'strength', NULL, '', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 0, 1);
+     ALTER TABLE planned_sessions DROP COLUMN time_of_day_minutes;
+     PRAGMA user_version = 37;`,
+  );
+
+  await migrate(db as never);
+
+  const cols = (
+    db.raw.prepare('PRAGMA table_info(planned_sessions)').all() as { name: string }[]
+  ).map((c) => c.name);
+  expect(cols).toContain('time_of_day_minutes');
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 38 });
+
+  // No backfill: a plan made before this column existed genuinely has no
+  // time to give it. NULL is the honest answer, not a guessed 0 (midnight).
+  const row = db.raw
+    .prepare('SELECT time_of_day_minutes FROM planned_sessions WHERE id = ?')
+    .get('p1') as { time_of_day_minutes: number | null };
+  expect(row.time_of_day_minutes).toBeNull();
+});
+
+it('a fresh install’s planned_sessions has time_of_day_minutes from the start', async () => {
+  const db = await migratedFixture();
+  const cols = (
+    db.raw.prepare('PRAGMA table_info(planned_sessions)').all() as { name: string }[]
+  ).map((c) => c.name);
+  expect(cols).toContain('time_of_day_minutes');
 });
 
 it('re-running the N511 biometric_hr_synced retry-ledger migration is not an error', async () => {

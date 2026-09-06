@@ -25,6 +25,7 @@ import {
   addMonths,
   formatDayLong,
   formatDuration,
+  formatTimeOfDay,
   localZone,
   monthGrid,
   today,
@@ -190,10 +191,11 @@ export default function CalendarPage() {
     sport: string,
     workoutID: string | null,
     classPlanID: string | null,
+    timeOfDayMinutes: number | null,
   ) {
     setBusy(true);
     try {
-      await createPlan(getToken, { day: selected, sport, workoutID, classPlanID });
+      await createPlan(getToken, { day: selected, sport, workoutID, classPlanID, timeOfDayMinutes });
       await load();
       setError(null);
     } catch (err) {
@@ -514,6 +516,24 @@ function Chip({ kind, label }: { kind: "trained" | "planned"; label: string }) {
 }
 
 /**
+ * "19:00" (an `<input type="time">`'s own value shape) into minutes since
+ * local midnight, or `null` for empty/unparseable — N126/#520.
+ *
+ * A plain string split, never a `Date`: the browser control's value has no
+ * timezone in it, and routing it through `Date`/`Intl` on the way to a
+ * wall-clock integer is exactly how a value designed to carry no zone picks
+ * one up. `formatTimeOfDay` in `lib/history.ts` is this function's inverse.
+ */
+function parseTimeInput(value: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
  * The selected day: what happened on it, what is planned, and a way to plan
  * more.
  *
@@ -556,7 +576,12 @@ function DayPanel({
    *  page's own comment on where that arrives from. */
   initialClassPlanID: string | null;
   busy: boolean;
-  onAdd: (sport: string, workoutID: string | null, classPlanID: string | null) => void;
+  onAdd: (
+    sport: string,
+    workoutID: string | null,
+    classPlanID: string | null,
+    timeOfDayMinutes: number | null,
+  ) => void;
   onRemove: (id: string) => void;
 }) {
   const { modules } = useModules();
@@ -603,6 +628,12 @@ function DayPanel({
       ? chosenClassPlan
       : "";
 
+  // N126/#520: optional, so an empty string here means "no specific time" —
+  // `<input type="time">`'s own empty state — rather than a value that has
+  // to be parsed away from a default.
+  const [chosenTime, setChosenTime] = useState("");
+  const timeOfDayMinutes = parseTimeInput(chosenTime);
+
   return (
     <aside className="flex h-fit flex-col gap-4 rounded-card border border-line bg-surface p-4">
       <div>
@@ -641,7 +672,14 @@ function DayPanel({
                       labelForModule(modules, p.sport)}
                   </span>
                   <span className="block text-xs text-text-dim">
+                    {/* N126/#520: appended only when a time was actually
+                        given — the honest, permanent state every plan made
+                        before this field existed is in stays just the
+                        discipline. */}
                     {labelForModule(modules, p.sport)}
+                    {formatTimeOfDay(p.time_of_day_minutes)
+                      ? ` · ${formatTimeOfDay(p.time_of_day_minutes)}`
+                      : ""}
                   </span>
                 </span>
                 <button
@@ -667,7 +705,7 @@ function DayPanel({
         className="flex flex-col gap-2 border-t border-line-soft pt-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (sport) onAdd(sport, workoutID || null, classPlanID || null);
+          if (sport) onAdd(sport, workoutID || null, classPlanID || null, timeOfDayMinutes);
         }}
       >
         <h3 className="eyebrow">Add to this day</h3>
@@ -737,6 +775,19 @@ function DayPanel({
                 </select>
               </label>
             )}
+
+            {/* N126/#520: optional — the browser's native picker already
+                renders empty as "no time chosen", so there is no separate
+                "no time" affordance to build here the way mobile needs one. */}
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-muted">Time (optional)</span>
+              <input
+                type="time"
+                value={chosenTime}
+                onChange={(e) => setChosenTime(e.target.value)}
+                className="rounded-control border border-line bg-surface px-2.5 py-2"
+              />
+            </label>
 
             <button
               type="submit"

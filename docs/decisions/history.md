@@ -59171,6 +59171,165 @@ adjacent observation outside this diff's changed files, not a regression
 this PR introduced.
 
 
+## 2026-09-06 — N126: a planned session can carry a time, so Today can say when (#520)
+
+Filed out of #487's reshape of Today to the reference design: the reference
+shows `UP NEXT — Today • 7:00 PM`, and `plans` had only `day`. #487
+deliberately kept the honest version — the day only — rather than inventing a
+time to match a mockup, which is the same class of dishonesty as a chart with
+no axis labels. This ticket makes the richer version true.
+
+### The three decisions, and why
+
+**Optional, not required.** Required would break every existing plan and
+every plan the generator has ever produced, and the ticket itself calls this
+"almost certainly right" — the interesting question was always what the UI
+does with the absence, not whether to allow it.
+
+**A real time, not a slot.** `Morning`/`Midday`/`Evening` was seriously
+considered — the ticket leans toward it — and rejected on the single
+criterion that actually mattered here: sorting is satisfied by either (a slot
+enum orders exactly as well as an integer), but "is this session behind me or
+ahead of me" is not. Comparing "now" against `Evening` still leaves the
+athlete guessing when Evening starts; comparing it against `19:00` does not. A
+hybrid (a slot plus an optional precise time) was also considered and
+rejected as exactly the unrequested flexibility CLAUDE.md's aversion to
+speculative generality warns against — one field, one representation, chosen
+for the case that actually needs precision. The three preset chips
+(`Morning`/`Midday`/`Evening`, at 07:00/12:00/18:00) that the mobile picker
+offers give the casual athlete the same one-tap convenience a slot would have,
+writing into the identical field a precise entry would — there is no separate
+slot concept anywhere downstream to keep in sync with it.
+
+**Minutes since LOCAL midnight, not a Postgres `TIME`.** This is not a new
+pattern: `daily_trackers.cutoff_minutes` (migration `000079`) already made
+this exact call for the identical category of value — "a plain clock time
+with no zone" — and named the reason directly: a `TIME` column invites a
+naive comparison against `now()` in UTC, and there is no timezone information
+anywhere else on the row to make that comparison correct. Reusing it here
+rather than introducing a second representation for the same kind of fact
+also sidestepped a real implementation cost: pgx v5's `pgtype.Time` does not
+wrap Go's `time.Time` at all (its own doc comment explains why — midnight
+rolling over from `24:00:00` cannot round-trip through `time.Time`), so a
+`TIME` column would have meant hand-building `pgtype.Time` values from
+hour/minute on every write and read, purely to store what a `SMALLINT`
+already stores for free. `plans.time_of_day_minutes` (0–1439, nullable) is
+the result — same shape, same CHECK range, same NULL-means-absent semantics
+as `cutoff_minutes`, sortable with a plain numeric `ORDER BY`.
+
+**Whose timezone.** Wall-clock, unzoned, exactly like `day` itself: "7pm"
+means 7pm wherever the athlete is standing that day, never an instant
+translated from wherever the server or the typing device happened to be.
+Nothing on the read or write path ever calls `time.Local`, `.In(...)`, or
+constructs a zoned `time.Time` — verified by a Postgres integration test that
+overrides `time.Local` to `America/Los_Angeles` for its duration (a more
+reliable simulation than `TZ=...` env-var timing, which needs the change to
+land before `time.Local`'s first lazy resolution) and asserts a 7:00 PM plan
+round-trips as exactly `1140`, unshifted, under that zone.
+
+### What changed
+
+- **Backend** (`internal/modules/plan`): `Plan.TimeOfDayMinutes *int`,
+  `NewPlan.TimeOfDayMinutes`, and a three-state `OptionalTimeOfDayMinutes`
+  (mirroring `OptionalWorkoutID`'s own reasoning about why a `**int` cannot
+  carry "absent" separately from "explicit null") on `PlanUpdate`. Migration
+  `000094` adds `plans.time_of_day_minutes SMALLINT` with a named range CHECK
+  and a column comment stating the wall-clock/no-zone contract in place —
+  the number will be reclaimed against `origin/main`'s actual highest at
+  rebase time, per the repo's migration-numbering rule.
+- **Ordering** (the sort half of the acceptance criteria): `List`'s query is
+  now `ORDER BY day ASC, time_of_day_minutes ASC NULLS LAST, created_at ASC,
+  id ASC` — untimed plans sort after every timed one on the same day,
+  `created_at`/`id` remaining the tiebreak for everything the new column
+  cannot distinguish. Asserted by a dedicated test that inserts three same-day
+  plans deliberately out of the order they should read back in, and confirmed
+  to fail (not merely pass) when the `ORDER BY` clause is reverted —
+  mutation-tested per the repo's "verify that a check can fail" rule, restored
+  afterward and re-confirmed green.
+- **`contracts/public.openapi.yaml`**: `time_of_day_minutes` on `Plan`, the
+  create body and the update body, each with the representation and its
+  timezone semantics spelled out once (on `Plan`) and referenced from the
+  others; the `/plans` GET description now states the new ordering rule.
+- **Mobile** (`apps/mobile`): `PlannedSession.timeOfDayMinutes` (required
+  field, `number | null` — matching `workoutId`/`classPlanId`'s own
+  required-but-nullable shape rather than an optional key, so every fixture
+  states its value explicitly instead of silently omitting it), threaded
+  through `lib/plan.ts` (local SQLite CRUD, sync push/pull) and
+  `lib/plansApi.ts` (the wire shape). `lib/db.ts` gains schema v38
+  (`planned_sessions.time_of_day_minutes INTEGER`, no backfill — every
+  existing row genuinely has no time to give it). `listPlannedBetween`'s
+  SQLite query sorts with the portable `(time_of_day_minutes IS NULL) ASC,
+  time_of_day_minutes ASC` idiom, since SQLite has no `NULLS LAST`.
+  `lib/planTime.ts` is the new pure-arithmetic display/entry layer
+  (`formatPlanTime`, `validTimeOfDayMinutes`, the three presets,
+  `clampTimeOfDay`) — deliberately never touching `Date`/`Intl`, since
+  routing a zone-free integer through either is exactly how it would pick one
+  up from the device it renders on.
+- **Mobile UI, entry side**: `components/ui/PlanTimeSheet.tsx` is a new sheet
+  in the Plan tab's add flow (`WeekPlanner.tsx`), opened after
+  `PickSessionSheet` resolves a discipline/template choice. "No specific
+  time" is the first, most reachable row — the fast path stays fast — with
+  three preset chips below it and a custom +/- hour/minute stepper (5-minute
+  steps) beneath that. No native time-picker dependency: this app carries no
+  `@react-native-community/datetimepicker`, adding one is a native-build
+  change out of this ticket's scope, and a tap-only control cannot produce
+  the malformed input a typed field would invite. `WeekPlanner`'s own planned
+  rows now show the time (`STRENGTH · 7:00 PM`) when one is set, and say
+  nothing extra when it is not.
+- **Mobile UI, Today's `UP NEXT`**: `app/(tabs)/index.tsx`'s `owed` branch
+  computes `when` per plan — `Today • 7:00 PM` when a time is present, plain
+  `Today` (or the day label, browsing a different day) when it is not — and
+  the card's `accessibilityLabel` states the time the same way sighted
+  athletes see it. The absent case was written to read as a complete,
+  permanent sentence rather than a stub: every plan made before this field
+  existed is in it forever.
+- **Web** (`apps/web`): `Plan.time_of_day_minutes` on the `lib/api.ts` type,
+  `createPlan`/`updatePlan` inputs, and a `formatTimeOfDay` helper in
+  `lib/history.ts` (the same pure-arithmetic contract as mobile's
+  `formatPlanTime`, independently implemented rather than shared code across
+  the two apps' otherwise-separate API clients). The calendar page's "Add to
+  this day" form gains a plain `<input type="time">` (optional — an empty
+  value is "no specific time", the browser's own native reading, so there is
+  no separate skip affordance to build the way mobile needed one), and the
+  Planned list shows the time next to the discipline label when set.
+
+### Testing
+
+Backend: seven new tests in `internal/modules/plan/postgres_test.go` —
+round-trip, default-absent, update set/clear (three-state, matching
+`TestWorkoutIDThreeStateSurvivesJSON`'s own JSON-level twin added alongside
+it), out-of-range rejection, the ordering test (mutation-confirmed above),
+and the `time.Local`-override timezone test. Mobile: `lib/plan.ts` gained
+round-trip, absence, and ordering tests in `plan.test.ts` (the ordering test
+also mutation-confirmed against `listPlannedBetween`'s query), a full
+`lib/__tests__/planTime.test.ts` for the display/validation arithmetic, two
+new `todayScreen.test.tsx` cases asserting the `UP NEXT` card's visible text
+and accessibility label in both the timed and untimed cases, and two new
+`schema.test.ts` cases for the v37→v38 migration (upgrade-in-place and
+fresh-install) — every pre-existing `PlannedSession` fixture across eight
+test files needed `timeOfDayMinutes: null` added once the field went from
+absent to required-but-nullable, which is the mechanism, not a side effect:
+a fixture that could silently omit the field would be exactly the kind of gap
+"every consumer handles the absent case explicitly" exists to close. Web:
+`formatTimeOfDay.test.ts` covers the same cases as mobile's twin. Full
+`pnpm run verify` and the full backend Go suite (`go build`, `go vet`,
+`gofmt -l`, and `go test -p 1` across every package with `TEST_DATABASE_URL`
+set) are green; the backend suite's skip count is still exactly one
+(`TestLiveComplete`).
+
+### Open
+
+**NEEDS HUMAN EVIDENCE, left unmet on purpose**: a planned session with a
+time and one without, both on Today, both read correctly on a device — the
+acceptance criterion the issue marks this way, and no amount of code review
+substitutes for it. Also unaddressed here, and not claimed to be: mobile has
+no way to EDIT a time on an already-created plan (only set one at creation)
+— consistent with every other plan field on mobile today, which is create/
+remove only, never in-place edit; and web's own add form is likewise
+create-only, matching its existing pattern. Widening either to a real edit
+flow is separate work.
+
+
 ## Open items / known gaps as of this entry
 
 
