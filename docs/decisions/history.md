@@ -57770,6 +57770,47 @@ next-session/warm-up/in-session/weekly-program recommendation products
 (phase 4), no immutable per-suggestion decision record or shadow replay
 (phase 5). Those remain open against #753, which stays open.
 
+**Review fold-in.** `frontend-reviewer` found two real `[blocking]` issues in
+the first version of this branch, both now fixed:
+
+- `ProtocolEditor`'s shared `numberField` helper always forced
+  `keyboardType="number-pad"` and `Math.round()`, correct for rep counts and
+  target sets but silently wrong for `equipment_increment` — real
+  plate/dumbbell steps are routinely fractional (1.25 kg, 2.5 kg), and iOS's
+  `number-pad` has no decimal key at all, so a phone-only athlete could not
+  even type one. Given an opt-in `decimal` flag, mirroring the item editor's
+  own pre-existing weight field a couple hundred lines above
+  (`decimal-pad`/`inputMode="decimal"`, no rounding) rather than inventing a
+  new convention.
+- Two of `ItemProtocol`'s scalar fields — `target_rpe` and
+  `exercise_profile` — were configurable on web (both single inputs, no
+  table) but entirely absent from mobile: not editable, not even visible
+  read-only. This is exactly the "reasoning reachable, action not" failure
+  shape CLAUDE.md's mobile-first rule was written to forbid, on the same
+  screen that otherwise carefully drew the mobile/web line at "needs a
+  table" (the per-set prescription list, correctly web-only). Added `Target
+  RPE` as a `numberField` (also fixed to accept a fraction, since RPE uses
+  half-points) and `Exercise profile` as a pill row mirroring the existing
+  `progression_strategy` row — `EXERCISE_PROFILES` added to
+  `lib/workouts.ts`, mirroring `apps/web/src/lib/api.ts`'s array exactly.
+
+Also folded in a cheap `[suggestion]`: `hitSlop={12}` on the Protocol
+disclosure toggle, matching this same file's own `workout-name-save` idiom
+for a small tap target. Two non-blocking suggestions were left as-is,
+per their own reviewer's framing as judgment calls: the rep-range-min/max
+pairing isn't enforced client-side on either app (a mismatch surfaces via
+the existing sync-failure path rather than a same-screen guard), and the
+web per-set table's `key={i}` (a synthetic id would need a new field on
+`SetPrescription` that doesn't otherwise exist).
+
+**Migration-number collision, caught before either branch was pushed.**
+This branch and N490 (#851, landing the same day) both independently
+claimed `000091` against the identical `origin/main` base (commit
+`9ad7220d`) — invisible in either branch's own three-dot diff, exactly as
+this repo's own "claim at rebase time" rule warns. This branch keeps
+`000091` (pushed first, `origin/main` still at `000090` at push time);
+N490 was renumbered to `000092` when it rebased after this one merged.
+
 ## Open items / known gaps as of this entry
 
 

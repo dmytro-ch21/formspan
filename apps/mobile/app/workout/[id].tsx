@@ -25,6 +25,7 @@ import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import type { UnitSystem } from '@/lib/units';
 import {
   emptyItem,
+  EXERCISE_PROFILES,
   getWorkout,
   PROGRESSION_STRATEGIES,
   protocolIsConfigured,
@@ -886,19 +887,32 @@ function ProtocolEditor({
     value: number | null | undefined,
     onSet: (n: number | null) => void,
     testIDSuffix: string,
+    // N494 review fold-in: this used to always be integer-only (`number-pad`
+    // + `Math.round`), which was correct for rep counts and target sets but
+    // silently corrupted `equipment_increment` — real plate/dumbbell steps
+    // are routinely fractional (1.25 kg, 2.5 kg) and iOS's `number-pad` has
+    // no decimal key at all, so a phone-only athlete could not even type
+    // one. Mirrors the item editor's own pre-existing weight field a couple
+    // hundred lines above (`decimal-pad`/`inputMode="decimal"`, no
+    // rounding) rather than inventing a new convention.
+    decimal = false,
   ) {
     return (
       <View style={styles.protocolField}>
         <Text style={styles.fieldLabel}>{label}</Text>
         <TextInput
           style={styles.fieldInput}
-          keyboardType="number-pad"
-          inputMode="numeric"
+          keyboardType={decimal ? 'decimal-pad' : 'number-pad'}
+          inputMode={decimal ? 'decimal' : 'numeric'}
           accessibilityLabel={label}
           value={value == null ? '' : String(value)}
           onChangeText={(text) => {
-            const n = text.trim() === '' ? null : Number(text);
-            onSet(n === null || !Number.isFinite(n) ? null : Math.round(n));
+            const n = text.trim() === '' ? null : Number(text.replace(',', '.'));
+            if (n === null || !Number.isFinite(n)) {
+              onSet(null);
+              return;
+            }
+            onSet(decimal ? n : Math.round(n));
           }}
           placeholder="—"
           placeholderTextColor="#9aa0a6"
@@ -916,6 +930,7 @@ function ProtocolEditor({
         accessibilityLabel={`Protocol${configured ? ', configured' : ''}. ${open ? 'Collapse' : 'Expand'}`}
         accessibilityState={{ expanded: open }}
         style={styles.protocolToggle}
+        hitSlop={12}
         testID={`workout-item-${index}-protocol-toggle`}
       >
         <Text style={styles.protocolToggleText}>
@@ -940,12 +955,20 @@ function ProtocolEditor({
           <View style={styles.fieldRow}>
             {numberField('Target RIR', protocol.target_rir, (n) => set({ target_rir: n }), 'rir')}
             {numberField(
+              'Target RPE',
+              protocol.target_rpe,
+              (n) => set({ target_rpe: n }),
+              'rpe',
+              true,
+            )}
+            {numberField(
               `Equipment increment (${weightUnit(units)})`,
               protocol.equipment_increment == null
                 ? null
                 : toDisplayWeight(protocol.equipment_increment, units),
               (n) => set({ equipment_increment: n == null ? null : fromDisplayWeight(n, units) }),
               'increment',
+              true,
             )}
           </View>
 
@@ -985,6 +1008,33 @@ function ProtocolEditor({
                 >
                   <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
                     {mode === 'total' ? 'Total' : 'Per side'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* N494 review fold-in: `exercise_profile` was configurable on web
+              (a single dropdown, no table) but had no phone path at all —
+              not even read-only — which is exactly the mobile-first gap
+              CLAUDE.md's "reasoning reachable, action not" failure describes.
+              Mirrors the progression-strategy pill row above, not a new
+              pattern. */}
+          <Text style={styles.fieldLabel}>Exercise profile</Text>
+          <View style={styles.protocolPillRow}>
+            {EXERCISE_PROFILES.map((p) => {
+              const active = protocol.exercise_profile === p.key;
+              return (
+                <Pressable
+                  key={p.key}
+                  style={[styles.protocolPill, active && styles.protocolPillActive]}
+                  onPress={() => set({ exercise_profile: active ? null : p.key })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  testID={`workout-item-${index}-protocol-profile-${p.key}`}
+                >
+                  <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
+                    {p.label}
                   </Text>
                 </Pressable>
               );

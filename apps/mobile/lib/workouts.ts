@@ -45,6 +45,20 @@ export type ExerciseProfile =
   | 'bodyweight_difficulty_progression'
   | 'timed_distance';
 
+// Mirrors apps/web/src/lib/api.ts's EXERCISE_PROFILES exactly (key/label
+// pairs) — added to close the mobile-first gap frontend-reviewer found on
+// N494: this and `target_rpe` were configurable on web but had no phone path
+// at all, not even read-only, which is exactly the "reasoning reachable,
+// action not" failure CLAUDE.md's mobile-first rule exists to forbid.
+export const EXERCISE_PROFILES: { key: ExerciseProfile; label: string }[] = [
+  { key: 'primary_compound', label: 'Primary compound' },
+  { key: 'secondary_compound_lunge', label: 'Secondary compound / lunge' },
+  { key: 'isolation_accessory', label: 'Isolation / accessory' },
+  { key: 'calf_high_rep_accessory', label: 'Calf / high-rep accessory' },
+  { key: 'bodyweight_difficulty_progression', label: 'Bodyweight / difficulty progression' },
+  { key: 'timed_distance', label: 'Timed / distance' },
+];
+
 export type SetRole = 'warmup' | 'working' | 'top_set' | 'backoff' | 'amrap';
 
 export type SetPrescription = {
