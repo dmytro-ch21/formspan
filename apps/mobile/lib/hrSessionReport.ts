@@ -1,7 +1,7 @@
 import { vola } from '@/constants/Colors';
 import { HR_LIMITED_SAMPLE_THRESHOLD } from './bjjSession';
 import { sessionEffectivenessSummary, type SessionEffectivenessSummary } from './sessionEffectiveness';
-import type { SessionMetrics } from './biometric';
+import type { ExerciseHR, SessionMetrics } from './biometric';
 
 /**
  * The per-session heart-rate report's view-model — N488/#849, the cross-sport
@@ -82,6 +82,21 @@ export type HRZoneRow = {
 
 export type HRSessionReportLimitedReason = 'sparse_samples' | 'no_hrmax';
 
+/**
+ * One exercise's row in the per-exercise breakdown — N490/#851. Shaped from
+ * `ExerciseHR` (the wire type) plus a resolved display name, the same split
+ * `withExerciseNames` already makes elsewhere in the app: this file stays
+ * sport/screen-agnostic and takes the name lookup as an input rather than
+ * importing the exercise catalog itself.
+ */
+export type HRExerciseRow = {
+  exerciseId: string;
+  exerciseName: string;
+  avgHR: number;
+  maxHR: number;
+  sampleCount: number;
+};
+
 export type HRSessionReportView =
   | { state: 'unavailable' }
   | {
@@ -100,6 +115,18 @@ export type HRSessionReportView =
       zones: HRZoneRow[];
       totalZoneMinutes: number;
       effectiveness: SessionEffectivenessSummary | null;
+      /**
+       * The per-exercise breakdown — N490/#851. Empty when the caller passed
+       * no `exerciseHR` (BJJ/running today, which have no per-exercise
+       * concept — see `HRSessionReport`'s own doc comment) or when the
+       * session genuinely has no exercise with an honest window/evidence of
+       * its own. Only ever populated alongside the 'full' state: see
+       * `buildHRSessionReport`'s doc comment for why a per-exercise
+       * breakdown built from an even SPARSER slice of the same evidence
+       * must not appear when the whole-session numbers themselves did not
+       * clear the sample/HRmax bar.
+       */
+      perExercise: HRExerciseRow[];
     };
 
 /**
@@ -188,6 +215,20 @@ function buildZoneRows(timeInZones: Record<string, number>): HRZoneRow[] {
  * own read of `metrics` has settled to a real answer (a fetch still in flight
  * is not the same as "no data" — the caller's problem to keep apart, per
  * `sessionEffectivenessSummary`'s own doc comment on this exact contract).
+ *
+ * `exerciseHR`/`exerciseNames` (N490/#851) are optional and additive: `null`
+ * or omitted (BJJ, running — neither has a per-exercise concept the way
+ * strength does) simply yields an empty `perExercise` in the 'full' state.
+ * **Deliberately gated on the whole-session state being 'full'**, checked
+ * before `perExercise` is ever built: an exercise's own window is a strict
+ * SUBSET of the evidence backing the session-level numbers (fewer minutes,
+ * fewer samples), so if the session itself does not clear the sample/HRmax
+ * bar, no per-exercise slice of it could either — computing one anyway would
+ * be re-deriving a "full" answer for individual exercises underneath a
+ * report that has already said the session-level one is not trustworthy.
+ * `exercise_id` is defensively filtered to `sample_count > 0` even though
+ * the backend never returns a zero-sample row — the same belt-and-braces
+ * stance this file already takes on `hr_source === 'none'` above.
  */
 export function buildHRSessionReport(
   metrics: Pick<
@@ -195,6 +236,8 @@ export function buildHRSessionReport(
     'avg_hr_bpm' | 'max_hr_bpm' | 'trimp' | 'time_in_zones' | 'hr_source' | 'sample_count'
   > | null,
   sessionRPE: number | null,
+  exerciseHR: Pick<ExerciseHR, 'exercise_id' | 'avg_hr_bpm' | 'max_hr_bpm' | 'sample_count'>[] | null = null,
+  exerciseNames: Record<string, string> = {},
 ): HRSessionReportView {
   if (!metrics || metrics.hr_source === 'none') return { state: 'unavailable' };
   // Defence in depth, matching `hrCorroboration`'s own stance: `Compute`
@@ -230,6 +273,16 @@ export function buildHRSessionReport(
     sessionRPE,
   );
 
+  const perExercise: HRExerciseRow[] = (exerciseHR ?? [])
+    .filter((e) => e.sample_count > 0)
+    .map((e) => ({
+      exerciseId: e.exercise_id,
+      exerciseName: exerciseNames[e.exercise_id] ?? e.exercise_id,
+      avgHR: e.avg_hr_bpm,
+      maxHR: e.max_hr_bpm,
+      sampleCount: e.sample_count,
+    }));
+
   return {
     state: 'full',
     avgHR: metrics.avg_hr_bpm,
@@ -239,5 +292,6 @@ export function buildHRSessionReport(
     zones,
     totalZoneMinutes,
     effectiveness,
+    perExercise,
   };
 }

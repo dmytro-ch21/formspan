@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -226,6 +227,131 @@ func (r *PostgresRepository) ListSamples(
 	return out, nil
 }
 
+// pgxQuerier is the slice of pgxpool.Pool/pgx.Tx that queryHRSamples needs —
+// small enough that both a bare pool read (ListExerciseHR) and an
+// in-transaction read (ComputeSessionMetrics) satisfy it with no adaptor.
+type pgxQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// queryHRSamples reads heart_rate samples in [from, to] — the one query
+// ComputeSessionMetrics and ListExerciseHR both need, factored out for
+// N490/#851 so the per-exercise read reuses this rather than duplicating
+// it (the two differ only in what window they pass and how many times they
+// call it).
+func queryHRSamples(ctx context.Context, q pgxQuerier, userID string, from, to time.Time) ([]HRSample, error) {
+	rows, err := q.Query(ctx, `
+		SELECT measured_at, value FROM biometric_samples
+		WHERE user_id = $1 AND metric_type = $2 AND measured_at >= $3 AND measured_at <= $4
+		ORDER BY measured_at`,
+		userID, string(MetricHeartRate), from, to)
+	if err != nil {
+		return nil, fmt.Errorf("biometric: query hr samples: %w", err)
+	}
+	defer rows.Close()
+
+	var out []HRSample
+	for rows.Next() {
+		var s HRSample
+		if err := rows.Scan(&s.MeasuredAt, &s.BPM); err != nil {
+			return nil, fmt.Errorf("biometric: scan hr sample: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("biometric: hr sample rows: %w", err)
+	}
+	return out, nil
+}
+
+// ListExerciseHR computes one avg/max HR readout per exercise within a
+// session — N490/#851. See Repository.ListExerciseHR's doc comment for the
+// contract, and exerciseHRWindow (trimp.go) for the join-granularity
+// decision this rests on.
+func (r *PostgresRepository) ListExerciseHR(
+	ctx context.Context, userID, sessionID string,
+) ([]ExerciseHR, error) {
+	var startedAt time.Time
+	var endedAt *time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT started_at, ended_at FROM sessions WHERE id = $1 AND user_id = $2`,
+		sessionID, userID).Scan(&startedAt, &endedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("biometric: check session: %w", err)
+	}
+	if endedAt == nil {
+		// Same reasoning as ComputeSessionMetrics: the session's own latest
+		// exercise has an open-ended window while training is still going.
+		return nil, fmt.Errorf("%w: session has not ended yet", ErrInvalidInput)
+	}
+
+	// One row per exercise ever logged in this session with at least one
+	// COMPLETED set carrying a real performed_at — an uncompleted set (a
+	// planned-but-not-done row, or one un-ticked as a correction after
+	// carrying a stale timestamp) must not anchor a window, which is why
+	// this filters on completed as well as performed_at IS NOT NULL rather
+	// than trusting the client to have cleared one when it cleared the
+	// other. Ordered by each exercise's first position so the list reads in
+	// the same order the athlete trained in.
+	rows, err := r.pool.Query(ctx, `
+		SELECT exercise_id, MIN(performed_at), MAX(performed_at)
+		FROM session_sets
+		WHERE session_id = $1 AND completed AND performed_at IS NOT NULL
+		GROUP BY exercise_id
+		ORDER BY MIN(position)`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("biometric: list exercise blocks: %w", err)
+	}
+	type block struct {
+		exerciseID   string
+		minAt, maxAt time.Time
+	}
+	var blocks []block
+	for rows.Next() {
+		var b block
+		if err := rows.Scan(&b.exerciseID, &b.minAt, &b.maxAt); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("biometric: scan exercise block: %w", err)
+		}
+		blocks = append(blocks, b)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("biometric: exercise block rows: %w", err)
+	}
+	rows.Close()
+
+	out := make([]ExerciseHR, 0, len(blocks))
+	for _, b := range blocks {
+		start, end := exerciseHRWindow(b.minAt, b.maxAt, startedAt)
+		samples, err := queryHRSamples(ctx, r.pool, userID, start, end)
+		if err != nil {
+			return nil, err
+		}
+		if len(samples) == 0 {
+			// Absent, not zero — no evidence for this exercise, so it is
+			// left out of the list entirely rather than reported at 0 bpm.
+			continue
+		}
+		// ZoneBreakdown's avg/max computation is reused rather than
+		// reimplemented; hrMaxBPM is passed as 0 deliberately, since a zone
+		// breakdown is never wanted here — ZoneForHR/ZoneBreakdown already
+		// treat hrMaxBPM <= 0 as "classify nothing" and still return a real
+		// avg/max, which is exactly the split this needs.
+		_, avg, max := ZoneBreakdown(samples, 0)
+		out = append(out, ExerciseHR{
+			ExerciseID:  b.exerciseID,
+			AvgHRBPM:    int(math.Round(avg)),
+			MaxHRBPM:    int(math.Round(max)),
+			SampleCount: len(samples),
+		})
+	}
+	return out, nil
+}
+
 // ComputeSessionMetrics derives and stores session_metrics for a session the
 // caller owns, from whatever heart_rate samples fall in that session's
 // started_at/ended_at window (design doc §2).
@@ -261,28 +387,10 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 		return SessionMetrics{}, fmt.Errorf("%w: session has not ended yet", ErrInvalidInput)
 	}
 
-	hrRows, err := tx.Query(ctx, `
-		SELECT measured_at, value FROM biometric_samples
-		WHERE user_id = $1 AND metric_type = $2 AND measured_at >= $3 AND measured_at <= $4
-		ORDER BY measured_at`,
-		userID, string(MetricHeartRate), startedAt, *endedAt)
+	hrSamples, err := queryHRSamples(ctx, tx, userID, startedAt, *endedAt)
 	if err != nil {
-		return SessionMetrics{}, fmt.Errorf("biometric: query hr samples: %w", err)
+		return SessionMetrics{}, err
 	}
-	var hrSamples []HRSample
-	for hrRows.Next() {
-		var s HRSample
-		if err := hrRows.Scan(&s.MeasuredAt, &s.BPM); err != nil {
-			hrRows.Close()
-			return SessionMetrics{}, fmt.Errorf("biometric: scan hr sample: %w", err)
-		}
-		hrSamples = append(hrSamples, s)
-	}
-	if err := hrRows.Err(); err != nil {
-		hrRows.Close()
-		return SessionMetrics{}, fmt.Errorf("biometric: hr sample rows: %w", err)
-	}
-	hrRows.Close()
 
 	var activeKcal *int
 	var kcalSum float64

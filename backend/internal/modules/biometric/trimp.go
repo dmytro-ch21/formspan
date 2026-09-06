@@ -153,6 +153,55 @@ func ZoneBreakdown(samples []HRSample, hrMaxBPM float64) (minutesInZone [5]float
 	return
 }
 
+// exerciseHRWindow is the join-granularity decision for N490/#851: how to
+// turn "when this exercise's sets were completed" into a time range worth
+// reading heart-rate samples from.
+//
+// **Decision: per-exercise, not per-set** — every session_sets row sharing
+// one exercise_id is grouped into a single window, rather than reading each
+// set's own gap to its neighbours. The ticket's own alternative (per-set) was
+// rejected on exactly the sparsity concern maxSampleGapForZoneAttribution
+// already exists for: Apple Watch's background cadence is roughly one sample
+// per five minutes when no active platform workout is running (this file's
+// own comment on that constant), and one working set plus its rest is
+// routinely SHORTER than that gap. A per-set window would, for the common
+// case, contain zero samples — not a thin reading, no reading at all — which
+// is a worse failure than the one this function exists to avoid: an
+// exercise's block of sets between them cover enough wall-clock time to have
+// a realistic chance of enclosing at least one real sample.
+//
+// **The boundary problem, and why the window is widened backward.**
+// `performed_at` is stamped at the MOMENT A SET IS COMPLETED — the end of the
+// interval it represents, never the start. Taking [minPerformedAt,
+// maxPerformedAt] literally therefore excludes, by construction, the entire
+// first set's own working time and whatever rest preceded it — exactly the
+// exertion a "how hard was this exercise" report most needs. This mirrors
+// ZoneBreakdown's own stance on the same asymmetry (attributing an interval
+// to its FIRST sample because only the first is known to be real), applied
+// here to completion events instead of HR samples.
+//
+// The fix is to widen the start backward by maxSampleGapForZoneAttribution —
+// reusing that constant rather than inventing a second sparsity tolerance,
+// because the question is the same one it already answers: how far back is
+// it still honest to reach for evidence. It is never widened past the
+// session's own start, since there is nothing before a session began.
+//
+// **Known, accepted limitation**: grouping by exercise_id rather than by
+// contiguous position run means a superset (A, B, A, B) merges both of
+// exercise A's occurrences into one window spanning the whole superset — this
+// package has no first-class representation of a superset to do better with,
+// and the common case (one exercise, one contiguous block of sets) is
+// unaffected. Recorded here and in this ticket's history entry rather than
+// hidden, since it is the reason a future superset feature may need to
+// revisit this function specifically.
+func exerciseHRWindow(minPerformedAt, maxPerformedAt, sessionStartedAt time.Time) (start, end time.Time) {
+	start = minPerformedAt.Add(-maxSampleGapForZoneAttribution)
+	if start.Before(sessionStartedAt) {
+		start = sessionStartedAt
+	}
+	return start, maxPerformedAt
+}
+
 // Compute derives a session's metrics from its heart-rate samples.
 //
 // hrSourceHint is the caller's claim about how the samples were gathered

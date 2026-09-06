@@ -216,6 +216,30 @@ type Set struct {
 	// set false, and each one ticks over as it's performed.
 	Completed bool `json:"completed"`
 
+	// PerformedAt is the real moment this set was actually completed —
+	// N490/#851 — client-stamped the instant the athlete ticks it done, not
+	// derived from when the session was saved.
+	//
+	// That distinction is the whole point of this field. `ReplaceSets`
+	// deletes and reinserts every set on every save, so `created_at` always
+	// reads as "the last save", identical across a whole session — worthless
+	// as a "when" for anything. `PerformedAt` is the client's own claim about
+	// a moment in the past, sent exactly like `StartedAt`/`EndedAt` already
+	// are, and this package does not second-guess it: no check here or in
+	// the migration ties it to the session's own window, because a client
+	// clock a few seconds (or, offline, a few minutes) off the server's must
+	// not turn an honest log entry into a 400.
+	//
+	// NIL is UNRECORDED, and stays that way forever for a great many rows —
+	// every set logged before this shipped, and any set entered as a
+	// reflection well after training rather than ticked live. That is not a
+	// gap to backfill: inventing a value from save time would be exactly the
+	// `created_at` lie this field exists to replace. A caller deriving a
+	// per-exercise heart-rate window (biometric.ListExerciseHR) simply
+	// excludes a set with no PerformedAt, the same "absent, not zero"
+	// stance biometric.SessionMetrics already takes on its own figures.
+	PerformedAt *time.Time `json:"performed_at"`
+
 	Notes string `json:"notes"`
 
 	// AssistedReps is how many of `Reps` somebody else helped with — a spotter,

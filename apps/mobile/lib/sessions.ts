@@ -246,6 +246,33 @@ export type LoggedSet = {
    * work rather than starting at the plan's total.
    */
   completed: boolean;
+
+  /**
+   * The real moment this set was actually completed — N490/#851 — stamped
+   * with `new Date().toISOString()` at the exact tap that flips `completed`
+   * to `true` (`toggleDone`/`recordTimedSet` in the session screen), never
+   * derived later from when the session happened to be saved.
+   *
+   * That distinction is the whole point. The server replaces a session's
+   * whole set list on every save (`replaceSets`), so a timestamp assigned
+   * at SAVE time would be identical across every set in the session —
+   * exactly the failure `created_at` had, and the reason this field exists.
+   *
+   * Cleared back to `null` whenever `completed` is un-ticked: an un-ticked
+   * set is a correction ("that didn't happen" or "not yet"), and a stale
+   * timestamp surviving on a set that no longer claims to be done would be
+   * the wrong kind of evidence for anything windowing heart rate against it
+   * — `null`/`false` stay paired, the same way `completed: false` on a
+   * template set has never carried a stray weight nobody entered.
+   *
+   * `null` is UNRECORDED — every set completed before this field existed,
+   * and any set entered as an after-the-fact reflection rather than ticked
+   * live during the session. Optional on the type so a row cached by an
+   * older build still parses; sent explicitly on every write (`null` when
+   * unrecorded) for the same "the server replaces the whole row" reason
+   * `grip`/`assisted_reps` already are.
+   */
+  performed_at?: string | null;
 };
 
 /**
@@ -651,6 +678,9 @@ export function emptySet(exerciseID: string, position: number, from?: LoggedSet)
     grip: from?.grip,
     notes: '',
     completed: false,
+    // Never carried forward, like completed itself — a new row has not been
+    // performed yet, whatever the row it was copied from once recorded.
+    performed_at: null,
   };
 }
 
@@ -681,6 +711,7 @@ export function setsFromWorkout(items: WorkoutItem[]): LoggedSet[] {
         rpe: null,
         notes: '',
         completed: false,
+        performed_at: null,
       });
     }
   }
@@ -764,6 +795,11 @@ export function swapExercise(
           rir: null,
           rpe: null,
           completed: false,
+          // The old set's completion moment described the OLD movement — a
+          // swap is a different exercise, so a stale performed_at surviving
+          // the swap would misrepresent when the (never-performed) new
+          // exercise happened.
+          performed_at: null,
         },
   );
 }

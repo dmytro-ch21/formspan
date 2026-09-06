@@ -143,6 +143,73 @@ describe('buildHRSessionReport — full', () => {
   });
 });
 
+describe('buildHRSessionReport — perExercise (N490/#851)', () => {
+  test('no exerciseHR passed at all: perExercise is empty, not undefined', () => {
+    const report = buildHRSessionReport(metrics(), null);
+    expect(report.state).toBe('full');
+    if (report.state !== 'full') throw new Error('expected full');
+    expect(report.perExercise).toEqual([]);
+  });
+
+  test('null exerciseHR (BJJ/running, which pass nothing): also empty', () => {
+    const report = buildHRSessionReport(metrics(), null, null);
+    expect(report.state).toBe('full');
+    if (report.state !== 'full') throw new Error('expected full');
+    expect(report.perExercise).toEqual([]);
+  });
+
+  test('shapes rows, resolving names and falling back to the raw id when unresolved', () => {
+    const report = buildHRSessionReport(
+      metrics(),
+      null,
+      [
+        { exercise_id: 'back-squat', avg_hr_bpm: 158, max_hr_bpm: 172, sample_count: 4 },
+        { exercise_id: 'lateral-raise', avg_hr_bpm: 112, max_hr_bpm: 120, sample_count: 2 },
+      ],
+      { 'back-squat': 'Back Squat' },
+    );
+    expect(report.state).toBe('full');
+    if (report.state !== 'full') throw new Error('expected full');
+    expect(report.perExercise).toEqual([
+      { exerciseId: 'back-squat', exerciseName: 'Back Squat', avgHR: 158, maxHR: 172, sampleCount: 4 },
+      // No entry in exerciseNames for this id — falls back to the id itself,
+      // not a blank or a generic placeholder.
+      { exerciseId: 'lateral-raise', exerciseName: 'lateral-raise', avgHR: 112, maxHR: 120, sampleCount: 2 },
+    ]);
+  });
+
+  test('a heavier compound exercise reads higher than an accessory movement — the shape the ticket exists for', () => {
+    const report = buildHRSessionReport(metrics(), null, [
+      { exercise_id: 'back-squat', avg_hr_bpm: 165, max_hr_bpm: 178, sample_count: 5 },
+      { exercise_id: 'lateral-raise', avg_hr_bpm: 108, max_hr_bpm: 115, sample_count: 3 },
+    ]);
+    if (report.state !== 'full') throw new Error('expected full');
+    const squat = report.perExercise.find((e) => e.exerciseId === 'back-squat');
+    const lateral = report.perExercise.find((e) => e.exerciseId === 'lateral-raise');
+    expect(squat && lateral && squat.avgHR > lateral.avgHR).toBe(true);
+  });
+
+  test('defensively filters a zero-sample row even though the backend should never send one', () => {
+    const report = buildHRSessionReport(metrics(), null, [
+      { exercise_id: 'back-squat', avg_hr_bpm: 158, max_hr_bpm: 172, sample_count: 4 },
+      { exercise_id: 'ghost-exercise', avg_hr_bpm: 0, max_hr_bpm: 0, sample_count: 0 },
+    ]);
+    if (report.state !== 'full') throw new Error('expected full');
+    expect(report.perExercise).toHaveLength(1);
+    expect(report.perExercise[0].exerciseId).toBe('back-squat');
+  });
+
+  test('never populated outside the full state: sparse-samples session gets no breakdown even with real exerciseHR data', () => {
+    const report = buildHRSessionReport(metrics({ sample_count: HR_REPORT_MIN_SAMPLES - 1 }), null, [
+      { exercise_id: 'back-squat', avg_hr_bpm: 158, max_hr_bpm: 172, sample_count: 4 },
+    ]);
+    expect(report.state).toBe('limited');
+    // A 'limited' report carries no perExercise field at all — the type
+    // itself only puts it on 'full'.
+    expect((report as { perExercise?: unknown }).perExercise).toBeUndefined();
+  });
+});
+
 describe('buildHRSessionReport — zone colours reuse existing semantic tokens', () => {
   test('every zone colour is an already-established status token, not a new hex value', () => {
     const report = buildHRSessionReport(metrics(), null);
