@@ -3074,40 +3074,60 @@ components:
             is what stops the next release reverting the edit.
         status:
           type: string
-          enum: [draft, published]
+          enum: [draft, published, retired]
           description: >
             Whether athletes can see it. `published` is in the public catalog;
             `draft` is visible only through `/admin/*` — not in
-            `GET /techniques` and not findable through the library.
+            `GET /techniques` and not findable through the library. `retired`
+            (F23/#523) is a technique that WAS published and is no longer
+            recommended for new work — never in `GET /techniques`, never
+            offered by search or a tagging picker — but, unlike `draft`, never
+            deleted and never unlinked from anything that already references
+            it: a curriculum item or a session tag logged before retirement
+            keeps naming it, exactly as it did before.
 
 
-            **A draft technique CAN still be referenced by id** — tagged into a
-            BJJ session, a focus list, a curriculum or a sequence. Those four
-            write paths validate against the foreign key, which does not know
-            about `status`. The exercise catalog does not have this gap: its two
-            write paths (workout items, session sets) check for `published`
-            explicitly. Closing it here means adding that check in four modules
-            and is not yet done — stated rather than implied, because an earlier
-            version of this description claimed drafts were "not taggable" and
-            nothing enforced it.
+            **A draft or retired technique CAN still be referenced by id** —
+            tagged into a BJJ session, a focus list, a curriculum or a
+            sequence. Those write paths validate against the foreign key,
+            which does not know about `status`. The exercise catalog does not
+            have this gap: its two write paths (workout items, session sets)
+            check for `published` explicitly. Closing it here means adding
+            that check in every write path and is not yet done — stated
+            rather than implied, because an earlier version of this
+            description claimed drafts were "not taggable" and nothing
+            enforced it. For `retired` specifically this is not a gap to
+            close so much as the reason retiring is safe: a curriculum item
+            or session tag written BEFORE retirement is data the write paths
+            never re-validate, and that is exactly what must keep resolving.
 
 
-            **Present only on `/admin/*` responses**, and for a stronger reason
-            than `source`: a technique read the public way is published by
-            definition, because the API filters drafts out entirely.
+            **Present on `/admin/*` responses always**, and on
+            **`GET /techniques/{techniqueID}` only when `retired`** — a
+            published technique's response there is unchanged from before
+            this value existed (still absent, per the convention below), but
+            a retired one now surfaces it so a client can render "no longer
+            taught" rather than nothing. `draft` still never appears there:
+            `GET /techniques/{techniqueID}` 404s a draft outright (nothing can
+            reference an id before it is published, so there is no history to
+            protect), while a retired technique routinely IS already
+            referenced and must keep resolving — see the retire/reactivate
+            operations below for the full reasoning.
 
 
-            The console CREATES as `draft`. Editing a published technique leaves
-            it published — a typo fix should reach athletes rather than withdraw
-            the technique. Publishing is `POST /admin/techniques/{id}/publish`
-            and is ONE-WAY; see that operation for why.
+            The console CREATES as `draft`. Editing a published technique
+            leaves it published — a typo fix should reach athletes rather
+            than withdraw the technique. Publishing is
+            `POST /admin/techniques/{id}/publish` and is ONE-WAY; see that
+            operation for why. Retiring (`POST /admin/techniques/{id}/retire`)
+            is a SEPARATE, REVERSIBLE decision — see that operation and
+            `POST /admin/techniques/{id}/reactivate`.
 
 
-            **Present only on `/admin/*` responses.** It is ABSENT from
-            `GET /techniques/{techniqueID}`, which does not select the column —
-            so do not derive ownership from it there. Its absence means "this
-            endpoint does not report provenance", never "not admin-authored".
-            Use membership of `GET /admin/techniques` instead.
+            **Absence still means "this endpoint does not report
+            provenance/visibility", never a specific value.** Use membership
+            of `GET /admin/techniques` to derive ownership, never this field's
+            absence — that guidance is unchanged from before `retired` existed.
         ibjjf_ruleset_id: { type: string }
         to_position:
           type: string
@@ -11765,7 +11785,7 @@ paths:
                         actor: { type: string }
                         action:
                           type: string
-                          enum: [create, update, publish, restore]
+                          enum: [create, update, publish, restore, retire, reactivate]
                         payload:
                           $ref: "#/components/schemas/Technique"
                         created_at: { type: string, format: date-time }
@@ -11837,6 +11857,9 @@ paths:
       operationId: publishTechnique
       description: >
         Makes a draft visible to athletes. **One-way — there is no unpublish.**
+        Withdrawing visibility from a technique that has already gone live is
+        `retire` below, a separate and reversible decision — not this
+        operation wearing a different name.
 
 
         Withdrawing a LIVE technique is a different and much riskier operation
@@ -11845,7 +11868,9 @@ paths:
         status — correctly, because an athlete's own history must not develop
         holes when a curator changes their mind. Hiding a live technique from
         the library while all of that still points at it is a half-state nobody
-        asked for. If a published technique is wrong, edit it.
+        asked for. If a published technique is wrong, edit it; if it should
+        stop being recommended while everything already logged against it
+        keeps meaning what it meant, retire it instead.
 
 
         A separate operation rather than a field on `PATCH`, so that a partial
@@ -11863,6 +11888,99 @@ paths:
       responses:
         "200":
           description: The published technique.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [technique]
+                properties:
+                  technique:
+                    $ref: "#/components/schemas/Technique"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/techniques/{techniqueID}/retire:
+    post:
+      summary: Retire a live technique
+      operationId: retireTechnique
+      description: >
+        F23/#523. Marks a **published** technique `retired`: no longer in
+        `GET /techniques`, no longer offered by search or a tagging picker —
+        but never deleted, and never unlinked from anything that already
+        references it.
+
+
+        **This is not a delete, and there is deliberately no
+        `DELETE /admin/techniques/{id}`.** The row survives with every column
+        intact, so a curriculum item or a session tag written before
+        retirement keeps naming the same real technique it always did — its
+        name, position and category still resolve, and any evidence already
+        logged against it still counts toward a roadmap's progress exactly as
+        before. Nothing about retiring touches `bjj_session_tags` or
+        `curriculum_items`. See the `status` field's own description for the
+        two read-path consequences: `GET /techniques` excludes a retired
+        technique from new work, while `GET /techniques/{techniqueID}` keeps
+        resolving one, unlike a draft.
+
+
+        **Reversible, unlike `publish`** — see `reactivate` below. A curator
+        who retires the wrong technique, or a technique that starts being
+        taught again, is not stuck.
+
+
+        `404` covers "no such id", "still a draft" (nothing to retire FROM —
+        a draft was never live) and "already retired": the caller is working
+        from a stale view in every case, and reporting a success it did not
+        cause is worse than a refusal it can refresh past.
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The retired technique.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [technique]
+                properties:
+                  technique:
+                    $ref: "#/components/schemas/Technique"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/techniques/{techniqueID}/reactivate:
+    post:
+      summary: Undo a retirement
+      operationId: reactivateTechnique
+      description: >
+        F23/#523. The inverse of `retire`: a **retired** technique goes back
+        to `published`. Exists because retiring must be undoable — a wrong
+        click, or a technique that is taught again — which is exactly the
+        property `publish` does not have and does not need, since nothing can
+        reference an id before it is first published.
+
+
+        `404` covers "no such id" and "not currently retired": the caller is
+        working from a stale view either way.
+      parameters:
+        - name: techniqueID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The reactivated (published) technique.
           content:
             application/json:
               schema:

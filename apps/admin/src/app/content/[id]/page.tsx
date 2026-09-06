@@ -10,10 +10,14 @@ import {
 import { AdminMasthead } from "../../AdminMasthead";
 import {
   publishTechniqueAction,
+  reactivateTechniqueAction,
   restoreRevisionAction,
+  retireTechniqueAction,
   updateTechniqueAction,
 } from "../actions";
 import { PublishButton } from "../PublishButton";
+import { ReactivateButton } from "../ReactivateButton";
+import { RetireButton } from "../RetireButton";
 import { RevisionHistory } from "../RevisionHistory";
 import { TechniqueForm } from "../TechniqueForm";
 
@@ -100,6 +104,22 @@ export default async function EditTechniquePage({
           </div>
         ) : null}
 
+        {/* F23/#523. Retired, not deleted — see RetireButton's own doc. Muted
+            rather than accent-coloured: unlike a draft (unfinished, needs
+            attention) a retired technique is a normal, deliberate state with
+            nothing broken about it. */}
+        {initial.status === "retired" ? (
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-5 py-4 text-[13px] text-text-secondary">
+            <p>
+              <strong className="text-text">This technique is retired.</strong> It is out of the
+              library, search and every tagging picker — nobody can pick it for new work. Every
+              curriculum item and session tag that already named it before retirement is
+              untouched and keeps working exactly as before.
+            </p>
+            <ReactivateButton action={reactivateTechniqueAction.bind(null, initial.id)} />
+          </div>
+        ) : null}
+
         {seeded ? (
           // Deliberately a warning rather than a refusal, and deliberately
           // BEFORE the form: the transfer happens on save, so the place to say
@@ -147,6 +167,25 @@ export default async function EditTechniquePage({
             restore={restoreRevisionAction.bind(null, initial.id)}
           />
         </section>
+
+        {/* F23/#523. Kept below History, out of the primary editing flow —
+            most techniques are published, so this would otherwise put a
+            call-out on every edit screen for the ordinary case. Retiring is
+            not alarming (it is reversible and touches nothing an athlete
+            already logged), so this is a plain section, not a warning. */}
+        {initial.status === "published" || !initial.status ? (
+          <section className="flex flex-col gap-3 border-t border-border pt-5">
+            <h2 className="font-barlow-condensed text-[11px] font-bold tracking-[0.16em] text-text-muted uppercase">
+              Retire
+            </h2>
+            <p className="text-[13px] text-text-secondary">
+              For a technique that is no longer taught, rather than one that was created by
+              mistake. Removes it from the library, search and any tagging picker; every
+              curriculum item and session tag that already names it keeps working. Reversible.
+            </p>
+            <RetireButton action={retireTechniqueAction.bind(null, initial.id)} />
+          </section>
+        ) : null}
       </main>
     </div>
   );

@@ -250,7 +250,7 @@ type Technique struct {
 	// out of the deploy's reach or demote a seeded one into it.
 	Source string `json:"source,omitempty"`
 
-	// Whether athletes can see it: "published" or "draft".
+	// Whether athletes can see it: "published", "draft" or "retired".
 	//
 	// EMPTY MEANS PUBLISHED, and that is deliberate rather than sloppy. The
 	// seed file carries 542 entries that are all live, and making them each
@@ -267,6 +267,17 @@ type Technique struct {
 	// athletes, not withdraw the technique while someone remembers to
 	// re-publish it. Draft protects content that has never been live, which is
 	// the only content nobody is relying on.
+	//
+	// RETIRED (F23/#523) is not a stronger draft. A retired technique WAS live
+	// and may already be a curriculum_items row or a bjj_session_tags.
+	// technique_id an athlete's history depends on — draft never is, because
+	// nothing can reference an id before it is published. That is why List
+	// (the browsable/searchable catalog, where a curator picks what is
+	// current) excludes retired exactly like draft, but Get (resolving one id
+	// that may already be a real reference) excludes only draft: 404ing a
+	// retired technique's detail page would develop the same "history grows
+	// holes" failure Publish's own doc warns about, just moved one layer up.
+	// See postgres.go's List/Get and content_postgres.go's Retire/Reactivate.
 	Status string `json:"status,omitempty"`
 
 	// Description is mechanics; WhenToUse is the decision about when the

@@ -76,13 +76,18 @@ type Revision struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// The four things that produce a revision. Coarse on purpose: enough to read
-// the history as a story, not so fine that adding a verb needs a migration.
+// The things that produce a revision. Coarse on purpose: enough to read the
+// history as a story, not so fine that adding a verb needs a migration.
+//
+// ActionRetire/ActionReactivate were added for F23/#523, alongside migration
+// 000095's widened technique_revisions_action_known CHECK.
 const (
-	ActionCreate  = "create"
-	ActionUpdate  = "update"
-	ActionPublish = "publish"
-	ActionRestore = "restore"
+	ActionCreate     = "create"
+	ActionUpdate     = "update"
+	ActionPublish    = "publish"
+	ActionRestore    = "restore"
+	ActionRetire     = "retire"
+	ActionReactivate = "reactivate"
 )
 
 type ContentRepository interface {
@@ -115,6 +120,26 @@ type ContentRepository interface {
 	// is acting on a stale view either way, and a success it did not cause is
 	// worse than a 404 it can refresh past.
 	Publish(ctx context.Context, id, actor string) (Technique, error)
+	// RetireTechnique marks a published technique 'retired': no longer
+	// recommended or taggable-through-search, but never deleted and never
+	// unlinked from anything that already references it (F23/#523 — see
+	// migration 000095).
+	//
+	// WHERE status = 'published', matching Publish's own guard: retiring an
+	// id that is not currently published is ErrNotFound rather than a silent
+	// no-op, because the caller's view of the row is stale either way (a
+	// draft was never live to retire from, and a technique already retired
+	// does not need retiring again).
+	RetireTechnique(ctx context.Context, id, actor string) (Technique, error)
+	// ReactivateTechnique undoes a retirement, returning a technique to
+	// 'published'. The inverse of RetireTechnique, for the "this was retired
+	// by mistake" or "it's being taught again" case — unlike Publish, which
+	// is genuinely one-way (see its own doc for why), retiring must be
+	// reversible or a curator has no way back from a wrong click.
+	//
+	// WHERE status = 'retired', for the same staleness reason RetireTechnique
+	// guards on 'published'.
+	ReactivateTechnique(ctx context.Context, id, actor string) (Technique, error)
 	// Revisions returns a technique's history, newest first. Empty for a row
 	// the console has never touched — the 542 seeded ones start with no
 	// history, and that absence is honest rather than a gap to backfill.

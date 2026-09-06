@@ -154,14 +154,18 @@ func (r *PostgresRepository) UpdateTechnique(ctx context.Context, t Technique, a
 
 // Publish makes a draft visible to athletes. One-way, deliberately.
 //
-// There is no unpublish. Withdrawing a LIVE technique is a different and much
-// riskier operation than finishing a new one: training records tag it by id,
-// curricula list it, and the focus screen resolves it — none of which filter on
-// status, correctly, because an athlete's own history must not develop holes
-// when a curator changes their mind. Hiding a live technique from the library
-// while all of that still points at it is a half-state nobody asked for, and
-// building it casually is how it would arrive. If a published technique is
-// wrong, editing it is the fix.
+// There is no unpublish — that is RetireTechnique's job, below, and the two
+// are not the same operation wearing different names. Withdrawing a LIVE
+// technique is a different and much riskier operation than finishing a new
+// one: training records tag it by id, curricula list it, and the focus screen
+// resolves it — none of which filter on status, correctly, because an
+// athlete's own history must not develop holes when a curator changes their
+// mind. Hiding a live technique from the library while all of that still
+// points at it is a half-state nobody asked for, and building it casually is
+// how it would arrive. If a published technique is wrong, editing it is the
+// fix; if it should stop being recommended going forward while everything
+// that already happened against it keeps meaning what it meant, that is
+// retiring it, and unlike publishing, retiring can be undone.
 //
 // `WHERE status = 'draft'` rather than an unconditional SET so that publishing
 // something already published is ErrNotFound rather than a silent no-op that
@@ -178,6 +182,63 @@ func (r *PostgresRepository) Publish(ctx context.Context, id, actor string) (Tec
 		}
 		if err != nil {
 			return Technique{}, fmt.Errorf("technique: publish: %w", err)
+		}
+		return out, nil
+	})
+}
+
+// RetireTechnique marks a live technique retired. Unlike Publish, this is
+// NOT the only way visibility ever changes — ReactivateTechnique undoes it —
+// and unlike deleting the row, it touches nothing outside `techniques`.
+//
+// THE WHOLE POINT (F23/#523): bjj_session_tags.technique_id and
+// curriculum_items.technique_id are never read by this statement, let alone
+// written. A retired technique is still the row every existing tag and every
+// existing roadmap item points at — see postgres.go's Get, which is the read
+// path that has to keep resolving it, and migration 000095 for why the two
+// foreign keys no longer need a SET NULL or a CASCADE to protect that: a real
+// DELETE of a referenced row is refused outright now, and this path never
+// attempts one.
+//
+// `WHERE status = 'published'`, matching Publish: retiring a draft (never
+// live, nothing could reference it yet) or a technique already retired is
+// ErrNotFound rather than a silent no-op.
+func (r *PostgresRepository) RetireTechnique(ctx context.Context, id, actor string) (Technique, error) {
+	return r.writeWithRevision(ctx, actor, ActionRetire, func(tx pgx.Tx) (Technique, error) {
+		row := tx.QueryRow(ctx, `
+			UPDATE techniques SET status = 'retired', updated_at = now()
+			WHERE id = $1 AND status = 'published'
+			RETURNING `+contentReturning, id)
+		out, err := scanContent(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Technique{}, ErrNotFound
+		}
+		if err != nil {
+			return Technique{}, fmt.Errorf("technique: retire: %w", err)
+		}
+		return out, nil
+	})
+}
+
+// ReactivateTechnique is RetireTechnique's inverse: 'retired' back to
+// 'published'. Retiring has to be reversible — a technique retired by
+// mistake, or one that starts being taught again, cannot otherwise get back
+// to visible without a raw SQL update — which is the property that makes it
+// a genuinely different decision from Publish's one-way visibility change.
+//
+// `WHERE status = 'retired'`, for the same staleness reason as above.
+func (r *PostgresRepository) ReactivateTechnique(ctx context.Context, id, actor string) (Technique, error) {
+	return r.writeWithRevision(ctx, actor, ActionReactivate, func(tx pgx.Tx) (Technique, error) {
+		row := tx.QueryRow(ctx, `
+			UPDATE techniques SET status = 'published', updated_at = now()
+			WHERE id = $1 AND status = 'retired'
+			RETURNING `+contentReturning, id)
+		out, err := scanContent(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Technique{}, ErrNotFound
+		}
+		if err != nil {
+			return Technique{}, fmt.Errorf("technique: reactivate: %w", err)
 		}
 		return out, nil
 	})

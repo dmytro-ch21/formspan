@@ -323,8 +323,8 @@ func TestMasteryNeedsVolumeSpreadDefenceAndRate(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete1")
 	tech := seedTechnique(t, pool, "test-armdrag")
+	cleanupUser(t, pool, "athlete1")
 
 	c, err := repo.Create(ctx, "athlete1", "", NewCurriculum{
 		Name:  "Roadmap",
@@ -393,8 +393,8 @@ func TestEvidenceBeforeEnrollingDoesNotCount(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete2")
 	tech := seedTechnique(t, pool, "test-triangle")
+	cleanupUser(t, pool, "athlete2")
 
 	// A year of fumbling, long before any roadmap: 300 misses, 20 scores.
 	for i := 400; i < 410; i++ {
@@ -443,8 +443,8 @@ func TestNoAttemptsMeansNoRateRatherThanZero(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete14")
 	tech := seedTechnique(t, pool, "test-norate")
+	cleanupUser(t, pool, "athlete14")
 
 	c, err := repo.Create(ctx, "athlete14", "", NewCurriculum{
 		Name:  "Roadmap",
@@ -475,8 +475,8 @@ func TestDrilledNeverSatisfiesTheSpreadRequirement(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete3")
 	tech := seedTechnique(t, pool, "test-kimura")
+	cleanupUser(t, pool, "athlete3")
 
 	c, err := repo.Create(ctx, "athlete3", "", NewCurriculum{
 		Name: "Roadmap",
@@ -517,8 +517,8 @@ func TestADefenceOnlyCriterionWorks(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete4")
 	tech := seedTechnique(t, pool, "test-guardpull")
+	cleanupUser(t, pool, "athlete4")
 
 	c, err := repo.Create(ctx, "athlete4", "", NewCurriculum{
 		Name:  "Defence",
@@ -547,8 +547,8 @@ func TestOneAthletesEvidenceNeverReachesAnothersProgress(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete5", "athlete6")
 	tech := seedTechnique(t, pool, "test-shared")
+	cleanupUser(t, pool, "athlete5", "athlete6")
 
 	c, err := repo.Create(ctx, "athlete5", "", NewCurriculum{
 		Name:       "Shared",
@@ -589,8 +589,8 @@ func TestBrowsingShowsCriteriaButNoProgress(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete7")
 	tech := seedTechnique(t, pool, "test-browse")
+	cleanupUser(t, pool, "athlete7")
 
 	c, err := repo.Create(ctx, "athlete7", "", NewCurriculum{
 		Name:  "Unstarted",
@@ -714,8 +714,8 @@ func TestUpdatingWithoutItemsLeavesThemAlone(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete11")
 	tech := seedTechnique(t, pool, "test-keep")
+	cleanupUser(t, pool, "athlete11")
 
 	c, err := repo.Create(ctx, "athlete11", "", NewCurriculum{
 		Name:  "X",
@@ -744,9 +744,9 @@ func TestItemOrderSurvivesAReplace(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete12")
 	a := seedTechnique(t, pool, "test-a")
 	b := seedTechnique(t, pool, "test-b")
+	cleanupUser(t, pool, "athlete12")
 
 	c, err := repo.Create(ctx, "athlete12", "", NewCurriculum{
 		Name:  "X",
@@ -916,10 +916,10 @@ func TestProgressCountsOnlyItemsThatCarryCriteria(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete18")
 	a := seedTechnique(t, pool, "test-mixed-a")
 	b := seedTechnique(t, pool, "test-mixed-b")
 	c2 := seedTechnique(t, pool, "test-mixed-c")
+	cleanupUser(t, pool, "athlete18")
 
 	c, err := repo.Create(ctx, "athlete18", "", NewCurriculum{
 		Name: "Mixed",
@@ -970,10 +970,10 @@ func TestTheListCanTellARoadmapFromAReadingList(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "athlete19")
 	a := seedTechnique(t, pool, "test-list-a")
 	b := seedTechnique(t, pool, "test-list-b")
 	c3 := seedTechnique(t, pool, "test-list-c")
+	cleanupUser(t, pool, "athlete19")
 
 	road, err := repo.Create(ctx, "athlete19", "", NewCurriculum{
 		Name: "Roadmap",
@@ -1088,8 +1088,8 @@ func TestEvidenceOnTheEnrollmentDayCountsInTheAthletesZone(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "tz2")
 	tech := seedTechnique(t, pool, "test-tz")
+	cleanupUser(t, pool, "tz2")
 
 	c, err := repo.Create(ctx, "tz2", "", NewCurriculum{
 		Name:  "Roadmap",
@@ -1136,8 +1136,8 @@ func TestWorkingReturnsOnlyActiveEnrollmentsWithProgress(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "work1", "work2")
 	tech := seedTechnique(t, pool, "test-working")
+	cleanupUser(t, pool, "work1", "work2")
 
 	mine, err := repo.Create(ctx, "work1", "", NewCurriculum{
 		Name:  "Active",
@@ -1204,8 +1204,8 @@ func TestPhasesAndConceptsRoundTrip(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "phases1")
 	tech := seedTechnique(t, pool, "test-trap-roll")
+	cleanupUser(t, pool, "phases1")
 
 	c, err := repo.Create(ctx, "phases1", "", NewCurriculum{
 		Name:  "White belt",
@@ -1266,8 +1266,8 @@ func TestUpdatingWithoutItemsLeavesPhasesAlone(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "phases2")
 	tech := seedTechnique(t, pool, "test-phase-keep")
+	cleanupUser(t, pool, "phases2")
 
 	c, err := repo.Create(ctx, "phases2", "", NewCurriculum{
 		Name:   "Structured",
@@ -1292,8 +1292,8 @@ func TestADrilledCriterionCountsSpreadNotVolume(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "drill1")
 	tech := seedTechnique(t, pool, "test-breakfall")
+	cleanupUser(t, pool, "drill1")
 
 	c, err := repo.Create(ctx, "drill1", "", NewCurriculum{
 		Name: "Fundamentals",
@@ -1383,8 +1383,8 @@ func TestWorkingExcludesCurriculaWithNothingCompletable(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "bookm1")
 	tech := seedTechnique(t, pool, "test-bookmark")
+	cleanupUser(t, pool, "bookm1")
 
 	roadmap, err := repo.Create(ctx, "bookm1", "", NewCurriculum{
 		Name:  "A real roadmap",
@@ -1482,11 +1482,10 @@ func TestAReseedKeepsTheEnrolmentAndTheEvidenceWhileTheFractionMoves(t *testing.
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
 	const athlete = "athlete-n97-reseed"
-	cleanupUser(t, pool, athlete)
-
 	stays := seedTechnique(t, pool, "n97-stays")
 	leaves := seedTechnique(t, pool, "n97-leaves")
 	arrives := seedTechnique(t, pool, "n97-arrives")
+	cleanupUser(t, pool, athlete)
 
 	scored := 3
 	met := &Criteria{TargetScored: &scored}
@@ -1596,8 +1595,8 @@ func TestMarkingAConceptReadIsReversibleAndCounted(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "reader20")
 	tech := seedTechnique(t, pool, "test-read-tech-1")
+	cleanupUser(t, pool, "reader20")
 
 	c, err := repo.Create(ctx, "reader20", "", NewCurriculum{
 		Name: "Purple belt",
@@ -1679,8 +1678,8 @@ func TestMarkingATechniqueItemReadIsRejected(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "reader21")
 	tech := seedTechnique(t, pool, "test-read-tech-2")
+	cleanupUser(t, pool, "reader21")
 
 	c, err := repo.Create(ctx, "reader21", "", NewCurriculum{
 		Name:  "Blue belt",
@@ -1752,8 +1751,8 @@ func TestReadStateNeverAffectsMasteryOrProgress(t *testing.T) {
 	pool := testPool(t)
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
-	cleanupUser(t, pool, "reader22")
 	tech := seedTechnique(t, pool, "test-read-tech-3")
+	cleanupUser(t, pool, "reader22")
 
 	c, err := repo.Create(ctx, "reader22", "", NewCurriculum{
 		Name: "White belt",
@@ -1826,8 +1825,8 @@ func TestReadMarksSurviveAContentRewrite(t *testing.T) {
 	repo := NewPostgresRepository(pool)
 	ctx := context.Background()
 	const athlete = "athlete-n123-rewrite"
-	cleanupUser(t, pool, athlete)
 	tech := seedTechnique(t, pool, "n123-rewrite-tech")
+	cleanupUser(t, pool, athlete)
 
 	before, err := repo.Create(ctx, athlete, "", NewCurriculum{
 		Name: "Blue belt",

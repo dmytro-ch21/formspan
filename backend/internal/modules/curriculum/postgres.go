@@ -423,9 +423,11 @@ func (r *PostgresRepository) items(ctx context.Context, userID, id string, since
 		       r.read_at
 		FROM curriculum_items i
 		-- LEFT, for the CONCEPT rows only — their technique_id is NULL by
-		-- constraint. For technique rows the join still cannot miss: the FK is
-		-- ON DELETE CASCADE, so an item whose technique is gone cannot exist,
-		-- and the COALESCEs above only ever fire for concepts.
+		-- constraint. For technique rows the join still cannot miss: F23/#523
+		-- made the FK ON DELETE RESTRICT (was CASCADE — corrected here, found
+		-- in review, backend-reviewer, after that migration made this stale),
+		-- so a referenced technique can never be deleted at all, and the
+		-- COALESCEs above only ever fire for concepts.
 		LEFT JOIN techniques lib ON lib.id = i.technique_id
 		LEFT JOIN ev ON ev.technique_id = i.technique_id
 		-- LEFT, scoped to the CALLER: r.read_at is non-NULL only where this

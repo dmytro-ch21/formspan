@@ -58548,6 +58548,218 @@ becomes a real reader of this column. Not fixed here because a correct fix
 needs an actual ownership signal `workout.ItemProtocols` doesn't currently
 return, not a one-line change; recorded here so it isn't forgotten.
 
+### 2026-09-06 — F23/#523: retiring a technique never deletes it, and the two foreign keys that disagreed about what a delete means now agree
+
+Found while diagnosing #511 (N122): two foreign keys pointed at
+`techniques(id)` and disagreed about what deleting a row meant —
+`bjj_session_tags.technique_id` was `ON DELETE SET NULL`,
+`curriculum_items.technique_id` was `ON DELETE CASCADE` — and the roadmap
+progress query filtered on `technique_id IS NOT NULL`. Deleting a technique
+therefore made an athlete's own evidence of having trained it silently stop
+counting (the row survived, nulled, invisible) while simultaneously dropping
+it from every roadmap that recommended it, with no error anywhere: a roadmap
+reading `7 of 12` would read `6 of 11` and look entirely consistent.
+Migration 000034's own comment on `curriculum_items.technique_id` had
+already named this exact failure mode as a live dependency — *"this is only
+safe while nothing deletes techniques... the day `techniques` gains it,
+every curriculum silently loses items, with no error anywhere"* — written
+before anything did. Nothing did, either: there has never been a
+`DELETE /v1/admin/techniques`, so this was a landmine rather than an active
+bug, reachable only by an operator running raw SQL against a live database.
+
+**THE DECISION, one sentence:** a technique is never deleted through the
+normal retirement path — retiring sets a third status, `retired`, alongside
+`draft`/`published` (migration 000036), so the row survives and every
+foreign key into it keeps pointing at something real; a genuine `DELETE` is
+still possible but now succeeds only for a technique nothing has ever
+referenced, and is refused outright otherwise.
+
+**Why status, not the ticket's other two candidates.** `RESTRICT-and-let-the-
+operator-resolve-it` doesn't fit this catalog's existing shape: 000036
+already solved "hide unfinished content from athletes" with a status column
+and a one-way `Publish` verb, and inventing a second visibility mechanism
+(a delete an operator has to fight) for the same *kind* of decision — is
+this technique currently taught — is the inconsistency this migration
+removes, not one to add back. It would also have done nothing for the
+common case: a technique with `bjj_session_tags` evidence and no
+`curriculum_items` row has nothing pointing at it with `NOT NULL`, so
+nothing would refuse the delete, and the silent `SET NULL` would fire
+exactly as it does today. Denormalising evidence to outlive the catalog
+row solves a problem retiring does not have to create — the row isn't
+going anywhere.
+
+**What changed, concretely (migration 000095):**
+
+1. `techniques.status` gains `retired`. `technique_revisions.action` gains
+   `retire` and `reactivate` so the audit trail names which happened,
+   matching `publish`/`restore`.
+2. Two new one-way-each verbs on `ContentRepository`,
+   `RetireTechnique`/`ReactivateTechnique` (`content_postgres.go`), each a
+   plain `UPDATE ... SET status = ...` guarded on the current status
+   (`WHERE status = 'published'` to retire, `WHERE status = 'retired'` to
+   reactivate) — mirroring `Publish`'s own staleness convention. Neither
+   touches `bjj_session_tags` or `curriculum_items`, which is the entire
+   fix: nothing to null, nothing to cascade, because nothing is deleted.
+   **Retiring is reversible, unlike publishing** — a curator who retires the
+   wrong technique, or one that starts being taught again, needs a way
+   back, and `publish`'s one-way-ness was never a property retiring shares.
+3. **The two foreign keys stop disagreeing: both become `ON DELETE
+   RESTRICT`.** Not `SET NULL` on one side and `CASCADE` on the other,
+   and not both `CASCADE` or both `SET NULL` either — `RESTRICT` on both,
+   because a real hard `DELETE` now means exactly one thing: this technique
+   should never have existed and nothing legitimate happened against it.
+   If nothing references it, the delete succeeds — the "created by mistake,
+   fix the typo before anyone trains it" case, and the *only* case a hard
+   delete now serves. If anything references it — one session tag, one
+   curriculum item, ever — Postgres refuses the delete outright with a
+   foreign-key-violation, and the operator has to retire instead. This is a
+   real behaviour change for a path nothing currently exercises (still no
+   `DELETE /v1/admin/techniques`), and that is the point: the day one is
+   added, or an operator reaches for raw SQL, the constraint that blocks
+   them is the one that tells them — the same lesson `technique`'s test
+   suite already recorded for its own cleanup, arriving here through the
+   production schema instead.
+4. **The public read paths were already inconsistent in a way that mattered
+   more once retiring could leave a real reference behind.** `GET
+   /techniques` (`List`) excludes anything not `published` — draft and
+   retired alike, unchanged in effect, because this is the picker a curator
+   or an athlete searches to find *new* work, and a retired technique must
+   not resurface there. But `GET /techniques/{id}` (`Get`) used to also
+   filter on `status = 'published'`, which was fine when the only other
+   state was `draft` — nothing can reference an id before it is published,
+   so 404ing a draft's detail page costs nothing. A retired technique is the
+   opposite case: it routinely *is* already a `curriculum_items` row or a
+   `bjj_session_tags.technique_id`, from before it was retired, and both
+   keep resolving it via a plain `LEFT JOIN techniques` with no status
+   filter (unchanged — this is what makes a roadmap's `lib.name` keep
+   working after retirement). 404ing the detail page on retirement would
+   have been the exact "athlete's own history must not develop holes"
+   failure `Publish`'s own doc comment already named, arriving one screen
+   further along. Fixed: `Get` now excludes only `draft` (`status <>
+   'draft'`), and additionally surfaces `status: "retired"` on that one
+   response (previously the column was not selected there at all, since a
+   public detail read was published by definition) so a client reached from
+   an existing reference can render "no longer taught" instead of nothing.
+   A published technique's response is byte-for-byte unchanged.
+
+**A real regression this surfaced in the existing test suite, not caused by
+this ticket's own new tests.** Every Postgres-backed package that seeds a
+technique and later deletes it in cleanup relied — mostly without saying so
+— on the delete always succeeding, which was true under `SET NULL`/`CASCADE`
+regardless of what still referenced the row. Under `RESTRICT` that stopped
+being true, and `t.Cleanup`'s LIFO ordering matters: `curriculum`'s and
+`accomplishment`'s test files uniformly called `cleanupUser(...)` (which
+deletes sessions/curricula, cascading away the referencing rows) *before*
+`seedTechnique(...)`, so cleanupUser's cleanup — registered first — ran
+*last*, and the technique-delete cleanup fired first, hit the new
+`RESTRICT`, and silently leaked the row (`_, _ = pool.Exec(...)` in these
+helpers discards the error, exactly the historical convention). Measured
+directly: a full `curriculum`+`technique` run left 28 leaked rows, which
+then broke `technique`'s own count-based tests (`seeded 554 but listed 582`)
+under `-p 1` in the same invocation — the identical "unscoped counts poisoned
+by a neighbour's leftover fixtures" shape this repo has hit before, with a
+new mechanism. `feed`'s single technique-seeding test had the same defect
+via a different helper (`person`'s cleanup, not `cleanupUser`). Fixed by
+reordering every affected call site to seed the technique *before* creating
+whatever references it — the same discipline `bjj/proficiency_postgres_test.go`
+already followed, which is why it was never affected. Verified: a full
+`go test -p 1 ./...` run now leaves zero rows in `techniques`,
+`curriculum_items` and `bjj_session_tags` afterward, checked directly rather
+than inferred from green.
+
+**Tests, and the mutation check performed by hand.**
+`technique/content_postgres_test.go` covers `RetireTechnique`/
+`ReactivateTechnique` at the repository level (including that retiring a
+draft, or retiring twice, is `ErrNotFound`) and that `Get` keeps resolving a
+retired technique while `List` excludes it.
+`curriculum/retire_regression_postgres_test.go` is the cross-module
+regression coverage the ticket's acceptance criteria asked for literally,
+and it earns being in `curriculum` rather than `technique` because the bug
+is inherently cross-module (`curriculum` already imports `technique`; the
+reverse does not exist and was not introduced):
+
+- `TestDeletingAReferencedTechniqueIsNowRefused` uses nothing from this PR's
+  Go changes — no new constant, no `Retire` method, pure SQL plus fixture
+  helpers that already existed on `main`. Run against `origin/main`
+  unmodified (a throwaway database migrated to exactly version 93, `main`'s
+  actual highest), it **fails**, not on a build error but on its own
+  assertion — the `DELETE FROM techniques` the test expects to be refused
+  *succeeds* under `main`'s real `SET NULL`/`CASCADE` schema, silently
+  orphaning the tag and cascading away the item. That is the literal
+  "must fail against main today" the acceptance criteria asked for,
+  measured rather than assumed. **Mutation check, performed by hand**: with
+  000095 applied, manually reverting *only* the two `ALTER TABLE`
+  statements (back to `SET NULL`/`CASCADE`, leaving the status column and
+  Go code untouched) and re-running — the test goes red again, on the same
+  assertion, for the same reason; restoring the constraints and re-running
+  confirms green again. The companion test in the same run
+  (`TestRetiringATechniqueThroughTheAdminConsolePreservesEvidenceAndRoadmap`,
+  below) stays green throughout that mutation, correctly — it never issues a
+  `DELETE`, so it has nothing to say about the FK action and isn't a
+  redundant assertion of the same thing.
+- `TestRetiringATechniqueThroughTheAdminConsolePreservesEvidenceAndRoadmap`
+  is the "admin console is the trigger" coverage: it drives
+  `technique.NewContentHandler(...).Retire` through `httptest` — an actual
+  HTTP-handler-level call, not a bare repository call — after seeding a
+  curriculum with a countable item, enrolling, and logging evidence, then
+  re-reads the roadmap (`curriculum.Get`) and the raw `bjj_session_tags` row
+  and asserts both are unchanged: the item's `Progress.Mastered` still
+  holds, the technique's name still resolves, and the tag's `technique_id`
+  is still non-null. It also asserts the retired technique's public detail
+  read now succeeds and reports `status: "retired"`.
+
+**Admin console.** There is still no `DELETE /admin/techniques/{id}` —
+retiring replaces the reachable meaning of "remove a technique" from
+`/content`, which is the acceptance criterion "the admin `/content` retire
+path is covered" taken literally: `POST /admin/techniques/{id}/retire` and
+`/reactivate` are the only new routes, wired the same way `/publish` is
+(their own verb, never a `PATCH` field, so a partial edit cannot change
+visibility by accident). `apps/admin/src/app/content/[id]/page.tsx` gained a
+retired-state notice with a Reactivate button (muted styling — a retired
+technique is a normal, deliberate state, not one that needs the draft
+banner's attention-getting treatment) and a low-key "Retire" section below
+History for the ordinary published case, deliberately not a prominent
+call-out, since most technique edit pages are for published rows and a
+banner on every one of them would be noise for the common case. The list
+screen gained a "Retired" badge matching the existing "Draft" one.
+
+**Deferred, and recorded rather than silently skipped:** nothing currently
+stops a NEW curriculum item (via `curriculum.Create`/`Update`, which an
+athlete can call for their own curriculum, not only the admin console) from
+naming a retired technique's id — the FK is satisfied (the row still
+exists) and no application-level check rejects it. This is not a new gap
+this ticket introduced: it is the identical, already-documented behaviour
+for a **draft** technique (`contracts/public.openapi.yaml`'s own `status`
+description: "a draft technique CAN still be referenced by id... those
+write paths validate against the foreign key, which does not know about
+status"), now extended to a third status rather than newly created. Closing
+it needs the same check added to every write path that currently omits it
+(BJJ session tags, focus lists, curricula, sequences) for *both* draft and
+retired uniformly, which is real work this ticket did not also take on —
+recorded here so a future ticket does not have to rediscover it from a code
+read.
+
+**Review fold-in.** `ac-verifier`: 4 MET, 2 judgment-call-treated-as-MET
+(the mutation-check claims for the "fails against unmodified main"/"reverting
+the constraint change goes red again" criteria were verified as specific and
+credible from the test's own comments and history.md's prose rather than
+independently re-run — this host's shared Colima networking meant a live
+re-run risked hitting a DIFFERENT concurrent worktree's Postgres container,
+so the reviewer correctly declined rather than risk that collision).
+`backend-reviewer`: 0 blocking — independently traced the FK graph and
+`t.Cleanup` LIFO ordering for the fixture-cleanup fix across curriculum/
+accomplishment/feed rather than trusting the description, confirmed sound.
+One suggestion, folded in: `curriculum/postgres.go`'s `items()` comment
+(untouched by the original diff) claimed the technique FK was
+`ON DELETE CASCADE`, which this migration changed to `RESTRICT` — the
+comment's conclusion (the join can't miss a technique row) still holds,
+more robustly now, but the stated mechanism was stale. Corrected.
+`frontend-reviewer` (apps/admin half): 0 blocking, one suggestion (redundant
+copy between `RetireButton`'s subtext and the page's own Retire-section
+paragraph) left as a judgment call, not folded in — trimming one risks
+losing context a reader landing directly on the button's own copy would
+otherwise need.
+
 
 ## N515/#903 — a shadow-replay tool comparing v1/v2 progression engines over real history, plus the written rollout plan (phase 5 of #753) (`backend/cmd/shadowreplay/`, `backend/internal/modules/session/shadowreplay.go`, `shadowreplay_postgres.go`)
 
@@ -59352,6 +59564,14 @@ planning attempt itself (`` `${pendingPick.day}-${pendingPick.sport}` ``, or
 Re-ran the full relevant mobile test suite (152 tests across
 `plan.test.ts`/`planTime.test.ts`/`todayScreen.test.tsx`/`schema.test.ts`)
 and the full `pnpm run verify` chain — both green — after the fix.
+
+**Migration-number collision, caught and resolved (F23/#523).** This
+branch and N126/#520 (entry immediately above) independently claimed
+`000094` against the identical `origin/main` base — invisible in either
+branch's own diff, exactly as this repo's "claim at rebase time" rule
+warns about. N126 merged first (#909); this branch's migration is
+renumbered to `000095` at rebase time, with every code comment and
+history.md reference to the old number updated to match.
 
 
 ## Open items / known gaps as of this entry

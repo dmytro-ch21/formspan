@@ -80,12 +80,22 @@ func RulesetSeedData() ([]Ruleset, error) {
 	return rulesets, nil
 }
 
-// The two publication states. Exported because the console write path and the
-// public read path both need them, and a third string literal is how the two
-// stop agreeing.
+// The three publication states. Exported because the console write path and
+// the public read path both need them, and a stray string literal is how the
+// two stop agreeing.
+//
+// StatusRetired was added for F23/#523: a technique that is no longer taught
+// but has real evidence against it (a curriculum item, a session tag) — see
+// migration 000095 and content_postgres.go's Retire/Reactivate for the full
+// reasoning. It is deliberately a THIRD state and not a repurposing of draft:
+// draft means "never shown to an athlete yet", retired means the opposite —
+// "was shown, was trained, and the catalog says so no longer" — and the two
+// public read paths (List, Get) treat them differently for exactly that
+// reason (see postgres.go).
 const (
 	StatusPublished = "published"
 	StatusDraft     = "draft"
+	StatusRetired   = "retired"
 )
 
 // NormalizeStatus resolves the empty-means-published convention.
@@ -101,7 +111,7 @@ func NormalizeStatus(s string) string {
 }
 
 //nolint:gochecknoglobals // vocabulary, not state
-var validStatuses = map[string]bool{StatusPublished: true, StatusDraft: true}
+var validStatuses = map[string]bool{StatusPublished: true, StatusDraft: true, StatusRetired: true}
 
 // gi_no_gi is the one field with a DB-level CHECK, so a bad value would
 // otherwise fail mid-deploy against the constraint rather than here with a

@@ -807,6 +807,11 @@ func main() {
 	// POST rather than PATCH: publishing is an action, not a field, and the
 	// edit path must not be able to change visibility by accident.
 	mux.Handle("POST /v1/admin/techniques/{techniqueID}/publish", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Publish)))
+	// F23/#523: retiring a technique — never a DELETE, see the migration and
+	// content_postgres.go's RetireTechnique. Same POST-not-PATCH reasoning as
+	// publish, and reversible via reactivate, unlike publish.
+	mux.Handle("POST /v1/admin/techniques/{techniqueID}/retire", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Retire)))
+	mux.Handle("POST /v1/admin/techniques/{techniqueID}/reactivate", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Reactivate)))
 	mux.Handle("GET /v1/admin/techniques/{techniqueID}/revisions", verifier.RequireAdmin(http.HandlerFunc(techniqueContentHandler.Revisions)))
 	// POST, not PUT: restoring APPENDS a revision rather than replacing state,
 	// so it is not idempotent — two restores of the same revision produce two

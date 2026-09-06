@@ -802,13 +802,19 @@ func TestWhatWasDoneToYouIsNotPublished(t *testing.T) {
 	// athlete is not the reader.
 	h := newHarness(t)
 	ctx := context.Background()
+	// Seeded BEFORE person(): person()'s cleanup deletes bob's sessions, which
+	// cascades away the bjj_session_tags rows below — and since F23/#523
+	// (migration 000095) that cascade is what makes the technique cleanup's
+	// own DELETE possible at all (curriculum_items/bjj_session_tags.
+	// technique_id are now ON DELETE RESTRICT, not CASCADE/SET NULL). t.Cleanup
+	// is LIFO, so seeding the technique first registers its cleanup first,
+	// which makes it run LAST — after the tags are already gone.
+	landed := seedTechnique(t, h.pool, "fd_b_armbar")
+	caught := seedTechnique(t, h.pool, "fd_b_triangle")
 	alice := person(t, h.pool, "fd_ba", "fd_ba_h", true)
 	bob := person(t, h.pool, "fd_bb", "fd_bb_h", true)
 	befriend(t, h, alice, "fd_ba_h", bob, "fd_bb_h")
 	wantsDetail(t, h.pool, bob)
-
-	landed := seedTechnique(t, h.pool, "fd_b_armbar")
-	caught := seedTechnique(t, h.pool, "fd_b_triangle")
 	rollID := "fd_b_roll"
 	started := time.Now().UTC().Add(-time.Hour)
 	if _, err := h.sessions.Create(ctx, session.NewSession{

@@ -3677,10 +3677,75 @@ differ here — deliberately, and stated rather than implied.
   is whether the file already carried this exact content, not whether it carried
   the id — an id check passes here and is wrong.
 
+### Retiring and reactivating (`status`, F23/#523)
+
+A published technique can be **retired**: no longer offered for new work, but
+never deleted and never unlinked from anything already referencing it — the
+fix for the bug where deleting a technique silently voided athletes'
+evidence and dropped roadmap items. Reversible, unlike publishing.
+
+**Happy path**
+
+- `POST /v1/admin/techniques/{id}/retire` on a published technique returns it
+  with `status: "retired"` and a `200`.
+- `POST /v1/admin/techniques/{id}/reactivate` on a retired one returns it
+  with `status: "published"` and a `200`.
+- Each appends a revision (`action: "retire"` / `"reactivate"`), visible in
+  `GET /v1/admin/techniques/{id}/revisions`.
+
+**The property everything rests on**
+
+- **Retiring must not touch a curriculum item or a session tag that already
+  names the technique.** Seed a technique, enrol an athlete in a curriculum
+  item referencing it, log a session tagging it, confirm the roadmap counts
+  it — then retire, and re-read both the roadmap and the session. The
+  curriculum item must still exist and still resolve the technique's name;
+  the athlete's logged evidence must still count toward the item's progress;
+  the session tag's `technique_id` must still be non-null. This is the
+  scenario that reproduces the original bug and must fail against
+  unmodified `main` — the mutation-testable claim is that a hard `DELETE` of
+  a referenced technique is now refused outright (`23503`,
+  foreign-key-violation) rather than silently succeeding via `SET NULL`/
+  `CASCADE`.
+- **A hard delete of an UNREFERENCED technique still succeeds.** The "created
+  by mistake, nobody has trained it yet" case — this is the only case a real
+  `DELETE` serves now, and there is still no
+  `DELETE /v1/admin/techniques` endpoint to reach it through; only a manual
+  operator query does.
+
 **Edge cases and errors**
 
-- A duplicate id is a **409, never an upsert** — the id may already be a
-  foreign key in somebody's training record.
+- **Retiring a draft is a 404** — nothing to retire FROM, since a draft was
+  never live.
+- **Retiring twice, or reactivating a technique that is not retired, is a
+  404** — not a silent no-op reporting success it did not cause.
+- **`GET /v1/techniques` (the browsable/searchable list, and any tagging
+  picker built on it) excludes a retired technique**, exactly like a draft —
+  nothing should pick it for new work.
+- **`GET /v1/techniques/{id}` KEEPS RESOLVING a retired technique — this is
+  the opposite of the draft case and the scenario most likely to regress
+  quietly.** Assert `200` with `status: "retired"` in the body, not `404`. A
+  curriculum item or session tag written before retirement may link straight
+  to this endpoint; 404ing it would be the same "athlete's history develops a
+  hole" failure retiring exists to prevent, one screen further along.
+- **A retired technique can still be tagged into a BJJ session, a focus
+  list, a curriculum or a sequence** — the same known gap as a draft (see
+  above), now extended to a third status rather than newly introduced. A
+  scenario written today should pin this behaviour, not assert the tighter
+  one a future ticket may add.
+- **Fixture discipline, and worth stating explicitly because it bit this
+  ticket's own backend suite:** a technique fixture's cleanup must run
+  AFTER anything referencing it is cleaned up, or the technique's own
+  `DELETE` in teardown now fails against the `RESTRICT` foreign key and
+  silently leaks the row into the shared test database (`t.Cleanup`'s LIFO
+  order means "seed the technique before creating what references it", the
+  opposite of "clean up the user before seeding the technique").
+
+**Auth and security**
+
+- `RequireAdmin` on both routes, matching `/publish`.
+
+
 - A 404 from PATCH now means exactly one thing — no such id. It used to also
   mean "that one is seeded" and answer 409; there is no second case.
 - **Search escapes LIKE metacharacters**: `?q=%` and `?q=half_guard` match

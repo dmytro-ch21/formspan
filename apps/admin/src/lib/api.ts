@@ -289,9 +289,14 @@ export type Technique = {
    */
   source?: string;
   /**
-   * "published" or "draft"; absent means published. Only present on `/admin/*`
-   * responses — the public read does not select it, and a technique fetched the
-   * public way is published by definition, because the API filters drafts out.
+   * "published", "draft" or "retired" (F23/#523); absent means published.
+   *
+   * Present on every `/admin/*` response. On the public read
+   * (`getTechnique`), absent means published exactly as before — but a
+   * RETIRED technique now comes back too (unlike a draft, which still 404s
+   * there), with `status: "retired"` so a screen reached from an existing
+   * curriculum item or session tag can say "no longer taught" rather than
+   * nothing.
    */
   status?: string;
   created_at?: string;
@@ -377,7 +382,9 @@ export async function createTechnique(body: TechniqueWrite): Promise<Technique> 
 export type Revision<T> = {
   revision: number;
   actor: string;
-  action: "create" | "update" | "publish" | "restore";
+  // "retire" and "reactivate" (F23/#523) only ever appear on a Technique
+  // revision — the exercise catalog has no retire path.
+  action: "create" | "update" | "publish" | "restore" | "retire" | "reactivate";
   payload: T;
   created_at: string;
 };
@@ -420,6 +427,37 @@ export async function restoreRevision(id: string, revision: number): Promise<Tec
 export async function publishTechnique(id: string): Promise<Technique> {
   const data = await adminFetch<{ technique: Technique }>(
     `/admin/techniques/${encodeURIComponent(id)}/publish`,
+    { method: "POST", body: {} },
+  );
+  return data.technique;
+}
+
+/**
+ * Retire a live technique (F23/#523). Never a delete — the row survives with
+ * every existing curriculum item and session tag still naming it; this only
+ * removes it from `GET /techniques`, search and any tagging picker. Unlike
+ * `publishTechnique`, this is reversible — see `reactivateTechnique`.
+ *
+ * A 404 means "no published technique with that id" — it may be a draft
+ * (nothing to retire from) or already retired, and either way the caller is
+ * working from a stale view.
+ */
+export async function retireTechnique(id: string): Promise<Technique> {
+  const data = await adminFetch<{ technique: Technique }>(
+    `/admin/techniques/${encodeURIComponent(id)}/retire`,
+    { method: "POST", body: {} },
+  );
+  return data.technique;
+}
+
+/**
+ * Undo a retirement, back to `published`. The inverse of `retireTechnique`.
+ *
+ * A 404 means "no such id" or "not currently retired".
+ */
+export async function reactivateTechnique(id: string): Promise<Technique> {
+  const data = await adminFetch<{ technique: Technique }>(
+    `/admin/techniques/${encodeURIComponent(id)}/reactivate`,
     { method: "POST", body: {} },
   );
   return data.technique;

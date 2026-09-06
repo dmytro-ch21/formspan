@@ -139,6 +139,14 @@ export default async function ContentPage({
                         Draft
                       </span>
                     ) : null}
+                    {/* F23/#523. Muted rather than accent-coloured, matching
+                        the edit page: retired is a normal, deliberate state,
+                        not one that needs attention. */}
+                    {t.status === "retired" ? (
+                      <span className="ml-2 rounded-full border border-text-muted px-2 py-0.5 align-middle font-barlow-condensed text-[9px] font-bold tracking-[0.12em] text-text-muted uppercase">
+                        Retired
+                      </span>
+                    ) : null}
                   </span>
                   <span className="truncate font-mono text-[12px] text-text-secondary">
                     {t.id}
