@@ -9,7 +9,7 @@ import { RoadmapSummary } from '@/components/RoadmapSummary';
 import { Text, View } from '@/components/Themed';
 import { CardGlass } from '@/components/ui/CardGlass';
 import { Icon, type IconName } from '@/components/ui/Icon';
-import { Card } from '@/constants/Card';
+import { Card, CARD_GLASS_COLORS } from '@/constants/Card';
 import { vola } from '@/constants/Colors';
 import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
@@ -411,6 +411,10 @@ export default function YouScreen() {
             <Pressable
               onPress={() => router.push('/friends')}
               style={({ pressed }) => [styles.friendsChip, pressed && styles.pillPressed]}
+              // The chip itself renders under 30pt tall — `hitSlop` brings its
+              // tap target up toward the 44pt floor this app uses elsewhere
+              // for a small pressable (see `index.tsx`'s `dismiss` control).
+              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Friends"
               accessibilityValue={{ text: friendCountLabel(friendCount, friendCountAnswered) }}
@@ -891,7 +895,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.xs },
   headerText: { flex: 1, gap: Spacing.xxs },
   name: { fontSize: 26, fontWeight: '800' },
-  handle: { color: vola.textMuted, fontSize: 13 },
+  handle: { ...Typography.meta, color: vola.textMuted },
 
   // The friends entry point — a small pill rather than a full pill-grid cell,
   // since it is one fact beside the masthead rather than a member of the
@@ -939,7 +943,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: CARD_GLASS_COLORS[0],
   },
   pillLabel: { ...Typography.emphasis, color: vola.text },
   // The value/caption line — only `NavValueRow` (Sports, Phase) uses this;
