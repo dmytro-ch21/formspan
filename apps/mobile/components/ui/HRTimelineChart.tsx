@@ -82,6 +82,7 @@ export function HRTimelineChart({
       height={HEIGHT}
       viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       testID={testID}
+      accessibilityRole="image"
       accessibilityLabel={`Heart rate across the session, from ${Math.round(minBpm)} to ${Math.round(maxBpm)} beats per minute over ${formatMinutes(totalMinutes)}`}
     >
       {/* y-axis: just the two real numbers that bound this session's own
