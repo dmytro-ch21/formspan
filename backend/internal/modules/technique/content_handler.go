@@ -298,6 +298,44 @@ func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"technique": out})
 }
 
+// Retire is a separate verb, not a field on PATCH — matching Publish, and for
+// the same reason: "athletes can still see it" is not a property a partial
+// update of eighteen fields should be able to change by accident.
+//
+// F23/#523: this is "the admin console is the trigger" the ticket names.
+// Nothing about a retire touches bjj_session_tags or curriculum_items — see
+// RetireTechnique's own doc — so a curator clicking this button never voids
+// an athlete's evidence or drops an item off a roadmap.
+func (h *ContentHandler) Retire(w http.ResponseWriter, r *http.Request) {
+	out, err := h.repo.RetireTechnique(r.Context(), r.PathValue("techniqueID"), actorOf(r))
+	if errors.Is(err, ErrNotFound) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"no published technique with that id — it may already be retired or still a draft")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"technique": out})
+}
+
+// Reactivate undoes a retirement. Its own route for the same reason Retire
+// has one: a decision this consequential is not a PATCH field.
+func (h *ContentHandler) Reactivate(w http.ResponseWriter, r *http.Request) {
+	out, err := h.repo.ReactivateTechnique(r.Context(), r.PathValue("techniqueID"), actorOf(r))
+	if errors.Is(err, ErrNotFound) {
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound,
+			"no retired technique with that id")
+		return
+	}
+	if err != nil {
+		apihttp.WriteInternal(w, r, "technique", err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"technique": out})
+}
+
 func (h *ContentHandler) write(
 	w http.ResponseWriter, r *http.Request, t Technique,
 	store func(context.Context, Technique, string) (Technique, error),

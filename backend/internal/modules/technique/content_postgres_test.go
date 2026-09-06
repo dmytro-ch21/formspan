@@ -463,6 +463,116 @@ func TestEditingAPublishedTechniqueKeepsItVisible(t *testing.T) {
 	}
 }
 
+// TestRetiringATechniqueHidesItFromBrowseButKeepsItResolvable is F23/#523's
+// core public-read-path assertion: a retired technique disappears from the
+// browsable/searchable list (nothing should pick it for new work) but a
+// direct Get — the shape of request a real curriculum item or session tag
+// already pointing at it would make — keeps resolving it, unlike a draft.
+func TestRetiringATechniqueHidesItFromBrowseButKeepsItResolvable(t *testing.T) {
+	repo, _ := contentFixture(t)
+	ctx := context.Background()
+
+	if err := repo.UpsertAll(ctx, []Technique{aTechnique("test-content-retire", "Retire Me")}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	inList := func() bool {
+		t.Helper()
+		all, err := repo.List(ctx, Filter{})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, s := range all {
+			if s.ID == "test-content-retire" {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !inList() {
+		t.Fatal("a freshly seeded (published) technique is missing from the public list")
+	}
+	if _, err := repo.Get(ctx, "test-content-retire"); err != nil {
+		t.Fatalf("public Get before retiring: %v", err)
+	}
+
+	retired, err := repo.RetireTechnique(ctx, "test-content-retire", testActor)
+	if err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if retired.Status != StatusRetired {
+		t.Errorf("status after retire = %q, want retired", retired.Status)
+	}
+
+	if inList() {
+		t.Error("a retired technique is still in the browsable/searchable list — " +
+			"it can be picked for new work")
+	}
+
+	// THE ASSERTION THIS TICKET EXISTS FOR: unlike a draft, a retired
+	// technique's detail must still resolve — a real curriculum item or
+	// session tag may already point at it, and 404ing here would be the same
+	// "history develops a hole" failure as an unpublish, one layer up.
+	got, err := repo.Get(ctx, "test-content-retire")
+	if err != nil {
+		t.Fatalf("public Get of a RETIRED technique = %v, want success — "+
+			"a technique that has already been trained must stay resolvable", err)
+	}
+	if got.Status != StatusRetired {
+		t.Errorf("Get's response status = %q, want %q surfaced so a client can show it", got.Status, StatusRetired)
+	}
+
+	// Reactivating undoes it, unlike Publish.
+	reactivated, err := repo.ReactivateTechnique(ctx, "test-content-retire", testActor)
+	if err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+	if reactivated.Status != StatusPublished {
+		t.Errorf("status after reactivate = %q, want published", reactivated.Status)
+	}
+	if !inList() {
+		t.Error("a reactivated technique is still missing from the public list")
+	}
+
+	// Retiring/reactivating an id in the wrong state is a stale-view 404, not
+	// a silent no-op, matching Publish's own convention.
+	if _, err := repo.ReactivateTechnique(ctx, "test-content-retire", testActor); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reactivating an already-published technique = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.RetireTechnique(ctx, "no-such-id", testActor); !errors.Is(err, ErrNotFound) {
+		t.Errorf("retiring an absent id = %v, want ErrNotFound", err)
+	}
+
+	// The audit trail names which verb happened.
+	revs, err := repo.Revisions(ctx, "test-content-retire")
+	if err != nil {
+		t.Fatalf("revisions: %v", err)
+	}
+	if len(revs) < 2 || revs[0].Action != ActionReactivate || revs[1].Action != ActionRetire {
+		t.Fatalf("revisions = %+v, want [reactivate, retire, ...] newest first", revs)
+	}
+}
+
+// TestRetiringADraftIsRefused: a draft was never live, so there is nothing to
+// retire it FROM — mirroring Publish's own "cannot publish what is already
+// published" staleness guard, applied to the other end of the state machine.
+func TestRetiringADraftIsRefused(t *testing.T) {
+	repo, _ := contentFixture(t)
+	ctx := context.Background()
+
+	created, err := repo.CreateTechnique(ctx, aTechnique("test-content-retire-draft", "Still Draft"), testActor)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Status != StatusDraft {
+		t.Fatalf("a freshly created technique has status %q, want draft", created.Status)
+	}
+	if _, err := repo.RetireTechnique(ctx, "test-content-retire-draft", testActor); !errors.Is(err, ErrNotFound) {
+		t.Errorf("retiring a draft = %v, want ErrNotFound", err)
+	}
+}
+
 func TestUpdateEditsAnAdminRow(t *testing.T) {
 	repo, _ := contentFixture(t)
 	ctx := context.Background()

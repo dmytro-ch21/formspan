@@ -276,8 +276,8 @@ func TestAnUndatedContestDoesNotStealFirst(t *testing.T) {
 func TestFirstScoredComesFromTheTagStream(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	const user = "user_acc_scored"
-	cleanupUser(t, pool, user)
 	tech := seedTechnique(t, pool, "ac_fx_armbar_from_guard")
+	cleanupUser(t, pool, user)
 
 	seedSession(t, pool, "acc_s_1", user, "bjj", "2026-02-10T18:00:00Z")
 	seedTag(t, pool, "acc_s_1", user, "attempted", &tech)
@@ -336,8 +336,8 @@ func TestAnUntaggedScoreStillCounts(t *testing.T) {
 func TestGraduationNeedsAnEarlierSession(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	const user = "user_acc_grad"
-	cleanupUser(t, pool, user)
 	tech := seedTechnique(t, pool, "ac_fx_triangle_from_guard")
+	cleanupUser(t, pool, user)
 
 	// Same session: drilled and scored together.
 	seedSession(t, pool, "acc_g_1", user, "bjj", "2026-02-10T18:00:00Z")
@@ -369,9 +369,9 @@ func TestGraduationNeedsAnEarlierSession(t *testing.T) {
 func TestGraduationIsPerTechnique(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	const user = "user_acc_grad_cross"
-	cleanupUser(t, pool, user)
 	drilled := seedTechnique(t, pool, "ac_fx_kimura_from_guard")
 	scored := seedTechnique(t, pool, "ac_fx_omoplata_from_guard")
+	cleanupUser(t, pool, user)
 
 	seedSession(t, pool, "acc_x_1", user, "bjj", "2026-02-10T18:00:00Z")
 	seedTag(t, pool, "acc_x_1", user, "drilled", &drilled)
@@ -444,8 +444,8 @@ func TestScopedToTheCaller(t *testing.T) {
 func TestTheListReadsAsACareer(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	const user = "user_acc_career"
-	cleanupUser(t, pool, user)
 	tech := seedTechnique(t, pool, "ac_fx_bow_and_arrow_choke")
+	cleanupUser(t, pool, user)
 
 	seedSession(t, pool, "acc_k_1", user, "bjj", "2025-01-10T18:00:00Z")
 	seedTag(t, pool, "acc_k_1", user, "drilled", &tech)
@@ -500,8 +500,8 @@ func TestTheListReadsAsACareer(t *testing.T) {
 func TestADrillOnANonBjjSessionDoesNotGraduate(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	const user = "user_acc_grad_sport"
-	cleanupUser(t, pool, user)
 	tech := seedTechnique(t, pool, "ac_fx_guillotine_from_guard")
+	cleanupUser(t, pool, user)
 
 	// The drill is on a barbell session, which cannot be mat evidence.
 	seedSession(t, pool, "acc_gs_1", user, "strength", "2026-02-10T18:00:00Z")

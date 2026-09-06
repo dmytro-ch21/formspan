@@ -7,7 +7,9 @@ import {
   ApiError,
   createTechnique,
   publishTechnique,
+  reactivateTechnique,
   restoreRevision,
+  retireTechnique,
   updateTechnique,
   type TechniqueWrite,
 } from "@/lib/api";
@@ -192,6 +194,43 @@ export async function publishTechniqueAction(
   try {
     await assertAdmin();
     await publishTechnique(id);
+    revalidatePath("/content");
+    revalidatePath(`/content/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
+  }
+}
+
+/**
+ * F23/#523. Reuses PublishResult's shape — retiring submits no fields either,
+ * for the same reason publishing does not.
+ */
+export async function retireTechniqueAction(
+  id: string,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await retireTechnique(id);
+    revalidatePath("/content");
+    revalidatePath(`/content/${id}`);
+    return { status: "ok" };
+  } catch (err) {
+    return { status: "error", message: explain(err) };
+  }
+}
+
+/** F23/#523. Undoes retireTechniqueAction. */
+export async function reactivateTechniqueAction(
+  id: string,
+  _prev: PublishResult,
+  _form: FormData,
+): Promise<PublishResult> {
+  try {
+    await assertAdmin();
+    await reactivateTechnique(id);
     revalidatePath("/content");
     revalidatePath(`/content/${id}`);
     return { status: "ok" };

@@ -29,6 +29,9 @@ const summaryColumns = `
 	COALESCE(t.to_position, ''),
 	t.gi_no_gi, t.typical_belt, COALESCE(t.ibjjf_ruleset_id, ''), t.setup_from`
 
+// t.status is scanned but, per Get, only ever surfaces on the response when
+// it is 'retired' — a published row's response is unchanged from before this
+// column was added here.
 const detailColumns = `
 	t.id, t.name, t.aliases, t.category, COALESCE(t.function, ''),
 	t.position, t.position_detail,
@@ -36,7 +39,7 @@ const detailColumns = `
 	t.gi_no_gi, t.typical_belt, t.description, t.when_to_use,
 	t.setup_from, t.common_next_moves, t.common_counters,
 	t.video_reference, t.source_notes, COALESCE(t.ibjjf_ruleset_id, ''),
-	t.created_at, t.updated_at`
+	t.status, t.created_at, t.updated_at`
 
 const rulesetColumns = `
 	id, age_scope, rule_class, gi_allowed_belts, gi_note,
@@ -67,7 +70,7 @@ func scanTechnique(row scannable) (*Technique, error) {
 		&t.Position, &t.PositionDetail, &t.ToPosition, &t.GiNoGi, &t.TypicalBelt, &t.Description,
 		&t.WhenToUse, &t.SetupFrom, &t.CommonNextMoves, &t.CommonCounters,
 		&t.VideoReference, &t.SourceNotes, &t.IBJJFRulesetID,
-		&t.CreatedAt, &t.UpdatedAt)
+		&t.Status, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -130,12 +133,17 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Summary, err
 			database.LikeClause("a", n)+"))")
 	}
 
-	// DRAFTS ARE NOT PUBLIC, and this is one of exactly two places that has to
-	// know it — here and Get. Deliberately not a filter the caller can turn
-	// off: there is no `?status=` and no admin bypass on this route, because
-	// the one thing worse than an invisible draft is a draft that becomes
-	// visible when somebody passes a query parameter they found in the
-	// contract.
+	// ONLY 'published' IS BROWSABLE, and this is one of exactly two places
+	// that has to know the full vocabulary — here and Get, which disagree on
+	// purpose (see Get's own comment). Equality rather than "!= draft" is
+	// deliberate: this is the list a curator picks NEW work from — the
+	// catalog search, a technique-tagging autocomplete, a curriculum-authoring
+	// picker — and a technique F23/#523 retired must not resurface there
+	// merely because it is not a draft. Deliberately not a filter the caller
+	// can turn off: there is no `?status=` and no admin bypass on this route,
+	// because the one thing worse than an invisible draft or a resurfaced
+	// retired technique is either becoming visible when somebody passes a
+	// query parameter they found in the contract.
 	//
 	// Prepended rather than appended so it survives every filter combination
 	// above, including none of them — which is why the `if len(where)` is gone.
@@ -168,14 +176,35 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Summary, err
 func (r *PostgresRepository) Get(ctx context.Context, id string) (*Technique, error) {
 	// A draft is ErrNotFound, not a 403: the caller has no business knowing an
 	// id exists before it is published, and a 403 would confirm it.
+	//
+	// A RETIRED technique is NOT excluded here (F23/#523), and that is the
+	// deliberate other half of List's "one of exactly two places" comment. A
+	// draft can never be a real reference — nothing can tag, list or resolve
+	// an id before it is published — so 404ing one costs nothing. A retired
+	// technique routinely IS one: a curriculum_items row or a
+	// bjj_session_tags.technique_id may point at it right now, from before it
+	// was retired, and both keep resolving it (LEFT JOIN techniques with no
+	// status filter — see curriculum's items() query). A detail page reached
+	// by tapping either of those must not 404 merely because the catalog
+	// stopped recommending it going forward; that is exactly the "athlete's
+	// own history must not develop holes" failure Publish's doc warns about,
+	// one layer up. `status <> 'draft'` therefore, not `= 'published'`.
 	row := r.pool.QueryRow(ctx, `SELECT `+detailColumns+` FROM techniques t
-		WHERE t.id = $1 AND t.status = '`+StatusPublished+`'`, id)
+		WHERE t.id = $1 AND t.status <> '`+StatusDraft+`'`, id)
 	t, err := scanTechnique(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("technique: get: %w", err)
+	}
+	// Only surfaced when non-empty, matching Technique.Status's own
+	// "absence is the common case" convention — a published detail response
+	// looks exactly as it did before this field existed. A client that has
+	// never heard of "retired" and checks nothing still renders correctly; one
+	// that wants to show "no longer taught" can.
+	if t.Status != StatusRetired {
+		t.Status = ""
 	}
 
 	// Resolved here rather than left to the client: a technique detail is one

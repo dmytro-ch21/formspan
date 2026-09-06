@@ -71,6 +71,30 @@ func (f *fakeContentRepo) Publish(_ context.Context, id, actor string) (Techniqu
 	return t, nil
 }
 
+func (f *fakeContentRepo) RetireTechnique(_ context.Context, id, actor string) (Technique, error) {
+	t, ok := f.stored[id]
+	// Mirrors the SQL's `WHERE status = 'published'`.
+	if !ok || NormalizeStatus(t.Status) != StatusPublished {
+		return Technique{}, ErrNotFound
+	}
+	t.Status = StatusRetired
+	f.stored[id] = t
+	f.record(id, actor, ActionRetire, t)
+	return t, nil
+}
+
+func (f *fakeContentRepo) ReactivateTechnique(_ context.Context, id, actor string) (Technique, error) {
+	t, ok := f.stored[id]
+	// Mirrors the SQL's `WHERE status = 'retired'`.
+	if !ok || t.Status != StatusRetired {
+		return Technique{}, ErrNotFound
+	}
+	t.Status = StatusPublished
+	f.stored[id] = t
+	f.record(id, actor, ActionReactivate, t)
+	return t, nil
+}
+
 func (f *fakeContentRepo) Revisions(_ context.Context, id string) ([]Revision, error) {
 	return f.revisions[id], nil
 }
@@ -156,6 +180,24 @@ func publish(t *testing.T, h *ContentHandler, id string) *http.Response {
 	req.SetPathValue("techniqueID", id)
 	rec := httptest.NewRecorder()
 	h.Publish(rec, req)
+	return rec.Result()
+}
+
+func retire(t *testing.T, h *ContentHandler, id string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/techniques/"+id+"/retire", nil)
+	req.SetPathValue("techniqueID", id)
+	rec := httptest.NewRecorder()
+	h.Retire(rec, req)
+	return rec.Result()
+}
+
+func reactivate(t *testing.T, h *ContentHandler, id string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/techniques/"+id+"/reactivate", nil)
+	req.SetPathValue("techniqueID", id)
+	rec := httptest.NewRecorder()
+	h.Reactivate(rec, req)
 	return rec.Result()
 }
 
@@ -346,6 +388,65 @@ func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
 	}
 	if res := publish(t, h, "no-such-id"); res.StatusCode != http.StatusNotFound {
 		t.Errorf("publishing an absent id = %d, want 404", res.StatusCode)
+	}
+}
+
+// TestRetireAndReactivateRoundTrip is the admin-console half of F23/#523's
+// acceptance criteria: this is the HTTP-handler-level exercise of "the admin
+// console is the trigger", not a bare repository call.
+func TestRetireAndReactivateRoundTrip(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["armbar-from-mount"] = Technique{
+		ID: "armbar-from-mount", Name: "Armbar From Mount", Category: "Submission",
+		Position: "Mount - Top", GiNoGi: "Both", Source: "admin",
+		Status: StatusPublished,
+	}
+	repo.sources["armbar-from-mount"] = "admin"
+	h := NewContentHandler(repo)
+
+	// A draft cannot be retired — it was never live, so there is nothing to
+	// withdraw.
+	repo.stored["draft-only"] = Technique{
+		ID: "draft-only", Name: "Draft Only", Category: "Pass",
+		Position: "Half Guard - Top", GiNoGi: "Both", Status: StatusDraft,
+	}
+	if res := retire(t, h, "draft-only"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("retiring a draft = %d, want 404", res.StatusCode)
+	}
+
+	res := retire(t, h, "armbar-from-mount")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("retire = %d, want 200", res.StatusCode)
+	}
+	if got := repo.stored["armbar-from-mount"].Status; got != StatusRetired {
+		t.Errorf("status after retire = %q, want retired", got)
+	}
+
+	// Retiring twice is a stale-view 404, matching Publish's own convention —
+	// not a silent no-op reporting success it did not cause.
+	if res := retire(t, h, "armbar-from-mount"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("re-retiring = %d, want 404", res.StatusCode)
+	}
+	if res := retire(t, h, "no-such-id"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("retiring an absent id = %d, want 404", res.StatusCode)
+	}
+
+	// UNLIKE publish, retiring is reversible.
+	res = reactivate(t, h, "armbar-from-mount")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reactivate = %d, want 200", res.StatusCode)
+	}
+	if got := repo.stored["armbar-from-mount"].Status; got != StatusPublished {
+		t.Errorf("status after reactivate = %q, want published", got)
+	}
+	if res := reactivate(t, h, "armbar-from-mount"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("reactivating an already-published technique = %d, want 404", res.StatusCode)
+	}
+
+	// The audit trail says which of the two verbs happened, not just "an edit".
+	revs := repo.revisions["armbar-from-mount"]
+	if len(revs) < 2 || revs[0].Action != ActionReactivate || revs[1].Action != ActionRetire {
+		t.Fatalf("revisions = %+v, want [reactivate, retire, ...] newest first", revs)
 	}
 }
 
