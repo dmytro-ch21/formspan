@@ -58739,6 +58739,27 @@ retired uniformly, which is real work this ticket did not also take on —
 recorded here so a future ticket does not have to rediscover it from a code
 read.
 
+**Review fold-in.** `ac-verifier`: 4 MET, 2 judgment-call-treated-as-MET
+(the mutation-check claims for the "fails against unmodified main"/"reverting
+the constraint change goes red again" criteria were verified as specific and
+credible from the test's own comments and history.md's prose rather than
+independently re-run — this host's shared Colima networking meant a live
+re-run risked hitting a DIFFERENT concurrent worktree's Postgres container,
+so the reviewer correctly declined rather than risk that collision).
+`backend-reviewer`: 0 blocking — independently traced the FK graph and
+`t.Cleanup` LIFO ordering for the fixture-cleanup fix across curriculum/
+accomplishment/feed rather than trusting the description, confirmed sound.
+One suggestion, folded in: `curriculum/postgres.go`'s `items()` comment
+(untouched by the original diff) claimed the technique FK was
+`ON DELETE CASCADE`, which this migration changed to `RESTRICT` — the
+comment's conclusion (the join can't miss a technique row) still holds,
+more robustly now, but the stated mechanism was stale. Corrected.
+`frontend-reviewer` (apps/admin half): 0 blocking, one suggestion (redundant
+copy between `RetireButton`'s subtext and the page's own Retire-section
+paragraph) left as a judgment call, not folded in — trimming one risks
+losing context a reader landing directly on the button's own copy would
+otherwise need.
+
 
 ## N515/#903 — a shadow-replay tool comparing v1/v2 progression engines over real history, plus the written rollout plan (phase 5 of #753) (`backend/cmd/shadowreplay/`, `backend/internal/modules/session/shadowreplay.go`, `shadowreplay_postgres.go`)
 
