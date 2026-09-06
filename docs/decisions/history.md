@@ -58117,6 +58117,163 @@ non-goal), it needs its own schema and very likely its own endpoint, plus
 its own confidence/evidence framing appropriate to whole-program evidence —
 none of that exists yet and building it was explicitly out of scope here.
 
+## N514/#902 — property tests for the progression engine's three core invariants (phase 5 of #753) (`backend/internal/modules/session/progression_property_test.go`)
+
+Split out of #867 (N497), which was itself phase 5 of #753 and flagged as too
+large for one PR. The other two siblings — N513's decision-record audit trail
+and N515's shadow-replay tool — are independent and out of scope here.
+
+**The problem.** `ProgressV2` (progression_v2.go) and `Progress` (v1,
+progression.go) were validated only by exact-fixture golden tests — #812's
+squat ramp, #494's upright-row/calves scenarios. Each proves the engine got
+ONE input right. None generalizes: nothing before this ticket proved the
+engine's core invariants hold across the input space, only across the
+handful of fixtures anyone happened to write. That is exactly the shape that
+let #812 ship in the first place — a bug three sets deep in a case nobody had
+written a fixture for.
+
+**Read the current code first, not a prior summary of it.** N494/#864,
+N495/#865 and N496/#866 all touched this package immediately before this
+ticket, so `progression_v2.go`, `protocol.go` and `warmup.go` were read fresh
+rather than assumed. `warmup.go` turned out to be out of scope: its ramp
+generation runs only after a numeric prescription already exists (handler.go,
+gated separately from `Progress`/`ProgressV2`) and doesn't touch any of the
+three invariants itself.
+
+**Design choice: a hand-rolled generator, not `testing/quick`.** `quick`
+generates arbitrary values of basic Go types with no natural way to express
+"a realistic rep count" or "a session shaped like a ramping squat day" short
+of writing a custom `quick.Generator` per type — which is most of the work of
+a hand-rolled generator anyway, with a worse failure report (`quick.Value` has
+no equivalent of a labelled `t.Fatalf`). A plain seeded `*rand.Rand` plus an
+ordinary loop reads like the rest of this package's tests and lets each
+generator's distribution match what an athlete could actually log — required
+by the ticket's own point 2 ("realistic... not adversarial garbage that could
+never occur in practice"). One fixed seed (`propertyTestSeed`) and a fixed
+iteration count (`propertyIterations = 300`) make every run reproducible —
+CLAUDE.md's own standing rule is that a property test which sometimes passes
+for the wrong reason is worse than a golden fixture, so this deliberately
+avoids Go 1.20+'s auto-seeded global `math/rand`.
+
+**Invariant 1 — never mix load evidence and rep evidence across cohorts.**
+"Cohort" is precisely defined in `progression_v2.go`'s own header comment
+(citing N473/#812's "coherent cohort" concept): the sets a rep-range decision
+may reason over are the STRAIGHT WORKING sets (`SetTypeWorking`, completed,
+weighted) at the session's single heaviest such weight (the anchor) —
+`straightWorkingSetsWithWeight` + `sameWeightCohort`. The generator builds one
+finished session per iteration with 4-13 sets spanning 2-5 distinct weights
+and every set role (working/warmup/backoff/drop/AMRAP/failure), plus randomly
+incomplete sets, then asserts the engine's cohort-derived output fields
+(`LastWeightKg`, `WorkingSets`, `LastMinReps`, `LastMaxReps`, `LastReps`)
+match an INDEPENDENTLY re-implemented reference cohort computation
+(`referenceCohort`/`referenceRepSpread`/`referenceTopSet` in the test file) —
+deliberately not calling `straightWorkingSetsWithWeight`/`sameWeightCohort`
+themselves, which would make the check true by construction (the exact
+"check-digit validating arithmetic the code had just performed itself" trap
+CLAUDE.md's "Verify that a check can fail" section names).
+
+Exercise identity is deliberately NOT fuzzed as a fourth cohort dimension,
+and that is a finding worth recording rather than a gap: reading
+`straightWorkingSetsWithWeight`/`sameWeightCohort` directly confirms neither
+ever looks at `Set.ExerciseID`. The boundary is architectural, not a runtime
+guard inside this pure function — `SessionEffort`'s own doc comment states it
+is "one past session's working sets for a single exercise", and
+`RecentEfforts`/`RecentEffortsV2` (postgres.go) scope their SQL by
+`ss.exercise_id = ANY($2)` before a `SessionEffort` is ever built. There is
+no code path inside `ProgressV2` to mutation-test for this dimension because
+there is no code there that does the job.
+
+**Invariant 2 — never progress from incomplete or conflicting effort data.**
+Read the actual thresholds rather than inventing new ones: `effortCoverage`
+(all/none/some) and `conflictThreshold = 2.0` in `hasEffortConflict`. The
+generator builds a clean single-weight cohort of 2-5 straight working sets,
+then either (a) gives effort (RIR-or-RPE, never both, so this scenario can
+never also trip the conflict check) to a random 1..k-1 subset — "some but not
+all" — and asserts `SuggestAbstain` with both `TargetWeightKg` and
+`TargetReps` nil, or (b) gives exactly one set a materially conflicting
+RIR/RPE pair, generated to disagree by 3.0-5.0 reserve-equivalent (well clear
+of the 2.0 threshold, avoiding float-boundary flakiness) and asserts
+`SuggestEffortConflict`, same nil-target check. Both scenarios keep every
+session well inside `staleAfter` (28 days) — the stale check runs BEFORE the
+conflict/coverage checks in `ProgressV2`, so a stale session would silently
+test `SuggestRepeatStale` instead of the invariant this test is for; missing
+that ordering would have made the test pass without covering anything.
+
+**Invariant 3 — never output an unloadable weight.** Every suggested
+`TargetWeightKg` must be an exact multiple of the athlete's real equipment
+increment — a literal, configured `ResolvedProtocol.EquipmentIncrementKg`
+(always kg-denominated, confirmed by reading `equipmentIncrementKg`'s and
+`roundForProtocolV2`'s own doc comments rather than assuming) when one is
+set, or the per-unit plate grid `roundToPlateV2` falls back to otherwise —
+checked in whichever unit that grid is NATIVE to, since an imperial value is
+only clean when checked in lb, not after converting back to kg (that
+round-trip is literally the reported 68.9lb bug this rounding exists to
+close). The generator randomizes: metric/imperial, a configured increment
+from a realistic set (1/1.25/2.5/5kg, plus 1.25/2.5/5/10lb converted to kg)
+versus none, and an athlete/program `RepRange`. The starting weight is always
+an exact multiple of whatever grid is in force and comfortably large (40-159
+grid steps), so it represents something the athlete could actually have
+lifted and so a 10% deload reliably clears at least one increment step. Two
+branches are driven to their real trigger conditions rather than approximated
+— `ProgressAddLoad` (cohort at the top of the rep range, reserve to spare) and
+`ProgressDeload` (three IDENTICAL stalled sessions, one or two reps short of
+the top, matching `stalledSessionsAtV2`'s own "no rep gained" definition
+exactly) — and the test asserts the generator actually landed on the intended
+`Code` before checking loadability, so a future change to branch ordering
+that silently stops exercising the rounding path fails loudly instead of
+quietly checking a weaker thing.
+
+**Mutation verification — all three, genuinely broken and genuinely
+restored, confirmed by re-running rather than by grepping the file.**
+
+- Invariant 1: `sameWeightCohort`'s epsilon check replaced with an
+  unconditional `true` (merging every weight into one cohort — reverting to
+  the pre-#812 behaviour). The property test failed at iteration 1 with a
+  real assertion (`cohort size mismatch — engine=3 reference=2`), not a
+  panic or compile error. Re-run non-fatally across all 300 iterations: 183
+  of 300 (61%) violated the invariant. Restored and confirmed green again
+  (`go test -run TestProgressV2_Property_NeverMixesEvidenceAcrossCohorts
+  -count=1`).
+- Invariant 2, conflict half: `hasEffortConflict` replaced with `return
+  false`. Failed at iteration 4 (`code=abstain want=effort_conflict`); 160 of
+  300 conflicting-scenario cases violated (the partial-coverage scenario was
+  unaffected, as expected — it's a separate guard). Restored, green again.
+- Invariant 2, partial-coverage half: the `!all` branch's condition
+  short-circuited to `false && !all`. Failed at iteration 0 — and notably
+  with `code=add_reps`, an actual numeric progression from partial effort
+  data, not merely a different safe code. 140 of 300 partial-coverage cases
+  violated, 62 of which produced a real progression code (`add_load`/
+  `add_reps`). Restored, green again.
+- Invariant 3, explicit-increment half: `roundToIncrement` replaced with
+  `return kg` (no rounding at all). Failed at iteration 0
+  (`83.25kg is not a multiple of the configured 1.25kg increment`); 69 of
+  300 violated. Restored, green again.
+- Invariant 3, imperial-pattern half: `roundToPlateV2`'s imperial branch
+  replaced with `return kg` (skipping the lb-grid snap — literally
+  reintroducing the reported 68.9lb bug). Failed at iteration 13
+  (`116.35kg / 256.5lb is not a multiple of the 5lb plate grid`); 35 of 300
+  violated. Restored, green again.
+
+Every mutation was reverted with `git checkout --
+internal/modules/session/progression_v2.go` and confirmed by RE-RUNNING the
+property tests (not by reading the diff) before moving to the next one.
+`go build ./...` and the full `internal/modules/session` package suite
+(`go test ./internal/modules/session/... -v -count=1`) both stayed green
+throughout, with the engine untouched — `git diff --stat` against
+`origin/main` shows only the new test file.
+
+**What this does not cover.** v1's `Progress` shares `roundToPlate`/
+`incrementWithin`/`stalledSessionsAt` with `ProgressV2`'s `V2`-suffixed
+siblings but is behind a separate feature flag (`new_recommendation_engine`)
+and was explicitly out of `#812`'s scope, per that file's own header
+comment ("Progress above... is UNCHANGED"); these property tests target
+`ProgressV2` only, matching where #753's phase-1 cohort/effort/rounding fixes
+actually live. A v1-targeted equivalent, if `Progress` is ever meant to carry
+the same guarantees, is future work. `docs/testing/functional-scenarios.md`
+gets a short note on the engine's now-property-tested invariants for a future
+E2E/API test author; no user-facing or wire-contract behavior changed, so
+that's the only doc-scenario update this ticket needed.
+
 ## Open items / known gaps as of this entry
 
 

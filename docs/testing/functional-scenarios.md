@@ -19867,3 +19867,41 @@ recommendation is proposed.
   Happy-path/Edge-case/Auth scenarios here, following this file's existing
   per-feature pattern, and update `Suggestion`'s OpenAPI description to
   point at wherever the new product actually lives.
+
+## N514/#902 — property tests for the progression engine's three core invariants (phase 5 of #753) (`backend/internal/modules/session/progression_property_test.go`)
+
+Pure internal test coverage — no endpoint, schema field, or UI changed, so
+there is no new user-facing scenario to translate into `tests/functional/`.
+Recorded here anyway because it establishes guarantees a functional/E2E test
+author for `GET /v1/sessions/suggestions` (or its mobile/web renderers) can
+now rely on rather than re-verify:
+
+- **A suggestion never blends evidence from two different weights, set
+  roles, or (structurally, by how `SessionEffort` is scoped) exercises.**
+  If a functional test logs a ramping session — several weights, a mix of
+  warm-up/backoff/drop/AMRAP/working sets — the suggestion's `last_weight_kg`,
+  `working_sets`, `last_min_reps`/`last_max_reps` will always describe
+  exactly the straight working sets at that session's single heaviest
+  weight, never a blend.
+- **A suggestion is never a numeric progression (`add_load`/`add_reps`)
+  when the underlying effort data is incomplete or self-contradictory.**
+  Partial RIR/RPE coverage across a session's straight sets reads as
+  `abstain`; a set whose own RIR and RPE materially disagree reads as
+  `effort_conflict`. Either way `target_weight_kg`/`target_reps` are both
+  null — a functional test asserting "no numeric target on this response"
+  for those two codes is asserting something the engine guarantees, not
+  something specific to one fixture.
+- **Every non-null `target_weight_kg` is loadable** — an exact multiple of
+  the athlete's configured equipment increment when one is set, or of the
+  correct per-unit (kg/lb) plate grid otherwise. A functional test that logs
+  a session in lb and one in kg and checks the returned suggestion's weight
+  against the corresponding grid should never see a fractional or
+  off-grid number on either.
+
+### Not yet covered (recorded as an open gap, not silently skipped)
+
+- These invariants are asserted only against `ProgressV2` — v1's `Progress`
+  is a separate, feature-flagged code path (`new_recommendation_engine`)
+  that N473/#812 explicitly left unchanged, so it carries no equivalent
+  property-test coverage. A functional test exercising the pre-flag engine
+  should not assume these three guarantees hold there.
