@@ -34,6 +34,11 @@ const DayLayout = "2006-01-02"
 // caller gets "notes are too long" rather than a constraint name.
 const MaxNotesLen = 500
 
+// MaxTimeOfDayMinutes is the last minute of a calendar day — 23:59. Mirrors
+// the plans_time_of_day_minutes_range CHECK. Enforced here too so the caller
+// gets "time_of_day_minutes must be..." rather than a constraint name.
+const MaxTimeOfDayMinutes = 1439
+
 // Plan is one intended session on one day.
 //
 // `Day` is a string rather than a time.Time deliberately. It is a calendar
@@ -54,22 +59,34 @@ type Plan struct {
 	// see the migration's `plans_one_template_kind` CHECK and this package's
 	// Create/Update in postgres.go, which enforce the same rule ahead of the
 	// database so the caller gets a message naming the conflict.
-	ClassPlanID *string   `json:"class_plan_id"`
-	Notes       string    `json:"notes"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ClassPlanID *string `json:"class_plan_id"`
+	// TimeOfDayMinutes is when on Day this is planned for, or nil when the
+	// athlete gave only a day. Minutes since LOCAL midnight, wall-clock, no
+	// timezone attached — matching `daily_trackers.cutoff_minutes` rather than
+	// a Postgres TIME, and for the identical reason (see the migration):
+	// there is no zone anywhere else on this row, and a TIME column invites a
+	// naive comparison against `now()` in UTC. 1140 is 7:00 PM.
+	//
+	// NULL is a real, permanent state — every plan on `main` before this
+	// field existed has one, and it must keep rendering as "day only" rather
+	// than a guessed or defaulted time forever.
+	TimeOfDayMinutes *int      `json:"time_of_day_minutes"`
+	Notes            string    `json:"notes"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // NewPlan is the input for creating one. The ID is client-supplied — the same
 // contract sessions and activities use, and what makes an offline plan
 // syncable without duplicating on retry.
 type NewPlan struct {
-	ID          string
-	Day         string
-	Sport       string
-	WorkoutID   *string
-	ClassPlanID *string
-	Notes       string
+	ID               string
+	Day              string
+	Sport            string
+	WorkoutID        *string
+	ClassPlanID      *string
+	TimeOfDayMinutes *int
+	Notes            string
 }
 
 // OptionalWorkoutID is a `workout_id` that can be absent, explicitly null, or
@@ -129,20 +146,46 @@ func (o *OptionalClassPlanID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// OptionalTimeOfDayMinutes is `time_of_day_minutes`'s three-state field, an
+// exact mirror of OptionalWorkoutID for the identical reason: a `**int`
+// cannot carry "absent" separately from "explicit null", and this field's
+// null is just as meaningful as workout_id's — it is how an athlete clears a
+// time back to "day only" rather than leaving a stale one in place.
+type OptionalTimeOfDayMinutes struct {
+	Present bool
+	Value   *int
+}
+
+func (o *OptionalTimeOfDayMinutes) UnmarshalJSON(b []byte) error {
+	o.Present = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	o.Value = &n
+	return nil
+}
+
 // PlanUpdate is a partial update — nil fields are left unchanged.
 //
-// WorkoutID and ClassPlanID each have three states rather than two: absent
-// (leave it alone), set (point at this template/class plan), and explicitly
-// null (clear it, so the day is planned as a bare discipline). See
-// OptionalWorkoutID for why each is a named type and not a pointer-to-pointer.
+// WorkoutID, ClassPlanID and TimeOfDayMinutes each have three states rather
+// than two: absent (leave it alone), set (a value), and explicitly null
+// (clear it). See OptionalWorkoutID for why each is a named type and not a
+// pointer-to-pointer.
 //
-// The two are mutually exclusive on the resulting row — see Plan.ClassPlanID.
+// WorkoutID and ClassPlanID are mutually exclusive on the resulting row — see
+// Plan.ClassPlanID. TimeOfDayMinutes has no such relationship to either.
 type PlanUpdate struct {
-	Day         *string
-	Sport       *string
-	WorkoutID   OptionalWorkoutID
-	ClassPlanID OptionalClassPlanID
-	Notes       *string
+	Day              *string
+	Sport            *string
+	WorkoutID        OptionalWorkoutID
+	ClassPlanID      OptionalClassPlanID
+	TimeOfDayMinutes OptionalTimeOfDayMinutes
+	Notes            *string
 }
 
 // Range is an inclusive window of calendar days.
@@ -163,6 +206,14 @@ type Range struct {
 func ValidDay(s string) bool {
 	_, err := time.Parse(DayLayout, s)
 	return err == nil
+}
+
+// ValidTimeOfDayMinutes reports whether n is a legal minutes-since-local-
+// midnight clock reading — mirroring `daily_trackers`'s identical rule
+// (`tracker.Patch.Validate`'s CutoffMinutes check) rather than inventing a
+// second one for the same category of value.
+func ValidTimeOfDayMinutes(n int) bool {
+	return n >= 0 && n <= MaxTimeOfDayMinutes
 }
 
 type Repository interface {

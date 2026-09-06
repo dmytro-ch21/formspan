@@ -70,6 +70,7 @@ describe('planned_sessions', () => {
       sport: 'strength',
       workoutId: 'workout-9',
       classPlanId: null,
+      timeOfDayMinutes: null,
       notes: '',
     });
   });
@@ -134,6 +135,43 @@ describe('planned_sessions', () => {
     const left = await plannedFor('user-1', '2026-08-05');
     expect(left).toHaveLength(1);
     expect(left[0].sport).toBe('bjj');
+  });
+
+  // N126/#520: a planned session can carry a time.
+  //
+  // This whole suite runs under TZ=America/Los_Angeles (see
+  // apps/mobile/package.json's `test` script) — a wall-clock bug that only
+  // shows up west of Greenwich is invisible under UTC, so every assertion
+  // below is already exercising the non-UTC case the ticket's acceptance
+  // criteria asks for, with no special per-test setup.
+  test('a time round-trips as minutes since local midnight', async () => {
+    const made = await planSession('user-1', '2026-08-05', 'strength', null, '', 1140); // 7:00 PM
+    const [plan] = await plannedFor('user-1', '2026-08-05');
+    expect(plan.timeOfDayMinutes).toBe(1140);
+    expect(made.timeOfDayMinutes).toBe(1140);
+  });
+
+  test('no time given is a real, permanent absence — not midnight', async () => {
+    await planSession('user-1', '2026-08-05', 'bjj', null);
+    const [plan] = await plannedFor('user-1', '2026-08-05');
+    expect(plan.timeOfDayMinutes).toBeNull();
+  });
+
+  // The ordering half of the acceptance criteria: two sessions on the same
+  // day sort by time_of_day_minutes, untimed last. Deleting the ORDER BY
+  // clause (or its "IS NULL" tiebreak) from listPlannedBetween's query makes
+  // this fail — asserting the order itself, not just membership, is the
+  // point (see the vola-testing skill's "assert the order" rule).
+  test('two sessions on the same day sort by time, untimed last', async () => {
+    // Inserted deliberately OUT of the order they should read back in, so
+    // passing this test cannot be an accident of insertion order (which
+    // `created_at ASC` would otherwise supply for free).
+    await planSession('user-1', '2026-08-05', 'strength', null, '', 18 * 60); // 6:00 PM
+    await planSession('user-1', '2026-08-05', 'bjj', null); // untimed
+    await planSession('user-1', '2026-08-05', 'running', null, '', 7 * 60); // 7:00 AM
+
+    const day = await plannedFor('user-1', '2026-08-05');
+    expect(day.map((p) => p.sport)).toEqual(['running', 'strength', 'bjj']);
   });
 
   test('unplan cannot delete another account’s row', async () => {

@@ -78,7 +78,15 @@ function session(over: Partial<Session> & { id?: string } = {}): Session {
 }
 
 function plan(over: Partial<PlannedSession> & { id: string }): PlannedSession {
-  return { day: TODAY, sport: 'strength', workoutId: null, classPlanId: null, notes: '', ...over };
+  return {
+    day: TODAY,
+    sport: 'strength',
+    workoutId: null,
+    classPlanId: null,
+    timeOfDayMinutes: null,
+    notes: '',
+    ...over,
+  };
 }
 
 const ready = <T,>(value: T): Source<T> => ({ state: 'ready', value });

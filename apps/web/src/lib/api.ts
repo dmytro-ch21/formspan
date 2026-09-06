@@ -2835,6 +2835,20 @@ export type Plan = {
    * than disappearing.
    */
   class_plan_id: string | null;
+  /**
+   * N126/#520: when on `day` this is planned for, or `null` when the athlete
+   * gave only a day. Minutes since LOCAL midnight, wall-clock, no timezone
+   * attached — e.g. `1140` for 7:00 PM. Never converted through any zone,
+   * matching `day` itself: "7pm" means 7pm wherever the athlete is standing
+   * that day. The identical representation `daily_trackers.cutoff_minutes`
+   * already uses for the same category of value, chosen for the identical
+   * reason — see the backend migration for the full reasoning.
+   *
+   * `null` is a real, permanent state, not a default of midnight — every
+   * plan made before this field existed has it, and it renders as "day only"
+   * forever rather than a guessed time.
+   */
+  time_of_day_minutes: number | null;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -2867,6 +2881,8 @@ export async function createPlan(
      * request that sets both.
      */
     classPlanID?: string | null;
+    /** Minutes since local midnight — see `Plan.time_of_day_minutes`. */
+    timeOfDayMinutes?: number | null;
     notes?: string;
   },
 ): Promise<Plan> {
@@ -2880,6 +2896,7 @@ export async function createPlan(
       sport: input.sport,
       workout_id: input.workoutID,
       class_plan_id: input.classPlanID ?? null,
+      time_of_day_minutes: input.timeOfDayMinutes ?? null,
       notes: input.notes ?? "",
     }),
   });
@@ -2905,6 +2922,11 @@ export async function updatePlan(
     sport?: Sport;
     workoutID?: string | null;
     classPlanID?: string | null;
+    /**
+     * Three-state like `workoutID`/`classPlanID`: omit to leave it, a number
+     * to set it, `null` to clear it back to "day only".
+     */
+    timeOfDayMinutes?: number | null;
     notes?: string;
   },
 ): Promise<Plan> {
@@ -2913,6 +2935,7 @@ export async function updatePlan(
   if (changes.sport !== undefined) body.sport = changes.sport;
   if (changes.workoutID !== undefined) body.workout_id = changes.workoutID;
   if (changes.classPlanID !== undefined) body.class_plan_id = changes.classPlanID;
+  if (changes.timeOfDayMinutes !== undefined) body.time_of_day_minutes = changes.timeOfDayMinutes;
   if (changes.notes !== undefined) body.notes = changes.notes;
 
   return request<Plan>(getToken, `/plans/${encodeURIComponent(id)}`, {

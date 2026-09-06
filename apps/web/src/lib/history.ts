@@ -243,3 +243,26 @@ export function formatDayLong(key: string): string {
     timeZone: "UTC",
   });
 }
+
+/**
+ * "7:00 PM" from `Plan.time_of_day_minutes` — N126/#520.
+ *
+ * Pure arithmetic over the integer, never a `Date`. `time_of_day_minutes` is
+ * a wall-clock reading with no timezone attached (see the field's own doc
+ * comment in `lib/api.ts`), and constructing a `Date` from it — even one
+ * immediately reformatted — is exactly how a value designed to have no zone
+ * picks one up from the browser it happens to render in.
+ *
+ * Returns `null` for `null` or anything outside 0..1439, so a caller can
+ * write `formatTimeOfDay(p.time_of_day_minutes) ?? fallback` without a
+ * separate presence check — the day-only state (no time given) is real and
+ * permanent, not a placeholder waiting on data.
+ */
+export function formatTimeOfDay(minutes: number | null): string | null {
+  if (minutes === null || !Number.isInteger(minutes) || minutes < 0 || minutes > 1439) return null;
+  const h24 = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const period = h24 < 12 ? "AM" : "PM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}

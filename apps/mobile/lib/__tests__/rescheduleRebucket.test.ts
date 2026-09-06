@@ -87,6 +87,7 @@ describe('rescheduleLocalSession moves a session everywhere its date is read', (
       sport: 'bjj',
       workoutId: null,
       classPlanId: null,
+      timeOfDayMinutes: null,
       notes: '',
     };
 

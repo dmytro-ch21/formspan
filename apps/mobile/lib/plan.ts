@@ -60,6 +60,21 @@ export type PlannedSession = {
    * through a sync pull, exactly like a class plan name it might resolve to.
    */
   classPlanId: string | null;
+  /**
+   * N126/#520: when on `day` this is planned for, or `null` when the athlete
+   * gave only a day. Minutes since LOCAL midnight, wall-clock, no timezone
+   * attached — e.g. `1140` for 7:00 PM. Never converted through any zone,
+   * exactly like `day` itself: "7pm" means 7pm wherever the athlete is
+   * standing that day. See `db.ts`'s `time_of_day_minutes` column comment for
+   * the full reasoning (a plain integer rather than a stored clock string, so
+   * sorting is a numeric ORDER BY and there is no time-string parsing on
+   * either side of a sync round trip).
+   *
+   * `null` is a real, permanent state, not a default of midnight (`0`) —
+   * every plan made before this field existed has it, and it renders as "day
+   * only" forever rather than a guessed time.
+   */
+  timeOfDayMinutes: number | null;
   notes: string;
 };
 
@@ -70,6 +85,7 @@ type Row = {
   sport: string;
   workout_id: string | null;
   class_plan_id: string | null;
+  time_of_day_minutes: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -84,6 +100,7 @@ function rowToPlan(r: {
   sport: string;
   workout_id: string | null;
   class_plan_id: string | null;
+  time_of_day_minutes: number | null;
   notes: string | null;
 }): PlannedSession {
   return {
@@ -92,6 +109,7 @@ function rowToPlan(r: {
     sport: r.sport,
     workoutId: r.workout_id,
     classPlanId: r.class_plan_id,
+    timeOfDayMinutes: r.time_of_day_minutes,
     notes: r.notes ?? '',
   };
 }
@@ -117,12 +135,21 @@ export async function listPlannedBetween(
     sport: string;
     workout_id: string | null;
     class_plan_id: string | null;
+    time_of_day_minutes: number | null;
     notes: string | null;
   }>(
-    `SELECT id, day, sport, workout_id, class_plan_id, notes
+    `SELECT id, day, sport, workout_id, class_plan_id, time_of_day_minutes, notes
        FROM planned_sessions
       WHERE user_id = ? AND deleted_at IS NULL AND day >= ? AND day <= ?
-      ORDER BY day ASC, created_at ASC`,
+      -- N126/#520: within a day, ordered by time_of_day_minutes ascending
+      -- with untimed plans LAST. SQLite (unlike Postgres) has no NULLS LAST,
+      -- so "(time_of_day_minutes IS NULL)" is the portable substitute —
+      -- FALSE (0) sorts before TRUE (1), which puts every timed plan ahead
+      -- of every untimed one before the numeric comparison even runs.
+      -- created_at is the tiebreak for two plans that share a time, or share
+      -- having none — the original "insertion order within a day" behavior,
+      -- preserved for everything this column cannot distinguish.
+      ORDER BY day ASC, (time_of_day_minutes IS NULL) ASC, time_of_day_minutes ASC, created_at ASC`,
     userId,
     from,
     to,
@@ -149,26 +176,28 @@ export async function planSession(
   sport: string,
   workoutId: string | null,
   notes = '',
+  timeOfDayMinutes: number | null = null,
 ): Promise<PlannedSession> {
   const db = await getDb();
   const id = randomUUID();
   const now = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO planned_sessions
-       (id, user_id, day, sport, workout_id, notes, created_at, updated_at, dirty, remote)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
+       (id, user_id, day, sport, workout_id, time_of_day_minutes, notes, created_at, updated_at, dirty, remote)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`,
     id,
     userId,
     day,
     sport,
     workoutId,
+    timeOfDayMinutes,
     notes,
     now,
     now,
   );
   // classPlanId: null — this device never schedules a class; see
   // PlannedSession.classPlanId's own comment.
-  return { id, day, sport, workoutId, classPlanId: null, notes };
+  return { id, day, sport, workoutId, classPlanId: null, timeOfDayMinutes, notes };
 }
 
 /**
@@ -460,13 +489,14 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
       // makes the read and the write one operation.
       await db.runAsync(
         `INSERT INTO planned_sessions
-           (id, user_id, day, sport, workout_id, class_plan_id, notes, created_at, updated_at, dirty, remote)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
+           (id, user_id, day, sport, workout_id, class_plan_id, time_of_day_minutes, notes, created_at, updated_at, dirty, remote)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
          ON CONFLICT(id) DO UPDATE SET
            day = excluded.day,
            sport = excluded.sport,
            workout_id = excluded.workout_id,
            class_plan_id = excluded.class_plan_id,
+           time_of_day_minutes = excluded.time_of_day_minutes,
            notes = excluded.notes,
            updated_at = excluded.updated_at,
            dirty = 0,
@@ -480,6 +510,7 @@ async function runSync(userId: string, getToken: TokenGetter): Promise<PlanSyncR
         r.sport,
         r.workout_id,
         r.class_plan_id,
+        r.time_of_day_minutes,
         r.notes ?? '',
         r.created_at,
         r.updated_at,
@@ -563,6 +594,7 @@ async function pushRow(
     day: row.day,
     sport: row.sport,
     workout_id: row.workout_id,
+    time_of_day_minutes: row.time_of_day_minutes,
     notes: row.notes ?? '',
   };
 

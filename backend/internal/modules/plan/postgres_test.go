@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -293,11 +294,12 @@ func decodeUpdate(t *testing.T, body string) PlanUpdate {
 		t.Fatalf("decode %s: %v", body, err)
 	}
 	return PlanUpdate{
-		Day:         req.Day,
-		Sport:       req.Sport,
-		WorkoutID:   req.WorkoutID,
-		ClassPlanID: req.ClassPlanID,
-		Notes:       req.Notes,
+		Day:              req.Day,
+		Sport:            req.Sport,
+		WorkoutID:        req.WorkoutID,
+		ClassPlanID:      req.ClassPlanID,
+		TimeOfDayMinutes: req.TimeOfDayMinutes,
+		Notes:            req.Notes,
 	}
 }
 
@@ -794,3 +796,242 @@ func (r *PostgresRepository) updateForTest(ctx context.Context, t *testing.T, us
 	_, err := r.Update(ctx, userID, planID, decodeUpdate(t, `{"class_plan_id":"`+classPlanID+`"}`))
 	return err
 }
+
+// N126/#520: a planned session gets a time.
+
+func TestTimeOfDayMinutesRoundTrips(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_time_roundtrip"
+	cleanupPlans(t, pool, user)
+
+	minutes := 1140 // 7:00 PM
+	made, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_time_1", Day: "2026-08-04", Sport: "strength", TimeOfDayMinutes: &minutes,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if made.TimeOfDayMinutes == nil || *made.TimeOfDayMinutes != 1140 {
+		t.Fatalf("create: time_of_day_minutes = %v, want 1140", made.TimeOfDayMinutes)
+	}
+
+	got, err := repo.Get(ctx, user, "plan_time_1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.TimeOfDayMinutes == nil || *got.TimeOfDayMinutes != 1140 {
+		t.Fatalf("get: time_of_day_minutes = %v, want 1140", got.TimeOfDayMinutes)
+	}
+}
+
+// The default, and the state every plan on `main` before this field existed
+// is in and must stay in: no time given is not midnight, and a day-only plan
+// must round-trip that absence rather than a guessed value.
+func TestTimeOfDayMinutesDefaultsToAbsent(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_time_absent"
+	cleanupPlans(t, pool, user)
+
+	made, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_time_absent_1", Day: "2026-08-04", Sport: "bjj",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if made.TimeOfDayMinutes != nil {
+		t.Fatalf("time_of_day_minutes = %v, want nil (no time given)", *made.TimeOfDayMinutes)
+	}
+}
+
+// A day-only plan can gain a time later, and a timed plan can be cleared back
+// to day-only — the three-state PATCH contract, exercised end to end rather
+// than only at the JSON-decode layer (see TestWorkoutIDThreeStateSurvivesJSON
+// for that half).
+func TestTimeOfDayMinutesUpdateSetAndClear(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_time_update"
+	cleanupPlans(t, pool, user)
+
+	made, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_time_update_1", Day: "2026-08-04", Sport: "strength",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	after, err := repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"time_of_day_minutes":420}`))
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if after.TimeOfDayMinutes == nil || *after.TimeOfDayMinutes != 420 {
+		t.Fatalf("after set: time_of_day_minutes = %v, want 420", after.TimeOfDayMinutes)
+	}
+
+	// Untouched by a PATCH that says nothing about it — the field is absent
+	// from the body, not null, so Update must leave the row alone.
+	after, err = repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"notes":"same time"}`))
+	if err != nil {
+		t.Fatalf("unrelated patch: %v", err)
+	}
+	if after.TimeOfDayMinutes == nil || *after.TimeOfDayMinutes != 420 {
+		t.Fatalf("after unrelated patch: time_of_day_minutes = %v, want unchanged 420", after.TimeOfDayMinutes)
+	}
+
+	after, err = repo.Update(ctx, user, made.ID, decodeUpdate(t, `{"time_of_day_minutes":null}`))
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if after.TimeOfDayMinutes != nil {
+		t.Fatalf("after clear: time_of_day_minutes = %v, want nil", *after.TimeOfDayMinutes)
+	}
+}
+
+func TestTimeOfDayMinutesRejectsOutOfRange(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_time_range"
+	cleanupPlans(t, pool, user)
+
+	for _, minutes := range []int{-1, 1440, 2000} {
+		m := minutes
+		_, err := repo.Create(ctx, user, NewPlan{
+			ID: "plan_time_range_should_not_exist", Day: "2026-08-04", Sport: "strength",
+			TimeOfDayMinutes: &m,
+		})
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("time_of_day_minutes=%d: err = %v, want ErrInvalidInput", minutes, err)
+		}
+	}
+}
+
+// The ordering half of N126's acceptance criteria: two sessions on the same
+// day sort by time_of_day_minutes, untimed last. Deleting the
+// `time_of_day_minutes ASC NULLS LAST` term from List's ORDER BY entirely
+// makes this fail — that is the point of asserting the order rather than
+// only the membership, per the mandatory-coverage rule in the vola-testing
+// skill. (Deleting just the `NULLS LAST` keyword alone would NOT: Postgres's
+// default null-ordering for ASC is already NULLS LAST — found in review,
+// backend-reviewer, correcting an inaccurate claim this comment used to
+// make. The keyword stays for readability, not because it changes behavior.)
+func TestListOrdersSameDayByTimeOfDay(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_time_order"
+	cleanupPlans(t, pool, user)
+
+	evening, morning := 1140, 420 // 7:00 PM, 7:00 AM
+	// Inserted deliberately OUT of the order they should read back in —
+	// evening first, then untimed, then morning — so passing this test
+	// cannot be an accident of insertion order (which `created_at ASC` would
+	// otherwise supply for free).
+	if _, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_order_evening", Day: "2026-08-04", Sport: "strength", TimeOfDayMinutes: &evening,
+	}); err != nil {
+		t.Fatalf("create evening: %v", err)
+	}
+	if _, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_order_untimed", Day: "2026-08-04", Sport: "bjj",
+	}); err != nil {
+		t.Fatalf("create untimed: %v", err)
+	}
+	if _, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_order_morning", Day: "2026-08-04", Sport: "running", TimeOfDayMinutes: &morning,
+	}); err != nil {
+		t.Fatalf("create morning: %v", err)
+	}
+
+	got, err := repo.List(ctx, user, Range{From: "2026-08-04", To: "2026-08-04"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	gotIDs := []string{got[0].ID, got[1].ID, got[2].ID}
+	wantIDs := []string{"plan_order_morning", "plan_order_evening", "plan_order_untimed"}
+	for i := range wantIDs {
+		if gotIDs[i] != wantIDs[i] {
+			t.Fatalf("order = %v, want %v (morning, then evening, then untimed last)", gotIDs, wantIDs)
+		}
+	}
+}
+
+// The timezone half of N126's acceptance criteria: the stored value is a
+// wall-clock reading with no zone, and it must survive unchanged regardless
+// of what timezone the SERVER PROCESS happens to be running in. Overriding
+// `time.Local` (rather than the TZ env var — see CLAUDE.md's own note on why
+// `t.Setenv("TZ", ...)` is unreliable once a process has already resolved its
+// local zone) simulates a server in America/Los_Angeles deterministically:
+// if anything on this column's read or write path ever called `.Local()` or
+// otherwise consulted the process timezone, a 7:00 PM plan would come back as
+// something other than 1140 here. A UTC-only test run can never catch this —
+// UTC minus its own offset is a no-op — which is exactly why this test forces
+// a non-UTC zone rather than trusting the ambient one.
+func TestTimeOfDayMinutesIgnoresServerTimezone(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "plan_test_time_tz"
+	cleanupPlans(t, pool, user)
+
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("load America/Los_Angeles: %v", err)
+	}
+	original := time.Local
+	time.Local = la
+	t.Cleanup(func() { time.Local = original })
+
+	minutes := 1140 // 7:00 PM, wall-clock, wherever the athlete is
+	made, err := repo.Create(ctx, user, NewPlan{
+		ID: "plan_time_tz_1", Day: "2026-08-04", Sport: "strength", TimeOfDayMinutes: &minutes,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if made.TimeOfDayMinutes == nil || *made.TimeOfDayMinutes != 1140 {
+		t.Fatalf("create under America/Los_Angeles: time_of_day_minutes = %v, want 1140 (unshifted)",
+			made.TimeOfDayMinutes)
+	}
+
+	got, err := repo.Get(ctx, user, "plan_time_tz_1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.TimeOfDayMinutes == nil || *got.TimeOfDayMinutes != 1140 {
+		t.Fatalf("get under America/Los_Angeles: time_of_day_minutes = %v, want 1140 (unshifted)",
+			got.TimeOfDayMinutes)
+	}
+}
+
+// The wire-level three-state test, matching TestWorkoutIDThreeStateSurvivesJSON.
+func TestTimeOfDayMinutesThreeStateSurvivesJSON(t *testing.T) {
+	for _, tc := range []struct {
+		body      string
+		present   bool
+		wantValue *int
+	}{
+		{`{}`, false, nil},
+		{`{"notes":"x"}`, false, nil},
+		{`{"time_of_day_minutes":null}`, true, nil},
+		{`{"time_of_day_minutes":420}`, true, iptr(420)},
+	} {
+		var req updateRequest
+		if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+			t.Fatalf("%s: %v", tc.body, err)
+		}
+		if req.TimeOfDayMinutes.Present != tc.present {
+			t.Errorf("%s: Present = %v, want %v", tc.body, req.TimeOfDayMinutes.Present, tc.present)
+		}
+		switch {
+		case tc.wantValue == nil && req.TimeOfDayMinutes.Value != nil:
+			t.Errorf("%s: Value = %d, want nil", tc.body, *req.TimeOfDayMinutes.Value)
+		case tc.wantValue != nil && (req.TimeOfDayMinutes.Value == nil || *req.TimeOfDayMinutes.Value != *tc.wantValue):
+			t.Errorf("%s: Value = %v, want %d", tc.body, req.TimeOfDayMinutes.Value, *tc.wantValue)
+		}
+	}
+}
+
+func iptr(n int) *int { return &n }

@@ -20045,3 +20045,95 @@ credentials.
   guard modes — those run in `pnpm run verify` and CI on every push already
   (see the CI job's "EAS production-safety guard" step), and are pure
   Node-script logic with no UI or API surface to exercise functionally.
+
+## N126/#520 — a planned session gets a time, so Today can say when (`backend/internal/modules/plan`, `/v1/plans`, `apps/mobile/lib/plan.ts`, `apps/mobile/components/ui/PlanTimeSheet.tsx`, `apps/mobile/components/WeekPlanner.tsx`, `apps/mobile/app/(tabs)/index.tsx`, `apps/web/src/app/dashboard/calendar/page.tsx`)
+
+Adds `time_of_day_minutes` (nullable, minutes since LOCAL midnight, 0–1439) to
+a plan. See the history entry for the design reasoning (a real time rather
+than a slot; minutes-since-midnight rather than a Postgres `TIME`, matching
+`daily_trackers.cutoff_minutes`; wall-clock with no timezone, matching `day`).
+Extends the existing "Plans API and the web calendar" section above rather
+than replacing it — everything there still holds.
+
+### Happy path
+
+- `POST /v1/plans` with `time_of_day_minutes: 1140` returns 201 and the field
+  set to `1140` on the created plan.
+- `POST /v1/plans` with no `time_of_day_minutes` (or `null`) returns the
+  field as `null` — a day-only plan, and a real, permanent state rather than
+  a default of midnight.
+- `PATCH /v1/plans/{id}` with `{"time_of_day_minutes": 420}` sets a time on a
+  previously day-only plan.
+- `PATCH /v1/plans/{id}` with `{"time_of_day_minutes": null}` clears a
+  previously-set time back to day-only; omitting the key entirely leaves
+  whatever value the plan already had — these two must not behave the same
+  (the same three-state rule `workout_id`/`class_plan_id` already follow).
+- `GET /v1/plans?from=&to=` on a day carrying two or more plans returns them
+  ordered by `time_of_day_minutes` ascending, with any untimed plan(s) last —
+  not insertion order, which is what the pre-N126 behavior was and remains
+  the tiebreak for two plans that share a time or share having none.
+- **Mobile — Plan tab**: adding a plan via `WeekPlanner` opens
+  `PlanTimeSheet` after the discipline/template choice. Tapping "No specific
+  time" creates a day-only plan exactly as before this ticket. Tapping a
+  preset (Morning/Midday/Evening) creates a plan at 07:00/12:00/18:00. Using
+  the custom +/- hour/minute stepper and tapping "Set 7:05 PM" (say) creates
+  a plan at that exact time. The planned row on the Plan tab shows the time
+  next to the discipline label (`STRENGTH · 7:00 PM`) when one was given, and
+  shows only the discipline when it was not.
+- **Mobile — Today's `UP NEXT`**: a plan with a time reads `Today • 7:00 PM`
+  (or `<Weekday, date> • 7:00 PM` when browsing a different day); a plan with
+  no time reads exactly `Today` (or the day label) — never a stub, never a
+  placeholder like "—" or "any time".
+- **Web — calendar**: the "Add to this day" form's optional `<input
+  type="time">` field, left empty, creates a day-only plan; filled in,
+  creates a plan at that time. The Planned list shows the time next to the
+  discipline label when one is set.
+- **Sync**: a plan given a time on web appears with that time on mobile after
+  the next pull, and vice versa (mobile writes it locally then pushes it) —
+  the same round trip every other plan field already makes.
+
+### Edge cases & errors
+
+- `time_of_day_minutes: 1440` (or any value `> 1439`, or negative) on either
+  `POST` or `PATCH` is a 400, not a 500 and not a silently clamped value —
+  1439 (23:59) is the last legal minute of the day.
+- `time_of_day_minutes: 0` (midnight) is accepted and is NOT the same as
+  omitting the field — a plan explicitly planned for midnight must read back
+  as `0`, not `null`, and the UI must render it as "12:00 AM", not as
+  "day only".
+- A plan made before this field existed (i.e., any plan created against a
+  pre-N126 backend or synced down before this migration ran) reads back with
+  `time_of_day_minutes: null` and renders identically to a plan explicitly
+  given no time — there is no third, "unknown/legacy" state to distinguish.
+- Two plans on the same day, one at `07:00` and one at `19:00`, entered in
+  either order — the returned/rendered order always has the earlier time
+  first, regardless of which was created first.
+- Three plans on the same day, two sharing the same time (or both untimed) —
+  the tiebreak is insertion order (`created_at`), matching the pre-N126
+  behavior for everything the new column cannot distinguish between.
+- Offline (mobile): setting a time on a plan while offline behaves like every
+  other offline plan write — the row is created locally with `dirty = 1` and
+  the time is pushed on the next successful sync; killing the app before sync
+  and reopening does not lose the time.
+- A plan's workout template is deleted (`ON DELETE SET NULL` on `workout_id`)
+  — its `time_of_day_minutes` is untouched by that unrelated cascade.
+
+### Auth / security
+
+- `PATCH /v1/plans/{id}` with a `time_of_day_minutes` change on a plan
+  belonging to another user returns 404 (not 403, not a leak of the other
+  user's plan) — same IDOR posture the rest of this endpoint already has for
+  every other field; this ticket adds no new attack surface, since the field
+  carries no reference to any other resource.
+
+### Not covered here, and why
+
+- No scenario for editing an EXISTING plan's time from mobile — the mobile
+  Plan tab has no in-place edit for any plan field today (create/remove
+  only), and this ticket did not widen that. A device check for this would
+  be testing a feature that does not exist yet.
+- The `NEEDS HUMAN EVIDENCE` criterion on issue #520 (a timed and an untimed
+  plan, both on Today, both reading correctly on a real device) is exactly
+  the top two bullets of "Happy path" above, run by hand rather than
+  through an automated test — recorded here as the scenario, not as
+  something this document can satisfy on its own.

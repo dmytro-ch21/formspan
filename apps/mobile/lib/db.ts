@@ -199,6 +199,18 @@ const CREATE_PLANNED = `
     -- arrives via a sync pull. Nullable and untouched by every local write
     -- function for exactly that reason.
     class_plan_id TEXT,
+    -- N126/#520: when on day this is planned for, or NULL when the
+    -- athlete gave only a day. Minutes since LOCAL midnight, wall-clock, no
+    -- timezone attached — e.g. 1140 for 7:00 PM. Never converted through any
+    -- zone, exactly like day itself: "7pm" means 7pm wherever the athlete
+    -- is standing that day, not an instant translated from wherever the
+    -- device happened to be when it was typed.
+    --
+    -- NULL is a real, permanent state, not a default of midnight (0) — every
+    -- plan made before this column existed has it, and it renders as "day
+    -- only" forever rather than a guessed time. Matches the server's
+    -- plans.time_of_day_minutes, which carries the identical comment.
+    time_of_day_minutes INTEGER,
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT '',
@@ -705,7 +717,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 37;
+const SCHEMA_VERSION = 38;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1407,6 +1419,20 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(
       `UPDATE biometric_hr_synced SET attempted_at = synced_at WHERE attempted_at = '';`,
     );
+  }
+
+  if (current < 38) {
+    // N126/#520: a planned session gets a time — see CREATE_PLANNED's own
+    // comment on `time_of_day_minutes` for the full contract. Real ALTER,
+    // same reason as every branch above: `CREATE TABLE IF NOT EXISTS` is a
+    // no-op against the existing table, so a device already stamped 37 would
+    // keep a `planned_sessions` with no `time_of_day_minutes` and every read
+    // or sync-pull writing one would throw.
+    //
+    // Nullable, no backfill: every existing plan predates this column and
+    // genuinely has no time to give it — the honest answer is "day only",
+    // not a guessed clock reading.
+    await addColumnIfMissing(db, 'planned_sessions', 'time_of_day_minutes', 'INTEGER');
   }
 
   // The day query the card runs on every render of Today.
