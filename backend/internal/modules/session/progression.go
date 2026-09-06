@@ -448,6 +448,19 @@ type Plan struct {
 	// exists rather than folded into either engine. Omitted from the wire
 	// entirely (omitempty) whenever nil, so a client on an old build, or
 	// asking under v1, sees exactly the response shape it always has.
+	//
+	// N496/#866 (phase 4 of #753) reviewed this Plan/InSessionSignal/Warmup
+	// grouping against #753 §4's "don't combine distinct recommendation
+	// products" rule and found it does NOT violate it: all three answer
+	// same-session, same-evidence-class questions (this caller's own logged
+	// sets), each is independently typed, documented and stated as
+	// additive, and the actual product #753 §4 is protecting against —
+	// weekly program balance / "add hamstring work" style advice, which
+	// needs the whole program and a muscle taxonomy — does not exist
+	// anywhere in this codebase. See the `Suggestion` schema's own
+	// description in contracts/public.openapi.yaml for the full reasoning.
+	// If a program-level recommendation is ever built, it must NOT become a
+	// field here.
 	Warmup []WarmupStep `json:"warmup,omitempty"`
 }
 

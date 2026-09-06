@@ -3987,6 +3987,55 @@ components:
         description and N191. Everything else on this object stays a pure
         function of the caller's history; it never changes because of
         `in_session_signal` being present.
+
+
+        **N496/#866 (phase 4 of #753) — why this object is not a "recommendation
+        products bolted together" violation.** #753 §4 forbids combining
+        distinct recommendation KINDS into one card/response: "next-session
+        load/reps, a warm-up ramp, an in-session adjustment, and weekly program
+        balance/exercise-selection advice" — its own example being that "add
+        hamstring work" cannot be concluded from one workout and must never
+        share a confidence framing with a same-exercise rep/load suggestion.
+        This object carries three of those four kinds — the standing
+        prescription (`code`/`reason`/`target_weight_kg`/`target_reps`/the
+        evidence fields), `in_session_signal` (N191) and `warmup` (N495/#865)
+        — as **sibling fields on one response**, which is deliberate, reviewed
+        under this ticket, and judged NOT to be the failure #753 describes,
+        for a reason specific to these three and not a license to add a
+        fourth:
+
+
+        All three answer questions of the SAME evidence class — this caller's
+        own logged sets, from this session or its own recent history, nothing
+        wider. None needs the weekly program or a muscle taxonomy the way
+        "add hamstring work" does, so none carries a confidence claim the
+        other two would contradict. Each is independently typed and
+        documented (`WarmupStep`, `InSessionSignal`, and the prescription
+        fields themselves), each states its own evidence in its own `reason`,
+        and each is explicitly documented as ADDITIVE — `in_session_signal`
+        and `warmup` are read-only annotations that never rewrite
+        `target_weight_kg`/`target_reps`, so a client reading only the
+        prescription sees exactly the object it always has. Sharing one
+        response body is a **latency** decision, not a confidence-hiding one:
+        the warm-up ramp has to be visible before the first set of an
+        exercise, one-handed, standing at the rack, and a second round trip
+        mid-workout was rejected on exactly that basis in N495 — see
+        `docs/decisions/history.md`.
+
+
+        The `weekly program balance/exercise-selection` kind #753 actually
+        warns about — "add hamstring work" and anything like it — **does not
+        exist anywhere in this codebase.** Nothing here reads across sessions
+        to recommend a change to the program itself, and nothing on this
+        object represents one. **If that kind is ever built, it MUST ship as
+        its own product** — its own schema, and very likely its own endpoint
+        — never as a field here, however small: its evidence (the whole
+        week's program, a validated muscle taxonomy) and its confidence class
+        are categorically different from the three above, which is the actual
+        thing #753 §4 is protecting against. A future PR adding a field like
+        `program_suggestion` to this object should be read as reintroducing
+        the bug this note exists to prevent, not as a reasonable extension of
+        it.
       required: [exercise_id, code, reason, target_weight_kg, target_reps,
                  rep_range, last_performed_at, last_weight_kg, last_reps,
                  last_rir, last_rpe, last_min_reps, last_max_reps,
@@ -10605,6 +10654,16 @@ paths:
         already logged working sets for the same exercise earlier in the
         session making this request; it never changes the prescription
         itself.
+
+
+        **N496/#866**: this response also carries `warmup` (N495) alongside
+        the prescription and `in_session_signal`. See `Suggestion`'s own
+        description for why three same-session, same-evidence-class
+        recommendation kinds sharing one response is a reviewed decision
+        under #753 §4, not the "recommendation products bolted together"
+        failure that section forbids — and why a genuinely program-level
+        recommendation (#753's own "add hamstring work" example) must never
+        follow the same pattern onto this object.
 
 
         **Behind the `new_recommendation_engine` feature flag** (operator-
