@@ -1,0 +1,3 @@
+DROP TRIGGER IF EXISTS session_progression_decisions_immutable_core_trg ON session_progression_decisions;
+DROP FUNCTION IF EXISTS session_progression_decisions_immutable_core();
+DROP TABLE IF EXISTS session_progression_decisions;

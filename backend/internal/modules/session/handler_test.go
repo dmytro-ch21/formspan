@@ -365,6 +365,16 @@ func TestParseInSessionWeights_RejectsNonFiniteAndOutOfRangeWeights(t *testing.T
 type suggestionsFakeRepo struct {
 	efforts map[string]ProgressionInput
 	bestRMs map[string]float64
+	// recordedDecisions accumulates every RecordDecisions call's records, in
+	// order — see TestSuggestionsHandler_RecordsADecisionPerExercise.
+	recordedDecisions []NewDecisionRecord
+	// recorded is signalled once RecordDecisions has been called — N513/#901
+	// made that call run on a detached goroutine (recordAfterResponse), so a
+	// test asserting on recordedDecisions the instant Suggestions returns is
+	// racing it. Buffered so a RecordDecisions call from a test that never
+	// reads this channel doesn't block. Nil is the zero value and is never
+	// sent to — only tests that care wait on it.
+	recorded chan struct{}
 }
 
 func (f *suggestionsFakeRepo) RecentEfforts(_ context.Context, _ string, ids []string) (map[string]ProgressionInput, error) {
@@ -432,6 +442,24 @@ func (f *suggestionsFakeRepo) Reschedule(context.Context, string, string, time.T
 	panic("not used by Suggestions")
 }
 func (f *suggestionsFakeRepo) Delete(context.Context, string, string) error {
+	panic("not used by Suggestions")
+}
+
+// RecordDecisions IS exercised by Suggestions (N513/#901) — captured rather
+// than panicking, so a test that cares can assert on what was written;
+// TestSuggestionsHandler_RecordsADecisionPerExercise below is the one that
+// does.
+func (f *suggestionsFakeRepo) RecordDecisions(_ context.Context, records []NewDecisionRecord) error {
+	f.recordedDecisions = append(f.recordedDecisions, records...)
+	if f.recorded != nil {
+		f.recorded <- struct{}{}
+	}
+	return nil
+}
+func (f *suggestionsFakeRepo) ResolveDecisionOutcomes(context.Context, string, *string, string, []Set) error {
+	panic("not used by Suggestions")
+}
+func (f *suggestionsFakeRepo) DismissPendingDecisions(context.Context, string, *string, string) error {
 	panic("not used by Suggestions")
 }
 
@@ -615,6 +643,79 @@ func TestSuggestionsHandler_FlagOnUsesV2AndNeverInventsTheSet(t *testing.T) {
 	if s.TargetWeightKg != nil && nearlyEqual(*s.TargetWeightKg, lb335Kg) && s.TargetReps != nil && *s.TargetReps == 8 {
 		t.Fatalf("GOLDEN TEST VIOLATION over the wire: got 335-equivalent x 8 with the "+
 			"flag on. code=%s reason=%q", s.Code, s.Reason)
+	}
+}
+
+// TestSuggestionsHandler_RecordsADecisionPerExercise (N513/#901) pins the
+// wire path end to end: one decision record per requested exercise, for
+// BOTH a real prescription (back-squat, v2, add_load-shaped) and an abstain
+// (bench-press, no history at all) — confirming the "every call, including a
+// no-op" requirement actually reaches the handler and not just
+// BuildDecisionRecord's own unit tests.
+func TestSuggestionsHandler_RecordsADecisionPerExercise(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{
+			"back-squat":  goldenSquatFixture(true),
+			"bench-press": {LoadType: "weight_reps", MovementPattern: "horizontal_push"},
+		},
+		bestRMs:  map[string]float64{},
+		recorded: make(chan struct{}, 1),
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: true}, nil)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat,bench-press&workout_id=wk-1", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// N513/#901: RecordDecisions runs on a detached goroutine
+	// (recordAfterResponse) precisely so it can never sit in the response
+	// path — see that function's own doc comment for why a synchronous call
+	// here would defeat the point. Waiting on the channel, not sleeping, is
+	// what makes this deterministic rather than merely usually-fast-enough.
+	select {
+	case <-repo.recorded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RecordDecisions was never called within 2s of Suggestions returning")
+	}
+
+	if len(repo.recordedDecisions) != 2 {
+		t.Fatalf("recorded %d decisions, want 2 (one per exercise_id)", len(repo.recordedDecisions))
+	}
+
+	byExercise := map[string]NewDecisionRecord{}
+	for _, d := range repo.recordedDecisions {
+		byExercise[d.ExerciseID] = d
+	}
+	squat, ok := byExercise["back-squat"]
+	if !ok {
+		t.Fatalf("no decision recorded for back-squat")
+	}
+	if squat.Engine != EngineProgressV2 {
+		t.Errorf("back-squat Engine = %q, want %q", squat.Engine, EngineProgressV2)
+	}
+	if squat.WorkoutID == nil || *squat.WorkoutID != "wk-1" {
+		t.Errorf("back-squat WorkoutID = %v, want \"wk-1\"", squat.WorkoutID)
+	}
+	if squat.OutcomeStatus != OutcomeStatusPending {
+		t.Errorf("back-squat OutcomeStatus = %q, want %q (a real target was suggested)",
+			squat.OutcomeStatus, OutcomeStatusPending)
+	}
+
+	bench, ok := byExercise["bench-press"]
+	if !ok {
+		t.Fatalf("no decision recorded for bench-press")
+	}
+	if bench.OutputCode != string(SuggestNoHistory) {
+		t.Errorf("bench-press OutputCode = %q, want %q — never logged, so no history", bench.OutputCode, SuggestNoHistory)
+	}
+	if bench.OutcomeStatus != OutcomeStatusNotApplicable {
+		t.Errorf("bench-press OutcomeStatus = %q, want %q", bench.OutcomeStatus, OutcomeStatusNotApplicable)
 	}
 }
 

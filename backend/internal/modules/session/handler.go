@@ -16,6 +16,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 )
 
 // newRecommendationEngineFlag gates ProgressV2 (progression_v2.go, N473/#812)
@@ -483,6 +484,44 @@ func parseInSessionWeights(raw string) (map[string][]float64, error) {
 	return out, nil
 }
 
+// decisionRecordWriteTimeout bounds recordAfterResponse's detached write —
+// this table's own budget, not the request's, so one stuck Postgres call
+// can never accumulate goroutines across a busy session.
+const decisionRecordWriteTimeout = 10 * time.Second
+
+// recordAfterResponse runs fn on a goroutine, DETACHED from the request's
+// own lifecycle — found in backend review, N513/#901.
+//
+// Every one of this file's three decision-record writes was written with a
+// comment claiming it runs "after the response" so it can never cost
+// logging-path latency. That claim was FALSE as originally written: calling
+// fn synchronously, in the same goroutine, before the handler returns, does
+// not achieve it — `apihttp.Compress`/`apihttp.ConditionalGet`
+// (internal/platform/apihttp) both BUFFER THE ENTIRE RESPONSE BODY and do
+// not flush a byte to the actual client until `next.ServeHTTP` returns, so
+// a synchronous call here sits IN the response path, not beside it. This
+// was invisible to `handler_test.go`'s own tests because they call the
+// handler directly against an `httptest.ResponseRecorder`, bypassing
+// `apihttp.Assemble`'s middleware stack entirely — exactly the "verify that
+// a check can fail" gap CLAUDE.md warns about landing on this file's own
+// central non-functional claim.
+//
+// `context.WithoutCancel(ctx)` keeps every value already on the request's
+// context (httplog.FromContext reads context VALUES, which WithoutCancel
+// preserves) while dropping the Done channel net/http closes the instant
+// `ServeHTTP` returns — without it, the goroutine below would race its own
+// cancellation on every single call. `decisionRecordWriteTimeout` is this
+// table's own independent bound on top of that.
+func recordAfterResponse(ctx context.Context, logMsg string, fn func(context.Context) error) {
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), decisionRecordWriteTimeout)
+	go func() {
+		defer cancel()
+		if err := fn(detached); err != nil {
+			httplog.FromContext(detached).Warn(logMsg, "err", err)
+		}
+	}()
+}
+
 // Suggestions answers "what should I load today" for a list of exercises.
 // The prescription itself (Code/Reason/TargetWeightKg/TargetReps) is still
 // purely what the caller did LAST TIME — see the N191 note on Progress in
@@ -585,8 +624,18 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// N513/#901: the workout_id a decision record is scoped to, mirrored
+	// from the same trimmed query param already parsed above — nil rather
+	// than "" so it round-trips through the nullable `workout_id` column
+	// exactly like Session.WorkoutID does everywhere else in this package.
+	var decisionWorkoutID *string
+	if workoutID != "" {
+		decisionWorkoutID = &workoutID
+	}
+
 	now := time.Now().UTC()
 	suggestions := make([]Suggestion, 0, len(ids))
+	decisions := make([]NewDecisionRecord, 0, len(ids))
 	for _, id := range ids {
 		// Zero value is the "never logged" case, and Progress reads it as
 		// such — no history, so no claim.
@@ -663,8 +712,23 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 			s.BestOneRMKg = &v
 		}
 		suggestions = append(suggestions, s)
+
+		// N513/#901: recorded for EVERY exercise, regardless of Code —
+		// including abstain/effort_conflict/no_history. See
+		// decisionrecord.go's own doc comment for why a no-op result is
+		// itself a decision worth recording.
+		decisions = append(decisions, BuildDecisionRecord(claims.UserID, id, decisionWorkoutID, v2, in, plan))
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
+
+	// Detached — see recordAfterResponse's own doc comment for why a
+	// synchronous call here would sit IN the response path, not beside it.
+	// Secondary bookkeeping on a path mobile calls after every completed set
+	// (see docs/decisions/history.md's N513 entry for the measured call
+	// frequency); failure is logged, never surfaced. One batched call for
+	// the whole request, not one per exercise.
+	recordAfterResponse(r.Context(), "session: could not record progression decisions",
+		func(ctx context.Context) error { return h.repo.RecordDecisions(ctx, decisions) })
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -798,6 +862,17 @@ func (h *Handler) ReplaceSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
+
+	// N513/#901: correlates this save back to whatever decision record(s) it
+	// answers — see decisionrecord.go and ResolveDecisionOutcomes' own doc
+	// comment for why this is scoped to s.WorkoutID and is a no-op when nil.
+	// Detached — see recordAfterResponse's own doc comment: a set the
+	// athlete just logged must never fail to save, or arrive late, because
+	// this audit correlation couldn't complete.
+	recordAfterResponse(r.Context(), "session: could not resolve progression decision outcomes",
+		func(ctx context.Context) error {
+			return h.repo.ResolveDecisionOutcomes(ctx, claims.UserID, s.WorkoutID, s.ID, s.Sets)
+		})
 }
 
 type finishRequest struct {
@@ -821,6 +896,16 @@ func (h *Handler) Finish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"session": s, "volume": Summarise(s.Sets)})
+
+	// N513/#901: closes out any decision record for this workout run that
+	// ResolveDecisionOutcomes never resolved — the suggestion was seen and
+	// never acted on. See DismissPendingDecisions' own doc comment for why
+	// this is scoped to s.WorkoutID and a no-op when nil. Detached — see
+	// recordAfterResponse's own doc comment.
+	recordAfterResponse(r.Context(), "session: could not dismiss pending progression decisions",
+		func(ctx context.Context) error {
+			return h.repo.DismissPendingDecisions(ctx, claims.UserID, s.WorkoutID, s.ID)
+		})
 }
 
 type renameRequest struct {

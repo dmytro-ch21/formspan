@@ -105,6 +105,7 @@ func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 	// in spirit rather than shared: v1 must stay untouched.
 	var skippedNonNormal bool
 	defer func() {
+		p.SkippedNonNormalSession = skippedNonNormal
 		if skippedNonNormal && p.Code != SuggestNoRecentNormalSession {
 			p.Reason += " (A light or deload session was skipped when finding this.)"
 		}
@@ -182,6 +183,7 @@ func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 	performedAt := last.PerformedAt
 	p.LastPerformedAt = &performedAt
 	p.LastWeightKg = &weight
+	p.EvidenceSessionID = last.SessionID
 	p.LastRIR, p.LastRPE = top.RIR, top.RPE
 	p.LastReps = top.Reps
 	p.LastAssistedReps = top.AssistedReps
