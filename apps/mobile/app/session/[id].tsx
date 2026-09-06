@@ -1523,9 +1523,13 @@ export default function SessionScreen() {
 
             `exerciseHR`/`exerciseNames` (N490/#851) are strength-only —
             BJJ/running never pass them, so they get no breakdown section.
-            Names are resolved from `catalog` at render, same fallback
-            (raw id) `withExerciseNames` above already uses for the same
-            "catalog arrives on its own schedule" reason. */}
+            Names are resolved from `catalog` at render, the same raw-id
+            fallback this file's own `exerciseName` below already uses
+            (`exercise?.name ?? set.exercise_id`) for the identical
+            "catalog arrives on its own schedule" reason — NOT
+            `withExerciseNames` above, which falls back to `null` instead;
+            review fold-in fixed this comment to cite the actual matching
+            precedent. */}
         {finished && hrLoaded && (
           <HRSessionReport
             metrics={hrMetrics}
