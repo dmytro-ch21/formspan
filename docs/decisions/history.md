@@ -59574,6 +59574,165 @@ renumbered to `000095` at rebase time, with every code comment and
 history.md reference to the old number updated to match.
 
 
+## 2026-09-06 — N153/#557: a per-rule lint ratchet, not a flat warning count
+
+`apps/mobile/package.json`'s `lint` script was one number: `eslint .
+--max-warnings=50` (the ticket's own filed numbers, 24/15, had already drifted
+by the time this was picked up — measured 14 for
+`react-hooks/set-state-in-effect`, not 15). A flat total can only ever notice
+the SUM moving. A PR that cleared 20 `react-hooks/refs` warnings and
+introduced 20 new `import/no-duplicates` ones would leave the total exactly
+where it was and the gate would say nothing happened — that gap, not "there
+are 53 warnings today", is the actual bug this ticket exists to fix. This is
+explicitly **not** a warning-burndown ticket: the acceptance criteria say so
+directly ("No giant formatting/refactor PR ... not a single sweep"), and
+nothing in this change fixes a real `react-hooks/refs` or
+`set-state-in-effect` site.
+
+**The real current per-rule counts**, measured against
+`apps/mobile/node_modules/.bin/eslint . -f json` run directly (not through
+`pnpm exec` — see below):
+
+```
+  react-hooks/refs                       24
+  react-hooks/set-state-in-effect        14
+  @typescript-eslint/no-require-imports   6
+  import/no-duplicates                    2
+  import/first                            2
+  react/no-unescaped-entities             1
+  @typescript-eslint/no-redeclare         1
+                                         ---
+  total                                  50
+```
+
+`eslint.config.mjs`'s own comment on the `@typescript-eslint/*` findings had
+also drifted — it said "1 unused var", and the live count has zero
+`no-unused-vars` findings and one `no-redeclare`. Fixed in the same commit
+that touches this comment block anyway.
+
+**One rule, `react-hooks/exhaustive-deps`, measured at zero live warnings** —
+but 15 sites carry a rule-specific `eslint-disable-next-line
+react-hooks/exhaustive-deps` comment, which suppresses the rule regardless of
+its configured severity. So "zero live warnings" here means zero *unsuppressed*
+ones, not that the underlying disagreements with the dependency array were
+fixed — a real, separate gap (disable comments hiding rather than resolving
+debt) that this ticket does not attempt to close, but is worth a future look.
+Confirmed directly that flipping the severity is safe regardless: setting it
+to `"error"` and re-running reports zero live *errors* too, since the disable
+comments suppress either way. Converted it to `error` in this same PR and
+removed it from the pin list — this was zero-cost (no code changes required,
+since there is nothing live to fix) and is exactly what the acceptance
+criteria ask for ("each rule converts back to error at zero for its category,
+one rule at a time as it clears"), so there was no reason to defer a change
+that costs nothing.
+
+**The mechanism**: `scripts/check-lint-ratchet.mjs`, wired as
+`pnpm run check:lint-ratchet`. It runs ESLint against `apps/mobile` with JSON
+output, groups live (severity-1) warnings by rule, and compares each
+currently-`warn` rule's count against a cap table (`RULE_CAPS`, a plain object
+literal at the top of the script — one entry per rule above, all seven of
+them, not only the two the ticket's evidence section named). Three failure
+modes, each a different kind of drift:
+
+1. **Over budget** — a rule's live count exceeds its recorded cap. This is the
+   ratchet itself: "no PR may add a new warning in a category already at its
+   cap."
+2. **Cleared but still capped** — a rule's live count is exactly zero while
+   still `warn` in `eslint.config.mjs` and still listed in `RULE_CAPS`. Fails
+   loudly with the exact next step (flip to `error`, delete the cap entry)
+   rather than letting a zero-warning rule sit at `warn` indefinitely.
+3. **Uncapped** — a `warn`-severity rule produced live warnings with no
+   `RULE_CAPS` entry at all (a brand-new warn rule, or a previously-cleared one
+   that regressed).
+
+**The judgment call from the ticket's design guidance (point 2), and the
+reasoning for it**: does the script fail on ANY reduction below cap (forcing
+every incidental partial fix to also edit `RULE_CAPS` in the same PR), or only
+on hitting exactly zero? Went with **only exactly zero fails; a partial
+reduction prints a non-blocking advisory note and nothing more**. The
+acceptance criteria's own wording only ties a required action to "fully
+cleared" — a rule dropping from 24 to 20 is real progress but obligates
+nobody to touch this file in the same diff. Forcing that would turn "I
+happened to fix one stray warning while working in this file anyway" into "and
+now also go edit the ratchet config", which directly contradicts "cleanup
+rides along with touched areas" being lightweight and incidental rather than a
+tollbooth. The advisory note keeps the slack visible (so a cap doesn't rot
+silently 20 warnings stale) without being a gate on unrelated work.
+
+**Mutation test — actually run, not just described** (this ticket's own
+"Steps to test" section, executed literally): added a throwaway component to
+`apps/mobile` reading `ref.current` during render — a genuine, deliberate
+`react-hooks/refs` violation, no eslint-disable — bringing that rule's live
+count to 25 against its cap of 24. `node scripts/check-lint-ratchet.mjs`
+printed `OVER      25 / 24  react-hooks/refs` and exited 1 with the message
+naming the exact rule and the over-budget amount. Deleted the throwaway file;
+re-ran; back to `ok        24 / 24  react-hooks/refs`, exit 0, tree clean.
+Separately, since actually clearing a real 24-or-14-warning category is
+explicitly out of this ticket's scope, the "a category clears" path (criterion
+2 above) is proven structurally instead: `scripts/check-lint-ratchet.mjs`
+factors its decision logic into a pure `evaluate(caps, liveCounts)` function
+and runs a `selfTest()` against synthetic data on every invocation (same
+pattern `scripts/validate_palette.mjs` already uses) — one case is exactly "a
+rule's live count is zero while still capped," asserting the script's own
+logic flags it for conversion, without needing a real burndown to exercise
+that branch.
+
+**Wiring**: `apps/mobile/package.json`'s `lint` script dropped
+`--max-warnings=50` entirely (`eslint .` now — the per-rule ratchet replaces
+the flat count rather than sitting alongside it; keeping both would leave two
+disagreeing sources of truth for the same warnings, which is the kind of
+duplication this repo's own conventions warn against). Root `package.json`
+gained `check:lint-ratchet` and it is chained into `verify` immediately after
+`lint:mobile`. CI's existing `Mobile (Expo)` job (`.github/workflows/ci.yml`)
+gained one new **step**, "Lint ratchet", right after its "Lint" step — not a
+new job, so `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py` is
+unchanged (still 6) and did not need touching, per this repo's own explicit
+instruction that a new declared CI job requires bumping that constant. A named
+step rather than folding the ratchet into `lint:mobile` itself, so a ratchet
+failure reads distinctly from a plain ESLint error in CI logs.
+
+**Why the script shells out to `apps/mobile/node_modules/.bin/eslint` directly
+rather than through `pnpm exec` or `pnpm --filter mobile exec`**: measured
+directly, both pnpm wrappers prepend non-JSON banner lines to stdout on this
+workspace ("Scope: all 4 workspace projects", lockfile/progress output),
+which breaks `JSON.parse` on the very first line. The local binary's stdout is
+clean.
+
+**Functional scenarios**: not updated. This is pure internal tooling — no new
+backend endpoint, web route, or mobile screen, and nothing an athlete or the
+API surface behaves differently for — which is exactly what
+`docs/testing/functional-scenarios.md`'s own "skip for refactors/CI/docs"
+instruction covers.
+
+**Left open**: the 24 `react-hooks/refs` and 14 `react-hooks/set-state-in-effect`
+warnings themselves — deliberately, per this ticket's scope. Burn them down
+module-by-module riding along with touched areas, per the acceptance criteria,
+tracked against `scripts/check-lint-ratchet.mjs`'s own `RULE_CAPS` table (never
+against this doc — the whole point of building the mechanism was to stop
+tracking these numbers in a place that goes stale). The 15 suppressed
+`react-hooks/exhaustive-deps` disable comments are a related, separate gap
+worth a future look: a rule with zero *live* warnings only because every site
+is individually silenced is not the same claim as a rule with zero real
+disagreements.
+
+**Review fold-in.** `ac-verifier`: 4 MET, both "Steps to test" independently
+reproduced (a real `OVER BUDGET` failure by adding a throwaway violation,
+restored to green after). `frontend-reviewer`: 0 blocking, several
+suggestions. Folded in: the "16 sites"/"16 suppressed" count quoted in four
+places (`check-lint-ratchet.mjs`'s doc comment, `eslint.config.mjs`'s
+comment, and twice in this file's own earlier prose) was stale — a live
+`grep` found 15, not 16 — corrected everywhere, which is exactly the "never
+trust a copied count, verify live" premise this ticket is built on, applied
+to its own documentation. Left as judgment calls: `apps/mobile/package.json`'s
+own `lint` script no longer self-enforces a warning cap in isolation (JSON
+can't carry an explanatory comment pointing at the root-level ratchet, and
+both CI and `verify` already catch it, so a developer running `pnpm lint`
+locally without going through either is the only gap); and the ratchet
+running a second, independent ESLint pass rather than consuming the
+existing "Lint" step's own JSON output — a real, but non-blocking,
+optimization for later if mobile lint time becomes a bottleneck.
+
+
 ## Open items / known gaps as of this entry
 
 
