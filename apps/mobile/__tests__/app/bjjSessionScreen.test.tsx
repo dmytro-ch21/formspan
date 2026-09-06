@@ -12,6 +12,7 @@ import { dayString } from '@/lib/calendar';
 import { addDays, fetchHistory, startOfWeek, today, type HistoryDay } from '@/lib/history';
 import { fetchAccomplishments, type Accomplishment } from '@/lib/accomplishments';
 import { playSound } from '@/lib/sounds';
+import { getSessionMetrics, listBiometricSamples, type SessionMetrics } from '@/lib/biometric';
 
 /**
  * Opening a BJJ session from Today crashed.
@@ -229,6 +230,16 @@ jest.mock('@/lib/sync', () => ({
   }),
 }));
 
+// N491/#852: the HR timeline's own fetch. Defaults match this file's
+// existing (unmocked-until-now) real behaviour under jest — no network, so
+// `getSessionMetrics` settles to `null` and there is nothing for a timeline
+// to draw — so every pre-existing test in this file is unaffected. Individual
+// tests below override `listBiometricSamples` to prove the wiring.
+jest.mock('@/lib/biometric', () => ({
+  getSessionMetrics: jest.fn(async () => null),
+  listBiometricSamples: jest.fn(async () => []),
+}));
+
 jest.mock('expo-router', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -354,6 +365,100 @@ it('offers no share card while the class is still open', async () => {
   // one: the finish control is what stands where Share stands afterwards.
   expect(screen.getByTestId('bjj-session-finish')).toBeTruthy();
   expect(screen.queryByTestId('bjj-session-share')).toBeNull();
+});
+
+/**
+ * N491/#852's wiring: the screen fetches raw HR samples for the session's own
+ * window (a second, independent call from the existing `getSessionMetrics`
+ * one) and hands them to `<HRSessionReport>` as an already-built timeline —
+ * `lib/__tests__/hrTimeline.test.ts` proves the shaping itself; this proves
+ * the screen actually calls the right endpoint with the right window and
+ * wires the result through, rather than only being true in the pure-logic
+ * layer.
+ */
+describe('the HR timeline (N491/#852)', () => {
+  afterEach(() => {
+    (getSessionMetrics as jest.Mock).mockClear();
+    (listBiometricSamples as jest.Mock).mockClear();
+  });
+
+  function fullMetrics(overrides: Partial<SessionMetrics> = {}): SessionMetrics {
+    return {
+      session_id: 's1',
+      avg_hr_bpm: 140,
+      max_hr_bpm: 172,
+      trimp: 88,
+      active_kcal: null,
+      hr_max_bpm: 190,
+      hr_max_source: 'estimated',
+      time_in_zones: { '3': 30, '4': 10 },
+      hr_source: 'window',
+      sample_count: 40,
+      computed_at: mockSession.ended_at as string,
+      rule_version: 1,
+      ...overrides,
+    };
+  }
+
+  it('fetches heart_rate samples for exactly the session window and renders a timeline once there are enough', async () => {
+    (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
+    const samples = Array.from({ length: 40 }, (_, i) => ({
+      id: `hr-${i}`,
+      metric_type: 'heart_rate',
+      source: 'apple_watch',
+      source_platform: 'healthkit',
+      value: 90 + i,
+      unit: 'count/min',
+      measured_at: new Date(new Date(mockSession.started_at).getTime() + i * 60_000).toISOString(),
+    }));
+    (listBiometricSamples as jest.Mock).mockResolvedValueOnce(samples);
+
+    render(<BjjSessionScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-session-hr-timeline')).toBeTruthy();
+    });
+    expect(listBiometricSamples).toHaveBeenCalledWith(
+      expect.any(Function),
+      'heart_rate',
+      mockSession.started_at,
+      mockSession.ended_at,
+    );
+  });
+
+  it('renders no timeline when the raw-sample fetch comes back too sparse, even though metrics were full', async () => {
+    (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
+    (listBiometricSamples as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 'hr-1',
+        metric_type: 'heart_rate',
+        source: 'apple_watch',
+        source_platform: 'healthkit',
+        value: 130,
+        unit: 'count/min',
+        measured_at: mockSession.started_at,
+      },
+    ]);
+
+    render(<BjjSessionScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-session-hr')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('bjj-session-hr-timeline')).toBeNull();
+  });
+
+  it('renders no timeline when the raw-sample fetch fails, without breaking the rest of the report', async () => {
+    (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
+    (listBiometricSamples as jest.Mock).mockRejectedValueOnce(new Error('network'));
+
+    render(<BjjSessionScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bjj-session-hr-stats')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('bjj-session-hr-timeline')).toBeNull();
+  });
 });
 
 /*

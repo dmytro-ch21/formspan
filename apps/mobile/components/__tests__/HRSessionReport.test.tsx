@@ -98,3 +98,69 @@ test('a custom testID namespaces every sub-element, so the same component on thr
   expect(screen.getByTestId('running-hr-stats')).toBeTruthy();
   expect(screen.getByTestId('running-hr-zone-1')).toBeTruthy();
 });
+
+// N491/#852 — the raw HR timeline. `lib/__tests__/hrTimeline.test.ts` already
+// proves `buildHRTimeline`'s own arithmetic; these prove the component wires
+// an already-built timeline in (or correctly doesn't) without inventing any
+// interpretation of it.
+describe('the HR timeline (N491/#852)', () => {
+  test('omitting hrTimeline renders no timeline — every caller that has not wired it yet', () => {
+    render(<HRSessionReport metrics={metrics()} />);
+    expect(screen.queryByTestId('hr-session-report-timeline')).toBeNull();
+  });
+
+  test('an empty hrTimeline renders no timeline, same as omitting it', () => {
+    render(<HRSessionReport metrics={metrics()} hrTimeline={[]} />);
+    expect(screen.queryByTestId('hr-session-report-timeline')).toBeNull();
+  });
+
+  test('a single point is not a line — still no timeline', () => {
+    render(<HRSessionReport metrics={metrics()} hrTimeline={[{ minutesElapsed: 0, bpm: 90 }]} />);
+    expect(screen.queryByTestId('hr-session-report-timeline')).toBeNull();
+  });
+
+  test('two or more real points render the timeline chart', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics()}
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 90 },
+          { minutesElapsed: 20, bpm: 95 },
+          { minutesElapsed: 21, bpm: 150 },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('hr-session-report-timeline')).toBeTruthy();
+    expect(screen.getByTestId('hr-session-report-timeline-chart')).toBeTruthy();
+  });
+
+  test('a timeline never renders in the limited state, even if the caller passed one', () => {
+    // Sparse-sample sessions are exactly where a two-point line would draw a
+    // shape the data cannot support — same reasoning as the zone breakdown
+    // not rendering below the threshold.
+    render(
+      <HRSessionReport
+        metrics={metrics({ sample_count: 5 })}
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 90 },
+          { minutesElapsed: 40, bpm: 150 },
+        ]}
+      />,
+    );
+    expect(screen.queryByTestId('hr-session-report-timeline')).toBeNull();
+  });
+
+  test('the custom-testID namespace covers the timeline too', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics()}
+        testID="running-hr"
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 90 },
+          { minutesElapsed: 10, bpm: 130 },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('running-hr-timeline')).toBeTruthy();
+  });
+});

@@ -18791,15 +18791,93 @@ screens.
 
 ### Not yet covered (recorded as an open gap, not silently skipped)
 
-- Per-exercise HR (strength) and drill-vs-roll HR (BJJ) — explicitly out of
-  this ticket's scope, filed separately as N490/#851 and N491/#852 (new
-  schema required).
+- Per-exercise HR (strength) — filed separately as N490/#851 (new schema
+  required).
+- Drill-vs-roll HR (BJJ) — N491/#852 shipped a raw HR timeline (below)
+  rather than the schema this line originally anticipated; no schema was
+  needed for what shipped. Automatic drill/roll DETECTION remains unbuilt —
+  see N491's own scenarios for why.
 - A cross-session rollup on the Progress tab — N489/#850, a separate ticket
   by design (this one reports on a single session, not a trend across many).
 - **Needs a device**: the zone-colour ramp read against a real 5-zone
   session on a physical screen, and the `ScrollView` added to running's
   finished branch behaving correctly at accessibility text sizes — nothing
   in this repo's suite renders layout/colour on a real screen.
+
+## N491 — BJJ: a raw HR-over-time timeline, not a drill/roll classifier (`apps/mobile/lib/hrTimeline.ts`, `apps/mobile/components/ui/HRTimelineChart.tsx`, wired into `apps/mobile/components/HRSessionReport.tsx` and `apps/mobile/app/bjj/session/[id].tsx`)
+
+**Read the N491 history entry before writing tests against this section** —
+it documents why neither of the ticket's two originally-proposed directions
+(a live "mark the transition" capture, or an inferred step-change
+classifier) shipped, and why a plain time series did instead. In short: live
+capture would add mid-session interaction to a sport whose own design
+(`bjj-tracking-design.md` §2, `app/bjj/log.tsx`'s doc comment) has already
+ruled that out entirely, and a classifier needs validation against real
+recorded HR data this dev environment does not have. What shipped shows the
+real numbers, in order, and lets the athlete read the shape themselves —
+literally "you can see the pattern," the user's own words, without VOLA ever
+asserting where a boundary falls.
+
+### Happy path
+
+- Finish (or open) a BJJ session whose HR report reaches the `'full'` state
+  (same `HR_REPORT_MIN_SAMPLES` gate N488 already established — at least 12
+  real heart-rate samples in the session's window, and a real `trimp`): the
+  "Heart rate" section now also shows a "Heart rate across the session" line
+  chart between the stat row and the zone breakdown, with the session's
+  lowest and highest reading labelled on the y-axis and `0:00`/the session's
+  real duration labelled on the x-axis.
+- A session whose HR genuinely steps up partway through (a real drilling
+  round followed by real rolling) should show that step visually in the
+  line — verify this on a real device with real Watch data; nothing in this
+  repo's suite can confirm a real physiological shape, only that the chart
+  draws whatever points it is given (`lib/__tests__/hrTimeline.test.ts`).
+- The chart never labels any stretch "drilling" or "rolling," or any other
+  interpretation — only real bpm figures and real elapsed time. This is a
+  design invariant, not a missing feature; a test asserting an interpretive
+  label would be asserting for a regression.
+
+### Edge cases & errors
+
+- **The HR report is in the `'limited'` or `'unavailable'` state** (sparse
+  samples, no HRmax, or no HR data at all): no timeline renders, even if
+  raw samples exist — the same reasoning as the zone breakdown not
+  rendering below threshold: a line through too few points would visually
+  assert a shape the data does not support.
+- **Fewer than two real samples fall in the session's window** (the raw
+  `GET /v1/biometric/samples` fetch, independent of whether the HR report
+  itself reached `'full'`): no timeline renders — a single point cannot
+  draw a line.
+- **The raw-sample fetch fails or is slow**: the rest of the HR report
+  (avg/max HR, TRIMP, zones, effectiveness) renders normally; the timeline
+  is simply absent, the same best-effort posture N488 already established
+  for the metrics fetch itself. No error surfaced, no retry storm.
+- **A session with more samples than the chart's point cap** (`lib/
+  hrTimeline.ts`'s `MAX_TIMELINE_POINTS`, 120): the chart still renders,
+  built from averaged buckets rather than every raw sample — verify a real
+  short spike inside one bucket is not averaged away to invisibility on an
+  unusually long or dense session.
+- **Strength and running session-detail screens**: unaffected — neither
+  screen was wired to fetch samples or pass `hrTimeline`, so `<HRSessionReport>`
+  renders exactly as it did before this ticket on both.
+
+### Auth/security
+
+- The raw samples shown are only ever the signed-in athlete's own —
+  inherited entirely from `GET /v1/biometric/samples`'s existing
+  user-scoped, token-authenticated query (N476/#821); this ticket adds no
+  new endpoint and no new authorization surface.
+
+### Not yet covered (recorded as an open gap, not silently skipped)
+
+- **Automatic drill/roll detection** — the ticket's literal ask, and
+  explicitly NOT built here. Filed as N512/#895, blocked on real recorded
+  HR data from an actual BJJ rolling session to validate a step-change
+  heuristic against (`NEEDS HUMAN EVIDENCE`).
+- **Needs a device**: whether the chart's shape is legible at a glance on a
+  real 5-6 inch screen, and whether a real drilling-to-rolling transition
+  is visually obvious in practice — nothing in this repo's suite can
+  measure either.
 
 ## N489 — Progress tab: a training-load/HR trend row, aggregating across sessions and sports (`backend/internal/modules/biometric` — `ListSessionLoad`/`GET /v1/biometric/sessions/load`, `apps/mobile/app/(tabs)/progress.tsx`, `apps/mobile/app/trainingLoad/trend.tsx`)
 

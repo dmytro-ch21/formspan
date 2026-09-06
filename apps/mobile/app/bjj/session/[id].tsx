@@ -26,7 +26,8 @@ import {
   monthGrid,
   weekDays as calendarWeekDays,
 } from '@/lib/calendar';
-import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
+import { getSessionMetrics, listBiometricSamples, type SessionMetrics } from '@/lib/biometric';
+import { buildHRTimeline, type HRTimelinePoint } from '@/lib/hrTimeline';
 import {
   getDetail,
   KINDS,
@@ -381,6 +382,32 @@ export default function BjjSessionScreen() {
       cancelled = true;
     };
   }, [id, session?.ended_at, getToken]);
+
+  // N491/#852: the raw HR-over-time timeline (see lib/hrTimeline.ts's doc
+  // comment for why this is a plain time series rather than a drill/roll
+  // classifier). A second, independent fetch rather than piggybacking on
+  // `hrMetrics` above — `GET /v1/biometric/samples` is a different endpoint
+  // (raw readings, not the derived SessionMetrics row) and can fail or be
+  // slow on its own without holding up the report's other numbers. Best-
+  // effort and non-blocking, same posture as the fetch above: a failure here
+  // just means no timeline renders, never an error surfaced to the athlete.
+  const [hrTimeline, setHrTimeline] = useState<HRTimelinePoint[]>([]);
+  useEffect(() => {
+    const startedAt = session?.started_at;
+    const endedAt = session?.ended_at;
+    if (!id || !startedAt || !endedAt) return;
+    let cancelled = false;
+    listBiometricSamples(getToken, 'heart_rate', startedAt, endedAt)
+      .then((samples) => {
+        if (!cancelled) setHrTimeline(buildHRTimeline(samples, startedAt, endedAt));
+      })
+      .catch(() => {
+        if (!cancelled) setHrTimeline([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, session?.started_at, session?.ended_at, getToken]);
 
   /**
    * Delete and Finish, which live here because nothing else offers them.
@@ -743,6 +770,7 @@ export default function BjjSessionScreen() {
         <HRSessionReport
           metrics={hrMetrics}
           sessionRPE={detail?.session_rpe ?? null}
+          hrTimeline={hrTimeline}
           testID="bjj-session-hr"
         />
       )}
