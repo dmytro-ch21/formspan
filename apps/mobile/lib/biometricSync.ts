@@ -3,10 +3,12 @@ import { AppState, type AppStateStatus } from 'react-native';
 import {
   computeSessionMetrics,
   hrMaxFromDateOfBirth,
+  needsEnrichmentAttempt,
   planHRSync,
   putBiometricSamples,
   sessionHRWindow,
   toBiometricSample,
+  type EnrichmentLedgerEntry,
 } from './biometric';
 import { getDb } from './db';
 import { isHealthKitSupported, queryHeartRateSamples, queryVO2MaxSamples } from './healthkit';
@@ -60,18 +62,21 @@ import type { TokenGetter } from './useAuthToken';
  * ## Platform-agnostic core, iOS-specific glue
  *
  * Everything this file imports from `./biometric` (the window join, the
- * upload plan, the HRmax seed, the API client) is platform-agnostic — see
- * that file's own doc comment. The only iOS-specific calls in this whole
- * module are `queryHeartRateSamples`/`queryVO2MaxSamples`/`isHealthKitSupported`
+ * upload plan, the HRmax seed, the API client, and — since N511/#893 — the
+ * retry-with-cooldown ledger decision) is platform-agnostic — see that
+ * file's own doc comment. The only iOS-specific calls in this whole module
+ * are `queryHeartRateSamples`/`queryVO2MaxSamples`/`isHealthKitSupported`
  * from `./healthkit`. The Android sibling (`lib/healthConnectSync.ts`, N478)
- * turned out different enough in orchestration shape — a retry ledger with
- * cooldown semantics rather than this file's dedupe-once table, an extra
- * N479 activity-detection pass riding the same trigger — that it stayed its
- * own module rather than becoming this file with `./healthkit` swapped for
+ * turned out different enough in orchestration shape — an extra N479
+ * activity-detection pass riding the same trigger, a different local table
+ * for the ledger row (`health_connect_enrichment` vs. this file's
+ * `biometric_hr_synced`, same shape as of N511) — that it stayed its own
+ * module rather than becoming this file with `./healthkit` swapped for
  * `./healthConnect`; N485/#837 consolidated the two orchestrators' SHARED
  * dependency (`./biometric`, this file's import above) rather than the
- * orchestrators themselves, which is the boundary this ticket actually
- * found duplicated.
+ * orchestrators themselves, which is the boundary that ticket found
+ * duplicated — N511 is what finished that consolidation for the ledger
+ * decision specifically, which N485 had left iOS without.
  *
  * ## N502/#873 — the size wall, and the VO₂max-toggle question it raised
  *
@@ -269,28 +274,78 @@ export async function readBiometricSyncFailureCount(userID: string): Promise<num
 
 // --- session heart-rate windows (design doc §2) ---------------------------
 
+type LedgerRow = { session_id: string; hr_source: string; attempted_at: string };
+
+/**
+ * The local retry ledger, keyed by session — N511/#893. Same shape and same
+ * reader pattern as `lib/healthConnectSync.ts`'s own `readLedger`, over
+ * `biometric_hr_synced` instead of `health_connect_enrichment`.
+ */
+async function readBiometricHRLedger(userID: string): Promise<Map<string, EnrichmentLedgerEntry>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<LedgerRow>(
+    `SELECT session_id, hr_source, attempted_at FROM biometric_hr_synced WHERE user_id = ?`,
+    userID,
+  );
+  const out = new Map<string, EnrichmentLedgerEntry>();
+  for (const r of rows) {
+    // Defensive fallback rather than trusting a column that could in
+    // principle hold anything — same posture as the Android reader.
+    out.set(r.session_id, {
+      hrSource: r.hr_source === 'window' ? 'window' : 'none',
+      attemptedAt: r.attempted_at,
+    });
+  }
+  return out;
+}
+
 async function syncSessionWindows(userID: string, getToken: TokenGetter): Promise<void> {
-  const floor = new Date(Date.now() - SESSION_BACKFILL_FLOOR_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const pending = await sessionsNeedingBiometricSync(userID, MAX_SESSIONS_PER_PASS, floor);
+  const now = new Date();
+  const floor = new Date(now.getTime() - SESSION_BACKFILL_FLOOR_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const [pending, ledger] = await Promise.all([
+    sessionsNeedingBiometricSync(userID, MAX_SESSIONS_PER_PASS, floor),
+    readBiometricHRLedger(userID),
+  ]);
   if (pending.length === 0) return;
+
+  // N511/#893: `sessionsNeedingBiometricSync` already excludes a TERMINAL
+  // ('window') session at the SQL layer (see its own doc comment on why
+  // that has to happen there, not here, to keep MAX_SESSIONS_PER_PASS's
+  // budget meaningful). What this filter adds is the finer, TIME-sensitive
+  // half SQL can't express: a 'none' result's cooldown/retry-window, via
+  // `lib/biometric.ts`'s shared `needsEnrichmentAttempt` — the same
+  // decision N478's Android sibling already made. Deliberately NOT
+  // `selectEnrichmentCandidates` itself: that helper also enforces
+  // Android's own `isWithinHealthConnectHistoryWall` (30 days), which has
+  // no iOS equivalent — iOS already applied its own, more generous backfill
+  // floor (`SESSION_BACKFILL_FLOOR_DAYS`, 180 days) in the SQL query above.
+  const toEnrich = pending.filter((s) =>
+    needsEnrichmentAttempt({ endedAt: s.ended_at }, ledger.get(s.id), now),
+  );
+  if (toEnrich.length === 0) return;
 
   // Fetched once per pass, not once per session — a session's own HRmax
   // seed (design doc §3) is a fact about the ATHLETE, not about any one
   // session. `null` — no date of birth, or a seed outside the range
   // ComputeMetrics accepts — means this pass computes NOTHING: see
   // `hrMaxFromDateOfBirth`'s doc comment for why leaving `session_metrics`
-  // uncomputed is the honest answer rather than guessing an HRmax.
+  // uncomputed is the honest answer rather than guessing an HRmax. Left
+  // exactly as it was pre-N511 (bail the whole pass, write no ledger rows
+  // at all) rather than matched to Android's per-session "'none' but still
+  // upload samples" branch — out of this ticket's scope, and every session
+  // this skips is already correctly retryable next pass with no ledger row
+  // written for it either way.
   let hrMaxBPM: number | null = null;
   try {
     const profile = await getProfile(getToken);
-    hrMaxBPM = hrMaxFromDateOfBirth(profile.date_of_birth, new Date());
+    hrMaxBPM = hrMaxFromDateOfBirth(profile.date_of_birth, now);
   } catch {
     // Offline, or no profile yet — same "nothing here is computable this
     // pass" outcome as a missing date of birth.
   }
   if (hrMaxBPM == null) return;
 
-  for (const session of pending) {
+  for (const session of toEnrich) {
     const window = sessionHRWindow(session.started_at, session.ended_at);
     if (!window) continue; // should not happen — the query already filters on ended_at set.
 
@@ -305,27 +360,58 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
       // 'estimated' — hrMaxBPM above only ever comes from
       // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
       // HRMaxSource doc comment for why nothing in this app produces
-      // 'observed' yet.
-      await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', plan.hrSource);
+      // 'observed' yet. `plan.hrSource` is always the CLAIM 'window' (see
+      // `planHRSync`'s own doc comment) — the backend is authoritative on
+      // the actual RESULT, downgrading to `hr_source: 'none'` itself once
+      // it sees zero heart_rate samples for the window. N511/#893's fix is
+      // reading THAT back (`metrics.hr_source` below) rather than — as the
+      // pre-N511 code did — ignoring the response and marking the ledger
+      // "done" unconditionally.
+      const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', plan.hrSource);
+      await recordBiometricHRAttempt(
+        userID,
+        session.id,
+        metrics.hr_source === 'window' ? 'window' : 'none',
+        now,
+      );
     } catch {
-      // Leave this session's ledger row unwritten so the next pass retries
-      // it — see this file's doc comment on why no backoff ladder is
-      // needed. Continue to the next session rather than aborting the
-      // whole batch on one failure.
+      // Leave this session's ledger row exactly as it was (absent, or its
+      // previous attempt) — the next pass's `needsEnrichmentAttempt` decides
+      // fresh whether to retry it. One session's network failure must not
+      // abort every other candidate in this pass.
       await recordBiometricSyncFailure(userID);
       continue;
     }
-    await recordBiometricHRSync(userID, session.id);
   }
 }
 
-async function recordBiometricHRSync(userID: string, sessionID: string): Promise<void> {
+/**
+ * Upserts this session's enrichment ATTEMPT — not merely "done" the way the
+ * pre-N511 `INSERT OR IGNORE` did. `ON CONFLICT ... DO UPDATE` because a
+ * retried session (its previous attempt was `'none'`) must overwrite that
+ * row with the new attempt's outcome and timestamp, not silently no-op the
+ * way `OR IGNORE` would have.
+ */
+async function recordBiometricHRAttempt(
+  userID: string,
+  sessionID: string,
+  hrSource: 'window' | 'none',
+  now: Date,
+): Promise<void> {
   const db = await getDb();
+  const nowISO = now.toISOString();
   await db.runAsync(
-    `INSERT OR IGNORE INTO biometric_hr_synced (user_id, session_id, synced_at) VALUES (?, ?, ?)`,
+    `INSERT INTO biometric_hr_synced (user_id, session_id, synced_at, hr_source, attempted_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, session_id) DO UPDATE SET
+       synced_at = excluded.synced_at,
+       hr_source = excluded.hr_source,
+       attempted_at = excluded.attempted_at`,
     userID,
     sessionID,
-    new Date().toISOString(),
+    nowISO,
+    hrSource,
+    nowISO,
   );
 }
 

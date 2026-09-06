@@ -588,29 +588,41 @@ const CREATE_HEALTHKIT_IMPORTS = `
  * session that never touched HealthKit at all, a strength or BJJ session
  * logged entirely by hand, still needs its window read exactly once).
  *
- * No `dirty`/`remote` — never pushed, and never removed once written: a
- * session whose window was checked and found empty (`hr_source: 'none'`)
- * must not be re-checked every foreground pass forever, so "checked" is
- * recorded regardless of whether anything was found. `lib/biometricSync.ts`
- * is the only reader/writer.
+ * No `dirty`/`remote` — never pushed. `lib/biometricSync.ts` is the only
+ * reader/writer.
+ *
+ * **`hr_source`/`attempted_at` (N511/#893)** are what make this a real retry
+ * ledger rather than a dedupe-once flag. Before they existed, ANY attempt —
+ * including one that found zero HR samples only because the Watch hadn't
+ * synced them into Health yet — permanently excluded a session from ever
+ * being asked again, via `sessionsNeedingBiometricSync`'s old `LEFT JOIN
+ * ... WHERE b.session_id IS NULL`. That was a genuine asymmetry with N478's
+ * Android sibling, which always had retry-with-cooldown for exactly this
+ * race (`lib/biometric.ts`'s `needsEnrichmentAttempt`/`EnrichmentLedgerEntry`
+ * — see that file's doc comment on `RETRY_WINDOW_DAYS`). This table now
+ * shares that same logic instead of iOS re-deriving its own copy.
  */
 const CREATE_BIOMETRIC_HR_SYNCED = `
   CREATE TABLE IF NOT EXISTS biometric_hr_synced (
     user_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
     synced_at TEXT NOT NULL,
+    hr_source TEXT NOT NULL DEFAULT 'none',
+    attempted_at TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (user_id, session_id)
   );
 `;
 
 /**
- * The retry ledger for N478's Health Connect heart-rate enrichment — NOT a
- * dedup table the way `healthkit_imports` (or N477's `biometric_hr_synced`
- * above, which IS a dedup/checked-once table despite the name) is. This one
- * exists because asking Health Connect (and the biometric API) about the
- * same finished session on every single foreground return, forever, is real
- * ongoing cost for no benefit once a session has either got real evidence
- * or is old enough that it never will.
+ * The retry ledger for N478's Health Connect heart-rate enrichment — same
+ * shape and same purpose as N477's `biometric_hr_synced` above as of
+ * N511/#893 (that table was a dedup-once table with no retry semantics
+ * until then; this comment used to describe that as a permanent iOS/Android
+ * asymmetry, which turned out to be the bug N511 fixes, not a deliberate
+ * design difference). This one exists because asking Health Connect (and
+ * the biometric API) about the same finished session on every single
+ * foreground return, forever, is real ongoing cost for no benefit once a
+ * session has either got real evidence or is old enough that it never will.
  *
  * One row per (user, session) enrichment ATTEMPT, overwritten each time —
  * see `lib/biometric.ts`'s `needsEnrichmentAttempt` (formerly
@@ -693,7 +705,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 36;
+const SCHEMA_VERSION = 37;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1362,6 +1374,38 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(
       `CREATE INDEX IF NOT EXISTS detected_activities_user_started_idx
          ON detected_activities (user_id, started_at DESC);`,
+    );
+  }
+
+  if (current < 37) {
+    // v36 -> v37 (N511/#893): `biometric_hr_synced` becomes a real retry
+    // ledger — see `CREATE_BIOMETRIC_HR_SYNCED`'s own doc comment for why.
+    //
+    // Real ALTERs, same reason as the `foods` block above: `CREATE TABLE IF
+    // NOT EXISTS` is a no-op against the existing table, so a device already
+    // stamped 36 would keep the old two-column shape and every read/write
+    // expecting `hr_source`/`attempted_at` would throw.
+    //
+    // `hr_source` backfills to its column default, `'none'` — a deliberate
+    // choice, not the conservative one. It means every session this device
+    // already "finished" enriching under the OLD buggy rule gets ONE more
+    // honest look under the new retry logic, which is exactly what fixes
+    // the bug for someone upgrading with today's affected session still
+    // sitting in this table. This is self-bounding, not a mass-retry storm:
+    // `needsEnrichmentAttempt`'s `RETRY_WINDOW_DAYS` (3) only re-offers a
+    // session whose `ended_at` is recent, so a legitimately-`'window'`
+    // session from months ago stays excluded regardless of what this
+    // backfill claims — only a handful of recent sessions pay one harmless,
+    // idempotent re-check (a session that already has real data simply gets
+    // it re-confirmed; `computeSessionMetrics` overwrites, it doesn't
+    // duplicate).
+    await addColumnIfMissing(db, 'biometric_hr_synced', 'hr_source', "TEXT NOT NULL DEFAULT 'none'");
+    await addColumnIfMissing(db, 'biometric_hr_synced', 'attempted_at', "TEXT NOT NULL DEFAULT ''");
+    // Backfill attempted_at from the pre-existing synced_at column — both
+    // meant the same "when did this pass touch this session" fact, just
+    // under the old table's narrower name.
+    await db.execAsync(
+      `UPDATE biometric_hr_synced SET attempted_at = synced_at WHERE attempted_at = '';`,
     );
   }
 

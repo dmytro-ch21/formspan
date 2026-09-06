@@ -19453,3 +19453,23 @@ each bullet.
 ### Auth/security
 
 None — no new endpoint, no new client permission, no data-shape change.
+
+## N511 — iOS heart-rate sync retries a session whose first pass found zero samples (`apps/mobile/lib/biometricSync.ts`, `apps/mobile/lib/sessionStore.ts`, `apps/mobile/lib/biometric.ts`'s shared `needsEnrichmentAttempt`, #893)
+
+Fixes a real asymmetry with N478 (Android): iOS used to permanently exclude a session from heart-rate enrichment after ONE attempt, even one that found zero samples because the Apple Watch hadn't synced yet. This is a background-sync correctness fix — no new screen, no new user-facing control, so there is no interaction flow to script; the scenarios below are about the retry *decision*, which the jest suite already exercises directly against a real SQLite fixture.
+
+### What's testable (and already covered by jest)
+
+- **A zero-sample attempt is retried after the cooldown, and finds real data** (`biometricSync.test.ts`): first pass finds nothing and records `hr_source: 'none'`; the ledger row is backdated past `RETRY_COOLDOWN_HOURS` (12h) to simulate time passing; a second pass, now with real samples available, uploads them and records `hr_source: 'window'`. A third pass does not re-offer it again — `'window'` is terminal.
+- **NOT retried within the cooldown** (`biometricSync.test.ts`): an immediate second pass, moments after the first, does not re-query HealthKit or call the biometric API again even though real samples are now available — proving the cooldown gate actually gates, not just that a later retry eventually works.
+- **The migration backfill is honest, not merely present** (`schema.test.ts`): a device upgrading from schema v36 gets a pre-existing `biometric_hr_synced` row backfilled to `hr_source: 'none'` (not `'window'`) and `attempted_at` copied from the old `synced_at` column — the specific choice that makes an already-affected session (the one that prompted this ticket) eligible for a fresh, honest attempt after upgrading, rather than staying permanently excluded.
+- **A terminal session cannot starve the per-pass budget for a newer one** (`biometricSync.test.ts`, `sessionsNeedingBiometricSync — SQL-level ledger exclusion`): with a deliberately tiny `limit` of 2, two older already-`'window'` sessions plus one newer genuinely-pending session — only the pending one comes back. Guards against a real regression caught during this ticket's own review: an early version of the fix dropped the SQL-level ledger exclusion entirely rather than narrowing it, which meant `MAX_SESSIONS_PER_PASS` (20) could be entirely consumed by already-enriched sessions on any account with more than 20 finished sessions in the 180-day floor, permanently starving exactly the new sessions this ticket exists to fix.
+- **Existing coverage unaffected**: every other `biometricSync.test.ts` case (gating on the shared toggle, no-HealthKit-module, the debug-accessible failure count, VO₂max, the `SESSION_BACKFILL_FLOOR_DAYS` floor) passes unchanged — this fix narrows WHICH sessions are candidates, not the pass's other behavior.
+
+### Device-only (not reachable by any automated suite in this repo)
+
+- **NEEDS HUMAN EVIDENCE**: on a real device, confirm a session logged today, whose first sync pass ran before the Apple Watch had synced its heart-rate samples into Health, actually picks up real data on a LATER pass (a subsequent foreground return or a manual Health-sync toggle flip) once the Watch has caught up — without deleting and re-logging the session. This is the exact real-world timing race the fix targets, and a jest fixture with a backdated timestamp can prove the retry LOGIC fires; it cannot prove the Watch-to-Health sync lag this exists for is real, or that the fix resolves an athlete's actual experience of it.
+
+### Auth/security
+
+None — no new endpoint, no new client permission, no data-shape change visible to the API (the fix reads the SAME `computeSessionMetrics` response the pre-existing code already received; it just stops discarding it).

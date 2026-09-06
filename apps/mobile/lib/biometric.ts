@@ -436,12 +436,14 @@ export function hrMaxFromDateOfBirth(dateOfBirth: string | null | undefined, on:
   return hrMax;
 }
 
-// --- Health Connect retry ledger (pure decisions, N478) --------------------
+// --- retry ledger (pure decisions, N478 + N511) -----------------------
 
 /** What this device already knows about one session's enrichment attempt —
- *  the local ledger row (see `lib/db.ts`'s `health_connect_enrichment`
- *  table). Android-specific: iOS's `biometric_hr_synced` ledger is a
- *  dedupe-once table with no retry semantics, so it needs none of this. */
+ *  the local ledger row (`lib/db.ts`'s `health_connect_enrichment` table on
+ *  Android, `biometric_hr_synced` on iOS as of N511/#893 — both the same
+ *  shape now, read by each platform's own orchestrator). This type, and
+ *  `needsEnrichmentAttempt` below, are the shared decision both platforms
+ *  make from it; only the SQL reading/writing the row differs. */
 export type EnrichmentLedgerEntry = {
   /** `'window'` once real evidence has been found and stored — a session
    *  never needs retrying past that point. `'none'` means the last attempt
