@@ -19406,3 +19406,50 @@ authenticated user's own friend list server-side.
   truncation on a long enabled-sports caption (e.g. "Strength · Nutrition ·
   BJJ") or a long training-phase label should be checked directly; no
   automated test renders at a specific device width.
+
+## N510 — reusable week-progress stepper (`apps/mobile/components/ui/WeekStepper.tsx`, wired into `apps/mobile/components/WeekPlanner.tsx`'s compact week strip, #887)
+
+A presentational component plus one pure derivation function
+(`weekStepperDayState`) — no new endpoint, no schema change, no new client
+permission. The scenarios below are what a Playwright-equivalent mobile
+suite would assert; the actual coverage today is the jest suites named in
+each bullet.
+
+### What's testable (and already covered by jest)
+
+- **The four states render distinguishably**
+  (`components/ui/__tests__/weekStepper.test.tsx`): a `done`/`current`/
+  `upcoming` day draws its number; a `rest` day draws the moon glyph instead
+  and never its number. Each day's own accessibility label speaks its state
+  ("today", "past", "rest day", "still to come") independently of its
+  neighbours.
+- **The state-derivation rule** (`components/ui/__tests__/
+  weekStepperDayState.test.ts`): all six reachable combinations of
+  `isToday`/`isPast`/`hasPlan`, including the one deliberate trade-off —
+  `current` wins over `rest` for today's own mark, pinned as its own test
+  rather than left implicit.
+- **The component takes plain day-state data, not a screen's own shape**
+  (`weekStepper.test.tsx`'s last case): a second, non-calendar "day 1/2/3"
+  input renders identically, which is the "not hardcoded to one screen's
+  data shape" acceptance criterion pinned directly.
+- **`WeekPlanner`'s existing coverage is unaffected**
+  (`__tests__/app/weekPlanner.test.tsx`, all 16 cases, including the
+  render-cost budget on `Date.prototype.toLocaleDateString` calls that a
+  denser header would blow) — the compact strip's markup changed, nothing
+  it asserts on did.
+
+### Device-only (not reachable by any automated suite in this repo)
+
+- **NEEDS HUMAN EVIDENCE**: the moon glyph, the dashed connectors and the
+  filled current-day mark actually read as distinct at a glance on a real
+  device, at default and at a large accessibility text size — this ticket's
+  own bar ("Reads at a glance") is a visual judgement a snapshot cannot
+  make. Check the Plan tab's week strip specifically, since that is where
+  this ships wired in.
+- Dark mode only (this app is dark-only on mobile by design) — confirm the
+  `rest` mark's dashed border and the `done` mark's softer fill are still
+  legible against `vola.surface`, not just present in the DOM.
+
+### Auth/security
+
+None — no new endpoint, no new client permission, no data-shape change.

@@ -17,6 +17,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
+import { WeekStepper, weekStepperDayState, type WeekStepperDay } from '@/components/ui/WeekStepper';
 import { vola } from '@/constants/Colors';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
@@ -415,55 +416,36 @@ export function WeekPlanner({
       {/*
         The compact week, which is what remains when the rows are closed.
 
-        **A hollow ring, not a filled dot.** `TrainingCalendar` spends a legend
-        teaching that shape distinction — filled is what happened, a ring is
-        what is intended — because green and lime are 1.18:1 apart in greyscale
-        and hue alone cannot carry it. This strip looks like that one and knows
-        only about plans, so a filled dot would report every planned day as
-        trained to anyone who learned the legend. The ring claims exactly what
-        this screen can claim, which is the opposite of the first draft's
-        reasoning.
-
-        Fixed `lime` rather than the athlete's accent, for the same reason the
-        palette states: the accent is identity and interaction, and anything
-        encoding a *reading* stays fixed. A marker whose colour follows a
-        preference is one nobody can learn to read — and it would be orange
-        here and lime on Today for the same fact.
+        **N510: `WeekStepper`, not a second hand-rolled strip.** This used to
+        be a bespoke row here — a weekday letter, a date and a hollow-vs-filled
+        dot for "has a plan or not". `WeekStepper` is the same job generalised
+        into a reusable module (see its own doc comment for the full
+        reasoning): four states instead of two (`done`/`current`/`upcoming`/
+        `rest`, via {@link weekStepperDayState}) and a distinct rest-day glyph
+        instead of an absent dot, which is a real improvement over what was
+        here before — a planned Tuesday and a rest Tuesday used to draw
+        identically once Tuesday itself was in the past.
       */}
-      <RNView style={styles.strip}>
-        {days.map((d) => {
+      <WeekStepper
+        testID="plan-week-stepper"
+        days={days.map((d): WeekStepperDay => {
           const key = dayString(d);
-          const isToday = key === todayKey;
-          const has = plans.some((pl) => pl.day === key);
-          return (
-            <RNView
-              key={key}
-              style={styles.stripCell}
-              // One stop per day. Left open, the weekday abbreviation and the
-              // date are two separate stops and the week costs fourteen.
-              accessible
-              accessibilityLabel={`${d.toLocaleDateString(undefined, {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-              })}${isToday ? ', today' : ''}${has ? ', planned' : ''}`}
-            >
-              <Text style={styles.stripDow}>
-                {d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 3).toUpperCase()}
-              </Text>
-              <Text
-                // `ink`, not `accent`: the fill is 3.92:1 on purple against a
-                // 11.25pt bold run, which needs 4.5:1. Every other coloured
-                // string in this file already uses `ink` for that reason.
-                style={[styles.stripDay, isToday && { color: accent.ink }]}
-              >
-                {d.getDate()}
-              </Text>
-              <RNView style={[styles.stripDot, has && styles.stripDotPlanned]} />
-            </RNView>
-          );
+          return {
+            key,
+            number: d.getDate(),
+            state: weekStepperDayState({
+              isToday: key === todayKey,
+              isPast: key < todayKey,
+              hasPlan: plans.some((pl) => pl.day === key),
+            }),
+            label: d.toLocaleDateString(undefined, {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+            }),
+          };
         })}
-      </RNView>
+      />
 
       <Pressable
         onPress={() => setExpanded((v) => !v)}
@@ -1075,14 +1057,6 @@ const styles = StyleSheet.create({
   hint: { fontSize: 11, color: vola.textDim },
 
   sheet: { flex: 1 },
-  strip: { flexDirection: 'row', paddingTop: 10, paddingBottom: 2 },
-  stripCell: { flex: 1, alignItems: 'center', gap: 3 },
-  stripDow: { color: vola.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  stripDay: { color: vola.text, fontSize: 15, fontWeight: '700' },
-  // 7pt, and empty days keep the same 7pt of space — a mark that appears and
-  // disappears would shuffle the row's height as you step through weeks.
-  stripDot: { width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.5, borderColor: 'transparent' },
-  stripDotPlanned: { borderColor: vola.lime },
   toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
   toggleText: { color: vola.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
   up: { transform: [{ rotate: '-90deg' }] },
