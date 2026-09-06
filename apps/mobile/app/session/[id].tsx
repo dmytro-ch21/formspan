@@ -62,6 +62,12 @@ import {
   PREF_SUGGESTIONS_OFF,
 } from '@/lib/prefs';
 import { parseMaster, parseIdSet, suggestionsAllowed } from '@/lib/suggestion';
+import {
+  WARMUP_FATIGUE_PROMPT,
+  detectWarmupFatigue,
+  reclassifyWarmupAsWork,
+  type WarmupFatigueReason,
+} from '@/lib/warmup';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { CardGlass } from '@/components/ui/CardGlass';
@@ -227,6 +233,25 @@ export default function SessionScreen() {
   const [suggestionPrefs, setSuggestionPrefs] = useState<{
     master: boolean;
     off: ReadonlySet<string>;
+  } | null>(null);
+  /**
+   * N495/#865 (phase 3 of #753) — #753's advisory, never-automatic fatigue
+   * flag for a just-completed warm-up set. Set the instant `toggleDone`
+   * ticks a warm-up set on and `detectWarmupFatigue` (a pure, local check —
+   * see `lib/warmup.ts`'s own header comment on why this never waits on the
+   * network) trips one of the three documented triggers.
+   *
+   * Rendered as a small, DISMISSIBLE, non-blocking card (below) — never a
+   * modal, never anything that stops the athlete from ticking the next set
+   * while this is showing. `index` is a position, exactly like the countdown
+   * machinery elsewhere in this file (`recordTimedSet`'s own doc comment) —
+   * cleared on any structural edit that could make it point at a different
+   * row, same reasoning.
+   */
+  const [warmupFlag, setWarmupFlag] = useState<{
+    index: number;
+    exerciseID: string;
+    reasons: WarmupFatigueReason[];
   } | null>(null);
   // The workout's goal, resolved once. Immutable for the life of a session,
   // and `load` re-runs on every focus.
@@ -1007,6 +1032,37 @@ export default function SessionScreen() {
     if (now && session) {
       refreshSuggestions(session.sport, session.workout_id, next).catch(() => {});
     }
+    // N495/#865 (phase 3 of #753) — the advisory fatigue check, run the
+    // instant a WARM-UP set is ticked done. Pure and entirely local: no
+    // network call sits between this tap and the next one, because the
+    // target it checks against is already sitting in `suggestions` from the
+    // fetch that ran before the set was ever logged (see lib/warmup.ts's own
+    // header comment). Only on the way to done — an un-tick is a
+    // correction, not a new warm-up to evaluate — and only for a warm-up
+    // set: a working set has nothing to be "reclassified" into.
+    if (now && next[index].set_type === 'warmup') {
+      const completed = next[index];
+      const hint = suggestions.get(exerciseID);
+      if (
+        hint?.target_weight_kg != null &&
+        hint.target_reps != null &&
+        completed.weight_kg != null &&
+        completed.reps != null
+      ) {
+        const reasons = detectWarmupFatigue(
+          { weightKg: completed.weight_kg, reps: completed.reps, rir: completed.rir, rpe: completed.rpe },
+          { weightKg: hint.target_weight_kg, reps: hint.target_reps },
+        );
+        // A LATER warm-up set's flag replaces an earlier one rather than
+        // stacking — one card at a time, so the athlete is never asked two
+        // things at once mid-set.
+        if (reasons.length > 0) setWarmupFlag({ index, exerciseID, reasons });
+      }
+    } else if (!now && warmupFlag?.index === index) {
+      // Un-ticking the exact set that raised the flag withdraws it — there
+      // is no longer a completed set for it to describe.
+      setWarmupFlag(null);
+    }
     // A haptic, not a sound. This fires 20+ times a session — more than
     // anything else the app does — and a chime that often is the one thing
     // guaranteed to wear out its welcome. A buzz is felt through a pocket,
@@ -1264,6 +1320,13 @@ export default function SessionScreen() {
    */
   function stopTimerForStructureChange() {
     if (timerState.run || timerState.timer?.kind === 'work') timerState.stop();
+    // N495/#865 — `warmupFlag.index` is a POSITION, the identical hazard
+    // `recordTimedSet`'s own doc comment describes for the countdown above:
+    // a reorder, a removed set or a swapped exercise can make it point at a
+    // different row. Every call site that invalidates a `setIndex` already
+    // calls this function, so clearing the flag here rather than repeating
+    // the same guard at each site keeps the two in lockstep by construction.
+    setWarmupFlag(null);
   }
 
   function removeSet(index: number) {
@@ -1513,6 +1576,59 @@ export default function SessionScreen() {
               />
             )}
           </StatRow>
+        )}
+
+        {/* N495/#865 (phase 3 of #753) — the advisory fatigue prompt.
+            NEVER a modal: it renders inline, in the normal scroll flow, so
+            it costs the athlete nothing if they ignore it entirely and keep
+            ticking sets — the CLAUDE.md rule this ticket is built around
+            ("dismissible/deferrable... never a blocking interruption to the
+            logging flow"). Reclassifying is one tap; dismissing is one tap;
+            doing neither and moving on is also a valid outcome. */}
+        {warmupFlag && (
+          <View style={styles.warmupFlagCard} testID="warmup-fatigue-flag">
+            <View style={styles.warmupFlagBody}>
+              <Text style={styles.warmupFlagTitle}>
+                {catalog.get(warmupFlag.exerciseID)?.name ?? 'This warm-up'}
+              </Text>
+              <Text style={styles.warmupFlagPrompt}>{WARMUP_FATIGUE_PROMPT}</Text>
+            </View>
+            <View style={styles.warmupFlagActions}>
+              <Pressable
+                onPress={() => {
+                  const { index } = warmupFlag;
+                  commit(reclassifyWarmupAsWork(sets, index));
+                  setWarmupFlag(null);
+                  // The set's own numbers just moved into working volume —
+                  // the same "today's own sets are real evidence" reasoning
+                  // N191 already established, so the standing suggestion is
+                  // worth refreshing exactly as a normal tick would.
+                  if (session) {
+                    refreshSuggestions(
+                      session.sport,
+                      session.workout_id,
+                      reclassifyWarmupAsWork(sets, index),
+                    ).catch(() => {});
+                  }
+                }}
+                style={[styles.warmupFlagButton, { backgroundColor: accent.accent }]}
+                accessibilityRole="button"
+                accessibilityLabel="Count this warm-up set as work"
+                testID="warmup-fatigue-count-as-work"
+              >
+                <Text style={styles.warmupFlagButtonText}>Count as work</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setWarmupFlag(null)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss — keep this as a warm-up set"
+                testID="warmup-fatigue-dismiss"
+              >
+                <Text style={styles.warmupFlagDismiss}>×</Text>
+              </Pressable>
+            </View>
+          </View>
         )}
 
         {/* N488/#849 — the same HR report BJJ and running show, reused
@@ -1955,6 +2071,22 @@ export default function SessionScreen() {
                           promises. */}
                       {hint.in_session_signal != null && (
                         <Text style={styles.hintInSession}>{hint.in_session_signal.reason}</Text>
+                      )}
+                      {/* N495/#865 (phase 3 of #753) — generated only once
+                          target_weight_kg above is known, so its presence
+                          here already means the working prescription exists.
+                          Every rung is a PERCENTAGE of that same number, not
+                          a fixed sequence — see warmup.go's own doc comment —
+                          which is why this reads differently for every
+                          exercise and every athlete rather than always
+                          showing "45/135/225/275/305". */}
+                      {hint.warmup != null && hint.warmup.length > 0 && (
+                        <Text style={styles.hintWarmup} testID={`warmup-ramp-${g.exerciseID}`}>
+                          Warm-up:{' '}
+                          {hint.warmup
+                            .map((step) => `${step.rep_min}-${step.rep_max} @ ${formatWeight(step.weight_kg, u)}`)
+                            .join('  ·  ')}
+                        </Text>
                       )}
                       {hint.last_weight_kg != null && (
                         /*
@@ -3402,6 +3534,17 @@ const styles = StyleSheet.create({
   // Bolding them would work against the exact hierarchy those comments argue
   // for.
   hintReason: { fontSize: Typography.caption.fontSize, color: vola.textMuted },
+  // N495/#865's ramp line — same low-hierarchy tone as hintReason (this is
+  // reference information to glance at, not the headline number), but its
+  // own row: it can wrap to two lines on a narrow phone where hintReason
+  // never does, and tying its style to that one's would couple two things
+  // that change independently.
+  hintWarmup: {
+    fontSize: Typography.caption.fontSize,
+    color: vola.textMuted,
+    fontVariant: ['tabular-nums'],
+    marginTop: Spacing.xxs,
+  },
   // N191's in-session note — deliberately NOT `hintReason`'s muted tone. It's
   // an FYI the standing prescription above hasn't seen, and reads as one:
   // `vola.text`, the app's primary colour (already load-bearing elsewhere
@@ -3420,6 +3563,42 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hintApplyText: { ...Typography.body, color: vola.navy, fontWeight: '700' },
+  // N495/#865 — the advisory fatigue card. Amber, not red: this is a
+  // question, not an error state — no-shame-messaging applies here exactly
+  // as it does everywhere else in this app (see the `vola-athlete-ux`
+  // skill). A left border rather than a filled background keeps it from
+  // reading as an alarm while still standing apart from the plain
+  // `hintRow` cards around it.
+  warmupFlagCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.smPlus,
+    backgroundColor: vola.surfaceRaised,
+    borderRadius: Radius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: vola.warn,
+    paddingVertical: Spacing.smPlus,
+    paddingHorizontal: Spacing.md,
+    marginTop: Spacing.smPlus,
+  },
+  warmupFlagBody: { flex: 1, gap: Spacing.xxs },
+  warmupFlagTitle: { ...Typography.caption, color: vola.textMuted, textTransform: 'uppercase' },
+  warmupFlagPrompt: { ...Typography.body, color: vola.text },
+  warmupFlagActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  warmupFlagButton: {
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.xsPlus,
+    paddingHorizontal: Spacing.smPlus,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  warmupFlagButtonText: { ...Typography.caption, color: vola.navy, fontWeight: '700' },
+  warmupFlagDismiss: {
+    fontSize: Typography.title.fontSize,
+    fontWeight: '700',
+    color: vola.textMuted,
+    paddingHorizontal: Spacing.xs,
+  },
   /*
     Both buttons share the row EVENLY (`flex: 1` on each), rather than each
     shrink-wrapping its own two words. Sized by their labels, "+ Set" and

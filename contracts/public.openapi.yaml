@@ -4238,6 +4238,58 @@ components:
             be noise. A client that ignores this field sees exactly the
             recommendation it always has — this never rewrites
             `target_weight_kg` or `target_reps`.
+        warmup:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/WarmupStep" }
+          description: >
+            N495/#865 (phase 3 of #753) — a generated warm-up ramp, present
+            ONLY when `new_recommendation_engine` is enabled for the caller
+            AND `target_weight_kg` above is non-null. Absent (or an empty
+            list is never sent; this is omitted entirely) whenever the
+            working target is unknown — #753's own rule, "no automatic
+            warm-up when the working target is unknown" — and always absent
+            under the legacy engine, matching every other v2-only field on
+            this object.
+
+
+            Every step is a PERCENTAGE of `target_weight_kg`, never an
+            absolute weight — this is a configurable starting policy, not
+            one fixed universal ramp, so the same shape of response scales
+            to a 60 kg press and a 200 kg squat alike.
+
+    WarmupStep:
+      type: object
+      description: >
+        One rung of a generated warm-up ramp (N495/#865) — see `Suggestion.warmup`.
+      required: [label, percent_of_work, weight_kg, rep_min, rep_max]
+      properties:
+        label:
+          type: string
+          description: >
+            A human-readable name for this rung ("technique", "light",
+            "moderate", "heavy"). Never parsed — branch on position in the
+            array if you need to, not on this string.
+          example: moderate
+        percent_of_work:
+          type: number
+          description: >
+            The fraction of `target_weight_kg` this rung is loaded at
+            (e.g. `0.725` for 72.5%).
+        weight_kg:
+          type: number
+          description: >
+            `target_weight_kg * percent_of_work`, already rounded to the
+            athlete's real equipment increment/unit system — the same
+            rounding `target_weight_kg` itself already received.
+        rep_min:
+          type: integer
+        rep_max:
+          type: integer
+          description: >
+            Reps decrease as `percent_of_work` increases across the ramp —
+            a heavier rung never carries a wider rep window than a lighter
+            one before it.
 
     InSessionSignal:
       type: object
@@ -4282,7 +4334,8 @@ components:
       description: >
         The derived working-volume summary, computed server-side so both
         clients report identical numbers rather than each rolling their own
-        arithmetic. Warm-up and uncompleted sets are excluded throughout.
+        arithmetic. Warm-up and uncompleted sets are excluded from the
+        WORKING fields throughout.
 
 
         TWO RULES, differing by one clause. `working_sets` counts what the
@@ -4290,7 +4343,17 @@ components:
         185x8 is one approach to the bar, so it is one set with a drop off it.
         `total_reps` and `tonnage_kg` DO include that drop, because the reps
         were performed and the load was moved.
-      required: [working_sets, total_reps, tonnage_kg, hardest_rpe, exercise_ids]
+
+
+        N495/#865 (phase 3 of #753): a completed warm-up set's own reps and
+        tonnage are not discarded — they land on `warmup_sets`/`warmup_reps`/
+        `warmup_tonnage_kg` below, tracked SEPARATELY so auditing preparatory
+        fatigue has a real number, without ever inflating the working totals
+        above. A set moves from the warm-up fields to the working ones only
+        when the athlete explicitly edits its own `set_type` — never
+        automatically, and never as a side effect of any suggestion or flag.
+      required: [working_sets, total_reps, tonnage_kg, hardest_rpe, exercise_ids,
+                 warmup_sets, warmup_reps, warmup_tonnage_kg]
       properties:
         working_sets: { type: integer }
         total_reps: { type: integer }
@@ -4315,6 +4378,17 @@ components:
         exercise_ids:
           type: array
           items: { type: string }
+        warmup_sets:
+          type: integer
+          description: >
+            Completed warm-up sets — the warm-up-side mirror of
+            `working_sets`, counted separately rather than folded in.
+        warmup_reps:
+          type: integer
+          description: The warm-up-side mirror of `total_reps`.
+        warmup_tonnage_kg:
+          type: number
+          description: The warm-up-side mirror of `tonnage_kg`.
 
     SessionPage:
       type: object

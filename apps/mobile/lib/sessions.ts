@@ -435,6 +435,29 @@ export type Suggestion = {
    * `target_reps` above say — see the type's own doc comment.
    */
   in_session_signal: InSessionSignal | null;
+
+  /**
+   * N495/#865 (phase 3 of #753) — a generated warm-up ramp, present only
+   * behind `new_recommendation_engine` and only once `target_weight_kg`
+   * above is non-null (see `backend/internal/modules/session/warmup.go`'s
+   * `GenerateWarmupRamp`). `undefined`/absent on an older server, or under
+   * `not_applicable`/`no_history`/`abstain`/`effort_conflict` — every code
+   * that carries no numeric target.
+   */
+  warmup?: WarmupStep[];
+};
+
+/**
+ * One rung of a generated warm-up ramp — see `Suggestion.warmup` and
+ * `lib/warmup.ts`, which is where a completed warm-up set is checked
+ * against this same prescription for #753's advisory fatigue flags.
+ */
+export type WarmupStep = {
+  label: string;
+  percent_of_work: number;
+  weight_kg: number;
+  rep_min: number;
+  rep_max: number;
 };
 
 export type Volume = {
@@ -443,6 +466,14 @@ export type Volume = {
   tonnage_kg: number;
   hardest_rpe: number;
   exercise_ids: string[];
+  /**
+   * N495/#865 — the warm-up-side mirror of `working_sets`/`total_reps`/
+   * `tonnage_kg`, tracked separately rather than discarded. See
+   * `localVolume`'s own doc comment.
+   */
+  warmup_sets: number;
+  warmup_reps: number;
+  warmup_tonnage_kg: number;
 };
 
 /**
@@ -1884,9 +1915,30 @@ export function localVolume(sets: LoggedSet[]): Volume {
     tonnage_kg: 0,
     hardest_rpe: 0,
     exercise_ids: [],
+    warmup_sets: 0,
+    warmup_reps: 0,
+    warmup_tonnage_kg: 0,
   };
   for (const s of sets) {
     if (!v.exercise_ids.includes(s.exercise_id)) v.exercise_ids.push(s.exercise_id);
+
+    // N495/#865: a completed warm-up set's own reps/tonnage are not simply
+    // discarded — they land on the SEPARATE warmup_* fields, mirroring the
+    // server's `Summarise` exactly. Still excluded from every WORKING total
+    // below, which `contributesVolume` already guards for every other
+    // (non-warm-up) case.
+    if (s.completed && s.set_type === 'warmup') {
+      if (s.reps != null) {
+        v.warmup_sets++;
+        v.warmup_reps += s.reps;
+        if (s.weight_kg != null) {
+          const total = totalWeightKg(s);
+          if (total != null) v.warmup_tonnage_kg += s.reps * total;
+        }
+      }
+      continue;
+    }
+
     // Must match the server's rule exactly. Missing this on the first pass
     // showed the plan's full volume against a column of unticked sets —
     // precisely the drift this duplicated arithmetic risks.
