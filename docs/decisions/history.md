@@ -59733,6 +59733,151 @@ existing "Lint" step's own JSON output — a real, but non-blocking,
 optimization for later if mobile lint time becomes a bottleneck.
 
 
+## 2026-09-06 — N134/#538: Clerk `azp` (authorized-party) validation, now that three frontends share the instance
+
+`internal/platform/auth/auth.go`'s `Verify` used to say outright that it
+skipped the `azp` claim — "revisit before there's more than one trusted
+origin" — and the repo has had mobile, web, and admin on the same Clerk
+instance for a while now. A token minted for one of those (or for anything
+else that could obtain a signed Clerk session token) was accepted here on
+signature/issuer/expiry/subject alone; nothing checked *which app* it was
+meant for. Milestone A / production-safety, priority critical.
+
+**The allowlist.** `CLERK_AUTHORIZED_PARTIES` — comma-separated, same
+convention as `WEB_ORIGIN` and `ADMIN_USER_IDS`, both already env-configured
+allowlists in this exact file. `NewVerifier` now takes it as a fourth
+parameter and stores it as a `map[string]bool` on `Verifier`, mirroring how
+`adminUserIDs` is already stored and trimmed. **Unset/empty allowlist is a
+supported no-op state** — azp checking simply doesn't run — because that's
+the local-dev status quo today (nobody sets this on a laptop) and this
+change must not silently start requiring it there.
+
+**The four claim states, in `(*Verifier).authorizedParty`:**
+
+1. **No allowlist configured** → no-op, regardless of the token's azp. The
+   local-dev case.
+2. **azp absent** → ALLOWED. See below.
+3. **azp present, not in the allowlist** → rejected.
+4. **azp present but not a string** (a malformed/hand-crafted token) →
+   rejected, same as case 3 — fail closed rather than treating "couldn't
+   parse it" as equivalent to "wasn't sent."
+
+**The absent-claim decision, and what backs it.** The ticket flagged this as
+the genuinely ambiguous case and asked for a decision, not a guess. This
+session does have live network access (unlike the sandboxed "no internet"
+default this kind of task usually runs under), so this was checked against
+Clerk's own docs rather than left as pure inference:
+per `docs/backend-requests/resources/session-tokens` (Clerk docs, fetched
+2026-09-06), `azp` is populated from *"the Origin header that was included in
+the original Frontend API request,"* and is explicitly documented as
+omittable when *"Origin is empty or null."* `Origin` is a browser-only HTTP
+header. A native request from `apps/mobile` (as opposed to the Expo *web*
+preview, which is a browser and does send one) has no Origin header for
+Clerk to have captured at token-issuance time, so it should fall into
+exactly the "omitted" case Clerk documents.
+
+That is a well-grounded inference from Clerk's documented mechanism, **not**
+a measurement against an actual token minted live by this app's own mobile
+client — that specific check (mint a real session on a physical/simulator
+install of `apps/mobile`, decode the JWT, confirm `azp` is absent) was not
+done in this session and is exactly the kind of `NEEDS HUMAN EVIDENCE`
+criterion `ac-verifier` should flag rather than wave through. Documented as
+such in the code (`authorizedParty`'s doc comment) and repeated here so it
+doesn't get read as settled fact from either location alone.
+
+Given that, absent-is-allowed was the only defensible default: rejecting it
+would mean this product's own mobile client goes down, silently and totally,
+the moment `CLERK_AUTHORIZED_PARTIES` is first configured in a real
+deployment — a worse failure than the bounded risk being accepted. That risk
+is bounded because the threat `azp` validation exists to catch — a token
+minted for a *different web origin* replayed against this API — requires an
+origin to spoof one from; a native client has none, and a browser-issued
+token still carries its real azp regardless of this carve-out (Clerk stamps
+it at issuance, before this code ever runs). This is a fixed policy decision
+about what `azp` can mean on this product's tokens, not a per-deployment
+config knob — there's no separate flag gating case 2, only the allowlist
+gating whether the check runs at all (case 1).
+
+**The boot-fail condition.** `CLERK_REQUIRE_AZP=true` (exact string
+match) — a *second*, deliberately separate env var from the allowlist
+itself. If set and `CLERK_AUTHORIZED_PARTIES` has no non-empty entries at
+boot, `cmd/api/main.go` logs and `os.Exit(1)`s before the server starts,
+matching this file's existing pattern for `CLERK_ISSUER` and `DATABASE_URL`
+(required, no default, fail loud). Why a separate flag rather than inferring
+"this needs it" from something environmental: **this codebase has no
+existing notion of "local dev vs. a real deployment" inside the Go binary
+at all** — `WEB_ORIGIN`, `ADMIN_USER_IDS`, and now `CLERK_AUTHORIZED_PARTIES`
+are all just env vars Railway happens to inject differently per environment;
+nothing in `main.go` branches on which environment it's in. Inventing that
+distinction implicitly, just for this one flag, risked exactly the failure
+mode this rule's own design guidance warned against: local dev suddenly
+requiring a var it never needed before, with no clear signal that it had
+started to. An explicit, opt-in flag means the fail-closed guarantee is
+live only once somebody deliberately turns it on — which is also, correctly,
+**not yet done**: Railway's staging/production dashboards don't currently
+set either new var, so today this ships the *mechanism* without yet forcing
+its use anywhere. Turning `CLERK_REQUIRE_AZP=true` on in Railway once
+`CLERK_AUTHORIZED_PARTIES` is populated there is the deliberate follow-up
+this leaves open — see below.
+
+**Never-leak.** The azp check doesn't write a response or log anything
+itself — `authorizedParty` just returns an `error`, and `Verify` returns it
+up through the exact same path every other verification failure already
+takes. `RequireAuth`'s existing handling was already correct for this: the
+client always gets the fixed string `"invalid token"` / `unauthorized`
+regardless of *why* `Verify` failed, while the real reason — including the
+rejected `azp` value — reaches only `httplog.Warn(..., "err", err)`,
+server-side. No new leak-prevention code was needed; reusing the chokepoint
+was the point. Checked at the HTTP boundary too, not just on
+`authorizedParty` directly: `TestRequireAuthRejectsDisallowedAzpWithoutLeakingTheAllowlist`
+asserts the response body contains neither the rejected origin, the
+allowlisted one, nor the string `"azp"`.
+
+**Tests** (`internal/platform/auth/azp_test.go`, alongside the existing
+`limiter_test.go`'s fake-JWKS pattern — no live Clerk instance needed):
+allowed party, disallowed party, absent claim, malformed claim, plus a
+"no allowlist configured" no-op case and the end-to-end leak-check above.
+**Mutation-tested**: `authorizedParty` temporarily replaced with an
+unconditional `return nil` (the guard "disabled") —
+`TestAuthorizedPartyDisallowed`, `TestAuthorizedPartyMalformedIsRejected`,
+and the end-to-end leak test all went red, exactly the three that should
+catch a disabled check; the other tests (allowed, absent, no-allowlist)
+correctly stayed green, since a disabled check accepts everything those
+already expected to pass. Restored, re-ran with `-count=1` (not cached),
+full suite green again. Separately, the boot-fail gate itself was run for
+real rather than only reasoned about: a built binary with
+`CLERK_REQUIRE_AZP=true` and `CLERK_AUTHORIZED_PARTIES` unset exited 1
+immediately with a clear log line and no server start; the same binary with
+the allowlist set got past that gate and failed later, normally, on
+`DATABASE_URL` — confirming the gate is scoped to exactly the one condition
+it's meant to catch, not a general startup failure.
+
+**Left open / follow-up**, named rather than silently deferred:
+
+- `CLERK_REQUIRE_AZP=true` and a real `CLERK_AUTHORIZED_PARTIES` value are
+  **not yet set in Railway's staging/production dashboards** — this PR ships
+  the mechanism and the env-var contract, not the ops step of turning
+  enforcement on for the deployed API. Until that's done by hand in the
+  dashboard, staging/production behave exactly as before (azp unchecked),
+  which is the same "supported, not configured yet" state as local dev.
+- The absent-claim assumption (native `apps/mobile` tokens omit `azp`) is
+  grounded in Clerk's documented mechanism but was not verified against an
+  actual token minted by this app's own mobile client. Worth a `NEEDS HUMAN
+  EVIDENCE`-style check before or shortly after `CLERK_REQUIRE_AZP` is
+  turned on anywhere real: decode a session token from a live
+  `apps/mobile` install and confirm it has no `azp`, so the mobile-outage
+  risk this design accepts is actually zero rather than merely well-argued.
+- The allowlist's *entries* — what `apps/web` and `apps/admin`'s production
+  origins will actually be — don't exist yet either (Railway's `web`/`admin`
+  services are still "in progress" per this file's own known-gotchas
+  section); `CLERK_AUTHORIZED_PARTIES` can't be populated for real until
+  those origins are.
+
+**Functional scenarios**: added — a disallowed `azp` now produces new,
+observable API behavior (401/`unauthorized` on an otherwise-valid token) that
+wasn't reachable before this change.
+
+
 ## Open items / known gaps as of this entry
 
 
