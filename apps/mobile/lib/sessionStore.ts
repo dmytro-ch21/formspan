@@ -452,6 +452,30 @@ export async function trainingSince(
  * passes `SESSION_BACKFILL_FLOOR_DAYS` here; optional (default: no floor)
  * only so the existing fixture tests that call this with two arguments stay
  * meaningful — every production caller supplies it.
+ *
+ * **No longer excludes a session with ANY ledger row (N511/#893) — only one
+ * whose ledger row is TERMINAL (`hr_source = 'window'`).** It used to
+ * exclude on mere existence (`LEFT JOIN ... WHERE b.session_id IS NULL`),
+ * which is what made ANY attempt — including one that found zero samples
+ * because the Watch hadn't synced yet — permanently final.
+ *
+ * This is a SQL-level pre-filter, not the full retry decision — the finer
+ * cooldown timing (`RETRY_COOLDOWN_HOURS`/`RETRY_WINDOW_DAYS`) still lives in
+ * `biometricSync.ts`'s `syncSessionWindows`, via `lib/biometric.ts`'s shared
+ * `needsEnrichmentAttempt`. What this SQL filter is for is `limit`'s budget:
+ * an early version of this fix dropped the ledger check from SQL entirely,
+ * returning every finished session in the backfill window regardless of
+ * state and letting `needsEnrichmentAttempt` filter them all in memory —
+ * which is correct in isolation, but wrong combined with `limit`: an athlete
+ * with more than `limit` finished sessions in the 180-day floor could have
+ * every one of that oldest-`limit` slice already sitting at `'window'`
+ * (fully enriched), so the query would return `limit` sessions, ALL get
+ * filtered out by `needsEnrichmentAttempt`, and a genuinely-pending recent
+ * session sorted past position `limit` would never even reach this
+ * function's result — starving the pass regardless of how many times it
+ * runs. Excluding `'window'` rows here keeps `limit` spent only on sessions
+ * that could still need an attempt (no ledger row, or `'none'`), matching
+ * what `MAX_SESSIONS_PER_PASS`'s own doc comment already assumes it bounds.
  */
 export async function sessionsNeedingBiometricSync(
   userID: string,
@@ -466,7 +490,7 @@ export async function sessionsNeedingBiometricSync(
       WHERE s.user_id = ?
         AND s.deleted_at IS NULL
         AND s.ended_at IS NOT NULL
-        AND b.session_id IS NULL
+        AND (b.session_id IS NULL OR b.hr_source != 'window')
         AND (? IS NULL OR s.ended_at >= ?)
       ORDER BY s.ended_at ASC
       LIMIT ?`,

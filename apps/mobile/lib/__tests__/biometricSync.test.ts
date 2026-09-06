@@ -47,7 +47,15 @@ jest.mock('../profile', () => ({
 }));
 
 const mockPutSamples = jest.fn().mockResolvedValue({ samples: [] });
-const mockComputeMetrics = jest.fn().mockResolvedValue({ metrics: {} });
+// Resolves to a FLAT SessionMetrics-shaped object — what the real
+// `computeSessionMetrics` actually resolves to (`res.metrics`, already
+// unwrapped) — not `{ metrics: {...} }`. The old `{ metrics: {} }` default
+// had this wrong for as long as nothing here read the return value; N511's
+// fix reads `metrics.hr_source`, which exposed it. Dynamic rather than a
+// fixed value: derived from `mockHRSamples` at call time, so it reflects
+// realistic server behavior (real samples uploaded -> 'window', none ->
+// 'none') without every test having to set it by hand.
+const mockComputeMetrics = jest.fn();
 jest.mock('../biometric', () => {
   const real = jest.requireActual('../biometric');
   return {
@@ -82,7 +90,12 @@ beforeEach(async () => {
   mockPutSamples.mockClear();
   mockComputeMetrics.mockClear();
   mockPutSamples.mockResolvedValue({ samples: [] });
-  mockComputeMetrics.mockResolvedValue({ metrics: {} });
+  mockComputeMetrics.mockImplementation(() =>
+    Promise.resolve({
+      hr_source: mockHRSamples.length > 0 ? 'window' : 'none',
+      sample_count: mockHRSamples.length,
+    }),
+  );
   await writeHealthKitImportEnabled(USER, true);
 });
 
@@ -138,6 +151,12 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     expect(hrMaxSource).toBe('estimated');
     expect(hrSource).toBe('window');
 
+    // N511/#893: a TERMINAL ('window') session IS excluded at the SQL
+    // layer — see sessionsNeedingBiometricSync's own doc comment on why
+    // that specific exclusion (not "any ledger row") is what keeps a small
+    // `limit` from being starved by old, already-enriched sessions. Back to
+    // `[]` here, same as before this ticket — only a `'none'` result is now
+    // retryable, not every ledger row.
     expect(await sessionsNeedingBiometricSync(USER, 10)).toEqual([]);
   });
 
@@ -153,6 +172,76 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
     const [, , , , hrSource] = mockComputeMetrics.mock.calls[0];
     expect(hrSource).toBe('window');
+  });
+
+  it("N511/#893: does NOT retry a zero-sample session again within the retry cooldown", async () => {
+    // A recent session, not the fixed 2026-09-01 default other tests in
+    // this file use — `needsEnrichmentAttempt`'s RETRY_WINDOW_DAYS check
+    // needs this session's `ended_at` to be recent relative to REAL
+    // `Date.now()` (this test does not mock the clock), or the retry-window
+    // check rejects it before the cooldown check ever runs.
+    const recentEnd = new Date(Date.now() - 60 * 60 * 1000);
+    const recentStart = new Date(recentEnd.getTime() - 30 * 60 * 1000);
+    mockHRSamples = [];
+    await finishedSession({ started_at: recentStart.toISOString(), ended_at: recentEnd.toISOString() });
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+
+    // The Watch data has since arrived, but the very next pass — moments
+    // later — is still inside RETRY_COOLDOWN_HOURS.
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+    mockHRSamples = [hrSample()];
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockComputeMetrics).not.toHaveBeenCalled();
+    expect(mockPutSamples).not.toHaveBeenCalled();
+  });
+
+  it('N511/#893: retries a zero-sample session once the retry cooldown has elapsed, and this time finds real data', async () => {
+    // Same reasoning as the cooldown test above — a recent session, not the
+    // fixed 2026-09-01 default, so RETRY_WINDOW_DAYS does not itself reject
+    // it before the cooldown check gets a chance to run.
+    const recentEnd = new Date(Date.now() - 60 * 60 * 1000);
+    const recentStart = new Date(recentEnd.getTime() - 30 * 60 * 1000);
+    mockHRSamples = [];
+    const session = await finishedSession({
+      started_at: recentStart.toISOString(),
+      ended_at: recentEnd.toISOString(),
+    });
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+
+    // Simulate RETRY_COOLDOWN_HOURS (12h) having elapsed by backdating the
+    // ledger row directly — this is the real `biometric_hr_synced` table
+    // migrated by the same fixture, not a mock.
+    await mockFixture.runAsync(
+      `UPDATE biometric_hr_synced SET attempted_at = ? WHERE user_id = ? AND session_id = ?`,
+      new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+      USER,
+      session.id,
+    );
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+    mockHRSamples = [hrSample()]; // the Watch has now synced its data
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+
+    // And a THIRD pass does not re-offer it again — this attempt's result
+    // was 'window', which is terminal regardless of cooldown.
+    mockComputeMetrics.mockClear();
+    await mockFixture.runAsync(
+      `UPDATE biometric_hr_synced SET attempted_at = ? WHERE user_id = ? AND session_id = ?`,
+      new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+      USER,
+      session.id,
+    );
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).not.toHaveBeenCalled();
   });
 
   it('a session still in progress (no ended_at) is never offered', async () => {
@@ -205,6 +294,45 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     await syncBiometricEnrichment(USER, getToken);
 
     expect(await sessionsNeedingBiometricSync('another_user', 10)).toHaveLength(0);
+  });
+});
+
+describe('sessionsNeedingBiometricSync — SQL-level ledger exclusion (N511/#893)', () => {
+  it("excludes a TERMINAL ('window') session from the LIMIT budget, so a small limit still reaches a newer, genuinely pending session", async () => {
+    // Two older sessions, already fully enriched to 'window' — a first
+    // version of this fix dropped the ledger check from this SQL query
+    // entirely, returning every finished session regardless of ledger state
+    // and relying only on the in-memory needsEnrichmentAttempt filter. That
+    // is correct in isolation but wrong combined with a small `limit`: with
+    // limit=2 and both these older sessions still landing in the raw SQL
+    // result (oldest-first), the query's own LIMIT would exhaust its
+    // budget on two sessions that get filtered out afterward, and the
+    // pending session below — sorted past position 2 — would never even
+    // reach this function's result. See sessionsNeedingBiometricSync's own
+    // doc comment.
+    mockHRSamples = [hrSample()];
+    await finishedSession({ started_at: '2026-08-01T07:00:00.000Z', ended_at: '2026-08-01T07:30:00.000Z' });
+    await syncBiometricEnrichment(USER, getToken);
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+
+    await finishedSession({ started_at: '2026-08-02T07:00:00.000Z', ended_at: '2026-08-02T07:30:00.000Z' });
+    await syncBiometricEnrichment(USER, getToken);
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+
+    // A brand-new, still-pending session, more recent than both of the
+    // above (and than any date-of-birth-driven floor concern here).
+    const recentEnd = new Date(Date.now() - 60 * 60 * 1000);
+    const recentStart = new Date(recentEnd.getTime() - 30 * 60 * 1000);
+    const pending = await finishedSession({
+      started_at: recentStart.toISOString(),
+      ended_at: recentEnd.toISOString(),
+    });
+
+    const candidates = await sessionsNeedingBiometricSync(USER, 2);
+
+    expect(candidates.map((c) => c.id)).toEqual([pending.id]);
   });
 });
 
