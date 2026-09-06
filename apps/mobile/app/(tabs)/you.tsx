@@ -3,17 +3,22 @@ import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { Avatar } from '@/components/Avatar';
 import { BjjRankHeader } from '@/components/BjjRankHeader';
 import { RoadmapSummary } from '@/components/RoadmapSummary';
 import { Text, View } from '@/components/Themed';
-import { Icon } from '@/components/ui/Icon';
+import { CardGlass } from '@/components/ui/CardGlass';
+import { Icon, type IconName } from '@/components/ui/Icon';
+import { Card, CARD_GLASS_COLORS } from '@/constants/Card';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { isHealthKitSupported } from '@/lib/healthkit';
 import { playSound } from '@/lib/sounds';
-import { anyArrived, getPendingCounts } from '@/lib/friends';
+import { anyArrived, getPendingCounts, listFriends } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -69,6 +74,48 @@ import { useAuthToken } from '@/lib/useAuthToken';
  *   and no device or data-source integration exists yet. A section header above
  *   a row that goes nowhere is a state that cannot be constructed, dressed as
  *   navigation.
+ *
+ * ## N509 (2026-09-05): a header, and a pill/card grid over the same rows
+ *
+ * The reference (Hevy's Profile tab) asked for three things this screen did
+ * not have: a photo, a friends count next to it, and its destinations grouped
+ * into a dense icon-labelled grid rather than a full-bleed vertical list. None
+ * of that reopens N178 or N181 above — this is a LAYOUT pass over the same
+ * sections and the same destinations, not a new set of them:
+ *
+ * - **The masthead grows an `Avatar` and a friends entry point.** `Avatar`
+ *   already existed (N12/N205) and needed no new upload plumbing — it reads
+ *   `profile.avatar_url`, exactly as `app/profile/edit.tsx` does. The friends
+ *   count is a FOURTH independent fetch chain, following the same silent-
+ *   degradation rule as the phase chain below it: a dead spot must not tell an
+ *   athlete their friend list emptied, so a failed read leaves the last known
+ *   count on screen. It links to `/friends` — the actual list, not `/social`
+ *   (the Social row below still points there) — because "friends count" on a
+ *   masthead is a request to see WHO, and Social's pane is a feed of what they
+ *   did.
+ * - **`Born` moved out of its own row and into a caption under the name.** It
+ *   was already the one inert fact in that card (see the note below, kept for
+ *   the history); with Sports and Phase now pills in their own right, a card
+ *   holding one inert field and nothing else was furniture.
+ * - **Every destination that was a `NavRow` still IS a `NavRow`** — same
+ *   props, same testID, same `accessibilityLabel`/`accessibilityHint`/badge
+ *   contract — with one addition, an `icon`, and a grid container around
+ *   groups of them instead of a vertical `gap`. `NavValueRow` (Sports, Phase)
+ *   is the same trade: the value that used to sit at the end of a row is now
+ *   the pill's own caption line, still visible, still the answer rather than
+ *   a link to one. Every property a test in `youScreen.test.tsx` pins about
+ *   these rows — a hint that must not borrow another row's words, a badge
+ *   that must not zero on a failed read, a press that must land on the right
+ *   route — is a property of the DATA these rows carry, not of whether they
+ *   are drawn 335pt wide or 157pt wide. That is why the redesign could keep
+ *   every one of those tests passing unchanged.
+ * - **No stats moved back onto this screen.** The reference's grid holds
+ *   Statistics/Exercises/Measures/Calendar — this screen's honest equivalent
+ *   is Sports, Phase, Library, Edit profile and VO2max (where supported): the
+ *   destinations and facts already living here, not a second copy of what
+ *   N178 put on Progress. Re-reading "A Goals & Records section" above: that
+ *   refusal stands. A pill grid is a LAYOUT, and a layout is not an exemption
+ *   from the W2/W4 rule against two surfaces answering one question.
  *
  * ## Every destination is a ROW, never a header control
  *
@@ -128,6 +175,16 @@ export default function YouScreen() {
   */
   const [phase, setPhase] = useState<Phase | null>(null);
   const [phaseAnswered, setPhaseAnswered] = useState(false);
+  /*
+    The friend count behind the header's entry point into `/friends` (N509).
+
+    Same two-piece shape as `phase`/`phaseAnswered` above, and for the same
+    reason: `null` alone cannot tell "we have not asked yet" from "you have
+    zero friends", and a dead spot must not tell an athlete their friend list
+    emptied. Only ever set by a successful read; a failure leaves both alone.
+  */
+  const [friendCount, setFriendCount] = useState<number | null>(null);
+  const [friendCountAnswered, setFriendCountAnswered] = useState(false);
   /*
     The last counts we actually saw, so a rise can be told from a first look.
 
@@ -230,9 +287,27 @@ export default function YouScreen() {
           // that it ended.
         });
 
+      // A FOURTH independent chain — the friend count behind the header's
+      // entry point into `/friends` (N509). Independent for the same reason
+      // the phase chain is: this fetch is slow, online-only, and nothing else
+      // on this screen should wait on it.
+      let friendsAlive = true;
+      listFriends(getToken)
+        .then((list) => {
+          if (!friendsAlive) return;
+          setFriendCount(list.length);
+          setFriendCountAnswered(true);
+        })
+        .catch(() => {
+          // Silent, and deliberately does not reset the count — see the
+          // phase chain's comment just above for why a dead spot must not
+          // assert a fact about the athlete.
+        });
+
       return () => {
         counting.abort();
         alive = false;
+        friendsAlive = false;
       };
     }, [getToken]),
   );
@@ -285,21 +360,73 @@ export default function YouScreen() {
           </Text>
         ) : (
           <>
-            {/* The name leads (N181 device pass, #586) — the athlete's own
-                name is more identity than a rank is, and "who am I" has to
-                read as a name first, a rank second. It shipped belt-first
-                instead, which the user caught on a real screenshot: *"I think
-                its better to place the name on top."* This is also the
-                identity section's anchor for the order assertion below, and
-                the athlete's own name is the right thing to anchor it on: it
-                is the one element of this section that renders for every
-                account. */}
-            <Text style={styles.name} testID="you-section-identity">
-              {profile?.display_name || 'Add your name'}
-            </Text>
-            {!profile?.display_name && (
-              <Text style={styles.muted}>Tap Edit profile to tell VOLA who you are.</Text>
-            )}
+            {/* The masthead (N509): a photo, the name, and a friends entry
+                point — the header the reference asked for. The name still
+                leads (N181 device pass, #586) and still anchors the order
+                assertion below; the avatar and the friends pill are new
+                siblings around it, not a replacement for it. */}
+            <RNView style={styles.header}>
+              <Avatar
+                url={profile?.avatar_url}
+                // Same fallback chain `app/profile/edit.tsx` uses for its own
+                // avatar: the handle the monogram is keyed on, or an empty
+                // string (which `monogramFor` reads as "no handle yet" rather
+                // than crashing) for an account that has not claimed one.
+                handle={profile?.username ?? ''}
+                size={64}
+              />
+              <RNView style={styles.headerText}>
+                {/* This is also the identity section's anchor for the order
+                    assertion below, and the athlete's own name is the right
+                    thing to anchor it on: it is the one element of this
+                    section that renders for every account. */}
+                <Text style={styles.name} testID="you-section-identity">
+                  {profile?.display_name || 'Add your name'}
+                </Text>
+                {!profile?.display_name && (
+                  <Text style={styles.muted}>Tap Edit profile to tell VOLA who you are.</Text>
+                )}
+                {/* The handle, and the date of birth that used to be its own
+                    inert row in the card below — see this file's N509 doc
+                    section for why it moved here rather than staying a row
+                    with nothing else in its card. Both are captions, never
+                    controls: a date of birth explains nothing that is
+                    missing elsewhere in the app, and the handle is changed
+                    from Edit profile, not from here. */}
+                {profile?.username && (
+                  <Text style={styles.handle}>@{profile.username}</Text>
+                )}
+                {profile?.date_of_birth && (
+                  <Text style={styles.handle}>Born {profile.date_of_birth}</Text>
+                )}
+              </RNView>
+            </RNView>
+
+            {/* The friends count — the reference's "Followers" figure, read
+                against this app's own social graph. Links straight to
+                `/friends` (the list itself), not `/social` (the Social row
+                below, which is a feed of what partners have been doing): a
+                count beside a face is a request to see WHO, not what they
+                did. */}
+            <Pressable
+              onPress={() => router.push('/friends')}
+              style={({ pressed }) => [styles.friendsChip, pressed && styles.pillPressed]}
+              // The chip itself renders under 30pt tall — `hitSlop` brings its
+              // tap target up toward the 44pt floor this app uses elsewhere
+              // for a small pressable (see `index.tsx`'s `dismiss` control).
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Friends"
+              accessibilityValue={{ text: friendCountLabel(friendCount, friendCountAnswered) }}
+              accessibilityHint="Opens your friends list"
+              testID="you-friends"
+            >
+              <Icon name="profile" size={14} color={vola.textMuted} />
+              <Text style={styles.friendsChipText}>
+                {friendCountLabel(friendCount, friendCountAnswered)}
+              </Text>
+              <Icon name="chevron" size={11} color={vola.textDim} />
+            </Pressable>
 
             {/* The belt follows the name for a ranked grappler — see
                 BjjRankHeader for why it is a masthead rather than a card. It
@@ -322,33 +449,27 @@ export default function YouScreen() {
                 consistency grid, the streak, the week bars and every record
                 row render on Progress exactly as they did here. */}
 
-            {/* The three facts about this athlete that the app REASONS OVER —
-                which sports are on, which phase is live, when they were born —
-                shown as answers rather than as links to answers.
+            {/* The pill/card grid (N509) — the reference's "Dashboard": every
+                destination this identity section already carried, grouped
+                two-per-row instead of stacked full-width. Every pill below
+                keeps the EXACT accessibility contract its row-shaped
+                predecessor had (see this file's N509 doc section) — only the
+                container and an `icon` are new.
 
-                Sports and Phase each navigate to where their own fact is
-                changed, which is what N61 established for Sports and is the
-                same argument for Phase: a value the athlete can see and cannot
-                act on is how "the app does not have this" gets mistaken for
-                "this is turned off".
+                Sports and Phase are the same two facts the old card held —
+                "which sports are on, which phase is live" — still shown as
+                ANSWERS (the pill's own caption line), not just as links to
+                answers; that argument (N61 for Sports, N181 for Phase) is
+                unchanged by the layout. Born no longer sits beside them; it
+                reads as a caption under the name in the masthead above, since
+                a card holding one inert field and nothing else was furniture
+                once its two siblings became pills.
 
-                BORN IS DELIBERATELY INERT, and the asymmetry is worth stating
-                because the paragraph above reads like a rule. N61's argument is
-                about a value that EXPLAINS AN ABSENCE elsewhere in the app —
-                Sports says why the roadmaps are missing, Phase says why a
-                calorie target has no direction. A date of birth explains
-                nothing that is missing; it is a fact, and the row directly
-                below this card changes it. Making it a control would be
-                consistency for its own sake, and the row would then be the
-                third thing on this card pointing at `/profile/edit`.
-
-                `Units` is NOT here any more. It was an inert row displaying a
-                preference, sitting one tap above a Settings row whose detail
-                line already names units — two surfaces for one fact, only one
-                of which could change it. Settings › Preferences › Units is the
-                single home now. */}
-            <View style={styles.card}>
+                `Units` is still NOT here. Settings › Preferences › Units
+                remains the single home for it. */}
+            <RNView style={styles.grid}>
               <NavValueRow
+                icon="workout"
                 label="Sports"
                 value={
                   enabledLabels === null
@@ -368,24 +489,94 @@ export default function YouScreen() {
                   said which one was running — so the one fact it existed to
                   carry was the one thing it did not show. */}
               <NavValueRow
+                icon="calendar"
                 label="Phase"
                 value={phaseValue(phase, phaseAnswered)}
                 onPress={() => router.push('/phase')}
                 hint="Start, change or end a training phase"
                 testID="you-phase"
               />
-              {profile?.date_of_birth && <Row label="Born" value={profile.date_of_birth} />}
-            </View>
-            {/* Directly under the facts it changes, which is the distinction
-                the old header pair was making and is easier to see here: Edit
-                alters facts about YOU that the app reasons over, Settings
-                alters how the app BEHAVES. */}
-            <NavRow
-              label="Edit profile"
-              detail="Your name, sports and date of birth"
-              onPress={() => router.push('/profile/edit')}
-              testID="you-edit"
-            />
+              {/* Directly beside the facts it changes, which is the
+                  distinction the old header pair was making and is easier to
+                  see here: Edit alters facts about YOU that the app reasons
+                  over, Settings alters how the app BEHAVES. */}
+              <NavRow
+                icon="pencil"
+                label="Edit profile"
+                detail="Your name, sports and date of birth"
+                onPress={() => router.push('/profile/edit')}
+                testID="you-edit"
+              />
+
+              {/* Your VO2max trend (N477/#822) — a device-read cardio-fitness
+                  estimate, per design doc §3: "read, never computed... show it
+                  as a trend on the athlete's profile; do not attach it to a
+                  session." That is why it lives in the IDENTITY block rather
+                  than on Progress: it is a fact ABOUT the athlete rather than
+                  a verdict on whether training is working, which is the line
+                  N178 already drew for the roadmap below.
+
+                  GATED on `isHealthKitSupported()`, unlike Library below —
+                  unlike a catalog that always exists, there is genuinely
+                  nothing to show on a build with no HealthKit module linked in
+                  (Android today; any iOS build predating this ticket), and a
+                  pill that always opens to "not available on this device" would
+                  be the same "cannot tell not-enabled from not-built" trap N61
+                  found for a DIFFERENT reason. Reading from Health itself is a
+                  further gate the trend screen states in words rather than
+                  hiding the pill over, matching `you-sports`'/`you-phase`'s own
+                  "explain yourself, don't disappear" rule. */}
+              {isHealthKitSupported() && (
+                <NavRow
+                  icon="heart"
+                  label="VO2max"
+                  detail="Your cardio fitness trend, read from Apple Health"
+                  onPress={() => router.push('/vo2max/trend')}
+                  testID="you-vo2max"
+                />
+              )}
+
+              {/* The position map used to be a row here and is on Progress now
+                  (N178, #583) — "where you score and where you get stuck" is a
+                  page of numbers you sit with after a hard week, which is that
+                  tab's question rather than this one's. Moved, not copied.
+
+                  `Sequences` used to be a row here too and is in the LIBRARY now
+                  (N181, #586) — moved, not copied, and asserted from both sides
+                  the way N178's move is. The chains an athlete captured are
+                  knowledge, and the Library is where this app keeps knowledge:
+                  the round map, the belt syllabuses and the position glossary are
+                  already there. The pill below is now the only thing standing
+                  between this screen and all of it. */}
+
+              {/* The catalog, which used to be a tab of its own.
+
+                  Moved here on the user's own call — "library is what we dont
+                  need a dedicated view and we can simply move to my profile and
+                  be able to open from there library to explore". The tab bar is
+                  for what you check; a catalog is what you explore, and it was
+                  spending the app's most valuable fixed slot on something read
+                  occasionally and deliberately.
+
+                  DELIBERATELY NOT GATED, unlike the tab it replaces. That tab
+                  hid itself whenever no enabled discipline had a catalog, and
+                  N61 is the bill for exactly that habit: the user went looking
+                  for the belt roadmaps on a real phone, reported them missing,
+                  and they exist and work — an athlete cannot tell *not enabled*
+                  from *not built* from *broken*. A pill that is always here and
+                  explains itself when empty is the honest version, and it costs
+                  nothing now that it is not competing for a tab slot.
+
+                  See the Library screen's own empty state for the other half:
+                  naming the reason is what makes the absence readable. */}
+              <NavRow
+                icon="route"
+                label="Library"
+                detail="Techniques, exercises, belt roadmaps and your own chains"
+                onPress={() => router.push('/library')}
+                testID="you-library"
+              />
+            </RNView>
 
             {/* What you are LEARNING, which stayed here when the records left.
                 The line N178 drew: records and the consistency grid answer
@@ -395,74 +586,6 @@ export default function YouScreen() {
                 athlete on no roadmap with no focus, so a strength-only account
                 never sees an empty BJJ block. */}
             <RoadmapSummary />
-
-            {/* Your VO2max trend (N477/#822) — a device-read cardio-fitness
-                estimate, per design doc §3: "read, never computed... show it
-                as a trend on the athlete's profile; do not attach it to a
-                session." That is why it lives in the IDENTITY block, beside
-                what you're learning, rather than on Progress: it is a fact
-                ABOUT the athlete rather than a verdict on whether training is
-                working, which is the line N178 already drew for the roadmap
-                above.
-
-                GATED on `isHealthKitSupported()`, unlike Library below —
-                unlike a catalog that always exists, there is genuinely
-                nothing to show on a build with no HealthKit module linked in
-                (Android today; any iOS build predating this ticket), and a
-                row that always opens to "not available on this device" would
-                be the same "cannot tell not-enabled from not-built" trap N61
-                found for a DIFFERENT reason. Reading from Health itself is a
-                further gate the trend screen states in words rather than
-                hiding the row over, matching `you-sports`'/`you-phase`'s own
-                "explain yourself, don't disappear" rule. */}
-            {isHealthKitSupported() && (
-              <NavRow
-                label="VO2max"
-                detail="Your cardio fitness trend, read from Apple Health"
-                onPress={() => router.push('/vo2max/trend')}
-                testID="you-vo2max"
-              />
-            )}
-
-            {/* The position map used to be a row here and is on Progress now
-                (N178, #583) — "where you score and where you get stuck" is a
-                page of numbers you sit with after a hard week, which is that
-                tab's question rather than this one's. Moved, not copied.
-
-                `Sequences` used to be a row here too and is in the LIBRARY now
-                (N181, #586) — moved, not copied, and asserted from both sides
-                the way N178's move is. The chains an athlete captured are
-                knowledge, and the Library is where this app keeps knowledge:
-                the round map, the belt syllabuses and the position glossary are
-                already there. The row below is now the only thing standing
-                between this screen and all of it. */}
-
-            {/* The catalog, which used to be a tab of its own.
-
-                Moved here on the user's own call — "library is what we dont
-                need a dedicated view and we can simply move to my profile and
-                be able to open from there library to explore". The tab bar is
-                for what you check; a catalog is what you explore, and it was
-                spending the app's most valuable fixed slot on something read
-                occasionally and deliberately.
-
-                DELIBERATELY NOT GATED, unlike the tab it replaces. That tab
-                hid itself whenever no enabled discipline had a catalog, and
-                N61 is the bill for exactly that habit: the user went looking
-                for the belt roadmaps on a real phone, reported them missing,
-                and they exist and work — an athlete cannot tell *not enabled*
-                from *not built* from *broken*. A row that is always here and
-                explains itself when empty is the honest version, and it costs
-                nothing now that it is not competing for a tab slot.
-
-                See the Library screen's own empty state for the other half:
-                naming the reason is what makes the absence readable. */}
-            <NavRow
-              label="Library"
-              detail="Techniques, exercises, belt roadmaps and your own chains"
-              onPress={() => router.push('/library')}
-              testID="you-library"
-            />
 
             {/* Everything that involves another person, in one place.
 
@@ -477,32 +600,39 @@ export default function YouScreen() {
                 summing two counts into a single badge — and a badge that cannot
                 say WHICH source is waiting is the thing `anyArrived` compares
                 per source specifically to avoid. They are secondary here by
-                POSITION, which is what the ticket asked for. */}
+                POSITION, which is what the ticket asked for. Pill-grid layout
+                (N509) changes nothing about that: same two testIDs, same
+                badges, same press targets — a `styles.grid` container with two
+                children instead of a vertical `gap` with two children. */}
             <Text style={styles.sectionLabel} testID="you-section-people">
               People
             </Text>
-            {/* Social took the entry point over, exactly as planned — this
-                row changed its label, its detail line and its href, and
-                nothing else moved. Friend management still exists at
-                `/friends`; the Social screen carries a pane through to it. */}
-            <NavRow
-              label="Social"
-              detail="What your training partners have been doing"
-              badge={waiting.friend_requests}
-              onPress={() => router.push('/social')}
-              testID="you-social"
-            />
-            {/* The RECEIVE half of sharing, and the reason the Share button on
-                a plan is a whole feature rather than half of one: the social
-                graph lives on this phone, so being sent a plan you could only
-                answer on a laptop was the gap. */}
-            <NavRow
-              label="Sharing"
-              detail="What partners sent you, and what you sent them"
-              badge={waiting.shares}
-              onPress={() => router.push('/shared')}
-              testID="you-shared"
-            />
+            <RNView style={styles.grid}>
+              {/* Social took the entry point over, exactly as planned — this
+                  row changed its label, its detail line and its href, and
+                  nothing else moved. Friend management still exists at
+                  `/friends`; the Social screen carries a pane through to it. */}
+              <NavRow
+                icon="profile"
+                label="Social"
+                detail="What your training partners have been doing"
+                badge={waiting.friend_requests}
+                onPress={() => router.push('/social')}
+                testID="you-social"
+              />
+              {/* The RECEIVE half of sharing, and the reason the Share button on
+                  a plan is a whole feature rather than half of one: the social
+                  graph lives on this phone, so being sent a plan you could only
+                  answer on a laptop was the gap. */}
+              <NavRow
+                icon="notification"
+                label="Sharing"
+                detail="What partners sent you, and what you sent them"
+                badge={waiting.shares}
+                onPress={() => router.push('/shared')}
+                testID="you-shared"
+              />
+            </RNView>
 
             {/* How VOLA behaves — the screen's second question, and one row,
                 because `app/settings.tsx` already carries the whole of it:
@@ -511,16 +641,21 @@ export default function YouScreen() {
                 ticket's recommended `Settings` section lists units, training
                 settings, notifications, privacy and account; that screen IS
                 that section, and re-listing its contents here would be the
-                second surface all over again. */}
+                second surface all over again. A grid of one still gets the
+                same pill styling as every other destination on this screen —
+                consistency, not decoration for its own sake. */}
             <Text style={styles.sectionLabel} testID="you-section-app">
               App
             </Text>
-            <NavRow
-              label="Settings"
-              detail="Units, accent, privacy and how VOLA behaves"
-              onPress={() => router.push('/settings')}
-              testID="you-settings"
-            />
+            <RNView style={styles.grid}>
+              <NavRow
+                icon="settings"
+                label="Settings"
+                detail="Units, accent, privacy and how VOLA behaves"
+                onPress={() => router.push('/settings')}
+                testID="you-settings"
+              />
+            </RNView>
           </>
         )}
       </View>
@@ -528,40 +663,31 @@ export default function YouScreen() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
-    </View>
-  );
-}
-
 /**
- * A Row that is also a destination.
+ * A pill that is also a destination — Hevy's "Dashboard" cell, applied to a
+ * fact this app already reasoned over. The visual is new (N509); the contract
+ * is not.
  *
- * Exists for exactly one row — Sports — and the reason is N61. Every
- * module-gated surface in this app disappears silently when its discipline is
- * off: the belt roadmaps, the Plan tab's curricula strip, BJJ in the session
- * picker, and the Food and Goals TABS. The destination screens explain
- * themselves properly ("BJJ tracking is off, turn it back on under What you
- * train" — N471/#471 corrected this row's own quoted copy, which had drifted
- * to naming a "Sports" section that never existed). This row's OWN label and
- * hint still say "Sports" over a value that lists every enabled module,
- * nutrition included — the same category error, not fixed here: W17/#737.
- * — but nothing links to them while they are off, so the athlete never reaches
- * the screen that would say so. The user went looking for the belt roadmaps on
- * a real phone and reported them missing; they exist and work.
+ * Exists for exactly two callers — Sports and Phase — and the argument for
+ * each is N61 and N181 respectively. Every module-gated surface in this app
+ * disappears silently when its discipline is off: the belt roadmaps, the Plan
+ * tab's curricula strip, BJJ in the session picker, and the Food and Goals
+ * TABS. The destination screens explain themselves properly ("BJJ tracking is
+ * off, turn it back on under What you train" — N471/#471 corrected this row's
+ * own quoted copy, which had drifted to naming a "Sports" section that never
+ * existed). This pill's OWN label and hint still say "Sports" over a value
+ * that lists every enabled module, nutrition included — the same category
+ * error, not fixed here: W17/#737. — but nothing links to them while they are
+ * off, so the athlete never reaches the screen that would say so.
  *
- * This row already showed the answer — "Strength · Nutrition" — and was inert,
- * so it named the cause of every one of those absences while offering no way
- * to act on it. Making it navigate is the cheapest thing that turns "the app
- * does not have this" into "this is turned off", because it is the one place
- * that already tells you which disciplines are on.
+ * This pill already shows the answer — "Strength · Nutrition" — as its
+ * caption line, so it names the cause of every one of those absences while
+ * still offering a way to act on it. That is the whole point of it being a
+ * pressable rather than plain text.
  *
- * Deliberately NOT a `NavRow`: those are section destinations with a detail
- * line, and this belongs in the identity card beside Born. It keeps the row's
- * shape and gains a hit target.
+ * Deliberately NOT a `NavRow`: a `NavRow`'s label is the only thing it says
+ * about itself, spoken through `rowLabelFor`'s badge phrasing; this carries a
+ * VALUE as `accessibilityValue`, a different slot, for the reason below.
  *
  * N181 made it take its own `hint` and gave it a second caller — Phase — for
  * the same reason. The hint was hard-coded to "Opens your sport toggles" while
@@ -570,12 +696,14 @@ function Row({ label, value }: { label: string; value: string }) {
  * phase row opens their sport toggles.
  */
 function NavValueRow({
+  icon,
   label,
   value,
   onPress,
   hint,
   testID,
 }: {
+  icon: IconName;
   label: string;
   value: string;
   onPress: () => void;
@@ -587,7 +715,7 @@ function NavValueRow({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      style={({ pressed }) => [styles.pill, pressed && styles.pillPressed]}
       accessibilityRole="button"
       // `accessibilityValue`, NOT a hint. An accessibilityLabel replaces child
       // text, so the disciplines have to be spoken some other way — and a hint
@@ -601,15 +729,21 @@ function NavValueRow({
       accessibilityHint={hint}
       testID={testID}
     >
-      <Text style={styles.rowLabel}>{label}</Text>
-      {/* A chevron and a pressed state, because the fix for a discoverability
-          bug produced a control nothing marked as tappable: this row sits
-          between Units and Born, which are inert, and looked identical to
-          them. Raised in review. */}
-      <RNView style={styles.rowValueGroup}>
-        <Text style={styles.rowValue}>{value}</Text>
-        <Icon name="chevron" size={13} color={vola.textDim} />
+      <CardGlass />
+      <RNView style={styles.pillHead}>
+        <RNView style={styles.pillIcon}>
+          <Icon name={icon} size={16} color={vola.text} />
+        </RNView>
+        {/* A chevron, because the fix for a discoverability bug produced a
+            control nothing marked as tappable: this pill used to sit in a
+            card between Units and Born, which were inert, and looked
+            identical to them. Raised in review. */}
+        <Icon name="chevron" size={12} color={vola.textDim} />
       </RNView>
+      <Text style={styles.pillLabel}>{label}</Text>
+      <Text style={styles.pillValue} numberOfLines={1}>
+        {value}
+      </Text>
     </Pressable>
   );
 }
@@ -643,6 +777,27 @@ export function phaseValue(phase: Phase | null, answered: boolean): string {
 }
 
 /**
+ * What the header's friends pill says, from the two pieces of state that
+ * carry it — same shape as {@link phaseValue} and for the same reason:
+ *
+ *   - **`'—'`** while the server has not answered, or has answered and failed.
+ *     `answered` is only ever set true by a SUCCESSFUL read, so a dead spot
+ *     stays at `'—'` rather than falling back to a guess.
+ *   - **`'No friends yet'`** once the server has answered with zero. This is
+ *     not the same state as the one above — a `0` withheld from a failed read
+ *     would tell somebody who has never added a friend that VOLA cannot say,
+ *     and a `0` asserted from a failed read would tell somebody with real
+ *     friends that their list emptied. Only a confirmed zero may say so.
+ *   - **`'N Friends'`** (`'1 Friend'` singular) once the server has answered
+ *     with a positive count.
+ */
+export function friendCountLabel(count: number | null, answered: boolean): string {
+  if (!answered || count === null) return '—';
+  if (count === 0) return 'No friends yet';
+  return `${count} ${count === 1 ? 'Friend' : 'Friends'}`;
+}
+
+/**
  * What a count renders as, or null for no badge at all.
  *
  * `0` deliberately renders NOTHING rather than a zero: a badge is believed,
@@ -668,14 +823,26 @@ export function rowLabelFor(label: string, n: number): string {
   return `${label}, ${n >= BADGE_CAP ? 'over 99' : n} waiting`;
 }
 
-/** One destination: a label, a line saying what is behind it, and a count. */
+/**
+ * One destination in the pill/card grid: an icon, a label, and a count —
+ * Hevy's "Dashboard" cell (N509). Every property below is unchanged from the
+ * full-width row this replaced: same testID, same `accessibilityLabel`
+ * (`rowLabelFor`'s badge phrasing), same `accessibilityHint` (the detail
+ * line, spoken but no longer also drawn — the reference's own pills carry no
+ * visible caption either, and the hint already exists for exactly this),
+ * same badge child with the same `${testID}-badge` testID and the same
+ * "hidden from assistive tech because the label already said it" reasoning.
+ * The layout is the only thing this ticket changed.
+ */
 function NavRow({
+  icon,
   label,
   detail,
   badge = 0,
   onPress,
   testID,
 }: {
+  icon: IconName;
   label: string;
   detail: string;
   badge?: number;
@@ -687,68 +854,66 @@ function NavRow({
   return (
     <Pressable
       onPress={onPress}
-      style={styles.navRow}
+      style={({ pressed }) => [styles.pill, pressed && styles.pillPressed]}
       accessibilityRole="button"
       accessibilityLabel={rowLabelFor(label, badge)}
-      // The detail line as a HINT, not folded into the label. An
-      // `accessibilityLabel` REPLACES the concatenation of child text, so
-      // without this the second line is simply never spoken — sighted users
-      // gained it and screen-reader users lost the one the old Sharing row
-      // had. A hint is the right slot: spoken after the name, and silenceable.
+      // The detail line as a HINT, not folded into the label and no longer
+      // drawn as a visible caption either — see the doc comment above for
+      // why. An `accessibilityLabel` REPLACES the concatenation of child
+      // text, so without this the description is simply never spoken.
       accessibilityHint={detail}
       testID={testID}
     >
-      <View style={styles.navBody}>
-        <Text style={styles.navLabel}>{label}</Text>
-        <Text style={styles.muted}>{detail}</Text>
-      </View>
-      {count !== null && (
-        <View
-          style={[styles.badge, { backgroundColor: accent.accent }]}
-          // The row's own label already says "3 waiting"; announcing the pill
-          // too would read the number twice.
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          testID={`${testID}-badge`}
-        >
-          <Text style={[styles.badgeText, { color: accent.on }]}>{count}</Text>
-        </View>
-      )}
-      <Text style={[styles.navChevron, { color: accent.ink }]}>›</Text>
+      <CardGlass />
+      <RNView style={styles.pillHead}>
+        <RNView style={styles.pillIcon}>
+          <Icon name={icon} size={16} color={vola.text} />
+        </RNView>
+        {count !== null && (
+          <RNView
+            style={[styles.pillBadge, { backgroundColor: accent.accent }]}
+            // The pill's own label already says "3 waiting"; announcing the
+            // badge too would read the number twice.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            testID={`${testID}-badge`}
+          >
+            <Text style={[styles.pillBadgeText, { color: accent.on }]}>{count}</Text>
+          </RNView>
+        )}
+      </RNView>
+      <Text style={styles.pillLabel}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
-  body: { paddingHorizontal: 20, gap: 10 },
-  navRow: {
+  body: { paddingHorizontal: Spacing.gutter, gap: Spacing.smPlus },
+
+  // The masthead (N509): avatar left, name/handle/DOB stacked beside it.
+  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.xs },
+  headerText: { flex: 1, gap: Spacing.xxs },
+  name: { fontSize: 26, fontWeight: '800' },
+  handle: { ...Typography.meta, color: vola.textMuted },
+
+  // The friends entry point — a small pill rather than a full pill-grid cell,
+  // since it is one fact beside the masthead rather than a member of the
+  // Dashboard grid below it.
+  friendsChip: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.xs,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.pill,
     backgroundColor: vola.surface,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginTop: 4,
+    paddingVertical: Spacing.xsPlus,
+    paddingHorizontal: Spacing.md,
   },
-  navBody: { flex: 1, gap: 2 },
-  // A filled pill rather than an outline: this is a count that wants to be
-  // seen from across the screen, and the accent is the athlete's own.
-  badge: {
-    minWidth: 22,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  navLabel: { fontSize: 15, fontWeight: '700' },
-  navChevron: { fontSize: 22, fontWeight: '700' },
-  name: { fontSize: 26, fontWeight: '800', marginTop: 4 },
+  friendsChipText: { fontWeight: '700', fontSize: 13 },
+
   sectionLabel: {
     fontSize: 12,
     color: vola.textDim,
@@ -756,26 +921,47 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop: 14,
   },
-  card: {
-    borderWidth: 1,
-    borderColor: vola.line,
-    borderRadius: 14,
-    backgroundColor: vola.surface,
-    paddingHorizontal: 16,
+
+  // The pill/card grid (N509) — Hevy's "Dashboard": two cells per row, each
+  // sized to wrap rather than pinned to an exact fraction, so a lone cell (the
+  // App section's single Settings pill) stretches to the full gutter width
+  // instead of sitting stranded at half of it.
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md },
+  pill: {
+    ...Card.base,
+    overflow: 'hidden',
+    flexBasis: '46%',
+    flexGrow: 1,
+    padding: Spacing.cardPadding,
+    gap: Spacing.xs,
   },
-  row: {
-    flexDirection: 'row',
+  pillPressed: { backgroundColor: vola.surfaceHover },
+  pillHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pillIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 14,
+    justifyContent: 'center',
+    backgroundColor: CARD_GLASS_COLORS[0],
   },
-  // The pressed state and the chevron group belong to the one row in this
-  // card that is a control — see NavValueRow.
-  rowPressed: { opacity: 0.6 },
-  rowValueGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
-  rowLabel: { color: vola.textMuted, fontSize: 14 },
-  rowValue: { fontWeight: '600', fontSize: 14, flexShrink: 1, textAlign: 'right' },
+  pillLabel: { ...Typography.emphasis, color: vola.text },
+  // The value/caption line — only `NavValueRow` (Sports, Phase) uses this;
+  // `NavRow`'s pills carry no visible caption, matching the reference, and
+  // speak their description through `accessibilityHint` instead.
+  pillValue: { ...Typography.caption, color: vola.textMuted },
+  // A filled badge rather than an outline: this is a count that wants to be
+  // seen from across the screen, and the accent is the athlete's own.
+  pillBadge: {
+    minWidth: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillBadgeText: { fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] },
+
   muted: { color: vola.textMuted, fontSize: 13 },
   error: { color: vola.danger, fontSize: 14 },
 });

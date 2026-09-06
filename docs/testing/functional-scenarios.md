@@ -19327,3 +19327,82 @@ Playwright/functional scenario.
 
 None — no new endpoint, no new client permission, no data-shape change. This
 ticket touches presentation only.
+
+## N509 — You/Profile redesign: avatar masthead, friends entry point, pill/card grid, belt-themed BJJ empty state (`apps/mobile/app/(tabs)/you.tsx`, `apps/mobile/components/BjjRankHeader.tsx`, #886)
+
+No new endpoint and no new data shape — `GET /v1/profile`, `GET /v1/friends`,
+`GET /v1/notifications` and `GET /v1/bjj/standing` are all read exactly as
+before. This is a layout and information-architecture pass over an existing
+screen: every destination that was a full-width row is now a pill in a 2-up
+grid, the masthead grows a photo and a friends count, and one empty state
+gains a belt render. The accessibility contract every existing scenario
+already implied — a hint that names the destination, a badge that never
+asserts zero from a failed read, a press that lands on the documented route —
+is unchanged; `__tests__/app/youScreen.test.tsx` pins this directly (34
+tests, the pre-existing 27 unmodified and 7 new).
+
+### Happy path
+
+- Opening You with a complete profile shows: the avatar (photo if uploaded,
+  monogram otherwise), the display name, the `@handle` and date of birth as
+  captions, and the friends pill reading `"N Friends"` — tapping it opens
+  `/friends`.
+- The Sports and Phase pills show the live answer as their caption (e.g.
+  `"Strength · Nutrition"`, `"Cut"`) and open `/profile/edit` and `/phase`
+  respectively.
+- Library, Edit profile, Social (badged), Sharing (badged) and Settings each
+  open their documented route; VO2max additionally requires
+  `isHealthKitSupported()` before its pill renders at all.
+- A BJJ athlete with a recorded rank sees the existing full masthead
+  (unchanged by this ticket); a BJJ athlete with **no** rank recorded sees the
+  new belt-themed empty state — a white belt at rest, "No rank yet", and a
+  tap that opens `/bjj` to add the first promotion.
+
+### Edge cases & errors
+
+- **No avatar uploaded, or the upload fails to load**: the monogram renders,
+  never a broken-image icon — this is `Avatar`'s own existing contract,
+  reused rather than re-implemented.
+- **The friends count read fails** (dead spot, mid-request when the tab
+  blurs): the pill keeps showing the last confirmed count, or `"—"` if there
+  has never been a successful read — it must never fall back to `"0"` or "No
+  friends yet" from a failure, since either would misreport a real friend
+  list as empty.
+- **A confirmed zero** (`GET /v1/friends` answers with an empty list) reads
+  as `"No friends yet"`, distinct from the unanswered `"—"` — an athlete who
+  has genuinely added nobody sees a different sentence than one whose
+  request is still in flight or failed.
+- **No username claimed yet**: the avatar falls back to the empty-handle
+  monogram (`?`) rather than crashing, and the `@handle` caption is omitted
+  rather than rendering `@null`.
+- **BJJ module off**: the whole masthead (belt or empty state) is absent, as
+  before — gated on the module, not on data existing.
+- **HealthKit unsupported** (Android, or a pre-N477 iOS build): the VO2max
+  pill is absent from the grid entirely, matching every other
+  `isHealthKitSupported()` gate in this app.
+- **Sports/Phase/Library/Settings pills**: every accessibility property
+  (`accessibilityLabel`, `accessibilityHint`/`accessibilityValue`, the
+  badge's own hidden-from-assistive-tech treatment) is byte-for-byte the
+  same string as before this ticket — a screen reader user's experience of
+  this screen's *content* is unchanged, only its layout is.
+
+### Auth/security
+
+None — no new endpoint, no new client permission. The friends count is read
+through the existing `listFriends` client call, which already scopes to the
+authenticated user's own friend list server-side.
+
+### NEEDS HUMAN EVIDENCE (tracked on issue #886)
+
+- The redesigned screen reads as intended against the Hevy reference on a
+  real device — avatar, name, friends pill, and the pill grid's density —
+  and does not feel like a worse, denser version of what existed before.
+  This is explicitly the one criterion this ticket cannot satisfy itself.
+- The belt-themed "no rank yet" empty state (`BjjRankHeader`'s
+  `bjj-rank-empty` state) reads as a deliberate belt render rather than a
+  washed-out mistake, at the dimmed opacity chosen for it, on a real screen
+  and in real light.
+- Two-column pill wrapping on the narrowest supported phone width — text
+  truncation on a long enabled-sports caption (e.g. "Strength · Nutrition ·
+  BJJ") or a long training-phase label should be checked directly; no
+  automated test renders at a specific device width.

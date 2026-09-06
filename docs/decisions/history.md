@@ -57261,6 +57261,93 @@ intentionally identical"), so the light-mode half of that check does not
 apply here — the device check is dark mode, at least two of the six
 `accents` in `Colors.ts` (the default `green` plus one more).
 
+## N509 — You/Profile redesign: avatar masthead, friends entry point, pill/card grid, belt-themed BJJ empty state (`apps/mobile/app/(tabs)/you.tsx`, `apps/mobile/components/BjjRankHeader.tsx`, #886)
+
+The user attached a screenshot of Hevy's Profile tab and asked for three
+things this screen did not have: a photo, a friends count beside it, and its
+destinations grouped densely instead of stacked one-per-row — plus a
+belt-themed treatment wherever BJJ shows "no data yet", since VOLA already
+has a real visual language for rank (`beltAccent`/`strap`/`rankBar` in
+`constants/Colors.ts`) and the empty state used none of it.
+
+**This is a layout pass, not a re-litigation of N178/N181.** Both of those
+tickets spent real effort deciding what belongs on this screen and what
+belongs on Progress instead — N178 moved `TrainingSummary`/`RecordsCard`/the
+position map off You specifically to stop two surfaces answering one
+question (the W2/W4 shape), and N181 gave what was left an order ("who am I"
+before "how does the app behave"). Hevy's own grid holds
+Statistics/Exercises/Measures/Calendar; re-adding stats to satisfy that
+literally would have reopened exactly the duplication N178 closed. So the
+grid here holds this app's honest equivalent instead — Sports, Phase,
+Library, Edit profile and VO2max (where supported) — the destinations and
+facts already living on this screen, regrouped rather than replaced.
+
+**What changed, concretely:**
+
+- **A masthead**: `Avatar` (already existed — N12/N205, no new upload
+  plumbing needed) reads `profile.avatar_url` exactly as
+  `app/profile/edit.tsx` already does, beside the name, the `@handle` and
+  date of birth (the latter two moved out of the old identity card into
+  captions here — see below). A FOURTH independent focus-fetch chain reads
+  `listFriends` for a count, following the same silent-degradation shape as
+  the existing phase chain: a dead spot leaves the last confirmed count on
+  screen rather than asserting `"0"` or `"No friends yet"`. The pill opens
+  `/friends` directly (the list), not `/social` (the existing Social row,
+  which is a feed of activity, not a roster).
+- **A pill/card grid**, built on N508's tokens (`Card.base`, `Spacing`,
+  `Typography`, `CardGlass`) rather than a new visual vocabulary: every
+  destination that was a `NavRow`/`NavValueRow` full-width row still IS one
+  — same component, same props, same testID, same
+  `accessibilityLabel`/`accessibilityHint`/`accessibilityValue`/badge
+  contract — with one addition (an `icon`) and a `flexWrap` grid container
+  around groups of them instead of a vertical `gap`. Because every property
+  a test in `youScreen.test.tsx` pins about these rows is a property of the
+  DATA (a hint that must not borrow another row's words, a badge that must
+  not zero on a failed read, a press that must land on the right route) and
+  not of the layout, all 27 pre-existing tests in that file pass **completely
+  unmodified** — the diff added five new describe blocks, it changed zero
+  existing assertions.
+- **Born** moved from its own row (inside a now-empty card once Sports and
+  Phase became pills) into a caption under the name — it was already the one
+  inert field there, and a card holding one inert field and nothing else was
+  furniture.
+- **`BjjRankHeader`'s "no rank recorded yet" state** — previously a bare
+  `Text` row with no belt art at all — now renders a white belt (0 stripes,
+  no `activeBeltAccent` tint, since a colour would assert a rank nobody has)
+  at reduced opacity beside "No rank yet" / "Tap to add your first
+  promotion", in the same glass-card family as the real masthead below it.
+  White is not a placeholder colour standing in for "none"; it is the actual
+  first belt, at rest — everyone starts there. This was a genuinely new
+  component behaviour with no prior test file, so it gets one:
+  `components/__tests__/bjjRankHeader.test.tsx` (3 tests: the empty card
+  still opens `/bjj`, still carries its accessibility label, and actually
+  draws the white belt rather than a generic icon).
+
+**Test suite impact**: `youScreen.test.tsx` grew from 27 to 34 tests (5 new —
+`friendCountLabel`'s three outcomes, the friends pill's press/degradation
+behaviour, and the masthead's photo/monogram wiring); a new
+`bjjRankHeader.test.tsx` adds 3. `pnpm test:mobile` — 275 suites, 4422 tests,
+all green. `lint:mobile` unchanged at the existing 50/50-warning ratchet
+ceiling (this PR adds zero new warnings). `typecheck:mobile` clean.
+
+**Deliberately NOT built**: a new avatar-upload pipeline. One already
+exists (`uploadAvatar`/`removeAvatar` in `lib/profile.ts`,
+`POST`/`DELETE /v1/profile/avatar`, wired into `app/profile/edit.tsx`) and
+this ticket reused it as-is rather than duplicating it on the masthead
+itself — tapping the avatar here does nothing; changing it is still an Edit
+profile action. If the reference's implicit "tap your own photo to change
+it" affordance is wanted directly on this screen, that is a small, separate
+follow-up (wire the existing picker/upload flow to the masthead `Avatar`),
+not a new pipeline.
+
+**NEEDS HUMAN EVIDENCE, unresolved by this entry**: whether the redesigned
+screen actually reads as intended against the reference on a real device,
+and does not feel like a worse, denser version of what existed before — the
+one acceptance criterion this ticket cannot satisfy from code alone. Also
+worth a device pass: the belt-themed empty state's dimmed opacity in real
+light, and two-column pill wrapping with a long enabled-sports caption
+("Strength · Nutrition · BJJ") on the narrowest supported phone width.
+
 ## Open items / known gaps as of this entry
 
 
