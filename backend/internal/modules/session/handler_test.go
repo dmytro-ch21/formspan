@@ -462,6 +462,9 @@ func (f *suggestionsFakeRepo) ResolveDecisionOutcomes(context.Context, string, *
 func (f *suggestionsFakeRepo) DismissPendingDecisions(context.Context, string, *string, string) error {
 	panic("not used by Suggestions")
 }
+func (f *suggestionsFakeRepo) ShadowReplayCandidates(context.Context) ([]ProgressionCandidate, error) {
+	panic("not used by Suggestions")
+}
 
 // The one join `parseInSessionWeights` and `Progress` are each tested in
 // isolation but never together: `in.InSessionWorkingWeightsKg =
