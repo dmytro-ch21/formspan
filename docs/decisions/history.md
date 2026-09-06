@@ -57464,6 +57464,158 @@ This bites in exactly the way it did here: the Apple Watch does not always finis
 
 **NEEDS HUMAN EVIDENCE**, unresolved by this entry: confirm on a real device that a session logged today, whose first sync pass found zero samples (checked immediately after finishing, before the Watch had synced), picks up real heart-rate data once the Watch has actually synced and the app is reopened later — without deleting and re-logging the session.
 
+### N491/#852 — BJJ drill-vs-roll HR: a real timeline shipped, automatic detection deliberately did not
+
+The user's own words: *"for bjj as well, you can see the pattern where we
+drilled and when rolled with elevated hr."* The ticket named two directions —
+a live "mark the transition" capture, or a post-hoc step-change classifier —
+and asked for an investigated, reasoned decision rather than a coin flip,
+explicitly warning that a real-data validation gap might make full
+implementation impossible in this environment. That warning turned out to be
+right for both directions, and this entry documents why, and what shipped
+instead.
+
+**Direction 1 (explicit capture) is not merely undesirable — it conflicts
+with an existing, deliberate design decision this codebase already made.**
+`app/bjj/log.tsx`'s own doc comment: "the strength flow starts a session and
+logs into it as you train. On the mat that is impossible — sweaty hands, a
+mouthguard, six-minute rounds, gis without pockets — so BJJ inverts it: zero
+interaction during the session, everything recalled straight after."
+`docs/decisions/bjj-tracking-design.md` §2 goes further, reasoning from
+memory decay ("by the drive home, 'I got swept a bunch' is all that
+remains") to a hard two-layer budget — a ≤3-tap floor and a post-class
+reflection wizard, nothing in between. Even the live-tracked path
+(`app/bjj/session/[id].tsx`'s `!session.ended_at` branch, for a session
+started via `/session/start`) offers literally one control while open —
+"Finish this session" — by design, not by omission. Adding a mid-round
+"mark: now rolling" tap would not be a lightweight addition to this
+pattern; it would be new interaction of exactly the kind this sport's own
+design doc already ruled out, for a population N487's own finding says is
+the minority of BJJ sessions anyway (most logging is post-hoc). Rejected on
+the merits, independent of the data question below.
+
+**Direction 2 (inferred segmentation) is the better fit in principle — it
+needs no mid-session interaction and works for post-hoc-logged sessions,
+the majority — but this ticket's own acceptance criteria require validating
+it against real recorded HR data from an actual rolling session before
+presenting a "detected pattern" to an athlete, per N480/#825's "HR
+corroborates, never replaces" stance. That data does not exist in this dev
+environment, confirmed by investigation rather than assumed:**
+
+- The Postgres this worktree's `backend/.env` points at (the currently
+  running `n507-fractional-distance-sync` worktree's own Compose stack, on
+  `localhost:5432`) had zero relations — migrations had not even been run
+  against it yet.
+- This host runs dozens of throwaway, worktree/ticket-scoped Postgres
+  containers (`docker ps -a` — one per concurrent session, named after its
+  worktree directory). By construction each holds only whatever seed or
+  test data that session's own work produced; none is a real HealthKit sync
+  from an actual human training session, because that only ever happens
+  when someone trains with a real Apple Watch against a backend running
+  from the primary checkout, not inside a container spun up to run `go
+  test`.
+- One older, stopped container (`bjj-postgres-1`, `.claude/worktrees/bjj`,
+  exited 4 weeks ago) was the closest thing to a long-lived candidate.
+  Starting it to check would have collided on port 5432 with the
+  currently-running `n507` worktree's active Postgres — not something to do
+  for a speculative check, and a worktree spun up to build a feature was
+  never going to be where real synced Watch data lands regardless.
+- The only place real synced Apple Watch data plausibly exists is Railway's
+  `staging` Postgres — the user's own real data path, and scripting an
+  ad hoc query against it for algorithm validation is exactly the
+  `NEEDS HUMAN EVIDENCE` case this repo's own conventions reserve for the
+  user, not something to route around.
+
+So: cannot validate here, full stop. Shipping a classifier anyway — even
+behind careful "detected pattern" language — would mean presenting an
+unvalidated guess as an athlete-facing finding, which is precisely what
+N480's stance and this ticket's own acceptance criteria forbid.
+
+**What shipped instead: the raw HR-over-time timeline, with no
+interpretation attached.** `apps/mobile/lib/hrTimeline.ts`'s
+`buildHRTimeline` maps a session's real `heart_rate` samples (already
+reachable with zero backend changes — `GET /v1/biometric/samples`,
+general-purpose and already used for the VO₂max trend, `lib/
+useVo2MaxTrend.ts`) to `{minutesElapsed, bpm}` points, clipped to the
+session's own window and averaged down to `MAX_TIMELINE_POINTS` (120) when
+denser than that. `apps/mobile/components/ui/HRTimelineChart.tsx` draws a
+plain SVG line through them with value-readable axes (the session's own
+min/max bpm, `0:00` and its real duration) — no smoothing beyond the
+downsample average, no goal, no projection, and critically, no boundary
+drawn or labelled anywhere. `HRSessionReport.tsx` gained an optional
+`hrTimeline` prop (additive, exactly like `sessionRPE` before it — every
+caller that hasn't wired it, which is strength and running today, renders
+unchanged), gated on the report already having reached its `'full'` state
+(the same `HR_REPORT_MIN_SAMPLES` threshold N480/N488 already established —
+a two-point line across an hour would visually assert a shape sparse data
+cannot support). `app/bjj/session/[id].tsx` fetches the raw samples in a
+second, independent, best-effort request alongside the existing
+`getSessionMetrics` call.
+
+**This satisfies the user's literal words more conservatively than either
+proposed direction would have.** "You can see the pattern" is now literally
+true — a real step-change in HR during a real drill-to-roll transition is
+visible in the line — without VOLA ever asserting where the boundary falls.
+This is a stronger form of "not an absolute fact" than the ticket's own
+acceptance criterion asked for: rather than a labelled "detected pattern"
+carrying a corroborating caveat, nothing is labelled at all, and the
+athlete's own reading of the shape carries the entire interpretation. It
+also needed **no new schema or migration** — N488's own history entry had
+flagged N490/N491 as needing "new schema"; that assumption does not hold
+for what actually shipped here, because `GET /v1/biometric/samples` already
+existed as a general-purpose, user-scoped raw-sample endpoint before this
+ticket started.
+
+**What explicitly did NOT ship: automatic drill/roll detection — the
+ticket's literal title.** Filed as **N512/#895**, blocked on the same real-
+data gap, to be picked up once the user has real Watch-synced HR data from
+an actual rolling session to validate a step-change heuristic against. If
+that validation fails, N512's own acceptance criteria call for closing it
+`not planned` with the finding recorded, rather than leaving an
+unsatisfiable gate open indefinitely (this repo's own "verify that a check
+can PASS" discipline, pointed at a ticket rather than a CI gate).
+
+**Testing**: `apps/mobile/lib/__tests__/hrTimeline.test.ts` (11 cases) —
+elapsed-minute mapping and ordering, window clipping (a sample outside is
+dropped, one exactly on either boundary is kept), malformed
+timestamps/values skipped rather than producing `NaN`, an inverted window
+yielding an empty timeline, the point cap left untouched below it and
+averaged (not stride-dropped) above it, and a real single-minute spike
+still visible after averaging. `apps/mobile/components/__tests__/
+HRSessionReport.test.tsx` gains 7 cases — no `hrTimeline` prop, an empty
+one, and a single point all render no timeline; two or more real points
+render one; a timeline never renders in the `'limited'` state even if the
+caller passed one; the custom-`testID` namespace covers it. `apps/mobile/
+__tests__/app/bjjSessionScreen.test.tsx` gains 3 wiring cases — the screen
+calls `listBiometricSamples` with exactly the session's own
+`started_at`/`ended_at` and renders the chart once enough real samples come
+back; too few samples (even with a `'full'` HR report) renders none; a
+failed fetch renders none without breaking the rest of the report.
+Mutation-verified: disabling the `hrTimeline.length >= 2` gate in
+`HRSessionReport.tsx` turned two tests red as real assertion failures
+(rendered timeline elements where none should exist), not compile errors;
+disabling the window-boundary filter in `buildHRTimeline` turned the
+"dropped, not clamped" test red the same way; swapping the
+`started_at`/`ended_at` argument order in the screen's fetch call turned the
+wiring test red on the exact expected-arguments assertion. All three
+restored and reconfirmed green by re-running, not by rereading the diff.
+Full mobile suite: 278 suites, 4461 tests, green (`TZ=America/Los_Angeles`).
+`pnpm run typecheck:mobile` and `pnpm run lint:mobile` both clean on every
+touched file (0 new warnings — the one pre-existing `no-require-imports`
+warning in `bjjSessionScreen.test.tsx` is the file's existing `expo-router`
+mock factory, untouched by this change).
+
+**Open, honestly**: automatic drill/roll detection (N512/#895, blocked on
+real device data). No device verification yet that the chart's shape is
+legible at a glance on a real 5–6 inch screen, or that a genuine
+drilling-to-rolling transition is visually obvious in a real session —
+nothing in this repo's suite can measure either; recorded as a gap below
+rather than assumed. This ticket also did not touch `backend/internal/
+modules/biometric/**` at all (the existing `ListSamples` endpoint already
+covered everything needed), so N490 (strength per-set HR, concurrently in
+progress in a sibling worktree at the time of writing) shares no file with
+this change.
+
 ## Open items / known gaps as of this entry
 
 
@@ -57500,3 +57652,4 @@ This bites in exactly the way it did here: the Apple Watch does not always finis
 - The new `backend-module-scaffolder` agent and `/new-module` skill are still unverified in practice — the feature-flags module was scaffolded by hand instead, since its shape (global, ownerless, read-only) didn't fit the agent's per-user-CRUD template. No module has gone through the agent for real yet (the `profile` module it's modeled on predates it) — worth checking it actually produces correct output the first time it's used for a module that *does* fit the template (e.g. a future `goals` module).
 - **`WeekStepper` (N510) has one caller.** It replaced `WeekPlanner`'s own inline strip, which is real reuse (the old ad hoc rendering is gone, not duplicated), but the ticket also asked whether Today or Progress would use it and the answer here was no for both: Today's own week strip (`components/today/WeekStrip.tsx`) answers a different question (food-logging days, explicitly not conflated with training per that file's own comment) and Progress's week section (`components/progress/ThisWeek.tsx`) is a verdict card (`WeekReview`), not a day-marker row — neither is the W2/W4 "two cards, one question" shape this component would create if forced in. A genuine second use is more likely once a screen exists that needs a day-by-day glance at a *training* week specifically (a coach-assigned program, say) — nothing about the component assumes there will ever be a second caller, and nothing prevents one.
 - **`WeekStepper`'s `done` state is honest, not complete.** It means "this day's slot has passed," never "you trained" — see the N510 entry above for why a real completion join (`lib/adherence.ts`'s `matchPlans`) was deliberately left out. A future ticket that wants the stepper to show real completion has that function ready to reach for; it just isn't reached for yet.
+- **BJJ's HR report shows the raw shape of a session, never a drill/roll boundary** (N491, entry above). Automatic detection is filed as N512/#895 and explicitly blocked — this dev environment has no real recorded HR data from an actual BJJ rolling session to validate a step-change heuristic against, only ephemeral worktree-scoped test Postgres instances. Also unverified on a real device: whether the timeline's shape is legible at a glance on a real phone screen, and whether a genuine drilling-to-rolling transition is visually obvious in practice.

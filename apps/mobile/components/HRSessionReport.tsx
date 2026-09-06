@@ -3,10 +3,12 @@ import { StyleSheet, View as RNView } from 'react-native';
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { InfoMark } from '@/components/ui/InfoSheet';
+import { HRTimelineChart } from '@/components/ui/HRTimelineChart';
 import { SectionHeader } from '@/components/ui/Section';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
 import { buildHRSessionReport, type HRZoneRow } from '@/lib/hrSessionReport';
+import type { HRTimelinePoint } from '@/lib/hrTimeline';
 import type { SessionMetrics } from '@/lib/biometric';
 
 /**
@@ -25,10 +27,20 @@ import type { SessionMetrics } from '@/lib/biometric';
  * from `getSessionMetrics`), never mid-flight; see `hrSessionReport.ts`'s doc
  * comment on why that distinction is the caller's to keep, not this
  * component's to guess at.
+ *
+ * `hrTimeline` is N491/#852's addition — an optional, already-computed
+ * `HRTimelinePoint[]` (`lib/hrTimeline.ts`'s `buildHRTimeline`, over the raw
+ * samples `GET /v1/biometric/samples` returns for the session's own window).
+ * Undefined/empty on every caller that hasn't wired it (strength, running,
+ * and BJJ before this ticket) — this component draws nothing for it in that
+ * case, so it is additive exactly the way `sessionRPE` was. See
+ * `lib/hrTimeline.ts`'s doc comment for why this renders the raw shape
+ * rather than a classified drill/roll boundary.
  */
 export function HRSessionReport({
   metrics,
   sessionRPE = null,
+  hrTimeline,
   testID = 'hr-session-report',
 }: {
   metrics: SessionMetrics | null;
@@ -36,6 +48,10 @@ export function HRSessionReport({
    *  `null` for sports with no single session-level RPE today (strength,
    *  running; see `hrSessionReport.ts`'s doc comment). */
   sessionRPE?: number | null;
+  /** N491/#852: real HR readings across the session, already computed by the
+   *  caller (`buildHRTimeline`). Omit, or pass `[]`, to render no timeline —
+   *  the ordinary case for every screen except BJJ's today. */
+  hrTimeline?: HRTimelinePoint[];
   testID?: string;
 }) {
   const report = buildHRSessionReport(metrics, sessionRPE);
@@ -100,6 +116,17 @@ export function HRSessionReport({
         {hrStats}
         <Stat label="Training load" value={String(Math.round(report.trimp))} fit />
       </StatRow>
+
+      {hrTimeline != null && hrTimeline.length >= 2 && (
+        // N491/#852. Real readings, in order — no boundary drawn or claimed;
+        // see lib/hrTimeline.ts's doc comment for why. `styles.zones`'s card
+        // treatment reused verbatim so this reads as one more piece of real
+        // evidence, not a different kind of thing from the zone bars below it.
+        <RNView style={styles.zones} testID={`${testID}-timeline`}>
+          <Text style={styles.timelineCaption}>Heart rate across the session</Text>
+          <HRTimelineChart points={hrTimeline} testID={`${testID}-timeline-chart`} />
+        </RNView>
+      )}
 
       {report.totalZoneMinutes > 0 ? (
         <RNView style={styles.zones} testID={`${testID}-zones`}>
@@ -167,6 +194,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   limitedText: { fontSize: 13, color: vola.textMuted, lineHeight: 19, fontStyle: 'italic' },
+  timelineCaption: { fontSize: 12, color: vola.textMuted, marginBottom: 2 },
 
   zones: {
     backgroundColor: vola.surface,
