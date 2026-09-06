@@ -58274,6 +58274,281 @@ gets a short note on the engine's now-property-tested invariants for a future
 E2E/API test author; no user-facing or wire-contract behavior changed, so
 that's the only doc-scenario update this ticket needed.
 
+## N513/#901 — an immutable decision-record audit trail for the progression engine (`backend/internal/modules/session/decisionrecord.go`, `decisionrecord_postgres.go`, `backend/migrations/000093_session_progression_decisions.up.sql`)
+
+Split out of #867 (N497, phase 5 of #753), alongside two independent siblings
+this ticket does not touch: N514/#902 (property tests) and N515/#903 (a
+shadow-replay tool comparing v1/v2 over real history).
+
+**The problem.** Nothing `Progress`/`ProgressV2` (`progression.go`,
+`progression_v2.go`) ever produced was recorded anywhere but the HTTP
+response itself. There was no way to ask, after the fact, which
+engine/ruleset version produced a suggestion, why a protocol was selected,
+which sets counted as evidence, what the normalized effort reading was,
+whether the athlete took it, or how they actually trained afterward.
+
+**Where this lives, and why.** Inside `internal/modules/session/` rather
+than a new top-level module — `decisionrecord.go` (domain types + the pure
+`BuildDecisionRecord`) and `decisionrecord_postgres.go` (the `Repository`
+implementation) stand in for the usual `<name>.go`/`postgres.go` pair. Both
+callers that need to write here (`Handler.Suggestions`, `Handler.ReplaceSets`,
+`Handler.Finish`) already live in this package, as do the domain types being
+audited (`ProgressionInput`, `Plan`, `SessionEffort`, `Set`) and the
+unexported pure helpers `BuildDecisionRecord` reuses to explain a decision
+(`straightWorkingSetsWithWeight`, `workingSetsWithWeight`, `sameWeightCohort`,
+`effortCoverage`). A separate module would need either a second copy of all
+of that or an exported surface this package doesn't otherwise want. There is
+no new HTTP handler, so the usual module pattern's `handler.go` has no
+counterpart here — see "no read endpoint" below for why.
+
+**The six design questions the ticket posed, and what was decided:**
+
+**1. Where does the write happen, and does it cost logging-path latency?**
+Checked before assuming anything, per the ticket's own instruction: `GET
+/v1/sessions/suggestions` is called from `apps/mobile` at session start
+(`app/session/start.tsx`), on every screen focus while a session is open
+(`app/session/[id].tsx`'s `useFocusEffect`), and — the finding that
+contradicts the ticket's own premise — **again after every completed set**
+(`toggleDone`, same file), so the suggestions engine already runs
+mid-workout today, not only before a session starts. `apps/web` calls it at
+workout start only. Given that, a synchronous decision-record write on every
+call would run more often than the ticket assumed, so `RecordDecisions` was
+called AFTER `apihttp.WriteJSON` wrote the response — and a failure is
+logged (`httplog.FromContext(...).Warn(...)`) and swallowed, never surfaced
+as a 500 and never retried. The same fail-open treatment applies to
+`ResolveDecisionOutcomes` (called from `ReplaceSets`, which genuinely IS the
+mid-workout hot path N495's warm-up ramp had to protect) and
+`DismissPendingDecisions` (called from `Finish`) — an audit table must never
+become a reason a real set fails to save.
+
+**That "never delayed by it" claim was FALSE as originally written — see
+"Review fold-in" below for the real bug `backend-reviewer` found and the
+fix.**
+
+**2. Is an abstained/no-history/effort-conflict result written too?** Yes,
+literally per the ticket's own text — `BuildDecisionRecord` is called for
+every exercise in a `Suggestions` request regardless of `Plan.Code`, and a
+no-op result's `output_target_weight_kg` is simply left NULL with
+`outcome_status = 'not_applicable'` rather than being skipped.
+`TestBuildDecisionRecord_NoHistoryIsStillRecorded` and
+`TestSuggestionsHandler_RecordsADecisionPerExercise` pin this at both the
+pure-function and wire-handler layers.
+
+**3. Correlating a decision with apply/edit/dismiss and subsequent
+performance.** Researched before designing anything: neither `apps/mobile`
+nor `apps/web` sends any event when a suggestion is accepted, edited, or
+ignored — "applied" is inferred client-side by comparing the logged
+weight/reps against the suggestion's target, and nothing about that
+inference reaches the server. There is also no existing correlation key —
+`session_sets` carries no `suggestion_id`-shaped column anywhere in the
+schema. The key chosen is `(user_id, exercise_id, workout_id)`: `workout_id`
+already survives from the `Suggestions` request through to the session
+that's eventually created and saved (`apps/mobile`'s `start.tsx` and
+`[id].tsx` both pass the same `workout.id` that produced the suggestion),
+so it is a real, already-plumbed link rather than a new one this ticket
+invents. `ResolveDecisionOutcomes` runs on every `ReplaceSets` call: for
+each exercise with a completed, weighted set, it takes the HEAVIEST such
+set as the representative performance (the same "top set" reasoning
+`Progress`/`ProgressV2` themselves use) and resolves the single most recent
+still-`pending` decision record for that `(user, exercise, workout)` to
+`applied` (weight within 0.01kg and reps exact) or `edited` (anything else).
+`DismissPendingDecisions` runs on `Finish` and closes out whatever is still
+`pending` for that workout — seen, never acted on.
+
+Two honest, stated simplifications: only the LAST decision record the
+athlete actually saw before logging gets resolved (earlier re-fetches from
+the same session — on focus, after an earlier completed set — stay
+`pending` rather than all being marked at once); and the whole mechanism is
+a no-op — not an error, a genuine skip — when `workout_id` is nil, because a
+freeform session (or the exercise-detail screen) has no reliable
+correlation key and this package does not guess one from a time window.
+
+**"Subsequent performance" (the next logged session for the same exercise)
+was tried and deliberately NOT built here.** Everything through
+applied/edited/dismissed resolves at a moment this codebase already has a
+hook for (a set being saved, a session finishing). "The next session,
+whenever it happens" has no such hook — it becomes true only when some
+future, unrelated request happens to touch that exercise again, and this
+backend (stdlib `net/http`, no framework, no job scheduler) has no
+background/scheduled-job infrastructure to notice that on its own. The other
+option — computing it lazily — has nothing to be lazy FOR yet, since this
+ticket deliberately builds no read endpoint (see point 5). Filed as a
+genuine follow-up rather than a shortcut: **N516/#904**, which explicitly
+asks the next session to pick a mechanism only once N515's shadow-replay
+tool (or another real consumer) exists and its access pattern is known,
+rather than guessing the shape blind.
+
+**4. What "immutable" actually protects.** Chosen model: ONE row per
+decision, written once, with a disjoint set of `outcome_*` columns that
+`ResolveDecisionOutcomes`/`DismissPendingDecisions` are the only things
+allowed to touch afterward — not a second append-only table of outcome
+events, because there is at most one outcome per decision record and a
+second table would only add a join for no expressiveness gained. This is
+enforced by a Postgres trigger
+(`session_progression_decisions_immutable_core_trg`), not merely documented
+— the same standing this repo already gives
+`workouts_owned_rows_are_never_seeded` (migration 000043) over a comment
+asking nicely. `TestSessionProgressionDecisions_CoreFieldsAreImmutable`
+mutation-tests this directly: the trigger was dropped by hand, the same test
+went red (a direct `UPDATE output_code` that should fail instead
+succeeded), and restoring the trigger (by recreating the test database from
+the migration and re-running) brought it back to green.
+
+One real bug this caught before it shipped: `workout_id` and
+`evidence_session_id` both carry `ON DELETE SET NULL` (deleting a workout or
+a session must not erase the audit trail pointing at it — the same "history
+outlives the plan it came from" reasoning `sessions.workout_id`'s own doc
+comment already gives), and the FIRST version of the trigger watched both
+columns as "core". Deleting the evidence-session fixture in a test's own
+cleanup then tripped the trigger it was never meant to fight — the FK's own
+`SET NULL` is itself an UPDATE, and a decision record was blocking the very
+deletion it is supposed to survive. Fixed by excluding exactly those two
+columns from the protected set (see the migration's own comment on why
+that's not a gap in the guarantee: nothing else ever writes a bare `UPDATE`
+naming them).
+
+**5. Authorization / no read endpoint.** This ticket builds no `GET` route
+for the table at all — the AC doesn't ask for one, and building UI or an
+API surface nobody asked for is exactly what CLAUDE.md's mobile-first
+section warns against doing pre-emptively. The data exists for internal/
+tooling use: N515's shadow-replay tool, future analytics, ad hoc
+`psql`/superuser access. If a read endpoint is ever built, it MUST scope to
+the caller's own `user_id` the same way every other per-athlete endpoint in
+this codebase does (`auth.ClaimsFromContext(r.Context()).UserID`) — this
+data is exactly as sensitive as the ticket's own framing says (it reveals
+what the engine "thought" about someone's training, including on abstained/
+conflicted calls), and there is nothing here that changes this repo's
+existing authorization pattern, only a reminder for whoever eventually adds
+that endpoint.
+
+**6. Volume, indexing, retention.** `GET /v1/sessions/suggestions` is capped
+at `maxSuggestionIDs` (100) exercises per call and, per point 1, is called
+more often than once per session — this will be a genuinely fast-growing
+table for an active athlete. Three indexes were added: a partial index on
+`(user_id, exercise_id, workout_id, created_at DESC) WHERE outcome_status =
+'pending'` for the correlation lookup (small and shrinks as rows resolve,
+never grows with an athlete's full history), a partial index on
+`workout_id WHERE workout_id IS NOT NULL` for `Finish`'s sweep, and a plain
+`(user_id, created_at DESC)` for whatever N515/future analytics eventually
+reads. Retention/pruning: **not built, and "not a concern yet, revisit if it
+becomes one" is the honest answer for this ticket's scope** — over-building
+a TTL or archival policy against a table with zero real readers yet would be
+guessing at an access pattern nobody has measured, the same reasoning N516
+gives for deferring the subsequent-performance mechanism.
+
+**What was built, concretely:**
+
+- Migration 000093: `session_progression_decisions` — engine
+  (`progress_v1`/`progress_v2`), a hand-bumped `ruleset_version` (distinct
+  from `engine`, which never changes meaning, and from the
+  `new_recommendation_engine` feature flag, which only gates which engine
+  runs — see `decisionRulesetVersion`'s own doc comment for when to bump
+  it), the resolved protocol (`protocol_source`/rep range/target sets/RIR/
+  equipment increment/strategy — NULL throughout for v1, which never
+  resolves one), which past session was used as evidence plus a best-effort
+  exclusion summary over that ONE session's own sets (`excluded_set_summary`
+  jsonb — e.g. `{"set_type:backoff": 1, "missing_weight_or_reps": 1}`,
+  computed by re-applying the SAME filters the engine itself used, not a
+  re-derived approximation), effort coverage/reading, the output itself
+  (code/reason/target), a `warnings` jsonb array (`effort_conflict`,
+  `abstain`, `no_recent_normal_session`, the in-session-signal code, and a
+  flag for a skipped light/deload session — never `Reason`, which is prose
+  a client, and now this table, must not pattern-match), and the five
+  `outcome_*` columns.
+- Two purely additive fields on `Plan` itself (`progression.go`,
+  `progression_v2.go`): `EvidenceSessionID` and `SkippedNonNormalSession`,
+  both `json:"-"` so nothing on the wire changes for any existing client —
+  stamped at the exact point each engine already computes `last`/
+  `skippedNonNormal`, so they can never say anything `Code`/`Reason`/
+  `Target*` don't already say. This is the one change to the two engine
+  files themselves, and it is the minimum needed to avoid re-deriving "which
+  session did this come from" outside the code that already knows.
+- `BuildDecisionRecord` (pure, `decisionrecord.go`) assembles the record
+  from `ProgressionInput`+`Plan`; `RecordDecisions`/`ResolveDecisionOutcomes`/
+  `DismissPendingDecisions` (`decisionrecord_postgres.go`) do the three
+  writes, all via `pgx.Batch` matching this package's existing
+  `insertSets`/`insertItems` convention.
+- Wired into `Handler.Suggestions` (batched, one call for the whole
+  request), `Handler.ReplaceSets` and `Handler.Finish` — all three call
+  sites AFTER their own `apihttp.WriteJSON`, all three fail open.
+
+**Testing.** `decisionrecord_test.go` (no DB) pins `BuildDecisionRecord`'s
+pure logic — the ticket's own three named examples (a no-history result
+still recorded, `effort_conflict` as a warning, "excluded: backoff set")
+plus protocol round-tripping and the two new `Plan` fields — with one guard
+mutation-tested directly (removing the backoff-set-type check in
+`classifySetExclusion` turned the matching test red as a real assertion
+failure, confirmed, then restored and re-run green).
+`decisionrecord_postgres_test.go` (gated on `TEST_DATABASE_URL`) covers the
+full insert/read round-trip including jsonb fields, the immutability
+trigger (mutation-tested by dropping and recreating it, above), applied-vs-
+edited resolution, the nil-`workout_id` no-op, dismissal, and that a
+`not_applicable` row is never swept into `dismissed`.
+`TestSuggestionsHandler_RecordsADecisionPerExercise` (`handler_test.go`)
+confirms the wire path end to end. Full package suite (`go test
+./internal/modules/session/...`) and the full backend suite (`go test
+./...`) both green, with and without `TEST_DATABASE_URL` set.
+
+**Deferred, with a filed ticket:** N516/#904 — subsequent-performance
+backfill, unassigned/Todo, per point 3 above.
+
+**Not touched:** N514/#902 (property tests) and N515/#903 (shadow-replay
+tool) — both independent pieces of #867's original scope, explicitly out of
+this ticket's scope per its own text.
+
+**Review fold-in.** `backend-reviewer` found one real `[blocking]` issue:
+this ticket's own headline non-functional claim — that writing the decision
+record AFTER `apihttp.WriteJSON` means "the athlete's suggestion is never
+delayed by it" — was FALSE. `GET /v1/sessions/suggestions` goes through
+`apihttp.Compress`/`apihttp.ConditionalGet`, and BOTH buffer the entire
+response body and don't flush a byte to the actual client until
+`next.ServeHTTP` returns. Calling `RecordDecisions` synchronously, in the
+same goroutine, before the handler function returns — which is exactly what
+"after `WriteJSON`" meant as originally written — does not let
+`next.ServeHTTP` return until the Postgres write finishes, so the write sat
+IN the response path, not beside it, for the endpoint this ticket itself
+identifies as the hottest one (called after every completed set).
+`handler_test.go`'s own tests call the handler directly against an
+`httptest.ResponseRecorder`, bypassing `apihttp.Assemble`'s middleware stack
+entirely, so nothing in this ticket's own suite could have caught it —
+exactly the "verify that a check can fail" gap CLAUDE.md names, landing on
+this PR's own central claim.
+
+Fixed with a new `recordAfterResponse` helper (`handler.go`): each of the
+three post-response writes now runs on a goroutine, using
+`context.WithoutCancel(r.Context())` (preserves the request's own trace/
+user log fields, since `httplog.FromContext` reads context VALUES, which
+`WithoutCancel` keeps) wrapped in a 10-second timeout independent of the
+request's own lifecycle — without the `WithoutCancel`, the goroutine would
+race the Done channel net/http closes the instant `ServeHTTP` returns, on
+every single call. The handler itself now returns immediately after
+`WriteJSON`, so `next.ServeHTTP` returns promptly regardless of how long the
+write takes, and the middleware's buffered flush is no longer gated on it.
+
+`TestSuggestionsHandler_RecordsADecisionPerExercise` needed updating to
+match: asserting on `recordedDecisions` the instant `Suggestions` returns is
+now a genuine race against the goroutine, so the fake repo gained a buffered
+`recorded` channel `RecordDecisions` signals, and the test waits on it
+(bounded 2s) rather than sleeping or asserting immediately. Re-run with
+`go test -race`: clean, no data race, confirming the goroutine's write to
+`recordedDecisions` and the test's read of it are correctly ordered by the
+channel receive rather than by luck.
+
+Two `[suggestion]`-level findings, one folded in and one deferred:
+`ResolveDecisionOutcomes`/`DismissPendingDecisions` now route their Postgres
+errors through `translatePgError` too, matching `RecordDecisions`'s own
+pattern (previously inconsistent, though with no observable effect since
+none of the three errors is ever branched on). Left as-is: `decisionWorkoutID`
+is still built from the caller-supplied `workout_id` query parameter without
+confirming visibility beyond `ItemProtocols`'s own `err == nil` check, which
+doesn't distinguish "invisible to this caller" from "visible, no configured
+protocols" (both return `nil, false, nil`) — harmless today since no read
+endpoint exists, but worth tightening before N515's shadow-replay tool
+becomes a real reader of this column. Not fixed here because a correct fix
+needs an actual ownership signal `workout.ItemProtocols` doesn't currently
+return, not a one-line change; recorded here so it isn't forgotten.
+
+
 ## Open items / known gaps as of this entry
 
 

@@ -677,4 +677,27 @@ type Repository interface {
 	// this is a second single-field method rather than folded into Rename.
 	Reschedule(ctx context.Context, userID, sessionID string, startedAt time.Time) (*Session, error)
 	Delete(ctx context.Context, userID, id string) error
+
+	// RecordDecisions is N513/#901's audit-trail write: one row per exercise
+	// in a single Suggestions request, appended once and never touched again
+	// except through ResolveDecisionOutcomes/DismissPendingDecisions below —
+	// see decisionrecord.go for the full design. Batched into one call
+	// (rather than one per exercise) because a single Suggestions request
+	// covers up to maxSuggestionIDs exercises and this must not turn into
+	// that many round trips on a path mobile calls after every completed set.
+	RecordDecisions(ctx context.Context, records []NewDecisionRecord) error
+	// ResolveDecisionOutcomes correlates a just-saved set list back to
+	// whatever pending decision record it answers, per exercise — "applied"
+	// when the logged weight/reps match the suggestion exactly, "edited"
+	// when they don't. Scoped to workoutID, which is why it is a no-op (not
+	// an error) when workoutID is nil — see decisionrecord.go's own doc
+	// comment on why a freeform session has no reliable correlation key.
+	// Called from Handler.ReplaceSets after a successful save; never fails
+	// the request it's called from.
+	ResolveDecisionOutcomes(ctx context.Context, userID string, workoutID *string, sessionID string, sets []Set) error
+	// DismissPendingDecisions closes out every decision record for this
+	// (user, workout) still 'pending' when the session that would have acted
+	// on it finishes — the suggestion was seen and never taken. Called from
+	// Handler.Finish; never fails the request it's called from.
+	DismissPendingDecisions(ctx context.Context, userID string, workoutID *string, sessionID string) error
 }

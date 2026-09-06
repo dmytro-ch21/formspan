@@ -462,6 +462,18 @@ type Plan struct {
 	// If a program-level recommendation is ever built, it must NOT become a
 	// field here.
 	Warmup []WarmupStep `json:"warmup,omitempty"`
+
+	// EvidenceSessionID and SkippedNonNormalSession are internal-only
+	// (json:"-") — added for N513/#901's decision-record audit trail (see
+	// decisionrecord.go), never exposed on the wire. Neither changes any
+	// branch above or anything a client sees: they are stamped at the exact
+	// points `last`/`skippedNonNormal` are already computed, in both Progress
+	// and ProgressV2, so they can never say something Code/Reason/Target*
+	// don't already say. EvidenceSessionID is "" whenever no evidence session
+	// exists (SuggestNoHistory, SuggestNotApplicable) — the same reading
+	// LastPerformedAt's own nil already gives a client for those cases.
+	EvidenceSessionID       string `json:"-"`
+	SkippedNonNormalSession bool   `json:"-"`
 }
 
 // Suggestion is what a client shows next to an exercise before its first set:
@@ -505,6 +517,7 @@ func Progress(in ProgressionInput, now time.Time) (p Plan) {
 	// uses for a different cross-cutting annotation, and not a coincidence.
 	var skippedNonNormal bool
 	defer func() {
+		p.SkippedNonNormalSession = skippedNonNormal
 		if skippedNonNormal && p.Code != SuggestNoRecentNormalSession {
 			p.Reason += " (A light or deload session was skipped when finding this.)"
 		}
@@ -570,6 +583,7 @@ func Progress(in ProgressionInput, now time.Time) (p Plan) {
 	performedAt := last.PerformedAt
 	p.LastPerformedAt = &performedAt
 	p.LastWeightKg = &weight
+	p.EvidenceSessionID = last.SessionID
 	// Effort is reported from the top set specifically, so the number a client
 	// shows beside "last time" is the one the heaviest set carried — not an
 	// average that belongs to no set that happened.

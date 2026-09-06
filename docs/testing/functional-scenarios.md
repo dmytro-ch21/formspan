@@ -19905,3 +19905,68 @@ now rely on rather than re-verify:
   that N473/#812 explicitly left unchanged, so it carries no equivalent
   property-test coverage. A functional test exercising the pre-flag engine
   should not assume these three guarantees hold there.
+
+## N513/#901 — immutable decision-record audit trail for the progression engine (`backend/internal/modules/session/decisionrecord.go`, `session_progression_decisions` table)
+
+Internal audit trail, no user-facing behavior and no new API surface — see
+`docs/decisions/history.md`'s N513 entry for the full design. This is
+recorded here anyway per this file's own "add its recommended scenarios"
+rule, because there IS new API-surface *behavior*, even without a new
+route: `GET /v1/sessions/suggestions`, `PUT
+/v1/sessions/{sessionID}/sets` and `POST /v1/sessions/{sessionID}/finish`
+each now do additional writes nobody calling those endpoints will ever see
+directly. What follows is what to verify about the write path, not a
+happy-path/edge-case treatment of user-visible behavior, since there isn't
+any.
+
+### What to verify (no UI to click through — this is a database-behind-an-existing-endpoint check)
+
+- Calling `GET /v1/sessions/suggestions?exercise_ids=...` writes exactly one
+  `session_progression_decisions` row per requested exercise id, regardless
+  of whether the engine returned a real prescription or abstained/found no
+  history/flagged an effort conflict — query the table by `user_id` and
+  `created_at` immediately after the call and count rows against
+  `exercise_ids`.
+- The response time of that same call is unaffected by the write —
+  time it with the table artificially made slow (a long lock, a large
+  `pg_sleep` in a trigger for testing only) and confirm the HTTP response
+  still returns promptly; the write is deliberately sequenced after
+  `apihttp.WriteJSON` for exactly this reason.
+- Killing the database mid-request (or revoking write access to the new
+  table only) must NOT turn a `GET /v1/sessions/suggestions` call into a
+  500 — the suggestion itself must still come back with its normal 200,
+  and the failure should appear only in server-side logs
+  (`session: could not record progression decisions`).
+- Logging a set via `PUT /v1/sessions/{sessionID}/sets` for a session
+  created with a `workout_id` that also had a pending decision record
+  (i.e., suggestions were fetched for that workout first) resolves that
+  decision to `applied` when the heaviest logged set for the exercise
+  matches the suggested weight/reps, or `edited` when it doesn't — same
+  "must not affect the set-save response" and "must not 500 on failure"
+  properties as above.
+- The same call for a FREEFORM session (no `workout_id`) must leave any
+  pending decision record entirely untouched — this is a deliberate, known
+  scope limit (see the history entry), not a bug to chase.
+- Finishing a session (`POST /v1/sessions/{sessionID}/finish`) closes out
+  any decision record for that workout run still sitting at `pending` to
+  `dismissed` — but never touches one already `applied`/`edited`, and never
+  touches one that started as `not_applicable` (an abstained/no-history
+  result was never something to apply in the first place).
+- Directly `UPDATE`-ing any column on `session_progression_decisions`
+  OTHER than the five `outcome_*` columns must be rejected by the database
+  itself (a Postgres trigger, not application code) — this is the
+  "immutable" guarantee the ticket's acceptance criteria names, and it is
+  worth confirming independently of the Go-level tests that already cover
+  it (`decisionrecord_postgres_test.go`).
+
+### Not covered, and why
+
+- No scenario for reading this data back — there is no `GET` endpoint for
+  it in this ticket's scope (see the history entry's point 5: the data is
+  for internal/tooling use — N515's shadow-replay tool, future analytics —
+  not athlete-facing display). If a read endpoint is ever built, ITS
+  scenarios belong here as their own section, including an auth/IDOR check
+  that a caller can only ever see their own `user_id`'s rows.
+- No scenario for "subsequent performance" (the next session's own
+  numbers for the same exercise) — deliberately deferred to N516/#904, not
+  built in this ticket. Add scenarios here once that ticket lands.
