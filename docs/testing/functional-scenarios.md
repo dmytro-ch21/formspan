@@ -36,6 +36,53 @@ Recommended end-to-end scenarios for every shipped piece of functionality — on
 **Auth & security**
 - Confirm the error body on every rejected-auth case matches the standard `{"error": {"code": "unauthorized", "message": "..."}}` shape — no stack traces or internal error text.
 
+**`azp` (authorized-party) validation (N134/#538 — `CLERK_AUTHORIZED_PARTIES`, `CLERK_REQUIRE_AZP`)**
+
+New observable behavior as of N134: a valid, unexpired, correctly-signed
+token can now be rejected purely because of who it was issued to. See
+`internal/platform/auth/auth.go`'s `authorizedParty` doc comment and
+`docs/decisions/history.md`'s N134 entry for the full policy and reasoning
+these scenarios are checking.
+
+- With `CLERK_AUTHORIZED_PARTIES` configured (a deployment that has it set),
+  a token whose `azp` claim names an allowlisted origin → verifies normally,
+  `200` on `GET /v1/me`.
+- Same, but `azp` names an origin **not** in the allowlist → `401
+  unauthorized`, and — this is the part worth asserting explicitly, not just
+  the status code — the response body names neither the rejected origin nor
+  any allowlisted one nor the string `azp`; it is the exact same generic
+  `{"error": {"code": "unauthorized", "message": "invalid token"}}` shape
+  every other rejected-auth case gets. This is the "never leak the
+  allowlist" acceptance criterion, checked at the wire, not just unit-tested
+  against the Go function.
+- A token with **no `azp` claim at all** (this is the expected shape of a
+  real token minted by `apps/mobile`, per Clerk's documented "omitted when
+  Origin is absent" behavior — see the history entry for the caveat that
+  this was not independently verified against a live mobile-issued token) →
+  still verifies normally, `200`, even with `CLERK_AUTHORIZED_PARTIES`
+  configured. This is the scenario worth a real device run once
+  `CLERK_REQUIRE_AZP` is ever turned on for a deployment `apps/mobile` talks
+  to: confirm the app keeps working, not just that the unit test's synthetic
+  no-azp token does.
+- A token with a **malformed** `azp` claim (present, but not a JSON string —
+  not producible through any of this project's own clients, but a
+  hand-crafted/adversarial token could carry one) → rejected the same as a
+  disallowed party, not treated as equivalent to "absent."
+- With `CLERK_AUTHORIZED_PARTIES` **unset** (today's state everywhere, and
+  the permanent local-dev default) → azp checking is a no-op; a token
+  carrying any `azp` value at all, allowlisted-looking or not, still
+  verifies normally. Worth one explicit regression scenario, since this is
+  the state most local/dev testing runs in and it would be easy for a future
+  change to accidentally start enforcing something here.
+- **Boot behavior (process-level, not a request scenario, but observable and
+  worth a script rather than only a Go test):** starting the API with
+  `CLERK_REQUIRE_AZP=true` and `CLERK_AUTHORIZED_PARTIES` unset/empty must
+  fail immediately with a clear log line and non-zero exit, before the
+  server binds a port — never boot successfully and silently run with azp
+  checking disabled. The same start with a non-empty
+  `CLERK_AUTHORIZED_PARTIES` must get past that check (and fail later, if at
+  all, for an unrelated reason like an unreachable database).
+
 ---
 
 ## Profile module (`GET/POST/PATCH /v1/profile`)

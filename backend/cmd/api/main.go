@@ -64,7 +64,45 @@ func main() {
 		os.Exit(1)
 	}
 	adminUserIDs := strings.Split(os.Getenv("ADMIN_USER_IDS"), ",")
-	verifier, err := auth.NewVerifier(context.Background(), clerkIssuer, adminUserIDs)
+
+	// N134/#538: azp (authorized-party) validation. CLERK_AUTHORIZED_PARTIES
+	// is comma-separated, same convention as ADMIN_USER_IDS and WEB_ORIGIN —
+	// see auth.Verifier.authorizedParty for the full per-request policy
+	// (what an allowed/disallowed/absent/malformed azp claim each do).
+	//
+	// CLERK_REQUIRE_AZP=true is a SEPARATE, explicit opt-in that this
+	// deployment's trust model depends on the allowlist actually being set —
+	// e.g. once a real staging/production Clerk instance has more than one
+	// trusted frontend origin. Unset (the default everywhere today) leaves
+	// an empty CLERK_AUTHORIZED_PARTIES as a supported "not configured yet"
+	// state, identical to today's behavior: this project has no existing
+	// notion of "local dev vs. a real deployment" baked into the Go binary
+	// (Railway injects different env values per environment; the binary
+	// itself doesn't branch on which one it's running in — see WEB_ORIGIN
+	// and ADMIN_USER_IDS above, neither of which behaves differently by
+	// environment either), so introducing one implicitly here, rather than
+	// as an explicit flag ops sets deliberately when the allowlist is ready,
+	// would risk suddenly requiring this in local dev with no clear signal
+	// that it had started to. Once CLERK_AUTHORIZED_PARTIES is configured
+	// in Railway's staging/production dashboards, CLERK_REQUIRE_AZP=true
+	// should be set alongside it, so a future accidental unset of the
+	// allowlist there fails the deploy loudly instead of silently
+	// re-opening this gap.
+	var authorizedParties []string
+	for _, p := range strings.Split(os.Getenv("CLERK_AUTHORIZED_PARTIES"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			authorizedParties = append(authorizedParties, p)
+		}
+	}
+	if os.Getenv("CLERK_REQUIRE_AZP") == "true" && len(authorizedParties) == 0 {
+		// Deliberately not naming any party here — there are none configured,
+		// so there's nothing to leak, but the message still shouldn't invite
+		// pasting real values into a log by habit.
+		logger.Error("CLERK_REQUIRE_AZP=true but CLERK_AUTHORIZED_PARTIES has no entries (see backend/.env.example)")
+		os.Exit(1)
+	}
+
+	verifier, err := auth.NewVerifier(context.Background(), clerkIssuer, adminUserIDs, authorizedParties)
 	if err != nil {
 		logger.Error("auth: init verifier", "err", err)
 		os.Exit(1)
