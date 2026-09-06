@@ -57348,6 +57348,104 @@ worth a device pass: the belt-themed empty state's dimmed opacity in real
 light, and two-column pill wrapping with a long enabled-sports caption
 ("Strength · Nutrition · BJJ") on the narrowest supported phone width.
 
+## N510 — a reusable week-progress stepper, wired into Plan's own week strip (`apps/mobile/components/ui/WeekStepper.tsx`, `apps/mobile/components/WeekPlanner.tsx`, #887)
+
+The user's reference was Hevy's Dashboard week stepper: a row of numbered
+day markers connected by dashes, a filled circle for the day you're on, and
+a moon glyph for a scheduled rest day, read in one glance.
+
+**Investigated `WeekPlanner.tsx` first, per the ticket's own instruction, and
+found a strip that was close but answering a narrower question.**
+`WeekPlanner` already drew a compact per-day row (`styles.strip`) when its
+authoring rows are collapsed — a weekday letter, a date, and a single bit:
+does this day have a plan or not, drawn as a hollow-vs-filled 7pt dot. That
+is the same JOB as the reference (a week glance strip) but only two states
+where the reference draws four, and no distinct rest-day glyph — a rest day
+and a planned-but-past day both rendered as a plain hollow dot. So this
+shipped as an extraction-and-extension, not a from-scratch build: pulling
+the strip's logic out into a new, genuinely reusable component and giving it
+the states the old inline version never had, rather than parking a second,
+unrelated glance-strip component beside the one already there.
+
+**`WeekStepper` is a new component, not a mode flag on `WeekPlanner`.**
+`WeekPlanner` and `WeekStepper` answer different questions and the ticket's
+own instruction was to avoid forcing one component to answer both: which
+week is currently shown, with full authoring (add/remove a plan, browse any
+week or month, edit the week's theme) is `WeekPlanner`'s job and stays
+calendar-shaped (real `Date`s, a weekday abbreviation, collapsible rows).
+"What does this week look like at a glance" — day 1 through day 7, four
+states, no dates required, nothing to author — is `WeekStepper`'s job, and
+it takes plain `{ key, number, state, label }` data so a future caller with
+no calendar at all (a coach-assigned program week, say) can use it without
+inventing dates for days that don't have any. `WeekPlanner` is `WeekStepper`'s
+first and, for this ticket, only caller — its old inline strip is gone,
+replaced by a call to the shared component, which is the "extend, don't
+duplicate" half of the acceptance criteria.
+
+**The four states, and the one deliberate gap in what `done` can mean.**
+`weekStepperDayState({ isToday, isPast, hasPlan })` is a pure function:
+`current` for today (unconditionally — see below), `rest` for any other day
+with nothing planned, `done` for a past day that had a plan, `upcoming` for
+a future one. The gap: `done` here means "this day's training slot has
+passed," not "you trained" — `lib/plan.ts`'s own doc comment is explicit
+that a plan carries no completion flag by design (*"nothing here writes a
+completion status, and there is no column for one"*), and answering "did you
+actually train" needs a join against logged sessions
+(`lib/adherence.ts`'s `matchPlans`), which this glance strip deliberately
+does not carry. Adding that join to `WeekPlanner` would have meant a new
+session-range read, new staleness/cancellation guards matching the
+meticulous pattern the rest of that file already uses for `plans`
+(`readSeq`, the anchor-vs-`now` split), and a rewrite of its 500-line
+existing test file's mocks — real cost for a fact the reference screenshot
+does not actually require reading. If a future caller genuinely needs
+verified completion, `matchPlans` is the function to reach for; this ticket
+did not need it and did not fake it.
+
+**`current` wins over `rest`, on purpose, and it's the one place the
+component's behavior isn't obvious from its name.** A rest day that is also
+today still shows the filled current-day mark with its number, not the moon
+— matching the reference literally (day 1's filled circle carries a number,
+never a glyph) and keeping one marker per day rather than trying to encode
+two facts in one glyph. The fact that today is a rest day is not lost: the
+screen around this component (`WeekPlanner`'s own per-day row, immediately
+below) still says "Rest" for that day in plain text. Pinned as its own test
+(`weekStepperDayState.test.ts`) precisely because it is the one branch that
+reads as a bug at first glance.
+
+**Tokens, not new literals — N508's, specifically.** `Spacing`/`Radius` for
+gaps and the mark's corner radius, `Typography.eyebrow`/`emphasis` for the
+optional week label and the day numbers. Colour is the one deliberate
+exception, matching `WeekStrip.tsx`'s and the old inline strip's own
+reasoning before it: `vola.lime` directly rather than `useAccent()`, because
+a mark encoding a reading (done/rest/current) has to stay legible regardless
+of which accent an athlete picked, not vary with a setting unrelated to it.
+
+**Testing**: two new suites — `weekStepperDayState.test.ts` (all six
+reachable state combinations, mutation-verified: swapped the `current`/`rest`
+priority, confirmed the "today, no plan" test goes red as a real assertion
+failure, restored, confirmed green by re-running) and `weekStepper.test.tsx`
+(each state renders distinguishably, a rest day never falls back to
+rendering its number, the component takes a second non-calendar day shape
+identically — the "not hardcoded to one screen's data shape" criterion
+pinned directly). `WeekPlanner`'s own 16-case suite
+(`__tests__/app/weekPlanner.test.tsx`) passes unchanged, including its
+render-cost budget on `Date.prototype.toLocaleDateString` calls, which a
+denser header would have blown. Full mobile suite: 276 suites, 4425 tests,
+green (`TZ=America/Los_Angeles`, per this repo's own convention — running
+without it reproduces four unrelated pre-existing timezone-sensitive
+failures in `trackerCard.test.tsx`, not a regression from this change).
+`pnpm run lint:mobile` unchanged at 50 warnings / 0 errors.
+
+**NEEDS HUMAN EVIDENCE**, unresolved by this entry, and explicit rather than
+a silent gap per this ticket's own acceptance criteria: whether the moon
+glyph, the dashed connectors and the filled current-day mark actually read
+as distinct "at a glance" on a real device — the ticket's own bar — at
+default and at a large accessibility text size. This is the only criterion
+this ticket could not satisfy through code and tests alone; every other
+acceptance criterion (four states render distinguishably, reusable data
+shape, wired into a real screen, `WeekPlanner`'s existing tests pass, new
+coverage) is verified above.
+
 ## Open items / known gaps as of this entry
 
 
@@ -57382,3 +57480,5 @@ light, and two-column pill wrapping with a long enabled-sports caption
 - **A BJJ-only athlete still sees strength-shaped zeroes.** Today's week summary reads "0kg volume" and the history chart's tonnage is structurally 0 for BJJ — the client already falls back to a time metric when tonnage is zero everywhere, but the volume tile itself does not. Mat time and rounds now exist as real numbers; nothing surfaces them yet.
 - **The technique library is not cached in SQLite** (only in memory, for the app's lifetime). So the reflection wizard's drilled step is empty on a cold launch with no signal — the one moment it is most likely to be used. It degrades honestly and stays skippable, but a `technique_cache` table (or a prefs blob, as `PREF_MODULES` already does) is the fix.
 - The new `backend-module-scaffolder` agent and `/new-module` skill are still unverified in practice — the feature-flags module was scaffolded by hand instead, since its shape (global, ownerless, read-only) didn't fit the agent's per-user-CRUD template. No module has gone through the agent for real yet (the `profile` module it's modeled on predates it) — worth checking it actually produces correct output the first time it's used for a module that *does* fit the template (e.g. a future `goals` module).
+- **`WeekStepper` (N510) has one caller.** It replaced `WeekPlanner`'s own inline strip, which is real reuse (the old ad hoc rendering is gone, not duplicated), but the ticket also asked whether Today or Progress would use it and the answer here was no for both: Today's own week strip (`components/today/WeekStrip.tsx`) answers a different question (food-logging days, explicitly not conflated with training per that file's own comment) and Progress's week section (`components/progress/ThisWeek.tsx`) is a verdict card (`WeekReview`), not a day-marker row — neither is the W2/W4 "two cards, one question" shape this component would create if forced in. A genuine second use is more likely once a screen exists that needs a day-by-day glance at a *training* week specifically (a coach-assigned program, say) — nothing about the component assumes there will ever be a second caller, and nothing prevents one.
+- **`WeekStepper`'s `done` state is honest, not complete.** It means "this day's slot has passed," never "you trained" — see the N510 entry above for why a real completion join (`lib/adherence.ts`'s `matchPlans`) was deliberately left out. A future ticket that wants the stepper to show real completion has that function ready to reach for; it just isn't reached for yet.
