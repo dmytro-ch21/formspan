@@ -599,6 +599,15 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		// own doc comment on that field. `program`/`athleteCfg` are sorted
 		// into the right priority slot by workout ownership (isProgram),
 		// resolved once per request above, not per exercise.
+		//
+		// `profile` is hoisted out of the `if v2` block below (N495/#865)
+		// because GenerateWarmupRamp, further down, needs the SAME classified
+		// profile ResolveProtocol already used — recomputing it a second time
+		// would risk the two silently drifting apart. Its zero value ("") is
+		// never ProfilePrimaryCompound, so under v1 (where it's never
+		// assigned) the warm-up engine's heavy-compound rung simply never
+		// applies, which matches v1 never generating a ramp at all.
+		var profile workout.ExerciseProfile
 		if v2 {
 			var program, athleteCfg *workout.ItemProtocol
 			if proto, ok := protocols[id]; ok {
@@ -609,7 +618,7 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 					athleteCfg = &p
 				}
 			}
-			profile := ClassifyExerciseProfile(in.MovementPattern, in.MovementPatternDetail, in.LoadType)
+			profile = ClassifyExerciseProfile(in.MovementPattern, in.MovementPatternDetail, in.LoadType)
 			resolved := ResolveProtocol(program, athleteCfg, profile)
 			in.Protocol = &resolved
 		}
@@ -619,6 +628,19 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 			plan = ProgressV2(in, now)
 		} else {
 			plan = Progress(in, now)
+		}
+
+		// N495/#865 (phase 3 of #753): a warm-up ramp is generated ONLY once
+		// a working-set prescription is actually known — plan.TargetWeightKg
+		// nil covers every v2 code that carries no numeric target
+		// (abstain/effort_conflict/no_history/not_applicable alike) plus the
+		// whole of v1, which must see no warm-up field at all, matching every
+		// OTHER v2-only addition in this file. See warmup.go for the engine
+		// itself — deliberately a separate code path from ProgressV2, called
+		// only from here, never from inside it.
+		if v2 && plan.TargetWeightKg != nil {
+			plan.Warmup, _ = GenerateWarmupRamp(*plan.TargetWeightKg, profile, DefaultWarmupPolicy,
+				func(kg float64) float64 { return roundForProtocolV2(in, kg) })
 		}
 		s := Suggestion{ExerciseID: id, Plan: plan}
 

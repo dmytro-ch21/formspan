@@ -57835,6 +57835,180 @@ That window still has a boundary problem worth stating precisely: `performed_at`
 
 **Migration-number collision with N494, caught and resolved before either merged.** This branch and N494 (#864, landing the same day) both independently claimed `000091` against the identical `origin/main` base — invisible in either branch's own three-dot diff, exactly as this repo's "claim at rebase time" rule warns about. N494 kept `000091` (pushed first); this branch's migration is renumbered to `000092` here, ahead of N494 actually merging, since the collision was already known rather than waiting to discover it again at this branch's own rebase.
 
+### N495/#865 (phase 3 of #753): a warm-up engine, separate from ProgressV2, and an advisory-only fatigue flag
+
+Phase 3 of #753 (N450), building on N494/#864 (phase 2, entry above) exactly
+as that ticket's own scope note asked: warm-ups generated only once a real
+working-set prescription exists, never folded into `ProgressV2` itself.
+Phases 4 (splitting recommendation products) and 5 (an immutable
+per-suggestion decision record) remain open against #753.
+
+**The problem, precisely.** Warm-ups were excluded from volume entirely —
+correct for working-set volume, wrong for auditing preparatory fatigue —
+and there was no warm-up engine at all, evidence-informed or otherwise, and
+no way to flag a warm-up that had quietly become training work.
+
+**The engine: `backend/internal/modules/session/warmup.go`, a genuinely
+separate code path from `ProgressV2`.** `GenerateWarmupRamp` is called only
+from `Handler.Suggestions`, only under `new_recommendation_engine`, and only
+once `plan.TargetWeightKg != nil` — every v2 code that carries no numeric
+target (`abstain`, `effort_conflict`, `no_history`, `not_applicable`) means
+no ramp, exactly as #753's "no automatic warm-up when the working target is
+unknown" requires. `profile` (from `ClassifyExerciseProfile`, N494) is
+hoisted out of the handler's existing `if v2` block specifically so the ramp
+consults the SAME classified profile `ResolveProtocol` already used, rather
+than a second call risking drift.
+
+**Every rung is a PERCENTAGE of the working weight, never an absolute
+number** — `WarmupPolicy`/`WarmupBand`, with `DefaultWarmupPolicy` following
+#753's own starting policy: a technique set (20% of work, 5-10 reps), then
+bands at 40-60% (3-5 reps), 65-80% (2-3 reps), and — for
+`workout.ProfilePrimaryCompound` exercises only — 80-90% (1-2 reps). This is
+the direct fix for #753's own "the exact ramp (45/135/225/275/305) must
+remain configurable — a starting policy, not a fixed universal ramp":
+nothing in `GenerateWarmupRamp` is a literal weight, so the identical policy
+produces a sane ramp for a 60kg press and a 200kg squat alike, and a
+different `WarmupPolicy` value produces a genuinely different ramp from the
+same inputs (`TestGenerateWarmupRamp_ConfigurableNotOneFixedSequence`). A
+caller-supplied `round` function applies the athlete's real
+equipment/unit-system rounding (`roundForProtocolV2`, already resolved by
+the handler) to every rung, rather than this engine inventing a second
+rounding rule.
+
+**Advisory fatigue detection, structurally incapable of becoming automatic.**
+`DetectWarmupFatigue` implements #753's three triggers exactly — reported
+warm-up RPE ≥7 or RIR ≤2 (`FatigueHighEffort`); a load at or above the
+heavy-compound band's own 80% floor with as many or more reps than the
+working target (`FatigueNearWorkingLoadHighReps`); a moderate load (40-80%)
+at roughly double the working reps (`FatigueModerateLoadDoubleReps`) — and
+returns a plain slice of reasons: no mutation, no side effect, nothing
+touched. `WarmupFatiguePrompt` is #753's one fixed question ("This warm-up
+may be training work. Count it as work?"), asked once regardless of how many
+triggers fired. **There is no "reclassify" function in this package on
+purpose** — see `warmup.go`'s own header comment: moving a warm-up set into
+working volume is not a computation this engine performs, it is the athlete
+editing that set's own `SetType` field (already first-class,
+`SetTypeWarmup`/`SetTypeWorking`) exactly the way any other correction to a
+logged set is made. Detecting a flag can never, by itself, change what
+`Summarise` counts.
+
+**Warm-up volume, stored separately rather than discarded.** `Volume` gains
+`WarmupSets`/`WarmupReps`/`WarmupTonnageKg` — the warm-up-side mirror of
+`WorkingSets`/`TotalReps`/`TonnageKg` — and `Summarise` now accumulates a
+completed warm-up set's own reps/tonnage into those fields instead of simply
+skipping them, while the working totals and `HardestRPE` remain exactly as
+guarded as before. No schema change: warm-up sets were already stored as
+ordinary rows tagged `SetTypeWarmup`, so this is purely a change to the
+derived aggregate every client already reads — mirrored identically in
+`apps/mobile/lib/sessions.ts`'s `Volume`/`localVolume` and
+`apps/web/src/lib/api.ts`'s `Volume` type. **No migration in this PR** —
+nothing here persists a new column; the ramp is generated on request and the
+fatigue flag is never stored.
+
+**The OHP golden test, resolving #753's own report exactly as specified.**
+`TestWarmupEngine_GoldenOHP_HoldsWorkingWeightAndFlagsFatiguingWarmup`
+(`warmup_test.go`) ties all three pieces together on one fixture: an
+athlete-configured 6-8 rep range (N494) holds the prescription at 115kg
+rather than inventing a different number from a mismatched cohort — the same
+coherent-cohort discipline N473/#812's squat golden test already pins, one
+exercise over; `GenerateWarmupRamp` produces a real ramp once that 115
+prescription exists; `DetectWarmupFatigue` flags a 95×12@RPE7 warm-up set
+against it (both `high_effort` and `near_working_load_high_reps` fire
+independently, each pinned by its own assertion rather than a bare non-empty
+check); and `Summarise` proves the flag alone changes nothing — the set
+stays on the warm-up side of `Volume` until its `SetType` is explicitly
+edited to `SetTypeWorking`, at which point (and only then) its reps and
+tonnage move to the working side. Every new guard was mutation-verified
+directly: the target-unknown gate, the RPE threshold, both percent-based
+triggers, and the warm-up/working `Summarise` split each reproduced a real
+failure when disabled and passed again once restored.
+
+**Mobile: the ramp displays, and the fatigue prompt runs, entirely
+client-side once fetched — no second network round trip mid-workout.** The
+ramp itself is generated server-side and rides the SAME `GET
+/sessions/suggestions` response mobile already fetches before a session
+starts (`Suggestion.warmup`, appended alongside `in_session_signal`) — zero
+added latency to the logging path. `apps/mobile/lib/warmup.ts` mirrors
+`DetectWarmupFatigue`'s three thresholds in TypeScript (the one deliberate
+exception to "the server is the one source of truth for a resolved
+prescription" — see that file's own header comment): the check must run the
+instant a warm-up set is ticked done, mid-workout, one-handed, against a
+target that is already sitting in the screen's own `suggestions` state, and
+a round trip would cost exactly the latency this codebase's "advice, not
+content" posture already refuses to add to logging. `app/session/[id].tsx`'s
+`toggleDone` runs the check only on the way to done and only for a warm-up
+set; a flag renders as a small, amber-bordered, DISMISSIBLE card in the
+normal scroll flow — never a modal, matching CLAUDE.md's explicit
+instruction that this prompt must not become a blocking interruption to the
+logging flow. One tap ("Count as work") calls `reclassifyWarmupAsWork` and
+commits the edited `set_type`; dismissing, or simply ignoring it and ticking
+the next set, costs nothing — the flag is cleared on every structural edit
+`stopTimerForStructureChange` already knows about (the same guard the
+rest-timer machinery uses for the identical positional hazard), and — see
+the review fold-in below — re-validated again immediately before "Count as
+work" acts, since two paths reach the flagged row without going through that
+function at all. The ramp itself renders as a plain reference line under the
+existing suggestion hint ("Warm-up: 5-10 @ 23kg · 3-5 @ 58kg · 2-3 @ 86kg"),
+readable at a glance standing at the rack.
+
+**Web** gets the same `Suggestion.warmup`/`Volume` type additions for
+type-level parity — nothing here silently drifts stale — but no dedicated
+ramp/fatigue UI: this is squarely mobile's "live logging" territory per
+CLAUDE.md, and web's own session flow doesn't get in-workout affordances.
+Flagged as a gap rather than built, the same posture N473/#812 and N494/#864
+took for their own out-of-scope edges.
+
+**Testing.** Backend: 17 new pure-function tests in `warmup_test.go`
+(ramp generation — no-target gate, heavy-compound-only rung, percentage
+scaling across two very different targets, decreasing reps, configurability,
+rounding — and fatigue detection — all three triggers plus their
+just-below-threshold negatives, the unknown-target guard, multiple triggers
+firing together), the OHP golden test above, 3 new `Handler.Suggestions`
+wiring tests (`warmup` present under v2 with a known target and the
+heavy-compound rung included; absent under v1; absent when the target is
+unknown), and `TestSummarise_ExcludesWarmups` extended to pin the new
+`Warmup*` fields alongside its existing working-side exclusion. Full backend
+suite green. Mobile: 15 new jest cases in `lib/__tests__/warmup.test.ts`
+mirroring the Go scenarios one-for-one (including the OHP report), `tsc
+--noEmit` clean, `lint:mobile` unchanged at 50 warnings/0 errors — the one
+new lint hit (a hardcoded `fontSize: 20` in the dismiss button) was fixed to
+reference `Typography.title.fontSize` before this landed — and the full
+mobile suite green. Web: `tsc --noEmit` and the full
+259-test `vitest` suite green. `pnpm run lint:openapi` validates the new
+`WarmupStep` schema and the `Suggestion.warmup`/`Volume.warmup_*` additions.
+(A pre-fold-in suite count was quoted here and turned out not to match a
+re-run — see "Review fold-in" below for the re-measured numbers, which are
+the ones to trust.)
+
+**Review fold-in.** `ac-verifier`: 6 MET, 0 NOT MET, 1 correctly
+`NEEDS HUMAN EVIDENCE` (usable standing at the rack, one-handed) — issue
+#865's own body did not yet carry that criterion under the properly-marked
+label the evidence latch requires, so it was amended before merge to split
+it into a code-checkable `[x]` line and a separate marked
+`NEEDS HUMAN EVIDENCE` line. `backend-reviewer`: 0 blocking, two minor
+suggestions left as-is (a garbled duplicated clause in the OpenAPI
+description for `Suggestion.warmup`; `DetectWarmupFatigue` has no Go caller
+outside its own tests, which is the deliberate client-side-latency tradeoff
+`lib/warmup.ts`'s own header comment already names, not an oversight).
+`frontend-reviewer` found one real `[blocking]` finding: the "Count as work"
+handler trusted `warmupFlag`'s stored `index` with no revalidation that the
+row there was still the flagged warm-up. Two concrete ways it goes stale,
+neither going through `stopTimerForStructureChange`: swapping the exercise
+(`swapExercise` rewrites rows in place by exercise id, bypassing `commit`
+entirely) and a manual `set_type` edit on the flagged row via the ordinary
+per-field `update`. Fixed with a new `warmupFlagStillValid` guard
+(`lib/warmup.ts`) checked immediately before `reclassifyWarmupAsWork` runs —
+the same "backstop that does not depend on anyone remembering to clear it"
+shape as `timedSetStillAt` for the rest-timer's identical positional hazard
+— plus 5 new mutation-verified tests (reverting the guard to drop its
+`set_type` check reproduces exactly the two failure modes it exists to
+catch). Folded in the reviewer's incidental duplicate-work note too: the
+handler previously called `reclassifyWarmupAsWork` twice (once for `commit`,
+once for `refreshSuggestions`) — now computed once and reused. Re-measured
+after the fold-in: full mobile suite 277 suites / 4441 tests green,
+`lint:mobile` still 50 warnings / 0 errors, `tsc --noEmit` clean,
+`pnpm run verify` exit 0.
+
 ## Open items / known gaps as of this entry
 
 

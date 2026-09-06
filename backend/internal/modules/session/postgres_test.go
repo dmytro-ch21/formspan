@@ -406,6 +406,10 @@ func TestCreateAndGet_RecordsEveryMeasure(t *testing.T) {
 
 // Warm-ups must not inflate working volume. Counting them would make a light
 // day look like a hard one and poison anything built on top.
+//
+// N495/#865: a warm-up's own reps/tonnage are not simply discarded, though —
+// they land on the SEPARATE Warmup* fields, which this test now pins
+// alongside the working-side exclusion it already covered.
 func TestSummarise_ExcludesWarmups(t *testing.T) {
 	v := Summarise([]Set{
 		{ExerciseID: exBench, SetType: SetTypeWarmup, Reps: ptrInt(10), WeightKg: ptrF(40), Completed: true},
@@ -422,11 +426,15 @@ func TestSummarise_ExcludesWarmups(t *testing.T) {
 		t.Errorf("tonnage: got %v, want %v", v.TonnageKg, 5*100+3*140)
 	}
 	if v.HardestRPE != 9.5 {
-		t.Errorf("hardest RPE: got %v, want 9.5", v.HardestRPE)
+		t.Errorf("hardest RPE: got %v, want 9.5 — a warm-up's RPE must never win this either", v.HardestRPE)
 	}
 	// An exercise appearing in several sets is still one exercise.
 	if len(v.ExerciseIDs) != 2 {
 		t.Errorf("exercise ids: got %v, want 2 distinct", v.ExerciseIDs)
+	}
+	if v.WarmupSets != 1 || v.WarmupReps != 10 || v.WarmupTonnageKg != 10*40 {
+		t.Errorf("warm-up totals: got sets=%d reps=%d tonnage=%v, want sets=1 reps=10 tonnage=%v",
+			v.WarmupSets, v.WarmupReps, v.WarmupTonnageKg, 10*40.0)
 	}
 }
 

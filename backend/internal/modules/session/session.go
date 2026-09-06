@@ -321,12 +321,26 @@ type Session struct {
 // that were planned but never performed. It answers "what is this session
 // about", not "what did I complete", which is why an opened template
 // reports its exercises alongside zero working volume.
+//
+// WarmupSets/WarmupReps/WarmupTonnageKg (N495/#865, phase 3 of #753) are the
+// warm-up-side mirror of WorkingSets/TotalReps/TonnageKg — a completed
+// warm-up set's own reps and tonnage, tracked SEPARATELY rather than
+// discarded outright. Before this ticket a warm-up's work was invisible
+// everywhere except ExerciseIDs; auditing preparatory fatigue (how much a
+// warm-up ramp itself cost, before the working sets even start) needs that
+// figure to exist somewhere, and it must never be added into the working
+// totals above — the whole reason this is a second set of fields rather
+// than relaxing the SetTypeWarmup guard below.
 type Volume struct {
 	WorkingSets int      `json:"working_sets"`
 	TotalReps   int      `json:"total_reps"`
 	TonnageKg   float64  `json:"tonnage_kg"`
 	HardestRPE  float64  `json:"hardest_rpe"` // over working sets only
 	ExerciseIDs []string `json:"exercise_ids"`
+
+	WarmupSets      int     `json:"warmup_sets"`
+	WarmupReps      int     `json:"warmup_reps"`
+	WarmupTonnageKg float64 `json:"warmup_tonnage_kg"`
 }
 
 // TotalWeightKg is what the athlete actually moved, which is not always the
@@ -436,11 +450,26 @@ func Summarise(sets []Set) Volume {
 		if !s.Completed {
 			continue
 		}
-		// Warm-ups count toward no working-volume measure — not sets, not
+		// Warm-ups count toward no WORKING-volume measure — not sets, not
 		// tonnage, and not the hardest RPE. They stay in ExerciseIDs above,
 		// because "what did I train" does include an exercise you only
 		// warmed up on.
+		//
+		// N495/#865: a warm-up's own reps and tonnage are not simply
+		// discarded, though — they accumulate into the Warmup* fields below,
+		// SEPARATELY from the working totals, so auditing preparatory
+		// fatigue has a real number to read. This is still never automatic
+		// reclassification: a set stays SetTypeWarmup, and stays counted
+		// here rather than above, until the athlete themselves edits its
+		// SetType — see warmup.go's own header comment.
 		if s.SetType == SetTypeWarmup {
+			if s.Reps != nil {
+				v.WarmupSets++
+				v.WarmupReps += *s.Reps
+				if s.WeightKg != nil {
+					v.WarmupTonnageKg += float64(*s.Reps) * s.TotalWeightKg()
+				}
+			}
 			continue
 		}
 		if s.RPE != nil && *s.RPE > v.HardestRPE {

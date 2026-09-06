@@ -19719,3 +19719,104 @@ set is ticked done — not derived from when the session happens to be saved.
   behavior during an actual workout.
 - BJJ's equivalent (drill-vs-roll HR segmentation) is a separate ticket,
   N491/#852, with its own schema questions.
+
+## N495/#865 — warm-up ramp as a separate engine, plus advisory fatigue flagging (phase 3 of #753) (`backend/internal/modules/session/warmup.go` — `GenerateWarmupRamp`/`DetectWarmupFatigue`, `GET /v1/sessions/suggestions`'s `warmup` field, `session.Volume`'s `warmup_sets`/`warmup_reps`/`warmup_tonnage_kg`, `apps/mobile/lib/warmup.ts`, `apps/mobile/app/session/[id].tsx`)
+
+Generates a warm-up ramp (percentage-of-work bands, never absolute weights)
+once `GET /v1/sessions/suggestions` already has a real working-set
+prescription, and raises an advisory (never automatic) flag when a
+completed warm-up set looks like it may have been training work — see
+`docs/decisions/history.md`'s N495 entry for the full design and #753 for
+the original OHP scenario this is built from.
+
+### Happy path
+
+- Fetch suggestions (flag on) for an exercise with real, finished,
+  effort-recorded history that resolves to a numeric `target_weight_kg` —
+  the response's `warmup` array is present, non-empty, and every step's
+  `weight_kg` is `target_weight_kg * percent_of_work` (rounded to the
+  athlete's own equipment increment/unit system).
+- The same request for a `workout.ProfilePrimaryCompound` exercise (a
+  squat, a deadlift, an overhead press) includes a final "heavy" rung at
+  ~80-90% of the target for 1-2 reps; the identical request for an
+  isolation accessory does not include that rung at all.
+- Reps decrease monotonically as `percent_of_work` increases across the
+  ramp's steps.
+- Two different working weights (say a 60kg press and a 200kg squat)
+  produce ramps with the SAME rep windows and DIFFERENT absolute
+  `weight_kg` per rung — proof the ramp is a percentage policy, not a
+  fixed sequence.
+- On mobile, mid-session: tick a warm-up set done at a weight/rep/effort
+  combination matching one of #753's three triggers (e.g. logged at RPE 7
+  or higher) against an exercise whose suggestion already carries a
+  `target_weight_kg`/`target_reps` — a small, dismissible card appears
+  with the exact prompt "This warm-up may be training work. Count it as
+  work?", without any spinner or network wait (the check runs entirely off
+  already-cached suggestion data).
+- Tapping "Count as work" on that card changes the flagged set's own type
+  from warm-up to working — its reps and weight are unchanged, but a
+  subsequent `Volume`/session summary now counts it under
+  `working_sets`/`total_reps`/`tonnage_kg` instead of
+  `warmup_sets`/`warmup_reps`/`warmup_tonnage_kg`.
+- Dismissing the card (the × control), or simply ignoring it and ticking
+  the next set, leaves the flagged set exactly as a warm-up — nothing
+  about stored volume changes.
+- `GET /v1/sessions/{id}` and every other endpoint returning `Volume`
+  reports a completed warm-up set's reps/tonnage under the new
+  `warmup_*` fields, never folded into the working totals, and never
+  simply dropped.
+
+### Edge cases & errors
+
+- The exercise has no history at all (`no_history`), or the resolved code
+  carries no numeric target (`abstain`, `effort_conflict`,
+  `not_applicable`, `no_recent_normal_session`) — the response's `warmup`
+  field is absent entirely, never an empty-but-present array.
+- The feature flag (`new_recommendation_engine`) is off — `warmup` is
+  absent from every suggestion, matching v1's byte-for-byte-unchanged
+  behaviour for every other v2-only field.
+- A warm-up set is logged with no weight or no reps recorded — the
+  fatigue check simply does not run for that set (nothing to evaluate),
+  and no card appears.
+- A warm-up set is ticked done for an exercise the suggestions fetch has
+  no cached entry for (e.g. a freeform exercise added mid-session with no
+  prior suggestions round trip) — no card appears; this is advisory
+  enrichment, not a blocking requirement.
+- Reordering sets or removing a set after a fatigue card is showing
+  dismisses the card entirely (`stopTimerForStructureChange`).
+- Swapping the flagged set's exercise, or manually changing its own type
+  away from warm-up via the per-row picker, while its fatigue card is
+  still showing: the card itself is not proactively dismissed by either
+  action, but tapping "Count as work" afterward is a no-op — it silently
+  withdraws rather than reclassifying the now-different row underneath it
+  (`warmupFlagStillValid`; found by `frontend-reviewer` during N495's own
+  review, since a stored positional flag is the identical hazard
+  `timedSetStillAt` already guards for the rest-timer).
+- Un-ticking the exact warm-up set that raised a currently-showing card
+  withdraws the card (there is no longer a completed set for it to
+  describe).
+- A warm-up set trips more than one trigger at once (e.g. high RPE AND
+  near-working-load with high reps) — exactly one card appears, with the
+  one fixed prompt, not one per trigger.
+
+### Auth/security
+
+- No new authorization surface: `warmup` rides the existing
+  `GET /v1/sessions/suggestions` response, already scoped to the caller's
+  own exercise history exactly as `target_weight_kg`/`target_reps` are.
+- The fatigue check and its "count as work" reclassification are both
+  purely client-side, mid-session, mobile-app operations against a
+  session the athlete already owns — no new endpoint, no new write path.
+
+### Not yet covered (recorded as an open gap, not silently skipped)
+
+- **NEEDS HUMAN EVIDENCE**: on a real device, mid-workout, confirm the
+  fatigue card actually appears within the same tap-to-tick interaction
+  (no perceptible delay) and that dismissing it or tapping "Count as
+  work" both feel like a single, one-handed action rather than an
+  interruption — this ticket's own mobile-first/logging-speed
+  requirement is a UX property no automated test can confirm.
+- Web has no dedicated ramp or fatigue-prompt UI — this is squarely
+  mobile's "live logging" territory per CLAUDE.md, and the gap is
+  recorded rather than built (same posture N473/#812 and N494/#864 took
+  for their own out-of-scope edges).

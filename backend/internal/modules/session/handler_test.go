@@ -750,3 +750,108 @@ func TestSuggestionsHandler_NoWorkoutIDKeepsGoalBasedRange(t *testing.T) {
 			"protocol must not apply without a workout_id naming it", got)
 	}
 }
+
+// TestSuggestionsHandler_WarmupPresentWhenV2AndTargetKnown is N495/#865's own
+// end-to-end wiring proof: once ProgressV2 has produced a real
+// TargetWeightKg, the wire response carries a generated ramp — not just the
+// pure GenerateWarmupRamp unit tests exercising it. Reuses the golden squat
+// fixture, whose "squat" movement pattern classifies as
+// workout.ProfilePrimaryCompound, so the heavy-compound-only rung must be
+// present too.
+func TestSuggestionsHandler_WarmupPresentWhenV2AndTargetKnown(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: true}, nil)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	s := body.Suggestions[0]
+	if s.TargetWeightKg == nil {
+		t.Fatalf("fixture must produce a known target for this test to mean anything")
+	}
+	if len(s.Warmup) == 0 {
+		t.Fatalf("a known target_weight_kg under v2 must carry a generated warm-up ramp over the wire, got none: %+v", s)
+	}
+	found := false
+	for _, step := range s.Warmup {
+		if step.Label == "heavy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a squat (primary compound) ramp must include the heavy-compound-only rung, got %+v", s.Warmup)
+	}
+}
+
+// TestSuggestionsHandler_WarmupAbsentUnderV1 is the flag-off mirror: v1 must
+// never carry a warmup field at all, matching every other v2-only addition
+// in this endpoint.
+func TestSuggestionsHandler_WarmupAbsentUnderV1(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: false}, nil)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	if len(body.Suggestions[0].Warmup) != 0 {
+		t.Fatalf("v1 (flag off) must never carry a generated warm-up ramp, got %+v", body.Suggestions[0].Warmup)
+	}
+}
+
+// TestSuggestionsHandler_WarmupAbsentWhenTargetUnknown is #753's own rule
+// made concrete over the wire: no history at all means no TargetWeightKg
+// (SuggestNoHistory), and that must mean no warm-up ramp either — never an
+// empty-but-generated one.
+func TestSuggestionsHandler_WarmupAbsentWhenTargetUnknown(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{
+			"back-squat": {ExerciseID: "back-squat", LoadType: "weight_reps", MovementPattern: "squat"},
+		},
+		bestRMs: map[string]float64{},
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: true}, nil)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	s := body.Suggestions[0]
+	if s.TargetWeightKg != nil {
+		t.Fatalf("fixture must have no history, want a nil target — got %v", s.TargetWeightKg)
+	}
+	if len(s.Warmup) != 0 {
+		t.Fatalf("no known working target must mean no warm-up ramp, got %+v", s.Warmup)
+	}
+}

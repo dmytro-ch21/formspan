@@ -438,6 +438,17 @@ type Plan struct {
 	// client that ignores this field sees exactly the recommendation it
 	// always has — this never rewrites TargetWeightKg or TargetReps itself.
 	InSessionSignal *InSessionSignal `json:"in_session_signal"`
+
+	// Warmup is N495/#865's ramp (phase 3 of #753) — populated ONLY by the
+	// handler, ONLY behind new_recommendation_engine, and ONLY when
+	// TargetWeightKg above is non-nil (see warmup.go's GenerateWarmupRamp and
+	// Handler.Suggestions). Progress and ProgressV2 themselves never set
+	// this field: warm-up generation is a deliberately separate code path
+	// from straight-set progression, invoked once a prescription already
+	// exists rather than folded into either engine. Omitted from the wire
+	// entirely (omitempty) whenever nil, so a client on an old build, or
+	// asking under v1, sees exactly the response shape it always has.
+	Warmup []WarmupStep `json:"warmup,omitempty"`
 }
 
 // Suggestion is what a client shows next to an exercise before its first set:

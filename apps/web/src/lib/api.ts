@@ -593,6 +593,27 @@ export type Suggestion = {
    * `target_reps` above say — see the type's own doc comment.
    */
   in_session_signal: InSessionSignal | null;
+
+  /**
+   * N495/#865 (phase 3 of #753) — a generated warm-up ramp, present only
+   * behind `new_recommendation_engine` and only once `target_weight_kg`
+   * above is non-null (see `backend/internal/modules/session/warmup.go`).
+   * Mobile owns the in-workout display and the advisory fatigue prompt
+   * (this is squarely "live logging" territory — see CLAUDE.md's
+   * mobile-first rule); this type stays in sync with the wire shape so
+   * nothing here goes silently stale, without web building its own copy of
+   * that UI yet.
+   */
+  warmup?: WarmupStep[];
+};
+
+/** One rung of a generated warm-up ramp — see `Suggestion.warmup`. */
+export type WarmupStep = {
+  label: string;
+  percent_of_work: number;
+  weight_kg: number;
+  rep_min: number;
+  rep_max: number;
 };
 
 export type Volume = {
@@ -601,6 +622,13 @@ export type Volume = {
   tonnage_kg: number;
   hardest_rpe: number;
   exercise_ids: string[];
+  /**
+   * N495/#865 — the warm-up-side mirror of `working_sets`/`total_reps`/
+   * `tonnage_kg`, tracked separately rather than discarded.
+   */
+  warmup_sets: number;
+  warmup_reps: number;
+  warmup_tonnage_kg: number;
 };
 
 /**
