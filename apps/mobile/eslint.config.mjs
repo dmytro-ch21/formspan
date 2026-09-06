@@ -232,7 +232,7 @@ export default defineConfig([
        * unrelated PR.
        *
        * `react-hooks/exhaustive-deps` used to be a third pin here. N153/#557
-       * measured its LIVE count at zero — the 16 sites that would otherwise warn
+       * measured its LIVE count at zero — the 15 sites that would otherwise warn
        * all carry a rule-specific `eslint-disable-next-line`, which suppresses
        * regardless of severity — so it converts to `error` below rather than
        * staying a third entry in this list. It is a real error now, not a pin:

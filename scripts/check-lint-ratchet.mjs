@@ -70,7 +70,7 @@
  *   total                                  50
  *
  * `react-hooks/exhaustive-deps` is deliberately NOT in this table. Its live
- * count measured zero — the 16 sites that would otherwise warn all carry a
+ * count measured zero — the 15 sites that would otherwise warn all carry a
  * rule-specific `eslint-disable-next-line react-hooks/exhaustive-deps`, which
  * suppresses the rule regardless of its configured severity, so nothing about
  * flipping the severity touches them (confirmed directly: setting it to

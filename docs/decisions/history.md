@@ -59391,7 +59391,7 @@ also drifted — it said "1 unused var", and the live count has zero
 that touches this comment block anyway.
 
 **One rule, `react-hooks/exhaustive-deps`, measured at zero live warnings** —
-but 16 sites carry a rule-specific `eslint-disable-next-line
+but 15 sites carry a rule-specific `eslint-disable-next-line
 react-hooks/exhaustive-deps` comment, which suppresses the rule regardless of
 its configured severity. So "zero live warnings" here means zero *unsuppressed*
 ones, not that the underlying disagreements with the dependency array were
@@ -59489,11 +59489,28 @@ warnings themselves — deliberately, per this ticket's scope. Burn them down
 module-by-module riding along with touched areas, per the acceptance criteria,
 tracked against `scripts/check-lint-ratchet.mjs`'s own `RULE_CAPS` table (never
 against this doc — the whole point of building the mechanism was to stop
-tracking these numbers in a place that goes stale). The 16 suppressed
+tracking these numbers in a place that goes stale). The 15 suppressed
 `react-hooks/exhaustive-deps` disable comments are a related, separate gap
 worth a future look: a rule with zero *live* warnings only because every site
 is individually silenced is not the same claim as a rule with zero real
 disagreements.
+
+**Review fold-in.** `ac-verifier`: 4 MET, both "Steps to test" independently
+reproduced (a real `OVER BUDGET` failure by adding a throwaway violation,
+restored to green after). `frontend-reviewer`: 0 blocking, several
+suggestions. Folded in: the "16 sites"/"16 suppressed" count quoted in four
+places (`check-lint-ratchet.mjs`'s doc comment, `eslint.config.mjs`'s
+comment, and twice in this file's own earlier prose) was stale — a live
+`grep` found 15, not 16 — corrected everywhere, which is exactly the "never
+trust a copied count, verify live" premise this ticket is built on, applied
+to its own documentation. Left as judgment calls: `apps/mobile/package.json`'s
+own `lint` script no longer self-enforces a warning cap in isolation (JSON
+can't carry an explanatory comment pointing at the root-level ratchet, and
+both CI and `verify` already catch it, so a developer running `pnpm lint`
+locally without going through either is the only gap); and the ratchet
+running a second, independent ESLint pass rather than consuming the
+existing "Lint" step's own JSON output — a real, but non-blocking,
+optimization for later if mobile lint time becomes a bottleneck.
 
 
 ## Open items / known gaps as of this entry
