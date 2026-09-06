@@ -119,3 +119,30 @@ export function reclassifyWarmupAsWork<T extends { set_type: string }>(
 ): T[] {
   return sets.map((s, i) => (i === index ? { ...s, set_type: 'working' } : s));
 }
+
+/**
+ * Whether a stored `warmupFlag`'s POSITION still names the same warm-up set
+ * it was raised against — the identical hazard `timedSetStillAt`
+ * (`lib/sessions.ts`) guards for a running rest countdown, applied here.
+ *
+ * `app/session/[id].tsx` clears the flag from `stopTimerForStructureChange`
+ * on every insert/remove/reorder it knows about, but two paths reach the
+ * flagged row WITHOUT going through that function: an exercise swap
+ * (`swapExercise`) rewrites every set of a given exercise id in place, and a
+ * manual `set_type` edit on the flagged row itself goes through the ordinary
+ * per-field `update`, not a structural mutator — a stale flag survives both.
+ * Either leaves "Count as work" pointing at a row that is no longer the
+ * flagged warm-up: a different exercise entirely after a swap, or a set the
+ * athlete has already recategorised by hand. Call this immediately before
+ * `reclassifyWarmupAsWork` runs, rather than trusting the flag was kept in
+ * sync — this is the backstop that does not depend on a future call site
+ * remembering to clear it.
+ */
+export function warmupFlagStillValid<T extends { exercise_id: string; set_type: string }>(
+  sets: readonly T[],
+  index: number,
+  exerciseID: string,
+): boolean {
+  const s = sets[index];
+  return s?.exercise_id === exerciseID && s?.set_type === 'warmup';
+}

@@ -19782,9 +19782,16 @@ the original OHP scenario this is built from.
   no cached entry for (e.g. a freeform exercise added mid-session with no
   prior suggestions round trip) — no card appears; this is advisory
   enrichment, not a blocking requirement.
-- Reordering sets, removing a set, or swapping an exercise after a
-  fatigue card is showing dismisses the card rather than letting it act
-  on a set it no longer correctly identifies.
+- Reordering sets or removing a set after a fatigue card is showing
+  dismisses the card entirely (`stopTimerForStructureChange`).
+- Swapping the flagged set's exercise, or manually changing its own type
+  away from warm-up via the per-row picker, while its fatigue card is
+  still showing: the card itself is not proactively dismissed by either
+  action, but tapping "Count as work" afterward is a no-op — it silently
+  withdraws rather than reclassifying the now-different row underneath it
+  (`warmupFlagStillValid`; found by `frontend-reviewer` during N495's own
+  review, since a stored positional flag is the identical hazard
+  `timedSetStillAt` already guards for the rest-timer).
 - Un-ticking the exact warm-up set that raised a currently-showing card
   withdraws the card (there is no longer a completed set for it to
   describe).

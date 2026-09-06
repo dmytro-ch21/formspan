@@ -57942,10 +57942,12 @@ normal scroll flow — never a modal, matching CLAUDE.md's explicit
 instruction that this prompt must not become a blocking interruption to the
 logging flow. One tap ("Count as work") calls `reclassifyWarmupAsWork` and
 commits the edited `set_type`; dismissing, or simply ignoring it and ticking
-the next set, costs nothing — the flag is cleared on any structural edit
-that could invalidate its `index` (`stopTimerForStructureChange`, the same
-guard the rest-timer machinery already uses for the identical positional
-hazard). The ramp itself renders as a plain reference line under the
+the next set, costs nothing — the flag is cleared on every structural edit
+`stopTimerForStructureChange` already knows about (the same guard the
+rest-timer machinery uses for the identical positional hazard), and — see
+the review fold-in below — re-validated again immediately before "Count as
+work" acts, since two paths reach the flagged row without going through that
+function at all. The ramp itself renders as a plain reference line under the
 existing suggestion hint ("Warm-up: 5-10 @ 23kg · 3-5 @ 58kg · 2-3 @ 86kg"),
 readable at a glance standing at the rack.
 
@@ -57971,9 +57973,41 @@ mirroring the Go scenarios one-for-one (including the OHP report), `tsc
 --noEmit` clean, `lint:mobile` unchanged at 50 warnings/0 errors — the one
 new lint hit (a hardcoded `fontSize: 20` in the dismiss button) was fixed to
 reference `Typography.title.fontSize` before this landed — and the full
-280-suite/4501-test mobile suite green. Web: `tsc --noEmit` and the full
+mobile suite green. Web: `tsc --noEmit` and the full
 259-test `vitest` suite green. `pnpm run lint:openapi` validates the new
 `WarmupStep` schema and the `Suggestion.warmup`/`Volume.warmup_*` additions.
+(A pre-fold-in suite count was quoted here and turned out not to match a
+re-run — see "Review fold-in" below for the re-measured numbers, which are
+the ones to trust.)
+
+**Review fold-in.** `ac-verifier`: 6 MET, 0 NOT MET, 1 correctly
+`NEEDS HUMAN EVIDENCE` (usable standing at the rack, one-handed) — issue
+#865's own body did not yet carry that criterion under the properly-marked
+label the evidence latch requires, so it was amended before merge to split
+it into a code-checkable `[x]` line and a separate marked
+`NEEDS HUMAN EVIDENCE` line. `backend-reviewer`: 0 blocking, two minor
+suggestions left as-is (a garbled duplicated clause in the OpenAPI
+description for `Suggestion.warmup`; `DetectWarmupFatigue` has no Go caller
+outside its own tests, which is the deliberate client-side-latency tradeoff
+`lib/warmup.ts`'s own header comment already names, not an oversight).
+`frontend-reviewer` found one real `[blocking]` finding: the "Count as work"
+handler trusted `warmupFlag`'s stored `index` with no revalidation that the
+row there was still the flagged warm-up. Two concrete ways it goes stale,
+neither going through `stopTimerForStructureChange`: swapping the exercise
+(`swapExercise` rewrites rows in place by exercise id, bypassing `commit`
+entirely) and a manual `set_type` edit on the flagged row via the ordinary
+per-field `update`. Fixed with a new `warmupFlagStillValid` guard
+(`lib/warmup.ts`) checked immediately before `reclassifyWarmupAsWork` runs —
+the same "backstop that does not depend on anyone remembering to clear it"
+shape as `timedSetStillAt` for the rest-timer's identical positional hazard
+— plus 5 new mutation-verified tests (reverting the guard to drop its
+`set_type` check reproduces exactly the two failure modes it exists to
+catch). Folded in the reviewer's incidental duplicate-work note too: the
+handler previously called `reclassifyWarmupAsWork` twice (once for `commit`,
+once for `refreshSuggestions`) — now computed once and reused. Re-measured
+after the fold-in: full mobile suite 277 suites / 4441 tests green,
+`lint:mobile` still 50 warnings / 0 errors, `tsc --noEmit` clean,
+`pnpm run verify` exit 0.
 
 ## Open items / known gaps as of this entry
 

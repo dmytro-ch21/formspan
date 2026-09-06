@@ -66,6 +66,7 @@ import {
   WARMUP_FATIGUE_PROMPT,
   detectWarmupFatigue,
   reclassifyWarmupAsWork,
+  warmupFlagStillValid,
   type WarmupFatigueReason,
 } from '@/lib/warmup';
 import { Text, View } from '@/components/Themed';
@@ -245,8 +246,12 @@ export default function SessionScreen() {
    * modal, never anything that stops the athlete from ticking the next set
    * while this is showing. `index` is a position, exactly like the countdown
    * machinery elsewhere in this file (`recordTimedSet`'s own doc comment) —
-   * cleared on any structural edit that could make it point at a different
-   * row, same reasoning.
+   * cleared by `stopTimerForStructureChange` on every insert/remove/reorder
+   * it knows about. That is NOT exhaustive: an exercise swap and a manual
+   * `set_type` edit both reach the flagged row without going through it, so
+   * the "Count as work" handler below re-validates with `warmupFlagStillValid`
+   * immediately before acting, rather than trusting this state stayed in sync
+   * — see that function's own doc comment in `lib/warmup.ts`.
    */
   const [warmupFlag, setWarmupFlag] = useState<{
     index: number;
@@ -1596,9 +1601,16 @@ export default function SessionScreen() {
             <View style={styles.warmupFlagActions}>
               <Pressable
                 onPress={() => {
-                  const { index } = warmupFlag;
-                  commit(reclassifyWarmupAsWork(sets, index));
+                  const { index, exerciseID } = warmupFlag;
                   setWarmupFlag(null);
+                  // Re-validate the position at the moment of the tap — see
+                  // `warmupFlagStillValid`'s own doc comment. A swap or a
+                  // manual `set_type` edit can have moved on since the flag
+                  // was raised, and neither clears it; acting on a stale
+                  // index would silently reclassify the wrong set.
+                  if (!warmupFlagStillValid(sets, index, exerciseID)) return;
+                  const reclassified = reclassifyWarmupAsWork(sets, index);
+                  commit(reclassified);
                   // The set's own numbers just moved into working volume —
                   // the same "today's own sets are real evidence" reasoning
                   // N191 already established, so the standing suggestion is
@@ -1607,7 +1619,7 @@ export default function SessionScreen() {
                     refreshSuggestions(
                       session.sport,
                       session.workout_id,
-                      reclassifyWarmupAsWork(sets, index),
+                      reclassified,
                     ).catch(() => {});
                   }
                 }}

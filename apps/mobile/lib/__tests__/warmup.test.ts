@@ -3,6 +3,7 @@ import {
   WARMUP_FATIGUE_PROMPT,
   detectWarmupFatigue,
   reclassifyWarmupAsWork,
+  warmupFlagStillValid,
   type WarmupSetEvidence,
   type WorkingTarget,
 } from '../warmup';
@@ -158,6 +159,51 @@ describe('reclassifyWarmupAsWork', () => {
     const next = reclassifyWarmupAsWork(sets, 1);
     expect(next[0].set_type).toBe('warmup');
     expect(next[1].set_type).toBe('working');
+  });
+});
+
+// frontend-reviewer, N495/#865: "Count as work" trusted a stored positional
+// flag with no revalidation. Two concrete ways it goes stale, both covered
+// here — an exercise swap rewriting the row in place, and the athlete
+// hand-editing the row's own set_type before tapping the button.
+describe('warmupFlagStillValid', () => {
+  test('true when the flagged row is unchanged', () => {
+    const sets: LoggedSet[] = [set({ exercise_id: 'ohp', set_type: 'warmup' })];
+    expect(warmupFlagStillValid(sets, 0, 'ohp')).toBe(true);
+  });
+
+  test('false after an exercise swap rewrites the row to a different exercise', () => {
+    // Mirrors `swapExercise`'s own effect: same index, exercise_id changed,
+    // set_type left alone.
+    const sets: LoggedSet[] = [set({ exercise_id: 'bench-press', set_type: 'warmup' })];
+    expect(warmupFlagStillValid(sets, 0, 'ohp')).toBe(false);
+  });
+
+  test('false after the athlete manually recategorises the flagged row', () => {
+    // Mirrors the Type-picker's `onChange`: same exercise, set_type edited
+    // by hand away from 'warmup' before the flag was cleared.
+    const sets: LoggedSet[] = [set({ exercise_id: 'ohp', set_type: 'working' })];
+    expect(warmupFlagStillValid(sets, 0, 'ohp')).toBe(false);
+  });
+
+  test('false when the index no longer exists', () => {
+    const sets: LoggedSet[] = [set({ exercise_id: 'ohp', set_type: 'warmup' })];
+    expect(warmupFlagStillValid(sets, 5, 'ohp')).toBe(false);
+  });
+
+  // Mutation check: a guard that always returns true (or checks only one of
+  // the two fields) would pass every "true" case above. Confirm it actually
+  // discriminates on BOTH fields independently, not just whichever field a
+  // careless implementation happened to check.
+  test('checks exercise_id and set_type independently, not just one', () => {
+    const rightExerciseWrongType: LoggedSet[] = [
+      set({ exercise_id: 'ohp', set_type: 'working' }),
+    ];
+    const wrongExerciseRightType: LoggedSet[] = [
+      set({ exercise_id: 'bench-press', set_type: 'warmup' }),
+    ];
+    expect(warmupFlagStillValid(rightExerciseWrongType, 0, 'ohp')).toBe(false);
+    expect(warmupFlagStillValid(wrongExerciseRightType, 0, 'ohp')).toBe(false);
   });
 });
 
