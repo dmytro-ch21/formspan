@@ -433,6 +433,24 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck:mobile
 
+      # N132 (#536). The static half of the EAS production-safety guard —
+      # confirms the CHECKED-IN apps/mobile/eas.json never bakes a staging
+      # hostname or an unfilled placeholder into the production profile
+      # (exactly today's bug: eas.json:22-32 shipped a literal staging URL
+      # and a literal "REPLACE_WITH_..." ASC app id), and that every build
+      # profile is explicitly linked to its own EAS environment. Also runs
+      # the guard's own self-test, mutation-testing the classifier against
+      # known-bad/known-good fixtures before trusting it against the real
+      # file — see apps/mobile/scripts/validate-production-config.mjs's own
+      # header for the fuller design (including why "missing" is tolerated
+      # here but not at actual build/submit time). Node, not Python, so it
+      # lives in THIS job rather than "Scripts (Python)", which deliberately
+      # installs neither Node nor pnpm. This is the same `check:` npm script
+      # `pnpm run verify` calls — this step is CI's copy of that, since this
+      # job runs discrete steps rather than the whole `verify` chain.
+      - name: EAS production-safety guard
+        run: pnpm run check:eas-production-safety
+
       # jest's worker budget is sized against this machine, so print what the
       # machine actually is. Issue #409 was exactly the failure of not doing
       # that: `apps/mobile/jest.config.js` carried no `maxWorkers` and CLAUDE.md

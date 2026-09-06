@@ -9,29 +9,32 @@
       "distribution": "internal",
       "ios": { "simulator": true },
       "android": { "buildType": "apk" },
+      "environment": "development",
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://localhost:8080"
+        "EXPO_PUBLIC_API_URL": "http://localhost:8080",
+        "EXPO_PUBLIC_APP_ENV": "development"
       }
     },
     "preview": {
       "distribution": "internal",
       "ios": { "simulator": false },
+      "environment": "preview",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://apivola-fitness-platform-staging.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://apivola-fitness-platform-staging.up.railway.app",
+        "EXPO_PUBLIC_APP_ENV": "preview"
       }
     },
     "production": {
       "autoIncrement": true,
+      "environment": "production",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://apivola-fitness-platform-staging.up.railway.app"
+        "EXPO_PUBLIC_APP_ENV": "production"
       }
     }
   },
   "submit": {
     "production": {
-      "ios": {
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
-      }
+      "ios": {}
     }
   }
 }

@@ -19990,3 +19990,58 @@ as of this entry), scenarios belong here at that point, including an
 auth/IDOR check that only an authorized operator can trigger it, since
 running it against a real database is not something an ordinary athlete
 request should ever be able to do.
+
+## N132/#536 — EAS production-safety guard and the on-screen environment marker
+
+No new API surface — this is a build-pipeline guard
+(`apps/mobile/scripts/validate-production-config.mjs`) and one always-mounted
+mobile component (`apps/mobile/components/EnvironmentBadge.tsx`). Neither is
+reachable through Playwright (there is no build to attempt from a browser),
+so this section is a checklist for a human running real EAS commands and
+looking at a real device/simulator, not something to translate into
+`tests/functional/`. See `docs/decisions/history.md`'s N132 entry for the
+full design and for what could and could not be verified without EAS
+credentials.
+
+### Build/submit-time guard (needs real EAS credentials — NEEDS HUMAN EVIDENCE on #536)
+
+- With `EXPO_PUBLIC_API_URL` unset in the `production` EAS environment (the
+  honest state as of this entry — no real production API exists yet),
+  attempt `pnpm --dir apps/mobile run build:ios:prod`: must fail before
+  producing an archive, naming `EXPO_PUBLIC_API_URL` as missing.
+- Same, with the `production` EAS environment's `EXPO_PUBLIC_API_URL`
+  deliberately set to the staging Railway host: must fail the same way,
+  naming the staging host explicitly rather than just "invalid".
+- With `submit.production.ios.ascAppId` left unset in `eas.json` (today's
+  state) or set to a placeholder string, attempt `pnpm --dir apps/mobile run
+  submit:ios`: must fail before `eas submit` is invoked at all.
+- Once a real production API and a real numeric ASC app id both exist,
+  register/commit them and confirm a production build **succeeds**, and
+  that the resulting app, on launch, successfully reaches the real
+  production API (not staging).
+
+### On-screen environment marker (device/simulator check, no EAS build needed)
+
+- A `pnpm run dev:mobile` dev-client build (or any build carrying
+  `EXPO_PUBLIC_APP_ENV=development`/`preview`) shows a small corner label
+  reading "DEV"/"PREVIEW" from the very first frame (including over the
+  splash), in every screen the app can reach — it does not disappear on
+  navigation.
+- A build with `EXPO_PUBLIC_APP_ENV` unset entirely (simulating a
+  misconfigured build, not a real profile) still shows a marker (defaults to
+  "DEV") rather than silently showing none — this is the fail-safe direction
+  the design is supposed to guarantee and is worth deliberately provoking
+  once on a real device.
+- A build with `EXPO_PUBLIC_APP_ENV=production` (once one can actually be
+  produced, per the build-time guard above) shows **no** marker anywhere.
+- The marker never intercepts taps on whatever is underneath it (it is
+  `pointerEvents="none"`) — worth a direct tap-through check on a device
+  near wherever it renders, since a corner badge overlapping a real header
+  control is a plausible collision on a small screen.
+
+### Not covered, and why
+
+- No scenario for the `--check`/`--check-submit`/`--self-test` static
+  guard modes — those run in `pnpm run verify` and CI on every push already
+  (see the CI job's "EAS production-safety guard" step), and are pure
+  Node-script logic with no UI or API surface to exercise functionally.
