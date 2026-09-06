@@ -15,9 +15,10 @@ import { Typography } from '@/constants/Typography';
  *
  * ## Genuinely new, not a duplicate of `WeekPlanner`
  *
- * `WeekPlanner.tsx` already renders a week strip (its `styles.strip` block),
- * and this ticket exists partly to answer whether that strip should just be
- * exported. It should not be, because the two solve different problems:
+ * `WeekPlanner.tsx` used to render a week strip inline (its old `styles.strip`
+ * block, removed by this ticket), and this ticket exists partly to answer
+ * whether that strip should just be exported. It should not be, because the
+ * two solve different problems:
  * `WeekPlanner`'s strip is a *calendar* view — seven real dates, a weekday
  * abbreviation over each, and a single "has a plan or not" bit, collapsible
  * to reveal full authoring rows underneath. This component is a *schedule*
