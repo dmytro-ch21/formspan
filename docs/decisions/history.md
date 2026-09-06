@@ -58009,6 +58009,114 @@ after the fold-in: full mobile suite 277 suites / 4441 tests green,
 `lint:mobile` still 50 warnings / 0 errors, `tsc --noEmit` clean,
 `pnpm run verify` exit 0.
 
+## N496/#866 — separate the recommendation products: session, warm-up, in-session, program-level (phase 4 of #753) (`contracts/public.openapi.yaml`'s `Suggestion`/`WarmupStep`/`InSessionSignal` schemas, `backend/internal/modules/session/progression.go`'s `Plan.Warmup` doc comment)
+
+Phase 4 of N450 (#753 §4, "separate recommendation products"). Read as a
+documentation-and-verification ticket first, per its own acceptance
+criteria's explicit escape hatch ("this ticket may resolve as 'already
+separated, verified and documented' if that's what's found once N494/N495
+land") — and that is where it landed, after actually checking rather than
+assuming either answer.
+
+**The tension the ticket names.** As of N495 (#899, just merged), `GET
+/v1/sessions/suggestions` returns one `Suggestion` object carrying, as
+sibling fields, the next-session load/reps prescription (N191/N473), a
+warm-up ramp (N495, `warmup`) and an in-session adjustment (N191,
+`in_session_signal`). #753 §4 says "do not combine [recommendation
+products] into one card" and lists four kinds — next-session load/reps, a
+warm-up ramp, an in-session adjustment, and weekly program balance/exercise-
+selection — with its own worked example: "add hamstring work" cannot be
+concluded from one workout, since it needs the whole weekly program and a
+validated muscle taxonomy, and must never share a card or a confidence
+framing with a same-exercise rep/load suggestion. Read literally, the
+current response shape looks like exactly the thing being forbidden.
+
+**What actually mattered in #753's own text, re-read in full rather than
+from its summary.** The worked example is doing the real work: the harm
+§4 names is a WHOLE-PROGRAM claim ("add hamstring work") riding alongside a
+SINGLE-WORKOUT claim with the same visual weight, so an athlete reads a
+low-evidence, wide-scope suggestion with the confidence of a high-evidence,
+narrow one. That is a claim about EVIDENCE CLASS and CONFIDENCE FRAMING,
+not a claim that one HTTP response body may never carry more than one named
+thing.
+
+**What was actually checked before concluding anything** — code, not
+inference:
+
+- `backend/internal/modules/session/progression.go`: `Plan`'s three
+  recommendation-shaped fields (the prescription itself, `InSessionSignal`,
+  `Warmup []WarmupStep`) are all derived from the SAME evidence class — this
+  caller's own logged sets, this session or its own recent finished
+  history. None reads across the weekly program; none touches a muscle
+  taxonomy; nothing anywhere in the codebase computes a "weekly program
+  balance" or "add exercise X" style recommendation — grepped for it
+  directly (`program.balance`, `exercise_selection`, "add hamstring work",
+  "muscle taxonomy" as a recommendation input) and found nothing but the
+  swap-exercise muscle-group ranking (`apps/mobile/lib/sessions.ts`'s
+  `swapSuggestions`), which is an athlete-initiated same-session
+  replacement lookup, not an automatic program-level suggestion.
+- `contracts/public.openapi.yaml`: `WarmupStep` and `InSessionSignal` are
+  already distinct, independently-documented, independently-required named
+  schema components — not flat scalars bolted onto `Suggestion` — each with
+  its own `code`/`reason` and its own explicit "this is additive, it never
+  rewrites the prescription" language already in the spec before this
+  ticket touched it.
+- `apps/mobile/app/session/[id].tsx`'s `hintRow`: the prescription's
+  `reason` (muted caption), `in_session_signal.reason` (full-contrast
+  italic, deliberately NOT muted — the code comment already called out why:
+  it's new information the standing prescription hasn't seen) and the
+  `warmup` ramp line (its own muted line, its own `marginTop`, its own
+  `testID`) are three visually and structurally distinct sub-elements
+  inside one exercise's row, each with its own established styling and its
+  own comment explaining it is additive rather than a replacement.
+- `apps/web/src/app/dashboard/sessions/[id]/ProgressionCard.tsx`: same
+  prescription/`in_session_signal` split, rendered as distinct paragraphs;
+  web does not render `warmup` at all (typed for parity, unused) — correct
+  per CLAUDE.md's mobile-owns-in-workout-affordances rule, since a warm-up
+  ramp is decoration on a screen nobody is standing at the rack in front of.
+
+**The decision.** Sharing one response body across the prescription,
+`in_session_signal` and `warmup` is NOT the failure #753 §4 describes,
+because all three are same-session, same-evidence-class signals with
+comparable confidence, each independently typed, documented and explicitly
+additive — and doing it as one response is a measured LATENCY decision
+(N495's own entry: the warm-up ramp must be visible before the first set of
+an exercise, one-handed, standing at the rack, and a second round trip
+mid-workout was rejected on exactly that basis), not a confidence-hiding
+one. The kind #753 §4 is actually protecting against — weekly program
+balance / exercise-selection advice needing the whole program and a
+validated muscle taxonomy — does not exist anywhere in this codebase to
+conflate with anything. This ticket therefore resolves as "already
+separated, verified and documented," per its own acceptance criteria's
+stated escape hatch, with no schema reshape and no endpoint split.
+
+**What was written down, so this isn't a rubber stamp that quietly rots.**
+`Suggestion`'s OpenAPI description now carries the full reasoning above
+(evidence class, additive framing, the latency rationale, and — most
+load-bearing — an explicit line that a future "add hamstring work"-style
+field MUST ship as its own product, never bolted onto this object), with a
+shorter pointer to it from the `GET /v1/sessions/suggestions` endpoint
+description. `Plan.Warmup`'s Go doc comment carries the same pointer, so a
+future engineer adding a field here in Go sees the guardrail before they
+ever open the OpenAPI file. This is deliberately load-bearing prose, not a
+tickbox: the next PR that adds a program-level suggestion field to this
+object is the regression this note exists to catch in review.
+
+**No code behavior changed.** No migration, no new endpoint, no UI change —
+this ticket's own scope note says explicitly it is "product/API-level
+separation, not a new inference engine," and once the investigation found
+the current shape already satisfies the intent, there was nothing left to
+build. `docs/testing/functional-scenarios.md` gets a short addition
+recording the verification performed and a forward-looking scenario for
+whenever a program-level recommendation is eventually built, rather than a
+new test suite — there is no new user/API-facing behavior to test.
+
+**Open question left for a real future ticket, not this one.** If a
+program-level recommendation is ever built (the ticket's own explicit
+non-goal), it needs its own schema and very likely its own endpoint, plus
+its own confidence/evidence framing appropriate to whole-program evidence —
+none of that exists yet and building it was explicitly out of scope here.
+
 ## Open items / known gaps as of this entry
 
 

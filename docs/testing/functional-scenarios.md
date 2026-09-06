@@ -19820,3 +19820,50 @@ the original OHP scenario this is built from.
   mobile's "live logging" territory per CLAUDE.md, and the gap is
   recorded rather than built (same posture N473/#812 and N494/#864 took
   for their own out-of-scope edges).
+
+## N496/#866 — separate the recommendation products: session, warm-up, in-session, program-level (phase 4 of #753) (`contracts/public.openapi.yaml`'s `Suggestion` schema, `apps/mobile/app/session/[id].tsx`'s `hintRow`, `apps/web/src/app/dashboard/sessions/[id]/ProgressionCard.tsx`)
+
+A documentation/verification ticket, not new behavior — see
+`docs/decisions/history.md`'s N496 entry for the full decision. No new
+endpoint, schema field or UI landed. The scenarios below record what was
+verified this ticket and what to re-check the day a genuine program-level
+recommendation is proposed.
+
+### Verified this ticket (no automated test added — a structural/documentation check, not new runtime behavior)
+
+- `GET /v1/sessions/suggestions`'s three recommendation-shaped fields (the
+  standing prescription, `in_session_signal`, `warmup`) are all derived
+  from the SAME evidence class — this caller's own logged sets, this
+  session or its own recent finished history — never the weekly program or
+  a muscle taxonomy. Confirmed by reading `progression.go`, `warmup.go` and
+  grepping the codebase for any program-level/exercise-selection
+  recommendation logic: none exists.
+- On mobile (`hintRow`), the prescription's `reason`, `in_session_signal.
+  reason` and the `warmup` ramp line each render as visually distinct
+  sub-elements (different color/weight/text style, each with its own doc
+  comment stating it is additive) rather than one merged sentence — an
+  athlete can tell the three apart, and none overwrites or is presented
+  with the confidence of another. Web (`ProgressionCard`) renders the
+  first two the same way, as distinct paragraphs; it does not render
+  `warmup` at all (typed for parity, unused) — correct per CLAUDE.md's
+  mobile-owns-in-workout-affordances rule, not a gap this ticket needs to
+  close. (Caught by `ac-verifier` reviewing this PR: an earlier draft of
+  this line and the commit message overstated web as rendering all three.)
+- No screen anywhere in `apps/mobile` or `apps/web` renders a program-level
+  ("add exercise X to your program", weekly-balance) recommendation next to
+  a same-session one, because no such recommendation exists yet to render.
+
+### Forward-looking scenario — re-run this check the day a program-level recommendation is proposed
+
+- **The regression this ticket's OpenAPI note exists to catch**: a future
+  PR adding a field like `program_suggestion` (or any weekly-balance /
+  exercise-selection advice) directly onto the `Suggestion` object, or
+  rendering one in the same `hintRow`/`ProgressionCard` element as the
+  session-scoped fields. The correct shape is a distinct, independently-
+  documented schema (and very likely its own endpoint), with its own
+  confidence/evidence framing appropriate to whole-program evidence, never
+  a sibling field on this object.
+- When that recommendation kind is eventually built, add its own
+  Happy-path/Edge-case/Auth scenarios here, following this file's existing
+  per-feature pattern, and update `Suggestion`'s OpenAPI description to
+  point at wherever the new product actually lives.
