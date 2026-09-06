@@ -19970,3 +19970,23 @@ any.
 - No scenario for "subsequent performance" (the next session's own
   numbers for the same exercise) — deliberately deferred to N516/#904, not
   built in this ticket. Add scenarios here once that ticket lands.
+
+## N515/#903 — shadow-replay tool comparing v1/v2 progression engines over real history (phase 5 of #753) (`backend/cmd/shadowreplay/`)
+
+An offline, read-only CLI tool (`go run ./backend/cmd/shadowreplay`) — no
+endpoint, no schema field, no UI, and no existing handler's behavior
+changed. There is genuinely no user/API-facing scenario to translate into
+`tests/functional/`, so this is a short note rather than a padded
+happy-path/edge-case section, per this file's own guidance for changes like
+this one.
+
+What's actually verified (in `backend/internal/modules/session/`'s own Go
+test suite, not here): `CompareEngines`'s definition of disagreement
+(`shadowreplay_test.go`, no database) and `Repository.ShadowReplayCandidates`'s
+enumeration query against a real Postgres (`shadowreplay_postgres_test.go`,
+gated on `TEST_DATABASE_URL`). If this tool is ever wired into an actual
+HTTP surface (an admin-console "compare engines" screen, say — not planned
+as of this entry), scenarios belong here at that point, including an
+auth/IDOR check that only an authorized operator can trigger it, since
+running it against a real database is not something an ordinary athlete
+request should ever be able to do.

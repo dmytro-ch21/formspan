@@ -700,4 +700,24 @@ type Repository interface {
 	// on it finishes — the suggestion was seen and never taken. Called from
 	// Handler.Finish; never fails the request it's called from.
 	DismissPendingDecisions(ctx context.Context, userID string, workoutID *string, sessionID string) error
+
+	// ShadowReplayCandidates enumerates every (user, exercise) pair with at
+	// least one real, finished, completed, weighted working set on a
+	// weight_reps exercise — the population N515/#903's shadow-replay tool
+	// (cmd/shadowreplay) walks to compare Progress and ProgressV2 against
+	// real history. See shadowreplay_postgres.go for the exact filter and
+	// why it deliberately matches the intersection of what RecentEfforts and
+	// RecentEffortsV2 both require. The only consumer is that offline,
+	// read-only tool — nothing in the live request path needs "every
+	// athlete's every exercise" at once, which is also why, unlike every
+	// other method here, this one takes no userID.
+	ShadowReplayCandidates(ctx context.Context) ([]ProgressionCandidate, error)
+}
+
+// ProgressionCandidate identifies one (athlete, exercise) pair with real,
+// finished training history a progression engine could reason about — see
+// Repository.ShadowReplayCandidates.
+type ProgressionCandidate struct {
+	UserID     string
+	ExerciseID string
 }

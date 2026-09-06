@@ -58549,6 +58549,389 @@ needs an actual ownership signal `workout.ItemProtocols` doesn't currently
 return, not a one-line change; recorded here so it isn't forgotten.
 
 
+## N515/#903 — a shadow-replay tool comparing v1/v2 progression engines over real history, plus the written rollout plan (phase 5 of #753) (`backend/cmd/shadowreplay/`, `backend/internal/modules/session/shadowreplay.go`, `shadowreplay_postgres.go`)
+
+Split out of #867 (N497), which was itself phase 5 of #753 and flagged as too
+large for one PR. The other two siblings — N513's decision-record audit trail
+(#901, merged just before this branch was rebased — see below) and N514's
+property tests (#902, merged earlier) — are independent and this ticket does
+not depend on either's code, though N513's merge did change what this entry
+can honestly say about measuring "athlete corrections" (see the rollout plan).
+
+**Read the current code first, not a prior summary of it.** `progression.go`
+and `progression_v2.go` were re-read in full against `origin/main` post-N513,
+which had, in the time since #867 was written, added two purely additive
+`json:"-"` fields to `Plan` (`EvidenceSessionID`, `SkippedNonNormalSession`)
+for its own decision-record audit trail. Neither field is used here — this
+tool never reads or writes `session_progression_decisions` at all (see "What
+this does NOT do" below), which corrects an assumption N513's own entry made
+about this ticket ("worth tightening before N515's shadow-replay tool becomes
+a real reader of this column" — it doesn't become one).
+
+### What the tool does
+
+`go run ./backend/cmd/shadowreplay` — a one-off command, following the
+`cmd/seed`/`cmd/exportcontent` convention exactly (`DATABASE_URL` from the
+environment, `internal/platform/database.NewPool`, `defer pool.Close()`).
+Three pieces:
+
+1. **`Repository.ShadowReplayCandidates`** (new method,
+   `shadowreplay_postgres.go`) enumerates every `(user_id, exercise_id)` pair
+   with at least one real, finished, completed, weighted straight-or-any
+   working set on a `weight_reps` exercise — the intersection of what
+   `RecentEfforts` (v1) and `RecentEffortsV2` (v2) both need before either
+   engine can build anything: `SQLWorkingSet`, a real weight and rep count,
+   `s.ended_at IS NOT NULL` (the STRICTER of the two — RecentEfforts alone
+   doesn't require it, so a candidate here is guaranteed usable by both
+   engines' reads, not merely v1's looser one), and `e.load_type =
+   'weight_reps'` (anything else makes both engines agree trivially on
+   `SuggestNotApplicable`, not worth a row to discover). No per-user filter
+   and no `LIMIT`, unlike every other method on this Repository — the only
+   caller is this offline tool, never a live request.
+2. **`session.CompareEngines`** (new, pure, `shadowreplay.go`) runs `Progress`
+   and `ProgressV2` — literally the same two functions
+   `Handler.Suggestions` already calls — over two SEPARATELY supplied
+   `ProgressionInput`s (one from `RecentEfforts`, one from `RecentEffortsV2`)
+   and returns a `Disagreement` when they diverge. Deliberately NOT one
+   shared input plus a bool: `RecentEfforts`/`RecentEffortsV2` are not
+   interchangeable (see `RecentEffortsV2`'s own doc comment on why v1's
+   ranking can seat an unfinished session ahead of real history and starve
+   its window), and collapsing them into one input here would silently paper
+   over exactly the kind of difference #753 exists to surface.
+3. **`cmd/shadowreplay/main.go` + `report.go`** — the thin orchestrator:
+   fetch candidates, group by athlete (so each athlete's history costs
+   exactly two queries — one `RecentEfforts`, one `RecentEffortsV2` — no
+   matter how many exercises they trained, the same batching
+   `Handler.Suggestions` already does, for the same N+1 reason), run
+   `CompareEngines` per pair, print a human-readable report, optionally
+   (`-json`) write the full disagreement list to a file.
+
+**Why the comparison logic lives inside `internal/modules/session`, not in
+`cmd/shadowreplay`.** Same reasoning `decisionrecord.go` gives for its own
+placement (see N513's entry above): the domain types being compared
+(`ProgressionInput`, `Plan`, `SuggestionCode`) already live here, "what
+counts as disagreement" is a fact about the two engines — testable with the
+same plain-Go, no-database tests `progression_test.go`/`progression_v2_test.go`
+already use — not a fact about a CLI tool's plumbing, and a caller outside
+this package reconstructing the comparison from `Plan`'s exported fields would
+be a second, driftable copy of the decision. `cmd/shadowreplay` itself has no
+`_test.go` — there is nothing to unit-test in flag parsing and I/O once
+`CompareEngines`/`ShadowReplayCandidates` are pinned in the package that owns
+them.
+
+### What counts as a disagreement
+
+Per the ticket's own three cases, kept as **mutually exclusive** categories
+(priority order matters — the switch checks them in this order) rather than
+one aggregate count:
+
+1. **`abstention_divergence`** — exactly one engine has no numeric target at
+   all (`TargetWeightKg == nil`) while the other does. Checked FIRST: an
+   abstain-like code is never the same string as `add_load`/`add_reps`/
+   `hold`/`deload`/`repeat_*`, so this case would otherwise always be
+   swallowed by category 2 below, and it's the most product-relevant kind of
+   divergence a coach reviewing the report would want surfaced first — "one
+   engine says nothing and the other tells you what to lift."
+2. **`code_differs`** — both produced a `Code`, and the codes differ, neither
+   side abstaining.
+3. **`target_differs`** — same `Code`, but the numeric prescription itself
+   differs: weight beyond `disagreementWeightEpsilonKg`, or a different
+   `TargetReps`.
+
+`disagreementWeightEpsilonKg` reuses `weightCohortEpsilonKg`
+(`progression_v2.go`, `1e-6`) rather than inventing a second float tolerance
+in this package — that constant is already this package's own answer to
+"how close is float noise, not a real difference," and it is four orders of
+magnitude below `smallestPlateKg` (1.25), so nothing loadable can ever
+collide with it.
+
+`Disagreement` carries enough for a strength coach to review without
+re-running anything, per the ticket's own "in a form a strength coach could
+review" requirement: athlete id, exercise id, the category, a one-sentence
+`Detail` in prose (never pattern-matched, same standing this package already
+gives `Plan.Reason`), and both engines' full `EngineOutcome` (code, reason,
+target weight/reps, last weight/reps, working-set count, sessions-at-load).
+
+### What this does NOT do
+
+- **No migration.** This tool only reads. `ShadowReplayCandidates` is a new
+  `SELECT`, not a new table.
+- **No new HTTP route, no OpenAPI change, no existing handler touched.**
+  `cmd/shadowreplay` is never wired into `cmd/api/main.go`. Confirmed by
+  reading the diff: the only files touched are `session.go` (interface +
+  `ProgressionCandidate` struct), two new `session` package files
+  (`shadowreplay.go`, `shadowreplay_postgres.go`), their tests, one new
+  panic-stub line in `handler_test.go`'s `suggestionsFakeRepo` (Go interfaces
+  require every implementer to have every method — the fake is otherwise
+  unrelated to this ticket), and the new `cmd/shadowreplay` package.
+- **v2's output never reaches an athlete.** `CompareEngines` calls
+  `ProgressV2` the same way `Handler.Suggestions` already does behind the
+  `new_recommendation_engine` flag, but this tool's own output goes to
+  stdout or a local file the operator chose — never to a response body, never
+  behind any flag check, because there is no request in the loop at all.
+- **Does not read or write `session_progression_decisions`** (N513's audit
+  table) — corrects the expectation N513's own entry stated. Enumerating
+  candidates and reconstructing `ProgressionInput` through the SAME two
+  repository methods the live handler already uses was simpler, needed no
+  new join back to `workout_id`/protocol ownership, and directly answers
+  the ticket's actual question ("where do the two ENGINES disagree"), not
+  "where did the live handler previously disagree with itself" (a different,
+  narrower question the audit table would answer once enough real traffic
+  accumulates behind it — see the rollout plan's metric 2 below for where
+  that table DOES become the right instrument).
+- **Does not resolve `ResolvedProtocol` for v2.** Every candidate is
+  evaluated with `Protocol: nil` (the default fallback, `repRangeForGoal`),
+  because reconstructing which program/athlete-config protocol a PAST
+  session's item actually used would require joining back to whichever
+  workout/program item it came from — a bigger reconstruction than this
+  ticket's scope. Similarly, `Goal` and `UnitSystem` are left at their zero
+  values (general goal, metric) on every candidate, because both are
+  per-REQUEST client inputs in the real API, not stored history — there is
+  nothing in `session_sets`/`sessions` to recover which goal or unit system a
+  past request actually used, and the zero values are exactly what an
+  unmodified client sees when it omits both query parameters. **Documented
+  explicitly in `cmd/shadowreplay/main.go`'s own doc comment as a known scope
+  limit**: this evaluates the CORE engine difference (coherent cohorts,
+  straight-sets-only, finished-only history, required effort, effort-conflict
+  detection, default equipment rounding) and will under-report disagreements
+  that stem purely from a per-item protocol override or a non-general goal —
+  the report is a floor, not a ceiling. Measured directly, below: the
+  synthetic run's `target_differs` count is 0 candidates found this way and
+  1 in the unit-test fixture that deliberately sets a `Protocol` by hand —
+  exactly the signature this limitation predicts, since a real disagreement
+  purely from protocol resolution can only show up when `Protocol` is
+  actually populated.
+
+### Testing
+
+`shadowreplay_test.go` (no database, same discipline as
+`progression_test.go`) pins `CompareEngines` directly: agreement on identical
+history, agreement on no-history-either-side, and one real, hand-constructed
+example of each of the three categories —
+`TestCompareEngines_AbstentionDivergence_V2AbstainsWhereV1Progresses` (a
+working set with no effort recorded lets v1's `anyEffortRecorded`/
+`allSetsHadReserve` pass while v2's `effortCoverage` reads "partial" and
+abstains — item 4 exactly), `TestCompareEngines_CodeDiffers_...` (a single
+backoff set at a lower weight pulls v1's `repSpread` gate below the rep
+range while v2 excludes it via `straightWorkingSetsWithWeight` — item 2
+exactly, reproducing the class of bug #753 reported, with synthetic
+numbers), and `TestCompareEngines_TargetDiffers_...` (an
+`EquipmentIncrementKg` on `v2In.Protocol` changes the loaded number without
+changing the `Code`). Plus direct tests of the two float/int-pointer
+comparison helpers, including the epsilon boundary.
+`shadowreplay_postgres_test.go` (gated on `TEST_DATABASE_URL`, same pattern
+as `recent_efforts_test.go`) pins `ShadowReplayCandidates` against a real
+database: a finished weighted working set is found, an unfinished session's
+sets never are, and a warm-up/an incomplete set/a non-`weight_reps` exercise
+are all excluded. Full package suite (`go test ./internal/modules/session/...`)
+and the full backend suite (`go test ./...`) both green, with and without
+`TEST_DATABASE_URL` set.
+
+### A real run, and being honest about what "real" means here
+
+This worktree has no `backend/.env`, no `backend/.env.staging.local`, and
+this host's shared local dev Postgres (port 5432, the primary checkout's
+`docker compose` service) had its port already claimed by a different
+concurrent worktree's own `docker compose up` at the time of this run — `docker
+port` on this repo's own `fitness-platform-postgres-1` container returned
+nothing, confirming its 5432 binding never actually took. There is therefore
+no real athlete session data reachable from this sandboxed session, and this
+entry says so rather than fabricating a number against a database it never
+touched.
+
+What WAS run for real: a disposable Postgres container on an unused port
+(5433), migrated to `origin/main`'s current schema (`go run ./cmd/migrate up`
+— 91 migrations, clean), seeded with the real exercise catalog
+(`go run ./cmd/seed`), then populated with a **synthetic-but-realistic**
+session history — six clean double-progression athletes across
+squat/bench/OHP, plus five groups deliberately shaped to exercise each known
+v1/v2 divergence (a heavy-single-plus-light-backoff pattern modeled on the
+#753 report, partial effort coverage, an RIR/RPE conflict, a backoff set
+diluting the rep-range gate, and a genuine three-session stall) — via a
+throwaway generator script that was deleted before this branch's final
+`git status --short` (never committed; see the PR/commit history for
+confirmation the tree is clean). `go run ./cmd/shadowreplay` against that
+database produced:
+
+```
+athlete/exercise pairs compared: 41
+agreed:                          27
+disagreed:                       14
+disagreement rate:               34.1%
+
+by disagreement type:
+  abstention_divergence    9
+  code_differs             5
+  target_differs           0
+```
+
+Broken down exactly as constructed — confirmed by cross-referencing the
+JSON output's athlete ids, not merely asserted: the 5 partial-effort athletes
+and 4 effort-conflict athletes account for all 9 `abstention_divergence`
+cases; the 5 backoff-dilution athletes account for all 5 `code_differs`
+cases; the 6 clean-progressor athletes (18 pairs), the 4 stall athletes and,
+notably, the 5 heavy-single-plus-light-backoff athletes modeled on the #753
+report all AGREED. That last one is worth recording rather than glossing
+over: the specific numbers this run's fixture used gave the single top set a
+low RIR (1), which drove `allSetsHadReserve` to `false` on BOTH engines for
+an unrelated reason (a low-reserve set fails that check regardless of which
+cohort it's evaluated against), sending both to an identical deload off the
+same anchor weight. Reproducing the LITERAL 335×8 recombination (which needs
+the heavy single to have PLENTY of reserve, so v1's HitTargetEffort stays
+true and its rep-range gate genuinely recombines the light session's higher
+rep count with the heavy weight) is not additionally attempted here — that
+exact scenario is already a permanent golden test
+(`TestProgressV2_Squat335x8NeverHappens` per N473/#812) pinned at the unit
+level, and this run's own honest negative result is left as-is rather than
+re-tuned until it reproduces something it wasn't asked to.
+
+**Reading this number honestly:** 34.1% is a synthetic dataset's
+disagreement rate, deliberately over-weighted toward known divergence
+patterns (5 of 6 fixture groups were built specifically to trigger one) —
+it is not a prediction of what fraction of REAL athlete history disagrees,
+and should not be quoted as one. What it demonstrates is narrower and still
+real: the tool runs end-to-end against a real Postgres, correctly finds and
+categorizes every one of the divergence patterns #753's phase-1 fix
+addresses, correctly leaves a coherent stall scenario alone, and produces
+output in the coach-reviewable shape the ticket asks for. The number that
+will actually matter is whatever this same command reports the first time
+it is run against `staging`'s real data — see the rollout plan's first step
+below.
+
+### The written rollout plan
+
+#753 names the validation sequence in full: golden fixtures (shipped,
+N473/#812) → property tests (shipped, N514/#902) → historical shadow replay
+(this ticket) → strength-coach review → opt-in pilot → staged rollout using
+the existing feature flag → success metrics. This is the plan for the last
+three steps, written against what actually exists in this codebase today,
+not against an assumed capability.
+
+**Step 1 — run this tool against real data, once, before anything else.**
+`go run ./backend/cmd/shadowreplay -json report.json` against `staging`'s
+Postgres (real credentials in `backend/.env.staging.local`, gitignored —
+this ticket did not have them and did not need them; whoever runs this step
+does). Hand the JSON and the printed summary to a strength coach for the
+review #753 explicitly asks for ("across novice/intermediate/advanced
+fixtures") — this tool's per-category breakdown is built for exactly that
+handoff: a coach can scan `abstention_divergence` first (the highest-stakes
+category — v2 declining to answer where v1 would have) before the subtler
+`code_differs`/`target_differs` cases. **Gate: do not proceed to step 2 until
+a coach has reviewed a real disagreement sample and confirmed v2's answer is
+the better one in the cases that matter**, not merely that the tool runs.
+
+**Step 2 — opt-in pilot, and the real constraint to design around.**
+`internal/modules/featureflag` is explicit in its own package doc comment:
+*"Global boolean flags only, no percentage rollout or per-user targeting —
+add that if a real use case shows up."* `new_recommendation_engine` today is
+one row in `feature_flags`, read the same way for every caller
+(`Handler.newEngineEnabled`) — turning it on turns v2 on for **every**
+athlete simultaneously. There is no code-level mechanism today for "on for
+these five accounts only." This ticket does not build one (out of scope —
+the ticket asks for a shadow-replay tool and a written plan, not a
+feature-flag redesign), but the plan cannot pretend the capability exists:
+
+- **Minimum viable pilot, buildable in an hour, not a redesign:** a
+  hardcoded allowlist check in `Handler.newEngineEnabled` — `if
+  claims.UserID` is in a short, code-reviewed list (or an env var,
+  `PILOT_USER_IDS`), return true regardless of the global flag — reviewed and
+  merged as its own tiny PR before the pilot starts, removed once the pilot
+  graduates to step 3. This is explicitly a stopgap, not a permanent
+  targeting mechanism, and should say so in its own comment.
+- **The real fix, if this becomes a repeated need beyond one pilot:**
+  `featureflag`'s own doc comment already names the trigger ("add that if a
+  real use case shows up") — extend `Flag`/`Repository.Enabled` to accept a
+  user id and consult a per-user override table before falling back to the
+  global boolean. Not built here because one pilot doesn't yet justify it;
+  recorded so the SECOND time this need comes up, it's recognized as the
+  signal to build it rather than a second hardcoded list.
+- Pilot size: 5-15 athletes across the coach-identified novice/intermediate/
+  advanced spread from step 1, for 2-4 weeks (long enough to see at least
+  one full progression cycle — double progression's own cadence, per
+  `progression.go`'s doc comment, needs multiple sessions to show a rep-then-
+  load cycle).
+
+**Step 3 — staged rollout, once the pilot's metrics (below) clear.** Flip
+the global `new_recommendation_engine` flag on for an increasing cohort.
+Given the flag's global-only nature, "staged" here means staged BY TIME, not
+by percentage: pilot allowlist → flag on for a longer beta window (same
+allowlist mechanism, larger list) → flag on globally, removing the allowlist
+stopgap entirely. A true percentage rollout is a nice-to-have this plan does
+not block on, per the same "add it when a real use case shows up" reasoning
+as step 2.
+
+**The four success metrics #753 names, and how to actually measure each
+against what exists today:**
+
+1. **Unsupported-output rate** — how often the engine outputs a number the
+   evidence doesn't support. This IS what `shadowreplay`'s disagreement
+   categories approximate pre-rollout (a `code_differs`/`target_differs`
+   case where v1's number is the unsupported one, per the coach review in
+   step 1), but the real, ongoing measurement post-pilot is `abstain`/
+   `effort_conflict`/`no_recent_normal_session` RATE among v2's own outputs —
+   query `session_progression_decisions` (N513/#901, merged) grouped by
+   `output_code`, restricted to `engine = 'progress_v2'`. A rising abstention
+   rate over the pilot window is not itself bad (it may mean the engine is
+   correctly declining rather than guessing) — the metric to watch is
+   whether NON-abstained outputs correlate with what actually happened next
+   (metric 3).
+2. **Athlete corrections** — how often an athlete edits or dismisses a
+   suggestion rather than taking it. **This is exactly what N513/#901's
+   `outcome_status` column measures**, now that it has merged:
+   `session_progression_decisions.outcome_status IN ('applied', 'edited',
+   'dismissed')`, correlated via `ResolveDecisionOutcomes`
+   (`Handler.ReplaceSets`) and `DismissPendingDecisions` (`Handler.Finish`).
+   The query is `SELECT outcome_status, count(*) FROM
+   session_progression_decisions WHERE engine = 'progress_v2' AND
+   outcome_status <> 'not_applicable' GROUP BY outcome_status`. Had N513 not
+   merged yet when this plan was written, this metric would have had no
+   answer beyond "build the audit table first" — recorded here so a future
+   reader knows this is not a guess at column names, but the actual, live
+   schema (migration `000093_session_progression_decisions`).
+3. **Target completion next session** — did the athlete's next logged
+   performance for the same exercise actually hit the suggested target.
+   **Not fully measurable today.** N513's own scope split (see its entry
+   above) explicitly carved this out as **N516/#904** ("subsequent-
+   performance backfill"), filed, unassigned, `Todo` — `outcome_session_id`/
+   `outcome_recorded_at` columns already exist on
+   `session_progression_decisions`, unwritten, waiting for that ticket. Until
+   N516 lands, this metric can only be approximated manually: for a pilot's
+   small cohort, cross-reference `session_progression_decisions`
+   (`output_target_weight_kg`/`output_target_reps`, `evidence_session_id`)
+   against that athlete's next `session_sets` row for the same exercise by
+   hand or a one-off script — viable at pilot scale (5-15 athletes), not at
+   staged-rollout scale, which is a real reason N516 should land before step
+   3, not merely before it becomes convenient.
+4. **Abstention quality** — when v2 abstains, is that the RIGHT call (the
+   evidence really is ambiguous) rather than an over-cautious one that just
+   annoys athletes with real, usable history. No automated proxy exists for
+   this — it is fundamentally a judgment call requiring a human to read a
+   sample of abstained cases against what the athlete actually logged. The
+   mechanism: pull every `output_code IN ('abstain', 'effort_conflict',
+   'no_recent_normal_session')` row from `session_progression_decisions` for
+   the pilot cohort, alongside the ACTUAL session history behind
+   `evidence_session_id`, and have the SAME strength coach from step 1 rate
+   a sample (recommend: every abstention in a 2-week pilot window, not a
+   subsample — pilot volume is small enough that "every one" is tractable).
+   A coach rating "the engine was right to decline" above some threshold
+   (no number specified here — that is the coach's call to set once they've
+   seen a first batch, not an arbitrary target invented in this plan) is the
+   gate for step 3, not a fixed percentage decided in advance of ever seeing
+   real abstentions.
+
+**What this plan explicitly does not resolve, so it isn't rediscovered as
+a silent gap later:** the per-user targeting mechanism (step 2) is a
+stopgap by design; N516/#904 (metric 3) is unassigned; and "abstention
+quality" (metric 4) has no numeric target because none should be invented
+before a coach has seen real data. All three are the honest state of the
+plan, not oversights in writing it.
+
+**Not touched here:** N513/#901 (decision-record audit trail — merged) and
+N514/#902 (property tests — merged), both independent pieces of #867's
+original scope. #867 itself should close once this PR lands, referencing all
+three.
+
+
 ## Open items / known gaps as of this entry
 
 
