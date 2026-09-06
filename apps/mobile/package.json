@@ -66,12 +66,13 @@
     "prebuild": "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 expo prebuild --clean",
     "web": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --web",
     "build:ios": "eas build --platform ios --profile preview",
-    "build:ios:prod": "eas build --platform ios --profile production",
-    "submit:ios": "eas submit --platform ios --latest",
+    "build:ios:prod": "node scripts/validate-production-config.mjs --check && eas build --platform ios --profile production",
+    "submit:ios": "node scripts/validate-production-config.mjs --check-submit && eas submit --platform ios --latest",
     "build:android": "eas build --platform android --profile development",
     "test": "TZ=America/Los_Angeles jest",
     "test:watch": "jest --watch",
-    "lint": "eslint . --max-warnings=50"
+    "lint": "eslint . --max-warnings=50",
+    "eas-build-pre-install": "node scripts/validate-production-config.mjs --build-hook"
   },
   "private": true
 }

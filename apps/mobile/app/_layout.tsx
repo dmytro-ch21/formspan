@@ -28,6 +28,7 @@ import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { AnimatedSplash } from '@/components/AnimatedSplash';
+import { EnvironmentBadge } from '@/components/EnvironmentBadge';
 
 import { tokenCache } from '@/lib/tokenCache';
 import { vola } from '@/constants/Colors';
@@ -310,6 +311,10 @@ function RootLayoutNav() {
       {splashDone ? null : (
         <AnimatedSplash ready={isLoaded} onFinish={() => setSplashDone(true)} />
       )}
+      {/* N132 (#536) — visible from the very first frame, over the splash
+          included: a build that can talk to the wrong backend should say so
+          before the athlete gets anywhere near a screen that matters. */}
+      <EnvironmentBadge />
     </View>
   );
 }

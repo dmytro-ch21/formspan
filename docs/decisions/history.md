@@ -58932,6 +58932,245 @@ original scope. #867 itself should close once this PR lands, referencing all
 three.
 
 
+## 2026-09-06 — N132: a production EAS build could succeed while talking to staging
+
+`apps/mobile/eas.json`'s `production` build profile carried a literal
+`EXPO_PUBLIC_API_URL` pointing at the staging Railway host, and its submit
+profile carried a literal `ascAppId` of `"REPLACE_WITH_APP_STORE_CONNECT_APP_ID"`.
+Both were checked in on purpose back on 2026-07-30 (see that date's "iOS
+build configuration, ahead of a real device" entry) — the reasoning then was
+"a profile aimed at a host that does not exist is worse than one aimed at a
+real one." That reasoning was sound for the problem it solved and wrong for
+the one it created: a `production` EAS build made from that file **succeeds,
+installs, and boots against staging**, with nothing on screen or in the build
+log saying so. That is strictly worse than a build that fails — it looks
+correct, ships, and can mix staging/test data with real-user expectations
+with no visible seam. #536 tracked it as a Milestone A release-safety bug.
+
+**No real production backend exists yet, and this fix has to be honest about
+that rather than papering over it.** Per CLAUDE.md's Known Gotchas: the `api`
+service is deployed to Railway's `staging` environment and live; there is no
+production Postgres and no production API deployment at all. So "point
+production at the real backend" isn't available as a fix — the only correct
+behavior today is for a production build/submit to **fail closed with a
+clear message** naming what's missing, and that failure is the intended,
+expected state until a real production API and a real App Store Connect app
+both exist. The design below treats "still fails today" as evidence the
+guard works, not as an unfinished ticket.
+
+### What changed
+
+**`apps/mobile/eas.json`.** Every build profile (`development`/`preview`/
+`production`) now carries an explicit `"environment"` field, linking it to
+an EAS Environment of the same name — the mechanism `eas env:create
+--environment <name>` targets, confirmed against Expo's own `eas.json`
+reference (`https://docs.expo.dev/eas/json/`: allowed values `development` /
+`preview` / `production`) and its environment-variables overview (linking a
+build profile to an environment is what makes that environment's variables
+available to the build). `development` and `preview` keep their existing
+literal `env.EXPO_PUBLIC_API_URL` (localhost and the staging Railway host,
+respectively) — both are legitimate, non-secret, safe-to-commit values per
+EAS's own documented purpose for a profile's `env` block ("for values you
+would commit to your git repository, not for secrets"), and neither is the
+bug. **`production`'s `env` block no longer carries `EXPO_PUBLIC_API_URL` at
+all** — the real value has to come from `eas env:create --name
+EXPO_PUBLIC_API_URL --value <real-url> --environment production` once a real
+production API exists, never from a checked-in literal. `submit.production.
+ios.ascAppId` is now **absent** rather than the placeholder string — eas.json
+has no `$VAR` interpolation for submit profiles (checked against the same
+reference; no such syntax is documented for `submit.ios` fields), so an App
+Store Connect app id can only ever be a plain JSON literal, checked in once a
+real ASC app is registered, never before.
+
+**One new EAS-safe, inert env var: `EXPO_PUBLIC_APP_ENV`.** Set literally to
+`"development"`/`"preview"`/`"production"` in each build profile's `env`
+block. Unlike the API URL this one is always safe to commit even for
+production — it's a label the on-screen badge reads, never a backend
+address, so there's no version of it being "wrong" that also means "points
+somewhere real". `.env.example` documents a local-dev default of
+`development`.
+
+**One shared validator, three thin call sites** — `apps/mobile/scripts/
+validate-production-config.mjs` (stdlib Node, no dependency, per CLAUDE.md's
+"small, focused, testable script" guidance for a handful of string checks).
+`classifyValue()` decides whether a string looks like a real, filled-in
+setting or a staging host / `REPLACE_WITH_` placeholder / `localhost` /
+`127.0.0.1` / generic template value; `classifyAscAppId()` layers a
+numeric-only check on top (a real ASC app id is always numeric). Everything
+else is plumbing around those two functions:
+
+- `--check` (static) reads the **checked-in** `eas.json` and asserts each
+  build profile's `environment` link is correct and that nothing bad is
+  baked into `production`'s literal `env` values or (if present at all)
+  `submit.production.ios.ascAppId`. This is what `pnpm run verify` calls
+  (`check:eas-production-safety` in the root `package.json`) — no network,
+  no EAS credentials, always answerable. **Presence is not required here**:
+  a value legitimately absent from the committed file (because it comes from
+  an EAS secret, or because no real ASC app exists yet) is the *correct*
+  committed state, not a failure. This is deliberately the check that would
+  have caught today's actual bug on sight — mutation-tested directly against
+  a synthetic fixture carrying the exact staging URL and placeholder string
+  eas.json used to ship, and it correctly rejects both (see "Mutation
+  testing" below).
+- `--build-hook` (resolved) reads `process.env.EXPO_PUBLIC_API_URL` — the
+  value actually resolved for a real build, which can come from an EAS
+  secret and is therefore invisible to `--check`. **Missing is a failure
+  here**, unlike in `--check`: this is the gate that has to stop a real
+  production build before it produces an archive, and "nobody has set the
+  real value yet" must fail exactly as loudly as "someone set it to
+  staging" — that's the honest state described above. Wired as `apps/mobile/
+  package.json`'s `eas-build-pre-install` lifecycle hook (an EAS Build
+  npm-script hook, run automatically before `npm install` on EAS's build
+  machine), gated on `EAS_BUILD_PROFILE === 'production'` so a development
+  or preview build is never at risk of being blocked by this. **This is the
+  one entry point that runs on EAS's own build machine rather than a
+  developer's**, and therefore the one this session could not exercise
+  end-to-end — see "What's NOT verified" below.
+- `--check-submit` is the ascAppId equivalent, but reads the same
+  checked-in `eas.json` `--check` does (there is nowhere else for
+  `ascAppId` to live, per the no-interpolation finding above) — **missing
+  is a failure here too**, for the same reason as `--build-hook`. Wired as a
+  prerequisite in `apps/mobile/package.json`'s `submit:ios` script, ahead of
+  the real `eas submit` call: `node scripts/validate-production-config.mjs
+  --check-submit && eas submit --platform ios --latest`. Unlike the API URL
+  case, this one *is* fully verifiable locally and was (below) — there's no
+  EAS-secret indirection to work around.
+- `build:ios:prod` also gained a local prerequisite (`--check`, the same
+  static check `verify` runs) — belt and braces for a stale local checkout,
+  not the real gate, since a developer's shell never sees the actual
+  EAS-managed production secret.
+- `--self-test` mutation-tests `classifyValue`/`classifyAscAppId`/
+  `checkEasJson`/`checkResolvedApiUrl`/`checkSubmitConfig` against fixed
+  vectors and wires into `verify` alongside `--check`, per "Verify that a
+  check can fail."
+
+**CI**: one new step, "EAS production-safety guard", inside the existing
+`Mobile (Expo)` job (`pnpm run check:eas-production-safety`) — not a new job.
+The script is Node, not Python, so it belongs there rather than in `Scripts
+(Python)`, which deliberately installs neither Node nor pnpm. Because this
+adds a step to an existing job rather than a new job, `EXPECTED_CHECK_RUNS`
+in `scripts/check-ci-checks.py` is **unchanged** (still 6) — confirmed by
+running `check:ci-detector`'s self-test after the edit, which re-derives the
+declared-check set from the workflow files and cross-checks it against that
+constant; it still reports the same six names.
+
+**On-screen marker**: `apps/mobile/components/EnvironmentBadge.tsx`, mounted
+once in `app/_layout.tsx`'s root view (rendered above `RootStack` and the
+splash, so it's present from the very first frame). Reads
+`process.env.EXPO_PUBLIC_APP_ENV`: renders nothing when it is exactly
+`"production"`, otherwise renders a small fixed corner label reading the
+value uppercased (or `"DEV"` if the var is unset entirely — a plain
+dev-client run with no `.env.local`, say). **Fails safe in the direction
+that matters**: the only way this badge can be wrong is by appearing on a
+real production build (which `--check` independently guards against, by
+asserting `production.env.EXPO_PUBLIC_APP_ENV` is literally `"production"`),
+never by silently hiding a marker on a non-production one. Deliberately a
+bare `StyleSheet`-based `<Text>` in a fixed corner rather than a designed
+component — this is a debugging/safety instrument, not athlete-facing UI,
+and it uses existing tokens (`vola.warn`, `Spacing`, `Radius`,
+`Typography.caption`) without inventing new ones.
+
+### Mutation testing (the "verify that a check can fail" evidence)
+
+Ran directly, before fixing `eas.json`, against the actual pre-fix file:
+
+```
+$ node scripts/validate-production-config.mjs --check
+  - build.production.env.EXPO_PUBLIC_API_URL points at a staging host
+    ("https://apivola-fitness-platform-staging.up.railway.app") — ...
+  - submit.production.ios.ascAppId is an unfilled placeholder
+    ("REPLACE_WITH_APP_STORE_CONNECT_APP_ID") — ...
+  (plus three "environment" link problems, since the field didn't exist yet)
+exit 1
+```
+
+then confirmed clean (`exit 0`) once `eas.json` was fixed, then confirmed the
+*resolved* path independently:
+
+```
+$ EAS_BUILD_PROFILE=production EXPO_PUBLIC_API_URL="https://apivola-fitness-platform-staging.up.railway.app" \
+    node scripts/validate-production-config.mjs --build-hook
+  - EXPO_PUBLIC_API_URL points at a staging host (...)
+exit 1
+
+$ EAS_BUILD_PROFILE=preview EXPO_PUBLIC_API_URL="https://apivola-...staging..." \
+    node scripts/validate-production-config.mjs --build-hook
+EAS_BUILD_PROFILE is "preview", not "production" — skipping
+exit 0   # confirms the hook never touches a non-production build
+
+$ EAS_BUILD_PROFILE=production node scripts/validate-production-config.mjs --build-hook
+  - EXPO_PUBLIC_API_URL is missing
+exit 1   # today's honest, correct state — no real production URL exists yet
+
+$ pnpm run submit:ios     # from apps/mobile, with the real ascAppId still unset
+  - submit.production.ios.ascAppId is missing
+exit 1   # fails BEFORE the `eas` binary is even invoked
+```
+
+`--self-test` additionally mutation-tests the structural `checkEasJson()`
+assertions against synthetic fixtures (missing `environment` link, wrong
+`environment` value, the exact historical staging-URL regression, a wrong
+`EXPO_PUBLIC_APP_ENV`, the exact historical ascAppId placeholder) and
+confirms every one is caught, plus confirms a clean fixture reports zero
+problems — 28 assertions total, all passing. Also ran `pnpm run
+lint:mobile`, `pnpm run typecheck:mobile`, `pnpm run check:verify-chain` and
+`pnpm run check:ci-detector --self-test` clean against the new files.
+
+### What's NOT verified (the NEEDS HUMAN EVIDENCE criterion, left open on purpose)
+
+**A real EAS cloud build was never attempted.** This session has no EAS
+credentials and could not exercise `eas-build-pre-install` on EAS's own
+build machine — the one entry point that can see an actual resolved
+EAS-secret value. Two things about it are asserted from Expo's documentation
+rather than measured live, and are worth re-checking if this guard is ever
+found not firing on a real build: (1) that `EAS_BUILD_PROFILE` is set to the
+build profile's name at pre-install time, and (2) that a linked environment's
+variables are available to the whole build job, pre-install step included,
+rather than only later at bundling time. The hook is written to fail *open*
+(skip, not block) rather than guess wrong if either assumption is off, so the
+worst case of being wrong here is the hook doing nothing — the reliable,
+already-verified half of this fix (`--check` in `verify`/CI, and
+`--check-submit` ahead of `submit:ios`) does not depend on either assumption
+holding. Per #536's own acceptance criteria, the remaining human-run checks
+are:
+
+1. Set (or leave unset) `EXPO_PUBLIC_API_URL` in the `production` EAS
+   environment to the staging hostname and attempt `pnpm --dir apps/mobile
+   run build:ios:prod` — confirm it fails before producing an archive, and
+   that the failure names the offending value.
+2. Repeat with `submit.production.ios.ascAppId` left as a placeholder
+   string (or attempt `pnpm --dir apps/mobile run submit:ios` with it
+   still unset, as it is today).
+3. Once a real production API and a real numeric ASC app id both exist,
+   register the former with `eas env:create ... --environment production`
+   and commit the latter, then confirm a production build/submit succeeds
+   and the resulting app boots against the real production API with no
+   `EnvironmentBadge` visible anywhere.
+
+**Review fold-in.** `ac-verifier`: 8 MET, 0 NOT MET, 1 correctly
+`NEEDS HUMAN EVIDENCE` (already properly marked in #536, no amendment
+needed). `frontend-reviewer`: 0 blocking, four `[suggestion]`s — two folded
+in, two left as-is. Folded in: (1) `checkEasJson` only asserted
+production's own `EXPO_PUBLIC_APP_ENV` literal, so a typo in a
+NON-production profile (e.g. preview accidentally set to `"development"`)
+went undetected — generalized the check to every profile, mutation-tested
+by reverting it and confirming the new self-test assertion goes red, then
+restored and reconfirmed green (29 assertions now, was 28). (2)
+`EnvironmentBadge` had no accessibility-hiding, unlike this codebase's own
+convention for purely decorative overlays (`Avatar.tsx`/
+`CaffeineBanner.tsx`) — added `accessibilityElementsHidden`/
+`importantForAccessibility="no-hide-descendants"`. Left as-is: `classifyValue`
+rejects known-bad shapes but doesn't positively assert ABSENCE of
+`EXPO_PUBLIC_API_URL` from the committed production profile (a real,
+non-staging, non-placeholder URL committed directly would pass `--check`
+even though the design intent is "no literal at all" — a real gap, but a
+stricter assertion changes the tool's contract and deserves its own
+ticket rather than a same-PR addition); and the `lib/*.ts` API clients'
+pre-existing `?? 'http://localhost:8080'` fallback, noted only as an
+adjacent observation outside this diff's changed files, not a regression
+this PR introduced.
+
+
 ## Open items / known gaps as of this entry
 
 
