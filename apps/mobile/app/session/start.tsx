@@ -181,6 +181,8 @@ export default function StartSessionScreen() {
             undefined,
             // N473/#812 item 8 — see fetchSuggestions's own doc comment.
             units,
+            // N494/#864 — see fetchSuggestions's own doc comment.
+            workout?.id ?? null,
           );
           // The catalog goes with it, so a dual-mode set already prescribed in
           // seconds does not also acquire a rep target — a row holding both is

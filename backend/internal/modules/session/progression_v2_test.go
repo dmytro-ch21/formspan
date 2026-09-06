@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 )
 
 // finishedSess is sess's v2 sibling — a completed session, ended, and
@@ -601,5 +603,142 @@ func TestStalledSessionsAtV2_LightSessionDoesNotCountTowardAStall(t *testing.T) 
 	}
 	if n := stalledSessionsAtV2(finished, 250); n != 2 {
 		t.Fatalf("stalled sessions = %d, want 2 — a light session at the same weight must not count", n)
+	}
+}
+
+// itemSet is a straightSet-style shorthand for these N494/#864 fixtures,
+// parameterised by exercise id so an upright row and a calf raise fixture
+// don't both silently claim to be a squat.
+func itemSet(exerciseID string, reps int, kg float64, rir *int) Set {
+	s := set(reps, kg, rir, nil)
+	s.ExerciseID = exerciseID
+	return s
+}
+
+// TestProgressV2_GoldenUprightRow_AddsOneEquipmentIncrementWithinConfiguredRange
+// is one of N494/#864's two required regression tests, resolving the
+// upright-row scenario from #753's original report verbatim: "add one
+// loadable increment while staying around 10-15 reps." Before this ticket,
+// EVERY exercise shared the workout-wide goal-based range — an upright row
+// on a "general" goal was held to 5-8 reps, and load resetting reps to 5 is
+// correct for a primary lift and wrong for this accessory. The athlete's own
+// explicit configuration (priority 2) is what fixes it here.
+func TestProgressV2_GoldenUprightRow_AddsOneEquipmentIncrementWithinConfiguredRange(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+	const weight = 20.0 // kg
+	const incrementKg = 1.25
+
+	repMin, repMax := 10, 15
+	increment := incrementKg
+	athlete := &workout.ItemProtocol{
+		RepRangeMin: &repMin, RepRangeMax: &repMax, EquipmentIncrement: &increment,
+	}
+	resolved := ResolveProtocol(nil, athlete, workout.ProfileIsolationAccessory)
+
+	in := ProgressionInput{
+		ExerciseID:      "upright-row",
+		LoadType:        "weight_reps",
+		MovementPattern: "vertical_pull",
+		Goal:            "general", // would be 5-8 without the configured protocol
+		Protocol:        &resolved,
+		Recent: []SessionEffort{
+			finishedSess(1*day, testNow,
+				itemSet("upright-row", 15, weight, rir2),
+				itemSet("upright-row", 15, weight, rir2),
+				itemSet("upright-row", 15, weight, rir2),
+			),
+		},
+	}
+
+	p := ProgressV2(in, testNow)
+
+	if p.RepRange != (RepRange{Low: repMin, High: repMax}) {
+		t.Fatalf("rep range = %+v, want the configured 10-15 — the workout-wide "+
+			"general 5-8 range must not have been used", p.RepRange)
+	}
+	if p.Code != ProgressAddLoad {
+		t.Fatalf("code = %s, want add_load (every set hit the top of the "+
+			"configured range with reserve to spare)", p.Code)
+	}
+	if p.TargetReps == nil || *p.TargetReps != repMin {
+		t.Fatalf("target reps = %v, want %d (the configured range's floor, "+
+			"not the general range's 5)", p.TargetReps, repMin)
+	}
+	wantWeight := weight + incrementKg
+	if p.TargetWeightKg == nil || !nearlyEqual(*p.TargetWeightKg, wantWeight) {
+		t.Fatalf("target weight = %v, want %v (exactly one configured "+
+			"equipment increment more)", p.TargetWeightKg, wantWeight)
+	}
+}
+
+// TestProgressV2_GoldenCalves_ProfileDefaultUsesTenToTwenty is N494/#864's
+// other required regression test: calves resolving to their configured
+// 10-20 range via the EXERCISE-PROFILE DEFAULT (priority 3) — no explicit
+// program or athlete configuration at all, only the classifier inferring
+// ProfileCalfHighRepAccessory from movement_pattern_detail (see
+// ClassifyExerciseProfile's own doc comment on why movement_pattern alone,
+// "isolation", cannot tell a calf raise apart from any other accessory).
+func TestProgressV2_GoldenCalves_ProfileDefaultUsesTenToTwenty(t *testing.T) {
+	day := 24 * time.Hour
+	rir2 := ptrInt(2)
+	const weight = 40.0
+
+	profile := ClassifyExerciseProfile("isolation", "Plantar Flexion", "weight_reps")
+	resolved := ResolveProtocol(nil, nil, profile)
+
+	in := ProgressionInput{
+		ExerciseID:            "barbell-calf-raise",
+		LoadType:              "weight_reps",
+		MovementPattern:       "isolation",
+		MovementPatternDetail: "Plantar Flexion",
+		Goal:                  "general",
+		Protocol:              &resolved,
+		Recent: []SessionEffort{
+			finishedSess(1*day, testNow,
+				itemSet("barbell-calf-raise", 20, weight, rir2),
+				itemSet("barbell-calf-raise", 20, weight, rir2),
+				itemSet("barbell-calf-raise", 20, weight, rir2),
+			),
+		},
+	}
+
+	p := ProgressV2(in, testNow)
+
+	wantRange := profileDefaults[workout.ProfileCalfHighRepAccessory].RepRange
+	if p.RepRange != wantRange {
+		t.Fatalf("rep range = %+v, want the calf profile default %+v", p.RepRange, wantRange)
+	}
+	if p.Code != ProgressAddLoad {
+		t.Fatalf("code = %s, want add_load", p.Code)
+	}
+	if p.TargetReps == nil || *p.TargetReps != wantRange.Low {
+		t.Fatalf("target reps = %v, want %d", p.TargetReps, wantRange.Low)
+	}
+}
+
+// TestProgressV2_GoldenCalves_AthleteConfiguredTenToFifteenOutranksProfileDefault
+// is the other half of #753's literal "10-15 OR 10-20" wording: an athlete
+// who explicitly configures the narrower 10-15 range (priority 2) gets it,
+// even though the profile default (priority 3) for calves is 10-20.
+func TestProgressV2_GoldenCalves_AthleteConfiguredTenToFifteenOutranksProfileDefault(t *testing.T) {
+	repMin, repMax := 10, 15
+	athlete := &workout.ItemProtocol{RepRangeMin: &repMin, RepRangeMax: &repMax}
+	profile := ClassifyExerciseProfile("isolation", "Plantar Flexion", "weight_reps")
+	resolved := ResolveProtocol(nil, athlete, profile)
+
+	in := ProgressionInput{
+		ExerciseID:            "barbell-calf-raise",
+		LoadType:              "weight_reps",
+		MovementPattern:       "isolation",
+		MovementPatternDetail: "Plantar Flexion",
+		Goal:                  "general",
+		Protocol:              &resolved,
+	}
+
+	p := ProgressV2(in, testNow)
+	if p.RepRange != (RepRange{Low: 10, High: 15}) {
+		t.Fatalf("rep range = %+v, want the athlete's configured 10-15, not "+
+			"the profile default 10-20", p.RepRange)
 	}
 }

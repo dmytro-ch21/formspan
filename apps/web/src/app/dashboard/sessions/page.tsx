@@ -213,6 +213,8 @@ export default function HistoryPage() {
               undefined,
               // N473/#812 item 8 — see fetchSuggestions's own doc comment.
               units,
+              // N494/#864 — see fetchSuggestions's own doc comment.
+              workout?.id,
             ),
           );
         } catch {

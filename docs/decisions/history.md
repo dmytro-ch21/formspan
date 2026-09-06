@@ -57616,6 +57616,160 @@ covered everything needed), so N490 (strength per-set HR, concurrently in
 progress in a sibling worktree at the time of writing) shares no file with
 this change.
 
+### N494/#864 (phase 2 of #753): a real per-workout-item prescription model
+
+Phase 2 of #753 (N450), the part N473/#812 (phase 1, entry above) deliberately
+stopped short of — that entry's own "Where this leaves #753's phase 1/phase 2
+boundary" note named the gap precisely: no schema on `Item`, and the
+equipment-rounding fix stayed a per-unit-system table rather than the
+per-workout-item `equipment_increment` field #753's plan called for.
+
+**The problem, precisely.** Every exercise in a workout shared the same
+workout-wide, goal-based rep range (`repRangeForGoal`). An upright row held
+to the same 5-8 "general training" range as a compound lift is the wrong
+protocol — adding load resets it to 5 reps, correct for a primary lift and
+wrong for an accessory — and there was no way to configure anything
+different per exercise.
+
+**The model.** `backend/internal/modules/workout/workout.go`'s `Item` gains
+an optional `Protocol *ItemProtocol`: `progression_strategy` (double
+progression, linear, top-set/backoff, difficulty progression,
+program-controlled), `rep_range_min`/`max`, `target_sets`,
+`target_rir`/`target_rpe`, `rep_count_mode` (total/per-side),
+`equipment_increment`, an `exercise_profile` tag, and a `Sets
+[]SetPrescription` list (role, load, rep range, effort range, rest,
+optionality) for schemes a single uniform prescription can't describe — a
+top set and its backoffs. Persisted as one JSONB column
+(`workout_items.protocol`, migration 000091) rather than exploded into a
+dozen scalar columns plus a child table, the same choice this codebase
+already made for `nutrition_targets.basis`: these fields are authored and
+read together and never queried independently of their parent item.
+`ItemProtocol.Validate()` is the real validation — enum membership, range
+ordering, per-set consistency — since none of that is expressible as a
+Postgres CHECK over an opaque JSONB blob; a minimal `jsonb_typeof = 'object'`
+CHECK is the only thing the database itself can enforce. Called from both
+`Create` and `ReplaceItems`, before the transaction even begins, so an
+invalid protocol on item 4 of 5 fails before items 1-3 are ever written.
+
+**Exercise profiles as defaults, never authorities** — the whole point of
+#753's design. Six profiles (primary compound, secondary compound/lunge,
+isolation/accessory, calf/high-rep accessory, bodyweight/difficulty
+progression, timed/distance), each carrying a `RepRange`/`TargetSets`/
+`TargetRIR`/`Strategy` default (`session/protocol.go`'s `profileDefaults`).
+`ClassifyExerciseProfile` infers one heuristically from data the progression
+engine already has — `MovementPattern`, `MovementPatternDetail`, `LoadType`
+— when nothing more specific is configured. `MovementPatternDetail` is new
+on `ProgressionInput`, populated only by `RecentEffortsV2` (v1's
+`RecentEfforts`/`Progress` never read it): it's what tells a calf raise
+(`movement_pattern` "isolation", detail "Plantar Flexion"/"Ankle
+Plantarflexion") apart from any other single-joint accessory sharing the
+same coarse "isolation" bucket — `movement_pattern` alone genuinely cannot,
+and an upright row (`vertical_pull`) needs no such disambiguation since its
+pattern already maps to a real profile.
+
+**The four-level priority order, exactly as #753 specified it**: coach/program
+prescription → athlete's explicit exercise configuration → exercise-profile
+default → abstain. `session.ResolveProtocol` implements it as a pure,
+deterministic function — no blending: a level that answers ONE question
+(say, only `target_sets`) does not cause the resolver to fill in a rep range
+from a lower level, which would be inventing an answer nobody actually gave
+(`TestResolveProtocol_DoesNotBlendLevels`). Which of #753's top two levels an
+`ItemProtocol` on a given workout item IS — program prescription or athlete
+config — is decided by workout OWNERSHIP, since this codebase has no
+separate coach-assignment feature yet: a workout the caller does not own (an
+official VOLA template, nil owner, or another athlete's shared/public one)
+is the program level; one they own is their own configuration
+(`workout.PostgresRepository.ItemProtocols`, exposed to the session package
+through a narrow `WorkoutProtocolSource` interface — the same
+narrow-interface pattern `FlagSource` already established for the feature
+flag, rather than session depending on workout's whole `Repository`).
+"Abstain" does **not** mean `ProgressV2` returns a new `SuggestAbstain`
+code — that would break every unconfigured item's existing behaviour, which
+this ticket's own acceptance criteria forbid. It means the resolver has
+nothing to say, and `ProgressV2`'s `effectiveRepRange` falls back to the
+pre-existing `repRangeForGoal` exactly as before this ticket existed — an
+item with nothing configured (every item that existed before this ticket)
+sees byte-identical suggestions.
+
+**Wiring into `ProgressV2`** (`progression_v2.go` — v1's `Progress` is
+untouched, per that file's own standing rule): `effectiveRepRange` reads
+`ProgressionInput.Protocol.RepRange` when present; `incrementWithinV2` and
+`roundForProtocolV2` read `Protocol.EquipmentIncrementKg` when present,
+rounding to the athlete's literal configured increment (`roundToIncrement`)
+rather than a movement-pattern guess, for both the add-load AND the deload
+branch. `GET /sessions/suggestions` gains an optional `workout_id` query
+param: the handler resolves each requested exercise's protocol
+(`ClassifyExerciseProfile` + `ResolveProtocol`) only behind
+`new_recommendation_engine` and only when a workout is named, and a lookup
+failure (a deleted workout, a transient error) fails open to "no
+configuration" rather than 500ing the request — the same posture
+`newEngineEnabled` already takes for a flag-read failure.
+
+**The two required golden regression tests**, resolving #753's original
+report exactly as stated: `TestProgressV2_GoldenUprightRow_AddsOneEquipmentIncrementWithinConfiguredRange`
+(an athlete-configured 10-15 range plus a literal equipment increment —
+`ProgressAddLoad` lands at exactly one increment more, reps reset to 10, and
+the workout-wide general 5-8 range is asserted absent) and two calves tests
+covering #753's literal "10-15 OR 10-20" wording:
+`TestProgressV2_GoldenCalves_ProfileDefaultUsesTenToTwenty` (the profile
+default, reached via `ClassifyExerciseProfile` with no explicit
+configuration at all) and `TestProgressV2_GoldenCalves_AthleteConfiguredTenToFifteenOutranksProfileDefault`
+(explicit athlete config at the narrower end, outranking the profile
+default). `TestResolveProtocol_PriorityOrder` exercises all four levels
+independently, as the ticket required, plus
+`TestResolveProtocol_DoesNotBlendLevels` and
+`TestResolveProtocol_BareProfileTagIsAnAnswer` for two adjacent traps a
+naive implementation could fall into.
+
+**Mobile-first, per CLAUDE.md's hard rule.** `apps/mobile/app/workout/[id].tsx`'s
+existing per-item editor (`ItemRow`) gains a collapsed-by-default `Protocol`
+disclosure covering every SCALAR field — rep range, target sets/RIR,
+progression strategy (pill row), rep-count mode, equipment increment — so an
+athlete can configure or at least see the resolved protocol standing at the
+rack, phone in hand. The richer per-set prescription TABLE (role/load/rep
+range/effort range/rest/optionality — the one piece that genuinely needs a
+wide, row-based layout) is web-only
+(`apps/web/src/app/dashboard/workouts/[id]/page.tsx`'s new `ProtocolEditor`),
+exactly the "richer on web, reachable on phone" split the mobile-first rule
+explicitly allows — mobile shows a read-only count ("N custom sets
+configured on web") when one exists rather than hiding it. Both apps'
+`fetchSuggestions` gained an optional, appended-last `workoutId` parameter
+(same non-shifting pattern N473/#812 already used for `unitSystem`), threaded
+through every call site that already has a workout in scope (`workout/[id].tsx`,
+`session/start.tsx`, `session/[id].tsx` on mobile; the equivalent three pages
+on web) — the exercise-detail screen, which has no workout context, simply
+omits it and sees unconfigured behaviour, same as before. `protocolIsConfigured`
+(mirrored identically in both apps' libs) is what decides whether an edited
+item's protocol is sent as a real object or as `undefined` — an object with
+every field cleared reads as "no protocol" so the server actually clears the
+column rather than persisting an empty-but-present one; a new mobile
+pure-logic test (`lib/__tests__/itemProtocol.test.ts`) pins both directions
+plus the "not a constant" mutation check this repo's testing discipline asks
+for.
+
+**Testing.** Backend: 6 new tests in `workout/postgres_test.go` (full
+round-trip through Create/Get, clearing via ReplaceItems, three invalid
+shapes rejected as `ErrInvalidInput` with nothing written, ownership
+correctly distinguishing program vs. athlete config, an invisible workout
+reading as empty rather than erroring) — full workout and session suites
+green against a fresh migrated database (`vola_test_n494`), 39 backend
+packages, one intentional skip (`TestLiveComplete`), zero failures. Session
+package: the priority-order suite above, the classifier's own table test
+against the exact catalog shapes #753's report named, the three golden
+regression tests, and two `Suggestions` handler tests proving the wiring
+reaches the wire (`workout_id` present changes `rep_range` in the JSON
+response; absent, it doesn't). Mobile: `tsc --noEmit` clean, `lint:mobile`
+unchanged at 50 warnings/0 errors (the ratchet ceiling — none of the new
+code introduced one), the new pure-logic suite, and the existing
+`workoutDetailScreen.test.tsx` suite unaffected. Web: `tsc --noEmit` and
+`lint:web` both clean, full `vitest` suite (259 tests) green.
+
+**What this deliberately does NOT do**, staying inside phase 2's own
+boundary per #753's phased plan: no warm-up engine (phase 3), no splitting
+next-session/warm-up/in-session/weekly-program recommendation products
+(phase 4), no immutable per-suggestion decision record or shadow replay
+(phase 5). Those remain open against #753, which stays open.
+
 ## Open items / known gaps as of this entry
 
 

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 )
@@ -33,17 +34,22 @@ type FlagSource interface {
 }
 
 type Handler struct {
-	repo  Repository
-	flags FlagSource
+	repo     Repository
+	flags    FlagSource
+	workouts WorkoutProtocolSource
 }
 
-// NewHandler takes an optional FlagSource. Nil is valid and deliberate: every
+// NewHandler takes an optional FlagSource and an optional
+// WorkoutProtocolSource. Nil is valid and deliberate for both: every
 // existing caller that doesn't care about the new engine (main tests, a
 // handler built only to exercise Create/ReplaceSets) keeps compiling and
 // keeps taking the v1 path, which is exactly the "unaffected for anyone not
-// on the flag" contract N473/#812 requires.
-func NewHandler(repo Repository, flags FlagSource) *Handler {
-	return &Handler{repo: repo, flags: flags}
+// on the flag" contract N473/#812 requires — and a nil workouts source
+// (N494/#864) means Suggestions simply never has per-item configuration to
+// consult, the same "abstain to legacy behaviour" ResolveProtocol's own doc
+// comment describes for a nil Protocol.
+func NewHandler(repo Repository, flags FlagSource, workouts WorkoutProtocolSource) *Handler {
+	return &Handler{repo: repo, flags: flags, workouts: workouts}
 }
 
 // newEngineEnabled resolves the flag defensively: a nil FlagSource, or the
@@ -529,6 +535,27 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// N494/#864 (phase 2 of #753): which workout the caller is asking about,
+	// so ProgressV2 can consult that item's own configured protocol instead
+	// of only the workout-wide goal-based range. Optional and unvalidated,
+	// same reasoning as goal/unit_system above — a caller not yet updated to
+	// send this (or asking outside any workout context, e.g. the exercise
+	// detail screen) simply gets no per-item configuration, which reads as
+	// ProtocolSourceAbstain and falls back to exactly today's behaviour.
+	workoutID := strings.TrimSpace(r.URL.Query().Get("workout_id"))
+	var protocols map[string]workout.ItemProtocol
+	var isProgram bool
+	if workoutID != "" && h.workouts != nil {
+		// A lookup failure (a deleted workout, a transient error) must not
+		// fail the whole suggestions request — the workout_id is enrichment,
+		// not the thing being asked for. Failing open here means "no
+		// configuration found", the same safe reading newEngineEnabled
+		// already gives a flag-read failure above.
+		if p, prog, err := h.workouts.ItemProtocols(r.Context(), claims.UserID, workoutID); err == nil {
+			protocols, isProgram = p, prog
+		}
+	}
+
 	// Resolved BEFORE the history read, not after: which repository method
 	// runs is part of what the flag decides, not just which pure function
 	// gets called afterward. See RecentEffortsV2's doc comment (postgres.go)
@@ -566,6 +593,26 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 		in := efforts[id]
 		in.ExerciseID, in.Goal, in.UnitSystem = id, goal, unitSystem
 		in.InSessionWorkingWeightsKg = todaySets[id]
+
+		// N494/#864: resolved ONLY for v2 — v1's Progress never reads
+		// ProgressionInput.Protocol and must not start, per progression.go's
+		// own doc comment on that field. `program`/`athleteCfg` are sorted
+		// into the right priority slot by workout ownership (isProgram),
+		// resolved once per request above, not per exercise.
+		if v2 {
+			var program, athleteCfg *workout.ItemProtocol
+			if proto, ok := protocols[id]; ok {
+				p := proto
+				if isProgram {
+					program = &p
+				} else {
+					athleteCfg = &p
+				}
+			}
+			profile := ClassifyExerciseProfile(in.MovementPattern, in.MovementPatternDetail, in.LoadType)
+			resolved := ResolveProtocol(program, athleteCfg, profile)
+			in.Protocol = &resolved
+		}
 
 		var plan Plan
 		if v2 {

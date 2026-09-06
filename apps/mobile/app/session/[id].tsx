@@ -644,6 +644,8 @@ export default function SessionScreen() {
           // per-exercise `unitFor`; see fetchSuggestions's own doc comment
           // for why one value per request is the deliberate simplification.
           units,
+          // N494/#864 — see fetchSuggestions's own doc comment.
+          workoutID,
         ),
       );
     },

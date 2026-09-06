@@ -19551,3 +19551,92 @@ Fixes a real asymmetry with N478 (Android): iOS used to permanently exclude a se
 ### Auth/security
 
 None — no new endpoint, no new client permission, no data-shape change visible to the API (the fix reads the SAME `computeSessionMetrics` response the pre-existing code already received; it just stops discarding it).
+
+---
+
+## N494/#864 — per-workout-item progression protocol (phase 2 of #753) (`backend/internal/modules/workout` — `ItemProtocol`/`ExerciseProfile`, `backend/internal/modules/session` — `ResolveProtocol`/`ProgressV2`, `PUT /v1/workouts/{id}/items`, `GET /v1/sessions/suggestions?workout_id=`, `apps/mobile/app/workout/[id].tsx`'s `ProtocolEditor`, `apps/web/src/app/dashboard/workouts/[id]/page.tsx`'s `ProtocolEditor`)
+
+Introduces a per-workout-item progression protocol (rep range, target sets,
+target effort, progression strategy, rep-count mode, equipment increment,
+and a per-set prescription list) plus exercise-profile defaults, resolved
+through a four-level priority order (program prescription → athlete config
+→ exercise-profile default → abstain) that `GET /v1/sessions/suggestions`
+consults — only behind `new_recommendation_engine` — when a `workout_id`
+names a workout containing the requested exercise.
+
+### Happy path
+
+- Authoring a workout item's protocol on mobile (`workout/[id].tsx`'s
+  Protocol disclosure): set a rep range, target sets, target RIR, a
+  progression strategy and an equipment increment on one item; Save;
+  reopen the workout (including after a cold app restart) and see every
+  field persisted exactly as entered.
+- The same round trip on web (`ProtocolEditor`), additionally covering the
+  per-set prescription table: add two rows (a top set and a backoff, each
+  with its own role/load/rep range/effort range/rest/optional flag), save,
+  reload, and see both rows intact.
+- A protocol authored on web is visible (read) on mobile, and vice versa —
+  both apps read the same `protocol` field off the same `WorkoutItem`.
+- Starting a session from a workout whose item carries a configured rep
+  range: `GET /v1/sessions/suggestions?...&workout_id=<id>` (flag on)
+  returns that item's configured `rep_range` in its `Suggestion`, not the
+  workout-wide goal-based range.
+- An item with NO configured protocol, in a workout with no `workout_id`
+  passed at all, or with the feature flag off: `rep_range` is exactly the
+  pre-existing goal-based range — byte-identical to before this ticket,
+  confirming the change is additive.
+- Clearing every field of a configured protocol (mobile or web) removes it
+  entirely — reopening shows no protocol configured, not an empty-but-present
+  object.
+- An exercise profile tag (e.g. "Calf / high-rep accessory") set with no
+  other field configured resolves to that profile's own default rep range
+  in the suggestion response.
+- The priority order itself: a workout the athlete does not own (an
+  official VOLA template, or a plan shared to them) carrying a configured
+  item protocol outranks that same athlete's own configuration on a workout
+  they DO own for the same exercise, which in turn outranks an
+  exercise-profile default.
+
+### Edge cases & errors
+
+- `PUT /v1/workouts/{id}/items` with an unknown `progression_strategy`,
+  `rep_count_mode`, or `exercise_profile` value → `400 invalid_input`,
+  nothing written (verify via a subsequent `GET` that the workout's items
+  are unchanged).
+- An inverted rep range (`rep_range_min > rep_range_max`), a non-positive
+  `target_sets`, `target_rir`/`target_rpe` outside 0-10, or a non-positive
+  `equipment_increment` → `400 invalid_input`, nothing written.
+- A per-set prescription with an unknown `role`, an inverted rep range, an
+  inverted effort range, a negative load, or a negative `rest_seconds` →
+  `400 invalid_input`, nothing written.
+- `workout_id` naming a workout that does not exist, or that the caller
+  cannot see → the suggestions request still succeeds; the named exercise
+  simply has no per-item configuration (falls back to the goal-based range),
+  same as omitting the parameter.
+- `workout_id` naming a real workout that does not contain the requested
+  exercise at all → same fallback, no error.
+- A workout item's protocol references an `exercise_profile` unknown to the
+  server (e.g. an older client's stale enum) → treated as "no profile
+  default available"; falls through to abstain (goal-based range), not a
+  500.
+- Replacing a workout's items (`PUT .../items`) with a shorter list that
+  drops a previously-configured item entirely removes that item's protocol
+  along with it — no orphaned configuration survives under a stale position.
+- Offline authoring on mobile: configure a protocol with no network, background
+  the app, come back online later — the sync outbox pushes the `protocol`
+  field along with the rest of the item exactly as it does today for
+  `target_sets`/`target_reps`/etc.
+
+### Auth/security
+
+- `PUT /v1/workouts/{id}/items` remains owner-only — a protocol cannot be
+  attached to, or read from, a workout the caller does not own or cannot
+  see (the existing `requireOwner`/`visibleTo` gates apply unchanged to the
+  new column; no new authorization surface was introduced).
+- `GET /v1/sessions/suggestions?workout_id=` cannot be used to read another
+  user's workout's configuration: the underlying `ItemProtocols` lookup is
+  scoped by the same `visibleTo` predicate every other read in the workout
+  module uses, so a `workout_id` the caller cannot see contributes nothing
+  rather than leaking that workout's protocol data.
+- No PII or secret is added by any new field here — every value is a
+  training-protocol number or enum.

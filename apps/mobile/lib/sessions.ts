@@ -969,12 +969,24 @@ export async function fetchSuggestions(
   todaySets?: readonly Pick<LoggedSet, 'exercise_id' | 'weight_kg' | 'completed' | 'set_type'>[],
   signal?: AbortSignal,
   unitSystem?: UnitSystem | null,
+  /**
+   * N494/#864 (phase 2 of #753) — which workout this is for, so the server
+   * can consult a requested exercise's own configured `protocol` (rep
+   * range, target effort, progression strategy…) instead of only the
+   * workout-wide goal-based range. Appended last, same reasoning
+   * `unitSystem` above already followed: no existing positional caller
+   * shifts. Omitted entirely (a call site with no workout in scope, e.g.
+   * the exercise detail screen) reads as "no per-item configuration to
+   * consult" — exactly today's behaviour.
+   */
+  workoutId?: string | null,
 ): Promise<Map<string, Suggestion>> {
   const unique = [...new Set(exerciseIDs)].filter(Boolean);
   if (unique.length === 0) return new Map();
   const q = new URLSearchParams({ exercise_ids: unique.join(',') });
   if (goal) q.set('goal', goal);
   if (unitSystem) q.set('unit_system', unitSystem);
+  if (workoutId) q.set('workout_id', workoutId);
   if (todaySets && todaySets.length > 0) {
     const pairs = todaySets
       .filter((s) => countsAsSet(s) && s.weight_kg != null && s.weight_kg > 0)

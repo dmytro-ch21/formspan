@@ -26,9 +26,14 @@ import type { UnitSystem } from '@/lib/units';
 import {
   emptyItem,
   getWorkout,
+  PROGRESSION_STRATEGIES,
+  protocolIsConfigured,
   summariseTargets,
   targetFieldsFor,
   withTarget,
+  type ItemProtocol,
+  type ProgressionStrategy,
+  type RepCountMode,
   type TargetField,
   type Workout,
   type WorkoutItem,
@@ -315,6 +320,9 @@ export default function WorkoutDetailScreen() {
             undefined,
             // N473/#812 item 8 — see fetchSuggestions's own doc comment.
             units,
+            // N494/#864 — this workout's own items may carry per-exercise
+            // protocol configuration; see fetchSuggestions's own doc comment.
+            workout.id,
           ),
           // The catalog, so a dual-mode set already prescribed in seconds does
           // not also acquire a rep target — see lib/setMode.ts.
@@ -787,6 +795,13 @@ function ItemRow({
             <Text style={styles.hint}>Weight is per hand — what one hand holds, not the pair.</Text>
           )}
 
+          <ProtocolEditor
+            item={item}
+            units={units}
+            onChange={onChange}
+            index={index}
+          />
+
           <View style={styles.itemActions}>
             <Pressable
               onPress={() => onMove(-1)}
@@ -819,6 +834,175 @@ function ItemRow({
               <Text style={[styles.smallButtonText, styles.removeText]}>Remove</Text>
             </Pressable>
           </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * N494/#864 (phase 2 of #753): the phone-reachable path to configure — or
+ * just see — a workout item's own progression protocol. CLAUDE.md's
+ * mobile-first rule ("can an athlete with only a phone do this at all?")
+ * is what this exists to satisfy: the richer per-set prescription table is
+ * web-only (see `apps/web`'s workout editor), but every SCALAR field an
+ * athlete would actually reach for standing at the rack — rep range,
+ * target sets, target effort, rep-count mode, equipment increment,
+ * progression strategy — is editable here, collapsed behind its own
+ * disclosure so it never crowds the target fields above it.
+ *
+ * Deliberately collapsed by default: most items have no protocol at all,
+ * and this repo's own "everything crowds the phone" lesson (the item editor
+ * above already carries five target fields plus per-side/per-hand hints)
+ * argues against a second block of inputs always being on screen.
+ */
+function ProtocolEditor({
+  item,
+  units,
+  index,
+  onChange,
+}: {
+  item: WorkoutItem;
+  units: UnitSystem;
+  index: number;
+  onChange: (next: WorkoutItem) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const protocol = item.protocol ?? {};
+  const configured = protocolIsConfigured(item.protocol);
+  const hasCustomSets = (protocol.sets?.length ?? 0) > 0;
+
+  function set(patch: Partial<ItemProtocol>) {
+    const next: ItemProtocol = { ...protocol, ...patch };
+    // An object with nothing real in it is the same thing as no protocol —
+    // send `undefined` rather than `{}` so a save that clears every field
+    // actually clears the column server-side instead of persisting an
+    // empty-but-present one.
+    onChange({ ...item, protocol: protocolIsConfigured(next) ? next : undefined });
+  }
+
+  function numberField(
+    label: string,
+    value: number | null | undefined,
+    onSet: (n: number | null) => void,
+    testIDSuffix: string,
+  ) {
+    return (
+      <View style={styles.protocolField}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        <TextInput
+          style={styles.fieldInput}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          accessibilityLabel={label}
+          value={value == null ? '' : String(value)}
+          onChangeText={(text) => {
+            const n = text.trim() === '' ? null : Number(text);
+            onSet(n === null || !Number.isFinite(n) ? null : Math.round(n));
+          }}
+          placeholder="—"
+          placeholderTextColor="#9aa0a6"
+          testID={`workout-item-${index}-protocol-${testIDSuffix}`}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.protocolSection}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={`Protocol${configured ? ', configured' : ''}. ${open ? 'Collapse' : 'Expand'}`}
+        accessibilityState={{ expanded: open }}
+        style={styles.protocolToggle}
+        testID={`workout-item-${index}-protocol-toggle`}
+      >
+        <Text style={styles.protocolToggleText}>
+          Protocol{configured ? ' · configured' : ''}
+        </Text>
+        <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>
+      </Pressable>
+
+      {open && (
+        <View style={styles.protocolBody}>
+          <Text style={styles.protocolHint}>
+            Overrides the workout&apos;s general rep range for JUST this exercise —
+            useful for accessory work (e.g. an upright row or calf raise) that
+            shouldn&apos;t follow the same range as a primary lift.
+          </Text>
+
+          <View style={styles.fieldRow}>
+            {numberField('Min reps', protocol.rep_range_min, (n) => set({ rep_range_min: n }), 'rep-min')}
+            {numberField('Max reps', protocol.rep_range_max, (n) => set({ rep_range_max: n }), 'rep-max')}
+            {numberField('Target sets', protocol.target_sets, (n) => set({ target_sets: n }), 'sets')}
+          </View>
+          <View style={styles.fieldRow}>
+            {numberField('Target RIR', protocol.target_rir, (n) => set({ target_rir: n }), 'rir')}
+            {numberField(
+              `Equipment increment (${weightUnit(units)})`,
+              protocol.equipment_increment == null
+                ? null
+                : toDisplayWeight(protocol.equipment_increment, units),
+              (n) => set({ equipment_increment: n == null ? null : fromDisplayWeight(n, units) }),
+              'increment',
+            )}
+          </View>
+
+          <Text style={styles.fieldLabel}>Progression strategy</Text>
+          <View style={styles.protocolPillRow}>
+            {PROGRESSION_STRATEGIES.map((s) => {
+              const active = protocol.progression_strategy === s.key;
+              return (
+                <Pressable
+                  key={s.key}
+                  style={[styles.protocolPill, active && styles.protocolPillActive]}
+                  onPress={() => set({ progression_strategy: active ? null : (s.key as ProgressionStrategy) })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  testID={`workout-item-${index}-protocol-strategy-${s.key}`}
+                >
+                  <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
+                    {s.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={styles.fieldLabel}>Rep counting</Text>
+          <View style={styles.protocolPillRow}>
+            {(['total', 'per_side'] as RepCountMode[]).map((mode) => {
+              const active = protocol.rep_count_mode === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  style={[styles.protocolPill, active && styles.protocolPillActive]}
+                  onPress={() => set({ rep_count_mode: active ? null : mode })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  testID={`workout-item-${index}-protocol-repcount-${mode}`}
+                >
+                  <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
+                    {mode === 'total' ? 'Total' : 'Per side'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Per-set prescriptions (role/load/rep range/effort/rest/optional
+              per set) are authored on web, where a table of rows has room —
+              see the mobile-first rule's own carve-out for "richer on web,
+              reachable on phone". This is the phone's reachability: the
+              count is visible and readable here even though editing the
+              list itself isn't. */}
+          {hasCustomSets && (
+            <Text style={styles.hint} testID={`workout-item-${index}-protocol-sets-count`}>
+              {protocol.sets!.length} custom set{protocol.sets!.length === 1 ? '' : 's'} configured
+              on web — visible here, editable there.
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -1049,6 +1233,31 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
   },
   hint: { fontSize: 12, color: vola.textMuted },
+  protocolSection: { marginTop: 4 },
+  protocolToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  protocolToggleText: { fontSize: 13, fontWeight: '600', color: vola.textDim },
+  protocolBody: { gap: 10, paddingTop: 4 },
+  protocolHint: { fontSize: 12, color: vola.textMuted },
+  protocolField: { flex: 1, minWidth: 100, gap: 4 },
+  protocolPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  protocolPill: {
+    borderWidth: 1,
+    borderColor: vola.line,
+    backgroundColor: vola.surface,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  protocolPillActive: { backgroundColor: vola.lime, borderColor: vola.lime },
+  protocolPillText: { fontSize: 13, fontWeight: '600', color: vola.text },
+  protocolPillTextActive: { color: vola.navy },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   smallButton: {
     borderWidth: 1,

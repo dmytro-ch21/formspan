@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/workout"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/auth"
 )
 
@@ -35,7 +36,7 @@ func createResponse(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/sessions", strings.NewReader(body))
-	NewHandler(nil, nil).Create(rec, req)
+	NewHandler(nil, nil, nil).Create(rec, req)
 	return rec
 }
 
@@ -44,7 +45,7 @@ func replaceSetsResponse(t *testing.T, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPut, "/v1/sessions/ses-1/sets", strings.NewReader(body))
 	req.SetPathValue("sessionID", "ses-1")
 	rec := httptest.NewRecorder()
-	NewHandler(nil, nil).ReplaceSets(rec, req)
+	NewHandler(nil, nil, nil).ReplaceSets(rec, req)
 	return rec
 }
 
@@ -462,7 +463,7 @@ func TestSuggestionsHandler_TodaySetsReachesTheSignal(t *testing.T) {
 		efforts: map[string]ProgressionInput{"bench-press": in},
 		bestRMs: map[string]float64{},
 	}
-	h := NewHandler(repo, nil)
+	h := NewHandler(repo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/sessions/suggestions?exercise_ids=bench-press&goal=hypertrophy&today_sets=bench-press:95",
@@ -563,7 +564,7 @@ func TestSuggestionsHandler_FlagOffKeepsV1PathUnchanged(t *testing.T) {
 		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
 		bestRMs: map[string]float64{},
 	}
-	h := NewHandler(repo, &fakeFlagSource{enabled: false})
+	h := NewHandler(repo, &fakeFlagSource{enabled: false}, nil)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
@@ -593,7 +594,7 @@ func TestSuggestionsHandler_FlagOnUsesV2AndNeverInventsTheSet(t *testing.T) {
 		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
 		bestRMs: map[string]float64{},
 	}
-	h := NewHandler(repo, &fakeFlagSource{enabled: true})
+	h := NewHandler(repo, &fakeFlagSource{enabled: true}, nil)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
@@ -626,7 +627,7 @@ func TestSuggestionsHandler_FlagSourceErrorStaysOnV1(t *testing.T) {
 		efforts: map[string]ProgressionInput{"back-squat": goldenSquatFixture(true)},
 		bestRMs: map[string]float64{},
 	}
-	h := NewHandler(repo, &fakeFlagSource{errOnRead: errors.New("connection reset")})
+	h := NewHandler(repo, &fakeFlagSource{errOnRead: errors.New("connection reset")}, nil)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/v1/sessions/suggestions?exercise_ids=back-squat", nil)
@@ -648,5 +649,104 @@ func TestSuggestionsHandler_FlagSourceErrorStaysOnV1(t *testing.T) {
 	if s.TargetWeightKg == nil || !nearlyEqual(*s.TargetWeightKg, lb335Kg) || s.TargetReps == nil || *s.TargetReps != 8 {
 		t.Fatalf("a flag read error must fail safe onto v1, got weight=%v reps=%v",
 			s.TargetWeightKg, s.TargetReps)
+	}
+}
+
+// fakeWorkoutProtocolSource is session.WorkoutProtocolSource's test double —
+// N494/#864's own wiring, mirroring fakeFlagSource's shape.
+type fakeWorkoutProtocolSource struct {
+	protocols map[string]workout.ItemProtocol
+	isProgram bool
+	err       error
+}
+
+func (f *fakeWorkoutProtocolSource) ItemProtocols(_ context.Context, _, _ string) (map[string]workout.ItemProtocol, bool, error) {
+	return f.protocols, f.isProgram, f.err
+}
+
+// TestSuggestionsHandler_WorkoutIDWiresPerItemProtocolIntoV2 is N494/#864's
+// own end-to-end wiring proof: a workout_id naming an item's configured
+// rep range must change the WIRE response's rep_range, not just the pure
+// ResolveProtocol/ProgressV2 unit tests. Uses a "general" goal, which
+// (unconfigured) is the 5-8 range — so a response outside that range can
+// only have come from the per-item configuration.
+func TestSuggestionsHandler_WorkoutIDWiresPerItemProtocolIntoV2(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{
+			"upright-row": {
+				ExerciseID: "upright-row", LoadType: "weight_reps",
+				MovementPattern: "vertical_pull",
+			},
+		},
+		bestRMs: map[string]float64{},
+	}
+	repMin, repMax := 10, 15
+	workouts := &fakeWorkoutProtocolSource{
+		protocols: map[string]workout.ItemProtocol{
+			"upright-row": {RepRangeMin: &repMin, RepRangeMax: &repMax},
+		},
+		isProgram: false, // the caller's own workout — athlete config, priority 2
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: true}, workouts)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=upright-row&goal=general&workout_id=wk-1", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	got := body.Suggestions[0].RepRange
+	if got != (RepRange{Low: repMin, High: repMax}) {
+		t.Fatalf("rep_range over the wire = %+v, want the configured 10-15 — "+
+			"the general goal's 5-8 must not have been used", got)
+	}
+}
+
+// Without a workout_id (or without a WorkoutProtocolSource at all), the
+// per-item lookup never runs and the general goal-based range is what
+// reaches the wire — the pre-existing, unconfigured behaviour.
+func TestSuggestionsHandler_NoWorkoutIDKeepsGoalBasedRange(t *testing.T) {
+	repo := &suggestionsFakeRepo{
+		efforts: map[string]ProgressionInput{
+			"upright-row": {
+				ExerciseID: "upright-row", LoadType: "weight_reps",
+				MovementPattern: "vertical_pull",
+			},
+		},
+		bestRMs: map[string]float64{},
+	}
+	repMin, repMax := 10, 15
+	workouts := &fakeWorkoutProtocolSource{
+		protocols: map[string]workout.ItemProtocol{
+			"upright-row": {RepRangeMin: &repMin, RepRangeMax: &repMax},
+		},
+	}
+	h := NewHandler(repo, &fakeFlagSource{enabled: true}, workouts)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/suggestions?exercise_ids=upright-row&goal=general", nil)
+	req = signedInSession(req, "user-1")
+	rec := httptest.NewRecorder()
+	h.Suggestions(rec, req)
+
+	var body struct {
+		Suggestions []Suggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body did not decode: %v — %s", err, rec.Body.String())
+	}
+	got := body.Suggestions[0].RepRange
+	if got != (RepRange{Low: 5, High: 8}) {
+		t.Fatalf("rep_range = %+v, want the unconfigured general range 5-8 — a "+
+			"protocol must not apply without a workout_id naming it", got)
 	}
 }

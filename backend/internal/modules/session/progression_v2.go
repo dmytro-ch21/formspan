@@ -5,14 +5,24 @@ import (
 	"time"
 )
 
-// ProgressV2 is the phase-1 "safety release" for the strength progression
-// engine — N473, carved out of #753 as its own ticket (#812) specifically
-// because #753 named phase 1 as the part with a narrow, testable bar and
-// phases 2-5 (a per-workout-item prescription model, a separate warm-up
-// engine, splitting recommendation products, an audit trail) as substantial
-// designs that need their own tickets. This file is phase 1 ONLY: it does
-// not add a prescription model, a warm-up engine, or an audit trail, and it
-// must not grow one by accretion.
+// ProgressV2 began as the phase-1 "safety release" for the strength
+// progression engine — N473, carved out of #753 as its own ticket (#812)
+// specifically because #753 named phase 1 as the part with a narrow,
+// testable bar and phases 2-5 (a per-workout-item prescription model, a
+// separate warm-up engine, splitting recommendation products, an audit
+// trail) as substantial designs that need their own tickets. It still does
+// not add a warm-up engine, product separation, or an audit trail — those
+// are still phases 3-5, still out of scope here.
+//
+// N494/#864 (phase 2) added the ONE thing this file's own priority-ordered
+// per-item configuration was always going to need: reading it. See
+// protocol.go for the actual four-level priority order (program
+// prescription → athlete config → exercise-profile default → abstain) —
+// this file only ever consults its OUTPUT, ProgressionInput.Protocol,
+// already resolved by the handler before Progress/ProgressV2 runs. Every
+// place that reads it falls back to the pre-existing, goal-based behaviour
+// when Protocol is nil, so an item with nothing configured — which is every
+// item that existed before this ticket — sees byte-identical suggestions.
 //
 // Gated behind the `new_recommendation_engine` feature flag (see
 // featureflag.Repository.Enabled and Handler.Suggestions) — Progress above,
@@ -82,7 +92,7 @@ import (
 // the CORRECTED cohort — none of those helpers care what slice of sets they
 // are handed, and the fix is entirely in which slice that is.
 func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
-	rng := repRangeForGoal(in.Goal)
+	rng := effectiveRepRange(in)
 	p = Plan{RepRange: rng}
 	// N474: identical treatment to Progress's own `skippedNonNormal` — see
 	// that function's doc comment. Backend review on this ticket caught that
@@ -237,7 +247,7 @@ func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 	}
 
 	if p.SessionsAtLoad >= stallSessions && !readyForLoad(cohort, rng) {
-		down := roundToPlateV2(weight*(1-deloadFraction), in.UnitSystem)
+		down := roundForProtocolV2(in, weight*(1-deloadFraction))
 		if down < weight {
 			reps := rng.High
 			p.TargetWeightKg = &down
@@ -260,8 +270,8 @@ func ProgressV2(in ProgressionInput, now time.Time) (p Plan) {
 
 	switch {
 	case readyForLoad(cohort, rng):
-		add := incrementWithinV2(in.MovementPattern, weight, in.UnitSystem)
-		next := roundToPlateV2(weight+add, in.UnitSystem)
+		add := incrementWithinV2(in, weight)
+		next := roundForProtocolV2(in, weight+add)
 		reps := rng.Low
 		p.TargetWeightKg = &next
 		p.TargetReps = &reps
@@ -476,12 +486,24 @@ func incrementForLb(pattern string) float64 {
 // the whole computation in pounds and converts to kg exactly once, at the
 // end, which is what roundToPlateV2 needs handed to it: a value that is
 // ALREADY a clean lb number before it goes back through the wire's kg field.
-func incrementWithinV2(pattern string, weightKg float64, unitSystem string) float64 {
-	if unitSystem != "imperial" {
-		return incrementWithin(pattern, weightKg)
+//
+// N494/#864: when the item's resolved protocol carries an
+// EquipmentIncrementKg, that literal, athlete/program-configured increment
+// wins over the pattern-based guess entirely — see equipmentIncrementKg's
+// own doc comment for why the safety cap still applies even here.
+func incrementWithinV2(in ProgressionInput, weightKg float64) float64 {
+	if inc := equipmentIncrementKg(in); inc != nil {
+		add := *inc
+		if capped := weightKg * maxIncrementFraction; add > capped {
+			add = capped
+		}
+		return add
+	}
+	if in.UnitSystem != "imperial" {
+		return incrementWithin(in.MovementPattern, weightKg)
 	}
 	weightLb := kgToLb(weightKg)
-	add := incrementForLb(pattern)
+	add := incrementForLb(in.MovementPattern)
 	if capped := weightLb * maxIncrementFraction; add > capped {
 		add = capped
 	}
@@ -489,6 +511,63 @@ func incrementWithinV2(pattern string, weightKg float64, unitSystem string) floa
 		add = smallestPlateLb
 	}
 	return lbToKg(add)
+}
+
+// equipmentIncrementKg returns the item's configured equipment increment
+// (N494/#864's `equipment_increment` field), when the resolved protocol has
+// one — nil otherwise, which callers read as "use the pattern-based guess
+// instead." A non-positive value is treated as absent rather than as a
+// zero-sized jump: ItemProtocol.Validate already rejects one at write time,
+// but a defensive read-side check costs nothing and means a future caller
+// that builds a ResolvedProtocol by hand (a test, say) can't silently wedge
+// this into an infinite "add zero, still not at the top of the range" loop.
+func equipmentIncrementKg(in ProgressionInput) *float64 {
+	if in.Protocol == nil || in.Protocol.EquipmentIncrementKg == nil {
+		return nil
+	}
+	if *in.Protocol.EquipmentIncrementKg <= 0 {
+		return nil
+	}
+	return in.Protocol.EquipmentIncrementKg
+}
+
+// roundForProtocolV2 rounds to the item's configured equipment increment
+// when one is present, and to roundToPlateV2's generic per-unit plate grid
+// otherwise. Consulted for BOTH the add-load and the deload branch: a
+// configured increment is the athlete's real equipment either way, and a
+// deload rounded to a grid the equipment doesn't have would suggest a
+// weight identical to the one it started from as often as not on light
+// isolation loads.
+func roundForProtocolV2(in ProgressionInput, kg float64) float64 {
+	if inc := equipmentIncrementKg(in); inc != nil {
+		return roundToIncrement(kg, *inc)
+	}
+	return roundToPlateV2(kg, in.UnitSystem)
+}
+
+// roundToIncrement snaps to the nearest multiple of a literal, real
+// increment — used only when the item's protocol names one explicitly, as
+// opposed to roundToPlate/roundToPlateV2's generic per-unit grid guess.
+func roundToIncrement(kg, incrementKg float64) float64 {
+	if incrementKg <= 0 {
+		return kg
+	}
+	return math.Round(kg/incrementKg) * incrementKg
+}
+
+// effectiveRepRange is N494/#864's actual wiring point: the item's own
+// resolved rep range when ResolveProtocol answered one (any of the top
+// three priority levels), falling back to the pre-existing, goal-based
+// repRangeForGoal when it didn't (ProtocolSourceAbstain, or no Protocol at
+// all — the same reading for both, see ResolveProtocol's own doc comment on
+// why "abstain" here means exactly this fallback rather than a new
+// SuggestAbstain result). An item with nothing configured — every item that
+// existed before this ticket — sees byte-identical behaviour.
+func effectiveRepRange(in ProgressionInput) RepRange {
+	if in.Protocol != nil && in.Protocol.RepRange != nil {
+		return *in.Protocol.RepRange
+	}
+	return repRangeForGoal(in.Goal)
 }
 
 // roundToPlateV2 is roundToPlate's unit-aware sibling (item 8) and the fix
