@@ -430,6 +430,14 @@ jobs:
       - name: Lint
         run: pnpm run lint:mobile
 
+      # Per-rule warning ratchet (N153/#557) — a separate, named step rather
+      # than folded into `lint:mobile` (which now just runs `eslint .` with no
+      # `--max-warnings`) so a ratchet failure reads distinctly from a plain
+      # ESLint error in CI logs. Not a new job: EXPECTED_CHECK_RUNS in
+      # scripts/check-ci-checks.py is unaffected.
+      - name: Lint ratchet
+        run: pnpm run check:lint-ratchet
+
       - name: Typecheck
         run: pnpm run typecheck:mobile
 

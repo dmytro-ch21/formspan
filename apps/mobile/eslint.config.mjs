@@ -212,34 +212,56 @@ export default defineConfig([
        * would make the fix unreviewable. Switching the rules off would throw the
        * information away instead.
        *
-       * So they warn, `--max-warnings` in package.json holds the line, and the
-       * backlog is visible on every run. Promote them a group at a time.
+       * So they warn, and `scripts/check-lint-ratchet.mjs` (N153/#557) holds a
+       * per-rule cap against the LIVE count on every run — never a flat total, and
+       * never a number copied into a doc. Promote a rule to `error` one at a time,
+       * the moment `check-lint-ratchet.mjs` reports its live count at zero; the
+       * script fails loudly with instructions when that happens rather than
+       * letting a zero-warning rule sit at `warn` forever. See that script's doc
+       * comment for the counts as last measured and the full design.
        *
        * These two are genuine downgrades — errors in eslint-config-expo:
        */
       "react-hooks/refs": "warn", // 24 — refs read or written during render
-      "react-hooks/set-state-in-effect": "warn", // 15 — cascading renders
+      "react-hooks/set-state-in-effect": "warn", // 14 — cascading renders
       "react/no-unescaped-entities": "warn", // 1
 
       /*
-       * These three are PINS, not downgrades: already `warn` upstream. Named so
+       * These two are PINS, not downgrades: already `warn` upstream. Named so
        * an upstream promotion to error cannot land as a surprise in an
        * unrelated PR.
+       *
+       * `react-hooks/exhaustive-deps` used to be a third pin here. N153/#557
+       * measured its LIVE count at zero — the 16 sites that would otherwise warn
+       * all carry a rule-specific `eslint-disable-next-line`, which suppresses
+       * regardless of severity — so it converts to `error` below rather than
+       * staying a third entry in this list. It is a real error now, not a pin:
+       * an upstream demotion of it back to `warn` would no longer be silent,
+       * either — `check-lint-ratchet.mjs` only walks rules that are `warn` in
+       * THIS file, so a demotion upstream is invisible to it precisely because
+       * this file overrides it, same as `rules-of-hooks` above.
        */
-      "react-hooks/exhaustive-deps": "warn",
       "import/first": "warn",
       "import/no-duplicates": "warn",
+      "react-hooks/exhaustive-deps": "error",
 
       /*
-       * The `@typescript-eslint/*` findings (6 require-imports in test mocks,
-       * 1 unused var, 1 redeclare) are NOT named here, and the reason is
-       * precise: eslint-config-expo registers the React plugins GLOBALLY but
-       * registers `@typescript-eslint` only for TypeScript globs. So a rules
-       * block naming one of its rules must be `files`-scoped to those globs; an
-       * unscoped block fails to LOAD the whole config the moment a `.js` file is
-       * linted ("could not find plugin"), rather than changing a severity.
+       * The `@typescript-eslint/*` findings (6 `no-require-imports` in test
+       * mocks, 1 `no-redeclare` — re-measured 2026-09-06 for N153/#557; an
+       * earlier version of this comment said "1 unused var" instead of
+       * `no-redeclare`, which had already gone stale) are NOT named here, and
+       * the reason is precise: eslint-config-expo registers the React plugins
+       * GLOBALLY but registers `@typescript-eslint` only for TypeScript globs.
+       * So a rules block naming one of its rules must be `files`-scoped to
+       * those globs; an unscoped block fails to LOAD the whole config the
+       * moment a `.js` file is linted ("could not find plugin"), rather than
+       * changing a severity.
        *
-       * They are already warnings upstream, so they are simply left alone.
+       * They are already warnings upstream, so severity is simply left alone
+       * here — but both are still capped in `scripts/check-lint-ratchet.mjs`
+       * (N153/#557), same as every other rule this app lints at `warn`. That
+       * script's cap table is the one place their counts are tracked; this
+       * comment is prose, not the source of truth, and the drift above is why.
        */
     },
   },
