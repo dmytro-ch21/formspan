@@ -339,6 +339,27 @@ type ProgressionInput struct {
 	// comment for why a suggestion has to be rounded in the unit the athlete
 	// actually trains in rather than converted through kg.
 	UnitSystem string
+
+	// MovementPatternDetail is the exercise catalog's finer-grained label
+	// (e.g. "Plantar Flexion" for a calf raise, whose MovementPattern is the
+	// much coarser "isolation" shared with every other single-joint
+	// accessory). Populated only by RecentEffortsV2 — v1's RecentEfforts and
+	// Progress never read it — because its one consumer is
+	// ClassifyExerciseProfile (N494/#864, phase 2 of #753), which needs it
+	// to tell a calf raise apart from any other isolation movement that
+	// MovementPattern alone cannot distinguish.
+	MovementPatternDetail string
+
+	// Protocol is this exercise's ALREADY-RESOLVED per-item progression
+	// configuration (N494/#864, phase 2 of #753) — the output of
+	// ResolveProtocol's four-level priority order (program prescription →
+	// athlete config → exercise-profile default → abstain), computed by the
+	// handler before Progress/ProgressV2 ever runs. Nil means abstain: no
+	// configuration at any level, so ProgressV2 falls back to
+	// repRangeForGoal exactly as it did before this field existed. Read
+	// only by ProgressV2 — v1's Progress must never branch on it, per this
+	// package's standing rule that v1 stays byte-for-byte unchanged.
+	Protocol *ResolvedProtocol
 }
 
 // InSessionSignalCode flags when today's own performance disagrees with the

@@ -14,6 +14,77 @@ export type Sport = 'strength' | 'running' | 'bjj';
 export type Goal = 'general' | 'powerlifting' | 'hypertrophy' | 'endurance';
 export type Visibility = 'private' | 'public';
 
+// N494/#864 (phase 2 of #753): per-workout-item progression protocol. See
+// `docs/decisions/history.md` and `backend/internal/modules/workout/workout.go`'s
+// `ItemProtocol` — this mirrors that type's wire shape field for field.
+// Every field optional: an item with no protocol at all (`undefined`) means
+// nothing configured here, and the progression engine falls back to the
+// workout-wide goal-based range exactly as it always has.
+export type ProgressionStrategy =
+  | 'double_progression'
+  | 'linear'
+  | 'top_set_backoff'
+  | 'difficulty_progression'
+  | 'program_controlled';
+
+export const PROGRESSION_STRATEGIES: { key: ProgressionStrategy; label: string }[] = [
+  { key: 'double_progression', label: 'Double progression' },
+  { key: 'linear', label: 'Linear' },
+  { key: 'top_set_backoff', label: 'Top set + backoff' },
+  { key: 'difficulty_progression', label: 'Difficulty progression' },
+  { key: 'program_controlled', label: 'Program-controlled' },
+];
+
+export type RepCountMode = 'total' | 'per_side';
+
+export type ExerciseProfile =
+  | 'primary_compound'
+  | 'secondary_compound_lunge'
+  | 'isolation_accessory'
+  | 'calf_high_rep_accessory'
+  | 'bodyweight_difficulty_progression'
+  | 'timed_distance';
+
+// Mirrors apps/web/src/lib/api.ts's EXERCISE_PROFILES exactly (key/label
+// pairs) — added to close the mobile-first gap frontend-reviewer found on
+// N494: this and `target_rpe` were configurable on web but had no phone path
+// at all, not even read-only, which is exactly the "reasoning reachable,
+// action not" failure CLAUDE.md's mobile-first rule exists to forbid.
+export const EXERCISE_PROFILES: { key: ExerciseProfile; label: string }[] = [
+  { key: 'primary_compound', label: 'Primary compound' },
+  { key: 'secondary_compound_lunge', label: 'Secondary compound / lunge' },
+  { key: 'isolation_accessory', label: 'Isolation / accessory' },
+  { key: 'calf_high_rep_accessory', label: 'Calf / high-rep accessory' },
+  { key: 'bodyweight_difficulty_progression', label: 'Bodyweight / difficulty progression' },
+  { key: 'timed_distance', label: 'Timed / distance' },
+];
+
+export type SetRole = 'warmup' | 'working' | 'top_set' | 'backoff' | 'amrap';
+
+export type SetPrescription = {
+  role: SetRole;
+  load_kg?: number | null;
+  rep_range_min?: number | null;
+  rep_range_max?: number | null;
+  effort_rir_min?: number | null;
+  effort_rir_max?: number | null;
+  rest_seconds?: number | null;
+  optional?: boolean;
+};
+
+export type ItemProtocol = {
+  progression_strategy?: ProgressionStrategy | null;
+  rep_range_min?: number | null;
+  rep_range_max?: number | null;
+  target_sets?: number | null;
+  target_rir?: number | null;
+  target_rpe?: number | null;
+  rep_count_mode?: RepCountMode | null;
+  equipment_increment?: number | null;
+  exercise_profile?: ExerciseProfile | null;
+  sets?: SetPrescription[];
+};
+
 export type WorkoutItem = {
   exercise_id: string;
   position: number;
@@ -23,7 +94,36 @@ export type WorkoutItem = {
   target_seconds: number | null;
   target_distance_m: number | null;
   notes: string;
+  /**
+   * The item's own progression configuration — see `ItemProtocol` above.
+   * Omitted (rather than `null`) for the common case of nothing configured,
+   * matching the server's own `omitempty`.
+   */
+  protocol?: ItemProtocol | null;
 };
+
+/**
+ * True when a protocol carries at least one real field — used to decide
+ * whether an item's "Protocol" section should show as configured, and
+ * whether it's worth sending `protocol` at all on save (an object with every
+ * field empty means the same thing as no protocol, so there is no reason to
+ * ask the server to store one).
+ */
+export function protocolIsConfigured(p: ItemProtocol | null | undefined): boolean {
+  if (!p) return false;
+  return (
+    p.progression_strategy != null ||
+    p.rep_range_min != null ||
+    p.rep_range_max != null ||
+    p.target_sets != null ||
+    p.target_rir != null ||
+    p.target_rpe != null ||
+    p.rep_count_mode != null ||
+    p.equipment_increment != null ||
+    p.exercise_profile != null ||
+    (p.sets != null && p.sets.length > 0)
+  );
+}
 
 export type Workout = {
   id: string;

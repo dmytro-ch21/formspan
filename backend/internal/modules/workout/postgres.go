@@ -2,6 +2,7 @@ package workout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -162,7 +163,7 @@ func (r *PostgresRepository) attachItems(ctx context.Context, workouts []Workout
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT workout_id, exercise_id, position, target_sets, target_reps,
-		       target_weight_kg, target_seconds, target_distance_m, notes
+		       target_weight_kg, target_seconds, target_distance_m, notes, protocol
 		FROM workout_items
 		WHERE workout_id = ANY($1)
 		ORDER BY workout_id, position`, ids)
@@ -174,13 +175,21 @@ func (r *PostgresRepository) attachItems(ctx context.Context, workouts []Workout
 	byWorkout := make(map[string][]Item, len(ids))
 	for rows.Next() {
 		var (
-			workoutID string
-			it        Item
+			workoutID   string
+			it          Item
+			protocolRaw []byte
 		)
 		if err := rows.Scan(&workoutID, &it.ExerciseID, &it.Position, &it.TargetSets,
 			&it.TargetReps, &it.TargetWeightKg, &it.TargetSeconds,
-			&it.TargetDistanceM, &it.Notes); err != nil {
+			&it.TargetDistanceM, &it.Notes, &protocolRaw); err != nil {
 			return fmt.Errorf("workout: scan item: %w", err)
+		}
+		if len(protocolRaw) > 0 {
+			var p ItemProtocol
+			if err := json.Unmarshal(protocolRaw, &p); err != nil {
+				return fmt.Errorf("workout: decode protocol: %w", err)
+			}
+			it.Protocol = &p
 		}
 		byWorkout[workoutID] = append(byWorkout[workoutID], it)
 	}
@@ -272,19 +281,51 @@ func assertSportsMatch(ctx context.Context, tx pgx.Tx, sport Sport, items []Item
 	return nil
 }
 
+// validateItemProtocols checks every item's Protocol before anything is
+// written — a client-supplied enum or an inverted range lives inside one
+// JSONB column, so nothing short of application code can catch it (see
+// ItemProtocol.Validate's own doc comment). Checked once, up front, so a bad
+// protocol on item 4 of 5 fails before item 1-3 are ever inserted, rather
+// than failing mid-transaction with a Postgres error the caller can't map
+// back to which item was wrong.
+func validateItemProtocols(items []Item) error {
+	for i, it := range items {
+		if err := it.Protocol.Validate(); err != nil {
+			return fmt.Errorf("item %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// marshalProtocol returns nil (a real SQL NULL, not the JSON literal "null")
+// for an item with no configured protocol — the same nullableJSON pattern
+// this codebase already uses (internal/modules/activity/postgres.go,
+// internal/modules/nutrition/postgres.go's Basis column) for an optional
+// JSONB value.
+func marshalProtocol(p *ItemProtocol) ([]byte, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return json.Marshal(p)
+}
+
 func insertItems(ctx context.Context, tx pgx.Tx, workoutID string, items []Item) error {
 	batch := &pgx.Batch{}
 	for i, it := range items {
+		protocolJSON, err := marshalProtocol(it.Protocol)
+		if err != nil {
+			return fmt.Errorf("%w: protocol could not be stored", ErrInvalidInput)
+		}
 		// Position is assigned from the array order rather than trusted from
 		// the client, so a caller can't create gaps, duplicates, or a list
 		// whose stored order differs from the one they sent.
 		batch.Queue(`
 			INSERT INTO workout_items (
 				workout_id, exercise_id, position, target_sets, target_reps,
-				target_weight_kg, target_seconds, target_distance_m, notes
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+				target_weight_kg, target_seconds, target_distance_m, notes, protocol
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 			workoutID, it.ExerciseID, i, it.TargetSets, it.TargetReps,
-			it.TargetWeightKg, it.TargetSeconds, it.TargetDistanceM, it.Notes)
+			it.TargetWeightKg, it.TargetSeconds, it.TargetDistanceM, it.Notes, protocolJSON)
 	}
 	results := tx.SendBatch(ctx, batch)
 	for range items {
@@ -303,6 +344,10 @@ func insertItems(ctx context.Context, tx pgx.Tx, workoutID string, items []Item)
 }
 
 func (r *PostgresRepository) Create(ctx context.Context, in NewWorkout) (*Workout, error) {
+	if err := validateItemProtocols(in.Items); err != nil {
+		return nil, err
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("workout: begin: %w", err)
@@ -433,6 +478,10 @@ func (r *PostgresRepository) Rename(ctx context.Context, userID, workoutID, name
 }
 
 func (r *PostgresRepository) ReplaceItems(ctx context.Context, userID, workoutID string, items []Item) (*Workout, error) {
+	if err := validateItemProtocols(items); err != nil {
+		return nil, err
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("workout: begin: %w", err)
@@ -607,15 +656,81 @@ func (r *PostgresRepository) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO workout_items (
 			workout_id, exercise_id, position, target_sets, target_reps,
-			target_weight_kg, target_seconds, target_distance_m, notes
+			target_weight_kg, target_seconds, target_distance_m, notes, protocol
 		)
 		SELECT $1, exercise_id,
 		       row_number() OVER (ORDER BY position) - 1,
 		       target_sets, target_reps, target_weight_kg, target_seconds,
-		       target_distance_m, notes
+		       target_distance_m, notes, protocol
 		FROM workout_items WHERE workout_id = $2`,
 		newID, resourceID); err != nil {
 		return "", false, fmt.Errorf("workout: copy items: %w", err)
 	}
 	return newID, true, nil
+}
+
+// ItemProtocols answers N494/#864's session-package need to resolve
+// per-item progression configuration, without exposing this module's whole
+// Repository to it — the same narrow-interface pattern
+// session.FlagSource already uses for the feature-flag lookup. Declared as
+// session.WorkoutProtocolSource over there; this satisfies it structurally,
+// the same way this module's own Describe/CopyTo satisfy share.Copier
+// without importing that package.
+//
+// isProgram distinguishes the two upper rungs of #753's priority order in
+// terms this codebase's ownership model already has: a workout NOT owned by
+// userID — an official VOLA template (nil owner) or another athlete's
+// shared/public one — is where a "coach/program prescription" lives today,
+// since there is no separate coach-assignment feature yet. The identical
+// field on a workout userID DOES own is their own explicit configuration.
+// See session.ResolveProtocol for how the two are prioritised.
+//
+// Uses the SAME visibleTo predicate every other read in this file uses:
+// visible-but-not-owned is exactly the "program" case, and a workout not
+// visible at all (deleted, or never existed) reads as an empty result
+// rather than an error — a suggestions request enriching itself with
+// protocol data must not fail outright just because the workout it named
+// has since vanished.
+func (r *PostgresRepository) ItemProtocols(ctx context.Context, userID, workoutID string) (map[string]ItemProtocol, bool, error) {
+	var owner *string
+	err := r.pool.QueryRow(ctx,
+		`SELECT owner_user_id FROM workouts WHERE id = $2 AND `+visibleTo, userID, workoutID).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("workout: item protocols: %w", err)
+	}
+	isProgram := owner == nil || *owner != userID
+
+	rows, err := r.pool.Query(ctx,
+		`SELECT exercise_id, protocol FROM workout_items
+		 WHERE workout_id = $1 AND protocol IS NOT NULL`, workoutID)
+	if err != nil {
+		return nil, false, fmt.Errorf("workout: item protocols: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]ItemProtocol{}
+	for rows.Next() {
+		var (
+			exerciseID string
+			raw        []byte
+		)
+		if err := rows.Scan(&exerciseID, &raw); err != nil {
+			return nil, false, fmt.Errorf("workout: scan protocol: %w", err)
+		}
+		var p ItemProtocol
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, false, fmt.Errorf("workout: decode protocol: %w", err)
+		}
+		// A workout with the same exercise twice is unusual but not
+		// forbidden; last one by scan order wins, same simplification
+		// session.RecentEfforts' own per-exercise map already makes.
+		out[exerciseID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("workout: protocol rows: %w", err)
+	}
+	return out, isProgram, nil
 }

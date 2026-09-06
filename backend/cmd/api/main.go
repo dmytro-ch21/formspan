@@ -292,7 +292,13 @@ func main() {
 	// featureFlagRepo satisfies session.FlagSource structurally (its Enabled
 	// method) — N473/#812's new_recommendation_engine gate. Seeded disabled,
 	// so this is a no-op for every deployment until the flag is flipped.
-	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool), featureFlagRepo)
+	//
+	// workoutRepo satisfies session.WorkoutProtocolSource structurally (its
+	// ItemProtocols method) — N494/#864's per-workout-item prescription
+	// model, phase 2 of #753. Already constructed above for the share
+	// registry; no second repository, same reuse the share registry line's
+	// own comment describes.
+	sessionHandler := session.NewHandler(session.NewPostgresRepository(pool), featureFlagRepo, workoutRepo)
 	planHandler := plan.NewHandler(plan.NewPostgresRepository(pool))
 	themeHandler := theme.NewHandler(theme.NewPostgresRepository(pool))
 

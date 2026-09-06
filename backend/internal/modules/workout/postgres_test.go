@@ -468,6 +468,254 @@ func TestInvalidTarget_IsInvalidInputNotInternal(t *testing.T) {
 	}
 }
 
+// N494/#864: the whole per-workout-item protocol round-trips through
+// Create/Get — every field, not just one, since a partial scan/marshal
+// mismatch would otherwise silently drop whichever field nobody happened to
+// assert on.
+func TestItemProtocol_RoundTripsThroughCreateAndGet(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-protocol-1")
+
+	strategy := StrategyDoubleProgression
+	repMin, repMax := 10, 15
+	sets := 3
+	rir := 1
+	increment := 2.5
+	profile := ProfileIsolationAccessory
+	loadKg := 20.0
+	setRepMin, setRepMax := 8, 12
+	effortMin, effortMax := 1, 3
+	rest := 90
+
+	in := strengthWorkout("wk-protocol-1", "user_a", VisibilityPrivate)
+	in.Items = []Item{
+		{
+			ExerciseID: exBench,
+			Protocol: &ItemProtocol{
+				ProgressionStrategy: &strategy,
+				RepRangeMin:         &repMin,
+				RepRangeMax:         &repMax,
+				TargetSets:          &sets,
+				TargetRIR:           &rir,
+				EquipmentIncrement:  &increment,
+				ExerciseProfile:     &profile,
+				Sets: []SetPrescription{
+					{
+						Role: SetRoleWorking, LoadKg: &loadKg,
+						RepRangeMin: &setRepMin, RepRangeMax: &setRepMax,
+						EffortRIRMin: &effortMin, EffortRIRMax: &effortMax,
+						RestSeconds: &rest, Optional: true,
+					},
+				},
+			},
+		},
+		// A second item with no protocol at all, to confirm the common case
+		// (nil) survives the round trip as nil, not as an empty object.
+		{ExerciseID: exOverhead},
+	}
+
+	wk, err := repo.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(wk.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(wk.Items))
+	}
+
+	got := wk.Items[0].Protocol
+	if got == nil {
+		t.Fatal("protocol did not round-trip: nil")
+	}
+	if got.ProgressionStrategy == nil || *got.ProgressionStrategy != strategy {
+		t.Errorf("progression_strategy: got %+v", got.ProgressionStrategy)
+	}
+	if got.RepRangeMin == nil || *got.RepRangeMin != repMin ||
+		got.RepRangeMax == nil || *got.RepRangeMax != repMax {
+		t.Errorf("rep range: got %v-%v", got.RepRangeMin, got.RepRangeMax)
+	}
+	if got.TargetSets == nil || *got.TargetSets != sets {
+		t.Errorf("target_sets: got %v", got.TargetSets)
+	}
+	if got.TargetRIR == nil || *got.TargetRIR != rir {
+		t.Errorf("target_rir: got %v", got.TargetRIR)
+	}
+	if got.EquipmentIncrement == nil || *got.EquipmentIncrement != increment {
+		t.Errorf("equipment_increment: got %v", got.EquipmentIncrement)
+	}
+	if got.ExerciseProfile == nil || *got.ExerciseProfile != profile {
+		t.Errorf("exercise_profile: got %v", got.ExerciseProfile)
+	}
+	if len(got.Sets) != 1 {
+		t.Fatalf("expected 1 per-set prescription, got %d", len(got.Sets))
+	}
+	sp := got.Sets[0]
+	if sp.Role != SetRoleWorking || sp.LoadKg == nil || *sp.LoadKg != loadKg ||
+		sp.RepRangeMin == nil || *sp.RepRangeMin != setRepMin ||
+		sp.RepRangeMax == nil || *sp.RepRangeMax != setRepMax ||
+		sp.EffortRIRMin == nil || *sp.EffortRIRMin != effortMin ||
+		sp.EffortRIRMax == nil || *sp.EffortRIRMax != effortMax ||
+		sp.RestSeconds == nil || *sp.RestSeconds != rest || !sp.Optional {
+		t.Errorf("set prescription did not round-trip: %+v", sp)
+	}
+
+	if wk.Items[1].Protocol != nil {
+		t.Errorf("item with no configured protocol should round-trip as nil, got %+v", wk.Items[1].Protocol)
+	}
+}
+
+// A protocol also round-trips through ReplaceItems, and CAN be cleared by
+// replacing an item with one carrying no Protocol at all — the same
+// wholesale-replace semantics ReplaceItems already promises for every other
+// field.
+func TestItemProtocol_ReplaceItemsUpdatesAndClears(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-protocol-replace-1")
+
+	repMin, repMax := 10, 20
+	in := strengthWorkout("wk-protocol-replace-1", "user_a", VisibilityPrivate)
+	in.Items = []Item{{ExerciseID: exBench, Protocol: &ItemProtocol{RepRangeMin: &repMin, RepRangeMax: &repMax}}}
+	if _, err := repo.Create(ctx, in); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	updated, err := repo.ReplaceItems(ctx, "user_a", "wk-protocol-replace-1", []Item{
+		{ExerciseID: exBench}, // no protocol this time
+	})
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if updated.Items[0].Protocol != nil {
+		t.Errorf("expected protocol cleared, got %+v", updated.Items[0].Protocol)
+	}
+}
+
+// Every kind of invalid protocol is rejected as ErrInvalidInput before
+// anything is written — not a Postgres error, since none of this shape
+// lives in a column Postgres can check.
+func TestItemProtocol_RejectsInvalidShapes(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+
+	badStrategy := ProgressionStrategy("not_a_real_strategy")
+	lowHigh := 15
+	highLow := 10
+	negativeSets := -1
+
+	cases := []struct {
+		name     string
+		protocol ItemProtocol
+	}{
+		{"unknown strategy", ItemProtocol{ProgressionStrategy: &badStrategy}},
+		{"inverted rep range", ItemProtocol{RepRangeMin: &lowHigh, RepRangeMax: &highLow}},
+		{"negative target_sets", ItemProtocol{TargetSets: &negativeSets}},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := fmt.Sprintf("wk-protocol-invalid-%d", i)
+			cleanupWorkout(t, pool, id)
+			in := strengthWorkout(id, "user_a", VisibilityPrivate)
+			p := tc.protocol
+			in.Items = []Item{{ExerciseID: exBench, Protocol: &p}}
+			if _, err := repo.Create(ctx, in); !errors.Is(err, ErrInvalidInput) {
+				t.Errorf("expected ErrInvalidInput, got %v", err)
+			}
+			// And nothing was written — validated before the transaction
+			// even begins.
+			if _, err := repo.Get(ctx, "user_a", id); !errors.Is(err, ErrNotFound) {
+				t.Errorf("invalid protocol left a row behind: %v", err)
+			}
+		})
+	}
+}
+
+// ItemProtocols is what session.WorkoutProtocolSource calls — the ownership
+// distinction (isProgram) is the load-bearing part: the same field on a
+// workout the caller owns vs. one they don't must resolve to different
+// priority levels, per session.ResolveProtocol's own doc comment.
+func TestItemProtocols_DistinguishesOwnershipForProgramVsAthleteConfig(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-protocol-owned-1")
+	cleanupWorkout(t, pool, "wk-protocol-official-1")
+
+	repMin, repMax := 10, 15
+	owned := strengthWorkout("wk-protocol-owned-1", "user_a", VisibilityPrivate)
+	owned.Items = []Item{{ExerciseID: exBench, Protocol: &ItemProtocol{RepRangeMin: &repMin, RepRangeMax: &repMax}}}
+	if _, err := repo.Create(ctx, owned); err != nil {
+		t.Fatalf("create owned: %v", err)
+	}
+
+	protocols, isProgram, err := repo.ItemProtocols(ctx, "user_a", "wk-protocol-owned-1")
+	if err != nil {
+		t.Fatalf("item protocols (owned): %v", err)
+	}
+	if isProgram {
+		t.Error("a workout the caller owns must not read as a program prescription")
+	}
+	if p, ok := protocols[exBench]; !ok || p.RepRangeMin == nil || *p.RepRangeMin != repMin {
+		t.Errorf("expected the configured protocol back, got %+v (ok=%v)", p, ok)
+	}
+
+	// An official VOLA template (nil owner) — created directly, since
+	// strengthWorkout always assigns an owner and the repository's own
+	// Create requires one.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workouts (id, owner_user_id, name, sport, goal, visibility)
+		VALUES ($1, NULL, 'Official', 'strength', 'general', 'public')`,
+		"wk-protocol-official-1"); err != nil {
+		t.Fatalf("seed official workout: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workout_items (workout_id, exercise_id, position, protocol)
+		VALUES ($1, $2, 0, $3)`,
+		"wk-protocol-official-1", exBench, `{"rep_range_min":10,"rep_range_max":15}`); err != nil {
+		t.Fatalf("seed official item: %v", err)
+	}
+
+	protocols, isProgram, err = repo.ItemProtocols(ctx, "user_a", "wk-protocol-official-1")
+	if err != nil {
+		t.Fatalf("item protocols (official): %v", err)
+	}
+	if !isProgram {
+		t.Error("an official VOLA template must read as a program prescription")
+	}
+	if _, ok := protocols[exBench]; !ok {
+		t.Error("expected the official template's item protocol back")
+	}
+}
+
+// A workout the caller cannot see at all — someone else's private plan, or
+// one that never existed — must not error: it's enrichment for a
+// suggestions request, not the thing being asked for.
+func TestItemProtocols_InvisibleWorkoutIsEmptyNotError(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	cleanupWorkout(t, pool, "wk-protocol-private-1")
+
+	other := strengthWorkout("wk-protocol-private-1", "user_owner", VisibilityPrivate)
+	if _, err := repo.Create(ctx, other); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	protocols, isProgram, err := repo.ItemProtocols(ctx, "user_stranger", "wk-protocol-private-1")
+	if err != nil {
+		t.Fatalf("expected no error for an invisible workout, got %v", err)
+	}
+	if isProgram || protocols != nil {
+		t.Errorf("expected empty result, got protocols=%v isProgram=%v", protocols, isProgram)
+	}
+
+	protocols, isProgram, err = repo.ItemProtocols(ctx, "user_stranger", "wk-protocol-does-not-exist")
+	if err != nil {
+		t.Fatalf("expected no error for a nonexistent workout, got %v", err)
+	}
+	if isProgram || protocols != nil {
+		t.Errorf("expected empty result, got protocols=%v isProgram=%v", protocols, isProgram)
+	}
+}
+
 // The visible list mixes the caller's own workouts with EVERY user's public
 // ones, so it is the one list on the platform whose size is driven by total
 // user count. apihttp.ConditionalGet buffers response bodies to hash them,

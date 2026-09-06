@@ -688,7 +688,7 @@ func (r *PostgresRepository) RecentEffortsV2(
 			  -- above for why that distinction is the whole fix.
 			  AND s.ended_at IS NOT NULL
 		)
-		SELECT ex.id, e.movement_pattern, e.load_type,
+		SELECT ex.id, e.movement_pattern, e.movement_pattern_detail, e.load_type,
 		       r.session_id, r.started_at, r.intent, r.position, r.set_type,
 		       r.reps, r.weight_kg, r.rir, r.rpe, r.assisted_reps
 		FROM unnest($2::text[]) AS ex(id)
@@ -703,16 +703,16 @@ func (r *PostgresRepository) RecentEffortsV2(
 
 	for rows.Next() {
 		var (
-			exerciseID        string
-			pattern, loadType string
-			sessionID         *string
-			startedAt         *time.Time
-			intent            *SessionIntent
-			position          *int
-			setType           *SetType
-			s                 Set
+			exerciseID                string
+			pattern, detail, loadType string
+			sessionID                 *string
+			startedAt                 *time.Time
+			intent                    *SessionIntent
+			position                  *int
+			setType                   *SetType
+			s                         Set
 		)
-		if err := rows.Scan(&exerciseID, &pattern, &loadType,
+		if err := rows.Scan(&exerciseID, &pattern, &detail, &loadType,
 			&sessionID, &startedAt, &intent, &position, &setType,
 			&s.Reps, &s.WeightKg, &s.RIR, &s.RPE, &s.AssistedReps); err != nil {
 			return nil, fmt.Errorf("session: scan recent effort v2: %w", err)
@@ -720,7 +720,11 @@ func (r *PostgresRepository) RecentEffortsV2(
 
 		in := out[exerciseID]
 		in.ExerciseID = exerciseID
-		in.MovementPattern, in.LoadType = pattern, loadType
+		// MovementPatternDetail: N494/#864's own field (see
+		// ProgressionInput's doc comment) — only RecentEffortsV2 populates
+		// it, which is why this SELECT diverges from RecentEfforts' own one
+		// column above and beyond.
+		in.MovementPattern, in.MovementPatternDetail, in.LoadType = pattern, detail, loadType
 		if sessionID == nil {
 			out[exerciseID] = in
 			continue

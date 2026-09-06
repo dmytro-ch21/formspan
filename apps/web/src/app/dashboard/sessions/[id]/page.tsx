@@ -283,6 +283,8 @@ export default function SessionPage({
       controller.signal,
       // N473/#812 item 8 — see fetchSuggestions's own doc comment.
       units,
+      // N494/#864 — see fetchSuggestions's own doc comment.
+      session?.workout_id,
     )
       // Advice, not content: a failed lookup leaves the session usable.
       .then(setSuggestions)

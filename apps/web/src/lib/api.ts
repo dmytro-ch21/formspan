@@ -88,6 +88,100 @@ export type Exercise = {
   media: Media[];
 };
 
+// N494/#864 (phase 2 of #753): per-workout-item progression protocol. See
+// `docs/decisions/history.md` and `backend/internal/modules/workout/workout.go`'s
+// `ItemProtocol` — this mirrors that type's wire shape field for field, and
+// `apps/mobile/lib/workouts.ts` carries the identical mobile-side copy.
+export type ProgressionStrategy =
+  | "double_progression"
+  | "linear"
+  | "top_set_backoff"
+  | "difficulty_progression"
+  | "program_controlled";
+
+export const PROGRESSION_STRATEGIES: { key: ProgressionStrategy; label: string }[] = [
+  { key: "double_progression", label: "Double progression" },
+  { key: "linear", label: "Linear" },
+  { key: "top_set_backoff", label: "Top set + backoff" },
+  { key: "difficulty_progression", label: "Difficulty progression" },
+  { key: "program_controlled", label: "Program-controlled" },
+];
+
+export type RepCountMode = "total" | "per_side";
+
+export type ExerciseProfile =
+  | "primary_compound"
+  | "secondary_compound_lunge"
+  | "isolation_accessory"
+  | "calf_high_rep_accessory"
+  | "bodyweight_difficulty_progression"
+  | "timed_distance";
+
+export const EXERCISE_PROFILES: { key: ExerciseProfile; label: string }[] = [
+  { key: "primary_compound", label: "Primary compound" },
+  { key: "secondary_compound_lunge", label: "Secondary compound / lunge" },
+  { key: "isolation_accessory", label: "Isolation / accessory" },
+  { key: "calf_high_rep_accessory", label: "Calf / high-rep accessory" },
+  { key: "bodyweight_difficulty_progression", label: "Bodyweight / difficulty progression" },
+  { key: "timed_distance", label: "Timed / distance" },
+];
+
+export type SetRole = "warmup" | "working" | "top_set" | "backoff" | "amrap";
+
+export const SET_ROLES: { key: SetRole; label: string }[] = [
+  { key: "warmup", label: "Warm-up" },
+  { key: "working", label: "Working" },
+  { key: "top_set", label: "Top set" },
+  { key: "backoff", label: "Backoff" },
+  { key: "amrap", label: "AMRAP" },
+];
+
+export type SetPrescription = {
+  role: SetRole;
+  load_kg?: number | null;
+  rep_range_min?: number | null;
+  rep_range_max?: number | null;
+  effort_rir_min?: number | null;
+  effort_rir_max?: number | null;
+  rest_seconds?: number | null;
+  optional?: boolean;
+};
+
+export type ItemProtocol = {
+  progression_strategy?: ProgressionStrategy | null;
+  rep_range_min?: number | null;
+  rep_range_max?: number | null;
+  target_sets?: number | null;
+  target_rir?: number | null;
+  target_rpe?: number | null;
+  rep_count_mode?: RepCountMode | null;
+  equipment_increment?: number | null;
+  exercise_profile?: ExerciseProfile | null;
+  sets?: SetPrescription[];
+};
+
+/**
+ * True when a protocol carries at least one real field — mirrors
+ * `apps/mobile/lib/workouts.ts`'s function of the same name exactly, since
+ * both apps use it to decide whether "nothing configured" should be sent as
+ * `undefined` rather than an empty-but-present object.
+ */
+export function protocolIsConfigured(p: ItemProtocol | null | undefined): boolean {
+  if (!p) return false;
+  return (
+    p.progression_strategy != null ||
+    p.rep_range_min != null ||
+    p.rep_range_max != null ||
+    p.target_sets != null ||
+    p.target_rir != null ||
+    p.target_rpe != null ||
+    p.rep_count_mode != null ||
+    p.equipment_increment != null ||
+    p.exercise_profile != null ||
+    (p.sets != null && p.sets.length > 0)
+  );
+}
+
 export type WorkoutItem = {
   exercise_id: string;
   position: number;
@@ -97,6 +191,8 @@ export type WorkoutItem = {
   target_seconds: number | null;
   target_distance_m: number | null;
   notes: string;
+  /** The item's own progression configuration — see `ItemProtocol` above. */
+  protocol?: ItemProtocol | null;
 };
 
 export type Workout = {
@@ -1220,12 +1316,21 @@ export async function fetchSuggestions(
   todaySets?: readonly Pick<LoggedSet, "exercise_id" | "weight_kg" | "completed" | "set_type">[],
   signal?: AbortSignal,
   unitSystem?: UnitSystem | null,
+  /**
+   * N494/#864 (phase 2 of #753) — which workout this is for, so the server
+   * can consult a requested exercise's own configured `protocol` instead of
+   * only the workout-wide goal-based range. Appended last, same reasoning
+   * `unitSystem` above already followed. Omitted entirely reads as "no
+   * per-item configuration to consult" — exactly today's behaviour.
+   */
+  workoutId?: string | null,
 ): Promise<Map<string, Suggestion>> {
   const unique = [...new Set(exerciseIDs)].filter(Boolean);
   if (unique.length === 0) return new Map();
   const q = new URLSearchParams({ exercise_ids: unique.join(",") });
   if (goal) q.set("goal", goal);
   if (unitSystem) q.set("unit_system", unitSystem);
+  if (workoutId) q.set("workout_id", workoutId);
   if (todaySets && todaySets.length > 0) {
     const pairs = todaySets
       .filter(

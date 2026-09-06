@@ -10,18 +10,25 @@ import {
   deleteWorkout,
   fetchSuggestions,
   emptyItem,
+  EXERCISE_PROFILES,
   FIELD_KEY,
   FIELD_LABEL,
   getWorkout,
   listExercises,
   pickImage,
+  PROGRESSION_STRATEGIES,
+  protocolIsConfigured,
   renameWorkout,
   copyWorkout,
   replaceItems,
+  SET_ROLES,
   setsFromWorkout,
   startSession,
   targetFieldsFor,
   type Exercise,
+  type ItemProtocol,
+  type RepCountMode,
+  type SetPrescription,
   type TargetField,
   type Workout,
   type WorkoutItem,
@@ -252,6 +259,8 @@ export default function WorkoutEditorPage({
             undefined,
             // N473/#812 item 8 — see fetchSuggestions's own doc comment.
             units,
+            // N494/#864 — see fetchSuggestions's own doc comment.
+            workout.id,
           ),
         );
       } catch {
@@ -573,10 +582,13 @@ function ItemRow({
   const fields: TargetField[] = exercise
     ? targetFieldsFor(exercise.load_type)
     : [];
+  const [protocolOpen, setProtocolOpen] = useState(false);
+  const configured = protocolIsConfigured(item.protocol);
 
   return (
-    <li
-      // Native HTML5 drag: no dependency, and it's the pointer affordance
+    <li className="rounded-card border border-line bg-surface transition hover:bg-surface-raised">
+      <div
+        // Native HTML5 drag: no dependency, and it's the pointer affordance
       // people expect on desktop. Keyboard users get the arrow buttons —
       // which is why both exist rather than drag alone.
       draggable={editable}
@@ -590,7 +602,7 @@ function ItemRow({
         const from = Number(e.dataTransfer.getData("text/plain"));
         if (Number.isFinite(from)) onDropFrom(from);
       }}
-      className="group flex items-center gap-4 rounded-card border border-line bg-surface px-4 py-3 transition hover:bg-surface-raised"
+      className="group flex items-center gap-4 px-4 py-3"
     >
       <span className="stat w-6 shrink-0 text-center text-lg text-text-dim">
         {index + 1}
@@ -696,33 +708,371 @@ function ItemRow({
       )}
 
       {editable && (
-        // Revealed on hover so the row stays calm at rest, but never hidden
-        // from keyboard users.
-        <div className="flex shrink-0 gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
-          <IconButton
-            label="Move up"
-            onClick={() => onMoveTo(index - 1)}
-            disabled={index === 0}
+        <div className="flex shrink-0 items-center gap-1">
+          {/* N494/#864: not hover-revealed like the icon buttons below — a
+              configured protocol is a fact about the item worth seeing at
+              rest, not a rarely-used action. */}
+          <button
+            type="button"
+            onClick={() => setProtocolOpen((v) => !v)}
+            aria-expanded={protocolOpen}
+            aria-label={`Protocol for ${exercise?.name ?? "exercise"}${configured ? ", configured" : ""}`}
+            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+              configured
+                ? "border-lime bg-lime/10 text-lime"
+                : "border-line text-text-dim hover:border-lime/60 hover:text-lime"
+            }`}
           >
-            ↑
-          </IconButton>
-          <IconButton
-            label="Move down"
-            onClick={() => onMoveTo(index + 1)}
-            disabled={index === total - 1}
-          >
-            ↓
-          </IconButton>
-          <IconButton
-            label={`Remove ${exercise?.name ?? "exercise"}`}
-            onClick={onRemove}
-            danger
-          >
-            ✕
-          </IconButton>
+            Protocol{configured ? " ✓" : ""}
+          </button>
+          {/* Revealed on hover so the row stays calm at rest, but never hidden
+              from keyboard users. */}
+          <div className="flex gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
+            <IconButton
+              label="Move up"
+              onClick={() => onMoveTo(index - 1)}
+              disabled={index === 0}
+            >
+              ↑
+            </IconButton>
+            <IconButton
+              label="Move down"
+              onClick={() => onMoveTo(index + 1)}
+              disabled={index === total - 1}
+            >
+              ↓
+            </IconButton>
+            <IconButton
+              label={`Remove ${exercise?.name ?? "exercise"}`}
+              onClick={onRemove}
+              danger
+            >
+              ✕
+            </IconButton>
+          </div>
         </div>
       )}
+    </div>
+
+      {editable && protocolOpen && (
+        <ProtocolEditor
+          protocol={item.protocol}
+          units={units}
+          exerciseName={exercise?.name}
+          onChange={(next) => onChange({ ...item, protocol: next })}
+        />
+      )}
     </li>
+  );
+}
+
+/**
+ * The richer, web-only authoring surface for a workout item's progression
+ * protocol (N494/#864, phase 2 of #753) — full scalar configuration PLUS
+ * the per-set prescription table (role/load/rep range/effort range/rest/
+ * optionality), which needs the row-based layout only a wide screen has
+ * room for. `apps/mobile`'s equivalent editor covers every scalar field
+ * here but not the per-set table — see CLAUDE.md's mobile-first rule and
+ * that editor's own doc comment for why that split is deliberate rather
+ * than a gap.
+ */
+function ProtocolEditor({
+  protocol,
+  units,
+  exerciseName,
+  onChange,
+}: {
+  protocol: ItemProtocol | null | undefined;
+  units: UnitSystem;
+  exerciseName: string | undefined;
+  onChange: (next: ItemProtocol | undefined) => void;
+}) {
+  const p = protocol ?? {};
+
+  function set(patch: Partial<ItemProtocol>) {
+    const next: ItemProtocol = { ...p, ...patch };
+    onChange(protocolIsConfigured(next) ? next : undefined);
+  }
+
+  function setSet(i: number, patch: Partial<SetPrescription>) {
+    const sets = [...(p.sets ?? [])];
+    sets[i] = { ...sets[i], ...patch };
+    set({ sets });
+  }
+
+  function addSet() {
+    set({ sets: [...(p.sets ?? []), { role: "working" }] });
+  }
+
+  function removeSet(i: number) {
+    const sets = (p.sets ?? []).filter((_, idx) => idx !== i);
+    set({ sets: sets.length > 0 ? sets : undefined });
+  }
+
+  const numberInput = (
+    label: string,
+    value: number | null | undefined,
+    onSet: (n: number | null) => void,
+    step = 1,
+  ) => (
+    <label className="flex flex-col gap-1">
+      <span className="eyebrow text-[0.625rem]">{label}</span>
+      <input
+        type="number"
+        step={step}
+        aria-label={`${label} for ${exerciseName ?? "exercise"}`}
+        value={value == null ? "" : value}
+        onChange={(e) => {
+          const raw = e.target.value;
+          const n = raw === "" ? null : Number(raw);
+          onSet(n === null || !Number.isFinite(n) ? null : n);
+        }}
+        placeholder="—"
+        className="stat w-24 rounded-lg border border-line bg-bg px-2 py-1.5 text-center text-sm outline-none focus:border-lime"
+      />
+    </label>
+  );
+
+  return (
+    <div className="border-t border-line bg-bg/40 px-4 py-4">
+      <p className="mb-3 max-w-2xl text-xs text-text-muted">
+        Overrides the workout&apos;s general rep range for just this exercise —
+        useful for accessory work (an upright row, a calf raise) that
+        shouldn&apos;t follow the same protocol as a primary lift. These are
+        defaults for THIS item; leaving a field blank falls back to the
+        exercise&apos;s profile default, then to the workout&apos;s own goal-based
+        range.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-4">
+        {numberInput("Min reps", p.rep_range_min, (n) => set({ rep_range_min: n }))}
+        {numberInput("Max reps", p.rep_range_max, (n) => set({ rep_range_max: n }))}
+        {numberInput("Target sets", p.target_sets, (n) => set({ target_sets: n }))}
+        {numberInput("Target RIR", p.target_rir, (n) => set({ target_rir: n }))}
+        {numberInput("Target RPE", p.target_rpe, (n) => set({ target_rpe: n }), 0.5)}
+        {numberInput(
+          `Equipment increment (${weightUnit(units)})`,
+          p.equipment_increment == null ? null : toDisplayWeight(p.equipment_increment, units),
+          (n) => set({ equipment_increment: n == null ? null : fromDisplayWeight(n, units) }),
+          0.5,
+        )}
+
+        <label className="flex flex-col gap-1">
+          <span className="eyebrow text-[0.625rem]">Progression strategy</span>
+          <select
+            aria-label="Progression strategy"
+            value={p.progression_strategy ?? ""}
+            onChange={(e) =>
+              set({
+                progression_strategy: e.target.value
+                  ? (e.target.value as ItemProtocol["progression_strategy"])
+                  : null,
+              })
+            }
+            className="stat rounded-lg border border-line bg-bg px-2 py-1.5 text-sm outline-none focus:border-lime"
+          >
+            <option value="">— not set —</option>
+            {PROGRESSION_STRATEGIES.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="eyebrow text-[0.625rem]">Rep counting</span>
+          <select
+            aria-label="Rep counting mode"
+            value={p.rep_count_mode ?? ""}
+            onChange={(e) =>
+              set({ rep_count_mode: (e.target.value || null) as RepCountMode | null })
+            }
+            className="stat rounded-lg border border-line bg-bg px-2 py-1.5 text-sm outline-none focus:border-lime"
+          >
+            <option value="">— not set —</option>
+            <option value="total">Total</option>
+            <option value="per_side">Per side</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="eyebrow text-[0.625rem]">Exercise profile</span>
+          <select
+            aria-label="Exercise profile"
+            value={p.exercise_profile ?? ""}
+            onChange={(e) =>
+              set({
+                exercise_profile: e.target.value
+                  ? (e.target.value as ItemProtocol["exercise_profile"])
+                  : null,
+              })
+            }
+            className="stat rounded-lg border border-line bg-bg px-2 py-1.5 text-sm outline-none focus:border-lime"
+          >
+            <option value="">— not set —</option>
+            {EXERCISE_PROFILES.map((prof) => (
+              <option key={prof.key} value={prof.key}>
+                {prof.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {/* Per-set prescriptions — the one piece of this ticket's scope that
+          genuinely needs a wide table rather than a phone-sized form: a
+          top-set/backoff scheme has no single set of numbers describing
+          both a top set and its backoffs, which is exactly what this table
+          exists to author. */}
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="eyebrow text-[0.625rem]">Per-set prescription</span>
+          <button
+            type="button"
+            onClick={addSet}
+            className="rounded-full border border-line px-2 py-1 text-xs font-semibold text-text-dim hover:border-lime hover:text-lime"
+          >
+            + Add set
+          </button>
+        </div>
+        {(p.sets ?? []).length === 0 ? (
+          <p className="text-xs text-text-muted">No per-set overrides — this item uses one uniform prescription.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-xs">
+              <thead className="text-text-dim">
+                <tr>
+                  <th className="pb-1 pr-2">Role</th>
+                  <th className="pb-1 pr-2">Load ({weightUnit(units)})</th>
+                  <th className="pb-1 pr-2">Reps</th>
+                  <th className="pb-1 pr-2">Effort (RIR)</th>
+                  <th className="pb-1 pr-2">Rest (s)</th>
+                  <th className="pb-1 pr-2">Optional</th>
+                  <th className="pb-1" />
+                </tr>
+              </thead>
+              <tbody>
+                {(p.sets ?? []).map((sp, i) => (
+                  <tr key={i} className="border-t border-line/60">
+                    <td className="py-1.5 pr-2">
+                      <select
+                        aria-label={`Role for set ${i + 1}`}
+                        value={sp.role}
+                        onChange={(e) => setSet(i, { role: e.target.value as SetPrescription["role"] })}
+                        className="rounded border border-line bg-bg px-1 py-1"
+                      >
+                        {SET_ROLES.map((r) => (
+                          <option key={r.key} value={r.key}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        type="number"
+                        step={0.5}
+                        aria-label={`Load for set ${i + 1}`}
+                        value={sp.load_kg == null ? "" : toDisplayWeight(sp.load_kg, units)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const n = raw === "" ? null : Number(raw);
+                          setSet(i, {
+                            load_kg: n === null || !Number.isFinite(n) ? null : fromDisplayWeight(n, units),
+                          });
+                        }}
+                        className="w-16 rounded border border-line bg-bg px-1 py-1"
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          aria-label={`Min reps for set ${i + 1}`}
+                          value={sp.rep_range_min == null ? "" : sp.rep_range_min}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setSet(i, { rep_range_min: raw === "" ? null : Math.round(Number(raw)) });
+                          }}
+                          className="w-12 rounded border border-line bg-bg px-1 py-1"
+                        />
+                        <span>–</span>
+                        <input
+                          type="number"
+                          aria-label={`Max reps for set ${i + 1}`}
+                          value={sp.rep_range_max == null ? "" : sp.rep_range_max}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setSet(i, { rep_range_max: raw === "" ? null : Math.round(Number(raw)) });
+                          }}
+                          className="w-12 rounded border border-line bg-bg px-1 py-1"
+                        />
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          aria-label={`Min effort RIR for set ${i + 1}`}
+                          value={sp.effort_rir_min == null ? "" : sp.effort_rir_min}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setSet(i, { effort_rir_min: raw === "" ? null : Math.round(Number(raw)) });
+                          }}
+                          className="w-12 rounded border border-line bg-bg px-1 py-1"
+                        />
+                        <span>–</span>
+                        <input
+                          type="number"
+                          aria-label={`Max effort RIR for set ${i + 1}`}
+                          value={sp.effort_rir_max == null ? "" : sp.effort_rir_max}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setSet(i, { effort_rir_max: raw === "" ? null : Math.round(Number(raw)) });
+                          }}
+                          className="w-12 rounded border border-line bg-bg px-1 py-1"
+                        />
+                      </div>
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        type="number"
+                        aria-label={`Rest seconds for set ${i + 1}`}
+                        value={sp.rest_seconds == null ? "" : sp.rest_seconds}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setSet(i, { rest_seconds: raw === "" ? null : Math.round(Number(raw)) });
+                        }}
+                        className="w-16 rounded border border-line bg-bg px-1 py-1"
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`Set ${i + 1} is optional`}
+                        checked={!!sp.optional}
+                        onChange={(e) => setSet(i, { optional: e.target.checked })}
+                      />
+                    </td>
+                    <td className="py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => removeSet(i)}
+                        aria-label={`Remove set ${i + 1}`}
+                        className="text-text-dim hover:text-danger"
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -3419,6 +3419,94 @@ components:
         target_seconds: { type: integer, nullable: true }
         target_distance_m: { type: integer, nullable: true }
         notes: { type: string }
+        protocol:
+          $ref: "#/components/schemas/ItemProtocol"
+
+    SetPrescription:
+      type: object
+      description: >
+        One planned set within a per-item protocol (`ItemProtocol.sets`) —
+        finer-grained than the item's own single target_sets/target_reps/
+        target_weight_kg, which can only describe one uniform set. A
+        top-set/backoff scheme has no single set of numbers that describes
+        both.
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [warmup, working, top_set, backoff, amrap]
+        load_kg: { type: number, nullable: true }
+        rep_range_min: { type: integer, nullable: true }
+        rep_range_max: { type: integer, nullable: true }
+        effort_rir_min:
+          type: integer
+          nullable: true
+          description: Reps in reserve this set should finish with at minimum.
+        effort_rir_max: { type: integer, nullable: true }
+        rest_seconds: { type: integer, nullable: true }
+        optional:
+          type: boolean
+          description: >
+            True for a set the athlete may skip without the session reading
+            as incomplete (an "if time allows" backoff, say).
+
+    ItemProtocol:
+      type: object
+      description: >
+        A workout item's own progression configuration (N494/#864, phase 2
+        of #753 — see docs/decisions/history.md). Every field is optional:
+        an absent/null ItemProtocol, or one whose fields are all empty,
+        means "nothing configured here" — the progression engine's
+        priority order (program prescription → athlete's own configuration
+        → exercise-profile default → abstain) then falls through to the
+        next level rather than treating that as an error. A profile default
+        is a DEFAULT, never an authority — any field configured here always
+        wins over one.
+      properties:
+        progression_strategy:
+          type: string
+          nullable: true
+          enum:
+            [double_progression, linear, top_set_backoff,
+             difficulty_progression, program_controlled]
+        rep_range_min: { type: integer, nullable: true }
+        rep_range_max: { type: integer, nullable: true }
+        target_sets: { type: integer, nullable: true }
+        target_rir:
+          type: integer
+          nullable: true
+          description: Mirrors Set.rir's own type — the same unit a logged set records effort in.
+        target_rpe: { type: number, nullable: true }
+        rep_count_mode:
+          type: string
+          nullable: true
+          enum: [total, per_side]
+          description: >
+            Whether reps are counted across the whole set (a barbell squat)
+            or per side (a walking lunge, a single-arm row).
+        equipment_increment:
+          type: number
+          nullable: true
+          description: >
+            In kilograms, matching target_weight_kg elsewhere on this item —
+            clients convert for display. The literal smallest loadable jump
+            this item's own equipment supports, used instead of a
+            movement-pattern guess when present.
+        exercise_profile:
+          type: string
+          nullable: true
+          enum:
+            [primary_compound, secondary_compound_lunge, isolation_accessory,
+             calf_high_rep_accessory, bodyweight_difficulty_progression,
+             timed_distance]
+          description: >
+            Tags which profile this item should inherit DEFAULTS from,
+            without spelling out every field. Any other field also set
+            explicitly on this same object still wins over the tagged
+            profile's own default for that one question.
+        sets:
+          type: array
+          items: { $ref: "#/components/schemas/SetPrescription" }
 
     Workout:
       type: object
@@ -10409,6 +10497,34 @@ paths:
             Deliberately not validated, for the same reason `goal` isn't:
             anything other than exactly `imperial` reads as metric, which is
             this endpoint's behaviour without this parameter at all.
+        - name: workout_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: >
+            N494/#864 (phase 2 of #753) — which workout the caller is
+            asking about, so a requested exercise's own configured
+            `ItemProtocol` (rep range, target sets/effort, progression
+            strategy, equipment increment) can be consulted instead of only
+            the workout-wide, goal-based range. Only consulted behind
+            `new_recommendation_engine`; absent (or naming a workout with
+            no configured protocol for the exercise) falls back to exactly
+            today's goal-based behaviour.
+
+
+            Whether a configured protocol is treated as a coach/program
+            prescription or the athlete's own explicit configuration is
+            decided by ownership of the named workout: one the caller does
+            not own (an official VOLA template, or another athlete's
+            shared one) is the program level; one they own is their own
+            configuration. See the four-level priority order in
+            `ItemProtocol`'s own description.
+
+
+            Not validated as belonging to any of `exercise_ids` — a
+            workout that doesn't contain the requested exercise, or that
+            the caller cannot see, simply contributes no configuration,
+            same as omitting this parameter.
       responses:
         "200":
           description: >
