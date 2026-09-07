@@ -33,16 +33,26 @@ const (
 	// response (docs/architecture/deployment.md). Call that reserve 10,
 	// leaving ~90 usable across every long-lived pool that can exist at once.
 	//
-	// Today exactly one service (`api`) holds a pool against this Postgres —
-	// `worker`/`admin-api` are planned but not deployed
+	// Today exactly one long-running service (`api`) holds a pool against
+	// this Postgres — `worker`/`admin-api` are planned but not deployed
 	// (docs/architecture/deployment.md, "Staging & production" section) — but
 	// a rolling Railway deploy briefly runs the OLD and NEW `api` containers
 	// side by side, and the planned services will add pools of their own.
 	// Budgeting for up to 4 concurrent pool-holding processes (2 overlapping
 	// `api` instances mid-deploy, plus `worker` and `admin-api` once they
 	// exist) against ~90 usable connections gives ~22 each; 20 is a clean
-	// number with a small margin under that. If the real topology ever grows
-	// past 4 concurrent pools, or a confirmed Postgres plan sets
+	// number with a small margin under that.
+	//
+	// Caught in review, worth naming rather than silently accepting: this
+	// budget doesn't count `cmd/seed`, `cmd/exportcontent` or
+	// `cmd/shadowreplay`, which also call NewPool and would also get
+	// MaxConns=20. All three are short-lived, manually-invoked, one-shot
+	// tools rather than long-running services, so the realistic overlap risk
+	// is low — but "low" is not "zero": a manually-run `exportcontent`
+	// against staging that happens to land mid-rolling-deploy is a real,
+	// if unlikely, way to exceed the 4-process assumption above. If the real
+	// topology ever grows past 4 concurrent pool-holders (long-running OR
+	// one-shot, overlapping), or a confirmed Postgres plan sets
 	// max_connections to something else, redo this arithmetic rather than
 	// bumping the number on instinct.
 	maxConns = 20
@@ -119,6 +129,23 @@ const (
 // context for both means the idle pre-fill and the readiness ping are
 // cancelled together, so a dead database can no longer wedge shutdown as
 // well as startup.
+//
+// One accepted side effect of sharing bootCtx, caught in review: on a
+// SUCCESSFUL boot, `defer cancel()` fires the moment Ping returns — almost
+// immediately, not after the full bootstrapPingTimeout — and the minConns
+// idle pre-fill (started concurrently, in the background) is often still in
+// flight at that instant. Cancelling bootCtx aborts whichever of those
+// pre-fill connections hadn't finished dialing yet, so minConns is not
+// always fully warm the moment NewPool returns. This self-heals within
+// healthCheckPeriod (pgxpool's own periodic checkMinConns top-up, which
+// runs on its own context.Background() independent of bootCtx — see
+// pgxpool/pool.go — so it is unaffected by this cancellation), and no error
+// is surfaced either way (NewWithConfig doesn't propagate the pre-fill's
+// own return value). Accepted rather than engineered around: the
+// alternative (delaying cancel until the pre-fill goroutine also finishes)
+// would reintroduce exactly the unbounded-wait risk this function exists to
+// remove, to buy back at most a few idle connections for at most one
+// health-check interval.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {

@@ -61881,14 +61881,33 @@ surfaces `pgxpool.Stat()`'s own counters
 routes are (`verifier.RequireAdmin`) — an operational internal, not
 athlete data, but still not something every authenticated user needs to
 see. Wiring this into a real scraped/alerted metrics backend is N172's job,
-not this one's. Deliberately **not** added to
-`contracts/public.openapi.yaml` — confirmed by grep that no `/v1/admin/*`
-path is documented there at all; the public contract only covers routes
-athletes/clients call, and admin routes have never been part of it.
+not this one's.
+
+**Correction caught in `backend-reviewer` (not by me first)**: an earlier
+version of this entry and of `poolstats.go`'s own doc comment claimed the
+new route was deliberately left out of `contracts/public.openapi.yaml`
+because "no `/v1/admin/*` path is documented there at all." That was
+wrong, and checkably so — the grep behind it searched for the literal
+`/v1/admin`, but the spec's `servers:` entry already carries the `/v1`
+prefix, so every path is written without it. Twenty `/admin/*` paths are
+already documented, `/admin/health` foremost among them: an admin-only,
+`RequireAdmin`-gated, operational (not athlete-data) `GET` endpoint —
+exactly this endpoint's own shape. So the actual convention is the
+opposite of what was first claimed: admin routes ARE part of the public
+contract. Fixed by adding `GET /admin/db-pool-stats` (with a new
+`DBPoolStats` schema) to `contracts/public.openapi.yaml`, mirroring
+`/admin/health`'s structure; `pnpm run lint:openapi` passes. Left as a
+reminder that "I grepped and found nothing" is exactly the kind of
+apparatus-that-cannot-fail this repo's "verify a check can fail" rule
+warns about — the grep found nothing because it was searching for a
+string the file structurally never contains, not because the thing being
+checked was actually absent.
 
 **Docs touched**: `docs/testing/functional-scenarios.md` gets a new N171
 section (a small one — most of this change has no HTTP-observable behavior
 outside the boot-timing change and the one new admin endpoint).
+`contracts/public.openapi.yaml` gets the `GET /admin/db-pool-stats` path
+and `DBPoolStats` schema (see correction above).
 
 **Left open:**
 
