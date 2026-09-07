@@ -161,6 +161,13 @@ change, and a liveness probe sending `If-None-Match` would be answered `304`
 for the life of the deployment while a checker asserting `200` reported an
 outage that wasn't happening.
 
+`/v1/readyz` (N163/#540 — a DB-aware readiness check, distinct from
+`/v1/healthz`'s pure liveness) does the same for a sharper reason: its answer
+can flip between one probe and the next, so a cached response would mean a
+load balancer keeps routing traffic to an instance that has already reported
+itself not ready — the same failure this endpoint exists to catch, moved into
+the caching layer.
+
 Browsers need two CORS headers for any of this: `If-None-Match` in
 `Access-Control-Allow-Headers` (it isn't safelisted, so the preflight rejects
 it otherwise) and `ETag` in `Access-Control-Expose-Headers` (JS cannot read a

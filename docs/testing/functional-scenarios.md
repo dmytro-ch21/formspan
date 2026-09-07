@@ -20312,3 +20312,73 @@ something worth asserting per route in an end-to-end suite.
   incompatibility (two existing tests rely on unrecognised fields — `id`,
   `source`, `actor` — being silently ignored as a security property, not
   rejected). Nothing to test here until that redesign lands.
+
+## N163/#540 — `GET /v1/readyz`, a DB-aware readiness check separate from `GET /v1/healthz` (`backend/cmd/api/readyz.go`)
+
+An operator-facing endpoint, not an athlete-facing one — no UI screen reads
+it — but it is exactly the kind of API surface this doc exists to cover:
+new observable server behavior with a real failure mode to reproduce. Both
+routes are unauthenticated (`security: []`); there is no auth/security
+scenario beyond confirming that.
+
+### Happy path
+
+- `GET /v1/readyz` against a reachable, fully-migrated, non-dirty database
+  → `200`, `{"status":"ok","service":"api"}`, `Cache-Control: no-store`, no
+  `reason` field and no `ETag` (conditional GET does not apply here, same
+  as `/healthz`).
+- `GET /v1/healthz` is unaffected by anything below — still `200`,
+  `{"status":"ok","service":"api"}`, regardless of database state, because
+  it never touches the database at all.
+
+### Edge cases & errors — the scenario `docs/architecture/deployment.md`'s incident describes
+
+- **Database unreachable** (wrong credentials, unreachable host, or the
+  connection refused outright) → `GET /v1/readyz` answers `503` with
+  `{"status":"not_ready","service":"api","reason":"db_unreachable"}` within
+  a few seconds (bounded — it must not hang), while `GET /v1/healthz`
+  **continues to answer `200`** in the same moment. This is the ticket's own
+  "Steps to test" #1, and the pass/fail line that matters: a healthcheck
+  consumer (Railway, or any load balancer) must see a non-2xx from `/readyz`
+  and stop routing traffic, while the process itself is correctly reported
+  alive via `/healthz`.
+- **Database reachable but never migrated, or migrated down to nothing**
+  (`schema_migrations` missing or empty) → `503`,
+  `reason: "schema_not_migrated"`.
+- **Database marked dirty** (a migration failed part-way,
+  `schema_migrations.dirty = true`) → `503`, `reason: "schema_dirty"`.
+- **The failure mode `deployment.md` actually records**: the database is
+  reachable, not dirty, but at an OLDER schema version than the deployed
+  binary expects (a predeploy `migrate up` that failed or never ran) → `503`,
+  `reason: "schema_version_mismatch"`. This is the scenario worth a real
+  regression test if this endpoint or the predeploy chain is ever touched
+  again — see the `TestReadyz_LiveDatabase_ReportsSchemaVersionMismatch`
+  and `TestReadyz_RealUnreachableDatabase_AnswersNotReadyFast` Go tests for
+  the automated version of this and the previous two bullets.
+- **No response body ever contains raw database error text** — a query
+  failure's real error goes to the server log only; the client sees one of
+  the five closed `reason` codes above, never a driver/SQL error string.
+  (Regression-tested: `TestReadyz_SchemaQueryFails_NotReadyAndErrorNotLeaked`
+  asserts the serialized JSON response directly.)
+
+### Confirmed NOT to affect readiness
+
+- **An AI/LLM provider outage (OpenAI/Anthropic — reflection drafting,
+  nutrition estimate, exercise photo identification) does not flip
+  `/readyz` to not-ready.** This is the ticket's "Steps to test" #2. Each of
+  those routes already answers its own `503`/`unavailable` when its provider
+  is down or unconfigured (see those modules' own scenarios); `/readyz`
+  reports `ok` throughout, because a dependency most requests never touch
+  should not eject the whole API from a load balancer's rotation.
+
+### Not covered here, and why
+
+- No scenario for Railway's own deploy-time behavior when it points its
+  healthcheck at a failing `/readyz` (does it actually stop routing traffic,
+  roll back a bad deploy, or only affect restart policy) — that is Railway's
+  platform behavior, not this repo's code, and needs a real staging deploy
+  to observe rather than a unit or functional test. Recorded as an open item
+  in the N163 `docs/decisions/history.md` entry.
+- No scenario for `worker`/`admin-api` readiness — neither binary exists
+  yet (see `docs/architecture/deployment.md`); this ticket's scope is `api`
+  only.

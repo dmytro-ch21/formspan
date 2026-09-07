@@ -35,7 +35,26 @@ startCommand = "/app/bin/api"
 # token is parsed identically under every model, so the fix depends on none
 # of it. The chain lives in /app/bin/predeploy (see backend/Dockerfile).
 preDeployCommand = "/app/bin/predeploy"
-healthcheckPath = "/v1/healthz"
+# N163/#540: was "/v1/healthz". Railway's `[deploy]` block has exactly ONE
+# healthcheckPath — it does not distinguish "is the process alive" from "should
+# this instance receive traffic", the way a Kubernetes-style liveness/readiness
+# pair would. Given that, this single slot should point at the STRICTER check:
+# a live-but-not-ready instance must not receive traffic either, so pointing
+# the one slot at readiness is strictly safer than pointing it at liveness —
+# the reverse (readiness-but-not-live can't happen; dead means dead either way).
+#
+# /v1/healthz stays a pure liveness check with no DB dependency (see
+# handleHealthz in backend/cmd/api/main.go) for anything that wants to probe
+# "is the process scheduling at all" separately — nothing in this repo does
+# yet, but the endpoint costs nothing to keep.
+#
+# /v1/readyz (backend/cmd/api/readyz.go) additionally verifies the database is
+# reachable within a bounded deadline and at the expected migrated schema
+# version. This is the check that would have caught the incident
+# docs/architecture/deployment.md records: a failed/never-run predeploy
+# `migrate up` left a stale, unmigrated environment serving behind
+# `/v1/healthz` staying green the entire time.
+healthcheckPath = "/v1/readyz"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
