@@ -3,7 +3,6 @@ package curriculum
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -411,12 +410,15 @@ func (h *Handler) UnmarkItemRead(w http.ResponseWriter, r *http.Request) {
 // Bounded because nothing else bounds it: a curriculum carries an item array,
 // and an unbounded decode of an array is a memory exhaustion the auth check
 // does not protect against — an authenticated user is still a stranger.
+//
+// N164/#541: this used to wrap r.Body in io.LimitReader(r.Body, MaxBody)
+// rather than http.MaxBytesReader. LimitReader silently truncates at MaxBody
+// — the decoder just sees the stream end early, so a body over the limit
+// surfaced as a plain "invalid JSON body" with no way for a caller to tell a
+// truncated-but-otherwise-fine request apart from a genuinely malformed one.
+// apihttp.DecodeJSON gives the oversized case its own 413.
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(io.LimitReader(r.Body, MaxBody)).Decode(v); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
-		return false
-	}
-	return true
+	return apihttp.DecodeJSON(w, r, MaxBody, v) == nil
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

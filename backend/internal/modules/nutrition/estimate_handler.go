@@ -2,7 +2,6 @@ package nutrition
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -519,7 +518,7 @@ type estimateBody struct {
 
 func parseJSONEstimate(r *http.Request) (EstimateInput, error) {
 	var body estimateBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := apihttp.DecodeJSONBody(r.Body, &body); err != nil {
 		return EstimateInput{}, errors.New("invalid JSON body")
 	}
 	return EstimateInput{

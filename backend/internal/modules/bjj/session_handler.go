@@ -1,7 +1,6 @@
 package bjj
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -100,8 +99,7 @@ func (h *SessionHandler) PutDetail(w http.ResponseWriter, r *http.Request) {
 	// array in memory — which is the wrong order for a limit whose job is to
 	// stop a caller from making the server allocate. 256 KiB is far past a
 	// full MaxTags reflection with long notes.
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, 256<<10, &req); err != nil {
 		return
 	}
 
@@ -264,8 +262,7 @@ func (h *FocusHandler) Set(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var body focusRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFocusBody)).Decode(&body); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
+	if err := apihttp.DecodeJSON(w, r, maxFocusBody, &body); err != nil {
 		return
 	}
 	// Absent or null, as opposed to an empty array. `{}` and

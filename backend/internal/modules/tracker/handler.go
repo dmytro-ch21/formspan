@@ -1,7 +1,6 @@
 package tracker
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -37,11 +36,7 @@ func userIDFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, into any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(into); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
-		return false
-	}
-	return true
+	return apihttp.DecodeJSON(w, r, maxBody, into) == nil
 }
 
 // The exact query values that switch a request onto its non-default behaviour.

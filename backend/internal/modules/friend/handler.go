@@ -1,7 +1,6 @@
 package friend
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -67,11 +66,10 @@ func (h *Handler) present(r *http.Request, cards []Card) {
 func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	// One short handle; a cap costs nothing and bounds the allocation.
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
 	var req struct {
 		Username string `json:"username"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" {
+	if err := apihttp.DecodeJSONError(w, r, 1<<10, &req); err != nil || req.Username == "" {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			"send the username to add, e.g. {\"username\": \"dmytro_bjj\"}")
 		return

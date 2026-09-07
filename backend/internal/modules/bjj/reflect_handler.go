@@ -2,7 +2,6 @@ package bjj
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -290,7 +289,7 @@ func parseDraftRequest(w http.ResponseWriter, r *http.Request) (DictationInput, 
 	r.Body = http.MaxBytesReader(w, r.Body, maxDictationBody)
 
 	var body draftRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := apihttp.DecodeJSONBody(r.Body, &body); err != nil {
 		// The decoder's own text can name a byte offset in the athlete's speech,
 		// so it is not forwarded.
 		return DictationInput{}, errors.New("invalid JSON body")

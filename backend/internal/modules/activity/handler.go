@@ -27,14 +27,22 @@ type createRequest struct {
 	Details    json.RawMessage `json:"details"`
 }
 
+// maxCreateBody bounds the request before it is buffered. `Details` is a
+// free-form envelope around whatever module-specific payload rides alongside
+// an activity (N164/#541) — there is no per-field cap to lean on the way a
+// bounded array elsewhere has one, so this picks a flat ceiling generous
+// enough for a substantial nested JSON blob (comparable to a workout
+// summary) while still refusing an unbounded "make the server allocate
+// forever" body.
+const maxCreateBody = 64 << 10
+
 // Create is self-scoped (RequireAuth): the caller creates their own
 // activity. Idempotent on the client-supplied id — see Repository.Create.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxCreateBody, &req); err != nil {
 		return
 	}
 	if req.ID == "" || req.Kind == "" || req.OccurredAt.IsZero() {

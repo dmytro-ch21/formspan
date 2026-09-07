@@ -2,7 +2,6 @@ package bjj
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -139,6 +138,11 @@ type promotionRequest struct {
 	Note       string  `json:"note"`
 }
 
+// maxPromotionBody bounds a promotion request before it is buffered. A
+// handful of short fields (N164/#541) — the same 8 KiB `plan`/`session`/
+// `theme` already use for a comparably-shaped body.
+const maxPromotionBody = 8 << 10
+
 func (req promotionRequest) toPromotion(userID, id string) (Promotion, error) {
 	rank := Rank{Belt: Belt(req.Belt), Stripes: req.Stripes, Degree: req.Degree}
 	if err := rank.Validate(); err != nil {
@@ -159,8 +163,7 @@ func (h *Handler) CreatePromotion(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req promotionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxPromotionBody, &req); err != nil {
 		return
 	}
 
@@ -185,8 +188,7 @@ func (h *Handler) UpdatePromotion(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("promotionID")
 
 	var req promotionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxPromotionBody, &req); err != nil {
 		return
 	}
 

@@ -2,7 +2,6 @@ package exercise
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -396,8 +395,7 @@ func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request,
 
 func decodeExercise(w http.ResponseWriter, r *http.Request) (exerciseRequest, bool) {
 	var body exerciseRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentBody)).Decode(&body); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
+	if err := apihttp.DecodeJSON(w, r, maxContentBody, &body); err != nil {
 		return exerciseRequest{}, false
 	}
 	// Judged on what the CLIENT sent, before any merge — which is the whole

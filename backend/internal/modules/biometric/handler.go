@@ -215,8 +215,7 @@ func (h *Handler) ComputeMetrics(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req computeMetricsRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, 1<<10, &req); err != nil {
 		return
 	}
 	if req.HRMaxBPM < minHRMaxBPM || req.HRMaxBPM > maxHRMaxBPM {
