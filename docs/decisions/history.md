@@ -60995,6 +60995,36 @@ and `build:admin`, which `verify` deliberately excludes as slow, were run
 manually (see above) specifically because this ticket's own acceptance
 criteria are a build-time behavior that only a real build can demonstrate.
 
+### CI fold-in (coordinating session): the CI build jobs needed the var too
+
+Pushing this branch's PR broke `Web (Next.js)` and `Admin (Next.js)` CI —
+both failed at "Collecting page data" with exactly the new, correct error
+(`NEXT_PUBLIC_API_URL is not set, and NODE_ENV is "production"...`). This
+is not a bug in the guard; it's that `.github/workflows/ci.yml`'s `web`/
+`admin` jobs' `Build` steps (`pnpm run build:web`/`build:admin`) never
+needed this variable before — the OLD code silently fell back to
+`localhost` and the build succeeded regardless. `next build` always runs
+with `NODE_ENV=production`, so a CI job doing a build-correctness check
+(never a real deploy) now needs the same variable a real Railway deploy
+would provide, even though CI makes no real network call.
+
+**Why this branch's own "verified live" claim above didn't catch it**:
+the manual `pnpm run build:web`/`build:admin` runs described above DID
+correctly reproduce both the unset-fails and set-succeeds cases — that
+testing was accurate. What was missing is the connection to CI's own
+workflow file specifically needing the same env var CI had simply never
+required before. Confirmed by reproducing the exact CI failure locally
+(`pnpm run build:web` with a genuinely clean environment — no ambient
+`NEXT_PUBLIC_API_URL`, no `.env.local`) and getting the identical error,
+then fixing it: added `env: NEXT_PUBLIC_API_URL:
+https://ci-placeholder.invalid` to both jobs' `Build` steps in
+`.github/workflows/ci.yml` — a placeholder is correct here since nothing
+in a build-correctness check makes a real network call to it. Reproduced
+both directions again after the fix: with the placeholder set, both
+builds succeed; with it removed, both still fail exactly as designed
+(confirming the fold-in doesn't accidentally defeat the guard it exists to
+prove).
+
 ### Left open / follow-up
 
 - No real device or EAS build ran for mobile (see above) — the acceptance
