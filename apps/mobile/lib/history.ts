@@ -1,5 +1,6 @@
 import { newTraceId, traceparent } from './trace';
 import { netFetch } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -15,9 +16,6 @@ import type { TokenGetter } from './useAuthToken';
  * the working-set rule lives in exactly one place; this file buckets what it
  * already summed and works out a streak from the dates.
  */
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 export type HistoryTotals = {
   sessions: number;

@@ -1,5 +1,6 @@
 import { newTraceId, traceparent } from './trace';
 import { netFetch, type NetFetchOptions } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import type { TokenGetter } from './useAuthToken';
 import type { TechniqueSummary } from './techniques';
 
@@ -12,9 +13,6 @@ import type { TechniqueSummary } from './techniques';
  * merged list.
  */
 const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 /**
  * The BJJ position glossary — what the library's techniques happen *inside* of.

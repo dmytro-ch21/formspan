@@ -1,10 +1,8 @@
 import { newTraceId, traceparent } from './trace';
 import { netFetch } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import { formatDistance, formatEstimate, formatWeight, type UnitSystem } from './units';
 import type { TokenGetter } from './useAuthToken';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 export type RecordKind =
   | 'heaviest_weight'

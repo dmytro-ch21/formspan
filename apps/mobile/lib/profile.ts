@@ -1,12 +1,10 @@
 import { ApiError, isNotFound, parseRetryAfterMs } from './apiError';
 import { apiRequest } from './apiRequest';
 import { netFetch, SLOW_REQUEST_TIMEOUT_MS } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import type { TokenGetter } from './useAuthToken';
 import { newTraceId, traceparent } from './trace';
 import type { FoodUnit, UnitSystem } from './units';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 /**
  * Module toggles are NOT here any more. They moved to `lib/modules.ts` and

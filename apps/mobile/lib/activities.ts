@@ -21,14 +21,12 @@
  */
 import { randomUUID } from 'expo-crypto';
 import { netFetch } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import type { TokenGetter } from './useAuthToken';
 
 import { isPermanentStatus } from './apiError';
 import { getDb } from './db';
 import { newTraceId, traceparent } from './trace';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 export type LocalActivity = {
   id: string;

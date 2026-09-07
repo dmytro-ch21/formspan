@@ -8,9 +8,7 @@ import { newTraceId, traceparent } from "@/lib/trace";
 import { inPositionFamily } from "@/lib/libraryTiles";
 import { localZone } from "@/lib/history";
 import { formatDistance, formatWeight, type UnitSystem } from "@/lib/units";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const API_BASE = `${API_URL}/v1`;
+import { API_BASE } from "@/lib/apiConfig";
 
 /**
  * A discipline key. Deliberately NOT a hand-written union any more: the list

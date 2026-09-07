@@ -1,9 +1,7 @@
 import { newTraceId, traceparent } from './trace';
 import { netFetch, type NetFetchOptions } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import type { TokenGetter } from './useAuthToken';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 /**
  * The BJJ technique library on the phone.

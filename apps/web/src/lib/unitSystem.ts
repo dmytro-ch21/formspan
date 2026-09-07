@@ -1,5 +1,6 @@
 import { newTraceId, traceparent } from "@/lib/trace";
 import { defaultFoodUnit, type FoodUnit, type UnitSystem } from "@/lib/units";
+import { API_BASE } from "@/lib/apiConfig";
 
 /**
  * The athlete's unit preference, server half — deliberately WITHOUT "use client".
@@ -20,9 +21,6 @@ import { defaultFoodUnit, type FoodUnit, type UnitSystem } from "@/lib/units";
  * narrower endpoint, and inventing a `unit_system`-only response would be a
  * contract change to save a few hundred bytes on one request per page load.
  */
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const API_BASE = `${API_URL}/v1`;
 
 type Token = (opts?: { template?: string }) => Promise<string | null>;
 

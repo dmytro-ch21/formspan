@@ -2,9 +2,7 @@ import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { newTraceId, traceparent } from "./trace";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const API_BASE = `${API_URL}/v1`;
+import { API_BASE } from "./apiConfig";
 
 export type AdminUserSummary = {
   user_id: string;

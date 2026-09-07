@@ -1,14 +1,12 @@
 import { randomUUID } from 'expo-crypto';
 import { ApiError, parseRetryAfterMs } from './apiError';
 import { netFetch } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import type { TokenGetter } from './useAuthToken';
 
 import type { Exercise } from './exercises';
 import { formatDistance, formatWeight, type UnitSystem } from './units';
 import { newTraceId, traceparent } from './trace';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 export type Sport = 'strength' | 'running' | 'bjj';
 export type Goal = 'general' | 'powerlifting' | 'hypertrophy' | 'endurance';

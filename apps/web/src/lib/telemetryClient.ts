@@ -2,9 +2,7 @@
 
 import { DEFAULTS, TelemetryBuffer, type BufferedEvent, type Level, type ReportKind } from "@/lib/telemetry";
 import { newTraceId, traceparent } from "@/lib/trace";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const API_BASE = `${API_URL}/v1`;
+import { API_BASE } from "@/lib/apiConfig";
 
 /**
  * The transport half for web.
