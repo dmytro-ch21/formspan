@@ -60373,6 +60373,212 @@ inconsistency (deliberate, already documented above — left as-is) and
 acceptance criteria MET with 0 NOT MET / 0 NEEDS HUMAN EVIDENCE.
 
 
+## 2026-09-06 — N162: graceful shutdown and explicit server timeouts, without touching the AI request budget (#539)
+
+`backend/cmd/api/main.go` ran bare `http.ListenAndServe` — no `*http.Server`
+lifecycle, no SIGTERM/SIGINT handling, no header/idle timeouts. A Railway
+deploy sent SIGTERM and the process died with whatever request happened to be
+in flight, and a client that opened a connection and trickled bytes in one at
+a time held a goroutine (and a listener slot) for as long as it liked.
+
+### What changed
+
+`cmd/api/server.go` (new) builds an explicit `*http.Server` and a small
+shutdown orchestrator:
+
+- **`ReadHeaderTimeout: 10s`** — bounds only the time to read a request's
+  headers, the classic slow-loris defense. Never touches the body or the
+  handler, so it has zero interaction with any request's processing time.
+- **`IdleTimeout: 120s`** — bounds how long a keep-alive connection may sit
+  idle *between* requests. A connection only goes idle once its response has
+  already been fully written, so this is also independent of any single
+  request's duration.
+- **Deliberately no `ReadTimeout`/`WriteTimeout`** — see "The central
+  judgment call" below.
+- **`shutdownTimeout: 60s`** — how long a SIGTERM/SIGINT drain waits for
+  in-flight requests before forcing the rest closed. See "Why 60s" below.
+
+`main.go` now: builds the server, opens its own `net.Listen` (so a listen
+failure is caught before anything else changes), derives a
+`context.Context` from `signal.NotifyContext(ctx, os.Interrupt,
+syscall.SIGTERM)` (the idiomatic Go 1.16+ form; this module is on Go 1.26 —
+`go.mod`), and calls `runUntilShutdown(ctx, srv, ln, shutdownTimeout,
+logger)`. That function serves on `ln` until either `Serve` exits on its own
+(a listener problem) or `ctx` is cancelled, at which point it calls
+`srv.Shutdown` bounded by a `shutdownTimeout` context and falls back to
+`srv.Close()` (force-closing whatever is left) if that deadline is reached
+— the standard idiomatic pairing, so a hung request can never hang the
+process indefinitely.
+
+**The DB pool now closes explicitly, once, after `runUntilShutdown`
+returns** — not via the `defer pool.Close()` that sat right after
+`database.NewPool` before this. That `defer` was not wrong for the
+happy path (it would in fact have fired after the old blocking
+`ListenAndServe` call returned too), but it read as "the pool is safe
+because it's deferred," which stops being true the moment shutdown logic
+gets any more structure than "block until the process dies" — and gives a
+future edit nothing to trip over if someone moves cleanup into a spot that
+runs *before* the drain completes. Making the ordering explicit removes the
+ambiguity rather than relying on the reader to trace defer-execution order
+through a function that now also branches on shutdown. (The handful of
+`os.Exit(1)` config/boot checks between pool creation and here — a bad
+estimator or identifier provider, a round map load failure — still leak the
+pool exactly as before, since `os.Exit` never runs deferred calls either
+way; this change doesn't add that gap, it just stops the defer from
+implying it covered a path it never actually guaranteed the *ordering*
+for.)
+
+### The central judgment call: no global WriteTimeout/ReadTimeout
+
+This repo already has three AI-backed routes with wildly different duration
+profiles, discovered by reading the actual code rather than trusting the
+ticket's own citations:
+
+- **`POST /v1/nutrition/estimate`** (`internal/modules/nutrition/estimate_handler.go`)
+  carries an explicit **35s** `context.WithTimeout(r.Context(), estimateTimeout)`
+  around its model call — chosen, per that file's own extensive comment, to be
+  **10s under** the mobile client's own **45s** deadline
+  (`apps/mobile/lib/authedFetch.ts`'s `SLOW_REQUEST_TIMEOUT_MS`), so the
+  server always answers before the phone gives up (N92/#433). This ordering
+  is enforced by `scripts/check-timeout-parity.py` in `verify` and CI —
+  confirmed still present and still wired in before touching anything.
+- **`POST /v1/bjj/reflect/draft`** and **`POST /v1/exercises/identify`** carry
+  **no explicit per-request deadline at all** — they run only as long as
+  `r.Context()` stays alive, i.e. until the client disconnects or the
+  response is written.
+- `internal/platform/apihttp/drain.go` (pre-existing) already documents, as a
+  load-bearing fact rather than an oversight: *"There is no `ReadTimeout` on
+  this server"* — its own `drainDeadline` (`SetReadDeadline` via
+  `http.NewResponseController`) exists specifically because nothing else
+  bounds a body read.
+
+A global `WriteTimeout`/`ReadTimeout` on the new `*http.Server` is a
+single process-wide number applied to *every* route regardless of which of
+the three profiles above it has. Set it anywhere at or below 45s and the
+estimate route's carefully-tuned 35s margin becomes moot and the
+unbounded reflect/identify routes get cut off mid-response on a slow
+provider day; set it high enough to never bite those and it stops being a
+meaningful defense against anything. This is exactly the "silently cut off
+a long-running draft" hazard the ticket's acceptance criteria call out by
+name, and exactly why the ticket's own guidance ranks "no global timeout,
+route-scoped deadlines instead" above "a global one set with margin."
+
+**Decision: no global `WriteTimeout`/`ReadTimeout` on this server.**
+Slow-loris on the request side is covered by `ReadHeaderTimeout` (headers)
+and `apihttp.DrainRequestBody`'s existing per-request `drainDeadline` (body,
+once a handler has run). Slow-loris on the *response* side — a client that
+opens a connection and reads the response back one byte a minute — is a
+real gap this leaves open, but it is the identical gap that already existed
+under bare `http.ListenAndServe` (also carrying no `WriteTimeout`), so this
+change is not a regression on that axis. Closing it needs a route-scoped
+mechanism (`http.TimeoutHandler`, or a context deadline chosen per route)
+applied only to routes that don't already carry their own budget — out of
+this ticket's scope, which is shutdown lifecycle plus the two timeouts that
+provably cannot interact with request duration. `cmd/api/server.go` carries
+this reasoning in full next to the code, and
+`TestNewServerHasNoGlobalRequestDeadlines` (`cmd/api/server_test.go`) pins
+`ReadTimeout`/`WriteTimeout` at the Go zero value (net/http's own documented
+meaning of "no timeout") so a future edit that adds either turns this test
+red immediately — mutation-verified: setting `WriteTimeout: 30 * time.Second`
+in `newServer` and rerunning the suite fails that exact test with the
+expected message, then the file was restored and the suite re-run green
+again.
+
+### Why 60s for the shutdown drain
+
+Chosen against the *longest client-enforced* deadline in the system, not the
+server's own: nutrition's 35s figure already self-terminates well inside any
+reasonable window. The number that matters is the mobile app's 45s
+(`SLOW_REQUEST_TIMEOUT_MS`), because an in-flight `bjj/reflect` or
+`exercise/identify` call from a phone — which the server does not itself
+bound — can legitimately still be running at that mark. 60s gives that
+~15s of margin, the same kind of margin `check-timeout-parity.py`'s 10s
+enforces between the AI routes' own client/server pair, widened slightly
+because this number sits downstream of *both* known deadlines (35s and 45s)
+rather than one. A web-originated call carries no client-side abort at all
+today (`apps/web/src/lib/api.ts`'s `request` helper takes an optional
+`AbortSignal` a caller may never pass) — such a call is not bounded by this
+reasoning and would be force-closed at the 60s mark during a deploy, which
+is the acceptance criteria's explicitly allowed "cleanly cut off" outcome,
+not a silent drop, and strictly better than the previous behavior of the
+whole process dying under it instantly regardless of duration.
+
+### The integration test ("Steps to test" #1, acceptance criterion 4)
+
+`cmd/api/server_test.go` adds three tests, all against a **real**
+`*http.Server` on a real `net.Listener` (ephemeral port), not a unit test of
+`Shutdown` in isolation:
+
+- `TestRunUntilShutdownDrainsAnInFlightRequestBeforeReturning` — starts
+  `runUntilShutdown` in its own goroutine, fires a real HTTP request at a
+  handler that sleeps 300ms, waits for the handler to actually be running,
+  then cancels the context exactly the way `signal.NotifyContext` would on a
+  real SIGTERM. Asserts: the client received its 200 response body intact,
+  `runUntilShutdown` did not return before the handler's sleep elapsed (the
+  load-bearing assertion — proves a *real* drain, not an instant cutoff),
+  and a fresh connection attempt fails once it has returned (the server is
+  genuinely stopped, not merely "shutting down"). Passes under `-race`.
+  **Mutation-verified**: temporarily replacing `srv.Shutdown` with an
+  immediate `srv.Close()` turned this red with a genuine test failure (`Get
+  ...: EOF` — the client's connection was torn out from under it, not a
+  compile error), confirming the apparatus can fail; restored and re-run
+  green (byte-diffed against the pre-mutation file, not just eyeballed).
+- `TestRunUntilShutdownForcesCloseAfterDrainDeadlineExpires` — the opposite
+  edge: a handler that sleeps 2s against a 200ms drain deadline. Asserts
+  `runUntilShutdown` returns no earlier than the 200ms deadline (the
+  ticket's "process exits before the drain window" failure mode) and no
+  later than the full 2s handler sleep (the deadline must actually force a
+  close, not hang).
+- `TestNewServerHasNoGlobalRequestDeadlines` — see above.
+
+All three ran green under `go test ./cmd/api/... -race -count=1`.
+
+### "Steps to test" #2 — reasoned structurally, not run end-to-end
+
+Honestly: **not** a live 35–45s AI call through the real provider. That
+would need a real Anthropic/OpenAI key and would make the suite slow for a
+single data point. Instead this relies on two things together: (1)
+`TestNewServerHasNoGlobalRequestDeadlines` proves, as a fact about the
+constructed `*http.Server` rather than an observation about one run, that
+`ReadTimeout`/`WriteTimeout` are the Go zero value — which `net/http`'s own
+documentation defines as "no timeout" — so there is structurally nothing at
+the HTTP-server level that could cut off a long-running response, regardless
+of how long it runs; and (2) `scripts/check-timeout-parity.py` (pre-existing,
+unaffected by this change, reconfirmed present and passing) independently
+guards the one *route-level* deadline that does exist (nutrition's 35s)
+against ever meeting or exceeding the client's 45s. Between the two, no
+component this ticket touches or introduces has a deadline that could
+regress an AI request — the previous behavior on that axis (bare
+`http.ListenAndServe`, also with no `WriteTimeout`) is unchanged. The full
+existing backend suite (39 packages, including `nutrition`, `bjj` and
+`exercise`) was also run against a real Postgres with `-race` and passed
+with the expected single intentional skip (`TestLiveComplete`), confirming
+nothing about this change broke any of those modules' own tests.
+
+### Verification
+
+`go build ./...`, `go vet ./...`, `gofmt -l .` all clean. Full suite —
+`go test ./... -p 1 -race` against a dedicated scratch database
+(`vola_test_n162`, migrated to `000095` and dropped afterward, per the
+worktree-isolation convention) — 39 packages, 0 failures, exactly the one
+expected skip. `pnpm run verify` green.
+
+### Left open / follow-up
+
+- Response-side slow-loris (a client reading the response back one byte at
+  a time) is not newly closed by this change, and was not closed before it
+  either — see "The central judgment call" above. A route-scoped fix
+  (`http.TimeoutHandler` or a per-route context deadline on routes that
+  don't already carry one) is future work, not regressed by this ticket.
+- The 60s shutdown-drain figure is derived from the mobile client's known
+  45s budget, not from Railway's actual SIGTERM→SIGKILL grace period, which
+  this repo's docs don't currently record and which was not independently
+  measured against the real Railway deploy for this PR — if Railway's own
+  grace window is ever found to be shorter than 60s, this number needs
+  revisiting against that constraint too, not just against the client
+  timeouts it was chosen from.
+
+
 ## Open items / known gaps as of this entry
 
 
