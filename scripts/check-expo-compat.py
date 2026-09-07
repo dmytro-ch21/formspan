@@ -57,16 +57,34 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MOBILE = ROOT / "apps" / "mobile"
 
+# This is the one network call in `verify`/CI (resolving Expo's hosted
+# compatibility matrix — see the module docstring). A refused connection
+# fails in under a second, but a hung DNS lookup or TLS handshake has no
+# other backstop locally (CI's job-level timeout is the only one there) —
+# bound it so `verify` can't block indefinitely on a stalled network call.
+NETWORK_TIMEOUT_SECONDS = 60
+
 
 def main() -> int:
     if not (MOBILE / "package.json").is_file():
         print(f"check-expo-compat: {MOBILE} has no package.json — nothing to check", file=sys.stderr)
         return 1
 
-    result = subprocess.run(
-        ["pnpm", "exec", "expo", "install", "--check"],
-        cwd=MOBILE,
-    )
+    try:
+        result = subprocess.run(
+            ["pnpm", "exec", "expo", "install", "--check"],
+            cwd=MOBILE,
+            timeout=NETWORK_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"\ncheck-expo-compat: `expo install --check` did not finish within "
+            f"{NETWORK_TIMEOUT_SECONDS}s — likely a stalled network call to "
+            "Expo's compatibility matrix, not a real dependency drift. Retry, "
+            "or check connectivity.",
+            file=sys.stderr,
+        )
+        return 1
     if result.returncode != 0:
         print(
             "\ncheck-expo-compat: apps/mobile has an expo-*/react-native "

@@ -129,20 +129,42 @@ def _build_scratch_project(scratch: Path, *, app_config_override: Path | None = 
                 break
 
 
+# No network (`--no-install` skips CocoaPods/Gradle dependency resolution)
+# and no native toolchain — this is pure JS config-plugin/mod evaluation, so
+# it's normally fast. The bound is a backstop against an unexpected hang
+# (a plugin blocking on stdin, say), not an expectation that this is slow.
+PREBUILD_TIMEOUT_SECONDS = 120
+
+
 def _run_prebuild(scratch: Path) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["LANG"] = "en_US.UTF-8"
     env["LC_ALL"] = "en_US.UTF-8"
-    return subprocess.run(
-        [
-            "pnpm", "exec", "expo", "prebuild", str(scratch),
-            "--no-install", "--platform", "all",
-        ],
-        cwd=MOBILE,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        return subprocess.run(
+            [
+                "pnpm", "exec", "expo", "prebuild", str(scratch),
+                "--no-install", "--platform", "all",
+            ],
+            cwd=MOBILE,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=PREBUILD_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # Synthesize a failed CompletedProcess so every call site's existing
+        # returncode/stdout/stderr handling works unchanged.
+        return subprocess.CompletedProcess(
+            args=exc.cmd,
+            returncode=1,
+            stdout=(exc.stdout or b"").decode() if isinstance(exc.stdout, bytes) else (exc.stdout or ""),
+            stderr=(
+                (exc.stderr or b"").decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            )
+            + f"\ncheck-expo-native-config: `expo prebuild` did not finish "
+            f"within {PREBUILD_TIMEOUT_SECONDS}s.",
+        )
 
 
 def run_check() -> int:

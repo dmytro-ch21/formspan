@@ -60099,15 +60099,57 @@ guidance. The one user-facing idea this work produced (automated
 launch-survival verification) is recorded as a design sketch on N519/#915
 rather than as a scenario here, since nothing implements it yet.
 
+### Review fold-in (coordinating session)
+
+`ac-verifier` independently reproduced the mutation-check above (confirmed
+criteria 1–3 MET, 4–6 honestly deferred with well-scoped follow-ups — see
+#913/#914/#915) and flagged one issue-body inaccuracy worth fixing before
+anyone picks up #913: its "no Android toolchain installed" reasoning was
+checked from this (macOS) sandbox, which cannot actually answer that
+question about the real GitHub-hosted `ubuntu-latest` runner used in CI —
+corrected in #913's body rather than left standing as measured fact.
+
+`backend-reviewer` found no blocking issues and two suggestions, both
+folded in:
+
+- **`check:expo-native-config`'s `--self-test` was never wired into the
+  command `verify`/CI actually runs** — every sibling script with a
+  `--self-test` mode (`check:ci-detector`, `check:eas-production-safety`,
+  `check:native-deps-guard`, `check:pr-work`, `check:evidence-latch`) runs
+  it automatically as part of its own `check:*` command; this one didn't.
+  Fixed: `check:expo-native-config` now runs `--self-test` before the real
+  check, matching the established pattern.
+- **None of the three scripts' `subprocess.run` calls had a `timeout`.**
+  `check-expo-compat.py` is the first network call in the local `verify`
+  chain, and a hung DNS/TLS handshake (as opposed to the fast
+  `ECONNREFUSED` already measured above) had no local backstop. Added a
+  60s timeout there, a 30s timeout on `check-expo-config.py`'s two
+  (network-free, normally sub-second) calls, and a 120s timeout on
+  `check-expo-native-config.py`'s prebuild call, each failing with a
+  clear, distinct message rather than hanging or crashing. Verified each
+  timeout path fires correctly (patched `subprocess.run` to raise
+  `TimeoutExpired`, confirmed the right message and a non-zero exit for
+  all three scripts), then re-ran all three for real afterward to confirm
+  the happy path is unaffected.
+
+### #537's closure (coordinating session's decision)
+
+Taking `ac-verifier`'s recommendation (option 1 above): this PR re-scopes
+issue #537's body to the three shipped criteria and closes it directly.
+N517/#913, N518/#914, N519/#915 (Android compile gate, nightly iOS EAS
+Build gate, launch-survival check) and N520/#916 (config-plugin
+registration decision) carry the deferred remainder as their own
+independently-assignable tickets, per the reasoning above.
+
 ### Left open / follow-up
 
 - N517/#913, N518/#914, N519/#915 — Android compile gate, nightly iOS EAS
   Build gate, and launch-survival check, all unassigned/Todo on the board.
+  #913's body corrected per the review fold-in above.
 - N520/#916 — whether/how to register `expo-audio`/`expo-font`/
   `expo-secure-store`/`expo-sqlite`'s config plugins, given the
   microphone-permission default trap found above.
-- #537's own closure/re-scope — left to the coordinating session, per
-  its recommendation above.
+- #537 — re-scoped and closed by this PR (see above).
 
 
 ## Open items / known gaps as of this entry

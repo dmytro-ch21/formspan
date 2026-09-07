@@ -47,6 +47,12 @@ MOBILE = ROOT / "apps" / "mobile"
 
 CONFIG_TYPES = ("public", "introspect")
 
+# No network, no native toolchain — this normally finishes in a fraction of
+# a second (see module docstring). The bound exists only as a backstop
+# against something unexpected hanging (e.g. an interactive prompt from a
+# misconfigured plugin), not because this is ever expected to be slow.
+SUBPROCESS_TIMEOUT_SECONDS = 30
+
 
 def main() -> int:
     if not (MOBILE / "package.json").is_file():
@@ -55,12 +61,25 @@ def main() -> int:
 
     overall_rc = 0
     for config_type in CONFIG_TYPES:
-        result = subprocess.run(
-            ["pnpm", "exec", "expo", "config", "--type", config_type],
-            cwd=MOBILE,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["pnpm", "exec", "expo", "config", "--type", config_type],
+                cwd=MOBILE,
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            overall_rc = 1
+            print(
+                f"check-expo-config: `expo config --type {config_type}` did not "
+                f"finish within {SUBPROCESS_TIMEOUT_SECONDS}s — this command "
+                "does no I/O and should be near-instant, so a hang here means "
+                "something is unexpectedly wrong (e.g. a plugin blocking on "
+                "stdin).",
+                file=sys.stderr,
+            )
+            continue
         if result.returncode != 0:
             overall_rc = result.returncode
             print(f"check-expo-config: `expo config --type {config_type}` failed:\n", file=sys.stderr)

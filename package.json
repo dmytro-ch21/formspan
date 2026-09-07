@@ -19,7 +19,7 @@
     "check:evals": "python3 scripts/check-dictation-evals.py",
     "check:expo-compat": "python3 scripts/check-expo-compat.py",
     "check:expo-config": "python3 scripts/check-expo-config.py",
-    "check:expo-native-config": "python3 scripts/check-expo-native-config.py",
+    "check:expo-native-config": "python3 scripts/check-expo-native-config.py --self-test && python3 scripts/check-expo-native-config.py",
     "check:grip-parity": "python3 scripts/check-grip-parity.py",
     "check:icons": "node scripts/generate_icons.mjs --check",
     "check:lint-ratchet": "node scripts/check-lint-ratchet.mjs",
