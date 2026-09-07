@@ -20249,3 +20249,66 @@ than replacing it — everything there still holds.
   the top two bullets of "Happy path" above, run by hand rather than
   through an automated test — recorded here as the scenario, not as
   something this document can satisfy on its own.
+
+## N164/#541 — request-body size limits across write endpoints (`backend/internal/platform/apihttp.DecodeJSON`/`DecodeJSONError`)
+
+New observable behavior on every migrated `POST`/`PUT`/`PATCH` endpoint
+(effectively every JSON-body write route in the API — see
+`docs/decisions/history.md`'s N164 entry for the full per-module list): a
+request body over that route's own size limit, and a body containing more
+than one concatenated JSON document, are both now refused before the whole
+body is read into memory. One general scenario covering the pattern, rather
+than one repeated per endpoint — the mechanism is identical everywhere it
+applies, and the per-route byte limit is an implementation detail, not
+something worth asserting per route in an end-to-end suite.
+
+**Happy path**
+
+- A well-formed, reasonably-sized JSON body on any write endpoint behaves
+  exactly as before — this ticket added no new required fields and no new
+  validation of legitimate input.
+
+**Edge cases & errors**
+
+- A body larger than the endpoint's limit (a large `POST` to any of `/v1
+  /activities`, `/v1/profile`, `/v1/sessions`, `/v1/sessions/{id}/sets`,
+  `/v1/workouts`, `/v1/workouts/{id}/items`, `/v1/nutrition/entries/{id}`,
+  `/v1/nutrition/foods/{id}`, `/v1/body/checkins/{date}`, `/v1/body/phases`,
+  `/v1/bjj/promotions`, `/v1/bjj/focus`, `/v1/curricula`, is enough to
+  exercise this) → `413`, `{"error":{"code":"invalid_input",...}}`, and the
+  connection does not hang or spike server memory while the oversized body
+  is still uploading — the whole point of rejecting via
+  `http.MaxBytesReader` rather than after a full decode.
+- A body containing two concatenated JSON documents (`{"a":1}{"a":2}`) on
+  any of the same endpoints → `400 invalid_input`, not a silent "the first
+  document was accepted and the rest ignored." This was the previously-
+  unguarded behavior of a bare `json.Decoder.Decode` call and is the
+  scenario worth a regression test if any of these routes is ever touched
+  again without going through the shared decode helper.
+- `friend.Send` (`POST /v1/friends`) and `share.Create` (`POST /v1/share`)
+  keep their own pre-existing single combined message for any decode
+  failure (oversized body included) rather than the 413/400 split above —
+  both predate this ticket and were left exactly as they behaved before it,
+  now with the same trailing-document protection added underneath.
+- `contest`'s entry-write endpoint (`POST`/`PUT /v1/contests[/{id}]`)
+  deliberately does **not** distinguish an oversized body from a malformed
+  one (both are a plain 400) — a stated, pre-existing design decision (see
+  its own code comment), not an oversight this ticket left unfixed. It
+  DOES now get the same trailing-document protection as every other
+  endpoint (`{"sport":"bjj",...}{"sport":"judo"}` → 400, not the first
+  document silently accepted) — only the status-code split was left alone,
+  not the underlying decode gap.
+
+### Not covered here, and why
+
+- No per-endpoint scenario for the exact byte limit chosen for each route —
+  those are implementation detail (see the history entry for the reasoning
+  behind each), not observable API contract; a client should never depend on
+  the specific number.
+- `DisallowUnknownFields` (rejecting a body with an unrecognised field) is
+  **not** part of this behavior change anywhere in the API today — see N521
+  /#918, filed as this ticket's deferred follow-up after an attempt on the
+  admin-only exercise/technique content endpoints measured a genuine
+  incompatibility (two existing tests rely on unrecognised fields — `id`,
+  `source`, `actor` — being silently ignored as a security property, not
+  rejected). Nothing to test here until that redesign lands.

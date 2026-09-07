@@ -1,7 +1,6 @@
 package nutrition
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -26,6 +25,22 @@ const (
 	maxEntries         = 2000
 	defaultFoodLimit   = 50
 	maxFoodLimit       = 200
+)
+
+// Request body caps (N164/#541), each bounding its body before it is
+// buffered rather than after a full decode:
+//
+//   - maxEntryBody and maxTargetBody: a handful of short numeric fields,
+//     the same 8 KiB `plan`/`session`/`theme` already use for a
+//     comparably-shaped body.
+//   - maxFoodBody: a food/recipe can carry an `items` array (its
+//     ingredients) with no cap of its own on how many, so this gets more
+//     headroom than a flat struct — generous for even a long home recipe
+//     while still refusing an unbounded body.
+const (
+	maxEntryBody  = 8 << 10
+	maxFoodBody   = 64 << 10
+	maxTargetBody = 8 << 10
 )
 
 type Handler struct {
@@ -149,8 +164,7 @@ func (h *Handler) SaveEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in entryBody
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxEntryBody, &in); err != nil {
 		return
 	}
 	// Trimmed here, like Name/ServingLabel above — not left to Validate(),
@@ -315,8 +329,7 @@ func (h *Handler) SaveFood(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in foodBody
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxFoodBody, &in); err != nil {
 		return
 	}
 	items := make([]RecipeItem, 0, len(in.Items))
@@ -415,8 +428,7 @@ func (h *Handler) SaveTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in targetBody
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxTargetBody, &in); err != nil {
 		return
 	}
 	t := Target{

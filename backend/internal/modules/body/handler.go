@@ -2,7 +2,6 @@ package body
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -177,6 +176,11 @@ type checkinBody struct {
 	Notes        string `json:"notes"`
 }
 
+// maxBodyRequestBytes bounds a check-in or phase request before it is
+// buffered. Both are a handful of short fields (N164/#541) — the same 8 KiB
+// `plan`, `session`, and `theme` already use for a comparably-shaped body.
+const maxBodyRequestBytes = 8 << 10
+
 // SaveCheckin handles PUT /v1/body/checkins/{date}
 //
 // PUT and not POST: the resource is identified by the day, the client names it,
@@ -192,8 +196,7 @@ func (h *Handler) SaveCheckin(w http.ResponseWriter, r *http.Request) {
 	date := r.PathValue("date")
 
 	var in checkinBody
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxBodyRequestBytes, &in); err != nil {
 		return
 	}
 
@@ -389,8 +392,7 @@ func (h *Handler) CreatePhase(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := claims.UserID
 	var in phaseBody
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxBodyRequestBytes, &in); err != nil {
 		return
 	}
 	if strings.TrimSpace(in.ID) == "" {
@@ -430,8 +432,12 @@ func (h *Handler) EndPhase(w http.ResponseWriter, r *http.Request) {
 		EndedOn string `json:"ended_on"`
 	}
 	// An empty body is fine and means today — ending a phase is a one-tap
-	// action and should not require the client to say what day it is.
-	_ = json.NewDecoder(r.Body).Decode(&in)
+	// action and should not require the client to say what day it is. Any
+	// decode failure (empty or otherwise malformed) is deliberately ignored
+	// here too, same as before N164/#541 — only the size bound is new, via
+	// DecodeJSONError so a malformed-but-harmless body still doesn't write a
+	// response out from under this handler's own error path below.
+	_ = apihttp.DecodeJSONError(w, r, maxBodyRequestBytes, &in)
 	if in.EndedOn == "" {
 		in.EndedOn = time.Now().UTC().Format("2006-01-02")
 	}

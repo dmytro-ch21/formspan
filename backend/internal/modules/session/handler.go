@@ -74,6 +74,15 @@ func (h *Handler) newEngineEnabled(ctx context.Context) bool {
 // and each set is a statement in a batch.
 const maxSets = 500
 
+// maxSessionBody bounds a Create/ReplaceSets request before it is buffered
+// (N164/#541). Each Set (exercise_id, a handful of numeric fields, a couple
+// of enum-ish strings) runs well under 300 bytes even fully populated with
+// field names included, so maxSets sets is comfortably under 150 KiB; 256 KiB
+// is generous headroom over that — the same figure bjj's PutDetail already
+// uses for a similarly-shaped "many small rows" body — while still refusing
+// an unbounded request.
+const maxSessionBody = 256 << 10
+
 // maxNameLen bounds a session name. Long enough for "Tuesday no-gi open mat
 // with the comp team", short enough that the column is not an essay field.
 const maxNameLen = 120
@@ -765,12 +774,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := apihttp.DecodeJSONError(w, r, maxSessionBody, &req); err != nil {
 		if msg, ok := distanceMDecodeMessage(err); ok {
 			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, msg)
 			return
 		}
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		apihttp.WriteDecodeError(w, err)
 		return
 	}
 	if req.ID == "" {
@@ -833,12 +842,12 @@ func (h *Handler) ReplaceSets(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req replaceSetsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := apihttp.DecodeJSONError(w, r, maxSessionBody, &req); err != nil {
 		if msg, ok := distanceMDecodeMessage(err); ok {
 			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, msg)
 			return
 		}
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+		apihttp.WriteDecodeError(w, err)
 		return
 	}
 	if len(req.Sets) > maxSets {
@@ -883,8 +892,10 @@ func (h *Handler) Finish(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req finishRequest
-	// An empty body is fine — "finish now" is the common case.
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	// An empty body is fine — "finish now" is the common case. Any decode
+	// failure is deliberately ignored here too, same as before N164/#541 —
+	// only the size bound is new.
+	_ = apihttp.DecodeJSONError(w, r, 8<<10, &req)
 	end := time.Now().UTC()
 	if req.EndedAt != nil {
 		end = *req.EndedAt
@@ -919,8 +930,7 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req renameRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
+	if err := apihttp.DecodeJSON(w, r, 8<<10, &req); err != nil {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -964,8 +974,7 @@ func (h *Handler) SetIntent(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req setIntentRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
+	if err := apihttp.DecodeJSON(w, r, 8<<10, &req); err != nil {
 		return
 	}
 	if !req.Intent.Valid() {
@@ -998,8 +1007,7 @@ func (h *Handler) Reschedule(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req rescheduleRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "Body must be valid JSON.")
+	if err := apihttp.DecodeJSON(w, r, 8<<10, &req); err != nil {
 		return
 	}
 	if req.StartedAt == nil {
@@ -1189,8 +1197,7 @@ func (h *Handler) SetPinnedExercises(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ExerciseIDs []string `json:"exercise_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed JSON body")
+	if err := apihttp.DecodeJSON(w, r, 8<<10, &body); err != nil {
 		return
 	}
 	if len(body.ExerciseIDs) > maxPinned {

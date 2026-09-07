@@ -1,7 +1,6 @@
 package theme
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -108,13 +107,12 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capped like every other write in this codebase except `profile`, which
-	// predates the practice. The worst legal payload is 580 runes — under 2.5 KB
-	// even at four bytes each — so 8 KB is headroom rather than a limit anyone
-	// meets.
+	// Capped like every other write in this codebase (N164/#541 closed the
+	// last gaps, `profile` included). The worst legal payload is 580 runes —
+	// under 2.5 KB even at four bytes each — so 8 KB is headroom rather than
+	// a limit anyone meets.
 	var req setRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, 8<<10, &req); err != nil {
 		return
 	}
 	title, ok := CleanTitle(req.Title)

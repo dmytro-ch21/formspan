@@ -1,7 +1,6 @@
 package share
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -21,13 +20,12 @@ func NewHandler(repo Repository, reg Registry) *Handler {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	// Three short fields; a cap costs nothing and bounds the allocation.
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	var body struct {
 		ToUsername   string `json:"to_username"`
 		ResourceType string `json:"resource_type"`
 		ResourceID   string `json:"resource_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := apihttp.DecodeJSONError(w, r, 4<<10, &body); err != nil {
 		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
 			`send {"to_username": "...", "resource_type": "sequence"|"workout", "resource_id": "..."}`)
 		return

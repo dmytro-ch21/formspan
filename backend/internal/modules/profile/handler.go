@@ -1,7 +1,6 @@
 package profile
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -26,6 +25,14 @@ func NewHandler(repo Repository, store *objectstore.Store) *Handler {
 	return &Handler{repo: repo, store: store}
 }
 
+// maxProfileBody bounds every plain-JSON profile request before it is
+// buffered (N164/#541). Every body in this file is a handful of short
+// fields — the same 8 KiB `plan`/`session`/`theme` already use for a
+// comparably-shaped body — including SetModules's map, which is bounded in
+// practice by the size of the discipline registry, not by anything a caller
+// controls.
+const maxProfileBody = 8 << 10
+
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 	p, err := h.repo.Get(r.Context(), claims.UserID)
@@ -48,8 +55,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxProfileBody, &req); err != nil {
 		return
 	}
 
@@ -108,8 +114,7 @@ func (h *Handler) SetModules(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req setModulesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxProfileBody, &req); err != nil {
 		return
 	}
 	if len(req) == 0 {
@@ -157,8 +162,7 @@ func (h *Handler) SetExerciseUnit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req setExerciseUnitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxProfileBody, &req); err != nil {
 		return
 	}
 	unit := ""
@@ -210,8 +214,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req updateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxProfileBody, &req); err != nil {
 		return
 	}
 

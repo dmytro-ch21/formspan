@@ -8254,8 +8254,10 @@ paths:
           description: >
             Body over 256 KB. This module caps the body before parsing because
             the step limit can only be checked once the whole request is in
-            memory; other modules let the decoder answer 400 instead, so a
-            client should treat this as a 400 variant rather than a convention.
+            memory. As of N164/#541 an oversized body on most write endpoints
+            in this API answers 413 the same way (see
+            apihttp.DecodeJSON/DecodeJSONError) — this endpoint predates that
+            change and was already doing it by hand.
           content:
             application/json:
               schema:
@@ -8444,7 +8446,9 @@ paths:
           description: >
             Body over 256 KB. This module caps the body before parsing, the
             same way `/v1/sequences` does, because the block-count limit can
-            only be checked once the whole request is already in memory.
+            only be checked once the whole request is already in memory. As
+            of N164/#541 this is the common shape for most write endpoints in
+            this API, not something specific to this one or `/v1/sequences`.
           content:
             application/json:
               schema:

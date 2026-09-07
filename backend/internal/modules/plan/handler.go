@@ -1,7 +1,6 @@
 package plan
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -84,8 +83,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	// fields, and `MaxNotesLen` is only checked after a full decode. Same limit
 	// `health` and `session` use.
 	var req createRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxBody, &req); err != nil {
 		return
 	}
 
@@ -156,8 +154,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("planID")
 
 	var req updateRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxBody, &req); err != nil {
 		return
 	}
 

@@ -60152,6 +60152,227 @@ independently-assignable tickets, per the reasoning above.
 - #537 — re-scoped and closed by this PR (see above).
 
 
+## 2026-09-06 — N164/#541: a shared decode helper closes the request-body-size gap (#918 filed for `DisallowUnknownFields`)
+
+**Evidence.** At least a dozen `json.NewDecoder(r.Body).Decode(...)` call
+sites across `internal/modules/*` had no body-size bound at all — a caller
+could send an arbitrarily large body and the decoder would buffer the whole
+thing before rejecting it, and the same bare `Decode` call also silently
+accepts a second, concatenated JSON document (the decoder just leaves it
+unread). `http.MaxBytesReader` was already the fix in several places
+(session's `Rename`/`SetIntent`/`Reschedule`, `theme`, `workout.Rename`,
+biometric's `PutSamples`/`running`'s `PutDetail` N502/#873 split), applied by
+hand at each site with no shared enforcement and — even where present — no
+protection against the trailing-document case.
+
+**The shared helper** (`backend/internal/platform/apihttp/decode.go`):
+
+- `DecodeJSONBody(body io.Reader, dst any) error` — decodes exactly one JSON
+  value and rejects a second one, via the standard idiom (a second `Decode`
+  call against a throwaway destination must return `io.EOF`). Does not bound
+  the body itself; exists for callers that already wrapped `r.Body` in their
+  own `http.MaxBytesReader` and for testing the trailing-value check in
+  isolation.
+- `DecodeJSONError(w, r, maxBytes, dst) error` — wraps `r.Body` in
+  `http.MaxBytesReader(w, r.Body, maxBytes)` then calls `DecodeJSONBody`.
+  Does **not** write a response, for the handful of callers that need a more
+  specific message than the generic ones below (session's
+  `distanceMDecodeMessage`, N507/#884, is the example this exists for).
+- `DecodeJSON(w, r, maxBytes, dst) error` — the one-liner most handlers use:
+  `DecodeJSONError` plus `WriteDecodeError` on failure.
+- `WriteDecodeError(w, err)` — the standard response: `errors.As` for
+  `*http.MaxBytesError` gets 413 with an actionable "request body is too
+  large" message (matching the 413-vs-400 split N502/#873 established); every
+  other failure (malformed JSON, a type mismatch, the trailing-document case)
+  gets 400 with this repo's long-standing generic `"invalid JSON body"`. The
+  raw decode error is never echoed back — it can quote arbitrary request
+  bytes — so both branches write a fixed message.
+
+Verified the two load-bearing Go idioms directly rather than from memory
+before designing around them (per this repo's "verify an external contract"
+discipline, applied here to a stdlib contract instead): a second `Decode`
+call after a clean single document returns the literal `io.EOF` sentinel; a
+body that exceeds `http.MaxBytesReader`'s limit while still being *valid*
+JSON up to the cut trips `*http.MaxBytesError`, detectable via `errors.As`
+(this repo's `go.mod` pins Go 1.26, so the typed-error mechanism applies, not
+the older string-match one) — but a body that is simply garbage past the
+limit fails with a plain `*json.SyntaxError` first, because the decoder
+rejects the bad byte before `MaxBytesReader`'s own counter fires. Both are
+still `invalid_input`, so `WriteDecodeError`'s generic branch covers it
+either way.
+
+**Migrated.** Every previously-unguarded `json.NewDecoder(r.Body).Decode`
+site the exhaustive `grep -rn "json.NewDecoder(" internal/ --include="*.go"`
+sweep found (not just the ticket's named examples): `activity.Create`,
+`body.SaveCheckin`/`CreatePhase`/`EndPhase`, `bjj.CreatePromotion`/
+`UpdatePromotion`, `profile.Create`/`Update`/`SetModules`/`SetExerciseUnit`,
+`session.Create`/`ReplaceSets`/`Finish`/`SetPinnedExercises`, `nutrition
+.SaveEntry`/`SaveFood`/`SaveTarget`, `workout.Create`/`ReplaceItems`, plus
+one non-obvious sibling: `curriculum.decode()` was wrapping `r.Body` in
+`io.LimitReader`, not `http.MaxBytesReader` — `LimitReader` silently
+truncates rather than signalling "too large", so an over-limit curriculum
+write surfaced as a generic "invalid JSON body" indistinguishable from a
+genuinely malformed one. All now go through `DecodeJSON`/`DecodeJSONError`.
+
+Also migrated, for consistency and to close the trailing-document gap
+everywhere rather than only where the bug was originally found: every
+already-`http.MaxBytesReader`-guarded single-`Decode`-call site —
+`biometric.ComputeMetrics`, `bjj.PutDetail`/`FocusHandler.Set`,
+`session.Rename`/`SetIntent`/`Reschedule`, `plan.Create`/`Update`,
+`theme.Set`, `tracker.decode()`, `exercise.decodeExercise`,
+`technique.decodeTechnique`, and `friend.Send`/`share.Create` (which wrapped
+`r.Body` by hand rather than inline). One deliberate partial exception:
+**`contest.decode()`'s status-code philosophy was left untouched, but its
+missing trailing-document guard was not.** It carries an explicit existing
+comment arguing that an oversized body and a malformed one should both be a
+plain 400 ("distinguishing them would say how big the limit is, which is not
+something a client can act on") — migrating it to `DecodeJSON`/
+`DecodeJSONError`'s default 413-for-oversized behaviour would have silently
+overridden that stated design decision, so this ticket does not do that.
+But `backend-reviewer`'s own review of this branch caught that `decode()`
+still called a bare `json.NewDecoder(...).Decode(&req)` underneath its
+`http.MaxBytesReader` wrap — the exact trailing-document gap this ticket
+exists to close, just not migrated because the status-code question got
+conflated with it. Fixed by switching to `apihttp.DecodeJSONBody` (the
+non-response-writing variant, since `contest` writes its own single 400
+either way) — this buys the trailing-document check without touching the
+413/400 decision at all. Mutation-checked the same way as everywhere else:
+reverting to the bare `Decode` call made the new
+`TestCreateRejectsATrailingJSONDocument` fail — not with a compile error,
+but by silently accepting the first of two concatenated documents and
+falling through to the nil-repository panic
+`TestAValidBodyReachesTheRepository` relies on, exactly the real bug shape —
+restored, confirmed green again by re-running, not by re-reading the diff.
+
+Two migrations changed observable behaviour, on purpose:
+
+- `session.Rename`/`SetIntent`/`Reschedule` and `theme.Set` moved from
+  `"Body must be valid JSON."` to the (now-shared, and vastly more common —
+  39 of ~45 decode sites already used it) `"invalid JSON body"`. No test
+  string-matched the old text; messages are explicitly not contract per
+  `docs/architecture/api-conventions.md`.
+- Several previously-single-status sites (`biometric.ComputeMetrics`, `bjj`,
+  `session`, `nutrition`, `workout`, `profile`, `activity`, `body`) now
+  return **413** rather than 400 for an oversized body specifically,
+  matching the split N502/#873 already established elsewhere in the API.
+  `friend.Send` and `share.Create` were left at a single combined message/
+  status for any decode failure (oversized included) — they route through
+  `DecodeJSONError` plus their own existing instructional message rather than
+  `DecodeJSON`, preserving exactly what they did before this ticket.
+
+**Per-handler max-byte reasoning**, since the ticket explicitly asked for
+endpoint-appropriate limits rather than one constant:
+
+- **8 KiB** — a handful of short fields, no arrays: `body`'s check-in/phase
+  bodies, `bjj`'s promotion request, `profile`'s four write endpoints,
+  `session`'s `Rename`/`SetIntent`/`Reschedule`/`SetPinnedExercises`,
+  `nutrition`'s entry/target bodies, `workout.Rename`, `theme.Set`. Matches
+  the pre-existing convention `plan`/`tracker`/`theme` already documented for
+  this shape.
+- **1 KiB** — `biometric.ComputeMetrics` (three scalar fields) and `friend
+  .Send` (one username), unchanged from their pre-existing hand-rolled
+  bounds.
+- **64 KiB** — `activity.Create` (an arbitrary `json.RawMessage` envelope
+  with no per-field cap to lean on — sized generously for a substantial
+  nested blob rather than derived from a real field list) and `nutrition
+  .SaveFood` (a food/recipe's `items` array has no length cap of its own).
+- **256 KiB** — `session.Create`/`ReplaceSets` (`maxSets` = 500, each `Set`
+  well under 300 bytes even fully populated, so 500 sets is comfortably
+  under 150 KiB — 256 KiB is headroom) and `workout.Create`/`ReplaceItems`
+  (`maxItems` = 200, same reasoning) — both sized to match the figure
+  `bjj.PutDetail` already used for a similarly-shaped "many small rows" body.
+- Everywhere else the existing constant (`plan.maxBody`, `tracker.maxBody`,
+  `exercise`/`technique`'s `maxContentBody`, `curriculum.MaxBody`,
+  `bjj.maxFocusBody`) was kept as-is; only the reader wrapping it changed.
+
+**`DisallowUnknownFields` — tried, measured incompatible, deferred.** The
+ticket's design guidance suggested admin-only endpoints as the safest
+candidate (a single controlled client), so that was actually tried rather
+than assumed safe: switching `exercise.decodeExercise` and `technique
+.decodeTechnique` (both wired under `RequireAdmin`, reachable only from
+`apps/admin`) to a `DisallowUnknownFields`-enabled decoder immediately broke
+two existing tests — `TestCreateDerivesTheIDAndIgnoresAnyTheClientSends` and
+`TestTheRequestBodyCannotChooseTheActor` — which assert, as a **security
+property**, that a body naming `id`, `source` or `actor` (fields the request
+struct omits on purpose because they are server-derived) is silently
+ignored rather than trusted. `DisallowUnknownFields` turns that defensive
+design into a hard 400: sending the id you want ignored now fails the
+request instead of being safely ignored. So even the single-controlled-
+client case doesn't clear "contract compatibility allows it" without first
+redesigning those structs (e.g. a documented, tested allowlist of
+consciously-ignored fields, decoded and discarded before a strict pass over
+the rest) — real design work, not a decode-layer change. Reverted; nothing
+in this API enables `DisallowUnknownFields` today. Filed **N521/#918**
+(`gh issue create`, scanned `gh issue list --state all` and `gh pr list
+--state open` first — highest existing id was N520) to track that redesign
+as its own follow-up, with the two broken tests and the measurement above as
+its acceptance criteria.
+
+**Mutation-checked** (`internal/platform/apihttp/decode_test.go`): removing
+the trailing-document check (`decodeExactlyOne` collapsed to a single
+`Decode` call, no second read) took four tests red —
+`TestDecodeJSON_RejectsTrailingJSONDocument`,
+`TestDecodeJSON_RejectsTrailingGarbage`,
+`TestDecodeJSON_ExactlyAtTheLimitSucceeds`, and
+`TestDecodeJSONBody_UnboundedButStillRejectsTrailingData` — restored,
+re-ran, green again. Separately, removing the `http.MaxBytesReader` wrap in
+`DecodeJSONError` (feeding the decoder `r.Body` directly) took
+`TestDecodeJSON_RejectsOversizedBody` and
+`TestDecodeJSON_ExactlyAtTheLimitSucceeds` red; restored, green again. Every
+touched module also got its own oversized-body test (per the acceptance
+criteria's "at least one handler per module") in a new
+`n164_body_limit_test.go` per package — `activity`, `body`, `bjj`, `profile`,
+`session`, `nutrition`, `workout`, `curriculum`, `friend`, `share`,
+`biometric`, `plan`, `theme`, `tracker`, `exercise`, `technique` — each
+POSTing a body sized past that handler's own `maxBytes` (valid JSON with an
+oversized string value, so the failure is genuinely `http.MaxBytesReader`'s
+limit rather than a syntax error arriving first) and asserting the correct
+status/error shape; several also assert the two-concatenated-documents case
+directly. Full backend suite run twice — once without `TEST_DATABASE_URL`
+(1478 tests, 616 skips — every Postgres-gated package, expected without the
+env var) and once against a fresh per-branch `vola_test_n164` database
+migrated to the current head (95 migrations) — both green, and the
+DB-backed run's skip count was exactly the one intentional
+`TestLiveComplete`. `gofmt -l .`, `go vet ./...` and `go build ./...` all
+clean.
+
+**`contracts/public.openapi.yaml`**: `createSequence`'s and
+`createClassPlan`'s pre-existing `413` response descriptions each claimed
+"other modules let the decoder answer 400 instead" / implied their 256 KB
+cap was unique to those two endpoints — both now false, since most write
+endpoints in the API answer 413 for an oversized body the same way. Both
+descriptions corrected to say so rather than left stale; `pnpm run
+lint:openapi` still passes. Deliberately **not** attempted: adding an
+explicit `413` response block to every one of the ~20 newly-413-capable
+endpoints this ticket touched. Only 4 endpoints in the whole spec document
+`413` today (all pre-existing, all for a body-shaped reason specific to that
+endpoint — a step/block count, a GPS track, a wearable batch), which reads
+as "worth calling out where the size limit is unusually large or the
+reasoning is non-obvious," not "document every status code every endpoint
+can return." Doing the latter for every migrated endpoint would be a large,
+mechanical spec change orthogonal to closing the security gap and is left
+as a candidate follow-up rather than folded in here.
+
+**Left open**: the N521/#918 `DisallowUnknownFields` redesign; whether
+`contest.decode()`'s deliberate same-status choice should itself be
+reconsidered now that the rest of the API has a documented 413/400 split
+(left alone here — it was an explicit prior decision, not an oversight, and
+overriding it wasn't this ticket's call to make unilaterally; note only the
+status-code philosophy is left open — the trailing-document gap in the same
+function is now closed, see above); whether the ~20 newly-413-capable
+endpoints should each get an explicit `413` response block in
+`contracts/public.openapi.yaml` (see above).
+
+**Review fold-in.** `backend-reviewer` found no blocking issues on the
+branch as a whole. Two suggestions: the `friend`/`share` 413-vs-400
+inconsistency (deliberate, already documented above — left as-is) and
+`contest.decode()`'s missing trailing-document guard (fixed, see above).
+`ac-verifier` independently reproduced both mutation-check claims
+(trailing-document and oversized-body rejection) and the
+`DisallowUnknownFields` incompatibility measurement, and confirmed all four
+acceptance criteria MET with 0 NOT MET / 0 NEEDS HUMAN EVIDENCE.
+
+
 ## Open items / known gaps as of this entry
 
 

@@ -109,6 +109,31 @@ func TestCreateRefusesAnOversizedBody(t *testing.T) {
 	}
 }
 
+// N164/#541: `decode` used to call json.NewDecoder(...).Decode(&req) directly,
+// which stops reading after the first JSON value and silently ignores
+// anything after it — a second, concatenated document would pass straight
+// through unnoticed. Switching to apihttp.DecodeJSONBody (see decode's own
+// comment on why not the response-writing variants) closes that without
+// touching this handler's 400-for-everything status-code choice.
+//
+// Mutation-checked: reverting `decode` to a bare json.NewDecoder(...).Decode
+// makes this test fail — the trailing `{"sport":"judo"}` is silently dropped,
+// the first (valid) document reaches toInput/Validate, and the request falls
+// through to the nil-repository panic TestAValidBodyReachesTheRepository
+// relies on above, rather than being rejected here. Restored afterward,
+// confirmed green again by re-running the test, not by re-reading the diff.
+func TestCreateRejectsATrailingJSONDocument(t *testing.T) {
+	body := `{"sport":"bjj","name":"Pan Ams"}{"sport":"judo"}`
+	rec := post(t, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	code, _ := decodeError(t, rec)
+	if code != "invalid_input" {
+		t.Errorf("want code invalid_input, got %q", code)
+	}
+}
+
 // The accepting case, asserted the only way it can be from here: a valid body
 // must pass validation and reach the repository, which is nil, so it panics.
 // Recovering that panic IS the assertion — without it, a `toInput` that

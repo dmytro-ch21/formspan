@@ -3,7 +3,6 @@ package workout
 import (
 	"github.com/dmytro-ch21/vola/backend/internal/platform/discipline"
 
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -26,6 +25,14 @@ const maxItems = 200
 // because the two names are edited by the same people for the same reasons and
 // a template named longer than a session could name is an arbitrary surprise.
 const maxNameLen = 120
+
+// maxWorkoutBody bounds a Create/ReplaceItems request before it is buffered
+// (N164/#541). Each Item (exercise_id, a handful of numeric targets, notes,
+// an optional nested Protocol) is comfortably under 300 bytes even fully
+// populated, so maxItems items is well under 60 KiB; 256 KiB is generous
+// headroom over that — the same figure session's Create/ReplaceSets use for
+// a similarly-shaped "many small rows" body.
+const maxWorkoutBody = 256 << 10
 
 // writeErr maps domain errors to the API's error contract in one place, so
 // every handler below reports the same situation the same way.
@@ -141,8 +148,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxWorkoutBody, &req); err != nil {
 		return
 	}
 	if len(req.Items) > maxItems {
@@ -214,8 +220,7 @@ func (h *Handler) ReplaceItems(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
 
 	var req replaceItemsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, maxWorkoutBody, &req); err != nil {
 		return
 	}
 	if len(req.Items) > maxItems {
@@ -250,8 +255,7 @@ type renameRequest struct {
 // that got that list slightly wrong would silently rewrite the workout.
 func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	var req renameRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "invalid JSON body")
+	if err := apihttp.DecodeJSON(w, r, 8<<10, &req); err != nil {
 		return
 	}
 	name := strings.TrimSpace(req.Name)

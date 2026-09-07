@@ -2,7 +2,6 @@ package technique
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -386,8 +385,7 @@ func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request,
 
 func decodeTechnique(w http.ResponseWriter, r *http.Request) (techniqueRequest, bool) {
 	var body techniqueRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentBody)).Decode(&body); err != nil {
-		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput, "malformed request body")
+	if err := apihttp.DecodeJSON(w, r, maxContentBody, &body); err != nil {
 		return techniqueRequest{}, false
 	}
 	return body, true
