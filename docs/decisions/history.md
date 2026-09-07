@@ -60961,14 +60961,47 @@ independently, was judged sufficient given the change is a patch-version
 toolchain bump and one dependency bump with no other backend code touched.
 
 **Secret scanning.** This repo is **public** (CLAUDE.md's own known gotchas
-say so), and a public GitHub repository gets native secret scanning
-automatically — no committed file turns that on; it is already on. What a
-committed file categorically cannot reach is **push protection**: as of
-GitHub's current documentation that is a Settings-only toggle
-(Settings → Code security → Push protection), never something a workflow or
-repo file can flip. Documented here rather than left to be rediscovered.
-**NEEDS HUMAN EVIDENCE**: enable push protection by hand in Settings if not
-already on, since nothing in this PR can do it.
+say so), and the assumption when this section was first drafted was that a
+public GitHub repository gets native secret scanning automatically. **That
+assumption was wrong, and it was caught, not merely repeated** — the
+coordinating session checked live (`gh api repos/dmytro-ch21/formspan --jq
+.security_and_analysis`) before merging and found `secret_scanning:
+{"status":"disabled"}`, `dependabot_security_updates: {"status":"disabled"}`,
+and (surfaced separately, via the "Dependency review" CI check itself
+failing with "Dependency graph is [not] enabled") the dependency graph was
+off too. "Public repos get it automatically" describes the FEATURE'S
+availability tier, not its default-on state — a repo owner still opts in.
+
+**Fixed live, via the API, not left as a NEEDS HUMAN EVIDENCE item for
+something this session could actually do**: `secret_scanning` flipped on
+via `PATCH /repos/{owner}/{repo}` (`security_and_analysis.secret_scanning.
+status=enabled`); the dependency graph (and Dependabot vulnerability
+alerts, which require it) flipped on via `PUT /repos/{owner}/{repo}/
+vulnerability-alerts`. Re-ran the previously-failing "Dependency review"
+CI job afterward — it passed, confirming the fix took effect rather than
+assuming it from the API response alone.
+
+**Push protection was also fixed live**, once `secret_scanning` itself was
+on (it's a dependent feature — the API rejects enabling push protection
+before its parent toggle): `security_and_analysis.secret_scanning_push_
+protection.status=enabled` via the same PATCH mechanism, confirmed by
+re-reading the response. So all three toggles this ticket's own acceptance
+criteria actually reference — secret scanning, push protection, and the
+dependency graph (surfaced as the "Dependency review" CI check's own
+failure) — are live, not just documented as available.
+
+One remaining toggle, `dependabot_security_updates` (which layers
+automatic security-fix PRs on top of the `dependabot.yml` config this
+ticket already adds), is left **off**: an attempt to flip it via the same
+API mechanism was declined by this session's own tool-permission
+classifier as a further repo-settings write, and repeatedly retrying past
+a permission denial is exactly the kind of workaround this repo's own
+conventions (and this session's operating rules) treat as out of bounds.
+Not one of this ticket's stated acceptance criteria, so left as a genuine
+optional follow-up rather than blocked scope: **NEEDS HUMAN EVIDENCE**
+(in the sense of "needs a human to do it, not evidence of something
+already done) — enable `Settings → Code security → Dependabot →
+Automatic security updates` by hand if wanted.
 
 Gitleaks was added anyway, as the ticket's own explicit fallback and as
 belt-and-braces against a differently-tuned ruleset than GitHub's native
@@ -61066,14 +61099,17 @@ code change needed; this closes the one gap the reviewer could not close
 itself.
 
 **Left open, all `NEEDS HUMAN EVIDENCE`**: Dependabot actually opening PRs
-against all four ecosystems; dependency-review and Gitleaks genuinely
-blocking a live PR (not just a local binary run); CodeQL's first run
-populating the Security tab for both languages; Trivy firing on a real
-CRITICAL/HIGH finding rather than only passing on today's clean image; and
-enabling GitHub push protection by hand, since Settings toggles are outside
-what any PR can do. `docs/testing/functional-scenarios.md` was deliberately
-**not** touched — this ticket has no user-facing or API surface, matching
-that doc's own skip criteria exactly.
+against all four ecosystems; the ticket's own dependency-review/Gitleaks
+live-block test (a scratch-branch CVE, confirmed blocked; a low/moderate
+one, confirmed not); CodeQL's first run populating the Security tab for
+both languages; Trivy firing on a real CRITICAL/HIGH finding rather than
+only passing on today's clean image; and `dependabot_security_updates` by
+hand, if wanted (see above — not a stated acceptance criterion). Secret
+scanning, push protection, and the dependency graph were all fixed live
+rather than left on this list — see the review fold-in above.
+`docs/testing/functional-scenarios.md` was deliberately **not** touched —
+this ticket has no user-facing or API surface, matching that doc's own
+skip criteria exactly.
 
 ## 2026-09-06 — N165/#542: API URL configuration no longer fails open to localhost
 
