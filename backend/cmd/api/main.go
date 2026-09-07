@@ -530,6 +530,9 @@ func main() {
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
 	// DB-aware readiness — see readyz.go and the readiness comment above.
 	mux.HandleFunc("GET /v1/readyz", readiness.handle)
+	// Pool utilization — see poolstats.go. Admin-gated: an operational
+	// internal, not something every authenticated user needs to see.
+	mux.Handle("GET /v1/admin/db-pool-stats", verifier.RequireAdmin(handleDBPoolStats(pool)))
 	mux.Handle("GET /v1/me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
 	// BJJ rank. Under /v1/bjj rather than /v1/profile because the data is
 	// discipline-scoped — see the note at the top of profile.go. The screens

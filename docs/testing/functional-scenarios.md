@@ -20382,3 +20382,54 @@ scenario beyond confirming that.
 - No scenario for `worker`/`admin-api` readiness — neither binary exists
   yet (see `docs/architecture/deployment.md`); this ticket's scope is `api`
   only.
+
+## N171/#548 — explicit connection-pool config, a bounded boot timeout, and `GET /v1/admin/db-pool-stats` (`backend/internal/platform/database/database.go`, `backend/cmd/api/poolstats.go`)
+
+Backend infrastructure with one small new API surface (the admin pool-stats
+endpoint) — no athlete-facing screen or flow changes. Most of what this
+ticket changed (pool sizing/lifetime values) has no HTTP-observable
+behavior at all outside the boot-timing change below, so this section is
+narrower than most.
+
+### Happy path
+
+- A normal boot against a reachable, healthy database: `NewPool` returns a
+  configured `*pgxpool.Pool` well within `bootstrapPingTimeout` (10s) —
+  typically in well under a second locally. No behavior change an athlete
+  or operator would notice.
+- `GET /v1/admin/db-pool-stats` as an admin user → `200` with
+  `max_conns`/`total_conns`/`acquired_conns`/`idle_conns` and the rest of
+  `pgxpool.Stat()`'s counters, `Cache-Control: no-store`.
+
+### Edge cases & errors
+
+- **Database unreachable at boot** (wrong host/port, connection refused, or
+  a silently-unresponsive endpoint) → the process fails to start within
+  `bootstrapPingTimeout` (10s) plus negligible overhead, with a clear
+  `database: bootstrap ping (...): ...` error logged — never hangs
+  indefinitely. This is the ticket's own "Steps to test" #1, and it is
+  regression-tested against a REAL connection attempt two different ways in
+  `backend/internal/platform/database/database_test.go`:
+  `TestNewPool_RealUnreachableDatabase_FailsFast` (a refused connection,
+  mirroring `readyz_test.go`'s N163 pattern) and, more load-bearingly,
+  `TestNewPool_BootstrapPing_HonorsBoundedTimeout` (a listener that accepts
+  the TCP connection and then never answers — the case that actually proves
+  the bound is enforced, since a refused connection fails fast regardless of
+  whether any timeout exists).
+- **`GET /v1/admin/db-pool-stats` without admin credentials** → same
+  `401`/`403` behavior as every other `RequireAdmin` route (no bespoke
+  security scenario here — it reuses that existing gate).
+
+### Not covered here, and why
+
+- No scenario for actually exhausting `MaxConns` under real concurrent load
+  (a genuine load test). The ticket's "Steps to test" #2 asks for this;
+  `pgxpool`'s own documented behavior is to queue `Acquire` calls past
+  `MaxConns` rather than reject them, and that was not independently
+  re-verified live against a local Postgres for this change — see the
+  `docs/decisions/history.md` N171 entry for the reasoning on why that was
+  judged acceptable to defer rather than construct here.
+- No scenario for wiring `db-pool-stats` (or any of this) into a real
+  metrics/alerting backend — that is Milestone B's SLO ticket (N172/#549),
+  not this one's scope; see the doc comment on `poolstats.go` and the N171
+  history entry.

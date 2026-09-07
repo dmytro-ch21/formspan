@@ -61751,6 +61751,164 @@ seven routes it tests already existed and are unchanged), which is exactly
 that doc's own stated skip criterion.
 
 
+## 2026-09-07 — N171/#548: the Postgres pool is explicitly configured, boot no longer hangs against a dead database, and pool saturation is visible
+
+**The gap.** `database.NewPool` (`backend/internal/platform/database/database.go`)
+called `pgxpool.New(ctx, databaseURL)` — pgx's own undocumented defaults for
+every sizing/lifetime knob — pinged it with the caller's own context (in
+practice `context.Background()`, from `cmd/api/main.go`), and returned. No
+`MaxConns`/`MinConns` reasoning, no connection recycling, and no bound on
+how long boot would wait against a database that never answers.
+
+**Explicit config, via `pgxpool.ParseConfig` + `NewWithConfig`.** The values,
+and the arithmetic behind each (also inline as comments next to the
+constants, per the ticket's own explicit demand):
+
+- **`MaxConns = 20`.** Postgres' own default `max_connections` is 100 —
+  `docs/architecture/deployment.md` and `railway/*.toml` record no
+  Railway-specific Postgres plan/tier for the real `staging` database, so
+  this assumes the common unconfigured default rather than a measured one;
+  that's the one input here most worth re-checking if a real plan is ever
+  confirmed. Off 100, reserve ~10 for connections this pool doesn't account
+  for (Postgres' own `superuser_reserved_connections` default of 3,
+  `cmd/migrate`'s short-lived connection on every deploy, manual
+  `DATABASE_URL_PUBLIC`/`psql` access during an incident), leaving ~90
+  usable. Today exactly one service (`api`) holds a pool against this
+  Postgres — `worker`/`admin-api` are planned but not deployed — but a
+  rolling Railway deploy briefly runs old+new `api` containers side by side,
+  and the planned services will add pools of their own. Budgeting for up to
+  4 concurrent pool-holding processes against ~90 usable connections gives
+  ~22 each; 20 is the clean number just under that.
+- **`MinConns = 2`** — small on purpose. Early-stage traffic doesn't
+  justify holding many connections warm, and `MaxConnIdleTime` exists
+  specifically so the pool doesn't sit at `MaxConns` on the strength of one
+  burst; 2 just avoids a cold connect on the first request after a quiet
+  spell.
+- **`MaxConnLifetime = 30m`** — the shorter end of the commonly-recommended
+  30–60 minute range, picked because this pool is small (20 conns) and
+  recycling one is cheap at this scale.
+- **`MaxConnIdleTime = 5m`** — shrinks the pool back toward `MinConns` once
+  a burst passes.
+- **`HealthCheckPeriod = 1m`** — pgx's own documented default, stated
+  explicitly rather than left implicit; no evidence yet this app's traffic
+  needs it tighter or looser.
+- **`bootstrapPingTimeout = 10s`** — bounds `NewPool`'s one-time startup
+  ping. Deliberately longer than `/v1/readyz`'s own 3-second
+  `readinessDeadline` (N163/#540): that check runs repeatedly against a
+  database that's normally already up and can afford to be tight; this one
+  runs once, at boot, and has to tolerate a real but slow Postgres cold
+  start without mistaking it for a dead database.
+
+**A real bug found by mutation-testing this, not merely reasoned about.**
+The ticket's own "Steps to test #1" — point the API at an unreachable
+database, confirm boot fails within the bound rather than hanging — was
+built as a live test against a REAL `*pgxpool.Pool`, per this repo's
+"verify a check can fail" discipline, and it caught something the design
+would not have: `pgxpool.NewWithConfig` itself spawns a background
+goroutine that pre-fills `MinConns` idle connections using **exactly the
+context passed to it at construction time**. The first version of this
+change passed the caller's original (unbounded, `context.Background()`)
+`ctx` straight to `NewWithConfig` and only bounded the subsequent
+`pool.Ping()` call. Against a real unreachable database, `Ping()` correctly
+timed out at 10s and returned an error — but the code then called
+`pool.Close()` on the error path, and `Close()` waits
+(`destructWG.Wait()`) for every in-flight connection construction to
+finish, including that unbounded background pre-fill, which was still
+blocked reading a Postgres handshake response that would never arrive.
+**The process would have hung indefinitely on the error path, which is the
+exact failure this ticket exists to prevent — just moved one call later.**
+
+A refused connection (`127.0.0.1:1`, the pattern `readyz_test.go` already
+uses for N163) could not have caught this: ECONNREFUSED returns
+near-instantly regardless of whether any timeout is wired up at all, so it
+proves nothing about boundedness. The test that did catch it
+(`TestNewPool_BootstrapPing_HonorsBoundedTimeout`,
+`backend/internal/platform/database/database_test.go`) points `NewPool` at
+a `net.Listen`-backed TCP listener that accepts the connection and then
+goes silent forever, never completing the Postgres handshake — a case
+that hangs unless the bound is actually enforced. Mutated live: reverting
+`NewWithConfig(bootCtx, ...)` back to `NewWithConfig(ctx, ...)` and running
+the test again reproduced the hang exactly as described above (`go test
+-timeout 20s` killed it and dumped the blocked goroutine stack, confirmed
+still inside `createIdleResources` → `connectOne` → blocked
+`receiveMessage`); restoring the fix and re-running (not grepping the
+restored file) went green again in the expected ~10s. **Fix**: both
+`pgxpool.NewWithConfig` and `pool.Ping` are now called with the SAME
+`context.WithTimeout(ctx, bootstrapPingTimeout)`-derived context, so the
+idle pre-fill and the readiness ping are cancelled together — a dead
+database can no longer wedge shutdown any more than it can wedge startup.
+
+**Live-tested, per the ticket's design guidance, not just the mutation
+above**: `TestNewPool_RealUnreachableDatabase_FailsFast` (a real refused
+connection, `127.0.0.1:1`) confirms the ordinary "steps to test #1" case
+fails fast, and `TestNewPool_ConfiguresExplicitPoolValues` (gated on
+`TEST_DATABASE_URL`, run against a real per-branch Postgres —
+`vola_test_n171`, migrated and dropped again for this work) asserts
+`pool.Config()`'s actual `MaxConns`/`MinConns`/`MaxConnLifetime`/
+`MaxConnIdleTime`/`HealthCheckPeriod` match the constants, not merely that
+they were passed in.
+
+**`MaxConns` enforcement (Steps to test #2) was reasoned about, not load
+tested, and that's a deliberate, stated gap.** `pgxpool`'s own documented
+behavior is to queue `Acquire` calls past `MaxConns` rather than reject
+them — a bounded wait, not an accidental exhaustion. Constructing a real
+concurrent-load scratch test against a local Postgres with an artificially
+low `MaxConns` was judged out of proportion to this ticket (it would be
+testing `pgxpool`'s own well-documented queuing behavior, not this repo's
+code) and was not done. If this is ever load-tested for real, the thing
+worth confirming is that queuing shows up as `EmptyAcquireCount`/
+`AcquireDuration` in the new pool-stats endpoint below, not a burst of
+errors.
+
+**Pool utilization: `GET /v1/admin/db-pool-stats`, not a metrics
+pipeline — narrow and deliberate scope, matching N133/#537's and N169's
+"don't build infrastructure that doesn't exist yet" precedent.** The
+ticket points at Milestone B's SLO ticket (N172/#549) for "pool utilization
+exposed as a metric." N172 is still open, defines no concrete
+metrics/alerting mechanism yet (its own acceptance criteria are still
+open checkboxes), and this backend's `go.mod` carries no
+prometheus/otel/expvar dependency to plug into. Building a real metrics
+pipeline here would be doing N172's design work under N171's number,
+without N172's own decisions about what's queryable, what's alerted, and
+its explicit privacy stance — a shape N172 would likely have to redo
+anyway. So `backend/cmd/api/poolstats.go` does the narrow, honest thing:
+surfaces `pgxpool.Stat()`'s own counters
+(`max_conns`/`total_conns`/`acquired_conns`/`idle_conns`/
+`constructing_conns`/`acquire_count`/`empty_acquire_count`/
+`canceled_acquire_count`/`acquire_duration_ms`/`new_conns_count`/
+`max_lifetime_destroy_count`/`max_idle_destroy_count`) as JSON on
+`GET /v1/admin/db-pool-stats`, gated the same way the content-authoring
+routes are (`verifier.RequireAdmin`) — an operational internal, not
+athlete data, but still not something every authenticated user needs to
+see. Wiring this into a real scraped/alerted metrics backend is N172's job,
+not this one's. Deliberately **not** added to
+`contracts/public.openapi.yaml` — confirmed by grep that no `/v1/admin/*`
+path is documented there at all; the public contract only covers routes
+athletes/clients call, and admin routes have never been part of it.
+
+**Docs touched**: `docs/testing/functional-scenarios.md` gets a new N171
+section (a small one — most of this change has no HTTP-observable behavior
+outside the boot-timing change and the one new admin endpoint).
+
+**Left open:**
+
+- The `MaxConns` load-test gap above (Steps to test #2) — reasoned about
+  and left for a future ticket with real load-testing infrastructure,
+  should the queuing-vs-exhaustion distinction ever need to be verified
+  live rather than trusted to `pgxpool`'s documented contract.
+- `MaxConns = 20`'s arithmetic assumes Postgres' default
+  `max_connections = 100` because no Railway-specific plan/tier is recorded
+  anywhere in this repo. If a real plan is ever confirmed with a different
+  limit, or the service topology grows past the assumed 4 concurrent pools,
+  this budget should be redone from the real numbers rather than adjusted
+  by instinct.
+- `GET /v1/admin/db-pool-stats` has no automated test of its own (a thin
+  JSON-serialization handler over `pool.Stat()`, in the same spirit as
+  `handleHealthz`) — reasoned as low-risk given how little logic it
+  contains, but worth a quick handler test if it grows any branching.
+- Wiring pool saturation into a real metrics/alerting backend remains
+  N172/#549's open scope, not resolved here.
+
 ## Open items / known gaps as of this entry
 
 
