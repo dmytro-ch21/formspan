@@ -109,7 +109,13 @@ WORKFLOWS = ROOT / ".github/workflows"
 # workflow files — this literal exists so a parser that silently finds nothing
 # cannot make the whole check vacuous, which is the way a detector most often
 # dies. If CI genuinely gains or loses a job, change this in the same commit.
-EXPECTED_CHECK_RUNS = 6
+#
+# 6 -> 8 on N166 (#543): `.github/workflows/dependency-review.yml` and
+# `.github/workflows/gitleaks.yml` each added one `pull_request`-triggered
+# job ("Dependency review", "Secret scan (Gitleaks)"). `codeql.yml`, added in
+# the same PR, deliberately does NOT trigger on `pull_request` (see that
+# workflow's header) and so contributes nothing here.
+EXPECTED_CHECK_RUNS = 8
 
 # A check run that actually did the work. ONLY `success`.
 #
@@ -535,8 +541,11 @@ def _run(name: str, status: str = "completed", conclusion: str = "success") -> d
 # count — renaming it on every addition would churn ~20 call sites below for
 # no gain, and the count that matters is EXPECTED_CHECK_RUNS, which the
 # self-test cross-checks against the workflows themselves.
+#
+# Grew to eight on N166 (#543) — see EXPECTED_CHECK_RUNS's comment above.
 FIVE = ["Backend (Go)", "Web (Next.js)", "Admin (Next.js)", "Scripts (Python)",
-        "Mobile (Expo)", "Ready PRs contain work"]
+        "Mobile (Expo)", "Ready PRs contain work",
+        "Dependency review", "Secret scan (Gitleaks)"]
 
 
 def self_test() -> int:

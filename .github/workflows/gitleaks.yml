@@ -1,0 +1,77 @@
+name: Secret scan
+
+# N166 (#543). This repo is PUBLIC (see CLAUDE.md's known gotchas), and a
+# public GitHub repository gets native secret scanning automatically — no
+# committed file can turn that ON, it is already on. What a committed file
+# CANNOT reach at all is **push protection**: as of GitHub's current docs that
+# is a Settings-only toggle (Settings → Code security → Push protection),
+# never something a workflow or a repo file can flip. This job is the
+# explicit fallback the ticket asks for regardless — belt and braces, and
+# useful even with native scanning on, because it runs Gitleaks' own,
+# differently-tuned ruleset against the PR's checked-out tree rather than
+# depending on GitHub's own scanner alone.
+#
+# THE STANDALONE BINARY, not `gitleaks/gitleaks-action`. The Action wrapper
+# has required a paid license for ORGANIZATION use since its v2 — this repo
+# is a personal account, not an org, so that would likely be free here, but
+# "likely" is exactly the kind of thing not worth resting a required PR check
+# on. Downloading the pinned, checksummed release binary directly has no
+# licensing question at all, and is what was actually mutation-tested while
+# building this (see docs/decisions/history.md's N166 entry): a fake
+# GitHub-PAT-shaped and OpenAI-key-shaped string in a scratch file were both
+# caught, and clean content was not.
+#
+# PR-BLOCKING. Unlike a CVE, a real secret match has no informational tier —
+# there is no severity threshold to set here (contrast the Trivy/
+# dependency-review CRITICAL/HIGH line): a credential-shaped string in the
+# tree is the finding, full stop, so any match fails the job.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
+jobs:
+  gitleaks:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to an exact version and checksummed against the value recorded
+      # above (from gitleaks' own published `_checksums.txt`) — this is a
+      # binary fetched from the network and run unmodified, so verifying it
+      # against a checksum decided in THIS commit (not fetched fresh at scan
+      # time) is what stops a compromised release asset from substituting
+      # silently. Bump both GITLEAKS_VERSION and GITLEAKS_SHA256 together.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version
+
+      # `--no-git`: scans the FILES at the checked-out commit (for a
+      # `pull_request` event, that is the PR's merge ref) rather than the
+      # full commit history. Deliberate: a history scan would also flag
+      # anything already in `main`'s past before this workflow existed, which
+      # this job cannot fix and would therefore block every future PR
+      # forever — see CLAUDE.md's "verify that it can PASS" on a gate that
+      # can never open. Scanning the tree still catches a secret added
+      # anywhere in the PR, not only in its diff, which is strictly more than
+      # a diff-only scan would.
+      #
+      # `.gitleaksignore` (repo root) holds the two known-fake fixture
+      # strings in engine/internal/devengine/gates_test.go, by exact
+      # fingerprint — see that file's own header for why they exist and are
+      # not real secrets.
+      - name: Scan for secrets
+        run: |
+          ./gitleaks detect --source . --no-git --redact --exit-code 1 -v

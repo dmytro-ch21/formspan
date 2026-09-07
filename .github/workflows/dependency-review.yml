@@ -1,0 +1,45 @@
+name: Dependency review
+
+# N166 (#543). GitHub's own supply-chain gate: diffs the dependency graph a
+# pull request would introduce (any of the four ecosystems Dependabot now
+# watches — Go modules and the pnpm workspace) against its base, and fails on
+# a newly-introduced advisory at or above the threshold below.
+#
+# PR-BLOCKING, deliberately — unlike CodeQL (see codeql.yml), this one is
+# fast: it diffs a manifest, it does not build or analyze anything, so it adds
+# negligible time to a PR and there is no reason to make it anything other
+# than a required check. Same `pull_request:` shape as `ci.yml` — deliberately
+# unfiltered by base branch, for the same stacked-PR reason documented there.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  # Only needed for `comment-summary-in-pr` below, which posts the findings
+  # as a PR comment so a blocked PR's author sees WHY without digging into
+  # workflow logs.
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v5
+        with:
+          # THE GATING THRESHOLD (N166 acceptance criterion: "only severe,
+          # exploitable findings gate a release"). `high` blocks `high` and
+          # `critical` GHSA severities; `low` and `moderate` are reported in
+          # the PR summary but never fail the check. This is the same
+          # CRITICAL/HIGH line drawn for the Trivy container scan in
+          # `ci.yml`'s Backend (Go) job, so a dependency's severity means the
+          # same thing wherever it is judged in this repo.
+          fail-on-severity: high
+          # Post the findings on the PR itself rather than only in the run
+          # log, always (not just on failure) — the summary is informative
+          # even when nothing blocks.
+          comment-summary-in-pr: always

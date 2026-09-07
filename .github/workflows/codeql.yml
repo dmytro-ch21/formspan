@@ -1,0 +1,94 @@
+name: CodeQL
+
+# N166 (#543). "Advanced setup" (a committed workflow using
+# `github/codeql-action`) rather than the Settings-toggle "default setup" —
+# because a committed file is the only one of the two a pull request can ship
+# at all. Note explicitly: enabling "default setup" itself is a repo Settings
+# action nothing in this repo can do; this workflow is the full substitute,
+# not a partial one — advanced setup is a fully supported, equivalent way to
+# run CodeQL, not a fallback.
+#
+# DELIBERATELY NOT `pull_request`-triggered, and that is a design choice
+# worth stating rather than an oversight: CodeQL analysis is call-graph-deep
+# static analysis, materially slower than this repo's other PR checks
+# (official guidance puts it well past the ~2 minute jobs `ci.yml` runs
+# today), and it is a FINDINGS feed (the Security tab), not a pass/fail gate
+# with a severity threshold the way Trivy/dependency-review/govulncheck are.
+# Making it required would make every PR pay CodeQL's latency for a signal
+# nobody is meant to act on synchronously. `push` to `main` plus a weekly
+# schedule keeps it running against exactly the code that ships, without
+# taxing every PR — and because it does not trigger on `pull_request`, it
+# contributes NO name to `scripts/check-ci-checks.py`'s expected-check set
+# (see that script's `triggers_on_pull_request`, which this workflow
+# deliberately never satisfies) and needed no change to
+# `EXPECTED_CHECK_RUNS`.
+#
+# TWO LANGUAGES, matching this repo's two source families: `go` covers
+# `backend/` and `engine/` (two separate Go modules, both analyzed — see the
+# manual build step below), `javascript-typescript` covers `apps/web`,
+# `apps/mobile` and `apps/admin` under CodeQL's current unified JS/TS
+# language id (confirmed against the current default-setup template, which
+# names it exactly this way, not `javascript` and `typescript` separately).
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Wednesday, off the Monday Dependabot runs and off the daily 04:00
+    # content-snapshot cron — no reason for these to compete for attention.
+    - cron: "0 6 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `manual`, not `autobuild`: autobuild's Go heuristic looks for a
+          # `go.mod` at the repository root and there isn't one — both Go
+          # modules live one level down, in backend/ and engine/ (see
+          # CLAUDE.md's module-pattern section on why engine/ is separate).
+          # Letting autobuild guess here would silently analyze nothing
+          # rather than fail loudly, which is worse.
+          - language: go
+            build-mode: manual
+          # Interpreted; nothing to build.
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: |
+            backend/go.sum
+            engine/go.sum
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - if: matrix.build-mode == 'manual'
+        name: Build (both Go modules)
+        run: |
+          set -euo pipefail
+          (cd backend && go build ./...)
+          (cd engine && go build ./...)
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
