@@ -1,5 +1,6 @@
 import { ApiError, parseRetryAfterMs } from './apiError';
 import { netFetch } from './authedFetch';
+import { API_BASE } from './apiConfig';
 import { newTraceId, traceparent } from './trace';
 import type { TokenGetter } from './useAuthToken';
 
@@ -10,9 +11,6 @@ import type { TokenGetter } from './useAuthToken';
  * same way `lib/sessions.ts` is split from `lib/sessionStore.ts`: this module
  * knows the HTTP contract and nothing about SQLite.
  */
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
 
 /** A plan as the server sends it. `day` is a bare `YYYY-MM-DD`. */
 export type RemotePlan = {

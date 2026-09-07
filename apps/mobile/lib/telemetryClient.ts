@@ -1,8 +1,6 @@
 import { DEFAULTS, TelemetryBuffer, type BufferedEvent, type Level, type ReportKind } from './telemetry';
 import { newTraceId, traceparent } from './trace';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-const API_BASE = `${API_URL}/v1`;
+import { API_BASE } from './apiConfig';
 
 /**
  * The transport half: a process-wide buffer, a timer, and the global handlers.

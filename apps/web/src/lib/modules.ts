@@ -1,4 +1,5 @@
 import { newTraceId, traceparent } from "@/lib/trace";
+import { API_BASE } from "@/lib/apiConfig";
 
 /**
  * The discipline registry, client half — deliberately WITHOUT "use client".
@@ -23,9 +24,6 @@ import { newTraceId, traceparent } from "@/lib/trace";
  *
  * `api.ts` re-exports these so existing client call sites are unchanged.
  */
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const API_BASE = `${API_URL}/v1`;
 
 type Token = (opts?: { template?: string }) => Promise<string | null>;
 

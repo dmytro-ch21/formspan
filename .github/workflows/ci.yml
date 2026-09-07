@@ -142,6 +142,15 @@ jobs:
         run: pnpm run test:web
 
       - name: Build
+        # N165/#542: apps/web now throws at build time in a non-development
+        # environment with no NEXT_PUBLIC_API_URL set (by design — this is
+        # the fail-loudly-instead-of-localhost behavior). This CI build is
+        # a correctness check, not a real deploy, but next build still
+        # forces NODE_ENV=production, so it needs a value here the same
+        # way a real Railway deploy would provide one — a placeholder is
+        # fine since nothing here makes a real network call.
+        env:
+          NEXT_PUBLIC_API_URL: https://ci-placeholder.invalid
         run: pnpm run build:web
 
   admin:
@@ -178,6 +187,9 @@ jobs:
         run: pnpm run check:brand-copies
 
       - name: Build
+        # Same reasoning as the web job's Build step above.
+        env:
+          NEXT_PUBLIC_API_URL: https://ci-placeholder.invalid
         run: pnpm run build:admin
 
   scripts:

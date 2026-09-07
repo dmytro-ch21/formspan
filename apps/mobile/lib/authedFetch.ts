@@ -3,6 +3,7 @@ import {
   RequestDroppedError,
   TimeoutError,
 } from './apiError';
+import { API_BASE as RESOLVED_API_BASE } from './apiConfig';
 
 /**
  * Getting a token, and reaching the network, without lying about either.
@@ -33,14 +34,17 @@ import {
  * that talks to Clerk. This file is now just the transport half.
  */
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-
 /**
- * Exported so `apiRequest` and the reachability probe cannot drift apart —
+ * Re-exported so `apiRequest` and the reachability probe cannot drift apart —
  * the probe has to ask the host the failed request was aimed at, or it answers
  * a different question from the one being asked.
+ *
+ * N165/#542: sourced from `./apiConfig`, the one module that reads
+ * `EXPO_PUBLIC_API_URL` — see its doc comment for why a missing/invalid value
+ * now throws outside development instead of silently resolving to
+ * `localhost`.
  */
-export const API_BASE = `${API_URL}/v1`;
+export const API_BASE = RESOLVED_API_BASE;
 
 /**
  * How long a request may run before we stop waiting.

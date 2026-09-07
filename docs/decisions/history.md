@@ -60831,6 +60831,217 @@ process should not receive traffic under either interpretation.
 
 
 
+## 2026-09-06 — N165/#542: API URL configuration no longer fails open to localhost
+
+**The bug.** Eleven mobile modules and four web modules (plus admin's single
+one) each opened with their own copy of
+`process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080'` (or Next's
+`NEXT_PUBLIC_API_URL` equivalent). A staging or production build compiled
+cleanly with the variable unset and shipped talking to `localhost` — for
+mobile, unreachable from a device; for web/admin, baked into the deployed
+bundle at `next build` time (`NEXT_PUBLIC_*` vars are inlined then, not read
+at request time) and wrong until the next rebuild. Nothing on screen or in
+the build log said so; it read as a network bug, not a config one.
+
+**The fix, per app: one gatekeeper module, exported as a resolved constant.**
+
+- `apps/mobile/lib/apiConfig.ts` exports `API_URL`/`API_BASE`, resolved once
+  at import time via a pure, separately-tested `resolveApiBaseUrl(rawEnvValue,
+  isDevelopment)`. All eleven call sites (`history.ts`, `authedFetch.ts`,
+  `workouts.ts`, `plansApi.ts`, `telemetryClient.ts`, `positions.ts`,
+  `records.ts`, `profile.ts`, `techniques.ts`, `sessions.ts`, `activities.ts`)
+  now import `API_BASE` from it instead of declaring their own fallback.
+  `authedFetch.ts` still *exports* `API_BASE` (so `apiRequest.ts` and
+  `transport.test.ts`, which import it from there, needed no change) — it now
+  just re-exports the value sourced from `apiConfig.ts`.
+- `apps/web/src/lib/apiConfig.ts` and `apps/admin/src/lib/apiConfig.ts` mirror
+  it. Web's four call sites (`api.ts`, `modules.ts`, `telemetryClient.ts`,
+  `unitSystem.ts`) and admin's one (`lib/api.ts`) now import `API_BASE` from
+  there.
+- `apps/admin/src/app/EnvironmentBadge.tsx` deliberately keeps reading the raw
+  `NEXT_PUBLIC_API_URL` directly and was **not** migrated: it has no
+  `?? 'localhost'` fallback at all — it uses the raw value (including
+  genuinely unset) as a heuristic for its own "Unlabelled environment" state,
+  which is a display concern this ticket's centralization would have erased
+  by resolving "unset" to a concrete localhost URL before the badge ever saw
+  it. `apps/admin/src/app/error.tsx` mentions the variable name in copy only,
+  not a code read.
+
+**Dev-mode gate, chosen per app rather than reused wholesale:**
+
+- **Mobile: `__DEV__`, not `EXPO_PUBLIC_APP_ENV`.** N132/#536 already
+  established `EXPO_PUBLIC_APP_ENV` as this repo's convention for *labelling*
+  which build this is (it drives `EnvironmentBadge`), and the design brief for
+  this ticket asked whether to reuse it. Deliberately not: it is itself just
+  another `EXPO_PUBLIC_*` value that can be missing or wrong, and a build that
+  forgot to set `EXPO_PUBLIC_API_URL` has no better reason to have correctly
+  set `EXPO_PUBLIC_APP_ENV` either — gating the fallback on it would let one
+  config mistake suppress the guard meant to catch config mistakes. `__DEV__`
+  is a global Hermes/Metro sets from how the JS was bundled, not something
+  anyone types into an env file, and it is already this codebase's established
+  dev/release signal (`lib/shareCard.ts` uses it the same way). It is `true`
+  for exactly the case the fallback exists to serve (a dev-client Metro
+  session, no env file, `pnpm run dev:mobile`) and `false` for every
+  release-mode bundle — `preview` and `production` both, since `eas.json` only
+  sets `developmentClient: true` on the `development` profile — and also for a
+  `--configuration Release` build run locally to check what would ship.
+- **Web/admin: `process.env.NODE_ENV !== "production"`, not
+  `=== "development"`.** The narrower form is the textbook idiom and is
+  *almost* right, but measured directly: `vitest run` sets `NODE_ENV=test`,
+  not `development`, and four existing web test files
+  (`curriculumSections.test.ts`, `mapCrossings.test.ts`,
+  `roundMapLayout.test.ts`, `nutritionSeries.test.ts`) import `@/lib/api`
+  without ever setting `NEXT_PUBLIC_API_URL`. The narrow gate would have made
+  every one of them throw on import, in every local run and in CI, the moment
+  this change landed — caught before it shipped rather than after, by
+  actually running `vitest run` and reading what `NODE_ENV` really was rather
+  than trusting the idiom's name. `!== "production"` keeps the guarantee that
+  matters: Next hard-codes `NODE_ENV=production` for `next build`/`next
+  start`, which is what every real deploy runs — staging and production alike;
+  there is no separate `NODE_ENV=staging`, so both are told apart only by
+  which URL was baked in, not by which mode Next thinks it's in.
+
+**What "fails loudly" means, concretely, per app:**
+
+- **Web/admin**: a throw at module-evaluation time. Measured directly on both
+  apps: `pnpm run build:web`/`build:admin` with `NEXT_PUBLIC_API_URL` unset
+  fails immediately during "Collecting page data", printing
+  `Error: NEXT_PUBLIC_API_URL is not set, and NODE_ENV is "production" —
+  refusing to silently fall back to http://localhost:8080. Set
+  NEXT_PUBLIC_API_URL for this deploy...` and exiting 1 — the build itself
+  never completes, let alone `next start`. Setting the variable (verified with
+  `NEXT_PUBLIC_API_URL=https://api.example.com`) makes both builds succeed.
+  This is the ticket's own test step verified for real, not inferred: "it
+  fails immediately, naming the missing variable."
+- **Mobile**: also a throw at module-evaluation time, but the reasoning is
+  different because a compiled React Native bundle cannot "fail the build"
+  the way `next build` can refuse to produce an artifact — the JS is already
+  inside a native binary by the time it runs. The two candidates were (a)
+  throw here, unconditionally, on every launch, before anything renders, or
+  (b) resolve lazily and let the throw surface wherever the first API call
+  happens, caught by `telemetryClient.ts`'s `ErrorUtils` hook or the
+  `expo-router` `ErrorBoundary` already wired in `app/_layout.tsx`. Chose (a),
+  for two reasons specific to this case: `telemetryClient.ts` is itself one of
+  the eleven migrated modules, so its only way to report a problem is a fetch
+  to this same broken API base — routing the report through the thing that is
+  broken tells you nothing. And a lazy throw only fires the first time some
+  screen happens to call the API, which could be deep in a rarely-opened
+  screen and would present as "this one feature is broken" rather than "this
+  build is misconfigured" — the exact "looks like a network bug" failure this
+  ticket exists to fix, just relocated one layer down rather than removed. An
+  unconditional, instantaneous, every-single-launch crash is the loudest
+  signal available on this platform; a developer or tester driving the build
+  from Xcode/Android Studio/`adb logcat` sees a clear stack trace naming
+  `apiConfig.ts` and the missing variable. This is not a new risk — every one
+  of the eleven modules already evaluated their own `API_URL` constant at
+  their own import time; centralizing only changes *when a bad value becomes
+  fatal*, not *when the read happens*.
+
+**Validation beyond missing-ness.** All three `apiConfig.ts` modules also
+reject a present-but-malformed value (anything that doesn't look like
+`http(s)://…`) unconditionally, in every mode including development — dev
+tolerates *absence* (nobody has set up `.env.local` yet), never *garbage*
+(somebody typed something and got it wrong).
+
+**Testing.**
+
+- Mobile: `apps/mobile/lib/__tests__/apiConfig.test.ts`, 13 cases, testing the
+  pure `resolveApiBaseUrl(rawEnvValue, isDevelopment)` directly — the same
+  shape `scripts/validate-production-config.mjs`'s `classifyValue` uses —
+  plus one test importing the real module to confirm local dev (jest-expo's
+  real `__DEV__ = true`, no env var set) still resolves to
+  `http://localhost:8080/v1`, unchanged from before this ticket.
+- Web/admin: `apps/web/src/lib/__tests__/apiConfig.test.ts` and
+  `apps/admin/src/lib/__tests__/apiConfig.test.ts`, same 13-case shape each,
+  plus the same "resolves to localhost under this suite's real
+  `NODE_ENV`/env" regression check.
+- **Mutation-checked on both mobile and admin**, per the repo's "verify that a
+  check can fail" rule: removed the "throw when not-dev and unset" branch in
+  each, re-ran — 4 real assertion failures each time (not a compile error, not
+  a hang), confirmed the message-content assertions specifically failed
+  (`toThrow(/…not set/)` and the "never mentions localhost" check both went
+  red), then restored from a pre-mutation backup and re-ran green (13/13 both
+  times). Not repeated for web since it shares the identical
+  `resolveApiBaseUrl` shape with admin, verified by the same test file
+  structure.
+
+**What was verified live vs. only in tests:**
+
+- **Web/admin: verified live**, both directions. `pnpm run build:web` and
+  `pnpm run build:admin`, unset, both fail with the exact expected message and
+  exit 1; both succeed with `NEXT_PUBLIC_API_URL` set. This is the strongest
+  evidence available short of a real Railway deploy — Next's build-time
+  inlining means the failure mode is identical between a local build and a
+  Railway one.
+- **Mobile: verified in tests, not on a device or via a real EAS
+  build.** `resolveApiBaseUrl`'s logic is fully covered and mutation-tested,
+  and jest-expo's real `__DEV__` global confirms the dev branch matches
+  pre-ticket behaviour exactly. What was **not** run: an actual `eas build
+  --profile preview` (or a local `--configuration Release` build) with
+  `EXPO_PUBLIC_API_URL` stripped, to confirm the app genuinely crashes on
+  launch rather than merely throwing somewhere jest can see. That is a
+  `NEEDS HUMAN EVIDENCE` gap for whoever reviews this before merge — the
+  `validate-production-config.mjs` build-hook already independently guards
+  the `production` EAS profile specifically at `eas-build-pre-install` time
+  (N132/#536), so this module is defense-in-depth on top of an
+  already-guarded path for production, and the first guard of any kind for
+  `preview` and for a local Release build.
+
+**Verify.** `pnpm run verify` green (full chain, including `test:mobile`
+4541/4541, `test:web` 278/278, `test:admin` 18/18, `typecheck:mobile`,
+`typecheck:web`, `typecheck:admin`, `lint:mobile` at 0 errors/50 warnings —
+unchanged from before this branch, under the existing ratchet). `build:web`
+and `build:admin`, which `verify` deliberately excludes as slow, were run
+manually (see above) specifically because this ticket's own acceptance
+criteria are a build-time behavior that only a real build can demonstrate.
+
+### CI fold-in (coordinating session): the CI build jobs needed the var too
+
+Pushing this branch's PR broke `Web (Next.js)` and `Admin (Next.js)` CI —
+both failed at "Collecting page data" with exactly the new, correct error
+(`NEXT_PUBLIC_API_URL is not set, and NODE_ENV is "production"...`). This
+is not a bug in the guard; it's that `.github/workflows/ci.yml`'s `web`/
+`admin` jobs' `Build` steps (`pnpm run build:web`/`build:admin`) never
+needed this variable before — the OLD code silently fell back to
+`localhost` and the build succeeded regardless. `next build` always runs
+with `NODE_ENV=production`, so a CI job doing a build-correctness check
+(never a real deploy) now needs the same variable a real Railway deploy
+would provide, even though CI makes no real network call.
+
+**Why this branch's own "verified live" claim above didn't catch it**:
+the manual `pnpm run build:web`/`build:admin` runs described above DID
+correctly reproduce both the unset-fails and set-succeeds cases — that
+testing was accurate. What was missing is the connection to CI's own
+workflow file specifically needing the same env var CI had simply never
+required before. Confirmed by reproducing the exact CI failure locally
+(`pnpm run build:web` with a genuinely clean environment — no ambient
+`NEXT_PUBLIC_API_URL`, no `.env.local`) and getting the identical error,
+then fixing it: added `env: NEXT_PUBLIC_API_URL:
+https://ci-placeholder.invalid` to both jobs' `Build` steps in
+`.github/workflows/ci.yml` — a placeholder is correct here since nothing
+in a build-correctness check makes a real network call to it. Reproduced
+both directions again after the fix: with the placeholder set, both
+builds succeed; with it removed, both still fail exactly as designed
+(confirming the fold-in doesn't accidentally defeat the guard it exists to
+prove).
+
+### Left open / follow-up
+
+- No real device or EAS build ran for mobile (see above) — the acceptance
+  criterion "run a production-mode build/start... it fails immediately" is
+  verified for web/admin by an actual `next build`, and for mobile only by
+  unit tests plus the reasoning that a module-scope throw fires identically
+  regardless of how the bundle is produced. Worth a real `eas build --profile
+  preview` with the var stripped before this is fully closed out.
+- The three `apiConfig.ts` modules (mobile/web/admin) are near-identical in
+  shape (`resolveApiBaseUrl`, `looksLikeUrl`, the two exported constants) but
+  deliberately not shared — mobile and web/admin have no cross-app package
+  today (the same reasoning `apps/web/src/lib/api.ts`'s own header gives for
+  its duplicated `targetFieldsFor`/`measuresFor` etc.), and web/admin are two
+  separate Next.js apps with no shared workspace package either. If a fourth
+  such module is ever needed, that is the point to extract a shared one.
+
+
 ## Open items / known gaps as of this entry
 
 
