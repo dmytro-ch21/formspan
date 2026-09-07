@@ -163,37 +163,115 @@ So, every time:
    `docker-compose.yml`, another app's files — is not yours to edit in
    passing. If you genuinely must (a temporary preview entry, say), restore it
    and *verify* the restore rather than assuming it.
-5. **Claim your migration number against `origin/main` at REBASE time, not
-   when you write it — and claim one STRICTLY ABOVE the highest there. Never
-   fill a gap below it.**
+5. **Every NEW migration is versioned by a UTC timestamp, not the next
+   sequential number.** `YYYYMMDDHHMMSS_description.up.sql` /
+   `YYYYMMDDHHMMSS_description.down.sql` — 14 digits, UTC, to the second, e.g.
+   `20260907143022_add_biometric_note.up.sql`. Generate it fresh, right before
+   you write the migration — `date -u +%Y%m%d%H%M%S` — never reuse one from an
+   earlier session or a stale branch.
 
-   **A migration numbered below the database's current version is SILENTLY
-   SKIPPED, and `migrate up` prints `done` and exits 0.** golang-migrate tracks
-   one integer and applies only what is strictly above it; the filenames look
-   like a list, the tool sees a number. Measured 2026-08-19 on a database
-   migrated from `main`: version 66, add a `000065`, run `up` → `"migrate: up:
-   done"`, exit 0, **version still 66, the new columns absent**. No error, no
-   warning, no dirty flag — the one output a deploy checks says it ran.
+   **This replaced sequential numbering (N149, #553) because two agents
+   branching from the same base could independently claim the same "next"
+   number** — this repo lost an afternoon to exactly that once (see the
+   `000043` account below, kept as history). A shared counter needs
+   coordination; a timestamp needs none — every agent's own clock is already
+   enough, and this repo now runs several agents on the board at once (see "At
+   most three at once" above).
 
-   **CI cannot catch this.** The `Backend (Go)` job migrates a throwaway
-   database that starts at zero and applies everything in order, so a gap is
-   invisible there and stays green forever. Staging and every developer machine
-   that has pulled `main` are already past the number, so the columns simply
-   never exist on any of them. The symptom surfaces much later and somewhere
-   else — every call failing on `column "…" does not exist` — which reads as a
-   code bug and is a numbering one.
+   **Existing sequential migrations (`000001` through roughly `000095`) are
+   UNTOUCHED — this is not a renumbering and never will be.** Renumbering
+   history would break every already-applied database's `schema_migrations`
+   row, for zero benefit. New work simply stops extending the sequence and
+   starts using timestamps instead.
 
-   **A gap in the sequence is not free space.** It is a number only a database
-   that has not yet reached it can ever apply. `main` currently has a permanent
-   harmless hole at `000065` for exactly this reason; leave it there. This rule
-   exists because the coordinating session told somebody to fill it, which is
-   the natural thing to suggest when a list has a hole in it.
- Two branches picking `000043` is not something
-   golang-migrate resolves — it refuses to start at all, breaking CI, local
-   dev and every deploy. And the collision is **invisible in
-   `git diff origin/main...HEAD`**, because a three-dot diff uses the merge
-   base, which predates the other branch. It only exists in the merged tree.
-   This has already happened once.
+   **The two schemes coexist correctly, in the same directory, forever, with
+   no transition logic — because golang-migrate compares versions as a plain
+   integer, never as a filename.** Verified directly against the vendored
+   source (`golang-migrate/migrate/v4@v4.19.1`), not assumed: `Migration.Version`
+   and `Migrate.Version()` are Go `uint` (64-bit on every platform this repo
+   builds for), `source/parse.go`'s own filename parser extracts the version
+   with `strconv.ParseUint(_, 10, 64)`, and the Postgres driver's
+   `schema_migrations` table declares `version bigint` (signed 64-bit,
+   comfortably wider than any 14-digit value). A 6-digit sequential version
+   tops out at `999999`; a 14-digit timestamp version starts at
+   `10000000000000`. The smallest possible timestamp version is therefore
+   always larger than the largest possible sequential one, so the very next
+   migration ever created — timestamp-based — is automatically "highest",
+   continuing the exact directional guarantee the old rule provided. This
+   repo's own `migrateguard` package (`backend/internal/platform/migrateguard`)
+   already parsed filenames with `strconv.ParseUint(digits, 10, 64)` before
+   this change, so nothing there needed editing either — it was 64-bit-safe by
+   construction.
+
+   **The silent-skip trap is UNCHANGED, and this paragraph is not weakened by
+   any of the above.** A migration numbered below the database's current
+   version is still SILENTLY SKIPPED, and `migrate up` still prints `done` and
+   exits 0. golang-migrate tracks one integer and applies only what is
+   strictly above it; the filenames look like a list, the tool sees a number.
+   Measured 2026-08-19 on a database migrated from `main`: version 66, add a
+   `000065`, run `up` → `"migrate: up: done"`, exit 0, **version still 66, the
+   new columns absent**. No error, no warning, no dirty flag — the one output a
+   deploy checks says it ran. **Re-measured 2026-09-07 against the NEW scheme,
+   live, with the real `golang-migrate` CLI and a real Postgres**: apply
+   `20260907120000_init` (version recorded: `20260907120000`), add
+   `20260907110000_add_column` — a genuinely earlier timestamp, the shape a
+   hand-typed or clock-drifted version would take — run `up` again →
+   `"no change"`, exit 0, version still `20260907120000`, the column never
+   added. Structurally identical to the 2026-08-19 measurement; a timestamp
+   makes landing below the current version far less LIKELY by accident (`date
+   -u` is always "now"), but does not make it impossible, and this is why: the
+   guard has to be about the number, not the format. See N149's
+   `docs/decisions/history.md` entry for the full transcript.
+
+   **The `Backend (Go)` CI job still cannot catch this** — it migrates a
+   throwaway database that starts at zero and applies everything in order, so
+   a too-low version is invisible there and stays green forever, exactly as
+   before. **What newly catches the mistake, before merge, is a separate
+   check: `scripts/check-migration-versions.py`** (`pnpm run
+   check:migration-versions` — in `verify` and in the `Scripts (Python)` CI
+   job, not the `Backend (Go)` one). For every migration
+   file new in a branch (absent at the merge base with `origin/main`), it
+   asserts the version is STRICTLY ABOVE the highest version already at that
+   merge base — which is precisely "would this be silently skipped" turned
+   into a question askable before anything is deployed. It also refuses a
+   duplicate version number across any two migrations regardless of scheme
+   (the one collision mode a timestamp does not fully close: two agents
+   generating a migration in the exact same wall-clock second) and an
+   unpaired `.up.sql`/`.down.sql`. This repo has no merge queue — CLAUDE.md's
+   "CI can run ZERO checks" section already documents that a `pull_request`
+   workflow re-runs on every push, including a rebase, and that a PR
+   conflicting with a moved `origin/main` gets zero NEW check runs until it is
+   rebased — so a plain per-push check here already gets re-validated
+   immediately before merge, by the same mechanism that already forces a
+   rebase before a stale PR can merge at all. No new merge-queue
+   infrastructure was built for this; N149's history.md entry states that
+   reasoning in full.
+
+   **This is a disruptive documentation change, on purpose, and the cost is
+   accepted rather than hidden.** Other sessions in this repo's fleet may be
+   reading the OLD sequential-numbering rule right now, mid-task, while this
+   change is in flight. That is not a bug this change causes: a sequential
+   migration a concurrent agent branched before this merged still applies
+   correctly after this merges (sorted correctly, per the numeric-coexistence
+   argument above) — it is only that agent's *next* migration, after it
+   rebases past this commit, that should use the new scheme.
+
+   **A gap in the OLD sequence is still not free space**, for exactly the
+   reason it never was: it is a number only a database that has not yet
+   reached it can ever apply. `main` still has a permanent harmless hole at
+   `000065`; leave it there. (The new scheme has no equivalent notion of a
+   "gap" — a timestamp is never claimed out of a shared, ordered list, so
+   there is nothing to leave a hole in.)
+
+   **Historical, kept for the reasoning it carries:** two branches once picked
+   the same sequential number, `000043`. golang-migrate does not resolve that
+   — it refuses to start at all, breaking CI, local dev and every deploy — and
+   the collision was **invisible in `git diff origin/main...HEAD`**, because a
+   three-dot diff uses the merge base, which predates the other branch; it
+   only existed in the merged tree. This is the exact failure mode timestamps
+   were adopted to make astronomically unlikely rather than merely
+   discouraged, and `check-migration-versions.py`'s duplicate check is what
+   now catches it mechanically if it ever happens again, under either scheme.
 6. **Clean up after the merge**: `git worktree remove <path>`,
    `git worktree prune`, `git branch -D <branch>`. Stale worktrees pin stale
    branches, hide dirty state, and make `git worktree list` useless as a

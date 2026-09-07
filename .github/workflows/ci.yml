@@ -305,6 +305,33 @@ jobs:
       - name: Task list integrity
         run: python3 scripts/check-tasks-integrity.py
 
+      # N149 (#553). Two agents branching from the same base can independently
+      # pick the same next migration version — this repo already lost an
+      # afternoon to exactly that collision once under the old sequential
+      # scheme (CLAUDE.md's `000043` account). `backend/migrations/` moved to
+      # timestamp-based versions for exactly this reason, but a timestamp
+      # scheme still has one reachable collision mode (two agents in the same
+      # wall-clock second) and one reachable ordering mistake (a hand-typed or
+      # clock-drifted version that is not actually above what is already
+      # merged) — both of which golang-migrate itself only discovers at
+      # RUNTIME, either by refusing to start (the collision) or by silently
+      # skipping the migration forever (the ordering mistake — CLAUDE.md's
+      # "Git / PR workflow" section has the full mechanism and the incident
+      # that first found it, for the old scheme; N149's history.md entry has
+      # the live reproduction against the new one).
+      #
+      # This is the merge-base half: a migration new in THIS branch must
+      # version-sort above everything already at the merge base with
+      # origin/main. Reuses the SAME `fetch-depth: 0` + `origin/main` ref this
+      # job already sets up two steps above, for `check-tasks-integrity.py` —
+      # no separate fetch needed. `--self-test` runs first (a real throwaway
+      # git repo reproducing the CLAUDE.md incident shape, plus the pairing
+      # and duplicate-version checks against synthetic fixtures) so a defect
+      # in the checker's own logic is caught before the real check is trusted
+      # to say there is none — same chaining as `check-expo-native-config.py`.
+      - name: Migration version safety (pairing, duplicates, above merge base)
+        run: python3 scripts/check-migration-versions.py --self-test && python3 scripts/check-migration-versions.py
+
       # The grip vocabulary is duplicated in Go, mobile and web because there
       # is no shared package to put it in. This is what makes that survivable:
       # drift fails here rather than reaching an athlete as a 400 they cannot
