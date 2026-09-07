@@ -28,6 +28,7 @@ package biometric
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 )
@@ -284,6 +285,72 @@ func HRSources() []HRSource {
 
 func (s HRSource) Valid() bool { return slices.Contains(hrSources, s) }
 
+// MaxHRWindowOverrideDrift bounds how far an explicit HR-window override
+// (ComputeSessionMetrics's windowStart/windowEnd parameters) may sit from the
+// owning session's own started_at — N522/#934. A sanity check, not a security
+// boundary: the samples read are always the caller's own, override or not.
+// It exists to reject an override that is obviously not "the same session,
+// mistimed" before it is stored as a real hr_window_start/hr_window_end.
+//
+// CORRECTION (backend-reviewer, N522 PR review): this comment previously
+// claimed the mobile client's own fit padding puts its worst case at "roughly
+// 14h from started_at at the far edge". That was wrong, measured directly
+// against apps/mobile/lib/hrWindowFit.ts's real shape: wideHRQueryWindow
+// bounds to the session's dated CALENDAR DAY (not a fixed offset from
+// started_at) plus WIDE_WINDOW_PADDING_HOURS on each side, so a session
+// started near local midnight puts the wide window's far edge up to
+// `24h + WIDE_WINDOW_PADDING_HOURS` (~25.9h) from started_at — ABOVE this
+// 24h bound. The client cannot close that gap by retuning its own padding
+// (the gap IS the padding, for any positive value), so
+// apps/mobile/lib/hrWindowFit.ts's fitHRWindow instead carries its own
+// HR_FIT_MAX_BACKEND_DRIFT_MS mirroring this exact constant, and declines a
+// fit that would land outside it rather than ever sending an override this
+// validation is guaranteed to reject. This bound itself is unchanged by that
+// correction — it exists to catch a client sending something unrelated to
+// the session at all, and 24h was and remains the deliberately-chosen value;
+// only the "why the client already respects it" justification was wrong.
+const MaxHRWindowOverrideDrift = 24 * time.Hour
+
+// ValidateHRWindowOverride checks a caller-supplied HR-window override
+// against the session it is for — N522/#934, the fix for a post-hoc-logged
+// session whose recorded started_at/ended_at do not reflect when the
+// athlete actually trained. Pure, so "is this a sane override" is
+// unit-testable without a database.
+//
+// windowStart and windowEnd must both be present or both be absent — one
+// without the other is a malformed request, not "no override" (see
+// Repository.ComputeSessionMetrics's own doc comment on why nil,nil is the
+// only legitimate "no override" shape). This NEVER touches sessions.started_at
+// or sessions.ended_at — it only changes which biometric_samples
+// ComputeSessionMetrics reads for THIS computation. That is deliberate:
+// "heart rate corroborates a session, it never replaces what the athlete
+// logged" (docs/testing — vola-athlete-ux's BJJ conventions), so the
+// athlete's own authored start/end time is never silently rewritten by an
+// inferred fit, no matter how confident.
+func ValidateHRWindowOverride(sessionStartedAt time.Time, windowStart, windowEnd *time.Time) error {
+	if windowStart == nil && windowEnd == nil {
+		return nil
+	}
+	if windowStart == nil || windowEnd == nil {
+		return fmt.Errorf("%w: hr_window_start and hr_window_end must both be set or both omitted", ErrInvalidInput)
+	}
+	if !windowStart.Before(*windowEnd) {
+		return fmt.Errorf("%w: hr_window_start must be before hr_window_end", ErrInvalidInput)
+	}
+	if absDuration(windowStart.Sub(sessionStartedAt)) > MaxHRWindowOverrideDrift ||
+		absDuration(windowEnd.Sub(sessionStartedAt)) > MaxHRWindowOverrideDrift {
+		return fmt.Errorf("%w: hr_window is too far from the session's own started_at", ErrInvalidInput)
+	}
+	return nil
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
 // HRMaxSource records whether the HRmax value that produced a session's
 // zones/TRIMP (SessionMetrics.HRMaxBPM) was an ESTIMATE or an OBSERVED
 // maximum — N483/#833, following design doc §3's HRmax sequencing directly:
@@ -380,6 +447,23 @@ type SessionMetrics struct {
 	HRSource    HRSource `json:"hr_source"`
 	SampleCount int      `json:"sample_count"`
 
+	// HRWindowStart and HRWindowEnd are the ACTUAL [start, end] this row's
+	// samples were queried from — always populated once a row exists, never
+	// nil. Ordinarily this equals the owning session's own
+	// started_at/ended_at (design doc §2's plain window read); it differs
+	// only when ComputeSessionMetrics's caller supplied an explicit
+	// windowStart/windowEnd override — N522/#934's fix for a post-hoc-logged
+	// session whose recorded times don't reflect when the athlete actually
+	// trained. Surfacing this on every row (not only overridden ones) is
+	// deliberate: it is exactly what would have made that incident
+	// immediately diagnosable rather than invisible — the athlete's watch
+	// had real data the whole time; nothing had ever queried for it in the
+	// right place, and there was nowhere to see what place HAD been queried.
+	// Never affects sessions.started_at/ended_at — see
+	// ValidateHRWindowOverride's doc comment.
+	HRWindowStart time.Time `json:"hr_window_start"`
+	HRWindowEnd   time.Time `json:"hr_window_end"`
+
 	ComputedAt time.Time `json:"computed_at"`
 	// RuleVersion matches what the design doc already requires of the
 	// recommendation engine (§8): store the inputs and the rule version
@@ -470,13 +554,33 @@ type Repository interface {
 	// ComputeSessionMetrics derives and stores session_metrics for a
 	// session the caller owns, from whatever biometric_samples already fall
 	// in that session's started_at/ended_at window (design doc §2's window
-	// read). hrMaxBPM must be > 0 — see Compute in trimp.go for why zones
-	// and TRIMP cannot be derived without it. hrMaxSource must be Valid()
-	// and records whether hrMaxBPM is the 220−age estimate or an observed
-	// maximum (design doc §3, HRMaxSource's doc comment) — stored alongside
-	// hrMaxBPM whenever zones actually get computed from it. hrSourceHint is
-	// downgraded to HRSourceNone whenever no heart-rate samples are found,
-	// regardless of what the caller claims — see HRSource's doc comment.
+	// read) — UNLESS windowStart/windowEnd override it (both non-nil; see
+	// ValidateHRWindowOverride). hrMaxBPM must be > 0 — see Compute in
+	// trimp.go for why zones and TRIMP cannot be derived without it.
+	// hrMaxSource must be Valid() and records whether hrMaxBPM is the
+	// 220−age estimate or an observed maximum (design doc §3, HRMaxSource's
+	// doc comment) — stored alongside hrMaxBPM whenever zones actually get
+	// computed from it. hrSourceHint is downgraded to HRSourceNone whenever
+	// no heart-rate samples are found, regardless of what the caller claims
+	// — see HRSource's doc comment.
+	//
+	// windowStart and windowEnd (N522/#934) let a caller ask this to look
+	// somewhere OTHER than the session's own recorded window — the fix for a
+	// post-hoc-logged BJJ session whose started_at/ended_at were computed
+	// from when the athlete tapped "Log it", not from when training actually
+	// happened, so the exact window a plain read would use finds nothing
+	// even though the watch has real data nearby. Both nil means "use the
+	// session's own window" (the ordinary case, and the only shape every
+	// caller before N522 ever passed); both non-nil is validated by
+	// ValidateHRWindowOverride and used as the query window INSTEAD of
+	// started_at/ended_at for both the heart-rate and active-energy queries.
+	// Exactly one non-nil is ErrInvalidInput. This NEVER writes to
+	// sessions.started_at/ended_at — seeing an override is not the same as
+	// correcting the session, deliberately (see ValidateHRWindowOverride's
+	// doc comment on "corroborates, never replaces"). The resolved window —
+	// override or default — is always returned on SessionMetrics.HRWindowStart/
+	// HRWindowEnd, so a client can show exactly what was queried regardless
+	// of which path produced it.
 	//
 	// ErrNotFound covers "no such session" and "not yours" alike — telling
 	// them apart would confirm which session ids are real. A session with
@@ -488,6 +592,7 @@ type Repository interface {
 	ComputeSessionMetrics(
 		ctx context.Context, userID, sessionID string,
 		hrMaxBPM float64, hrMaxSource HRMaxSource, hrSourceHint HRSource,
+		windowStart, windowEnd *time.Time,
 	) (SessionMetrics, error)
 
 	// GetSessionMetrics reads back a previously computed row.

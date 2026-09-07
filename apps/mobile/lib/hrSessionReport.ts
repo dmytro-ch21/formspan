@@ -69,6 +69,38 @@ import type { ExerciseHR, SessionMetrics } from './biometric';
 
 export const HR_REPORT_MIN_SAMPLES = HR_LIMITED_SAMPLE_THRESHOLD;
 
+/**
+ * How far apart the queried HR window and the session's own logged
+ * started_at/ended_at have to be, on EITHER boundary, before it is worth
+ * showing the two side by side — N522/#934, the decision behind the
+ * session-detail screen's diagnostic line. 10 minutes: comfortably above
+ * ordinary clock noise (a session finished a minute or two after the timer
+ * reads, say — not worth a line every time), while far below what a
+ * wide-window fit actually correcting a wrong anchor produces (this
+ * ticket's own incident was off by roughly two HOURS). Below this, the
+ * queried window is shown but nothing calls out a difference; at or above
+ * it, this is exactly the mismatch that made the original bug invisible —
+ * surfacing it is the point.
+ */
+export const HR_WINDOW_MISMATCH_THRESHOLD_MINUTES = 10;
+
+/**
+ * Whether `hrWindow` differs meaningfully from the session's own logged
+ * started_at/ended_at — pure, so the "is this worth a diagnostic line"
+ * decision is unit-testable without rendering anything.
+ */
+export function hrWindowDiffersFromSession(
+  hrWindow: HRQueriedWindow,
+  sessionStartedAt: string,
+  sessionEndedAt: string,
+  thresholdMinutes: number = HR_WINDOW_MISMATCH_THRESHOLD_MINUTES,
+): boolean {
+  const thresholdMs = thresholdMinutes * 60_000;
+  const startDiffMs = Math.abs(new Date(hrWindow.start).getTime() - new Date(sessionStartedAt).getTime());
+  const endDiffMs = Math.abs(new Date(hrWindow.end).getTime() - new Date(sessionEndedAt).getTime());
+  return startDiffMs > thresholdMs || endDiffMs > thresholdMs;
+}
+
 export type HRZoneRow = {
   zone: number;
   label: string;
@@ -97,6 +129,14 @@ export type HRExerciseRow = {
   sampleCount: number;
 };
 
+/** The ACTUAL window a report's evidence was queried from — N522/#934.
+ *  Ordinarily equals the owning session's own started_at/ended_at; differs
+ *  only when enrichment used a wide-window fit instead (see
+ *  `lib/hrWindowFit.ts`). Carried on every non-`unavailable` state, since
+ *  `SessionMetrics.hr_window_start/end` are themselves always present once
+ *  a metrics row exists at all. */
+export type HRQueriedWindow = { start: string; end: string };
+
 export type HRSessionReportView =
   | { state: 'unavailable' }
   | {
@@ -105,6 +145,7 @@ export type HRSessionReportView =
       avgHR: number | null;
       maxHR: number | null;
       sampleCount: number;
+      hrWindow: HRQueriedWindow;
     }
   | {
       state: 'full';
@@ -115,6 +156,7 @@ export type HRSessionReportView =
       zones: HRZoneRow[];
       totalZoneMinutes: number;
       effectiveness: SessionEffectivenessSummary | null;
+      hrWindow: HRQueriedWindow;
       /**
        * The per-exercise breakdown — N490/#851. Empty when the caller passed
        * no `exerciseHR` (BJJ/running today, which have no per-exercise
@@ -233,7 +275,14 @@ function buildZoneRows(timeInZones: Record<string, number>): HRZoneRow[] {
 export function buildHRSessionReport(
   metrics: Pick<
     SessionMetrics,
-    'avg_hr_bpm' | 'max_hr_bpm' | 'trimp' | 'time_in_zones' | 'hr_source' | 'sample_count'
+    | 'avg_hr_bpm'
+    | 'max_hr_bpm'
+    | 'trimp'
+    | 'time_in_zones'
+    | 'hr_source'
+    | 'sample_count'
+    | 'hr_window_start'
+    | 'hr_window_end'
   > | null,
   sessionRPE: number | null,
   exerciseHR: Pick<ExerciseHR, 'exercise_id' | 'avg_hr_bpm' | 'max_hr_bpm' | 'sample_count'>[] | null = null,
@@ -246,6 +295,8 @@ export function buildHRSessionReport(
   // no figures should still say nothing rather than fabricate one.
   if (metrics.avg_hr_bpm == null && metrics.max_hr_bpm == null) return { state: 'unavailable' };
 
+  const hrWindow: HRQueriedWindow = { start: metrics.hr_window_start, end: metrics.hr_window_end };
+
   if (metrics.sample_count < HR_REPORT_MIN_SAMPLES) {
     return {
       state: 'limited',
@@ -253,6 +304,7 @@ export function buildHRSessionReport(
       avgHR: metrics.avg_hr_bpm,
       maxHR: metrics.max_hr_bpm,
       sampleCount: metrics.sample_count,
+      hrWindow,
     };
   }
 
@@ -263,6 +315,7 @@ export function buildHRSessionReport(
       avgHR: metrics.avg_hr_bpm,
       maxHR: metrics.max_hr_bpm,
       sampleCount: metrics.sample_count,
+      hrWindow,
     };
   }
 
@@ -292,6 +345,7 @@ export function buildHRSessionReport(
     zones,
     totalZoneMinutes,
     effectiveness,
+    hrWindow,
     perExercise,
   };
 }

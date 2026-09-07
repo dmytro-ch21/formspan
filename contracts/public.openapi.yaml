@@ -1916,7 +1916,17 @@ components:
 
     SessionMetrics:
       type: object
-      required: [session_id, time_in_zones, hr_source, sample_count, computed_at, rule_version]
+      required:
+        [
+          session_id,
+          time_in_zones,
+          hr_source,
+          sample_count,
+          computed_at,
+          rule_version,
+          hr_window_start,
+          hr_window_end,
+        ]
       description: >
         Per-session derived enrichment — average/peak heart rate, a
         five-zone breakdown, and one Edwards' TRIMP load number — computed
@@ -1996,6 +2006,26 @@ components:
         sample_count:
           type: integer
           description: How many heart_rate samples this row was computed from.
+        hr_window_start:
+          type: string
+          format: date-time
+          readOnly: true
+          description: >
+            The ACTUAL start of the window this row's samples were queried
+            from — N522/#934. Always present. Ordinarily equals the owning
+            session's own started_at (design doc §2's plain window read); it
+            differs only when the compute call's own hr_window_start/
+            hr_window_end request fields overrode it, which never changes
+            the session's own recorded started_at/ended_at (see that
+            request field's own description). Surfacing this is what makes
+            a mismatch between "when the session was logged" and "when this
+            row's heart-rate evidence was actually queried from" visible
+            rather than invisible.
+        hr_window_end:
+          type: string
+          format: date-time
+          readOnly: true
+          description: The end of the window described by hr_window_start.
         computed_at: { type: string, format: date-time, readOnly: true }
         rule_version:
           type: integer
@@ -9728,6 +9758,28 @@ paths:
                     a legal claim here — it is what the server derives
                     itself from an empty result, never something a caller
                     asks for.
+                hr_window_start:
+                  type: string
+                  format: date-time
+                  description: >
+                    N522/#934 — optionally ask this computation to look
+                    somewhere OTHER than the session's own started_at/
+                    ended_at, e.g. a mobile client's own wide-window fit for
+                    a post-hoc-logged session whose recorded times don't
+                    reflect when the athlete actually trained. Must be paired
+                    with hr_window_end — one without the other is 400. Both
+                    omitted (the ordinary case) uses the session's own
+                    window. Bounded to within 24h of the session's own
+                    started_at (400 otherwise) — a sanity check, not a
+                    security boundary, since the samples read are always the
+                    caller's own either way. This NEVER changes the
+                    session's own started_at/ended_at — "heart rate
+                    corroborates a session, it never replaces what the
+                    athlete logged."
+                hr_window_end:
+                  type: string
+                  format: date-time
+                  description: Paired with hr_window_start — see its description.
       responses:
         "200":
           description: The computed (and stored) metrics.
@@ -9741,7 +9793,9 @@ paths:
         "400":
           description: >-
             hr_max_bpm out of range; hr_max_source not estimated/observed;
-            hr_source not workout/window; or the session has no ended_at yet.
+            hr_source not workout/window; hr_window_start/hr_window_end not
+            both present, not RFC3339, end before start, or too far from the
+            session's own started_at; or the session has no ended_at yet.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

@@ -25,6 +25,8 @@ function metrics(overrides: Partial<SessionMetrics> = {}): SessionMetrics {
     time_in_zones: {},
     hr_source: 'window',
     sample_count: 40,
+    hr_window_start: '2026-09-01T11:00:00Z',
+    hr_window_end: '2026-09-01T12:00:00Z',
     computed_at: '2026-09-01T12:00:00Z',
     rule_version: 1,
     ...overrides,

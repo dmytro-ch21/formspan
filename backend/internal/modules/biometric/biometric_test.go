@@ -234,3 +234,62 @@ func TestHRMaxSource_WireValues(t *testing.T) {
 		t.Errorf("HRMaxSourceObserved = %q, want %q", HRMaxSourceObserved, "observed")
 	}
 }
+
+// N522/#934 — ValidateHRWindowOverride, pure so "is this a sane override"
+// needs no database.
+func TestValidateHRWindowOverride(t *testing.T) {
+	sessionStart := time.Date(2026, 9, 1, 18, 0, 0, 0, time.UTC)
+	t.Run("both nil is no override", func(t *testing.T) {
+		if err := ValidateHRWindowOverride(sessionStart, nil, nil); err != nil {
+			t.Fatalf("got %v, want nil", err)
+		}
+	})
+	t.Run("a same-day fit within the drift bound is accepted", func(t *testing.T) {
+		ws := sessionStart.Add(-7 * time.Hour)
+		we := ws.Add(82 * time.Minute)
+		if err := ValidateHRWindowOverride(sessionStart, &ws, &we); err != nil {
+			t.Fatalf("got %v, want nil (this is exactly the incident's real shape)", err)
+		}
+	})
+	t.Run("start without end is invalid", func(t *testing.T) {
+		ws := sessionStart.Add(-time.Hour)
+		if err := ValidateHRWindowOverride(sessionStart, &ws, nil); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("got %v, want ErrInvalidInput", err)
+		}
+	})
+	t.Run("end without start is invalid", func(t *testing.T) {
+		we := sessionStart.Add(time.Hour)
+		if err := ValidateHRWindowOverride(sessionStart, nil, &we); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("got %v, want ErrInvalidInput", err)
+		}
+	})
+	t.Run("end at or before start is invalid", func(t *testing.T) {
+		ws, we := sessionStart, sessionStart
+		if err := ValidateHRWindowOverride(sessionStart, &ws, &we); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("equal start/end: got %v, want ErrInvalidInput", err)
+		}
+		we2 := sessionStart.Add(-time.Minute)
+		if err := ValidateHRWindowOverride(sessionStart, &ws, &we2); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("end before start: got %v, want ErrInvalidInput", err)
+		}
+	})
+	t.Run("exactly at the drift bound is accepted, one tick past is not", func(t *testing.T) {
+		ws := sessionStart.Add(-MaxHRWindowOverrideDrift)
+		we := ws.Add(time.Hour)
+		if err := ValidateHRWindowOverride(sessionStart, &ws, &we); err != nil {
+			t.Fatalf("exactly at the bound: got %v, want nil", err)
+		}
+		wsTooFar := ws.Add(-time.Second)
+		weTooFar := wsTooFar.Add(time.Hour)
+		if err := ValidateHRWindowOverride(sessionStart, &wsTooFar, &weTooFar); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("one second past the bound: got %v, want ErrInvalidInput", err)
+		}
+	})
+	t.Run("far in the future is rejected the same as far in the past", func(t *testing.T) {
+		ws := sessionStart.Add(48 * time.Hour)
+		we := ws.Add(time.Hour)
+		if err := ValidateHRWindowOverride(sessionStart, &ws, &we); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("got %v, want ErrInvalidInput", err)
+		}
+	})
+}

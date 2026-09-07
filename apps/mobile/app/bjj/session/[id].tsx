@@ -771,6 +771,14 @@ export default function BjjSessionScreen() {
           metrics={hrMetrics}
           sessionRPE={detail?.session_rpe ?? null}
           hrTimeline={hrTimeline}
+          // N522/#934: lets the report show a diagnostic line when the
+          // heart-rate window it actually queried differs meaningfully
+          // from this session's own logged started_at/ended_at — see
+          // HRSessionReport's own doc comment. Silent whenever the two
+          // already agree, which is every live-tracked session and every
+          // post-hoc one whose exact window already had real evidence.
+          sessionStartedAt={session.started_at}
+          sessionEndedAt={session.ended_at}
           testID="bjj-session-hr"
         />
       )}

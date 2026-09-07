@@ -27,13 +27,29 @@ jest.mock('expo-crypto', () => ({ randomUUID: () => `uuid-${++mockUuidSeq}` }));
 
 let mockSupported = true;
 let mockHRSamples: HealthKitQuantitySample[] = [];
+// N522/#934: the wide-window fallback query is a SEPARATE, much longer-span
+// call than the exact session-window one — distinguishing on span length
+// (rather than call order/count) models the real difference between the two
+// windows (`sessionHRWindow` vs. `wideHRQueryWindow`) without coupling this
+// mock to how many times either is invoked.
+const WIDE_SPAN_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+let mockWideHRSamples: HealthKitQuantitySample[] = [];
 let mockVO2MaxSamples: HealthKitQuantitySample[] = [];
+// N522 PR review (frontend-reviewer): "never runs the wide-window fallback"
+// used to be checked only by asserting the RESULT didn't reflect the wide
+// samples — true even if the wide query ran and simply failed to fit, which
+// is a real but different bug (an unnecessary HealthKit query, not an
+// incorrect override). This spy lets the test assert the CALL itself never
+// happened.
+const mockQueryHeartRateSamples = jest.fn((start: Date, end: Date) =>
+  Promise.resolve(end.getTime() - start.getTime() > WIDE_SPAN_THRESHOLD_MS ? mockWideHRSamples : mockHRSamples),
+);
 jest.mock('../healthkit', () => {
   const real = jest.requireActual('../healthkit');
   return {
     ...real,
     isHealthKitSupported: () => mockSupported,
-    queryHeartRateSamples: () => Promise.resolve(mockHRSamples),
+    queryHeartRateSamples: (start: Date, end: Date) => mockQueryHeartRateSamples(start, end),
     queryVO2MaxSamples: () => Promise.resolve(mockVO2MaxSamples),
   };
 });
@@ -85,10 +101,12 @@ beforeEach(async () => {
   mockUuidSeq = 0;
   mockSupported = true;
   mockHRSamples = [];
+  mockWideHRSamples = [];
   mockVO2MaxSamples = [];
   mockDateOfBirth = '1990-01-01';
   mockPutSamples.mockClear();
   mockComputeMetrics.mockClear();
+  mockQueryHeartRateSamples.mockClear();
   mockPutSamples.mockResolvedValue({ samples: [] });
   mockComputeMetrics.mockImplementation(() =>
     Promise.resolve({
@@ -294,6 +312,126 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     await syncBiometricEnrichment(USER, getToken);
 
     expect(await sessionsNeedingBiometricSync('another_user', 10)).toHaveLength(0);
+  });
+});
+
+describe('syncBiometricEnrichment — wide-window HR fit fallback (N522/#934)', () => {
+  // A step of 5 minutes across a wide span, elevated (150 bpm) only inside
+  // [blockStartISO, blockEndISO) and at a resting baseline (68 bpm)
+  // everywhere else — enough real oscillation-free structure to prove the
+  // WIRING (fit found -> filtered samples uploaded -> override passed to
+  // computeSessionMetrics), which is this describe block's job. The
+  // fitting algorithm's own precision, ambiguity handling and empty-case
+  // honesty are covered exhaustively, against the real incident's shape,
+  // in `hrWindowFit.test.ts` — this only has to prove biometricSync wires
+  // that algorithm in correctly.
+  function samplesWithElevatedBlock(blockStartISO: string, blockEndISO: string): HealthKitQuantitySample[] {
+    const out: HealthKitQuantitySample[] = [];
+    const start = new Date('2026-09-01T15:00:00.000Z').getTime();
+    const end = new Date('2026-09-01T22:00:00.000Z').getTime();
+    const blockStart = new Date(blockStartISO).getTime();
+    const blockEnd = new Date(blockEndISO).getTime();
+    const step = 5 * 60_000;
+    for (let t = start; t <= end; t += step) {
+      const elevated = t >= blockStart && t < blockEnd;
+      out.push(hrSample({ uuid: `wide-${t}`, measuredAt: new Date(t).toISOString(), value: elevated ? 150 : 68 }));
+    }
+    return out;
+  }
+
+  it('when the exact window is empty but the wide window fits a real elevated block, uploads only the fitted samples and computes with an explicit window override', async () => {
+    mockHRSamples = []; // the session's own (wrong) logged window finds nothing
+    mockWideHRSamples = samplesWithElevatedBlock('2026-09-01T18:00:00.000Z', '2026-09-01T19:00:00.000Z');
+    // The session's own logged window: same DURATION as the real block (60
+    // min), wrong CLOCK PLACEMENT (2 hours later) — exactly this ticket's
+    // incident shape.
+    await finishedSession({ started_at: '2026-09-01T20:00:00.000Z', ended_at: '2026-09-01T21:00:00.000Z' });
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    const [, uploaded] = mockPutSamples.mock.calls[0];
+    // A real SUBSET of the fitted window's neighbourhood — not the whole
+    // wide window's worth of baseline readings alongside the real block (a
+    // fitted window's own boundary sample can legitimately be a
+    // transitional, non-elevated reading — see this fixture's own 19:00
+    // sample — the property that matters is that this is a fit, not a dump
+    // of everything the wide query returned).
+    expect(uploaded.length).toBeGreaterThan(0);
+    expect(uploaded.length).toBeLessThan(mockWideHRSamples.length);
+    expect(uploaded.some((s: { value: number }) => s.value === 150)).toBe(true);
+
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    const [, , , , hrSource, windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(hrSource).toBe('window');
+    expect(windowOverride).not.toBeNull();
+    expect(typeof windowOverride.start).toBe('string');
+    expect(typeof windowOverride.end).toBe('string');
+    // The override is the REAL block's neighbourhood, not the session's own
+    // (wrong) logged window it replaces.
+    expect(windowOverride.start).not.toBe('2026-09-01T20:00:00.000Z');
+    const overrideStartMs = new Date(windowOverride.start).getTime();
+    const overrideEndMs = new Date(windowOverride.end).getTime();
+    expect(overrideStartMs).toBeGreaterThanOrEqual(new Date('2026-09-01T17:55:00.000Z').getTime());
+    expect(overrideStartMs).toBeLessThanOrEqual(new Date('2026-09-01T18:05:00.000Z').getTime());
+    expect(overrideEndMs).toBeGreaterThanOrEqual(new Date('2026-09-01T18:55:00.000Z').getTime());
+    expect(overrideEndMs).toBeLessThanOrEqual(new Date('2026-09-01T19:05:00.000Z').getTime());
+  });
+
+  it('when the wide window is genuinely empty (flat resting HR), falls back to compute-only exactly as before — no override, no upload', async () => {
+    mockHRSamples = [];
+    mockWideHRSamples = samplesWithElevatedBlock('2099-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z'); // never elevated
+    await finishedSession({ started_at: '2026-09-01T20:00:00.000Z', ended_at: '2026-09-01T21:00:00.000Z' });
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockPutSamples).not.toHaveBeenCalled();
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    const [, , , , hrSource, windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(hrSource).toBe('window'); // still the claim; the server derives 'none' from zero samples
+    expect(windowOverride).toBeFalsy();
+  });
+
+  it('when the wide window has two comparably-good, well-separated elevated blocks, declines to force a fit — no override, no upload', async () => {
+    mockHRSamples = [];
+    // Two real-looking blocks, ~3 hours apart, each the same duration as
+    // the session's own logged window — genuinely ambiguous: nothing here
+    // says which one this session actually was.
+    const a = samplesWithElevatedBlock('2026-09-01T16:00:00.000Z', '2026-09-01T17:00:00.000Z');
+    const b = samplesWithElevatedBlock('2026-09-01T19:30:00.000Z', '2026-09-01T20:30:00.000Z');
+    // Merge: wherever either fixture reports elevated, keep it elevated.
+    mockWideHRSamples = a.map((s, i) => ({
+      ...s,
+      value: s.value === 150 || b[i]?.value === 150 ? 150 : 68,
+    }));
+    await finishedSession({ started_at: '2026-09-01T22:00:00.000Z', ended_at: '2026-09-01T23:00:00.000Z' });
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockPutSamples).not.toHaveBeenCalled();
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toBeFalsy();
+  });
+
+  it('never runs the wide-window fallback when the exact window already found real samples', async () => {
+    mockHRSamples = [hrSample()];
+    mockWideHRSamples = samplesWithElevatedBlock('2026-09-01T18:00:00.000Z', '2026-09-01T19:00:00.000Z');
+    await finishedSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toBeFalsy();
+    // N522 PR review (frontend-reviewer): the assertion above alone is
+    // satisfied even if the fallback query ran and simply failed to fit —
+    // a real but DIFFERENT bug (an unnecessary HealthKit query on the
+    // common, non-broken path) that this test's own name promises to catch.
+    // Assert the call itself, not merely its absence from the result.
+    const ranAWideQuery = mockQueryHeartRateSamples.mock.calls.some(
+      ([start, end]: [Date, Date]) => end.getTime() - start.getTime() > WIDE_SPAN_THRESHOLD_MS,
+    );
+    expect(ranAWideQuery).toBe(false);
   });
 });
 

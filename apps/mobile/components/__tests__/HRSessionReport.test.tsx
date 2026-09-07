@@ -24,6 +24,8 @@ function metrics(overrides: Partial<SessionMetrics> = {}): SessionMetrics {
     time_in_zones: { '2': 10, '3': 20, '4': 10 },
     hr_source: 'window',
     sample_count: 40,
+    hr_window_start: '2026-09-01T11:00:00Z',
+    hr_window_end: '2026-09-01T12:00:00Z',
     computed_at: '2026-09-01T12:00:00Z',
     rule_version: 1,
     ...overrides,
@@ -41,6 +43,53 @@ test('hr_source "none" renders the same unavailable state as no metrics — no f
   render(<HRSessionReport metrics={metrics({ hr_source: 'none', avg_hr_bpm: null, max_hr_bpm: null, trimp: null, sample_count: 0 })} />);
   expect(screen.getByTestId('hr-session-report-unavailable')).toBeTruthy();
   expect(screen.getByText(/no heart-rate data/i)).toBeTruthy();
+});
+
+describe('the queried-window diagnostic (N522/#934)', () => {
+  test('renders nothing when the session times are not passed at all', () => {
+    render(<HRSessionReport metrics={metrics()} />);
+    expect(screen.queryByTestId('hr-session-report-window-note')).toBeNull();
+  });
+
+  test('renders nothing when the queried window matches the session (the ordinary case)', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics({ hr_window_start: '2026-09-01T11:00:00Z', hr_window_end: '2026-09-01T12:00:00Z' })}
+        sessionStartedAt="2026-09-01T11:00:00Z"
+        sessionEndedAt="2026-09-01T12:00:00Z"
+      />,
+    );
+    expect(screen.queryByTestId('hr-session-report-window-note')).toBeNull();
+  });
+
+  test('shows both windows once the mismatch is real — this ticket\'s own incident shape', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics({ hr_window_start: '2026-09-07T11:14:00Z', hr_window_end: '2026-09-07T12:44:00Z' })}
+        sessionStartedAt="2026-09-07T14:00:00Z"
+        sessionEndedAt="2026-09-07T15:30:00Z"
+      />,
+    );
+    expect(screen.getByTestId('hr-session-report-window-note')).toBeTruthy();
+    expect(screen.getByText(/heart rate found/i)).toBeTruthy();
+    expect(screen.getByText(/session logged/i)).toBeTruthy();
+  });
+
+  test('also renders on the limited state, not only full', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics({
+          sample_count: 2,
+          hr_window_start: '2026-09-07T11:14:00Z',
+          hr_window_end: '2026-09-07T12:44:00Z',
+        })}
+        sessionStartedAt="2026-09-07T14:00:00Z"
+        sessionEndedAt="2026-09-07T15:30:00Z"
+      />,
+    );
+    expect(screen.getByTestId('hr-session-report-limited')).toBeTruthy();
+    expect(screen.getByTestId('hr-session-report-window-note')).toBeTruthy();
+  });
 });
 
 test('sparse samples renders avg/max but not TRIMP, zones, or an effectiveness card', () => {

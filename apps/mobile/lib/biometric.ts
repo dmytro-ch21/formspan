@@ -153,6 +153,18 @@ export type SessionMetrics = {
   time_in_zones: Record<string, number>;
   hr_source: HRSource;
   sample_count: number;
+  /** The ACTUAL [start, end] this row's samples were queried from —
+   *  N522/#934. Always present. Ordinarily equals the owning session's own
+   *  started_at/ended_at (design doc §2's plain window read); it differs
+   *  only when `computeSessionMetrics` was called with a `windowOverride`
+   *  (see that function's own doc comment) — this NEVER changes the
+   *  session's own recorded started_at/ended_at. Surfacing this is what
+   *  makes a mismatch between "when the session was logged" and "when this
+   *  row's evidence was actually queried from" visible on-screen rather
+   *  than invisible, which is exactly what would have made N522's own
+   *  incident immediately diagnosable. */
+  hr_window_start: string;
+  hr_window_end: string;
   computed_at: string;
   rule_version: number;
 };
@@ -622,6 +634,18 @@ export async function listBiometricSamples(
  * file's own doc comment on the bug that went unnoticed until this
  * consolidation. Every caller today passes `'estimated'`, since
  * `hrMaxFromDateOfBirth` is the only HRmax producer in this app.
+ *
+ * `windowOverride` (N522/#934) asks the SERVER to derive this session's
+ * metrics from a window other than its own started_at/ended_at — the wire
+ * half of `lib/hrWindowFit.ts`'s wide-window fit: `biometricSync.ts` passes
+ * this only when the exact-window query found nothing and a fit was
+ * confident enough to trust (see that file's own doc comment). Omitted
+ * (the ordinary case, including every 'workout'/'window' call this app made
+ * before N522) means "use the session's own window" — this NEVER touches
+ * the session's own recorded started_at/ended_at either way; see
+ * `hrWindowFit.ts`'s doc comment for why that distinction is the whole
+ * point ("heart rate corroborates a session, it never replaces what the
+ * athlete logged").
  */
 export async function computeSessionMetrics(
   getToken: TokenGetter,
@@ -629,13 +653,21 @@ export async function computeSessionMetrics(
   hrMaxBPM: number,
   hrMaxSource: HRMaxSource,
   hrSource: Extract<HRSource, 'workout' | 'window'>,
+  windowOverride?: { start: string; end: string } | null,
 ): Promise<SessionMetrics> {
   const res = await apiRequest<{ metrics: SessionMetrics }>(
     getToken,
     `/biometric/sessions/${sessionID}/metrics`,
     {
       method: 'POST',
-      body: JSON.stringify({ hr_max_bpm: hrMaxBPM, hr_max_source: hrMaxSource, hr_source: hrSource }),
+      body: JSON.stringify({
+        hr_max_bpm: hrMaxBPM,
+        hr_max_source: hrMaxSource,
+        hr_source: hrSource,
+        ...(windowOverride
+          ? { hr_window_start: windowOverride.start, hr_window_end: windowOverride.end }
+          : {}),
+      }),
     },
   );
   return res.metrics;

@@ -79,6 +79,8 @@ const mockComputeSessionMetrics = jest.fn((...args: unknown[]) => {
     time_in_zones: {},
     hr_source: 'none',
     sample_count: 0,
+    hr_window_start: new Date().toISOString(),
+    hr_window_end: new Date().toISOString(),
     computed_at: new Date().toISOString(),
     rule_version: 1,
     ...mockComputedMetrics,
