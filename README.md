@@ -122,7 +122,9 @@ One command, before every push:
 pnpm run verify
 ```
 
-It chains every check with `&&` deliberately — run as separate lines, a failing typecheck scrolls past and the commit happens anyway. It covers the palette and icon guards, Python syntax, gofmt/vet/build, the OpenAPI spec, and lint/typecheck/test for mobile, web and admin. Everything is stdlib or already-installed tooling, so there is nothing extra to set up.
+It chains every check with `&&` deliberately — run as separate lines, a failing typecheck scrolls past and the commit happens anyway. It covers the palette and icon guards, Python syntax, gofmt/vet/build, `govulncheck` against both Go modules (backend and engine — reachable-vulnerability scanning, not a bare CVE-in-go.sum check), the OpenAPI spec, and lint/typecheck/test for mobile, web and admin. Everything is stdlib or already-installed tooling except `govulncheck` itself, fetched on demand via `go run` at a pinned version, so there is nothing to install ahead of time.
+
+Repository-level supply-chain automation lives in `.github/dependabot.yml` (weekly grouped dependency updates) and three more workflows: `dependency-review.yml` and `gitleaks.yml` are required PR checks (a high/critical advisory or a matched secret fails the build); `codeql.yml` runs on pushes to `main` and weekly rather than on every PR, since static analysis at that depth is not something every PR should pay the latency for. See docs/decisions/history.md's N166 entry for the gating thresholds and the reasoning behind each.
 
 One check in there is about pull requests rather than code. `check:pr-work` runs
 the self-test for the `PR has work` workflow, which **refuses a PR that is marked

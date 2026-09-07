@@ -1,6 +1,6 @@
 module github.com/dmytro-ch21/vola/backend
 
-go 1.26.1
+go 1.26.8
 
 require (
 	github.com/MicahParks/jwkset v0.11.1

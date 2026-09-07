@@ -88,6 +88,34 @@ jobs:
         # still bounds a hang at a third of the default.
         run: go test -p 1 -timeout 3m ./...
 
+      # N166 (#543). REQUIRED, part of this job rather than a separate one —
+      # no new check NAME, so no EXPECTED_CHECK_RUNS change. Pinned to an
+      # exact govulncheck version (matching `check:govulncheck-api` in
+      # package.json, which is the same command and is what `pnpm run
+      # verify` runs locally) rather than `@latest`, for the same
+      # reproducibility reason every other pinned tool in this repo is
+      # pinned.
+      #
+      # THE GATING THRESHOLD: govulncheck's own design point is call-graph
+      # REACHABILITY — by default it reports only vulnerabilities in code
+      # this binary's call graph actually reaches, not merely a vulnerable
+      # version sitting in go.sum unused. That already is "severe and
+      # exploitable" for this repo's purposes: a reachable vulnerability in
+      # code the API really runs is qualitatively different from a naive
+      # CVE-in-go.sum scan, which would flag dependencies never called. No
+      # additional severity filter is layered on top — govulncheck has no
+      # severity field to filter on; reachability is the filter. Exits
+      # non-zero (3) only when it finds one.
+      #
+      # Mutation-checked for real while building this, not merely reasoned
+      # about: `backend/go.mod`'s `go 1.26.1` had 15 reachable stdlib CVEs
+      # (GO-2026-6218 and friends) that this exact command caught before the
+      # toolchain bump alongside it in this PR, and reports zero after —
+      # see docs/decisions/history.md's N166 entry for the exit codes
+      # measured both ways.
+      - name: Vulnerability scan (govulncheck)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
       # The dev engine (engine/) is a separate Go module, deliberately outside
       # backend/: this Dockerfile builds every binary under backend/cmd/... into
       # the image Railway deploys, so engine code there would ship inside the
@@ -109,8 +137,42 @@ jobs:
           go build ./...
           go test -timeout 3m ./...
 
+      # Same tool, same pin, same threshold reasoning as the backend's step
+      # above — engine/ is a second, separate Go module with its own go.sum
+      # (see the comment on the step above it), so it needs its own scan.
+      # Also mutation-checked live: engine's go.sum pinned
+      # golang.org/x/text v0.29.0, reachable via pgx's connection setup
+      # (GO-2026-5970), caught here before the bump alongside it in this PR.
+      - name: Engine vulnerability scan (govulncheck)
+        working-directory: engine
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
       - name: Build Docker image
         run: docker build -f Dockerfile -t vola-api:ci .
+
+      # N166 (#543). Scans the image just built, not a registry pull, so
+      # there is nothing new to configure — Railway deploys this exact image.
+      #
+      # THE GATING THRESHOLD, matching the dependency-review job's
+      # `fail-on-severity: high` so a package's severity means the same thing
+      # everywhere it is judged in this repo: CRITICAL and HIGH fail the
+      # build; MEDIUM/LOW/UNKNOWN are omitted from `severity` entirely, so
+      # they are not even reported here, let alone gating. `ignore-unfixed`
+      # is the second half of "exploitable, not merely present" — a
+      # CRITICAL CVE in `alpine:3.20`'s base packages with no available fix
+      # yet is not something this PR (or any PR) can act on, and gating on it
+      # would be a release blocker nobody can clear, which is exactly the
+      # "every informational CVE is a release blocker" failure the ticket
+      # asks this NOT to be. A fixed CRITICAL/HIGH still fails, because
+      # "fixed" is exactly the case a dependency bump resolves.
+      - name: Container vulnerability scan (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: vola-api:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
 
   web:
     name: Web (Next.js)

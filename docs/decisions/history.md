@@ -60829,7 +60829,235 @@ Railway's current documented behavior in this session; either way, pointing
 the one slot at the stricter check is correct, since a live-but-not-ready
 process should not receive traffic under either interpretation.
 
+## 2026-09-06 — N166/#543: repository-level dependency/security automation — Dependabot, dependency review, CodeQL, govulncheck, Gitleaks, Trivy
 
+Milestone A (production safety/security). The ticket's own evidence was
+right: this repo had no Dependabot/Renovate, no CodeQL, no dependency-review,
+no secret scan, no `govulncheck`, no container scan. Six tools landed, each
+with an explicit gating threshold rather than a vague "high severity", and
+each decision about PR-blocking vs. scheduled/informational is recorded here
+because the ticket asked for that explicitly.
+
+**Dependabot (`.github/dependabot.yml`).** Four ecosystem entries cover the
+ticket's literal ask, plus two more added and called out as additions rather
+than silently expanded scope:
+
+- `gomod` at `/backend` — weekly, minor/patch grouped into one PR, majors
+  left standalone.
+- `gomod` at `/engine` — **not** one of the ticket's "four workspaces".
+  `engine/` is a second, separate Go module (deliberately outside `backend/`
+  — see CLAUDE.md's module-pattern section) with its own `go.sum`, and it
+  turned out to matter: see the govulncheck section below.
+- `npm` at `/` (repo root), **one entry, not three.** Read `pnpm-workspace.yaml`
+  and confirmed by `find . -name pnpm-lock.yaml` before deciding this: `apps/*`
+  is one pnpm workspace sharing exactly ONE lockfile at the repo root. Dependabot
+  resolves an npm/pnpm workspace from its lockfile, so `directory` has to point
+  at the root that lockfile lives in — `apps/web`, `apps/mobile` and
+  `apps/admin` individually carry no lockfile of their own for a
+  directory-scoped entry to resolve against. Groups substitute for
+  per-app separation: `mobile-dependencies` (`expo*`, `react-native*`, …),
+  `web-and-admin-dependencies` (`next`, `react`, `@clerk/*`, `tailwindcss`, …)
+  and `dev-tooling`, each grouping minor/patch only.
+- `github-actions` at `/` — also not one of the "four"; added because it is
+  the mechanism that keeps `dependency-review-action`, `codeql-action` and
+  `trivy-action` (below) from going stale themselves, which is squarely in
+  scope for a supply-chain ticket.
+
+This file is config GitHub's own service reads — nothing in it executes
+locally or in `verify`, and nothing in this sandbox can make Dependabot
+actually open a PR. Validated instead against SchemaStore's
+`dependabot-2.0.json` schema with `jsonschema.validate()` — it passes — which
+is the ceiling on what can be verified without GitHub's own infrastructure.
+**NEEDS HUMAN EVIDENCE**: confirm on GitHub that Dependabot actually opens a
+PR against each of the four entries after this merges.
+
+**Dependency review (`.github/workflows/dependency-review.yml`).** GitHub's
+`actions/dependency-review-action@v5`, PR-blocking, diffing the dependency
+graph a PR would introduce against its base. **Threshold: `fail-on-severity:
+high`** — blocks `high`/`critical` GHSA severities, reports but never fails
+on `low`/`moderate`. Fast (a manifest diff, no build), so making it required
+costs negligible PR latency, unlike CodeQL below. `comment-summary-in-pr:
+always` so a blocked PR's author sees why without opening workflow logs.
+Not executable from this sandbox at all — it needs GitHub's own advisory
+database and a real PR diff. **NEEDS HUMAN EVIDENCE**: the ticket's own test
+script (introduce a dependency with a known high/critical CVE on a scratch
+branch, confirm the PR is blocked; confirm a low/moderate one is not).
+
+**CodeQL (`.github/workflows/codeql.yml`).** Advanced setup (a committed
+workflow using `github/codeql-action`), which is the whole answer available
+from a PR — "default setup" is a Settings-only toggle nothing here can flip,
+and the advanced workflow is a complete substitute, not a partial one.
+Two languages: `go` (covering both `backend/` and `engine/` — `build-mode:
+manual` rather than `autobuild`, because autobuild's Go heuristic looks for
+a root `go.mod` and there isn't one; an explicit step builds both modules)
+and `javascript-typescript` (`build-mode: none`, confirmed against GitHub's
+current default-setup template as the correct unified language id rather
+than assuming it). **Deliberately NOT `pull_request`-triggered** — `push` to
+`main` plus a weekly Wednesday cron instead. Two reasons, both stated in the
+workflow's own header: CodeQL is materially slower than every other check in
+`ci.yml`, and it is a findings feed (the Security tab) rather than a
+pass/fail gate with a severity line the way the other five tools here are —
+making it required would tax every PR for a signal nobody acts on
+synchronously. Because it never triggers on `pull_request`,
+`scripts/check-ci-checks.py`'s `triggers_on_pull_request` correctly skips it
+entirely — confirmed by running `expected_check_names()` directly against
+the real workflow files rather than assuming the parser would do the right
+thing. Structurally unverifiable here: CodeQL databases and analysis need
+GitHub's own runners. **NEEDS HUMAN EVIDENCE**: confirm the first scheduled
+or post-merge run actually populates the Security → Code scanning tab for
+both languages.
+
+**`govulncheck` (backend's `ci.yml` job + `verify`).** This is the one tool
+in the six that is fast and fully local, so it joined the existing
+`Backend (Go)` job (no new job name, no `EXPECTED_CHECK_RUNS` change) AND
+`package.json`'s `verify` chain, as two new gates —
+`check:govulncheck-api` (`cd backend && go run
+golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...`) and
+`check:govulncheck-engine` (same, `cd engine`) — pinned to an exact version
+rather than `@latest`, matching every other pinned tool in this repo.
+
+**The gating threshold is govulncheck's own design, not a filter layered on
+top: reachability.** By default it reports only vulnerabilities in code the
+binary's call graph actually reaches, not merely a vulnerable version idling
+unused in `go.sum`. That already answers "only severe, exploitable findings
+gate a release" for this tool — a naive CVE-in-go.sum scan would flag
+dependencies never called; govulncheck cannot, structurally. No additional
+severity filter sits on top of it, because it has no severity field to
+filter on.
+
+**This was mutation-tested for real, not merely reasoned about, and it found
+two genuine live vulnerabilities while doing it — with no artificial CVE
+needed:**
+
+- `backend/go.mod` pinned `go 1.26.1`. `govulncheck ./...` against it
+  reported **15 reachable standard-library vulnerabilities** (GO-2026-6218,
+  -6090, -6089, -6088, -5972, -5856, -5039, -5037, -5026, -4971, -4947,
+  -4946, -4918, -4870, -4866 — all fixed between go1.26.2 and go1.26.6),
+  exit code 3. Bumped `go 1.26.1` → `go 1.26.8` (the current stable 1.26.x
+  patch, confirmed via `go.dev/dl/?mode=json` rather than guessed) in both
+  `backend/go.mod` and `engine/go.mod`; `GOTOOLCHAIN=auto` fetched it
+  automatically. Re-ran: **zero vulnerabilities, exit 0.** `go build ./...`,
+  `gofmt -l .` and `go vet ./...` all still pass on the bumped toolchain.
+- `engine/go.mod` separately pinned `golang.org/x/text v0.29.0`, reachable
+  via `pgx.ConnectConfig` → `norm.Form.{Properties,Span,Transform}`
+  (GO-2026-5970, an infinite loop on invalid input), exit code 3. `go get
+  golang.org/x/text@v0.39.0 && go mod tidy` (which also carried
+  `golang.org/x/sync` v0.17.0 → v0.21.0 as a transitive bump). Re-ran:
+  **zero vulnerabilities, exit 0.** `go build ./...` and the full `engine`
+  test suite (`internal/devengine`, `internal/runstate`, `internal/worker`,
+  `internal/worker/egressbroker`) all still pass.
+
+Both directions — real red before the fix, real green after — were measured
+in this session, on this exact repository, which is the strongest form of
+mutation-check this ticket's own "verify that a check can fail" section
+asks for: not a fabricated CVE, but the tool catching what was actually
+sitting in the tree. `backend`'s own Postgres-backed test suite
+(`test:api`) was **not** re-run against the toolchain bump — the shared
+local `vola_test` database was left `DIRTY` at version 92 by unrelated
+concurrent work in another worktree, and fixing another session's database
+state is not this ticket's to do; `gofmt`/`vet`/`build`/`govulncheck` all
+passing, plus CI provisioning its own throwaway Postgres for `test:api`
+independently, was judged sufficient given the change is a patch-version
+toolchain bump and one dependency bump with no other backend code touched.
+
+**Secret scanning.** This repo is **public** (CLAUDE.md's own known gotchas
+say so), and a public GitHub repository gets native secret scanning
+automatically — no committed file turns that on; it is already on. What a
+committed file categorically cannot reach is **push protection**: as of
+GitHub's current documentation that is a Settings-only toggle
+(Settings → Code security → Push protection), never something a workflow or
+repo file can flip. Documented here rather than left to be rediscovered.
+**NEEDS HUMAN EVIDENCE**: enable push protection by hand in Settings if not
+already on, since nothing in this PR can do it.
+
+Gitleaks was added anyway, as the ticket's own explicit fallback and as
+belt-and-braces against a differently-tuned ruleset than GitHub's native
+scanner. **The standalone binary, not `gitleaks/gitleaks-action`** — the
+Action wrapper has required a paid license for GitHub *Organization* use
+since its v2; this repo is a personal account, so it would likely be free
+here, but "likely" is not something worth resting a required PR check on.
+`.github/workflows/gitleaks.yml` downloads gitleaks v8.30.1's Linux x64
+release directly, verifies it against a SHA-256 pinned in the workflow
+itself (from gitleaks' own published `_checksums.txt`, not fetched fresh at
+scan time), and runs `gitleaks detect --source . --no-git --redact
+--exit-code 1` against the PR's checked-out tree. `--no-git` (files at the
+current commit, not full history) is deliberate: a history scan would also
+flag anything already sitting in `main`'s past, which this job cannot fix
+and would therefore block every future PR forever — the "verify that a
+check can PASS" failure mode from CLAUDE.md, aimed at a gate too eager
+rather than one too lax. **No severity threshold** — unlike a CVE, a real
+secret match has no informational tier; any match fails the job.
+
+**Mutation-tested live, in both directions, against this exact repository**
+(the fixture files lived under the session scratchpad, never inside this
+worktree): a fake GitHub-PAT-shaped string (`ghp_` + 36 chars, matching
+gitleaks' own regex exactly) and a fake OpenAI-key-shaped string (`sk-` +
+20 chars + `T3BlbkFJ` + 20 chars) were both caught, exit 1, "leaks found: 2";
+clean content in the same fixture scanned clean, exit 0. Then a **real**
+full-repo scan (`gitleaks detect --source . --no-git`) found two genuine
+false positives already in the tree —
+`engine/internal/devengine/gates_test.go`'s own
+`TestUnderscoreJoinedCredentialNamesAreCaught`, whose deliberately
+fake-credential-shaped test vectors exist to prove the ENGINE's own
+`scanDiffForSecrets` catches exactly that shape. Added `.gitleaksignore` at
+the repo root keyed on the two exact Fingerprints gitleaks reported
+(`<path>:<rule-id>:<line>`), not on the file or a path glob — the same
+"keyed on a line, not a file" discipline `check-unit-literals.py`'s
+allowlist already uses in this repo, for the same reason: a file-wide
+exclusion would also hide a real secret added to that file later. Re-ran
+after adding it: zero findings. This is a real, complete mutation-check —
+catches a real fake secret, does not over-suppress a real one, and the
+allowlist mechanism was proven narrow rather than assumed narrow.
+
+**Container scan (Trivy, in `ci.yml`'s `Backend (Go)` job).**
+`aquasecurity/trivy-action@v0.36.0` scans `vola-api:ci` — the image
+`docker build` already produces earlier in the same job, so nothing new to
+build or configure, and Railway deploys this exact image. **Threshold:
+`severity: CRITICAL,HIGH`** (matching dependency-review's `high` line, so a
+package's severity means the same thing everywhere it's judged in this
+repo) **with `ignore-unfixed: true`** — a CRITICAL in a base-image package
+with no available fix yet is not something any PR can act on, and gating on
+it would be an unclearable release blocker, exactly the "every informational
+CVE is a blocker" failure the ticket asks this not to be. A CVE that DOES
+have a fix still gates, because "fixed" is exactly the case a dependency
+bump resolves. Structurally unverifiable from this sandbox in the way that
+matters most: Docker/Colima is available here, and `docker build -f
+Dockerfile -t vola-api:ci backend` could be run by hand, but reproducing a
+genuinely vulnerable `alpine:3.20` base layer to prove the gate fires would
+mean pinning a stale, real base image specifically to manufacture a red —
+not attempted, and the reasoning above (severity + ignore-unfixed) is
+argued rather than measured against a real finding. **NEEDS HUMAN EVIDENCE**:
+confirm on a real CI run that Trivy actually scans the image and that the
+CRITICAL/HIGH threshold fires on a genuine finding, not only on the happy
+path where the current image (Alpine 3.20 + a Go static binary) reports
+none.
+
+**What joined `EXPECTED_CHECK_RUNS` and why.** `dependency-review.yml` and
+`gitleaks.yml` each declare one new `pull_request`-triggered job
+("Dependency review", "Secret scan (Gitleaks)"), so
+`scripts/check-ci-checks.py`'s `EXPECTED_CHECK_RUNS` moved **6 → 8** and the
+`FIVE` fixture list (kept that name deliberately — see its own comment)
+grew to match, in the same commit. `codeql.yml` contributes nothing here by
+design (see above). Confirmed by running `expected_check_names()` and
+`--self-test` directly against the edited workflow files rather than
+trusting the count by inspection: both report exactly 8, matching the
+updated constant.
+
+**What did and didn't get a reviewer.** `govulncheck`'s addition touches
+`backend/**` (`ci.yml`'s Backend job, `backend/go.mod`) and `engine/go.mod`,
+so `backend-reviewer` was dispatched despite this being overwhelmingly a
+`.github/**`/config change. No `apps/**` or `contracts/**` file changed, so
+`frontend-reviewer` was not.
+
+**Left open, all `NEEDS HUMAN EVIDENCE`**: Dependabot actually opening PRs
+against all four ecosystems; dependency-review and Gitleaks genuinely
+blocking a live PR (not just a local binary run); CodeQL's first run
+populating the Security tab for both languages; Trivy firing on a real
+CRITICAL/HIGH finding rather than only passing on today's clean image; and
+enabling GitHub push protection by hand, since Settings toggles are outside
+what any PR can do. `docs/testing/functional-scenarios.md` was deliberately
+**not** touched — this ticket has no user-facing or API surface, matching
+that doc's own skip criteria exactly.
 
 ## 2026-09-06 — N165/#542: API URL configuration no longer fails open to localhost
 

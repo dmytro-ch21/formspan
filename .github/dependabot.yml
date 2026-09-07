@@ -1,0 +1,116 @@
+# N166 (#543). Weekly, grouped dependency updates, opened by GitHub's own
+# Dependabot service — nothing here executes locally or in `verify`; this file
+# is read by GitHub's infrastructure, not by this repo's own tooling.
+#
+# FOUR ecosystems cover the ticket's ask (backend Go, web, mobile, admin), plus
+# two more this repo already has real code in — see the notes on each entry.
+version: 2
+
+updates:
+  # --- backend/ (Go module) ---------------------------------------------
+  - package-ecosystem: "gomod"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      # Minor/patch bumps land as one weekly PR; a major stays its own PR,
+      # since a major Go dependency bump is exactly the kind of change that
+      # wants its own review rather than being folded into a batch.
+      go-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "area: backend"]
+
+  # --- engine/ (Go module) -----------------------------------------------
+  # NOT one of the ticket's literal "four workspaces" — added anyway, and
+  # called out here so the addition isn't mistaken for scope creep nobody
+  # noticed. `engine/` is a second, separate Go module (deliberately outside
+  # `backend/`, see its own go.mod header and CLAUDE.md's module-pattern
+  # section) with its own go.sum, built and tested by CI. Measured while
+  # building this ticket: it was carrying a real reachable vulnerability
+  # (golang.org/x/text v0.29.0, GO-2026-5970) that a backend-only Dependabot
+  # config would never have surfaced. See docs/decisions/history.md's N166
+  # entry.
+  - package-ecosystem: "gomod"
+    directory: "/engine"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "area: backend"]
+
+  # --- apps/web, apps/mobile, apps/admin (one pnpm workspace) ------------
+  # ONE entry, not three, and this is a deliberate reading of the repo rather
+  # than a shortcut. `pnpm-workspace.yaml` declares `apps/*` as workspace
+  # members and there is exactly ONE `pnpm-lock.yaml`, at the repo root —
+  # confirmed by `find . -name pnpm-lock.yaml` before writing this file.
+  # Dependabot resolves an npm/pnpm workspace from its lockfile, so a
+  # `directory` entry has to point at the ROOT that lockfile lives in, not at
+  # `apps/web` or `apps/mobile` individually — none of those subdirectories
+  # carries its own lockfile for Dependabot to resolve against, so three
+  # directory-scoped entries here would not independently resolve; the one
+  # root entry already reaches apps/web, apps/mobile and apps/admin's
+  # package.json files through the shared workspace.
+  #
+  # Groups substitute for the "one PR series per app" shape the ticket asked
+  # for, since a single ecosystem entry has no per-directory grouping: mobile
+  # (Expo/React Native) dependencies are named distinctly enough from
+  # web/admin's (Next.js) that a name-pattern group reaches the same
+  # separation the three-directory design was going for.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      mobile-dependencies:
+        patterns:
+          - "expo*"
+          - "@expo/*"
+          - "react-native*"
+          - "@react-native*"
+        update-types: ["minor", "patch"]
+      web-and-admin-dependencies:
+        patterns:
+          - "next"
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "@clerk/*"
+          - "tailwindcss"
+          - "@tailwindcss/*"
+        update-types: ["minor", "patch"]
+      dev-tooling:
+        patterns:
+          - "eslint*"
+          - "@types/*"
+          - "typescript"
+          - "vitest"
+          - "@testing-library/*"
+          - "@redocly/*"
+        update-types: ["minor", "patch"]
+    labels: ["dependencies"]
+
+  # --- .github/workflows/ (Actions used by CI, including the ones this
+  #     ticket adds: dependency-review, codeql-action, trivy-action) --------
+  # Also not one of the literal "four" — added because it is the mechanism
+  # that keeps the OTHER additions in this PR (dependency-review-action,
+  # codeql-action, trivy-action) from going stale themselves, which is
+  # directly in scope for a ticket about supply-chain hygiene. `directory`
+  # is always "/" for this ecosystem — GitHub only reads workflows from
+  # `.github/workflows/`, wherever the repo root is.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "area: ci"]

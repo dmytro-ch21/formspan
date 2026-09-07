@@ -1,0 +1,17 @@
+# Read by `gitleaks detect` (see .github/workflows/gitleaks.yml, N166/#543).
+#
+# Each line is a Fingerprint (`<path>:<rule-id>:<line>`) for a SPECIFIC
+# finding gitleaks already reported — not a path or a rule, on purpose: an
+# allowlist keyed on the whole file would also hide a REAL secret accidentally
+# added to it later, which is exactly the failure mode this narrow form avoids
+# (see CLAUDE.md's own "keyed on a file" cautionary example for the same
+# reasoning applied to a different check).
+#
+# Both findings below are deliberately fake credential-shaped strings in
+# engine/internal/devengine/gates_test.go's OWN secret-scanning test
+# (TestUnderscoreJoinedCredentialNamesAreCaught, which asserts that ENGINE's
+# `scanDiffForSecrets` catches exactly this shape) — never real secrets.
+# Measured 2026-09-06: a full `gitleaks detect --source . --no-git` scan of
+# this repo flags precisely these two lines and nothing else.
+engine/internal/devengine/gates_test.go:generic-api-key:245
+engine/internal/devengine/gates_test.go:generic-api-key:246
