@@ -62503,6 +62503,48 @@ separated" reasoning directly, and asked specifically to scrutinize whether
 the TTL/cleanup mechanism was genuinely tested against something resembling
 a killed process rather than merely reasoned about.
 
+**No `[blocking]` findings.** The reviewer independently re-derived the cost
+and concurrency numbers above (within a few ms/percent), independently
+mutation-tested `sweep.go`'s cutoff comparison (flipped `.After` to
+`.Before`, watched 4 of 5 sweep tests go red, restored and **re-ran** to
+confirm green — not just grepped, per CLAUDE.md's own "a restore is
+confirmed by re-running" rule), and confirmed the `docs/decisions/
+history.md` append and the `docs/testing/functional-scenarios.md` skip were
+both done correctly. Four `[suggestion]`s came back, three left as
+documented trade-offs and one fixed:
+
+- **Fixed**: `Runner.Now` was exported, settable by any future caller
+  despite a doc comment saying "never outside a test" — nothing in the type
+  system enforced it. Renamed to unexported `nowFn`; only this package's own
+  tests (same package, no external caller possible) can reach it now.
+- **Documented, not built**: `Sweep` judges staleness purely from the
+  name-encoded creation timestamp, with no check against `runstate.Store`'s
+  own lease/heartbeat (`agent_runs.lease_expires_at`) for "is this actually
+  still running". Harmless today — nothing outside this package's own tests
+  calls `Provision` at all, so there is no live worker for a sweep to
+  mistake for dead — but it would matter the moment `cmd/sweepephemeral` is
+  ever pointed at a real fleet with a `--ttl` shorter than some legitimate
+  run's wall-clock budget. Building the lease-aware check now would be
+  designing for an orchestrator that doesn't exist yet (Milestone C's own
+  scope boundary — see the ticket's own "don't invent orchestration this
+  ticket doesn't ask for" guidance); the gap and its fix are now spelled out
+  directly in `sweep.go`'s own doc comment and `cmd/sweepephemeral`'s, so
+  whoever wires this into a live fleet cannot miss it.
+- **Left as a documented trade-off**: the 5-concurrent-workers timing test
+  (`elapsed > baseline*3`) is a genuine, non-theater assertion (normal runs
+  sit at ~1.9–2x, comfortably under the 3x bound) but is still a wall-clock
+  threshold running unconditionally in CI — a modest, accepted flake vector
+  the reviewer flagged as worth watching rather than fixing pre-emptively.
+- **Left as a documented trade-off, inherited from N187, out of this
+  ticket's scope**: no per-role Postgres resource governor
+  (`CONNECTION LIMIT`, `statement_timeout`) exists on the shared server, so
+  one worker's pathological query could in principle degrade the shared
+  Postgres process for every other concurrent worker — an isolation gap a
+  real per-worker container would close at the OS level and this
+  database-per-worker design does not. Real, and worth a follow-up ticket
+  against `Provision` itself rather than this one, since the mechanism
+  predates N150 and nothing here makes it worse.
+
 
 ## Open items / known gaps as of this entry
 

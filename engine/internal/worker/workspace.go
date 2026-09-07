@@ -114,14 +114,19 @@ type Runner struct {
 	// itself never receives this URL or its credentials — it is handed a
 	// connection string for the per-run role instead (see Workspace.DBURL).
 	AdminDBURL string
-	// Now overrides the clock Provision stamps into a workspace's ephemeral
-	// database/role names (see ephemeralResourceName) — nil means
+	// nowFn overrides the clock Provision stamps into a workspace's
+	// ephemeral database/role names (see ephemeralResourceName) — nil means
 	// time.Now, which is what every real run must use. Tests are the only
 	// legitimate caller: Sweep's own TTL boundary is exercised by backdating
 	// ONE workspace's creation time rather than waiting real wall-clock
-	// hours for a resource to actually go stale (see sweep_test.go). Never
-	// set outside a test.
-	Now func() time.Time
+	// hours for a resource to actually go stale (see sweep_test.go).
+	// Deliberately UNEXPORTED, not merely doc-commented "test only" — found
+	// in review: an exported field a caller could set is one a future
+	// production Runner literal, built by copy-pasting a test helper, could
+	// silently backdate every real run's TTL accounting with. Unexported
+	// means only this package's own tests (same package, no _test suffix on
+	// the package name) can reach it at all.
+	nowFn func() time.Time
 }
 
 // Workspace is one run's disposable environment.
@@ -186,8 +191,8 @@ func (r *Runner) Provision(ctx context.Context, runID int64, issue int, slug, ba
 	}
 	suffix := hex.EncodeToString(raw[:])
 	now := time.Now
-	if r.Now != nil {
-		now = r.Now
+	if r.nowFn != nil {
+		now = r.nowFn
 	}
 	createdAt := now().UTC()
 	ws := &Workspace{

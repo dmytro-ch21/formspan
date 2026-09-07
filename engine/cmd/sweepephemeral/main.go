@@ -16,6 +16,17 @@
 //
 //	go run ./cmd/sweepephemeral --admin-db-url=$TEST_DATABASE_URL --ttl=1h
 //	go run ./cmd/sweepephemeral --admin-db-url=$TEST_DATABASE_URL --ttl=1h --dry-run
+//
+// --ttl IS THE ONLY THING STANDING BETWEEN A STILL-RUNNING WORKER AND HAVING
+// ITS DATABASE DROPPED OUT FROM UNDER IT (flagged in review): worker.Sweep
+// judges age purely from the name-encoded creation time, with no check
+// against runstate.Store's own lease/heartbeat for "is this run actually
+// still alive". That is safe today because nothing outside worker's own
+// tests calls Provision at all — there is no live worker for --ttl to cut
+// off. The moment this is pointed at a real fleet, whoever wires it up must
+// either set --ttl comfortably longer than the longest legitimate run, or
+// extend worker.Sweep to check agent_runs' lease before this runs
+// unattended on a schedule.
 package main
 
 import (

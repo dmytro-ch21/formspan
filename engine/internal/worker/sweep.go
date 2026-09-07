@@ -119,6 +119,19 @@ type SweepResult struct {
 // property: vola_test and every vola_test_<branch> a human created are
 // simply invisible to the regex Sweep queries with, not merely absent from
 // some exclusion list.
+//
+// KNOWN GAP, flagged in review and left open deliberately rather than
+// built now: cutoff is judged purely from the NAME's encoded creation
+// time — Sweep never consults runstate.Store's own lease/heartbeat
+// mechanism (agent_runs.lease_expires_at et al., internal/runstate/store.go)
+// to distinguish "genuinely crashed" from "still running, just older than
+// this cutoff". That distinction cannot matter today: nothing outside this
+// package's own tests calls Provision (see devengine's own shadow-mode doc
+// comment), so nothing real can be running for Sweep to mistake for dead.
+// It WILL matter the moment cmd/sweepephemeral is pointed at a live fleet —
+// whoever wires that up must either pass a cutoff comfortably longer than
+// the longest legitimate run, or extend Sweep to skip anything whose
+// agent_runs row still holds a live lease, before running it unattended.
 func Sweep(ctx context.Context, adminURL string, cutoff time.Time, dryRun bool) (SweepResult, error) {
 	conn, err := pgx.Connect(ctx, adminURL)
 	if err != nil {

@@ -95,8 +95,9 @@ func TestParseEphemeralNameRoundTripsAndRejectsNearMisses(t *testing.T) {
 }
 
 // TestSweepRemovesResourcesCreatedAtOrBeforeCutoffAndLeavesLaterOnesAlone is
-// the TTL boundary itself, made deterministic with Runner.Now rather than by
-// waiting real wall-clock time for something to go stale: one workspace is
+// the TTL boundary itself, made deterministic with Runner's own unexported
+// clock override (nowFn) rather than by waiting real wall-clock time for
+// something to go stale: one workspace is
 // stamped as if created two hours ago (Provision's own creation-time
 // segment, not a separate side record — see sweep.go), a second is stamped
 // with the real clock, and a single cutoff an hour back must catch exactly
@@ -111,7 +112,7 @@ func TestSweepRemovesResourcesCreatedAtOrBeforeCutoffAndLeavesLaterOnesAlone(t *
 
 	twoHoursAgo := time.Now().Add(-2 * time.Hour)
 	rOld := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin,
-		Now: func() time.Time { return twoHoursAgo }}
+		nowFn: func() time.Time { return twoHoursAgo }}
 	old, err := rOld.Provision(ctx, 9101, 1, "stale", first, nil, "")
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +191,7 @@ func TestSweepIsTheRealCrashRecoveryPath(t *testing.T) {
 
 	killedAt := time.Now().Add(-3 * time.Hour)
 	r := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin,
-		Now: func() time.Time { return killedAt }}
+		nowFn: func() time.Time { return killedAt }}
 	ws, err := r.Provision(ctx, 9103, 1, "killed", first, nil, "")
 	if err != nil {
 		t.Fatal(err)
@@ -276,7 +277,7 @@ func TestSweepDryRunReportsWithoutRemoving(t *testing.T) {
 
 	old := time.Now().Add(-2 * time.Hour)
 	r := &Runner{RepoURL: src, WorkRoot: t.TempDir(), AdminDBURL: admin,
-		Now: func() time.Time { return old }}
+		nowFn: func() time.Time { return old }}
 	ws, err := r.Provision(ctx, 9105, 1, "dryrun", first, nil, "")
 	if err != nil {
 		t.Fatal(err)
