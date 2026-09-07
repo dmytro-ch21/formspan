@@ -459,6 +459,47 @@ jobs:
       - name: EAS production-safety guard
         run: pnpm run check:eas-production-safety
 
+      # N133 (#537). `docs/decisions/history.md`'s 2026-08-09 incident:
+      # `expo-image-manipulator` called a symbol only present in
+      # `expo-modules-core` 57.0.8+, but the lockfile had resolved core at
+      # 57.0.7 — every Release build crashed at launch with a `dyld`
+      # symbol-not-found `SIGABRT`, before any JS ran. `expo install --check`
+      # had been warning about exactly this drift for weeks; nothing ran it.
+      # It needs network (resolves Expo's compatibility matrix), which this
+      # job already has for `pnpm install`, and fails fast and distinctly
+      # (a connection error, not a false pass) when it doesn't — see
+      # `scripts/check-expo-compat.py`'s docstring for the measurement.
+      # Mutation-checked by hand against this exact incident's shape: see the
+      # N133 history.md entry.
+      - name: Expo dependency compatibility (expo install --check)
+        run: pnpm run check:expo-compat
+
+      # The other half of N133: `expo install --check` only compares
+      # versions, so it cannot see a config that fails to resolve at all — a
+      # `PluginError` on a broken plugin reference, exactly the class in the
+      # `vola-mobile-build` skill's known gotchas for a native dependency
+      # landing in `package.json` without a matching config update. Confirmed
+      # by hand: a deliberately corrupted plugin name makes both `expo
+      # config --type public` and `--type introspect` exit 1 naming it;
+      # restoring the name makes both exit 0 again.
+      - name: Expo config resolves cleanly
+        run: pnpm run check:expo-config
+
+      # The third piece of N133: `expo config` above stops before a config
+      # plugin's file-writing "mods" run (`withInfoPlist`,
+      # `withEntitlementsPlist`, ...), so it cannot catch a plugin that
+      # resolves but writes something broken or incomplete — the entitlement
+      # class of bug in the N465/N477 HealthKit history.md entry. This
+      # actually runs `expo prebuild --no-install` against a throwaway
+      # scratch copy of the config (never `apps/mobile/ios`/`android`
+      # themselves — see the script's docstring for why that split matters
+      # even in CI, where those directories don't exist yet anyway) and
+      # confirms the native project generates cleanly. No native toolchain
+      # needed — confirmed by hand, well under a second, on this same
+      # ubuntu-latest image.
+      - name: Expo native config generates cleanly (prebuild dry run)
+        run: pnpm run check:expo-native-config
+
       # jest's worker budget is sized against this machine, so print what the
       # machine actually is. Issue #409 was exactly the failure of not doing
       # that: `apps/mobile/jest.config.js` carried no `maxWorkers` and CLAUDE.md
