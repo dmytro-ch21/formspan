@@ -233,5 +233,13 @@ func TestRunUntilShutdownForcesCloseAfterDrainDeadlineExpires(t *testing.T) {
 		t.Fatalf("runUntilShutdown waited %s, as long as the full handler sleep (%s) — the drain deadline did not force a close", elapsed, handlerSleep)
 	}
 
-	<-reqDone
+	// Same guard as every other wait above: if the forcibly-closed
+	// connection somehow doesn't unblock the client goroutine promptly,
+	// this should fail fast with a clear message rather than hang until
+	// the test binary's own timeout.
+	select {
+	case <-reqDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client goroutine never returned after the forced close")
+	}
 }

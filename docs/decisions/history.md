@@ -60563,6 +60563,58 @@ nothing about this change broke any of those modules' own tests.
 worktree-isolation convention) — 39 packages, 0 failures, exactly the one
 expected skip. `pnpm run verify` green.
 
+### Review fold-in (coordinating session)
+
+`backend-reviewer` found no blocking issues, independently verifying every
+factual claim this entry makes (the 35s/45s figures, the `os.Exit(1)`
+pool-leak history, the exec-form `CMD`/Railway `startCommand` prerequisite
+for SIGTERM to reach the process directly) against the actual source
+rather than trusting the comments. Two suggestions, both folded in:
+
+- The two `pool.Close()` call sites in `main.go` look symmetric but aren't
+  — the one after a `runUntilShutdown` error runs on an ABNORMAL exit
+  (e.g. a permanent `Accept` error), where `Shutdown` was never called and
+  nothing has drained. Added a comment at that call site making the
+  distinction explicit, so a future reader doesn't assume both give the
+  same drain guarantee.
+- `TestRunUntilShutdownForcesCloseAfterDrainDeadlineExpires`'s final
+  `<-reqDone` had no timeout guard, unlike every other wait in that test —
+  added the same `select`/`time.After(5s)` pattern the rest of the file
+  already uses, so a stuck client goroutine fails fast with a clear
+  message instead of hanging until the test binary's own timeout.
+
+`ac-verifier` independently reproduced the mutation-check
+(`Shutdown`→`Close` swap, confirmed a genuine test failure, restored,
+confirmed byte-identical and green again) and returned 5 MET / 0 NOT MET /
+3 NEEDS HUMAN EVIDENCE — AC4 and both "Steps to test" items. Its reasoning:
+the automated drain test is real (a genuine `*http.Server` on a real
+listener, cancelling a real `context.Context`), but it approximates rather
+than performs the ticket's literal ask — an actual `kill -TERM` sent to a
+running binary, and a genuinely bandwidth-throttled client, not a
+context-cancel and a handler-side `time.Sleep`. That's a fair distinction:
+this is exactly the "code reading cannot settle it" class CLAUDE.md's
+evidence-latch rule exists for, so issue #539's own acceptance criteria
+were amended to mark the two remaining items `NEEDS HUMAN EVIDENCE`
+explicitly (they weren't marked that way when the ticket was originally
+filed) — the numbered checklist for the user is in the amended issue body
+and below.
+
+**For the user to check** (from `ac-verifier`'s report):
+
+1. Real SIGTERM against the compiled binary: `cd backend && go run
+   ./cmd/api`, fire a slow/throttled request at an unbounded AI route
+   (e.g. `curl --limit-rate 1k` against `/v1/nutrition/estimate`), then
+   send the process a real `kill -TERM <pid>` (or trigger a restart via
+   Railway) while it's in flight. **Pass**: the response completes or the
+   connection closes cleanly, and the process exits only afterward (up to
+   the 60s `shutdownTimeout`). **Fail**: torn down mid-response, or the
+   process exits immediately.
+2. A live AI-backed call under the new server config: with a real provider
+   key configured, call an AI route and confirm it completes normally past
+   the 30-35s mark, not cut off early.
+3. (Optional, see "Left open" below) Confirm Railway's actual staging
+   SIGTERM→SIGKILL grace window is at least 60s + margin.
+
 ### Left open / follow-up
 
 - Response-side slow-loris (a client reading the response back one byte at

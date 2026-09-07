@@ -987,6 +987,12 @@ func main() {
 	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
 	if err := runUntilShutdown(ctx, srv, ln, shutdownTimeout, logger); err != nil {
 		logger.Error("server exited", "err", err)
+		// This pool.Close() is NOT the drained, safe one below — it runs
+		// after an abnormal exit (e.g. a permanent Accept error), which
+		// means runUntilShutdown returned WITHOUT having called Shutdown,
+		// so nothing has drained in-flight connections here. os.Exit(1)
+		// follows immediately either way, so this doesn't make anything
+		// worse in practice — but don't read the two calls as equivalent.
 		pool.Close()
 		os.Exit(1)
 	}
