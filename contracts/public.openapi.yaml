@@ -5382,6 +5382,43 @@ components:
           items:
             $ref: "#/components/schemas/AdminUserSummary"
 
+    DBPoolStats:
+      type: object
+      description: >
+        pgxpool.Stat()'s own fields, unmodified — see
+        backend/cmd/api/poolstats.go. Counts, not rates: `acquire_count` and
+        friends are cumulative since process start, not per-second.
+      required:
+        [
+          max_conns,
+          total_conns,
+          acquired_conns,
+          idle_conns,
+          constructing_conns,
+          acquire_count,
+          empty_acquire_count,
+          canceled_acquire_count,
+          acquire_duration_ms,
+          new_conns_count,
+          max_lifetime_destroy_count,
+          max_idle_destroy_count,
+        ]
+      properties:
+        max_conns: { type: integer, description: "The configured ceiling (see database.go's maxConns)." }
+        total_conns: { type: integer, description: "constructing + acquired + idle." }
+        acquired_conns: { type: integer }
+        idle_conns: { type: integer }
+        constructing_conns: { type: integer, description: "Connections mid-dial, not yet usable." }
+        acquire_count: { type: integer, description: "Cumulative successful acquires." }
+        empty_acquire_count:
+          type: integer
+          description: "Cumulative acquires that had to wait for a connection rather than getting one immediately."
+        canceled_acquire_count: { type: integer, description: "Cumulative acquires whose context was cancelled before one became available." }
+        acquire_duration_ms: { type: integer, description: "Cumulative time spent waiting across every acquire." }
+        new_conns_count: { type: integer, description: "Cumulative count of new connections opened." }
+        max_lifetime_destroy_count: { type: integer, description: "Cumulative connections recycled for exceeding MaxConnLifetime." }
+        max_idle_destroy_count: { type: integer, description: "Cumulative connections closed for exceeding MaxConnIdleTime." }
+
     Proficiency:
       type: object
       description: >
@@ -11304,6 +11341,30 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/db-pool-stats:
+    get:
+      summary: Postgres connection-pool saturation, right now (admin-only)
+      operationId: adminDBPoolStats
+      description: >
+        pgxpool's own built-in accounting (Stat()), surfaced rather than left
+        invisible. N171/#548: a narrow, deliberate stand-in for a real
+        metrics/alerting pipeline — Milestone B's SLO ticket (N172) is still
+        open and this backend has no metrics dependency to plug into yet, so
+        this exposes the raw counters rather than inventing infrastructure
+        that ticket hasn't designed. A live snapshot, not a time series —
+        `Cache-Control: no-store`.
+      responses:
+        "200":
+          description: The pool's current stats.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DBPoolStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /admin/health:
     get:
