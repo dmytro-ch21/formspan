@@ -11,6 +11,7 @@ import {
   type EnrichmentLedgerEntry,
 } from './biometric';
 import { getDb } from './db';
+import { fitHRWindow, wideHRQueryWindow } from './hrWindowFit';
 import { isHealthKitSupported, queryHeartRateSamples, queryVO2MaxSamples } from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
 import { getProfile } from './profile';
@@ -115,6 +116,27 @@ import type { TokenGetter } from './useAuthToken';
  * second toggle sharing the one permission grant (rather than a second
  * HealthKit consent prompt) is the shape it should take, exactly as this
  * reasoning describes.
+ *
+ * ## N522/#934 — the wide-window fallback for a post-hoc-logged session
+ *
+ * `syncSessionWindows` below queries the session's EXACT
+ * `[started_at, ended_at]` first, same as always. Only when that comes back
+ * empty does it fall back to `./hrWindowFit`'s wide-window fit (see that
+ * file's own doc comment for the full design and why: a post-hoc-logged
+ * session's recorded times are not real clock readings, so the exact
+ * window can be wrong even though the watch has real evidence nearby the
+ * same day, and N511's retry ladder cannot fix that because it re-queries
+ * the SAME wrong window forever). The fit is trusted only when it clears a
+ * confidence bar and isn't genuinely ambiguous with another comparably-good
+ * placement — see `hrWindowFit.ts`'s `HR_FIT_MIN_CONFIDENCE`/
+ * `HR_FIT_AMBIGUITY_MARGIN`. When trusted, only the samples the fit
+ * actually found are uploaded, and `computeSessionMetrics` is told to
+ * derive this row from THAT window instead of the session's own — which
+ * never rewrites the session's own started_at/ended_at (see
+ * `computeSessionMetrics`'s own doc comment). When not trusted, or when the
+ * wide window also finds nothing, behavior is byte-for-byte what it was
+ * before this ticket: `hr_source: 'none'` via the server's own honest
+ * derivation from zero samples.
  */
 
 // --- identity, mirroring lib/sync.ts's `creds` shape ----------------------
@@ -349,7 +371,44 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
     const window = sessionHRWindow(session.started_at, session.ended_at);
     if (!window) continue; // should not happen — the query already filters on ended_at set.
 
-    const raw = await queryHeartRateSamples(window.start, window.end);
+    let raw = await queryHeartRateSamples(window.start, window.end);
+    // N522/#934: the exact session window found NOTHING — before giving up
+    // and letting this land as `hr_source: 'none'`, try a wide-window fit.
+    // This is exactly the post-hoc-logged-session shape (design doc in
+    // `lib/hrWindowFit.ts`): the exact window can be wrong even though the
+    // watch has real evidence nearby the same day. A session whose exact
+    // window DID find samples never reaches this — the fit only ever
+    // FALLS BACK, it never overrides a plain read that already worked.
+    let windowOverride: { start: string; end: string } | null = null;
+    if (raw.length === 0) {
+      const wide = wideHRQueryWindow(session.started_at);
+      const wideRaw = await queryHeartRateSamples(wide.start, wide.end);
+      const durationMs = window.end.getTime() - window.start.getTime();
+      const fit = fitHRWindow(
+        wideRaw.map((s) => ({ measuredAt: s.measuredAt, bpm: s.value })),
+        durationMs,
+        // `window.start`/`window.end` rather than `session.started_at`/
+        // `session.ended_at` directly — identical values (sessionHRWindow
+        // just parses them to Date), but already known non-null here (the
+        // `if (!window) continue` above), where the session's own field is
+        // still typed `string | null`.
+        { start: window.start.toISOString(), end: window.end.toISOString() },
+      );
+      if (fit) {
+        const fitStartMs = new Date(fit.start).getTime();
+        const fitEndMs = new Date(fit.end).getTime();
+        raw = wideRaw.filter((s) => {
+          const t = new Date(s.measuredAt).getTime();
+          return t >= fitStartMs && t <= fitEndMs;
+        });
+        // Only claim the fit as the query window once it actually produced
+        // real samples to upload — an empty intersection here would mean
+        // the fit and the filter disagree, which should not happen but
+        // must not silently claim an override with nothing behind it.
+        if (raw.length > 0) windowOverride = { start: fit.start, end: fit.end };
+      }
+    }
+
     const samples = raw.map((s) => toBiometricSample(s, 'heart_rate', 'healthkit'));
     const plan = planHRSync(samples);
 
@@ -366,8 +425,16 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
       // it sees zero heart_rate samples for the window. N511/#893's fix is
       // reading THAT back (`metrics.hr_source` below) rather than — as the
       // pre-N511 code did — ignoring the response and marking the ledger
-      // "done" unconditionally.
-      const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', plan.hrSource);
+      // "done" unconditionally. `windowOverride` (N522/#934) is null on
+      // every path except a trusted wide-window fit — see above.
+      const metrics = await computeSessionMetrics(
+        getToken,
+        session.id,
+        hrMaxBPM,
+        'estimated',
+        plan.hrSource,
+        windowOverride,
+      );
       await recordBiometricHRAttempt(
         userID,
         session.id,

@@ -1,4 +1,4 @@
-import { buildHRSessionReport, HR_REPORT_MIN_SAMPLES } from '../hrSessionReport';
+import { buildHRSessionReport, hrWindowDiffersFromSession, HR_REPORT_MIN_SAMPLES } from '../hrSessionReport';
 import { vola } from '@/constants/Colors';
 import type { SessionMetrics } from '../biometric';
 
@@ -12,8 +12,17 @@ import type { SessionMetrics } from '../biometric';
 
 type Metrics = Pick<
   SessionMetrics,
-  'avg_hr_bpm' | 'max_hr_bpm' | 'trimp' | 'time_in_zones' | 'hr_source' | 'sample_count'
+  | 'avg_hr_bpm'
+  | 'max_hr_bpm'
+  | 'trimp'
+  | 'time_in_zones'
+  | 'hr_source'
+  | 'sample_count'
+  | 'hr_window_start'
+  | 'hr_window_end'
 >;
+
+const DEFAULT_HR_WINDOW = { hr_window_start: '2026-09-01T11:00:00Z', hr_window_end: '2026-09-01T12:00:00Z' };
 
 function metrics(overrides: Partial<Metrics> = {}): Metrics {
   return {
@@ -23,6 +32,7 @@ function metrics(overrides: Partial<Metrics> = {}): Metrics {
     time_in_zones: { '2': 10, '3': 20, '4': 10 },
     hr_source: 'window',
     sample_count: 40,
+    ...DEFAULT_HR_WINDOW,
     ...overrides,
   };
 }
@@ -58,6 +68,7 @@ describe('buildHRSessionReport — limited (real evidence, not enough for a brea
       avgHR: 142,
       maxHR: 168,
       sampleCount: HR_REPORT_MIN_SAMPLES - 1,
+      hrWindow: { start: DEFAULT_HR_WINDOW.hr_window_start, end: DEFAULT_HR_WINDOW.hr_window_end },
     });
   });
 
@@ -77,6 +88,7 @@ describe('buildHRSessionReport — limited (real evidence, not enough for a brea
       avgHR: 142,
       maxHR: 168,
       sampleCount: 100,
+      hrWindow: { start: DEFAULT_HR_WINDOW.hr_window_start, end: DEFAULT_HR_WINDOW.hr_window_end },
     });
   });
 
@@ -232,5 +244,60 @@ describe('buildHRSessionReport — zone colours reuse existing semantic tokens',
     if (report.state !== 'full') throw new Error('expected full');
     const order = [2, 3, 4, 5].map((z) => report.zones.find((r) => r.zone === z)?.color);
     expect(order).toEqual([vola.green, vola.rpeModerate, vola.warn, vola.danger]);
+  });
+});
+
+describe('buildHRSessionReport — hrWindow (N522/#934)', () => {
+  test('carries the queried window through on the full state', () => {
+    const m = metrics({
+      hr_window_start: '2026-09-07T11:14:00Z',
+      hr_window_end: '2026-09-07T12:44:00Z',
+    });
+    const report = buildHRSessionReport(m, null);
+    if (report.state !== 'full') throw new Error('expected full');
+    expect(report.hrWindow).toEqual({ start: '2026-09-07T11:14:00Z', end: '2026-09-07T12:44:00Z' });
+  });
+
+  test('carries the queried window through on the limited state too', () => {
+    const m = metrics({
+      sample_count: HR_REPORT_MIN_SAMPLES - 1,
+      hr_window_start: '2026-09-07T11:14:00Z',
+      hr_window_end: '2026-09-07T12:44:00Z',
+    });
+    const report = buildHRSessionReport(m, null);
+    if (report.state !== 'limited') throw new Error('expected limited');
+    expect(report.hrWindow).toEqual({ start: '2026-09-07T11:14:00Z', end: '2026-09-07T12:44:00Z' });
+  });
+});
+
+describe('hrWindowDiffersFromSession (N522/#934)', () => {
+  const hrWindow = { start: '2026-09-07T11:14:00Z', end: '2026-09-07T12:44:00Z' };
+
+  test('an exact match never differs', () => {
+    expect(hrWindowDiffersFromSession(hrWindow, hrWindow.start, hrWindow.end)).toBe(false);
+  });
+
+  test('a small clock-noise gap (well under the threshold) does not differ', () => {
+    expect(
+      hrWindowDiffersFromSession(hrWindow, '2026-09-07T11:15:00Z', '2026-09-07T12:43:00Z'),
+    ).toBe(false);
+  });
+
+  test('exactly at the threshold does not differ; one minute past it does', () => {
+    // hrWindow.start is 14 minutes after 11:00 — a 10-minute threshold from
+    // an 11:00 session start means "differs" starts at an 11:10 session.
+    expect(hrWindowDiffersFromSession(hrWindow, '2026-09-07T11:04:00Z', hrWindow.end)).toBe(false);
+    expect(hrWindowDiffersFromSession(hrWindow, '2026-09-07T11:03:00Z', hrWindow.end)).toBe(true);
+  });
+
+  test("this ticket's own incident (roughly two hours off) clearly differs", () => {
+    expect(
+      hrWindowDiffersFromSession(hrWindow, '2026-09-07T14:00:00Z', '2026-09-07T15:30:00Z'),
+    ).toBe(true);
+  });
+
+  test('a mismatch on only ONE boundary is still a difference', () => {
+    expect(hrWindowDiffersFromSession(hrWindow, hrWindow.start, '2026-09-07T15:00:00Z')).toBe(true);
+    expect(hrWindowDiffersFromSession(hrWindow, '2026-09-07T09:00:00Z', hrWindow.end)).toBe(true);
   });
 });

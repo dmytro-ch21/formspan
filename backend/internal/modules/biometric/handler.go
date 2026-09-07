@@ -207,6 +207,14 @@ type computeMetricsRequest struct {
 	// evidence" while asking for metrics to be computed is a contradiction,
 	// not a valid request).
 	HRSource string `json:"hr_source"`
+	// HRWindowStart and HRWindowEnd (N522/#934) let a caller ask this
+	// computation to look somewhere other than the session's own
+	// started_at/ended_at — RFC3339, both present or both omitted (a lone
+	// one is invalid_input). See Repository.ComputeSessionMetrics's own doc
+	// comment and ValidateHRWindowOverride for the full reasoning; this
+	// never changes the session's own recorded times.
+	HRWindowStart *string `json:"hr_window_start,omitempty"`
+	HRWindowEnd   *string `json:"hr_window_end,omitempty"`
 }
 
 // ComputeMetrics (re)computes and stores session_metrics for a session the
@@ -236,8 +244,35 @@ func (h *Handler) ComputeMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Both present or both absent — a lone one is malformed, not "no
+	// override" (ValidateHRWindowOverride enforces the same rule again once
+	// the session's own started_at is known; this parse-time check is what
+	// turns a bad RFC3339 string into invalid_input rather than a 500).
+	var windowStart, windowEnd *time.Time
+	if req.HRWindowStart != nil || req.HRWindowEnd != nil {
+		if req.HRWindowStart == nil || req.HRWindowEnd == nil {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"hr_window_start and hr_window_end must both be set or both omitted")
+			return
+		}
+		ws, err := parseTimestamp(*req.HRWindowStart)
+		if err != nil {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"hr_window_start must be RFC3339")
+			return
+		}
+		we, err := parseTimestamp(*req.HRWindowEnd)
+		if err != nil {
+			apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+				"hr_window_end must be RFC3339")
+			return
+		}
+		windowStart, windowEnd = &ws, &we
+	}
+
 	m, err := h.repo.ComputeSessionMetrics(
-		r.Context(), claims.UserID, r.PathValue("sessionID"), req.HRMaxBPM, hrMaxSource, hrSource)
+		r.Context(), claims.UserID, r.PathValue("sessionID"), req.HRMaxBPM, hrMaxSource, hrSource,
+		windowStart, windowEnd)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -361,7 +396,10 @@ func invalidInputMessage() string {
 		"; source_platform must be one of " + join(SourcePlatforms()) +
 		"; unit must not be empty; measured_at must not be zero" +
 		"; period_end, if set, must not be before measured_at" +
-		"; a session must have ended before its metrics can be computed"
+		"; a session must have ended before its metrics can be computed" +
+		"; hr_window_start and hr_window_end must both be set or both omitted" +
+		"; hr_window_start must be before hr_window_end" +
+		"; hr_window must not be more than 24h from the session's own started_at"
 }
 
 func join[T ~string](vals []T) string {

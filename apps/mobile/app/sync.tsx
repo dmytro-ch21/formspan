@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { triggerBiometricSyncNow } from '@/lib/biometricSync';
 import { useModules } from '@/lib/ModulesProvider';
 import { blockedRows, retryBlockedRow, type BlockedRow } from '@/lib/sessionStore';
 import { sessionHref } from '@/lib/startSession';
@@ -40,6 +41,16 @@ import { fallbackModules, type Module } from '@/lib/modules';
  * to set 10. "Try again" is the right answer only for a row whose obstacle has
  * moved on its own; anything the athlete has to change needs the screen that
  * can change it.
+ *
+ * **"Sync now" used to mean only the offline outbox** (`lib/sync.ts`'s
+ * `syncNow`) — activities, sessions, workouts. N522/#934: the biometric
+ * enrichment pass (heart-rate windows, VO₂max — `lib/biometricSync.ts`) is a
+ * genuinely separate orchestrator with its own mutex and its own foreground
+ * trigger, and nothing on this screen ever ran it. An athlete told
+ * elsewhere in this app that HR data "may not have synced yet" would land
+ * here, tap the only obviously-discoverable "Sync now" control, and get
+ * zero effect on the thing they actually came to fix. The button now
+ * triggers both.
  */
 export default function SyncScreen() {
   const accent = useAccent();
@@ -106,7 +117,22 @@ export default function SyncScreen() {
         </View>
 
         <Pressable
-          onPress={() => void syncNow().then(load)}
+          onPress={() => {
+            void syncNow().then(load);
+            // N522/#934: this was previously the offline-outbox push ONLY —
+            // the biometric enrichment pass (heart-rate windows, VO2max) is
+            // a SEPARATE orchestrator with its own mutex (see
+            // biometricSync.ts's doc comment), and nothing here ever
+            // triggered it. That made this screen's own "may not have
+            // synced yet" framing (below, in the transient-error copy) a
+            // dead end for exactly the HR-enrichment failures an athlete
+            // is most likely to land here over: tapping the app's own
+            // obviously-discoverable "Sync now" control did nothing for
+            // them. Same identity/mutex path Settings' HealthKit toggle
+            // already uses (`triggerBiometricSyncNow`) — never the raw
+            // orchestrator function.
+            if (userId) triggerBiometricSyncNow(userId, getToken);
+          }}
           style={styles.syncButton}
           accessibilityRole="button"
           accessibilityLabel="Sync now"

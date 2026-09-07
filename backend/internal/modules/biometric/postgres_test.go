@@ -333,7 +333,7 @@ func TestComputeSessionMetrics_HappyPath(t *testing.T) {
 		t.Fatalf("seed samples: %v", err)
 	}
 
-	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if err != nil {
 		t.Fatalf("compute: %v", err)
 	}
@@ -364,6 +364,12 @@ func TestComputeSessionMetrics_HappyPath(t *testing.T) {
 	if m.HRMaxSource == nil || *m.HRMaxSource != HRMaxSourceEstimated {
 		t.Fatalf("hr_max_source = %v, want estimated", m.HRMaxSource)
 	}
+	// N522/#934: with no override, the resolved window is exactly the
+	// session's own started_at/ended_at.
+	if !m.HRWindowStart.Equal(start) || !m.HRWindowEnd.Equal(end) {
+		t.Fatalf("hr_window = [%v, %v], want [%v, %v] (the session's own window, no override given)",
+			m.HRWindowStart, m.HRWindowEnd, start, end)
+	}
 
 	// And it round-trips through GetSessionMetrics.
 	got, err := repo.GetSessionMetrics(ctx, user, id)
@@ -379,6 +385,155 @@ func TestComputeSessionMetrics_HappyPath(t *testing.T) {
 	if got.HRMaxSource == nil || *got.HRMaxSource != HRMaxSourceEstimated {
 		t.Fatalf("get hr_max_source = %v, want estimated", got.HRMaxSource)
 	}
+	if !got.HRWindowStart.Equal(start) || !got.HRWindowEnd.Equal(end) {
+		t.Fatalf("get hr_window = [%v, %v], want [%v, %v]", got.HRWindowStart, got.HRWindowEnd, start, end)
+	}
+}
+
+// N522/#934, backend-reviewer (PR review): the migration's
+// session_metrics_hr_window_valid CHECK originally used `<` (strictly
+// before), which is STRICTER than sessions' own long-standing
+// sessions_ends_after_start CHECK (`ended_at >= started_at`, 000010) — a
+// zero-duration session is legitimately allowed there. With no override,
+// ComputeSessionMetrics writes hr_window_start/end as exactly the session's
+// own started_at/ended_at (see the happy-path test above), so a
+// zero-duration session would have hit the DB CHECK constraint with an
+// opaque 23514 the first time anyone tried to compute its metrics — a real
+// regression this ticket did not intend to cause. The migration now uses
+// `<=`, matching sessions' own bound exactly; this proves it end to end.
+func TestComputeSessionMetrics_ZeroDurationSessionNoOverride(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-zero-duration", "user_bio_zero_duration"
+	cleanupSamples(t, pool, user)
+	instant := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, instant, instant)
+
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceNone, nil, nil)
+	if err != nil {
+		t.Fatalf("compute on a zero-duration session: %v, want success (not a CHECK-constraint violation)", err)
+	}
+	if !m.HRWindowStart.Equal(instant) || !m.HRWindowEnd.Equal(instant) {
+		t.Fatalf("hr_window = [%v, %v], want [%v, %v] (both equal to the session's own instant)",
+			m.HRWindowStart, m.HRWindowEnd, instant, instant)
+	}
+}
+
+// N522/#934 — the fix itself: a caller-supplied window override is what a
+// post-hoc-logged session's mistimed started_at/ended_at needed all along.
+// This proves the override actually changes which biometric_samples get
+// read, WITHOUT touching the session's own recorded times.
+func TestComputeSessionMetrics_WindowOverrideReadsFromTheOverrideNotTheSession(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-override", "user_bio_override"
+	cleanupSamples(t, pool, user)
+
+	// The session's OWN (wrong) logged window — a post-hoc log's mistimed
+	// clock placement.
+	sessionStart := time.Date(2026, 9, 1, 18, 0, 0, 0, time.UTC)
+	sessionEnd := sessionStart.Add(90 * time.Minute)
+	seedSession(t, pool, id, user, sessionStart, sessionEnd)
+
+	// A real HR sample, but OUTSIDE the session's own window — inside the
+	// fitted window a client-side wide-window fit found instead, hours
+	// earlier the same day.
+	overrideStart := time.Date(2026, 9, 1, 11, 2, 0, 0, time.UTC)
+	overrideEnd := overrideStart.Add(82 * time.Minute)
+	if _, err := repo.PutSamples(ctx, user, []Sample{
+		hrSample("bio-override-1", overrideStart.Add(10*time.Minute), 150),
+	}); err != nil {
+		t.Fatalf("seed samples: %v", err)
+	}
+
+	// Without the override, the session's own (wrong) window finds nothing.
+	baseline, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
+	if err != nil {
+		t.Fatalf("compute (no override): %v", err)
+	}
+	if baseline.HRSource != HRSourceNone || baseline.SampleCount != 0 {
+		t.Fatalf("without an override, want hr_source none/0 samples (the actual bug), got %q/%d",
+			baseline.HRSource, baseline.SampleCount)
+	}
+
+	// With the override, the SAME sample is found.
+	m, err := repo.ComputeSessionMetrics(
+		ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, &overrideStart, &overrideEnd)
+	if err != nil {
+		t.Fatalf("compute (with override): %v", err)
+	}
+	if m.HRSource != HRSourceWindow || m.SampleCount != 1 {
+		t.Fatalf("with the override, want hr_source window/1 sample, got %q/%d", m.HRSource, m.SampleCount)
+	}
+	if m.AvgHRBPM == nil || *m.AvgHRBPM != 150 {
+		t.Fatalf("avg_hr_bpm = %v, want 150", m.AvgHRBPM)
+	}
+	if !m.HRWindowStart.Equal(overrideStart) || !m.HRWindowEnd.Equal(overrideEnd) {
+		t.Fatalf("hr_window = [%v, %v], want the override [%v, %v]",
+			m.HRWindowStart, m.HRWindowEnd, overrideStart, overrideEnd)
+	}
+
+	// And the session's own recorded times are UNTOUCHED — "corroborates,
+	// never replaces".
+	var gotStart, gotEnd time.Time
+	if err := pool.QueryRow(ctx, `SELECT started_at, ended_at FROM sessions WHERE id = $1`, id).
+		Scan(&gotStart, &gotEnd); err != nil {
+		t.Fatalf("re-read session: %v", err)
+	}
+	if !gotStart.Equal(sessionStart) || !gotEnd.Equal(sessionEnd) {
+		t.Fatalf("session's own started_at/ended_at changed: got [%v, %v], want the original [%v, %v]",
+			gotStart, gotEnd, sessionStart, sessionEnd)
+	}
+}
+
+func TestComputeSessionMetrics_WindowOverrideRejectsOneSided(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-override-onesided", "user_bio_override_onesided"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+
+	only := start.Add(-5 * time.Minute)
+	if _, err := repo.ComputeSessionMetrics(
+		ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, &only, nil); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("one-sided override (start only) gave %v, want ErrInvalidInput", err)
+	}
+	if _, err := repo.ComputeSessionMetrics(
+		ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, &only); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("one-sided override (end only) gave %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestComputeSessionMetrics_WindowOverrideRejectsEndBeforeStart(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-override-inverted", "user_bio_override_inverted"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+
+	ws, we := start.Add(10*time.Minute), start.Add(5*time.Minute)
+	if _, err := repo.ComputeSessionMetrics(
+		ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, &ws, &we); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("inverted override gave %v, want ErrInvalidInput", err)
+	}
+}
+
+// A sanity bound, not a security boundary (see ValidateHRWindowOverride's
+// doc comment) — this is what stops a client sending an override wildly
+// unrelated to the session at all.
+func TestComputeSessionMetrics_WindowOverrideRejectsTooFarFromSession(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const id, user = "ses-bio-override-toofar", "user_bio_override_toofar"
+	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	seedSession(t, pool, id, user, start, start.Add(time.Hour))
+
+	ws := start.Add(-48 * time.Hour)
+	we := ws.Add(time.Hour)
+	if _, err := repo.ComputeSessionMetrics(
+		ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, &ws, &we); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("an override 48h from the session gave %v, want ErrInvalidInput", err)
+	}
 }
 
 // Zero samples: hr_source must be forced to 'none' even though the caller
@@ -391,7 +546,7 @@ func TestComputeSessionMetrics_NoSamplesForcesHRSourceNone(t *testing.T) {
 	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	seedSession(t, pool, id, user, start, start.Add(time.Hour))
 
-	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWorkout)
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWorkout, nil, nil)
 	if err != nil {
 		t.Fatalf("compute: %v", err)
 	}
@@ -415,7 +570,7 @@ func TestComputeSessionMetrics_SessionNotEndedIsInvalidInput(t *testing.T) {
 	const id, user = "ses-bio-inprogress", "user_bio_inprogress"
 	seedInProgressSession(t, pool, id, user, time.Now().UTC())
 
-	_, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
+	_, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("compute on an in-progress session gave %v, want ErrInvalidInput", err)
 	}
@@ -425,7 +580,7 @@ func TestComputeSessionMetrics_UnknownSessionIsNotFound(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	ctx := context.Background()
 
-	_, err := repo.ComputeSessionMetrics(ctx, "user_bio_ghost", "ses-does-not-exist", 200, HRMaxSourceEstimated, HRSourceWindow)
+	_, err := repo.ComputeSessionMetrics(ctx, "user_bio_ghost", "ses-does-not-exist", 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("compute against a missing session gave %v, want ErrNotFound", err)
 	}
@@ -440,7 +595,7 @@ func TestComputeSessionMetrics_CannotBeComputedForAnotherUsersSession(t *testing
 	start := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	seedSession(t, pool, id, owner, start, start.Add(time.Hour))
 
-	_, err := repo.ComputeSessionMetrics(ctx, attacker, id, 200, HRMaxSourceEstimated, HRSourceWindow)
+	_, err := repo.ComputeSessionMetrics(ctx, attacker, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("computing against another user's session gave %v, want ErrNotFound", err)
 	}
@@ -468,7 +623,7 @@ func TestGetSessionMetrics_CrossUserIsolation(t *testing.T) {
 	if _, err := repo.PutSamples(ctx, owner, []Sample{hrSample("bio-read-iso-1", start, 150)}); err != nil {
 		t.Fatalf("seed samples: %v", err)
 	}
-	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 
@@ -512,7 +667,7 @@ func TestComputeSessionMetrics_RecomputeUpdatesInPlace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed first sample: %v", err)
 	}
-	first, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
+	first, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if err != nil {
 		t.Fatalf("first compute: %v", err)
 	}
@@ -528,7 +683,7 @@ func TestComputeSessionMetrics_RecomputeUpdatesInPlace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed second sample: %v", err)
 	}
-	second, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
+	second, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if err != nil {
 		t.Fatalf("second compute: %v", err)
 	}
@@ -574,7 +729,7 @@ func TestComputeSessionMetrics_RecomputeWithDifferentHRMaxOverwritesProvenance(t
 	}
 
 	// First compute: the seeded 220-age estimate.
-	first, err := repo.ComputeSessionMetrics(ctx, user, id, 190, HRMaxSourceEstimated, HRSourceWindow)
+	first, err := repo.ComputeSessionMetrics(ctx, user, id, 190, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if err != nil {
 		t.Fatalf("first compute: %v", err)
 	}
@@ -589,7 +744,7 @@ func TestComputeSessionMetrics_RecomputeWithDifferentHRMaxOverwritesProvenance(t
 	// The athlete's observed maximum arrives later and supersedes the
 	// estimate -- a recompute against a DIFFERENT HRmax and a DIFFERENT
 	// source.
-	second, err := repo.ComputeSessionMetrics(ctx, user, id, 205, HRMaxSourceObserved, HRSourceWindow)
+	second, err := repo.ComputeSessionMetrics(ctx, user, id, 205, HRMaxSourceObserved, HRSourceWindow, nil, nil)
 	if err != nil {
 		t.Fatalf("second compute: %v", err)
 	}
@@ -641,7 +796,7 @@ func TestDeletingTheSessionCascadesToSessionMetrics(t *testing.T) {
 	if _, err := repo.PutSamples(ctx, user, []Sample{hrSample("bio-cascade-1", start, 150)}); err != nil {
 		t.Fatalf("seed sample: %v", err)
 	}
-	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 
@@ -673,8 +828,8 @@ func TestSessionMetricsUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel(t *te
 	seedSession(t, pool, id, owner, start, start.Add(time.Hour))
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version)
-		VALUES ($1, $2, 'window', 3, 1)`, id, owner); err != nil {
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_window_start, hr_window_end)
+		VALUES ($1, $2, 'window', 3, 1, $3, $4)`, id, owner, start, start.Add(time.Hour)); err != nil {
 		t.Fatalf("seed metrics: %v", err)
 	}
 
@@ -683,12 +838,12 @@ func TestSessionMetricsUpsertPredicateRefusesACrossUserUpdateAtTheSQLLevel(t *te
 	// that is what stops the foreign key from re-checking, and why this
 	// predicate has to exist.
 	tag, err := pool.Exec(ctx, `
-		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version)
-		VALUES ($1, $2, 'workout', 999, 1)
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_window_start, hr_window_end)
+		VALUES ($1, $2, 'workout', 999, 1, $3, $4)
 		ON CONFLICT (session_id) DO UPDATE SET
 			hr_source    = excluded.hr_source,
 			sample_count = excluded.sample_count
-		WHERE session_metrics.user_id = $2`, id, attacker)
+		WHERE session_metrics.user_id = $2`, id, attacker, start, start.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("upsert errored rather than matching no rows: %v", err)
 	}
@@ -716,8 +871,8 @@ func TestSessionMetricsHRSourceCheckConstraintRejectsUnknownValues(t *testing.T)
 	seedSession(t, pool, id, user, start, start.Add(time.Hour))
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version)
-		VALUES ($1, $2, 'made_up_value', 0, 1)`, id, user)
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_window_start, hr_window_end)
+		VALUES ($1, $2, 'made_up_value', 0, 1, $3, $4)`, id, user, start, start.Add(time.Hour))
 	if err == nil {
 		t.Fatal("insert with an invalid hr_source succeeded, want a check_violation")
 	}
@@ -735,8 +890,8 @@ func TestSessionMetricsHRMaxSourceCheckConstraintRejectsUnknownValues(t *testing
 	seedSession(t, pool, id, user, start, start.Add(time.Hour))
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_max_source)
-		VALUES ($1, $2, 'window', 0, 1, 'made_up_value')`, id, user)
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_max_source, hr_window_start, hr_window_end)
+		VALUES ($1, $2, 'window', 0, 1, 'made_up_value', $3, $4)`, id, user, start, start.Add(time.Hour))
 	if err == nil {
 		t.Fatal("insert with an invalid hr_max_source succeeded, want a check_violation")
 	}
@@ -755,10 +910,14 @@ func TestSessionMetricsHRMaxSourceCheckConstraintAllowsNull(t *testing.T) {
 
 	// A row written the way a pre-N483 caller would have -- no
 	// hr_max_bpm/hr_max_source at all, simulating a legacy row this
-	// migration never backfills.
+	// migration never backfills. hr_window_start/end ARE supplied — unlike
+	// hr_max_bpm/hr_max_source, N522's own migration DOES backfill every
+	// pre-existing row (from the owning session's own started_at/ended_at;
+	// see that migration's comment), so a legacy row never legitimately
+	// lacks these two.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version)
-		VALUES ($1, $2, 'window', 0, 1)`, id, user); err != nil {
+		INSERT INTO session_metrics (session_id, user_id, hr_source, sample_count, rule_version, hr_window_start, hr_window_end)
+		VALUES ($1, $2, 'window', 0, 1, $3, $4)`, id, user, start, start.Add(time.Hour)); err != nil {
 		t.Fatalf("insert pre-N483-shaped row: %v", err)
 	}
 
@@ -788,7 +947,7 @@ func TestComputeSessionMetrics_ActiveEnergySummed(t *testing.T) {
 		t.Fatalf("seed active_energy: %v", err)
 	}
 
-	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow)
+	m, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil)
 	if err != nil {
 		t.Fatalf("compute: %v", err)
 	}
@@ -822,7 +981,7 @@ func TestListSessionLoad_SpansAllThreeSports(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("seed samples for %s: %v", sport, err)
 		}
-		if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+		if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 			t.Fatalf("compute for %s: %v", sport, err)
 		}
 	}
@@ -880,7 +1039,7 @@ func TestListSessionLoad_LimitTruncatesToTheOldestRowsFirst(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("seed samples %d: %v", i, err)
 		}
-		if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+		if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 			t.Fatalf("compute %d: %v", i, err)
 		}
 	}
@@ -934,7 +1093,7 @@ func TestListSessionLoad_ExcludesHRSourceNoneSessions(t *testing.T) {
 
 	// No samples put at all -- Compute forces hr_source to 'none' and leaves
 	// trimp nil regardless of the caller's hint (see trimp.go's Compute).
-	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 
@@ -978,7 +1137,7 @@ func TestListSessionLoad_ExcludesOutOfRangeSessions(t *testing.T) {
 	if _, err := repo.PutSamples(ctx, user, []Sample{hrSample("bio-load-range-1", start, 150)}); err != nil {
 		t.Fatalf("seed samples: %v", err)
 	}
-	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, user, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 
@@ -1004,7 +1163,7 @@ func TestListSessionLoad_CrossUserIsolation(t *testing.T) {
 	if _, err := repo.PutSamples(ctx, owner, []Sample{hrSample("bio-load-iso-1", start, 150)}); err != nil {
 		t.Fatalf("seed samples: %v", err)
 	}
-	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRMaxSourceEstimated, HRSourceWindow); err != nil {
+	if _, err := repo.ComputeSessionMetrics(ctx, owner, id, 200, HRMaxSourceEstimated, HRSourceWindow, nil, nil); err != nil {
 		t.Fatalf("compute: %v", err)
 	}
 

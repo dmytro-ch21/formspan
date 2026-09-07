@@ -7,7 +7,13 @@ import { HRTimelineChart } from '@/components/ui/HRTimelineChart';
 import { SectionHeader } from '@/components/ui/Section';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
-import { buildHRSessionReport, type HRExerciseRow, type HRZoneRow } from '@/lib/hrSessionReport';
+import {
+  buildHRSessionReport,
+  hrWindowDiffersFromSession,
+  type HRExerciseRow,
+  type HRQueriedWindow,
+  type HRZoneRow,
+} from '@/lib/hrSessionReport';
 import type { HRTimelinePoint } from '@/lib/hrTimeline';
 import type { ExerciseHR, SessionMetrics } from '@/lib/biometric';
 
@@ -43,6 +49,18 @@ import type { ExerciseHR, SessionMetrics } from '@/lib/biometric';
  * component branching on sport itself. Independent of `hrTimeline` above —
  * one caller (BJJ) can pass a timeline with no exercise breakdown, another
  * (strength) the reverse, and both can pass neither.
+ *
+ * `sessionStartedAt`/`sessionEndedAt` (N522/#934) are optional and additive,
+ * same posture as everything else here: pass the owning session's own
+ * logged times and, ONLY when the queried HR window
+ * (`SessionMetrics.hr_window_start/end`) differs from them by more than
+ * `hrWindowDiffersFromSession`'s threshold, a small muted line appears
+ * showing both. Deliberately silent otherwise — the ordinary case (a
+ * live-tracked session, or a post-hoc one whose exact window already had
+ * real evidence) never differs, and this screen is dense enough without a
+ * line that says nothing new on every session. When it DOES differ, this is
+ * exactly the diagnostic that would have made N522's own incident visible
+ * immediately instead of reading as an unexplained "no heart-rate data".
  */
 export function HRSessionReport({
   metrics,
@@ -50,6 +68,8 @@ export function HRSessionReport({
   hrTimeline,
   exerciseHR = null,
   exerciseNames = {},
+  sessionStartedAt,
+  sessionEndedAt,
   testID = 'hr-session-report',
 }: {
   metrics: SessionMetrics | null;
@@ -71,6 +91,11 @@ export function HRSessionReport({
    *  elsewhere for the identical reason (NOT `withExerciseNames`, which
    *  falls back to `null` instead). */
   exerciseNames?: Record<string, string>;
+  /** The owning session's own logged started_at/ended_at (N522/#934) — see
+   *  this component's own doc comment. Omit to never show the diagnostic
+   *  line, e.g. a caller with no convenient RFC3339 pair on hand yet. */
+  sessionStartedAt?: string;
+  sessionEndedAt?: string;
   testID?: string;
 }) {
   const report = buildHRSessionReport(metrics, sessionRPE, exerciseHR, exerciseNames);
@@ -110,6 +135,12 @@ export function HRSessionReport({
               : 'Add your date of birth in your profile to unlock training load and zone breakdown.'}
           </Text>
         </RNView>
+        <HRWindowMismatchNote
+          hrWindow={report.hrWindow}
+          sessionStartedAt={sessionStartedAt}
+          sessionEndedAt={sessionEndedAt}
+          testID={`${testID}-window-note`}
+        />
       </RNView>
     );
   }
@@ -191,7 +222,45 @@ export function HRSessionReport({
           <Text style={styles.effectivenessDetail}>{report.effectiveness.detail}</Text>
         </RNView>
       )}
+
+      <HRWindowMismatchNote
+        hrWindow={report.hrWindow}
+        sessionStartedAt={sessionStartedAt}
+        sessionEndedAt={sessionEndedAt}
+        testID={`${testID}-window-note`}
+      />
     </RNView>
+  );
+}
+
+function formatClockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * N522/#934's diagnostic line — see this component's own doc comment on
+ * `sessionStartedAt`/`sessionEndedAt` for the full reasoning. Renders
+ * nothing unless BOTH session times were passed AND
+ * `hrWindowDiffersFromSession` says the mismatch is real, not clock noise.
+ */
+function HRWindowMismatchNote({
+  hrWindow,
+  sessionStartedAt,
+  sessionEndedAt,
+  testID,
+}: {
+  hrWindow: HRQueriedWindow;
+  sessionStartedAt: string | undefined;
+  sessionEndedAt: string | undefined;
+  testID: string;
+}) {
+  if (!sessionStartedAt || !sessionEndedAt) return null;
+  if (!hrWindowDiffersFromSession(hrWindow, sessionStartedAt, sessionEndedAt)) return null;
+  return (
+    <Text style={styles.windowNote} testID={testID}>
+      Heart rate found {formatClockTime(hrWindow.start)}–{formatClockTime(hrWindow.end)} (session logged{' '}
+      {formatClockTime(sessionStartedAt)}–{formatClockTime(sessionEndedAt)})
+    </Text>
   );
 }
 
@@ -298,4 +367,9 @@ const styles = StyleSheet.create({
     color: vola.textMuted,
   },
   exerciseSampleCount: { width: 62, textAlign: 'right', fontSize: 11, color: vola.textDim },
+
+  // N522/#934 — deliberately the quietest text on this whole screen: it
+  // only ever appears to explain a mismatch, never to assert a normal
+  // state, so it reads as a footnote rather than a warning.
+  windowNote: { fontSize: 11, color: vola.textDim, paddingHorizontal: 2 },
 });

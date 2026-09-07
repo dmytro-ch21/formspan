@@ -394,6 +394,8 @@ describe('the HR timeline (N491/#852)', () => {
       time_in_zones: { '3': 30, '4': 10 },
       hr_source: 'window',
       sample_count: 40,
+      hr_window_start: mockSession.started_at as string,
+      hr_window_end: mockSession.ended_at as string,
       computed_at: mockSession.ended_at as string,
       rule_version: 1,
       ...overrides,

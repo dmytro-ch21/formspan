@@ -62546,6 +62546,339 @@ documented trade-offs and one fixed:
   predates N150 and nothing here makes it worse.
 
 
+## 2026-09-07 — N522/#934: a wide-window HR-signal fit for a BJJ session whose logged clock, not just its watch, was wrong
+
+**The live incident.** A BJJ "Class" session logged today showed "No
+heart-rate data for this session" despite Apple HealthKit having complete,
+continuous HR samples covering the real class window — a real workout
+recorded by an Amazfit Helio Strap and synced via Zepp, 11:12 AM–12:34 PM,
+81:43 duration, 151 avg / 190 max bpm. The session detail screen showed "90
+min on the mat" — an exact match to one of `app/bjj/log.tsx`'s duration
+presets, not the real 81:43 — strong evidence the session was logged
+through the post-hoc "How long on the mat?" screen well after class ended,
+without correcting the collapsed "Ended at" row (`EndTimeCorrection`,
+N487/#848). `app/bjj/log.tsx`'s `started_at = endBase − durationMinutes`
+computed a window with ZERO overlap with the real class, `sessionHRWindow`
+queried exactly that wrong window, found nothing, and N511/#893's retry
+mechanism (`needsEnrichmentAttempt`) is powerless here — it re-queries the
+IDENTICAL wrong window on every retry, forever.
+
+**The fix has three real pieces, not one.** A pure fitting algorithm
+(`apps/mobile/lib/hrWindowFit.ts`), the plumbing to actually USE its result
+without touching the athlete's own logged times (a new backend override),
+and two smaller but load-bearing fixes the acceptance criteria named
+explicitly (`app/sync.tsx`'s dead "Sync now" button, and surfacing the
+mismatch on-screen).
+
+### 1. The fitting algorithm
+
+`fitHRWindow` (pure, `hrWindowFit.ts`) is wired into
+`biometricSync.ts`'s `syncSessionWindows` as a fallback that runs ONLY when
+the exact-window query already returned zero samples.
+
+- **Wide-window width: the session's own DATED calendar day (device-local),
+  padded ±2 hours.** Considered against a fixed-hours-around-the-wrong-anchor
+  alternative and rejected: the dated day is the one piece of a post-hoc
+  log's input that is NOT computed from the wrong clock — it comes from the
+  date picker, which this codebase's own `backdatedTimestamp`/N492
+  same-day-remap logic already treats as reliable. The exact anchor time can
+  be wrong by any amount within a day; the DAY is right. ±2h covers a class
+  that straddles local midnight either direction without reaching far enough
+  to risk pulling in an unrelated session from the day before or after.
+- **The matched-filter length is the athlete's own logged DURATION**
+  (`ended_at − started_at`), not the true duration (which is obviously
+  unknown ahead of time) — this incident's own data is the justification: a
+  90-minute guess against a real 81:43 duration is close, even though the
+  clock PLACEMENT was hours off. The fit slides a window of that length
+  across the wide sample set.
+- **Scoring: elevated-time fraction, using the SAME gap-attribution method
+  `backend/internal/modules/biometric/trimp.go`'s `ZoneBreakdown` already
+  uses** (attribute each inter-sample gap to the sample that opens it, cap
+  the gap at `HR_FIT_MAX_GAP_MS` = 6 minutes — the same
+  `maxSampleGapForZoneAttribution` value, reused rather than reinvented).
+  Baseline: the 20th percentile of the WIDE window's own samples (no new
+  `HKQuantityTypeIdentifierRestingHeartRate` permission — a real rollout
+  cost this fix does not need to pay). Elevated threshold: baseline + 20 bpm
+  — sized directly against this incident's numbers (a 60-77 bpm baseline
+  puts the threshold at 85-90 bpm, comfortably below the real block's LOW
+  points during drilling/instruction lulls, 92-125 bpm, and far below its
+  190 bpm peak).
+- **Confidence bar: 0.4 (40% of covered time elevated).** The real block —
+  sustained rolling and drilling with genuine oscillation, never dropping to
+  a resting HR — clears this comfortably (≥0.7, in fact, in the synthetic
+  fixture below); ordinary daily-life HR variance (walking, a warm room)
+  crossing threshold+20bpm for more than 40% of a many-minutes-long
+  candidate window is itself real evidence something was happening.
+  Deliberately conservative (not 0.5+) because the real block's own lower-
+  intensity stretches are real training, not noise.
+- **Ambiguity: candidates within 0.1 of the best score are clustered by
+  window overlap; more than one cluster is a genuine ambiguity and declines
+  outright**, rather than letting proximity to the (wrong) original anchor
+  pick a winner between two real possibilities. Proximity to the anchor is
+  used ONLY to tie-break among candidates already known to describe the same
+  event (their windows overlap).
+- **Validated against a synthetic fixture built directly from this
+  incident's real numbers** (`lib/__tests__/hrWindowFit.test.ts`): a ~82-
+  minute block alternating drilling/instruction stretches (92-125 bpm) and
+  rolling stretches (up to 190 bpm) against a 60-77 bpm baseline, offset two
+  hours from a 90-minute wrong logged anchor. Result: fit located at
+  11:14:00–12:44:00 against a true block of 11:12:00–12:33:43 (within the
+  90-minute slide's own ~8-minute slack over the true 81:43 duration),
+  confidence 1.0. A genuinely-ambiguous fixture (two comparable ~82-minute
+  blocks, hours apart) and a genuinely-empty one (flat resting HR for 16
+  hours) both correctly return `null`. This is the "verify an external
+  contract against the real service at least once" discipline applied to an
+  algorithm rather than a live API — the fixture is this incident's own
+  numbers, not an invented stand-in.
+- **Mutation-tested for real, twice.** (1) Removed the `maxScore <
+  HR_FIT_MIN_CONFIDENCE` gate entirely — the "genuinely empty" test went red
+  with a real assertion failure (`Received: {"confidence": 0, ...}` where
+  `null` was expected), not a compile error. (2) Inverted the elevation
+  comparison (`>= threshold` → `< threshold`) — BOTH the "locates the real
+  block" test (now `null`) and the "genuinely empty" test (now confidently
+  "found" the flat-resting window as elevated, confidence 1.0) went red,
+  each with a real, distinct assertion failure. Both mutations were then
+  reverted and the suite re-confirmed green by RE-RUNNING (`diff -q` against
+  the pre-mutation file first confirmed a byte-identical restore, then the
+  full `hrWindowFit.test.ts` suite was re-run and passed 9/9) — never by
+  reading the diff.
+
+### 2. The backend plumbing — an explicit HR-window override, never the session's own record
+
+The critical discovery, made before writing any client code: `backend/internal/modules/biometric/postgres.go`'s
+`ComputeSessionMetrics` has ALWAYS derived its query window from
+`sessions.started_at`/`ended_at` directly — the client cannot pass an
+explicit window at all. So a client-side fit that finds real samples
+elsewhere in HealthKit has, until now, had no way to get the backend to
+actually look there. Two options existed: (a) correct the session's own
+`started_at`/`ended_at` to the fitted window, or (b) add a way to tell
+`ComputeSessionMetrics` "read from HERE instead, just for this
+computation." (a) was rejected outright — `vola-athlete-ux`'s BJJ
+convention is explicit that "HR corroborates, never replaces," and silently
+overwriting an athlete's own authored session duration based on a
+statistical guess is exactly the kind of overwrite that principle forbids,
+even a confident one. (b) is what shipped:
+
+- `ComputeSessionMetrics` gained two new optional parameters,
+  `windowStart`/`windowEnd *time.Time`. Both nil (every pre-N522 caller,
+  unchanged) uses the session's own window exactly as before. Both non-nil,
+  validated by a new pure function `ValidateHRWindowOverride`, is used
+  INSTEAD for both the heart-rate and active-energy queries — but NEVER
+  written back to `sessions.started_at`/`ended_at`. Exactly one non-nil is
+  `ErrInvalidInput`.
+- `ValidateHRWindowOverride` also bounds the override to within 24 hours of
+  the session's own `started_at` — a sanity check, not a security boundary
+  (the samples read are always the caller's own regardless), sized
+  deliberately generous relative to the mobile fit's own ±2h-on-a-calendar-
+  day padding (~14h at the far edge) so a real fit is never rejected by this
+  bound.
+- `SessionMetrics` gained `hr_window_start`/`hr_window_end` (NOT NULL,
+  always populated — the actual window a row's evidence was queried from,
+  override or default). Migration `20260907174309_session_metrics_hr_window`
+  adds both columns and BACKFILLS every existing row from its owning
+  session's own `started_at`/`ended_at` — unlike N483/#833's
+  `hr_max_bpm`/`hr_max_source` (which had no correct historical value to
+  infer), every row computed before this ticket WAS computed from exactly
+  the session's own window, so this backfill is not a guess.
+- `POST /v1/biometric/sessions/{id}/metrics` gained optional
+  `hr_window_start`/`hr_window_end` request fields (RFC3339, both-or-
+  neither, parsed before `ValidateHRWindowOverride` ever runs). Wire
+  contract updated in `contracts/public.openapi.yaml`.
+- Full backend test coverage added: the override actually changes which
+  samples get read (seeded outside the session's own window, inside the
+  override — proven to differ with vs. without it); the session's own
+  `started_at`/`ended_at` are read back byte-identical after an override is
+  used; one-sided, inverted, and >24h-drift overrides are all rejected, at
+  both the handler's parse layer and the repository's semantic layer.
+  Existing hand-crafted `INSERT INTO session_metrics` tests (the
+  cross-user-upsert-predicate test, the two CHECK-constraint tests, and the
+  pre-N483-shaped-row test) were updated to supply the new NOT NULL columns
+  — three of the four were asserting "this insert fails", so without the
+  fix they were still failing, just for the NOT NULL violation instead of
+  the constraint actually under test; all four now exercise the intended
+  constraint again.
+
+### 3. The `hr_source` wire-contract decision
+
+**No new enum value. `'window'` is reused, deliberately, for a
+wide-window-fit result.** `HRSourceWorkout`'s own doc comment in
+`biometric.go` is explicit that it means "known to come from a platform
+workout OBJECT the caller matched to this session… evidence at least as
+dense as an actively-recorded workout" — an anchor-CONFIRMED claim. A
+wide-window fit is the opposite in kind: a statistical best-guess at where
+training happened, explicitly declining whenever it is not confident. It is,
+honestly, `HRSourceWindow`'s own description almost verbatim — "a plain
+time-window read… real evidence, but without the guarantee that every
+sample in the window was actually recorded during the session" — just with
+the window itself corrected first instead of taken as given. Introducing a
+third value would have meant a second backend migration (a new CHECK
+constraint entry) to express a distinction the wire contract does not
+actually need: nothing downstream reads `hr_source` differently based on
+HOW the window was determined, only on whether real evidence exists at all.
+Not deferred — decided, with reasoning, in this PR. If a future ticket adds
+a real anchor-confirmation mechanism (matching an actual `HKWorkout` object,
+the "additional cross-check" this ticket's issue mentioned as future work),
+THAT is what should finally produce `'workout'` for real.
+
+### 4. `app/sync.tsx`'s "Sync now" — a real manual retry path
+
+Confirmed by reading `triggerBiometricSyncNow`'s actual signature
+(`biometricSync.ts`) and how `app/settings.tsx`'s HealthKit toggle already
+calls it: it needs `(userId, getToken)` and is safely re-entrant (mutex-
+guarded against a pass already in flight). `sync.tsx` already had both
+values in scope (`useAuth()`, `useAuthToken()`) but never called it — "Sync
+now" was the offline-outbox push ONLY. Fixed to call both. This was the
+immediate remediation path named in the ticket: an athlete told elsewhere in
+the app that HR data "may not have synced yet" would land on this exact
+screen, tap its only obviously-discoverable control, and get zero effect on
+the thing they came to fix.
+
+### 5. Session-detail surfacing — a diagnostic line, shown only when it says something
+
+`HRSessionReport` gained optional `sessionStartedAt`/`sessionEndedAt` props.
+`hrSessionReport.ts`'s `buildHRSessionReport` now carries `hrWindow` on
+every non-`unavailable` state (sourced from the now-always-present
+`SessionMetrics.hr_window_start/end`), and a new pure function
+`hrWindowDiffersFromSession` (10-minute threshold either boundary — well
+above clock noise, far below this incident's own ~2-hour mismatch) decides
+whether the two are worth showing side by side. **Decision: silent unless
+there IS a meaningful mismatch**, not always-visible — the BJJ session
+screen is already dense (drilling/technique/live-roll data), and the
+ordinary case (a live-tracked session, or a post-hoc one whose exact window
+already worked) would otherwise carry a line that says nothing new on every
+single session. When it DOES differ, it reads "Heart rate found H:MM–H:MM
+(session logged H:MM–H:MM)" — exactly the diagnostic that would have made
+this incident visible on the athlete's own screen (and to a debugging
+engineer) the moment it happened, instead of reading as an unexplained "no
+heart-rate data". Wired on the BJJ session screen only, matching this
+ticket's scope; the prop is optional and additive, so strength/running
+callers are unaffected and can adopt it later with no further plumbing
+changes.
+
+### What this closes, and what it doesn't
+
+Closes #934 (N522). Related but explicitly out of scope, per the ticket's
+own text: N512/#895 (detecting the drilling→rolling transition WITHIN an
+already-correctly-windowed session) is a different problem — finding a
+session's own outer boundary versus segmenting its interior. N512 was
+separately blocked on "no real recorded HR data from an actual BJJ rolling
+session to validate a step-change heuristic against" (see this file's
+existing N491 entry, and the Open Items list); this incident's own real
+data (now encoded as this ticket's test fixture) is exactly that validated
+sample, so whoever picks up N512 next has one to work from.
+
+Not done: the earlier draft of this ticket considered anchoring against a
+real `HKWorkout` object (`WorkoutProxy.getStatistic()`, already available
+unused in the installed `@kingstinct/react-native-healthkit@14.1.0`) as an
+additional cross-check/prior. Per the user's own explicit steering, this
+was NOT built — it depends on the wearable/sync path correctly writing a
+clean workout object, which not every source does (this incident's own
+Amazfit/Zepp path is exactly the kind that might not), so the wide-window
+fit had to work without it regardless. Worth revisiting as a confidence
+BOOST on top of the fit, never as a replacement for it.
+
+Also not done: this fix corrects HR *evidence attribution*, not the
+athlete's own logged session record — a post-hoc log with a mistimed
+"Ended at" still shows the WRONG duration/time-of-day everywhere else in
+the app (calendar placement, "min on the mat", etc.). That is a real,
+separate gap this ticket deliberately did not touch, for the same
+"corroborates, never replaces" reason section 2 above gives.
+
+Also not done: Android. `lib/healthConnectSync.ts`'s own `computeSessionMetrics`
+call is untouched — it still never passes a window override, so a
+post-hoc-logged BJJ session enriched via Health Connect gets none of this
+fix. `hrWindowFit.ts`'s two functions are platform-agnostic (no
+`healthkit`/`healthConnect` import), so wiring the identical fallback into
+`healthConnectSync.ts`'s own `syncSessionWindows`-equivalent is
+straightforward follow-up work, not a redesign — this PR scoped to the
+reported incident (iOS/HealthKit) rather than porting to both platforms at
+once.
+
+### N522 review fold-in: three real `[blocking]` findings, fixed
+
+`backend-reviewer` and `frontend-reviewer` (per `/pre-merge`) each found one
+genuine, reproducible defect before this PR opened. All three are fixed
+directly in this branch, and each is mutation-verified against the real
+apparatus it depends on (CLAUDE.md's "verify that a check can fail") rather
+than trusted on inspection.
+
+1. **The migration's CHECK constraint was stricter than the invariant it
+   was supposed to enforce** (backend-reviewer). `hr_window_start <
+   hr_window_end` rejects a zero-duration window, but sessions' own
+   long-standing `sessions_ends_after_start` CHECK (migration `000010`)
+   allows a zero-duration SESSION — and with no override,
+   `ComputeSessionMetrics` writes `hr_window_start`/`hr_window_end` as
+   exactly the session's own `started_at`/`ended_at`. Fixed by loosening the
+   constraint to `<=` (`backend/migrations/20260907174309_session_metrics_hr_window.up.sql`),
+   matching sessions' own bound exactly, and left
+   `ValidateHRWindowOverride`'s own separate `<` check untouched — that one
+   validates a genuine caller-supplied override/finding, which can't
+   legitimately be zero-duration, a different case from "no override was
+   given at all."
+
+   Mutation-verified against a real Postgres, not just read: created a
+   scratch database (`vola_mutation_scratch`), applied the migration with
+   the constraint reverted to `<`, and confirmed
+   `TestComputeSessionMetrics_ZeroDurationSessionNoOverride` (new — see
+   below) genuinely fails with a real `23514` ("a value is out of range")
+   surfaced through the repository as `ErrInvalidInput` — exactly the opaque
+   rejection the review predicted. Restored the migration to `<=`, dropped
+   the scratch database, and reran: green, and the full
+   `internal/modules/biometric` package (`go test ./... -p 1` against the
+   real shared dev Postgres) passes end to end.
+
+2. **A confident false positive was directly reproduced**
+   (frontend-reviewer): `fitHRWindow`'s scoring — an elevated-time fraction
+   above a single low bar — cannot tell real training apart from any other
+   sustained, moderately-raised activity. A brisk walk held at 98-112 bpm
+   against a 60-77 bpm baseline scored an identical `confidence: 1.0` to the
+   real incident block. Fixed with a second, independent gate
+   (`HR_FIT_HIGH_INTENSITY_MARGIN_BPM` / `HR_FIT_MIN_HIGH_INTENSITY_FRACTION`
+   in `apps/mobile/lib/hrWindowFit.ts`): a candidate now also has to spend
+   some real (if small — 5%) fraction of its covered time comfortably above
+   the elevation threshold, which BJJ's genuine high-intensity stretches
+   (a hard roll, a live round) reliably produce and a walk or errand
+   essentially never does. Mutation-verified directly: with the gate
+   disabled, the new false-positive test reproduces `confidence: 1` on the
+   walk fixture exactly as the review found; restored, the suite is green
+   (11/11 in `hrWindowFit.test.ts`).
+
+3. **The client's own wide-window padding can exceed the backend's fixed
+   drift bound** (frontend-reviewer + backend-reviewer, independently
+   derived and cross-checked). `wideHRQueryWindow`'s calendar-day-plus-
+   padding shape puts its far edge up to `24h + WIDE_WINDOW_PADDING_HOURS`
+   (~25.9h) from a session started near local midnight — ABOVE
+   `MaxHRWindowOverrideDrift`'s fixed 24h. No retuning of either constant
+   closes this for any positive padding; the backend's own doc comment
+   previously claimed a "~14h" worst case, which was simply wrong (now
+   corrected in `backend/internal/modules/biometric/biometric.go`, with the
+   real derivation and a pointer to the fix). Fixed with a structural client
+   guard: `HR_FIT_MAX_BACKEND_DRIFT_MS` mirrors the backend constant exactly,
+   and `fitHRWindow` declines (returns `null`) rather than returning any
+   candidate whose start or end would land outside it — matching this file's
+   own "a wrong guess that looks confident is worse than an honest not
+   found" stance, one layer earlier than the backend's own rejection.
+   Mutation-verified: with the guard removed, the new drift-bound test
+   reproduces a real accepted fit (`2026-09-06T21:04–22:04`, ~26-27h before
+   its `2026-09-08T00:00` anchor) that the backend's `ValidateHRWindowOverride`
+   would permanently reject; restored, green.
+
+Folded in alongside the three blocking fixes, all cheap and all verified:
+`invalidInputMessage()` (`handler.go`) now names the `hr_window_*` failure
+modes it can actually produce; the `realIncidentBlock` test fixture's doc
+comment no longer claims it averages 151 bpm (the REAL incident did; the
+synthetic fixture, built from alternating per-segment low/high values rather
+than a real per-second trace, averages ~134 — both are real numbers, for
+different things); and `biometricSync.test.ts`'s "never runs the wide-window
+fallback" test now asserts on the query call itself (via a spy on the mocked
+`queryHeartRateSamples`), not merely on the result — the old assertion alone
+would have passed even if the fallback ran and simply failed to fit, which is
+a real but different bug (an unnecessary HealthKit query on the common,
+already-working path) that the test's own name promised to catch and, before
+this fix, did not. Verified this genuinely strengthens the test: with the
+fallback forced to always run against a flat (non-fitting) wide window, the
+old assertion still passed while the new one correctly failed.
+
 ## Open items / known gaps as of this entry
 
 

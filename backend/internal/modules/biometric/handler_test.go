@@ -268,6 +268,50 @@ func TestComputeMetrics_RejectsUnknownHRSource(t *testing.T) {
 	}
 }
 
+// N522/#934 — the parse-time half of the hr_window_start/hr_window_end
+// override: both present-or-absent, and both RFC3339, before this ever
+// reaches ValidateHRWindowOverride (which needs the session's own
+// started_at, so it cannot run at this layer).
+func TestComputeMetrics_RejectsOneSidedHRWindow(t *testing.T) {
+	for _, body := range []string{
+		`{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"window","hr_window_start":"2026-09-01T11:02:00Z"}`,
+		`{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"window","hr_window_end":"2026-09-01T12:24:00Z"}`,
+	} {
+		rec := computeMetricsResponse(t, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %q: want 400, got %d", body, rec.Code)
+		}
+	}
+}
+
+func TestComputeMetrics_RejectsMalformedHRWindow(t *testing.T) {
+	rec := computeMetricsResponse(t,
+		`{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"window",`+
+			`"hr_window_start":"not-a-date","hr_window_end":"2026-09-01T12:24:00Z"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d", rec.Code)
+	}
+}
+
+func TestComputeMetrics_ValidHRWindowReachesTheRepository(t *testing.T) {
+	// Same technique as TestComputeMetrics_ValidBodyReachesTheRepository —
+	// a nil repository dereferenced past every guard panics, which this
+	// recovers as proof the window override itself did not stop the request.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a valid compute-metrics request with an hr_window override should reach the repository")
+		}
+	}()
+	req := httptest.NewRequest(http.MethodPost, "/v1/biometric/sessions/ses-1/metrics",
+		strings.NewReader(`{"hr_max_bpm":190,"hr_max_source":"estimated","hr_source":"window",`+
+			`"hr_window_start":"2026-09-01T11:02:00Z","hr_window_end":"2026-09-01T12:24:00Z"}`))
+	req.SetPathValue("sessionID", "ses-1")
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{UserID: "user_x"}))
+	h := NewHandler(nil)
+	rec := httptest.NewRecorder()
+	h.ComputeMetrics(rec, req)
+}
+
 func TestComputeMetrics_ValidBodyReachesTheRepository(t *testing.T) {
 	// The inverse of every case above: proves the guards above are what's
 	// stopping the request, not some unrelated bug — a nil repository
