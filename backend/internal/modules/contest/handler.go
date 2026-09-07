@@ -1,7 +1,6 @@
 package contest
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -100,7 +99,14 @@ func (req contestRequest) toInput() (Input, error) {
 
 func decode(w http.ResponseWriter, r *http.Request) (Input, bool) {
 	var req contestRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
+	// apihttp.DecodeJSONBody (not the response-writing DecodeJSON/DecodeJSONError)
+	// because this handler's status-code philosophy is deliberately different
+	// from the shared helper's default: oversized and malformed both collapse
+	// to one 400 below, rather than DecodeJSON's 413-vs-400 split — see the
+	// comment on that below. DecodeJSONBody still buys the trailing-document
+	// guard (N164/#541 found this call site used a bare Decode with no such
+	// check — a second concatenated JSON document was silently ignored).
+	if err := apihttp.DecodeJSONBody(http.MaxBytesReader(w, r.Body, maxBody), &req); err != nil {
 		// A body over the limit lands here too, as a *http.MaxBytesError. Both
 		// are the caller's problem and both are 400 — distinguishing them would
 		// say how big the limit is, which is not something a client can act on.

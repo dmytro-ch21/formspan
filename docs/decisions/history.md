@@ -60221,13 +60221,28 @@ already-`http.MaxBytesReader`-guarded single-`Decode`-call site —
 `session.Rename`/`SetIntent`/`Reschedule`, `plan.Create`/`Update`,
 `theme.Set`, `tracker.decode()`, `exercise.decodeExercise`,
 `technique.decodeTechnique`, and `friend.Send`/`share.Create` (which wrapped
-`r.Body` by hand rather than inline). One deliberate exception:
-**`contest.decode()` was left untouched** — it carries an explicit existing
+`r.Body` by hand rather than inline). One deliberate partial exception:
+**`contest.decode()`'s status-code philosophy was left untouched, but its
+missing trailing-document guard was not.** It carries an explicit existing
 comment arguing that an oversized body and a malformed one should both be a
 plain 400 ("distinguishing them would say how big the limit is, which is not
-something a client can act on"), and migrating it to the shared helper's
-default 413-for-oversized behaviour would have silently overridden that
-stated design decision rather than respected it.
+something a client can act on") — migrating it to `DecodeJSON`/
+`DecodeJSONError`'s default 413-for-oversized behaviour would have silently
+overridden that stated design decision, so this ticket does not do that.
+But `backend-reviewer`'s own review of this branch caught that `decode()`
+still called a bare `json.NewDecoder(...).Decode(&req)` underneath its
+`http.MaxBytesReader` wrap — the exact trailing-document gap this ticket
+exists to close, just not migrated because the status-code question got
+conflated with it. Fixed by switching to `apihttp.DecodeJSONBody` (the
+non-response-writing variant, since `contest` writes its own single 400
+either way) — this buys the trailing-document check without touching the
+413/400 decision at all. Mutation-checked the same way as everywhere else:
+reverting to the bare `Decode` call made the new
+`TestCreateRejectsATrailingJSONDocument` fail — not with a compile error,
+but by silently accepting the first of two concatenated documents and
+falling through to the nil-repository panic
+`TestAValidBodyReachesTheRepository` relies on, exactly the real bug shape —
+restored, confirmed green again by re-running, not by re-reading the diff.
 
 Two migrations changed observable behaviour, on purpose:
 
@@ -60342,9 +60357,20 @@ as a candidate follow-up rather than folded in here.
 `contest.decode()`'s deliberate same-status choice should itself be
 reconsidered now that the rest of the API has a documented 413/400 split
 (left alone here — it was an explicit prior decision, not an oversight, and
-overriding it wasn't this ticket's call to make unilaterally); whether the
-~20 newly-413-capable endpoints should each get an explicit `413` response
-block in `contracts/public.openapi.yaml` (see above).
+overriding it wasn't this ticket's call to make unilaterally; note only the
+status-code philosophy is left open — the trailing-document gap in the same
+function is now closed, see above); whether the ~20 newly-413-capable
+endpoints should each get an explicit `413` response block in
+`contracts/public.openapi.yaml` (see above).
+
+**Review fold-in.** `backend-reviewer` found no blocking issues on the
+branch as a whole. Two suggestions: the `friend`/`share` 413-vs-400
+inconsistency (deliberate, already documented above — left as-is) and
+`contest.decode()`'s missing trailing-document guard (fixed, see above).
+`ac-verifier` independently reproduced both mutation-check claims
+(trailing-document and oversized-body rejection) and the
+`DisallowUnknownFields` incompatibility measurement, and confirmed all four
+acceptance criteria MET with 0 NOT MET / 0 NEEDS HUMAN EVIDENCE.
 
 
 ## Open items / known gaps as of this entry

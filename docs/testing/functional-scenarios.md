@@ -20290,10 +20290,14 @@ something worth asserting per route in an end-to-end suite.
   failure (oversized body included) rather than the 413/400 split above —
   both predate this ticket and were left exactly as they behaved before it,
   now with the same trailing-document protection added underneath.
-- `contest`'s entry-write endpoint deliberately does **not** distinguish an
-  oversized body from a malformed one (both are a plain 400) — a stated,
-  pre-existing design decision (see its own code comment), not an oversight
-  this ticket left unfixed.
+- `contest`'s entry-write endpoint (`POST`/`PUT /v1/contests[/{id}]`)
+  deliberately does **not** distinguish an oversized body from a malformed
+  one (both are a plain 400) — a stated, pre-existing design decision (see
+  its own code comment), not an oversight this ticket left unfixed. It
+  DOES now get the same trailing-document protection as every other
+  endpoint (`{"sport":"bjj",...}{"sport":"judo"}` → 400, not the first
+  document silently accepted) — only the status-code split was left alone,
+  not the underlying decode gap.
 
 ### Not covered here, and why
 
