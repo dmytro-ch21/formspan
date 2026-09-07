@@ -441,13 +441,21 @@ describe('sessionsNeedingBiometricSync — SQL-level ledger exclusion (N511/#893
     // version of this fix dropped the ledger check from this SQL query
     // entirely, returning every finished session regardless of ledger state
     // and relying only on the in-memory needsEnrichmentAttempt filter. That
-    // is correct in isolation but wrong combined with a small `limit`: with
-    // limit=2 and both these older sessions still landing in the raw SQL
-    // result (oldest-first), the query's own LIMIT would exhaust its
-    // budget on two sessions that get filtered out afterward, and the
-    // pending session below — sorted past position 2 — would never even
-    // reach this function's result. See sessionsNeedingBiometricSync's own
-    // doc comment.
+    // is correct in isolation but wrong combined with a small `limit`: the
+    // query's own LIMIT gets spent on sessions that are filtered out
+    // afterward, so the budget shrinks to nothing while genuinely-pending
+    // sessions go unenriched. See sessionsNeedingBiometricSync's own doc
+    // comment.
+    //
+    // N523/#937 updated this comment, not this test. Under the ordering this
+    // test was written against (oldest-first) the failure mode was the
+    // pending session being sorted PAST position 2 and never reaching the
+    // result at all. Under newest-first it sorts to position 1 instead, so a
+    // reverted ledger filter shows up differently — the terminal session
+    // pollutes the result ALONGSIDE pending, making the returned length 2
+    // rather than 1. The assertion below still catches the mutation either
+    // way (it pins the exact list, not merely membership); only the
+    // mechanism the prose describes has changed.
     mockHRSamples = [hrSample()];
     await finishedSession({ started_at: '2026-08-01T07:00:00.000Z', ended_at: '2026-08-01T07:30:00.000Z' });
     await syncBiometricEnrichment(USER, getToken);
@@ -471,6 +479,55 @@ describe('sessionsNeedingBiometricSync — SQL-level ledger exclusion (N511/#893
     const candidates = await sessionsNeedingBiometricSync(USER, 2);
 
     expect(candidates.map((c) => c.id)).toEqual([pending.id]);
+  });
+
+  // N523/#937 — the OTHER starvation mode, the one that reached a real
+  // phone. N511 (the test above) fixed a slice of already-`'window'`
+  // sessions eating the LIMIT budget. This is the same starvation with a
+  // different cause and no ledger rows at all: a backlog of NEVER-attempted
+  // old sessions. `needsEnrichmentAttempt` opens with `if (!ledgerEntry)
+  // return true` — no age test, no cooldown — so every one of them stays
+  // eligible forever, and under the old `ORDER BY ended_at ASC` the oldest
+  // `limit` of them were re-selected at the front of the queue on every
+  // single pass. Live-observed on the reporting user's device: twenty
+  // candidates, all from 2026-08-01..15, zero from September, while that
+  // day's own BJJ session sat unenriched. Newest-first is the fix.
+  it('reaches a session logged TODAY even when more than `limit` older, never-attempted sessions exist', async () => {
+    // A backlog strictly larger than the limit under test, all older than
+    // the session that actually matters, none of them ever attempted (no
+    // ledger rows written for any of them — nothing here runs a pass).
+    const backlog = [];
+    for (let day = 1; day <= 5; day++) {
+      const d = String(day).padStart(2, '0');
+      backlog.push(
+        await finishedSession({
+          started_at: `2026-08-${d}T07:00:00.000Z`,
+          ended_at: `2026-08-${d}T07:30:00.000Z`,
+        }),
+      );
+    }
+
+    // The session the athlete just logged and is actually looking at.
+    const recentEnd = new Date(Date.now() - 60 * 60 * 1000);
+    const recentStart = new Date(recentEnd.getTime() - 90 * 60 * 1000);
+    const today = await finishedSession({
+      started_at: recentStart.toISOString(),
+      ended_at: recentEnd.toISOString(),
+    });
+
+    // A budget far smaller than the backlog — exactly the shape that made
+    // the real device never reach September.
+    const candidates = await sessionsNeedingBiometricSync(USER, 3);
+
+    expect(candidates).toHaveLength(3);
+    // The whole point: today's session is in the page, and FIRST, rather
+    // than sorted behind five older ones that will never resolve. Under the
+    // old `ASC` ordering this line fails with the oldest August session —
+    // which is exactly the starvation observed on the real device.
+    expect(candidates[0].id).toBe(today.id);
+    // And the backlog is not abandoned — it spends what's left of the
+    // budget, newest of the old ones first.
+    expect(candidates.slice(1).map((c) => c.id)).toEqual([backlog[4].id, backlog[3].id]);
   });
 });
 

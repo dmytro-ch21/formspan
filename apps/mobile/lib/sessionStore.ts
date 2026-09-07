@@ -437,21 +437,24 @@ export async function trainingSince(
  * do with HealthKit at all — a strength or BJJ session logged entirely by
  * hand still needs its window checked once.
  *
- * Bounded by `limit`, oldest-finished-first, matching
- * `lib/healthkitSync.ts`'s own "oldest first, so an interrupted pass leaves
- * the ledger consistent with a contiguous prefix" reasoning — a device
- * catching up on months of unsynced sessions should not spend one
- * foreground pass working backward from the newest.
+ * Bounded by `limit`, **newest-finished-first** — see the N523/#937 paragraph
+ * at the end of this comment for why, and for the live incident that
+ * overturned the previous ordering. This paragraph used to argue the
+ * opposite ("oldest first, so an interrupted pass leaves the ledger
+ * consistent with a contiguous prefix", borrowed from
+ * `lib/healthkitSync.ts`), and that reasoning turned out to be exactly
+ * backwards for THIS query: a contiguous prefix is worth having only if the
+ * prefix advances, and N523 is the case where it provably never does.
  *
  * `notOlderThanISO` (N502/#873) additionally floors the walk in TIME, not
  * just per-pass count: without it, an account with a long training history
- * that only just turned the HealthKit toggle on walks EVERY session it has
- * ever logged, oldest first, `limit` at a time, forever advancing toward the
- * present — including sessions that predate any wearable by years, which can
- * never gain HR evidence no matter how many passes run. `biometricSync.ts`
- * passes `SESSION_BACKFILL_FLOOR_DAYS` here; optional (default: no floor)
- * only so the existing fixture tests that call this with two arguments stay
- * meaningful — every production caller supplies it.
+ * that only just turned the HealthKit toggle on would walk EVERY session it
+ * has ever logged, `limit` at a time — including sessions that predate any
+ * wearable by years, which can never gain HR evidence no matter how many
+ * passes run. `biometricSync.ts` passes `SESSION_BACKFILL_FLOOR_DAYS` here;
+ * optional (default: no floor) only so the existing fixture tests that call
+ * this with two arguments stay meaningful — every production caller supplies
+ * it.
  *
  * **No longer excludes a session with ANY ledger row (N511/#893) — only one
  * whose ledger row is TERMINAL (`hr_source = 'window'`).** It used to
@@ -476,6 +479,61 @@ export async function trainingSince(
  * runs. Excluding `'window'` rows here keeps `limit` spent only on sessions
  * that could still need an attempt (no ledger row, or `'none'`), matching
  * what `MAX_SESSIONS_PER_PASS`'s own doc comment already assumes it bounds.
+ *
+ * **N523/#937 — NEWEST FIRST, and this ordering is the whole point of that
+ * ticket.** N511's exclusion above closed one starvation mode (a slice of
+ * already-`'window'` sessions eating `limit`); it left a second one wide
+ * open, and that one reached a real athlete's phone. Live-debugged
+ * 2026-09-07 against the reporting user's own device: this query, ordered
+ * `ended_at ASC`, returned twenty sessions ALL ended between 2026-08-01 and
+ * 2026-08-15 — and not one session from September, including a BJJ class
+ * logged that same day, whose missing heart rate was the reported bug.
+ *
+ * The mechanism, precisely. `lib/biometric.ts`'s `needsEnrichmentAttempt`
+ * opens with `if (!ledgerEntry) return true` — a session that has NEVER been
+ * attempted is eligible unconditionally, with no age test and no cooldown
+ * (only a session that already HAS a ledger row is subject to
+ * `RETRY_COOLDOWN_HOURS`/`RETRY_WINDOW_DAYS`). So any session that never
+ * completes an attempt — for whatever reason, and the reasons are not all
+ * understood, see the ticket — never gains a ledger row, stays eligible
+ * forever, and under `ASC` is re-selected at the FRONT of the queue on every
+ * single pass. Accumulate `MAX_SESSIONS_PER_PASS` of those and the queue can
+ * never advance past them: no newer session is ever reached, no matter how
+ * many passes run. The athlete's symptom is total — every new session's
+ * heart rate silently missing, permanently — and no per-session fix can
+ * reach it, because the per-session code never runs for a new session at
+ * all.
+ *
+ * Newest-first is also what this module's own stated priorities already
+ * argued for, and `ASC` simply contradicted them: see
+ * `biometricSync.ts`'s `SESSION_BACKFILL_FLOOR_DAYS` doc comment — *"A
+ * session from a year before the athlete owned a wearable can never gain
+ * real HR evidence no matter how many passes run, so spending passes on it
+ * delays the sessions that actually CAN be enriched."* The 180-day floor
+ * bounds WHICH sessions are eligible; nothing bounded the ORDER, and the
+ * order was backwards. A session logged today is the one most likely to have
+ * freshly-synced watch data still worth finding; one from five weeks ago has
+ * most likely already lost whatever it had. Backlog still gets attempted —
+ * it simply spends the budget LEFT OVER once the recent candidates are
+ * exhausted, instead of consuming all of it first.
+ *
+ * **That last sentence is contingent, and the contingency is the same one
+ * this bug violated — say so rather than imply otherwise** (found by
+ * `frontend-reviewer` on this PR). "Left over" budget exists only if recent
+ * candidates reliably DROP OUT of the pending set, by landing on
+ * `hr_source = 'window'` or by entering `needsEnrichmentAttempt`'s cooldown
+ * via a `'none'` ledger row. A session that fails to write ANY ledger row
+ * never drops out — which is precisely what the twenty August sessions were
+ * doing, and why the queue could not advance. So `DESC` mirrors rather than
+ * eliminates the structural risk: if that same unresolved root cause (a
+ * silent throw, or a pass interrupted mid-backlog — see #937, still open)
+ * lands on NEW sessions instead of old ones, the newest ~`limit` stuck
+ * sessions would occupy the queue and the backlog would starve instead.
+ * That trade is deliberate and is still strictly better — the sessions an
+ * athlete actually looks at are the recent ones, so if exactly one end of
+ * the queue has to starve, it should be the end whose watch data is already
+ * gone — but the real repair is making a failed attempt always leave a
+ * ledger row, which is #937's own open follow-up, not this ordering.
  */
 export async function sessionsNeedingBiometricSync(
   userID: string,
@@ -492,7 +550,7 @@ export async function sessionsNeedingBiometricSync(
         AND s.ended_at IS NOT NULL
         AND (b.session_id IS NULL OR b.hr_source != 'window')
         AND (? IS NULL OR s.ended_at >= ?)
-      ORDER BY s.ended_at ASC
+      ORDER BY s.ended_at DESC
       LIMIT ?`,
     userID,
     notOlderThanISO ?? null,

@@ -20574,3 +20574,48 @@ rate corroborates a session, it never replaces what the athlete logged").
   `HKQuantityTypeIdentifierHeartRate` read this app already has consent for
   (see `hrWindowFit.ts`'s own doc comment on why an `HKQuantityTypeIdentifierRestingHeartRate`
   read was considered and rejected).
+
+## N523/#937 — the enrichment queue must reach NEW sessions, not starve on old backlog (`apps/mobile/lib/sessionStore.ts`'s `sessionsNeedingBiometricSync`, `apps/mobile/lib/biometric.ts`'s `needsEnrichmentAttempt`, `apps/mobile/lib/biometricSync.ts`'s `syncSessionWindows`)
+
+Found live on a real device: the candidate query ordered `ended_at ASC` with a
+20-session budget, while `needsEnrichmentAttempt` treats a never-attempted
+session as unconditionally eligible (no age test, no cooldown). A backlog of
+20+ never-resolving old sessions therefore re-filled the entire budget on every
+pass, so no newer session was ever reached — every new session's heart rate
+silently missing, permanently, with no error anywhere. Fixed by ordering
+newest-first.
+
+### Automated (`apps/mobile/lib/__tests__/biometricSync.test.ts`)
+
+- **The starvation case itself**: five never-attempted sessions from early
+  August plus one logged today, queried with a budget (3) smaller than the
+  backlog — today's session is returned, and returned FIRST, rather than
+  sorted behind older ones that never resolve. The backlog still fills the
+  remaining slots (it is deprioritised, not abandoned). Mutation-verified by
+  reverting `DESC` to `ASC`: the test goes red naming the exact defect (the
+  oldest August session selected instead of today's), green again on restore.
+- **N511/#893's existing case still holds unchanged**: a small limit still
+  reaches a newer, genuinely pending session when older sessions are already
+  terminal (`hr_source = 'window'`) — that exclusion and this ordering are
+  two different starvation modes, and both fixes are needed.
+
+### Device-only (not reachable by any automated suite in this repo)
+
+- **NEEDS HUMAN EVIDENCE**: on a real device carrying an account with a real
+  backlog of older unenriched sessions, confirm a newly-logged session
+  (post-hoc or live-tracked) actually gets its HR/VO2max enrichment attempted
+  — i.e. that `POST /v1/biometric/sessions/{id}/metrics` is issued for it —
+  while those older sessions remain unresolved.
+
+### Known gaps this does NOT cover
+
+- Why a given session may never complete an attempt at all (and so never gain
+  a ledger row, staying eligible forever with no backoff) is unresolved — a
+  silent exception during `computeSessionMetrics` and an app-backgrounding
+  interruption both fit the observed evidence. The per-session `catch` writes
+  only a global failure counter, never a per-session ledger row, so the next
+  pass cannot distinguish "threw" from "never tried". Worth its own ticket.
+- Separately: whatever stopped fresh HealthKit samples reaching the server for
+  this account five days before the incident (last `heart_rate` upload
+  2026-09-02, only `vo2_max` sample ever 2026-08-21) is a different question
+  entirely — enrichment cannot find samples nobody uploaded.

@@ -62879,6 +62879,135 @@ this fix, did not. Verified this genuinely strengthens the test: with the
 fallback forced to always run against a flat (non-fitting) wide window, the
 old assertion still passed while the new one correctly failed.
 
+## 2026-09-07 — N523: the biometric enrichment queue starved on old backlog, so no NEW session's heart rate was ever attempted (#937)
+
+Found live, on the reporting user's own phone, an hour after N522/#934 shipped
+— and it is the reason N522's fix appeared to do nothing. N522 was correct; it
+simply never ran for the session the athlete was looking at, because the
+enrichment loop never reached that session at all.
+
+### What the user saw
+
+"no hr or vo2 max data" on a freshly installed build, for a BJJ class logged
+that same day. N522 had shipped specifically to fix a wrong-window query for a
+post-hoc-logged session, so the obvious first hypothesis was that its fit had
+failed. It had not; it was never invoked.
+
+### What the evidence actually said, in the order it was gathered
+
+**The backend was healthy, and this was established first rather than
+assumed.** `ComputeSessionMetrics` was called DIRECTLY against the real
+staging Postgres — no HTTP, no Clerk, no client — with exactly the arguments
+the mobile client would send for that day's real session. It returned
+immediately and correctly: `hr_source: none`, `sample_count: 0`,
+`hr_window_start`/`hr_window_end` correctly populated with the session's own
+window (N522's new columns, working). Nothing server-side was wrong.
+
+**The server had never been asked.** Railway request logs for the account
+across the whole incident window showed eleven successful
+`POST /v1/biometric/samples` calls and, for `/v1/biometric/sessions/{id}/metrics`,
+only GETs — every one a 404, because nothing had ever computed that row. Not
+one POST to the compute endpoint, for any session, in over an hour of real
+app use. A request that reaches the Go handler is logged whatever its status,
+so this was not a 4xx being swallowed: the call was never made.
+
+**The client's own candidate list was the answer.** Temporary instrumentation
+in `syncSessionWindows` (a Debug build driving Metro's console) printed the
+pass's `pending` list directly:
+
+    pending = [20 sessions, ALL ended between 2026-08-01 and 2026-08-15]
+    ledgerSize = 59
+
+Twenty candidates, every one from early August, and **not a single September
+session** — including the one logged that morning — despite
+`SESSION_BACKFILL_FLOOR_DAYS` (180 days) covering them all comfortably.
+
+### The mechanism
+
+Two pieces, each defensible alone, fatal together:
+
+- `sessionStore.ts`'s `sessionsNeedingBiometricSync` ordered `ended_at ASC`
+  with `LIMIT MAX_SESSIONS_PER_PASS` (20) — oldest first.
+- `biometric.ts`'s `needsEnrichmentAttempt` opens `if (!ledgerEntry) return
+  true` — a session that has never been attempted is eligible
+  unconditionally, with no age test and no cooldown. Only a session that
+  already HAS a ledger row is subject to `RETRY_COOLDOWN_HOURS` /
+  `RETRY_WINDOW_DAYS`.
+
+So a session that never completes an attempt never gains a ledger row, stays
+eligible forever, and — ordered oldest-first — is re-selected at the FRONT of
+the queue on every single pass. Accumulate twenty of those and the queue can
+never advance past them. **No newer session is ever reached, no matter how
+many passes run.** The athlete's symptom is total and permanent: every new
+session's heart rate silently missing, forever, with no error anywhere and
+every individual component behaving exactly as written.
+
+This is a starvation bug, not a per-session bug, which is why no amount of
+per-session correctness (N511's retry ladder, N522's wide-window fit) could
+have reached it. Both of those fixes run inside a loop body that, for a new
+session, was never entered.
+
+### The fix
+
+`ORDER BY s.ended_at DESC` — newest first. One line, and it is the ordering
+this module's own stated priorities already argued for; `ASC` simply
+contradicted them. `biometricSync.ts`'s `SESSION_BACKFILL_FLOOR_DAYS` doc
+comment had said it outright, months earlier: *"A session from a year before
+the athlete owned a wearable can never gain real HR evidence no matter how
+many passes run, so spending passes on it delays the sessions that actually
+CAN be enriched."* The 180-day floor bounded WHICH sessions were eligible.
+Nothing bounded the ORDER, and the order was backwards.
+
+Backlog is not abandoned — it spends the budget left over once the recent
+candidates are exhausted, which at a realistic logging cadence (roughly one
+session a day against a 20-slot budget) is most of it.
+
+**Testing.** A new case in `biometricSync.test.ts` builds the exact observed
+shape: five never-attempted August sessions, one session logged today, a
+budget (3) smaller than the backlog. It asserts today's session is not merely
+present but FIRST, and that the backlog still fills the remaining slots.
+Mutation-verified by reverting the single word `DESC` to `ASC`: the test goes
+red naming the real defect (`Expected: "uuid-6"` — today — `Received:
+"uuid-1"` — the oldest August session), and green again on restore, re-run
+rather than re-read. N511's own existing test ("a small limit still reaches a
+newer, genuinely pending session") is untouched and still passes — its intent
+is precisely what this ordering finally makes true in general.
+
+### What this does NOT explain, recorded honestly rather than closed over
+
+**Why those twenty August sessions never completed an attempt in the first
+place is still unknown.** Two hypotheses survive the evidence and were not
+distinguished: a silent exception during `computeSessionMetrics` that never
+reaches `recordBiometricHRAttempt` (the per-session `catch` writes only a
+global failure counter, never a per-session ledger row — so a session that
+throws is indistinguishable, to the next pass, from one never tried), or a
+pass simply interrupted by app backgrounding partway through a twenty-session
+serial backlog. Both produce exactly the observed trace.
+
+This fix is deliberately robust to either: it removes the STARVATION those
+sessions cause regardless of why they individually never resolve. The
+underlying question — that a session which throws forever is retried forever
+with no backoff and no ledger row — is real and is worth its own ticket.
+
+**Also unresolved, and older than this bug:** the account's last uploaded
+`heart_rate` sample is from 2026-09-02 and its only `vo2_max` sample ever is
+from 2026-08-21. Whatever stopped fresh HealthKit data reaching the server
+five days before this incident is a separate question this ticket did not
+answer; enrichment cannot find samples nobody uploaded.
+
+### Process note
+
+The instrumentation used to find this (temporary `console.error` calls in
+`syncSessionWindows`) was reverted before any commit; the primary checkout
+was verified clean by `git status` rather than by assumption. Metro's own
+console pipe to a physical device proved unreliable across this session —
+repeatedly reporting `connection terminated with Device ... after not
+responding for 60 seconds` while the app was demonstrably alive and serving
+real API traffic — so the load-bearing evidence above is deliberately drawn
+from sources that do not depend on it: Railway's request logs, direct
+Postgres queries, and one direct in-process call to the repository function.
+
+
 ## Open items / known gaps as of this entry
 
 
