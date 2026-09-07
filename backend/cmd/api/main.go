@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	// The history endpoint resolves the caller's IANA timezone to bucket
@@ -118,7 +121,16 @@ func main() {
 		logger.Error("database: connect", "err", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
+	// Deliberately NOT `defer pool.Close()`. N162/#539: the pool must close
+	// only after the HTTP server has fully drained its in-flight requests —
+	// it is closed explicitly, once, right after `runUntilShutdown` returns,
+	// near the bottom of this function. A handful of `os.Exit(1)` config/boot
+	// checks still run between here and there (a bad estimator or identifier
+	// provider, a round map that fails to load); `os.Exit` never runs
+	// deferred calls either way, so those paths leak this pool exactly as
+	// they always have — this change doesn't add that gap, it just stops
+	// pretending a `defer` here covered the one path that matters (a normal
+	// shutdown), which it never actually guaranteed the *ordering* for.
 
 	// Private object storage — check-in photos AND, since N12, avatars. Nil
 	// when unconfigured, which is a supported state: local dev and CI have no
@@ -946,14 +958,51 @@ func main() {
 	}
 	recorder := health.NewRecorder(healthRepo, slowRequestAfter, logger)
 
-	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
 	// The chain lives in `apihttp.Assemble`, not inline here, so a test can
 	// build the real one — see that function for why, and for the two bugs
 	// that were invisible while it was assembled at this call site.
-	if err := http.ListenAndServe(":"+port, apihttp.Assemble(logger, recorder.Observe, withCORS(mux))); err != nil {
-		logger.Error("server exited", "err", err)
+	handler := apihttp.Assemble(logger, recorder.Observe, withCORS(mux))
+
+	// N162/#539: an explicit *http.Server with SIGTERM/SIGINT-triggered
+	// graceful shutdown, replacing bare http.ListenAndServe. See server.go
+	// for the full reasoning behind readHeaderTimeout/idleTimeout, the
+	// deliberate absence of a global ReadTimeout/WriteTimeout, and
+	// shutdownTimeout's value.
+	srv := newServer(":"+port, handler)
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		logger.Error("listen", "err", err)
+		pool.Close()
 		os.Exit(1)
 	}
+
+	// signal.NotifyContext, not a raw signal.Notify channel: it's the
+	// idiomatic modern form (Go 1.16+; this module is on 1.26 — see go.mod)
+	// and it hands runUntilShutdown a plain context.Context, which is also
+	// what the graceful-shutdown integration test drives directly without
+	// having to synthesize an OS signal.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger.Info("api listening", "port", port, "slow_request_ms", slowRequestAfter.Milliseconds())
+	if err := runUntilShutdown(ctx, srv, ln, shutdownTimeout, logger); err != nil {
+		logger.Error("server exited", "err", err)
+		// This pool.Close() is NOT the drained, safe one below — it runs
+		// after an abnormal exit (e.g. a permanent Accept error), which
+		// means runUntilShutdown returned WITHOUT having called Shutdown,
+		// so nothing has drained in-flight connections here. os.Exit(1)
+		// follows immediately either way, so this doesn't make anything
+		// worse in practice — but don't read the two calls as equivalent.
+		pool.Close()
+		os.Exit(1)
+	}
+
+	// Only now: every in-flight request has been drained (or, past
+	// shutdownTimeout, forcibly cut off) by the time runUntilShutdown
+	// returns — see its doc comment in server.go. Closing the pool any
+	// earlier is exactly the hazard this ticket's acceptance criteria name.
+	pool.Close()
+	logger.Info("api stopped")
 }
 
 // withCORS allows local web dev servers to call the API from different

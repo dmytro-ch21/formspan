@@ -60,8 +60,11 @@ const maxEstimateBody = 8 << 20
 // # The failure it removes
 //
 // There was no deadline anywhere on this path: not on the request context, not
-// on the provider's HTTP client, and `cmd/api` runs `http.ListenAndServe` with
-// no `WriteTimeout`. So a provider that took five minutes got five minutes,
+// on the provider's HTTP client, and `cmd/api`'s `*http.Server` (an explicit
+// one since N162/#539; a bare `http.ListenAndServe` before it) carries no
+// `WriteTimeout` — deliberately, on both sides of that change, since a global
+// one would cut this exact response off mid-write; see `cmd/api/server.go`.
+// So a provider that took five minutes got five minutes,
 // and the phone — which does have a request timeout, inherited from the OS and
 // not configurable through `fetch` — gave up first. A client that gives up
 // receives **no status and no body**, which leaves it nothing to say beyond
