@@ -2121,6 +2121,28 @@ components:
           type: string
           example: api
 
+    Readyz:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [ok, not_ready]
+        service:
+          type: string
+          example: api
+        reason:
+          type: string
+          description: >
+            Present only when status is not_ready. One of a small closed set
+            of internal reason codes (db_unreachable, schema_not_migrated,
+            schema_dirty, schema_query_failed, schema_version_mismatch) — not
+            the public error-code enum in the Error schema, since this is an
+            infra probe response rather than a per-request error, and never
+            the raw underlying error text (see api-conventions.md: never leak
+            raw internal error text to the client).
+          example: schema_version_mismatch
+
     Me:
       type: object
       required: [user_id]
@@ -6671,6 +6693,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Healthz"
+
+  /readyz:
+    get:
+      summary: Readiness check — DB-aware, safe to gate traffic on
+      operationId: getReadyz
+      security: []
+      description: >
+        N163/#540: unlike /healthz (liveness only — no DB, no dependencies),
+        this checks that the database is reachable within a short bounded
+        deadline (a few seconds) and that its schema_migrations version
+        matches what this binary expects, and is not marked dirty. Point
+        Railway's (or any load balancer's) readiness/traffic-routing
+        healthcheck here, not at /healthz — a process that is alive but
+        serving against an unreachable or stale-migrated database should not
+        receive traffic, which is exactly the incident recorded in
+        docs/architecture/deployment.md (a failed predeploy step left a
+        stale, unmigrated environment serving behind a liveness check that
+        stayed green throughout).
+
+
+        Deliberately excludes AI/LLM provider health (reflection drafting,
+        nutrition estimate, exercise photo ID). A provider outage degrades
+        only the routes that call it, and is reported there as its own `503`
+        with `unavailable` — it does not mean this API is unfit to serve
+        every other route, so it must never flip this endpoint.
+
+
+        Always `Cache-Control: no-store`, same reasoning as /healthz and more
+        acutely: readiness can flip between one probe and the next, and a
+        cached answer would mean traffic keeps routing to an instance that
+        has already reported itself not ready.
+      responses:
+        "200":
+          description: The database is reachable and at the expected schema version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readyz"
+        "503":
+          description: >
+            Not ready — the database is unreachable, unmigrated, dirty, or at
+            an unexpected schema version. Railway (or any healthcheck
+            consumer) should treat this as unhealthy and stop routing traffic
+            here; the process itself is still alive (see /healthz).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readyz"
 
   /me:
     get:

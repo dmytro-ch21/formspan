@@ -60631,6 +60631,206 @@ and below.
   timeouts it was chosen from.
 
 
+## 2026-09-06 — N163/#540: `/v1/readyz` — a DB-aware readiness check, separate from `/v1/healthz`'s liveness
+
+`/v1/healthz` (`backend/cmd/api/main.go`) is, and stays, a pure liveness
+check — no DB, no dependencies, `{"status":"ok"}` for as long as this binary
+is scheduling goroutines. That is exactly what let it stay green through the
+`deployment.md` incident this ticket cites: a predeploy step (`migrate up`)
+failed or never ran, the database stayed on its old schema, and the API kept
+serving a stale, unmigrated environment behind a healthcheck that had no way
+to see any of that — it was never asked to.
+
+**Added `backend/cmd/api/readyz.go`, a new `readinessChecker` backing `GET
+/v1/readyz`** (same `/v1` prefix as `/healthz` — the existing liveness route
+is already versioned, so the new one matches rather than inventing a bare
+top-level convention). On a request, bounded to a 3s context deadline (short
+on purpose: Railway's own healthcheck has its own timeout, and a probe that
+hangs only delays the same verdict rather than avoiding it):
+
+1. `pool.Ping(ctx)` — is the database reachable at all.
+2. `SELECT version, dirty FROM schema_migrations` through the same pool
+   (not a fresh connection per probe — see the comment on `undefinedTable`)
+   — not ready if the table doesn't exist yet, is empty (migrated down to
+   nothing), or is marked `dirty` (a migration failed part-way; per
+   `migrateguard.CheckAgreement`, never safe to serve against regardless of
+   which version it's dirty at).
+3. **The check that actually catches this ticket's incident**: the recorded
+   version is compared, with `!=` rather than `<`, against `expectedVersion`
+   — the highest migration file embedded in *this binary's own image*,
+   resolved once at boot via `migrateguard.DirFromPath` +
+   `migrateguard.ReadMigrations` + `migrateguard.Highest`, reusing
+   `cmd/migrate`'s own `MIGRATIONS_PATH` convention (default
+   `file://migrations`, relative to the binary's working directory — `/app`
+   inside the deployed image, where `backend/Dockerfile` already copies
+   `migrations/` to `/app/migrations`; `backend/` locally, matching `go run
+   ./cmd/api`'s cwd). A predeploy `migrate up` that failed or never ran
+   leaves the database strictly *behind* this binary's embedded migrations —
+   `<` alone would have caught the actual incident — but `!=` also catches
+   the database somehow *ahead* (the #465/#461 failure mode `migrateguard`'s
+   own migrate-time guard already prevents; this is belt-and-suspenders that
+   costs nothing here, since a database whose schema doesn't match what this
+   binary was built against shouldn't be trusted in either direction).
+
+   **Rejected alternative**: checking only the `dirty` flag, with no version
+   comparison at all. That would have missed the exact incident cited above
+   — `dirty` is only ever true mid-failed-migration; a predeploy step that
+   silently *never runs* (Railway's `preDeployCommand` failing, or being
+   skipped for some other reason) leaves the database in a perfectly clean,
+   un-dirty state at its old version, which is precisely what happened at
+   the deployment.md incident. The version comparison is the check that
+   would have gone red there; `dirty` is a real but strictly smaller net.
+
+4. **Explicitly excludes AI/LLM provider health** — the reflection drafter,
+   the nutrition estimate provider, the exercise photo identifier. A comment
+   on `readinessChecker` says so directly and names the four existing
+   `apihttp.CodeUnavailable` call sites (`exercise/identify_handler.go`,
+   `bjj/reflect_handler.go`, `food/handler.go`,
+   `nutrition/estimate_handler.go`) as where a provider outage's own 503
+   already belongs, specifically so nobody "helpfully" adds a provider ping
+   to readiness later, per the ticket's own instruction. Checked: nothing in
+   the existing health/readiness surface reached into provider status before
+   this change — there was no readiness endpoint at all, so there was
+   nothing to find reaching into it.
+
+**Response shape**: mirrors `/healthz`'s `{"status","service"}` JSON, adding
+an optional `reason` field — one of five closed internal codes
+(`db_unreachable`, `schema_not_migrated`, `schema_dirty`,
+`schema_query_failed`, `schema_version_mismatch`), never the raw underlying
+error text. The real error (the actual pgconn/context error) is logged
+server-side via `slog` and never serialized into the response, per
+`api-conventions.md`'s "never leak raw internal error text to the client."
+**503, not 200**, on any not-ready path — confirmed this is what a
+healthcheck consumer needs (a non-2xx to treat an instance as unhealthy);
+`200` with a `"not_ready"` body would require Railway to parse JSON to learn
+what its own healthcheck already tells it via status code. `Cache-Control:
+no-store` on every response, same reasoning as `/healthz` and more acute:
+readiness can flip between one probe and the next, and a cached/`304`
+answer would mean traffic keeps routing to an instance that has already
+told this handler it should not receive any.
+
+**Not included: the optional seed/catalog presence check.** No concrete,
+load-bearing reason surfaced that the app is genuinely unusable without it
+at readiness-check granularity — an empty `exercises` table (the
+`deployment.md` seed-skip incident, a *different* incident from the one this
+ticket cites) makes specific *routes* degrade (an empty catalog response),
+which is a product-correctness problem already caught differently (`cmd/seed`
+runs idempotently on every predeploy, right after `migrate up`), not a
+"this process should stop receiving traffic" problem the way an unreachable
+or unmigrated database is. Marked optional in the ticket for exactly this
+kind of case-by-case judgment call.
+
+**`railway/api.toml`**: `healthcheckPath` changed from `/v1/healthz` to
+`/v1/readyz`, with a comment explaining why. Railway's `[deploy]` block has
+exactly one healthcheck slot — it doesn't distinguish liveness from
+readiness the way a Kubernetes probe pair would — so per the ticket's own
+reasoning, the single slot gets the *stricter* check: a live-but-not-ready
+process must not receive traffic either, and the reverse (ready-but-not-live)
+isn't a real state. `/v1/healthz` stays wired and unused by Railway for now
+— cheap to keep for any future liveness-specific consumer.
+
+**Testing** (`backend/cmd/api/readyz_test.go`, `main_test.go`): the
+`pool` field is typed as a narrow `dbProbe` interface (`Ping` +
+`QueryRow`, both satisfied by `*pgxpool.Pool` with no wrapping needed at the
+real call site) purely so every branch of `check()` — dirty flag, missing
+table, empty table, query error, version mismatch either direction, the
+graceful skip when the expected version couldn't be resolved — can be driven
+by a `fakeProbe` without a live Postgres, including the case where the
+response body must NOT contain a raw error string (asserted directly against
+the serialized JSON, not just the internal `detail` return value).
+
+**The genuine broken-DB-connection test the ticket's "Steps to test" #1
+asks for** (`TestReadyz_RealUnreachableDatabase_AnswersNotReadyFast`) uses a
+real `*pgxpool.Pool` pointed at `127.0.0.1:1` — a privileged port nothing
+listens on, so the kernel refuses the connection immediately rather than
+needing a black-holed address and a timeout to prove the point — and asserts
+`/readyz` answers `503`/`db_unreachable` well inside the bounded deadline
+(no `TEST_DATABASE_URL` needed; the point is that this connection is
+unreachable everywhere this test runs). Two more tests
+(`TestReadyz_LiveDatabase_ReportsReady`,
+`TestReadyz_LiveDatabase_ReportsSchemaVersionMismatch`) run against a real,
+migrated Postgres when `TEST_DATABASE_URL` is set — created here as a
+dedicated `vola_test_n163` (per CLAUDE.md's "use your own database" guidance,
+since another worktree's Postgres already held the shared instance's port),
+migrated to head (95 migrations, 93 files — the permanent `000065` gap
+accounted for) — reading the live version directly from the database rather
+than assuming a filesystem path relative to the test binary's own working
+directory, which differs between `go run ./cmd/api` (cwd `backend/`) and `go
+test ./cmd/api` (cwd `backend/cmd/api/`). `TestNewReadinessChecker_*` covers
+that directory-resolution path itself, pointed at `../../migrations`.
+
+This package (`cmd/api`) had no `TestMain` before this change; added one
+(`os.Exit(testdb.Main(m))` + `TestTheFixtureLockIsHeldForThisBinary`) per
+the vola-testing convention, since the two live-database tests now read
+`TEST_DATABASE_URL` — they only `SELECT`, never write, but the convention
+applies regardless of what a package's own tests touch.
+
+**Mutation-checked**, three separate mutations, each confirmed red as a test
+failure (not a compile error) and confirmed green again by re-running after
+restoring: (1) disabling the version-mismatch comparison entirely —
+`TestReadyz_SchemaVersionBehindExpected_NotReady` and
+`TestReadyz_SchemaVersionAheadOfExpected_NotReady` both failed; (2) disabling
+the dirty-flag check — `TestReadyz_SchemaDirty_NotReady` failed; (3)
+concatenating the raw `detail` string into the response's `reason` field
+(simulating exactly the leak this handler exists to avoid) —
+`TestReadyz_SchemaQueryFails_NotReadyAndErrorNotLeaked` failed, catching a
+real leak rather than a hypothetical one. All three restored and re-run
+green, not merely grepped back.
+
+Full suite: `gofmt -l .`, `go vet ./...` and `go build ./...` clean;
+`go test ./cmd/api/...` green both without `TEST_DATABASE_URL` (the two
+live-database tests skip, everything else runs) and with it pointed at
+`vola_test_n163`. `pnpm run lint:openapi` passes against the new `Readyz`
+schema and `/readyz` path entry.
+
+**Docs**: `docs/architecture/deployment.md` gets a paragraph tying this back
+to both migration incidents it already records, explaining why neither
+would have flipped a liveness-only healthcheck and what changed.
+`docs/architecture/api-conventions.md` gets `/v1/readyz` added alongside
+`/v1/healthz` in the `Cache-Control: no-store` discussion. `README.md`'s
+backend endpoint listing now names `/v1/readyz`.
+
+**Review fold-in (coordinating session)**: `backend-reviewer` found no
+blocking issues — it independently traced every path in `check()`/`handle()`
+confirming the raw `detail` string never reaches `apihttp.WriteJSON` (only
+the closed 5-constant `reason` set does), ran `TestReadyz_SchemaQueryFails_
+NotReadyAndErrorNotLeaked` itself against the serialized HTTP response
+body, and pointed a real `TEST_DATABASE_URL` at this host's shared
+`vola_test` to confirm the two live-database tests skip gracefully rather
+than falsely failing against another session's in-progress fixture. One
+suggestion, folded in: `handle()` was logging via the boot-time-captured
+`rc.logger` rather than `httplog.FromContext(r.Context())`, even though
+`httplog.Middleware` wraps the whole mux and a request-scoped logger
+(`request_id`/`trace_id` correlation) is available — the same pattern
+`internal/modules/profile/avatar.go` already uses. Fixed; `rc.logger`
+stays reserved for `newReadinessChecker`'s boot-time warnings, which
+genuinely have no request to correlate to. Re-ran the full `readyz` suite
+and `gofmt`/`vet`/`build` after the change — all clean.
+
+`ac-verifier` returned 5/5 acceptance criteria MET with concrete evidence
+(including independently reproducing the version-mismatch mutation check
+itself), but flagged that "Steps to test #1" — a real Railway staging
+deploy with the updated `healthcheckPath`, and a genuine broken-DB dry run
+against it — is a live-infrastructure action no amount of code reading can
+settle, and issue #540 didn't carry a marked criterion for it. Amended
+#540's acceptance criteria to add a properly-marked
+`NEEDS HUMAN EVIDENCE` item for exactly that, so the evidence latch tracks
+it correctly on merge rather than the ticket closing as if this had been
+observed.
+
+**Left open**: this only covers `api`'s own `/readyz`; `worker`/`admin-api`
+don't exist yet, and whichever of them eventually gets its own database
+dependency should get its own readiness check rather than assuming `api`'s
+covers it. Also open: whether Railway's healthcheck is read continuously
+(gating ongoing traffic routing) or only at deploy time (gating rollout) —
+reasoned about from the ticket's own stated behavior and standard
+load-balancer healthcheck semantics, not independently re-verified against
+Railway's current documented behavior in this session; either way, pointing
+the one slot at the stricter check is correct, since a live-but-not-ready
+process should not receive traffic under either interpretation.
+
+
+
 ## Open items / known gaps as of this entry
 
 

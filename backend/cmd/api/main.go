@@ -132,6 +132,14 @@ func main() {
 	// pretending a `defer` here covered the one path that matters (a normal
 	// shutdown), which it never actually guaranteed the *ordering* for.
 
+	// N163/#540: /v1/healthz is liveness only (see handleHealthz) and answers
+	// "ok" even when the database is unreachable or unmigrated — which is what
+	// let a failed predeploy step serve a stale, unmigrated environment behind
+	// a healthcheck that never went red (docs/architecture/deployment.md's
+	// #465/#461 incident). readinessChecker backs a separate /v1/readyz that
+	// Railway's healthcheck should point at instead.
+	readiness := newReadinessChecker(pool, logger)
+
 	// Private object storage — check-in photos AND, since N12, avatars. Nil
 	// when unconfigured, which is a supported state: local dev and CI have no
 	// bucket, and every endpoint that needs it says so rather than failing. A
@@ -520,6 +528,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
+	// DB-aware readiness — see readyz.go and the readiness comment above.
+	mux.HandleFunc("GET /v1/readyz", readiness.handle)
 	mux.Handle("GET /v1/me", verifier.RequireAuth(http.HandlerFunc(handleMe)))
 	// BJJ rank. Under /v1/bjj rather than /v1/profile because the data is
 	// discipline-scoped — see the note at the top of profile.go. The screens
@@ -1063,6 +1073,16 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	// LIVENESS ONLY, deliberately: no database, no dependencies, nothing that
+	// can make this handler block or fail for a reason other than "the process
+	// is not running". It answers `{"status":"ok"}` as long as this binary is
+	// scheduling goroutines, whether or not it can currently do anything useful
+	// — which is precisely why it must never be what decides whether Railway
+	// routes traffic here. See /v1/readyz (readyz.go) for the DB-aware check,
+	// added for N163/#540 after a failed predeploy step left a stale,
+	// unmigrated environment serving behind this endpoint staying green the
+	// whole time (docs/architecture/deployment.md's #465/#461 incident).
+	//
 	// The one route that opts out of conditional GET, and the only one where
 	// caching is actively wrong. Its body is a constant, so its ETag would be
 	// constant forever — a prober sending If-None-Match would get 304 for the
