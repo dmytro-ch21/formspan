@@ -65,6 +65,19 @@
 // shells out directly on the host, unwired to the sandbox the same way the
 // rest of this package has been unwired since N141: there is still no live
 // dispatcher (blocked on N145) to wire it into.
+//
+// N150/#554 closed the remaining gap in the ephemeral-database story: a
+// worker that is genuinely KILLED runs neither Teardown nor AuditResidue —
+// both need a live process — so its database and role would otherwise sit
+// on the shared server forever. Provision now stamps a UTC creation
+// timestamp into both names (ephemeralResourceName, in sweep.go), and
+// Sweep removes anything past a caller-supplied TTL, identified by that
+// name alone — no side table, and it survives the owning process's death
+// by construction. See sweep.go's own package doc for why this reuses the
+// existing database-+-role-per-run mechanism rather than a real Postgres
+// SERVER container per worker (testcontainers-go is not, and was
+// deliberately not made, a dependency here), and cmd/sweepephemeral for how
+// it runs today absent a live orchestrator to hook it into automatically.
 package worker
 
 import (
@@ -101,6 +114,14 @@ type Runner struct {
 	// itself never receives this URL or its credentials — it is handed a
 	// connection string for the per-run role instead (see Workspace.DBURL).
 	AdminDBURL string
+	// Now overrides the clock Provision stamps into a workspace's ephemeral
+	// database/role names (see ephemeralResourceName) — nil means
+	// time.Now, which is what every real run must use. Tests are the only
+	// legitimate caller: Sweep's own TTL boundary is exercised by backdating
+	// ONE workspace's creation time rather than waiting real wall-clock
+	// hours for a resource to actually go stale (see sweep_test.go). Never
+	// set outside a test.
+	Now func() time.Time
 }
 
 // Workspace is one run's disposable environment.
@@ -113,8 +134,15 @@ type Workspace struct {
 	DBName  string
 	DBRole  string // the per-run Postgres role that owns DBName; dropped at Teardown
 	DBURL   string // connects as DBRole, never as the admin role
-	runner  *Runner
-	dropped bool
+	// CreatedAt is the UTC instant Provision stamped into DBName/DBRole (see
+	// ephemeralResourceName). It is informational on a live *Workspace —
+	// Teardown/AuditResidue never consult it — but it is the SAME value
+	// Sweep recovers from the name alone when the owning process is gone,
+	// so a workspace and a name-parsed ephemeralIdentity agree on one
+	// definition of "when was this created" (see sweep.go).
+	CreatedAt time.Time
+	runner    *Runner
+	dropped   bool
 
 	// mountVerified caches RunSandboxed's mount pre-flight check (see
 	// sandbox.go): the property it checks — whether this host's Docker
@@ -156,14 +184,21 @@ func (r *Runner) Provision(ctx context.Context, runID int64, issue int, slug, ba
 	if _, err := rand.Read(raw[:]); err != nil {
 		return nil, err
 	}
+	suffix := hex.EncodeToString(raw[:])
+	now := time.Now
+	if r.Now != nil {
+		now = r.Now
+	}
+	createdAt := now().UTC()
 	ws := &Workspace{
-		RunID:   runID,
-		Issue:   issue,
-		Dir:     filepath.Join(r.WorkRoot, fmt.Sprintf("run-%d-%s", runID, hex.EncodeToString(raw[:]))),
-		Branch:  fmt.Sprintf("agent/%d-%s", issue, slug),
-		BaseSHA: baseSHA,
-		DBName:  fmt.Sprintf("engine_run_%d_%s", runID, hex.EncodeToString(raw[:])),
-		runner:  r,
+		RunID:     runID,
+		Issue:     issue,
+		Dir:       filepath.Join(r.WorkRoot, fmt.Sprintf("run-%d-%s", runID, suffix)),
+		Branch:    fmt.Sprintf("agent/%d-%s", issue, slug),
+		BaseSHA:   baseSHA,
+		DBName:    ephemeralResourceName("engine_run", runID, createdAt, suffix),
+		CreatedAt: createdAt,
+		runner:    r,
 	}
 
 	if err := runGit(ctx, "", "clone", "--quiet", r.RepoURL, ws.Dir); err != nil {
@@ -191,7 +226,7 @@ func (r *Runner) Provision(ctx context.Context, runID int64, issue int, slug, ba
 		}
 		defer conn.Close(ctx)
 
-		ws.DBRole = fmt.Sprintf("engine_role_%d_%s", runID, hex.EncodeToString(raw[:]))
+		ws.DBRole = ephemeralResourceName("engine_role", runID, createdAt, suffix)
 		password, err := randomHex(16)
 		if err != nil {
 			os.RemoveAll(ws.Dir)
