@@ -377,6 +377,21 @@ def self_test() -> int:
     # 4. Merge-base check, against a REAL throwaway git repository.
     failures += _self_test_merge_base()
 
+    # 5. The property that closes the ticket's "merge queue" acceptance
+    #    criterion: two migrations under DIFFERENT filenames, whose versions
+    #    collide, merge into git with NO textual conflict (ac-verifier found
+    #    this — see docs/decisions/history.md's N149 entry) — so the
+    #    merge-base check alone is blind to it. What catches it is
+    #    `run_check()` ITSELF, invoked exactly as CI invokes it, once BOTH
+    #    files are present with neither "new" relative to the ref being
+    #    compared against (the state a `push`-to-`main` CI run sees, since
+    #    HEAD and origin/main are the same commit right after a merge). This
+    #    exercises the real entry point, not just `check_duplicates()` in
+    #    isolation (case 2 above), so a future change that scoped duplicate
+    #    detection to only "new" files — which would silently reopen this
+    #    exact gap — fails HERE.
+    failures += _self_test_post_merge_duplicate_via_run_check()
+
     if failures:
         print("check-migration-versions self-test FAILED:\n", file=sys.stderr)
         for label in failures:
@@ -448,6 +463,92 @@ def _self_test_merge_base() -> list[str]:
         if not ok3 or problems3:
             failures.append(f"merge-base check: did not go green again after removing the bad migration: {problems3}")
 
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return failures
+
+
+def _self_test_post_merge_duplicate_via_run_check() -> list[str]:
+    """Reproduce a `push`-to-`main` CI run AFTER two non-conflicting PRs have
+    landed a version collision, and confirm `run_check()` — the actual CI
+    entry point, not an internal function in isolation — reports it.
+
+    Two branches off one base each add a DIFFERENTLY-NAMED migration with the
+    SAME colliding version; merging both sequentially is git-clean (no
+    textual conflict, confirmed here exactly as `ac-verifier` first found).
+    `origin/main` is then pointed at the merged HEAD — the state a `push`-to-
+    `main` CI run sees, where neither file is "new" relative to what is being
+    compared against. `run_check()` must still catch the duplicate, via its
+    unconditional whole-directory scan, not the merge-base-vs-new-files path
+    (which is provably blind here — asserted explicitly below).
+    """
+    failures: list[str] = []
+    tmp = Path(tempfile.mkdtemp(prefix="check-migration-versions-selftest-postmerge-"))
+    try:
+        repo = tmp / "repo"
+        repo.mkdir()
+        _run_git(repo, "init", "-q", "-b", "main")
+        _run_git(repo, "config", "user.email", "test@example.com")
+        _run_git(repo, "config", "user.name", "Test")
+
+        mig_dir = repo / MIGRATIONS_REL
+        mig_dir.mkdir(parents=True)
+        _mk(mig_dir, "000001_init.up.sql")
+        _mk(mig_dir, "000001_init.down.sql")
+        _run_git(repo, "add", "-A")
+        _run_git(repo, "commit", "-q", "-m", "base")
+        base_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        _run_git(repo, "checkout", "-q", "-b", "pr-a", base_sha)
+        _mk(mig_dir, "20260907120000_add_foo.up.sql")
+        _mk(mig_dir, "20260907120000_add_foo.down.sql")
+        _run_git(repo, "add", "-A")
+        _run_git(repo, "commit", "-q", "-m", "PR A: add_foo")
+
+        _run_git(repo, "checkout", "-q", "-b", "pr-b", base_sha)
+        _mk(mig_dir, "20260907120000_add_bar.up.sql")  # SAME version, different name
+        _mk(mig_dir, "20260907120000_add_bar.down.sql")
+        _run_git(repo, "add", "-A")
+        _run_git(repo, "commit", "-q", "-m", "PR B: add_bar (same timestamp)")
+
+        _run_git(repo, "checkout", "-q", "main")
+        _run_git(repo, "merge", "-q", "--no-ff", "-m", "merge PR A", "pr-a")
+        merge_b = subprocess.run(
+            ["git", "merge", "--no-ff", "-m", "merge PR B", "pr-b"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        if merge_b.returncode != 0:
+            failures.append(
+                "post-merge self-test: PR B did not merge cleanly — the fixture "
+                f"itself is wrong (expected NO conflict): {merge_b.stderr}"
+            )
+            return failures
+
+        # Simulate the push-to-main state: origin/main IS this commit.
+        _run_git(repo, "update-ref", "refs/remotes/origin/main", "main")
+
+        # Confirm the merge-base-vs-new-files path is indeed blind here —
+        # this is the asserted precondition, not just a comment.
+        mb_problems, mb_ok = check_new_migrations_above_merge_base(repo)
+        if not mb_ok:
+            failures.append("post-merge self-test: could not establish merge base at all")
+        elif mb_problems:
+            failures.append(
+                "post-merge self-test: merge-base check UNEXPECTEDLY caught the "
+                f"collision — the fixture no longer demonstrates the blind spot: {mb_problems}"
+            )
+
+        # The actual assertion: run_check(), the real CI entry point, still
+        # catches the collision via its unconditional whole-directory scan.
+        rc = run_check(repo_root=repo, migrations_dir=mig_dir)
+        if rc == 0:
+            failures.append(
+                "post-merge self-test: run_check() PASSED on a directory with a "
+                "genuine version collision between two non-conflicting PRs — "
+                "the exact gap ac-verifier found would have reopened silently"
+            )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return failures

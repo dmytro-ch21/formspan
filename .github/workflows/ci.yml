@@ -329,6 +329,20 @@ jobs:
       # and duplicate-version checks against synthetic fixtures) so a defect
       # in the checker's own logic is caught before the real check is trusted
       # to say there is none — same chaining as `check-expo-native-config.py`.
+      #
+      # The merge-base half is blind to one case, BY CONSTRUCTION: two PRs
+      # adding DIFFERENTLY-NAMED migrations that happen to collide on version
+      # merge into git with no textual conflict, so neither PR's own diff
+      # ever shows a duplicate. This job's OTHER trigger — `on: push: branches:
+      # [main]` at the top of this file, which every job here runs under, not
+      # just `pull_request` — is what closes that gap: the duplicate check
+      # below scans the WHOLE migrations directory, unconditionally, so the
+      # moment the second colliding PR merges to `main`, this exact step runs
+      # again on that push and goes red immediately, naming both files.
+      # Verified live (N149's history.md entry) rather than assumed — an
+      # earlier draft of this reasoning relied on the "CI can run ZERO
+      # checks" rebase-forcing mechanism instead, which does NOT cover a
+      # non-conflicting collision like this one; caught by `ac-verifier`.
       - name: Migration version safety (pairing, duplicates, above merge base)
         run: python3 scripts/check-migration-versions.py --self-test && python3 scripts/check-migration-versions.py
 

@@ -62118,23 +62118,97 @@ real tool and a real database), and the new pre-merge check would have
 caught the exact mistake that produces it, under either numbering scheme.
 
 **Does a plain per-push CI check already give "re-validated immediately
-before merge," without a merge queue?** The ticket's acceptance criteria ask
-for a merge queue's re-validation property; this repo has no merge queue
-(GitHub's native one, or an equivalent bot) — nothing in the Git/PR workflow
-section describes one, and inventing one was explicitly out of scope per
-this ticket's own design guidance. The argument, stated rather than assumed:
-CLAUDE.md's "CI can run ZERO checks" section already establishes that this
-repo's `pull_request` workflows re-run on every push, including a rebase,
-and that a PR conflicting with a moved `origin/main` gets **zero NEW check
-runs** until it is rebased onto the new base — which is the mechanism that
-already forces a rebase (and therefore a fresh run of every check, this one
-included) immediately before a stale PR can be merged at all. A merge queue
-exists to guarantee "checked against what will actually land"; this repo's
-actual, already-documented workflow (`pnpm run ci:checks`, rebase if
-conflicting, re-run, merge) gets the same guarantee for free, because a
-conflicting merge is invisible to CI rather than checked-and-passed against
-stale content. No new infrastructure was built for this criterion — this is
-the argument for why none was needed.
+before merge," without a merge queue? First draft of this answer was wrong,
+and `ac-verifier` caught it — recorded here rather than quietly fixed.** This
+repo has no merge queue (GitHub's native one, or an equivalent bot) — nothing
+in the Git/PR workflow section describes one, and inventing one was
+explicitly out of scope per this ticket's own design guidance.
+
+The first draft argued that CLAUDE.md's "CI can run ZERO checks" mechanism
+(a `pull_request` workflow re-runs on every push including a rebase, and a
+PR conflicting with a moved `origin/main` gets zero NEW check runs until
+rebased) already forces the re-validation the ticket asks for. **`ac-verifier`
+tested this directly and it does not hold for the exact scenario the
+criterion names.** Two PRs adding migrations under DIFFERENT filenames whose
+versions happen to collide (the one residual collision mode — two agents in
+the same wall-clock second) produce **no git-level conflict at all**: two
+distinct files merge cleanly. `ac-verifier` reproduced this — two branches
+off one base, sequential `git merge --no-ff`, second merge exits 0 — and
+independently confirmed via the GitHub API that this repo has no branch
+protection requiring a branch be up to date before merging
+(`required_status_checks` 404s, `mergeQueue` is `null`). So the
+rebase-forcing mechanism the first draft leaned on simply never fires here:
+nothing about a non-conflicting collision forces either PR to see the
+other's content before merging, and a `pull_request` check never re-runs
+just because the base branch moved.
+
+**The mechanism that actually closes this gap is a different one, already
+present rather than newly built: `ci.yml`'s `on: push: branches: [main]`
+trigger**, which every job in the file runs under — including the `scripts`
+job this check lives in, with no per-job restriction to `pull_request` only.
+`check-migration-versions.py`'s duplicate check scans the WHOLE
+`backend/migrations/` directory unconditionally, not merely a branch's new
+files relative to some merge base. So the moment the SECOND colliding PR
+merges into `main`, that push retriggers the identical CI job, and the
+whole-directory scan reports the collision by name — not "before merge" in
+the ticket's literal words (nothing can be, without a merge queue), but the
+closest available equivalent: caught within the same CI cycle the merge
+itself triggers, before Railway's `api` service would ever run `migrate up`
+against that commit as its pre-deploy step, and before any developer's local
+`migrate up` would encounter the runtime refusal directly.
+
+Verified live, 2026-09-07, reproducing `ac-verifier`'s exact scenario end to
+end:
+
+```
+>>> two PRs, DIFFERENT filenames, SAME embedded version, both branched
+>>> from the same base, merged sequentially -- no git conflict expected.
+
+PR A merged into main. main's check (PR-A's own PR-time view) would have
+been clean (only add_foo existed).
+merging PR B into main: exit=0  (0 = clean, no conflict)
+Merge made by the 'ort' strategy.
+ backend/migrations/20260907120000_add_bar.down.sql | 1 +
+ backend/migrations/20260907120000_add_bar.up.sql   | 1 +
+
+[merge-base-vs-new-files check, run post-merge on main] ok=True problems=[]
+(expected: empty -- this check alone does NOT see the collision post-merge,
+confirming ac-verifier's finding)
+
+[full-directory duplicate check, run post-merge on main] problems:
+  - version 20260907120000 is claimed by 2 different migrations: add_bar,
+    add_foo — golang-migrate's migrate.New refuses to start against a
+    source with a duplicate version, and if it somehow ran, only one of
+    these would ever apply
+```
+
+The per-PR merge-base check is confirmed blind to this case, exactly as
+`ac-verifier` found — and the SAME script's unconditional whole-directory
+duplicate scan, run by the SAME CI job on the push that lands the second PR,
+catches it immediately. Both CLAUDE.md's item 5 and the `ci.yml` step's own
+comment were rewritten to state this corrected mechanism rather than the
+first draft's insufficient one.
+
+No new merge-queue infrastructure was built for this criterion. What closes
+it was already there (`ci.yml`'s existing `push: branches: [main]` trigger)
+— the work here was recognizing that it applies, verifying it live rather
+than trusting the more obvious-sounding argument, and documenting which
+mechanism actually does the job.
+
+**This is now a permanent, mutation-tested regression guard, not just a
+one-off transcript.** `check-migration-versions.py --self-test`'s case 5
+reproduces the exact fixture above (two branches, non-conflicting merge,
+`origin/main` pointed at the merged HEAD) and asserts `run_check()` — the
+real CI entry point, not `check_duplicates()` in isolation — still reports
+the collision. Mutation-tested live: commenting out the whole-directory
+`check_duplicates(migs)` call in `run_check()` makes this new case fail with
+`"run_check() PASSED on a directory with a genuine version collision... the
+exact gap ac-verifier found would have reopened silently"`; restoring the
+line and re-running (not re-reading) confirms self-test green again. This
+means a future change that accidentally re-scopes duplicate detection to
+only "new" files — which would silently reopen precisely the gap
+`ac-verifier` found — fails `verify` immediately, rather than waiting for
+another review pass to notice.
 
 **The CLAUDE.md edit, scoped deliberately narrowly.** Only the "Git / PR
 workflow" section's numbered migration-numbering item (item 5) was rewritten

@@ -229,23 +229,52 @@ So, every time:
    before. **What newly catches the mistake, before merge, is a separate
    check: `scripts/check-migration-versions.py`** (`pnpm run
    check:migration-versions` — in `verify` and in the `Scripts (Python)` CI
-   job, not the `Backend (Go)` one). For every migration
-   file new in a branch (absent at the merge base with `origin/main`), it
-   asserts the version is STRICTLY ABOVE the highest version already at that
-   merge base — which is precisely "would this be silently skipped" turned
-   into a question askable before anything is deployed. It also refuses a
-   duplicate version number across any two migrations regardless of scheme
-   (the one collision mode a timestamp does not fully close: two agents
-   generating a migration in the exact same wall-clock second) and an
-   unpaired `.up.sql`/`.down.sql`. This repo has no merge queue — CLAUDE.md's
-   "CI can run ZERO checks" section already documents that a `pull_request`
-   workflow re-runs on every push, including a rebase, and that a PR
-   conflicting with a moved `origin/main` gets zero NEW check runs until it is
-   rebased — so a plain per-push check here already gets re-validated
-   immediately before merge, by the same mechanism that already forces a
-   rebase before a stale PR can merge at all. No new merge-queue
-   infrastructure was built for this; N149's history.md entry states that
-   reasoning in full.
+   job, not the `Backend (Go)` one). For every migration file new in a branch
+   (absent at the merge base with `origin/main`), it asserts the version is
+   STRICTLY ABOVE the highest version already at that merge base — which is
+   precisely "would this be silently skipped" turned into a question askable
+   before anything is deployed. It also refuses an unpaired
+   `.up.sql`/`.down.sql`.
+
+   **Two DIFFERENT residual risks need two DIFFERENT mechanisms, and they must
+   not be conflated — an earlier draft of this section did, and review
+   (`ac-verifier`) caught it.** The merge-base check above is a genuine
+   pre-merge gate, but it is blind, BY CONSTRUCTION, to one case: two PRs,
+   each adding a migration under a DIFFERENT filename, whose 14-digit
+   versions happen to collide (the one mode a timestamp does not close — two
+   agents in the same wall-clock second). Neither PR's own diff contains a
+   duplicate on its own, two different filenames merge into git with **no
+   textual conflict**, and this repo has no merge queue and no branch
+   protection requiring a branch be up to date before merging (verified via
+   the GitHub API — no `required_status_checks`, no `mergeQueue`) — so
+   nothing forces either PR to re-check against the other's content before
+   landing. **CLAUDE.md's "CI can run ZERO checks" section's rebase-forcing
+   mechanism does NOT cover this case** — it fires on a git-level conflict,
+   and two distinct filenames never produce one. Relying on it here would
+   have been the same "asserted, not verified" mistake this file's own
+   "Verify that a check can fail" section warns about, and was caught the
+   same way that section recommends: by trying to reproduce the failure
+   live rather than trusting the argument.
+
+   **What actually closes this gap is `ci.yml`'s pre-existing `push:
+   branches: [main]` trigger**, which every job — including the `scripts` job
+   this check lives in — already runs under, with no per-job restriction to
+   `pull_request` only. `check-migration-versions.py`'s duplicate check scans
+   the WHOLE `backend/migrations/` directory unconditionally, not just a
+   branch's new files. So the instant the SECOND colliding PR merges to
+   `main`, that push retriggers the same CI job, and it goes red immediately,
+   naming both files — not "before merge" in the literal sense the ticket
+   asks for (nothing can be, without a merge queue this repo deliberately
+   didn't build), but the closest available equivalent: caught within the
+   same CI cycle the merge itself triggers, before Railway's pre-deploy
+   `migrate up` would ever run against that commit. Verified live,
+   2026-09-07: two branches off one base add `20260907120000_add_foo` and
+   `20260907120000_add_bar` respectively (colliding version, different
+   names); merging both sequentially is git-clean, no conflict; the
+   merge-base check alone reports nothing (confirming the blind spot above),
+   but the SAME script's whole-directory scan reports the collision by name
+   the moment it is run against the merged state — i.e., on the very next
+   `push`-to-`main` CI run. N149's history.md entry has the full transcript.
 
    **This is a disruptive documentation change, on purpose, and the cost is
    accepted rather than hidden.** Other sessions in this repo's fleet may be
