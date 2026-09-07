@@ -61049,6 +61049,22 @@ so `backend-reviewer` was dispatched despite this being overwhelmingly a
 `.github/**`/config change. No `apps/**` or `contracts/**` file changed, so
 `frontend-reviewer` was not.
 
+**Review fold-in (coordinating session).** `backend-reviewer` found no
+blocking issues — it independently re-derived rather than trusted nearly
+every claim above (built both Go modules on the bumped toolchain, ran
+`govulncheck` itself and got the same zero-vulnerabilities result,
+re-parsed every new YAML file, re-ran `check-ci-checks.py --self-test`).
+One flagged gap: it could not verify the Gitleaks binary's pinned SHA-256
+(`551f6fc8...`) against the real upstream `_checksums.txt`, since this
+sandbox's outbound network to GitHub connects but returns no data. The
+coordinating session has real network access and fetched
+`gitleaks_8.30.1_checksums.txt` from the actual GitHub release directly:
+the published checksum for `gitleaks_8.30.1_linux_x64.tar.gz` is
+`551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb` —
+matches this workflow's pinned value exactly, character for character. No
+code change needed; this closes the one gap the reviewer could not close
+itself.
+
 **Left open, all `NEEDS HUMAN EVIDENCE`**: Dependabot actually opening PRs
 against all four ecosystems; dependency-review and Gitleaks genuinely
 blocking a live PR (not just a local binary run); CodeQL's first run
