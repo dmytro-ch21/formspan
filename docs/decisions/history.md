@@ -60790,6 +60790,34 @@ would have flipped a liveness-only healthcheck and what changed.
 `/v1/healthz` in the `Cache-Control: no-store` discussion. `README.md`'s
 backend endpoint listing now names `/v1/readyz`.
 
+**Review fold-in (coordinating session)**: `backend-reviewer` found no
+blocking issues — it independently traced every path in `check()`/`handle()`
+confirming the raw `detail` string never reaches `apihttp.WriteJSON` (only
+the closed 5-constant `reason` set does), ran `TestReadyz_SchemaQueryFails_
+NotReadyAndErrorNotLeaked` itself against the serialized HTTP response
+body, and pointed a real `TEST_DATABASE_URL` at this host's shared
+`vola_test` to confirm the two live-database tests skip gracefully rather
+than falsely failing against another session's in-progress fixture. One
+suggestion, folded in: `handle()` was logging via the boot-time-captured
+`rc.logger` rather than `httplog.FromContext(r.Context())`, even though
+`httplog.Middleware` wraps the whole mux and a request-scoped logger
+(`request_id`/`trace_id` correlation) is available — the same pattern
+`internal/modules/profile/avatar.go` already uses. Fixed; `rc.logger`
+stays reserved for `newReadinessChecker`'s boot-time warnings, which
+genuinely have no request to correlate to. Re-ran the full `readyz` suite
+and `gofmt`/`vet`/`build` after the change — all clean.
+
+`ac-verifier` returned 5/5 acceptance criteria MET with concrete evidence
+(including independently reproducing the version-mismatch mutation check
+itself), but flagged that "Steps to test #1" — a real Railway staging
+deploy with the updated `healthcheckPath`, and a genuine broken-DB dry run
+against it — is a live-infrastructure action no amount of code reading can
+settle, and issue #540 didn't carry a marked criterion for it. Amended
+#540's acceptance criteria to add a properly-marked
+`NEEDS HUMAN EVIDENCE` item for exactly that, so the evidence latch tracks
+it correctly on merge rather than the ticket closing as if this had been
+observed.
+
 **Left open**: this only covers `api`'s own `/readyz`; `worker`/`admin-api`
 don't exist yet, and whichever of them eventually gets its own database
 dependency should get its own readiness check rather than assuming `api`'s

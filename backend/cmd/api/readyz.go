@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
+	"github.com/dmytro-ch21/vola/backend/internal/platform/httplog"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/migrateguard"
 )
 
@@ -213,7 +214,14 @@ func (rc *readinessChecker) handle(w http.ResponseWriter, r *http.Request) {
 
 	ready, reason, detail := rc.check(r.Context())
 	if !ready {
-		rc.logger.Warn("readyz: not ready", "reason", reason, "detail", detail)
+		// httplog.FromContext, not rc.logger: this is a per-request log line
+		// and httplog.Middleware wraps the whole mux, so a request-scoped
+		// logger (request_id/trace_id correlation) is available here — the
+		// same pattern internal/modules/profile/avatar.go already uses.
+		// rc.logger (captured once at boot in newReadinessChecker) stays
+		// reserved for boot-time warnings that have no request to
+		// correlate to.
+		httplog.FromContext(r.Context()).Warn("readyz: not ready", "reason", reason, "detail", detail)
 		apihttp.WriteJSON(w, http.StatusServiceUnavailable, readyzResponse{
 			Status:  "not_ready",
 			Service: "api",
