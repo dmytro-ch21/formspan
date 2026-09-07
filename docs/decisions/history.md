@@ -61928,6 +61928,347 @@ and `DBPoolStats` schema (see correction above).
 - Wiring pool saturation into a real metrics/alerting backend remains
   N172/#549's open scope, not resolved here.
 
+## 2026-09-07 — N149/#553: migration versions move to UTC timestamps, and a new CI check catches what golang-migrate only discovers at runtime
+
+**The problem.** `.claude/agents/backend-module-scaffolder.md` told an agent to
+use "the next sequential number" for a new migration. Two agents branching
+from the same base can independently pick the same one — this repo already
+lost an afternoon to exactly that (`000043`, recorded in CLAUDE.md's Git/PR
+workflow section) — and the fleet now routinely runs several agents at once
+(see "At most three at once").
+
+**The decision: timestamp-numeric versions, not a central lease.** The
+ticket's own recommended fix offered two options — an orchestrator-held
+migration-version lease, or timestamp versions. A lease needs a live
+orchestrator service that does not exist in this repo (Milestone C's
+webhook gateway and GitHub App tickets are themselves still open/blocked).
+Timestamps need no new infrastructure and match golang-migrate's own
+documented numeric-version model directly. Format: `YYYYMMDDHHMMSS_
+description.up.sql` / `.down.sql` — 14 digits, UTC, to the second, generated
+fresh (`date -u +%Y%m%d%H%M%S`) right before the migration is written, never
+reused from an earlier session.
+
+**Verified, not assumed: the two schemes coexist safely.** Read directly out
+of the vendored `golang-migrate/migrate/v4@v4.19.1` source rather than taken
+on faith:
+
+- `Migration.Version` (`migration.go`) and `Migrate.Version()`'s return type
+  (`migrate.go`) are both Go `uint` — 64-bit on every platform this repo
+  builds for (amd64, arm64).
+- `source/parse.go`'s filename regex (`^([0-9]+)_(.*)\.(up|down)\.(.*)$`)
+  extracts the version with `strconv.ParseUint(m[1], 10, 64)` — any number of
+  leading digits is accepted, not just six.
+- The Postgres driver's `schema_migrations` table (`database/postgres/
+  postgres.go`) declares `version bigint` — signed 64-bit, comfortably wider
+  than any 14-digit value (max `9223372036854775807` vs. a 14-digit ceiling
+  of `99999999999999`).
+- Arithmetically: a 6-digit sequential version tops out at `999999`; a
+  14-digit timestamp version starts at `10000000000000`. The smallest
+  possible timestamp version is therefore always larger than the largest
+  possible sequential one — the two schemes compare correctly as plain
+  integers with no special-casing, and the very next migration ever created
+  (timestamp-based) is automatically "highest," continuing the exact
+  directional guarantee the old rule provided.
+- This repo's own `backend/internal/platform/migrateguard` package
+  (`plan.go`'s `ReadMigrations`) already parsed filenames with
+  `strconv.ParseUint(digits, 10, 64)` before this change — it was 64-bit-safe
+  by construction and needed no edit.
+
+Existing sequential migrations (`000001` through `000095`, 186 files as of
+this entry) are **untouched** — this is not a renumbering, and renumbering
+history would break every already-migrated database's `schema_migrations`
+row for zero benefit. New work simply stops extending the sequence.
+
+**Collision probability, stated rather than asserted.** A 14-digit
+per-second timestamp still has exactly one reachable collision mode: two
+agents generating a migration in the same wall-clock second. At this repo's
+actual concurrency (at most three agents in parallel, per the "At most three
+at once" hard rule — not thousands), that is a real but rare event, and the
+new CI check below turns it from a runtime refusal (`migrate.New` simply
+won't start against a source with a duplicate version) into a pre-merge
+finding with a clear message. This is not "collisions are impossible" — it
+is "collisions are rare, and the one mode that remains is mechanically
+caught before merge, exactly like the old scheme's duplicate-number problem
+was not."
+
+**The silent-skip trap — re-verified LIVE against the new scheme, not just
+argued about.** CLAUDE.md's existing account (2026-08-19): a database at
+version 66, add a `000065`, `migrate up` prints `"migrate: up: done"`, exits
+0, version stays 66, the new columns are silently absent. This is inherent
+to golang-migrate — it applies only versions strictly above the recorded
+one — and a numbering scheme cannot change that behavior, only make landing
+below the recorded version less likely by accident.
+
+Reproduced today with the real tool, not the wrapper: a scratch Postgres
+(`postgres:16-alpine`, an isolated container on port 55432, unrelated to any
+worktree's shared `docker-compose.yml` Postgres), and the actual
+`golang-migrate/migrate/v4/cmd/migrate@v4.19.1` CLI built with `-tags
+postgres` (bypassing this repo's own `cmd/migrate` wrapper and its
+`migrateguard` protections entirely, so the measurement is about
+golang-migrate itself, not about code this repo controls):
+
+```
+$ migrate -path . -database "$DSN" up
+20260907120000/u init (11.454708ms)
+$ migrate -path . -database "$DSN" version
+20260907120000
+
+# add 20260907110000_add_column.up.sql (ALTER TABLE demo ADD COLUMN name text;)
+# — a genuinely EARLIER timestamp than what's already applied, the shape a
+# hand-typed or clock-drifted version would take.
+
+$ migrate -path . -database "$DSN" up
+no change
+$ migrate -path . -database "$DSN" version
+20260907120000
+
+$ psql -c '\d demo'
+                            Table "public.demo"
+ Column |  Type   | ...
+--------+---------+-----
+ id     | integer | ...
+# — "name" column never added. Silently skipped, exit 0, no error.
+```
+
+Structurally identical to the 2026-08-19 measurement. The scheme changed;
+the failure mode golang-migrate itself produces did not, and per the
+ticket's own framing this is expected and correct — a numbering convention
+cannot patch a library's runtime behavior, only make the mistake harder to
+make and easier to catch beforehand.
+
+**What catches it now, before merge:** `scripts/check-migration-versions.py`
+(`pnpm run check:migration-versions` — self-test then the real check, in
+`verify` and as a new step in the `Scripts (Python)` CI job's existing
+`scripts` job). Three checks:
+
+1. Every migration has a matching `.up.sql`/`.down.sql` pair (existing gate
+   search turned up nothing that already did this — the pairing had never
+   been checked at all).
+2. No two distinct migrations claim the same version number (the collision
+   mode above, and the old scheme's `000043` incident, under one mechanism).
+3. **Every migration new in this branch (absent at the merge base with
+   `origin/main`) must version above the highest version already at that
+   merge base.** This is the direct, pre-merge form of "would this be
+   silently skipped" — reusing the exact `fetch-depth: 0` +
+   `git fetch --no-tags origin main:refs/remotes/origin/main` setup the
+   `scripts` CI job already has for `check-tasks-integrity.py`'s own
+   merge-base comparison, so no new CI plumbing was needed for it.
+
+Live mutation-check transcripts (both explicitly demanded by the ticket):
+
+*Collision, against the real check in this actual worktree* (not just the
+hermetic self-test): added `20260907143000_live_test_a.{up,down}.sql` and
+`20260907143000_live_test_b.{up,down}.sql` — same version, different
+stems — and ran `python3 scripts/check-migration-versions.py`:
+
+```
+check-migration-versions: 1 problem(s) in backend/migrations:
+
+  - version 20260907143000 is claimed by 2 different migrations:
+    live_test_a, live_test_b — golang-migrate's migrate.New refuses to
+    start against a source with a duplicate version, and if it somehow
+    ran, only one of these would ever apply
+exit code: 1
+```
+
+Removed the four artificial files; re-ran; `check-migration-versions: ok —
+186 migration files, 93 distinct migrations, no duplicates, every new one
+versioned above the merge base`, exit 0 — a genuine restore confirmed by
+re-running the check, not by re-reading the files, per CLAUDE.md's own
+"a restore is confirmed by re-running the thing that fails" rule. `git
+status --short backend/migrations` confirmed empty afterward.
+
+*Silent-skip, reproduced as the exact CLAUDE.md incident shape, against a
+real throwaway git repository* (same technique `append-only-merge.py
+--self-test` uses — real git plumbing, not a mock): `origin/main` (the
+throwaway repo's own `main` branch) committed with `000066_prior_work` as
+the only migration; a `feature` branch then added `000065_forgot_to_check`
+— below the merge base's 66, the precise 2026-08-19 incident:
+
+```
+>>> feature branch adds a NEW migration numbered 000065 — below the merge
+    base's 66.
+check_new_migrations_above_merge_base -> ok=True
+  PROBLEM: 000065_forgot_to_check.up.sql: version 65 is not above 66, the
+  highest migration version already at the merge base with main.
+  golang-migrate applies only versions STRICTLY ABOVE the one recorded in
+  schema_migrations — a migration landing at or below an already-deployed
+  version is SILENTLY SKIPPED (`migrate up` prints "done", exits 0, and
+  never runs it).
+```
+
+And the timestamp-shaped version of the same test, using the EXACT file
+from the live golang-migrate demonstration above (`origin/main` at
+`20260907120000`, feature branch adds `20260907110000_add_column` — the
+file just proven, live, to be silently skipped by the real tool):
+
+```
+>>> feature branch adds a NEW migration timestamped EARLIER than the merge
+    base's head. this is the exact file that bare golang-migrate silently
+    skipped in the live demo above.
+check_new_migrations_above_merge_base -> ok=True
+  PROBLEM: 20260907110000_add_column.up.sql: version 20260907110000 is not
+  above 20260907120000, the highest migration version already at the merge
+  base with main. ...
+```
+
+Both close the loop the ticket asked for: golang-migrate's own runtime
+behavior is unchanged (still silently skips, confirmed live against the
+real tool and a real database), and the new pre-merge check would have
+caught the exact mistake that produces it, under either numbering scheme.
+
+**Does a plain per-push CI check already give "re-validated immediately
+before merge," without a merge queue? First draft of this answer was wrong,
+and `ac-verifier` caught it — recorded here rather than quietly fixed.** This
+repo has no merge queue (GitHub's native one, or an equivalent bot) — nothing
+in the Git/PR workflow section describes one, and inventing one was
+explicitly out of scope per this ticket's own design guidance.
+
+The first draft argued that CLAUDE.md's "CI can run ZERO checks" mechanism
+(a `pull_request` workflow re-runs on every push including a rebase, and a
+PR conflicting with a moved `origin/main` gets zero NEW check runs until
+rebased) already forces the re-validation the ticket asks for. **`ac-verifier`
+tested this directly and it does not hold for the exact scenario the
+criterion names.** Two PRs adding migrations under DIFFERENT filenames whose
+versions happen to collide (the one residual collision mode — two agents in
+the same wall-clock second) produce **no git-level conflict at all**: two
+distinct files merge cleanly. `ac-verifier` reproduced this — two branches
+off one base, sequential `git merge --no-ff`, second merge exits 0 — and
+independently confirmed via the GitHub API that this repo has no branch
+protection requiring a branch be up to date before merging
+(`required_status_checks` 404s, `mergeQueue` is `null`). So the
+rebase-forcing mechanism the first draft leaned on simply never fires here:
+nothing about a non-conflicting collision forces either PR to see the
+other's content before merging, and a `pull_request` check never re-runs
+just because the base branch moved.
+
+**The mechanism that actually closes this gap is a different one, already
+present rather than newly built: `ci.yml`'s `on: push: branches: [main]`
+trigger**, which every job in the file runs under — including the `scripts`
+job this check lives in, with no per-job restriction to `pull_request` only.
+`check-migration-versions.py`'s duplicate check scans the WHOLE
+`backend/migrations/` directory unconditionally, not merely a branch's new
+files relative to some merge base. So the moment the SECOND colliding PR
+merges into `main`, that push retriggers the identical CI job, and the
+whole-directory scan reports the collision by name — not "before merge" in
+the ticket's literal words (nothing can be, without a merge queue), but the
+closest available equivalent: caught within the same CI cycle the merge
+itself triggers, before Railway's `api` service would ever run `migrate up`
+against that commit as its pre-deploy step, and before any developer's local
+`migrate up` would encounter the runtime refusal directly.
+
+Verified live, 2026-09-07, reproducing `ac-verifier`'s exact scenario end to
+end:
+
+```
+>>> two PRs, DIFFERENT filenames, SAME embedded version, both branched
+>>> from the same base, merged sequentially -- no git conflict expected.
+
+PR A merged into main. main's check (PR-A's own PR-time view) would have
+been clean (only add_foo existed).
+merging PR B into main: exit=0  (0 = clean, no conflict)
+Merge made by the 'ort' strategy.
+ backend/migrations/20260907120000_add_bar.down.sql | 1 +
+ backend/migrations/20260907120000_add_bar.up.sql   | 1 +
+
+[merge-base-vs-new-files check, run post-merge on main] ok=True problems=[]
+(expected: empty -- this check alone does NOT see the collision post-merge,
+confirming ac-verifier's finding)
+
+[full-directory duplicate check, run post-merge on main] problems:
+  - version 20260907120000 is claimed by 2 different migrations: add_bar,
+    add_foo — golang-migrate's migrate.New refuses to start against a
+    source with a duplicate version, and if it somehow ran, only one of
+    these would ever apply
+```
+
+The per-PR merge-base check is confirmed blind to this case, exactly as
+`ac-verifier` found — and the SAME script's unconditional whole-directory
+duplicate scan, run by the SAME CI job on the push that lands the second PR,
+catches it immediately. Both CLAUDE.md's item 5 and the `ci.yml` step's own
+comment were rewritten to state this corrected mechanism rather than the
+first draft's insufficient one.
+
+No new merge-queue infrastructure was built for this criterion. What closes
+it was already there (`ci.yml`'s existing `push: branches: [main]` trigger)
+— the work here was recognizing that it applies, verifying it live rather
+than trusting the more obvious-sounding argument, and documenting which
+mechanism actually does the job.
+
+**This is now a permanent, mutation-tested regression guard, not just a
+one-off transcript.** `check-migration-versions.py --self-test`'s case 5
+reproduces the exact fixture above (two branches, non-conflicting merge,
+`origin/main` pointed at the merged HEAD) and asserts `run_check()` — the
+real CI entry point, not `check_duplicates()` in isolation — still reports
+the collision. Mutation-tested live: commenting out the whole-directory
+`check_duplicates(migs)` call in `run_check()` makes this new case fail with
+`"run_check() PASSED on a directory with a genuine version collision... the
+exact gap ac-verifier found would have reopened silently"`; restoring the
+line and re-running (not re-reading) confirms self-test green again. This
+means a future change that accidentally re-scopes duplicate detection to
+only "new" files — which would silently reopen precisely the gap
+`ac-verifier` found — fails `verify` immediately, rather than waiting for
+another review pass to notice.
+
+**The CLAUDE.md edit, scoped deliberately narrowly.** Only the "Git / PR
+workflow" section's numbered migration-numbering item (item 5) was rewritten
+— the silent-skip warning's exact incident and measurement text was kept
+verbatim inside it (not weakened, not shortened) and a second, live
+2026-09-07 measurement against the new scheme was appended alongside it, so
+the paragraph now demonstrates the trap survives the scheme change rather
+than merely asserting it. `.claude/agents/backend-module-scaffolder.md`'s
+one line telling an agent how to number a new migration's files was updated
+to say "current UTC timestamp, 14-digit format" instead of "next sequential
+number" — the minimal edit that keeps it accurate, per the ticket's own
+instruction not to touch it otherwise. **One known, deliberate gap**: the
+"Backend module pattern" section elsewhere in CLAUDE.md (`A migration in
+backend/migrations/ (plain versioned SQL, golang-migrate —
+NNNNNN_description.up.sql / .down.sql)`) still shows the old
+`NNNNNN`-shaped example and was **not** touched, per this ticket's explicit
+design guidance to scope the edit to the Git/PR workflow section only and
+touch no other section of the file. That line is not wrong (a
+`NNNNNN`-shaped file is still a real, valid migration filename — it is just
+no longer the recommended shape for a *new* one) but it is now incomplete on
+its own; flagged here rather than silently left, and worth a quick follow-up
+touch the next time that section is edited for any other reason.
+
+**Acknowledged, on purpose: this documentation change is disruptive to a
+fleet mid-flight.** Other sessions in this repo's fleet may be reading the
+OLD sequential-numbering rule right now, while this PR is open. That is
+accepted rather than engineered around: a sequential migration a concurrent
+agent branches before this merges still applies correctly after it does
+(sorted correctly per the numeric-coexistence argument above); the only
+consequence is that agent's *next* migration, after rebasing past this
+commit, should use the new scheme instead. Nothing about an in-flight
+agent's current migration breaks.
+
+**What this does not fix.** It cannot see a collision or an ordering
+violation that exists only in the MERGED tree of several still-open PRs,
+each individually fine against `origin/main` — the identical blind spot
+CLAUDE.md already documents for the old scheme's `git diff
+origin/main...HEAD`. That is caught the moment the first colliding PR
+actually merges and the second rebases onto it, which this repo's own
+"CI can run ZERO checks" mechanism already forces before that second PR can
+get any CI runs at all.
+
+`docs/testing/functional-scenarios.md` was **not** updated — this is
+backend/tooling infrastructure (a CI check and a documentation change) with
+no new API endpoint, no changed response shape, and no user-facing surface,
+which is exactly that doc's own stated skip criterion.
+
+No new CI **job** was added — the migration check is a new **step** inside
+the existing `scripts` job — so `EXPECTED_CHECK_RUNS` in
+`scripts/check-ci-checks.py` is unchanged.
+
+`backend-reviewer` was **not** dispatched for this PR. The diff touches
+`scripts/check-migration-versions.py` (Python, not `backend/**` Go),
+`.github/workflows/ci.yml`, `package.json`, `CLAUDE.md` and
+`.claude/agents/backend-module-scaffolder.md` — no Go code under `backend/`
+was added or changed, matching N166's own precedent (#543) for a
+pure-config/tooling ticket skipping the Go-specific reviewer. `ac-verifier`
+and a general review pass were still run per `/pre-merge`.
+
+
 ## Open items / known gaps as of this entry
 
 
