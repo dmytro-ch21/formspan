@@ -59878,6 +59878,238 @@ observable API behavior (401/`unauthorized` on an otherwise-valid token) that
 wasn't reachable before this change.
 
 
+## 2026-09-06 — N133 (part of #537): the native-compatibility gate that would have caught 2026-08-09 finally exists — three cheap checks, three infrastructure pieces split out
+
+Milestone A — production safety. The 2026-08-09 incident this ticket exists
+because of (`expo-image-manipulator` calling a symbol only present in
+`expo-modules-core` 57.0.8+, while the lockfile had resolved core at
+57.0.7 — every Release build crashed at launch with a `dyld`
+symbol-not-found `SIGABRT`, before any JS ran) had been warned about by
+`expo install --check` for **weeks**. Nothing in `verify` or CI ever ran
+that command. This closes that specific gap and two adjacent ones the
+ticket asked for, and splits three genuinely larger pieces (Android
+compile, iOS native build, launch-survival check) into their own tickets
+rather than faking them.
+
+### What actually shipped (3 of 6 acceptance criteria, in full)
+
+1. **`scripts/check-expo-compat.py`** (`check:expo-compat`) — wraps `pnpm
+   --dir apps/mobile exec expo install --check`, wired into `verify` and a
+   new `Mobile (Expo)` CI step. This is exactly the command the incident's
+   own postmortem asked "should this join verify/CI?" about.
+2. **`scripts/check-expo-config.py`** (`check:expo-config`) — runs both
+   `expo config --type public` and `--type introspect`, confirming
+   `apps/mobile/app.config.js` resolves without throwing. Catches a
+   `PluginError` (a plugin reference that can't resolve) that version
+   drift alone wouldn't.
+3. **`scripts/check-expo-native-config.py`** (`check:expo-native-config`) —
+   actually runs `expo prebuild --no-install --platform all`, which the
+   two checks above do NOT do: `expo config` never executes a plugin's
+   file-writing "mods" (`withInfoPlist`, `withEntitlementsPlist`, ...), so
+   it can't catch a plugin that resolves but writes something broken or
+   incomplete — exactly the class in the N465/N477 HealthKit entry (an
+   empty `.entitlements` file, above), where the config was structurally
+   fine and the write never happened.
+
+### Why item 3 needed its own design, not just "run expo prebuild"
+
+`expo prebuild` writes (and by default recreates) `apps/mobile/ios` and
+`apps/mobile/android` — gitignored directories that, on a developer
+machine mid-iteration, hold a real, working native project (Xcode may have
+it open, `pod install` may have just run, a Simulator build may be
+installed from it). Running it in `verify` unattended would risk silently
+destroying that.
+
+The fix: `expo prebuild <dir>` takes the project directory as an explicit
+argument, so `check-expo-native-config.py` builds a throwaway scratch
+directory (`tempfile.TemporaryDirectory`), symlinks in exactly what prebuild
+needs to resolve config plugins (`package.json`, `app.config.js`, `assets/`,
+the `.env*` files, `eas.json`, `tsconfig.json`, `node_modules`), and points
+`expo prebuild` at THAT directory instead. Confirmed by hand: this produces
+byte-identical output to a real `apps/mobile` prebuild — the same
+`VOLA.entitlements` (`com.apple.developer.healthkit: true`), the same
+`AndroidManifest.xml` permission set — without ever writing inside the real
+`apps/mobile/` tree, and it never touches `apps/mobile/ios`/`android` even
+when they already exist. Runs in well under a second, no Xcode, no Android
+SDK, no CocoaPods needed (`--no-install` skips that half entirely) — so it
+costs nothing to run unconditionally in every `verify` and every CI run of
+the `Mobile (Expo)` job, rather than trying to path-filter it to
+`package.json`/`app.config.js` diffs only (the acceptance criterion's
+literal ask). Path-filtering a sub-second check that never mutates the
+repo bought nothing worth the added complexity.
+
+### The real, current drift this immediately found
+
+Wiring `expo install --check` in did not start from a clean baseline.
+`apps/mobile/package.json` on `origin/main` was already drifted across
+**24 packages** relative to the installed Expo CLI's compatibility matrix
+for pinned Expo `~57.0.11` — `expo` itself, every `expo-*` dependency, and
+`react-native`. Confirmed by running the check before writing any code:
+
+```
+expo@57.0.11 - expected version: ~57.0.20
+expo-audio@57.0.3 - expected version: ~57.0.4
+... (22 more)
+react-native@0.86.2 - expected version: 0.86.3
+Found outdated dependencies
+```
+
+This is the same failure class as the incident, not a hypothetical one —
+merging the gate without fixing this would have made `verify`/CI red for
+every PR from the moment it landed, which is exactly the "a check that
+only warns and doesn't fail is not a fix" trap turned inside out (a check
+that fails and nobody can ever make pass is worse — it gets disabled).
+So this PR also runs `npx expo install --fix` for real: `expo` →
+`~57.0.20`, every listed `expo-*` package bumped to its expected `~`
+range, `react-native` → `0.86.3`. `pnpm-lock.yaml` updated accordingly.
+Deliberately NOT bundled with this fix: `expo install --fix` separately
+recommended adding `expo-audio`, `expo-font`, `expo-secure-store` and
+`expo-sqlite` to `app.config.js`'s `plugins` array (it can't autowrite to
+a dynamic JS config). Reading those four packages' plugin source found
+`expo-audio`'s plugin defaults `recordAudioAndroid: true` when it runs
+with no explicit options — adding it naively would silently request a
+microphone permission this app doesn't use, the exact mistake this repo
+already made and fixed twice for `expo-camera`/`expo-image-picker` (see
+the `vola-mobile-build` skill's "THREE silent permission traps" entry).
+Filed as N520/#916 instead of folded in here, since it needs a
+product/security decision (what exact plugin options preserve current
+behavior), not a mechanical add.
+
+### Mutation-checked (the AC's own explicit demand)
+
+Reproduced the 2026-08-09 incident's exact shape on the now-fixed
+baseline: pinned `expo-camera` to an exact, older version
+(`"57.0.3"`, no `~`) than the SDK expects, ran `pnpm install` (a
+targeted `+1 -1` package change, confirmed via `git diff --stat`), then:
+
+```
+$ pnpm exec expo install --check
+  expo-camera@57.0.3 - expected version: ~57.0.4
+Found outdated dependencies
+Found outdated dependencies
+EXIT: 1
+```
+
+Restored the correct version, reinstalled, re-ran — confirmed clean
+(`Dependencies are up to date`, exit 0) **by re-running the check, not by
+re-reading the file** — and confirmed via `git diff --stat` that the tree
+matched the intended fixed state with no residue from the mutation.
+
+`check-expo-config.py` and `check-expo-native-config.py` were each
+mutation-checked the same way, by hand and (for the native-config script)
+via an automated `--self-test`: corrupting one `app.config.js` plugin
+name into `"expo-router-does-not-exist-plugin"` makes both `expo config
+--type public`/`--type introspect` and `expo prebuild` fail with a
+`PluginError` naming the broken module; restoring it passes again.
+`check-expo-native-config.py --self-test` proves this without ever
+touching the real `app.config.js` — it copies the file into a scratch
+fixture, corrupts the copy, and asserts the real file's content is
+unchanged afterward (now itself wired into `verify` and CI, alongside the
+real check).
+
+### Network requirement, checked rather than assumed
+
+`expo install --check` resolves Expo's compatibility matrix over the
+network. Pointed at an unreachable proxy, it fails in well under a second
+with a distinct `ECONNREFUSED`, exit 1 — a clear network error, never a
+false "up to date". CI already needs network for `pnpm install
+--frozen-lockfile` in the same job; a developer running `verify` before a
+`git push` already needs it for the push itself. `expo config` and `expo
+prebuild --no-install` need no network at all — confirmed the same way.
+
+### What was scoped OUT, and why (this ticket's own explicit instruction)
+
+The parent ticket's acceptance criteria span "a few lines in an existing
+CI job" to "provision new native build infrastructure." Three pieces
+needed real infrastructure/credentials this sandbox doesn't have, and were
+split into their own tickets rather than faked:
+
+- **N517/#913 — Android native compile CI gate.** Confirmed from this
+  sandbox: no Android SDK, NDK, `sdkmanager`, `adb`, or `emulator`
+  anywhere, and the `Mobile (Expo)` CI job's `ubuntu-latest` runner has no
+  Android toolchain installed. A real compile gate needs SDK provisioning,
+  Gradle caching design, and a CI time-budget decision this ticket
+  couldn't responsibly assume.
+- **N518/#914 — nightly iOS EAS Build gate.** Confirmed from this sandbox:
+  `pnpm exec eas --version` fails (`eas-cli` isn't installed anywhere in
+  this repo), no workflow references EAS/`expo-github-action` today, and
+  the `plugin:expo:expo` MCP server reported itself unauthenticated at the
+  start of this work. **Cadence decision, made now even though
+  implementation is deferred**: nightly, via a scheduled GitHub Actions
+  workflow driving EAS Build's cloud service (not a GitHub-Actions-hosted
+  macOS runner — EAS Build's own infra absorbs the compile cost, so this
+  avoids the real per-minute multiplier GitHub charges for macOS runners
+  entirely). Release-candidate-only was considered and rejected: this
+  project has no fixed, frequent release cadence yet, so a
+  release-only gate would reproduce the incident's own "weeks of warning"
+  blind window, just relocated to a different check. Nightly bounds "how
+  many commits could have broken this" to about a day's worth.
+- **N519/#915 — automated launch-survival check for release-candidate
+  builds.** Structurally depends on N517/N518 already producing a real
+  installable build to launch — none of this PR's three checks ever
+  produces one. Design sketch recorded on the ticket (`xcrun simctl
+  launch` + a time-boxed `launchctl print system` poll for iOS,
+  `adb shell pidof` for Android) rather than implemented, since a `dyld`
+  abort is a launch-time crash the launch command's own exit code cannot
+  see — the exact blind spot the 2026-08-09 incident's postmortem named.
+
+### Recommendation on how #537 should close (coordinating session's call
+to make, per this ticket's own instruction — not decided here)
+
+Two honest options, both considered:
+
+1. **Re-scope #537's body** to cover only the three shipped checks, and
+   use `closes #537` — clean if the coordinating session agrees the
+   original six-criteria ticket is better represented as "N133 (the cheap
+   gate) plus three named follow-ups" than as one still-open umbrella.
+2. **Leave #537 open**, this PR's commit says "part of #537", and #537
+   stays open until N517/N518/N519 (and the #916 plugin-config decision)
+   also land or are explicitly cut.
+
+This entry's author's recommendation: **option 1** — re-scope #537's body
+to name N517/#913, N518/#914, N519/#915 and N520/#916 as the split-off
+remainder, then close #537 with this PR. The three deferred pieces are
+independently well-scoped, independently assignable, and none of them
+blocks the value this PR already delivers (a real, currently-red-until-
+fixed compatibility gate is now running on every PR). Leaving #537 open
+as an umbrella over four other tickets' worth of work makes it a tracking
+label more than an issue with its own acceptance criteria — the same shape
+CLAUDE.md's ticket-splitting precedent (N513/#901) already chose to avoid.
+Deferred to the coordinating session regardless, as instructed.
+
+### Testing
+
+`pnpm run verify` (full chain, including the three new gates and the
+version bump above) — green. All three new `check:*` scripts confirmed
+individually via `pnpm run check:expo-compat` / `check:expo-config` /
+`check:expo-native-config`. `check:verify-chain` and
+`check:ci-detector --self-test` both still pass with the three new gates
+counted (46 gates total now, no new declared CI job — the three new steps
+live inside the existing `Mobile (Expo)` job, so `EXPECTED_CHECK_RUNS` in
+`scripts/check-ci-checks.py` is unchanged at 6).
+
+Reviewed by `ac-verifier` and `backend-reviewer`/`frontend-reviewer` as
+applicable — see the PR for their findings.
+
+### Functional scenarios
+
+Not added — this is CI/tooling with no new user-facing behavior or API
+surface, matching `functional-scenarios.md`'s own "skip for CI tweaks"
+guidance. The one user-facing idea this work produced (automated
+launch-survival verification) is recorded as a design sketch on N519/#915
+rather than as a scenario here, since nothing implements it yet.
+
+### Left open / follow-up
+
+- N517/#913, N518/#914, N519/#915 — Android compile gate, nightly iOS EAS
+  Build gate, and launch-survival check, all unassigned/Todo on the board.
+- N520/#916 — whether/how to register `expo-audio`/`expo-font`/
+  `expo-secure-store`/`expo-sqlite`'s config plugins, given the
+  microphone-permission default trap found above.
+- #537's own closure/re-scope — left to the coordinating session, per
+  its recommendation above.
+
+
 ## Open items / known gaps as of this entry
 
 
