@@ -62269,6 +62269,283 @@ pure-config/tooling ticket skipping the Go-specific reviewer. `ac-verifier`
 and a general review pass were still run per `/pre-merge`.
 
 
+## 2026-09-07 — N150/#554: ephemeral Postgres per engine worker — the primitive already existed, so this is measurement, a TTL sweep, and closing the gaps
+
+**The ticket's own premise needed checking against the code before anything
+else, and it was half wrong in an interesting way.** N150's design guidance
+asked, correctly, "does an engine run currently call into
+`backend/internal/platform/testdb` at all, or is there no real Postgres-
+provisioning logic yet?" Reading `engine/internal/worker/workspace.go` in
+full answered it: **the ephemeral-database-per-worker primitive was already
+built and extensively tested**, as part of N187/#603 (the per-run role) and
+its neighbours — `Runner.Provision` already creates a uniquely-named
+database and a dedicated, unprivileged Postgres role for every run
+(`engine_run_<runID>_<suffix>` / `engine_role_<runID>_<suffix>`), applies the
+product's own `backend/migrations/*.up.sql` against it directly
+(`Workspace.MigrateBackend`), and drops both at `Teardown`, with
+`AuditResidue` verifying the drop against `pg_database`/`pg_roles` rather
+than trusting it. It has never once used `vola_test`, a human's
+`vola_test_<branch>`, or `testdb.go`'s advisory lock — `grep -rn testdb
+engine/` finds nothing outside one test package's own comment explaining why
+it deliberately doesn't need one. So the two hardest acceptance criteria —
+"not a shared database", and "the advisory lock stays a human-concurrency
+safety net, not something the engine depends on" — were already true, by
+construction, before this ticket touched anything. That separation was
+never a bypass flag threaded through `testdb.go`'s locked path; it is a
+disjoint code path in a different package that has never imported the other
+one.
+
+**What was genuinely missing, confirmed by reading rather than assumed:**
+cost/latency measurement, a TTL/cleanup mechanism for a crashed worker's
+leaked database+role, and a real concurrency reproduction. `devengine`
+(`engine/cmd/devengine/main.go`) is still Phase-1 SHADOW MODE exactly as its
+own doc comment says — `grep -rn "\.Provision(" engine` finds it called
+from test files only — so there is also no live orchestrator to hook a
+"sweep on startup" or "sweep on a timer" call into yet; that part of
+Milestone C is honestly still unbuilt, and this entry does not pretend
+otherwise.
+
+**Mechanism chosen: extend the existing database-+-role-per-worker
+primitive, not testcontainers-go or a Postgres-server-per-worker Docker
+container.** `testcontainers-go` is not a dependency of `engine/go.mod` (nor
+of anything else in the repo), and the alternative this ticket's design
+guidance asked to weigh — a real `docker run postgres:...` per worker,
+mirroring the sandbox/egress-broker container patterns in
+`engine/internal/worker/sandbox.go` and `egress.go` — was rejected after
+measuring both options rather than guessing:
+
+- A fresh CREATE ROLE + CREATE DATABASE + ALTER OWNER cycle against the
+  *already-running* shared Postgres server costs **~165ms median** to
+  provision and **~39ms** to tear down (full numbers below) — because it
+  never pays image pull, container start, or `initdb`.
+- A real per-worker Postgres *container* pays all three of those on top,
+  and — the part that actually decided this — CLAUDE.md's own "Known
+  gotchas" section already measures this exact host's Colima VM at **2
+  CPUs / 2GiB**, shared by every concurrent Docker use on the machine
+  (worktree tests, the sandbox image, the egress broker's own sidecar all
+  compete for it today). Five concurrent full Postgres *server* containers
+  on top of that is a materially different resource ask than five
+  lightweight `CREATE DATABASE` calls against one server process that is
+  already running and already paying its own steady-state memory cost once.
+
+The ticket's own acceptance criterion reads "a container or equivalent, not
+a shared `vola_test`" — this reads database-role-per-worker-on-one-server as
+the "or equivalent" it names, and the choice is recorded here explicitly
+rather than left to be inferred from the diff, per the ticket's own request
+to justify whichever is picked. `Runner.AdminDBURL` already generalizes to
+"any Postgres server with CREATEDB/CREATEROLE", including a genuinely
+separate server if this host's constraint is ever the bottleneck — nothing
+about this design forecloses moving to real per-worker containers later if
+the host situation changes; it simply isn't the right trade today, measured.
+
+**What changed, concretely, in `engine/internal/worker/workspace.go`:**
+`Provision` now stamps the UTC creation second into both the database name
+and the role name — `engine_run_<runID>_<unixSeconds>_<suffix>` /
+`engine_role_<runID>_<unixSeconds>_<suffix>` — via a small shared
+`ephemeralResourceName` helper. This is the Postgres-object equivalent of
+labelling a Docker container with a creation timestamp and a
+fleet-recognizable tag (the same idea `sandbox.go`/`egress.go` already use
+by NAME for their own disposable containers/networks): no new side table to
+keep in sync with reality, and it survives the owning process's death by
+construction, because the name is exactly what `pg_database`/`pg_roles`
+already track. `Runner` also grew a test-only `Now func() time.Time` clock
+override, so the TTL boundary can be tested deterministically (backdating
+one workspace's stamped creation time) rather than by waiting real
+wall-clock hours for something to actually go stale.
+
+**The sweep itself: `engine/internal/worker/sweep.go`, new.** `Sweep(ctx,
+adminURL, cutoff, dryRun)` lists every database/role matching
+`ephemeralNamePattern` on the server `adminURL` connects to, drops (with
+`WITH (FORCE)`, terminating sessions first for the role, mirroring
+`Teardown`'s own ordering) anything whose ENCODED creation time is at or
+before `cutoff`, and reports what it removed (or would remove, under
+`dryRun`) plus a best-effort `Errors` list — one stubborn resource never
+hides the rest, the same discipline `Teardown` already has. It also handles
+the same partial-failure shape `Provision`'s own `dropRole` cleanup already
+guards for in-process (a role created with no matching database, because
+the process died between `CREATE ROLE` and `CREATE DATABASE`) — for the
+cross-process, killed-process case.
+
+**The safety property that matters most on a shared host, checked live, not
+just argued:** `Sweep` never touches anything that doesn't match its own
+naming convention. On this actual host, `vola_test` and several real
+`vola_test_<branch>` scratch databases (`vola_test_f23`, `vola_test_n126`,
+`vola_test_n163`, `vola_test_n169`, `vola_test_n490`, `vola_test_n494`,
+`vola_test_n513` — all real, all belonging to other concurrent sessions on
+the exact Postgres server this branch's own tests ran against) sit on the
+SAME server this ticket's tests exercised `Sweep` against, and a wide-open,
+24-hours-in-the-future, dry-run-only sweep never named any of them —
+`TestSweepNeverTouchesAnythingOutsideItsOwnNamingConvention` asserts this
+live rather than as a comment, and it is structural (the regex simply
+doesn't match those names), not a denylist that has to remember every name
+that must survive.
+
+**A CLI, not a startup/timer hook, because there is nothing live to hook it
+into yet.** `engine/cmd/sweepephemeral` (`go run ./cmd/sweepephemeral
+--admin-db-url=$TEST_DATABASE_URL --ttl=1h [--dry-run]`) is the explicit
+third option N150's own design guidance named. Verified live end to end,
+not just via `go test`: a leaked database+role pair was created by hand with
+a 2-hour-backdated name, `--dry-run` correctly reported it without touching
+anything, and the real (non-dry-run) invocation removed both, confirmed gone
+against `pg_database`/`pg_roles` afterward.
+
+**Cost, measured live on this actual host** — `engine/internal/worker/cost_test.go`,
+5 cycles of Provision → MigrateBackend → Teardown, against this repo's real
+93-file `backend/migrations` directory (copied wholesale into a throwaway
+git repo, not a toy 2-file fixture):
+
+```
+provision (clone+role+db+owner)  median=164.6ms  p95=169.1ms  min=162.6ms  max=174.8ms
+migrate (93 real .up.sql files)  median=374.5ms  p95=375.3ms  min=347.7ms  max=407.5ms
+teardown (drop db+role)          median=39.1ms   p95=41.8ms   min=36.8ms   max=42.2ms
+full cycle                       median=578.2ms  p95=592.4ms  min=547.4ms  max=618.4ms
+```
+
+So a worker pays a bit over half a second, end to end, to go from "nothing"
+to "a fully-migrated, isolated database it owns exclusively" — and roughly
+two-thirds of that is applying 93 real migrations sequentially over
+individual `Exec` round-trips (`MigrateBackend`'s own doc comment already
+explains why it doesn't use `backend/cmd/migrate` as a subprocess), not the
+database/role provisioning this ticket is actually about. That number is
+recorded here rather than estimated, per CLAUDE.md's own "Verify that a
+check can fail" discipline extended to its positive form — a real
+measurement replaces what would otherwise have been a plausible-sounding
+guess.
+
+**The 5-concurrent-workers reproduction — steps-to-test #1, done the way the
+ticket's own design guidance said an environment without a real orchestrator
+actually can:** `engine/internal/worker/concurrency_test.go` runs 5 real
+goroutines, each calling `Runner.Provision` for its OWN run id and doing a
+real `CREATE TABLE` / `INSERT` / `SELECT` round-trip against its own
+database, timed against a single-worker baseline measured first and alone.
+Measured live:
+
+```
+single-worker baseline:                 139.0ms
+5 concurrent workers, total wall clock: 286.2ms   (per-worker: 183.9ms / 236.6ms / 188.3ms / 243.3ms / 234.8ms)
+```
+
+5 workers cost roughly **2x** one worker's time, not 5x — the shape true
+parallelism produces, not the shape a shared advisory lock would (which
+would have put this close to `5 × 139ms ≈ 695ms`, each worker queueing
+behind the last). The test asserts a generous `elapsed > baseline*3` failure
+bound (loose enough to absorb this host's own variance without becoming
+theater) rather than a tight one, and it was mutation-tested twice, live,
+not just reasoned about: tightening the bound to `baseline/1000` reliably
+turned it red with a real "looks serialized" message, and loosening the
+concurrency-test's own TTL comparison (`sweep.go`'s `id.createdAt.After` →
+`.Before`) reliably broke all four of `sweep_test.go`'s live-cutoff
+assertions the same way. Both were restored and re-confirmed green
+afterward by re-running the suite, not by reading the diff.
+
+**The crashed-worker test, done for real, not reasoned about:**
+`TestSweepIsTheRealCrashRecoveryPath` provisions a workspace and then
+deliberately never calls `Teardown` — which is the honest scope of "kill a
+worker mid-run" in this codebase: nothing can trap `SIGKILL` to run cleanup
+on the way out, so "the process is killed" and "`Teardown` never runs" are
+the same event, not two events this test would need to simulate
+separately. The test's own cleanup bypasses `Workspace.Teardown` entirely
+(a raw `DROP DATABASE`/`DROP ROLE` via a fresh connection) specifically so
+it never accidentally exercises the mechanism under test as its own safety
+net. `TestSweepRemovesResourcesCreatedAtOrBeforeCutoffAndLeavesLaterOnesAlone`
+is the TTL boundary itself: a cutoff before either workspace's stamped
+creation time removes neither; a cutoff after the backdated one but before
+the real one removes exactly the backdated one and leaves the other
+provably untouched (both its database AND role still present and usable
+afterward).
+
+**The honest resource-constraint assessment the ticket asked for.** This
+host's Colima VM is 2 CPUs / 2GiB, shared by every concurrent session's
+Docker/engine work — CLAUDE.md already names this. The design chosen here
+(database-per-worker against one already-running Postgres server) makes
+that constraint mostly moot for THIS mechanism specifically: 5 concurrent
+`CREATE DATABASE` calls are cheap relative to what the VM already carries
+(the sandbox's `golang:1.26-bookworm` image, the egress broker's own
+sidecar container per active workspace). It does NOT make the host's
+resource ceiling disappear for the FLEET as a whole — a real dispatched run
+also pays `RunSandboxed`'s own per-workspace container plus, if network
+egress is needed, the egress broker's sidecar (measured elsewhere, N470/
+#799, at up to 30s cold-start under contention) — so "5 ephemeral
+Postgres databases" is cheap, but "5 concurrent full engine runs, sandboxed
+and networked" is a materially larger ask this measurement does not cover
+and this entry does not claim it does. CLAUDE.md's own "At most three at
+once" policy (`max_parallel_agents: 3`) is already the operative ceiling on
+this repo's actual dispatched concurrency, well under the 5 this ticket's
+own steps-to-test ask for as a synthetic stress case — the database-
+provisioning half comfortably clears 5 concurrent, and the harder question
+of whether 3 concurrent FULL sandboxed runs (container + egress broker +
+database, together) fit this host's 2GiB comfortably remains open and
+untested by this ticket, since there is no live orchestrator yet to run
+that reproduction against.
+
+**What this ticket does NOT change:** `backend/internal/platform/testdb.go`
+is byte-for-byte untouched (confirmed — it does not appear in this branch's
+diff at all) — the advisory lock keeps doing exactly the job #454 built it
+for, protecting accidental shared-local use by two human sessions (or a
+human and an agent) pointed at the same real database. Nothing in this
+branch threads a bypass flag through it; the two paths were already, and
+remain, structurally disjoint packages that have never called into each
+other.
+
+`docs/testing/functional-scenarios.md` was **not** updated — this is
+engine/dev-infrastructure with no new API endpoint, no changed response
+shape, and no user-facing surface, matching that doc's own stated skip
+criterion and N169's own precedent for the same kind of change.
+
+`backend-reviewer` reviewed this branch despite the diff living entirely
+under `engine/**`, not `backend/**` — `engine` is a separate Go module by
+design (see its own `go.mod` doc comment) but is still Go server-side code
+with the same correctness/security/performance shape that agent exists to
+check, and there is no `engine`-specific reviewer defined in
+`.claude/agents/`. Handed the acceptance criteria and this entry's own
+"kept the advisory-lock path and the ephemeral-per-worker path cleanly
+separated" reasoning directly, and asked specifically to scrutinize whether
+the TTL/cleanup mechanism was genuinely tested against something resembling
+a killed process rather than merely reasoned about.
+
+**No `[blocking]` findings.** The reviewer independently re-derived the cost
+and concurrency numbers above (within a few ms/percent), independently
+mutation-tested `sweep.go`'s cutoff comparison (flipped `.After` to
+`.Before`, watched 4 of 5 sweep tests go red, restored and **re-ran** to
+confirm green — not just grepped, per CLAUDE.md's own "a restore is
+confirmed by re-running" rule), and confirmed the `docs/decisions/
+history.md` append and the `docs/testing/functional-scenarios.md` skip were
+both done correctly. Four `[suggestion]`s came back, three left as
+documented trade-offs and one fixed:
+
+- **Fixed**: `Runner.Now` was exported, settable by any future caller
+  despite a doc comment saying "never outside a test" — nothing in the type
+  system enforced it. Renamed to unexported `nowFn`; only this package's own
+  tests (same package, no external caller possible) can reach it now.
+- **Documented, not built**: `Sweep` judges staleness purely from the
+  name-encoded creation timestamp, with no check against `runstate.Store`'s
+  own lease/heartbeat (`agent_runs.lease_expires_at`) for "is this actually
+  still running". Harmless today — nothing outside this package's own tests
+  calls `Provision` at all, so there is no live worker for a sweep to
+  mistake for dead — but it would matter the moment `cmd/sweepephemeral` is
+  ever pointed at a real fleet with a `--ttl` shorter than some legitimate
+  run's wall-clock budget. Building the lease-aware check now would be
+  designing for an orchestrator that doesn't exist yet (Milestone C's own
+  scope boundary — see the ticket's own "don't invent orchestration this
+  ticket doesn't ask for" guidance); the gap and its fix are now spelled out
+  directly in `sweep.go`'s own doc comment and `cmd/sweepephemeral`'s, so
+  whoever wires this into a live fleet cannot miss it.
+- **Left as a documented trade-off**: the 5-concurrent-workers timing test
+  (`elapsed > baseline*3`) is a genuine, non-theater assertion (normal runs
+  sit at ~1.9–2x, comfortably under the 3x bound) but is still a wall-clock
+  threshold running unconditionally in CI — a modest, accepted flake vector
+  the reviewer flagged as worth watching rather than fixing pre-emptively.
+- **Left as a documented trade-off, inherited from N187, out of this
+  ticket's scope**: no per-role Postgres resource governor
+  (`CONNECTION LIMIT`, `statement_timeout`) exists on the shared server, so
+  one worker's pathological query could in principle degrade the shared
+  Postgres process for every other concurrent worker — an isolation gap a
+  real per-worker container would close at the OS level and this
+  database-per-worker design does not. Real, and worth a follow-up ticket
+  against `Provision` itself rather than this one, since the mechanism
+  predates N150 and nothing here makes it worse.
+
+
 ## Open items / known gaps as of this entry
 
 
