@@ -50,8 +50,16 @@ Two principles carry everything else here, both earned the hard way:
 - **A green local `verify` is not evidence the DB-backed tests ran.**
   `verify` includes `test:engine`, but without `TEST_DATABASE_URL` exported
   its Postgres-gated tests SKIP silently (measured: 22 skips, all green);
-  `test:api` isn't in `verify` at all, deliberately. Run them with the env
-  var set, or read CI's Backend (Go) job, which sets it at job level.
+  none of `test:api:unit`/`test:api:integration`/`test:api:all` is in
+  `verify` at all, deliberately (#546 — a Postgres-requiring gate would break
+  `verify` for anyone without a local Postgres, which is exactly the
+  human-contributor case this ticket distinguishes from an autonomous run).
+  Run `pnpm run test:api:all` with the env var set — it is the one that
+  ALSO fails if a Postgres integration test skips for any reason beyond the
+  one legitimate exception (`TestLiveComplete`), so it is the gate to reach
+  for rather than a bare `go test`, autonomous run or not. Or read CI's
+  Backend (Go) job, which sets `TEST_DATABASE_URL` at job level and runs
+  `test:api:all` itself now.
 - Ordering dependencies between test fixtures (lexical ID order, cleanup
   cascade order) are load-bearing and invisible at call sites — where a
   test depends on an order, ASSERT the order, so a rename fails loudly.
@@ -67,7 +75,7 @@ Two principles carry everything else here, both earned the hard way:
 
 ## Backend test isolation and the shared `vola_test` database — the full mechanism
 
-**Backend tests run with `-p 1`** (`test:api` and CI both), for **isolation**.
+**Backend tests run with `-p 1`** (`test:api:unit`/`test:api:integration`/`test:api:all` and CI all pass it), for **isolation**.
 `go test ./...` runs packages in PARALLEL against ONE shared database, and
 several tests assert global counts — `SELECT count(*) FROM techniques` and
 friends. The moment a second package's fixtures seed library rows, those counts

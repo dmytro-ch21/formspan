@@ -72,21 +72,23 @@ jobs:
         run: go run ./cmd/migrate up
 
       - name: Test
-        # -p 1: packages share ONE database, and several tests assert global
-        # counts (SELECT count(*) FROM techniques). Run in parallel, another
-        # package's fixtures are inside those counts. Latent on main and
-        # reproducible the moment a second package seeds library rows —
-        # measured 3 failures in 6 concurrent runs, 0 with -p 1.
-        #
-        # -timeout 3m: Go's default is 10 MINUTES per package, and a test that
-        # hangs rather than fails burns all of it. Measured, not hypothetical —
-        # F11 deleted a deferred `tx.Rollback` and the leaked connection kept
-        # `pgxpool.Close` waiting forever, so the package could not exit even
-        # after its assertions had already named the cause. Slowest package here
-        # is ~2s locally and ~45s under the parallel-session contention
-        # CLAUDE.md documents, so 3m is roughly four times the worst seen and
-        # still bounds a hang at a third of the default.
-        run: go test -p 1 -timeout 3m ./...
+        # `python3 scripts/check-api-tests.py --mode all` — package.json's
+        # `test:api:all` — rather than a bare `go test ./...`: see #546. It
+        # runs the exact same suite (`go test -p 1 -timeout 3m -json ./...`,
+        # same -p 1/-timeout reasoning as before: packages share ONE database
+        # and several tests assert global counts, so parallel packages see
+        # another package's fixtures inside those counts — measured 3
+        # failures in 6 concurrent runs, 0 with -p 1; and Go's default
+        # 10-minute-per-package timeout let a leaked `pgxpool.Close` wait
+        # forever once, F11) and additionally fails if any Postgres
+        # integration test skips for a reason OTHER than the one legitimate
+        # skip (`TestLiveComplete`, gated on LLM_LIVE=1) — the "did this
+        # silently lose coverage" check an autonomous run cannot do just by
+        # reading `go test`'s own exit code. `working-directory: .` here
+        # overrides the job default (`backend`) because the script lives at
+        # the repo root and cd's into `backend` itself.
+        working-directory: .
+        run: python3 scripts/check-api-tests.py --mode all
 
       # N166 (#543). REQUIRED, part of this job rather than a separate one —
       # no new check NAME, so no EXPECTED_CHECK_RUNS change. Pinned to an

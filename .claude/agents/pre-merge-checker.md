@@ -46,7 +46,7 @@ cd backend && gofmt -l .        # ANY output = fail. `gofmt -l` exits 0 even whe
 cd backend && go vet ./...
 cd backend && go build ./...
 cd backend && go run ./cmd/migrate up   # CI does this before the tests
-cd backend && go test -p 1 ./...
+python3 scripts/check-api-tests.py --mode all   # = pnpm run test:api:all (#546); replaced a bare `go test -p 1 ./...`
 docker build -f backend/Dockerfile backend   # only if Docker/Colima is up —
                                 # check `docker version` first; skip and say so
                                 # rather than failing the report over a dead daemon
@@ -84,7 +84,7 @@ expectations against the real technique catalog. They are cheap, they are
 stdlib-only, and they are the reason those duplications are survivable. Do not
 skip them because they look like linting.
 
-Note `build:web`, `build:admin`, `test:api` and the Docker build are **not** in `verify` (each is slow or needs setup) but **are** in CI — so they are exactly the checks a local `verify` will not catch for you.
+Note `build:web`, `build:admin`, `test:api:unit`/`test:api:integration`/`test:api:all` and the Docker build are **not** in `verify` (each is slow or needs setup) but **are** in CI — so they are exactly the checks a local `verify` will not catch for you.
 
 The asymmetry runs the other way too, and it is safe: `validate_palette` and
 `generate_icons --check` are in `verify` and in **no** CI job. `verify` is the
@@ -108,10 +108,10 @@ carrying a stale generated file. The step **fails closed** by design, so a red
 Mobile job here is a real failure, never a flake — do not retry it away, and do
 not report it as environmental.
 
-**Backend integration tests skip silently without `TEST_DATABASE_URL`**, and a skipped test is indistinguishable from a passing one in the default output. If a local Postgres is reachable (`docker compose ps`), set it and:
+**Backend integration tests used to skip silently without `TEST_DATABASE_URL`, indistinguishable from passing in the default output — `test:api:all` (#546) is the fix, use it rather than a bare `go test`.** With `TEST_DATABASE_URL` unset it fails immediately, naming the variable, instead of quietly running only the pure-logic tests; with it set, it also fails if any Postgres integration test skips for any reason OTHER than the one legitimate skip (`TestLiveComplete`, gated on `LLM_LIVE=1`). If a local Postgres is reachable (`docker compose ps`), set `TEST_DATABASE_URL` and run `pnpm run test:api:all` (or `python3 scripts/check-api-tests.py --mode all` directly) rather than `go test` by hand — it does the skip-accounting for you and reports the exact package/test if something skipped that shouldn't have. Still worth doing on top of a green run:
 
-- run the suite **twice back to back with `-count=1`** — this project has been bitten by cleanup that leaks state on repeated runs (a `defer pool.Close()` racing `t.Cleanup`), and one clean run is not evidence;
-- **count how many tests actually RAN versus skipped**, with `-v` if needed, and say so. A branch has shipped where 8 of 9 new tests skipped and the package still printed `ok`, because the tests depended on seeded reference data that CI never seeds. If the caller names new tests, confirm those specific ones executed.
+- run it **twice back to back with `-count=1`** — this project has been bitten by cleanup that leaks state on repeated runs (a `defer pool.Close()` racing `t.Cleanup`), and one clean run is not evidence;
+- if the caller named new tests, confirm those specific ones actually ran (not just that the package printed `ok`) — a branch has shipped where 8 of 9 new tests skipped and the package still printed `ok`, because the tests depended on seeded reference data that CI never seeds; `test:api:all`'s skip check catches a *silent* skip but won't know a test you expected to exist was never written in the first place.
 
 ## Report format
 
