@@ -61514,6 +61514,243 @@ and inert in practice because the wrapper's precondition check catches an
 unset `TEST_DATABASE_URL` process-wide before any package, `testdb`
 included, gets a chance to run.
 
+## 2026-09-07 — N168/#545: a contract test that fails when a handler's response drifts from `contracts/public.openapi.yaml`
+
+`docs/architecture/api-conventions.md` said CI checks the spec's own
+structural validity but never checks it against what the handlers actually
+return — drift between the two was a manual discipline. N168 asked for four
+things: pick and enforce one contract direction, confirm offline/domain
+models stay independent of wire models, build a contract test that fails on
+real drift (mutation-checked, both directions), and wire it into `verify`.
+
+### Scope decision: the narrow reading, not the full "Recommended" architecture
+
+The issue's acceptance criteria carry a "Recommended" note describing a much
+larger build — generated typed frontend wire models/client primitives, and
+contract tests running against a *live* integration API. The four checkboxes
+underneath it don't actually require any of that, and the ticket's own
+"IMPORTANT: scope this deliberately" section said so explicitly, naming the
+N133/#537 precedent for documenting a scope decision instead of either
+silently shrinking the ticket or building the oversized version by default.
+Taking the narrow reading here for the same reason N133 did: the buildable
+core (a real handler + a real schema, checked in-process) satisfies "fails on
+real divergence, mutation-checked" without needing a running server, a
+generated client, or a second language's type system. Nothing found while
+building it changed that assessment — see "Does the narrow scope satisfy the
+ticket?" below.
+
+### Direction chosen: `contracts/public.openapi.yaml` stays authoritative; a contract test checks handlers against it in-process
+
+No code generation, no schema-driven client. The spec is already
+hand-maintained and precise (`type: object`, explicit `properties:`,
+explicit `required:` lists throughout — confirmed by reading the `Profile`,
+`Workout`, `Session`, `NutritionEntry` and `BjjStanding` schemas before
+designing anything), so the cheapest thing that actually enforces the
+direction is a test that resolves a route's schema from the real spec file
+and diffs a real handler's real JSON response against it. That's
+`backend/internal/contract/` (a new package, not under `internal/platform/`
+since it imports several `internal/modules/*` packages and the module
+pattern says platform code never imports modules):
+
+- `spec.go` — loads and parses the OpenAPI doc as a generic
+  `map[string]interface{}` tree (via `gopkg.in/yaml.v3`, decoded straight to
+  `map[string]interface{}` rather than `map[interface{}]interface{}`) and
+  resolves `$ref`/`allOf` into a small `Schema` struct (`Type`, `Nullable`,
+  `Properties`, `Required`, `Items`). `ResponseSchema(path, method, status)`
+  is the public entry point.
+- `validate.go` — `Diff(schema, body)` walks a decoded response alongside a
+  resolved `Schema` and reports every field present in the response but
+  undeclared in the schema, and every field the schema's `required:` list
+  names but the response omits — recursively, through nested objects and
+  array items.
+- `spec_test.go` — pure-logic tests of the resolver/differ mechanism against
+  a small inline fixture spec (ref resolution, `allOf` merging, required
+  tracking, array recursion, null-is-never-flagged), independent of the real
+  14,000-line spec file.
+- `contract_test.go` — the actual deliverable: real handlers, real fake
+  repositories, real spec.
+
+**Library choice, and why not `kin-openapi`.** `go.mod`/`go.sum` were
+checked first, per the ticket's own guidance — no OpenAPI-aware validator
+already in the graph. `getkin/kin-openapi` was the obvious next stop, and
+was rejected after actually reading what it validates: **ten** schemas in
+the whole spec set `additionalProperties` at all, and every response schema
+this test covers leaves it unset — which in OpenAPI/JSON-Schema means
+additional properties are *allowed*. A real JSON-Schema validator run
+against these schemas as written would let a handler add an undeclared
+field straight through, which is exactly the failure mode N168 exists to
+catch (Steps to test #1). Pulling in a real validator and then *also*
+writing a field-set differ on top to catch what it misses is more code and
+more dependency surface than writing the field-set differ alone — and the
+ticket's own acceptance criteria are about field names, not full schema
+validity (formats, enums, numeric bounds), so nothing is lost by not
+checking those. `gopkg.in/yaml.v3` (already resolved in the module graph
+transitively — via `pgx`'s and `testify`'s own test dependencies — and now
+promoted to a direct `require` by `go mod tidy`, at v3.0.1, no new network
+fetch of the module itself, a few of its own indirect test deps pulled in
+alongside it) is the only new dependency, and it's used only to parse YAML
+into a generic tree.
+
+### Endpoint sample: seven GET routes, seven modules — a representative sample, not full coverage
+
+`GET /profile` (profile), `GET /activities` (activity, a `{activities:
+[...]}` wrapper), `GET /workouts/{workoutID}` (workout, nested array of
+objects), `GET /sessions/{sessionID}` (session, a `{session, volume}`
+two-object wrapper — chosen over building all 22 methods of
+`session.Repository` for anything beyond `Get`, see below), `GET /trackers`
+(tracker, a write-on-read handler), `GET /nutrition/entries` (nutrition, an
+*inline* — non-`$ref` — response schema whose item type is `allOf`-composed
+from an embedded Go struct), `GET /bjj/standing` (bjj, `allOf` attached to a
+single nullable property rather than the whole schema). Chosen for shape
+diversity (wrapper vs. bare object, `$ref` vs. inline, `allOf` in two
+different positions, nested arrays) across seven different modules, not for
+being the seven most important routes. Extending this sample to the rest of
+the wire surface — the full path list is much longer, see
+`contracts/public.openapi.yaml`'s `paths:` section — is a documented
+follow-up, not something this version claims to do.
+
+Every fake repository embeds its module's `Repository` interface (nil) and
+overrides only the method the handler under test calls — `session.Repository`
+alone has 22 methods, and hand-implementing all of them for a test that only
+ever calls `Get` would be pure boilerplate with a worse failure mode (a
+silently-wrong zero-value return) than the embedding trick's actual one (a
+nil-pointer panic if a test ever reaches a method it didn't mean to).
+
+### Mutation-check transcript (both directions, run for real, not asserted)
+
+Direction 1 — **add a field the spec doesn't declare** (Steps to test #1):
+added `MutationCheckExtraField string \`json:"mutation_check_extra_field"\``
+to `profile.Profile`. `go test ./internal/contract/... -run
+TestProfileGet_MatchesSpec -v`:
+
+```
+contract_test.go:128: response for GET /profile diverges from contracts/public.openapi.yaml:
+  $.mutation_check_extra_field: present in the response but not declared in contracts/public.openapi.yaml
+--- FAIL: TestProfileGet_MatchesSpec (0.03s)
+```
+
+Reverted; re-ran; `PASS`. `git diff` on the module afterward: empty.
+
+Direction 2a — **rename a required field off the wire** (a combined
+add+remove, since the old name disappears and a new one appears): renamed
+`workout.Workout.CreatedAt`'s tag from `json:"created_at"` to
+`json:"created_at_MUTATED_AWAY"`. Result — both problems reported at once,
+which is the correct behavior for what actually happened on the wire:
+
+```
+$.created_at: required by contracts/public.openapi.yaml but missing from the response
+$.created_at_MUTATED_AWAY: present in the response but not declared in contracts/public.openapi.yaml
+--- FAIL: TestWorkoutGet_MatchesSpec (0.02s)
+```
+
+Reverted; re-ran; `PASS`. `git diff`: empty.
+
+Direction 2b — **pure removal, nothing added** (Steps to test #2, isolated):
+set `nutrition.Macros.Kcal`'s tag to `json:"-"` (drops it off the wire
+entirely, no replacement field). This also exercises recursion into an
+`allOf`-composed array item, since `kcal` only reaches the response nested
+inside `entries[0]`:
+
+```
+$.entries[0].kcal: required by contracts/public.openapi.yaml but missing from the response
+--- FAIL: TestNutritionEntriesList_MatchesSpec (0.03s)
+```
+
+Reverted; re-ran; `PASS` (all 15 tests in the package, both `spec_test.go`
+and `contract_test.go`). `git diff --stat backend/internal/modules/`: empty
+— confirmed by re-running the suite, not by grepping the reverted files, per
+`/pre-merge`'s standing correction about confirming a restore.
+
+### Offline/domain-model independence: confirmed by inspection, no new code
+
+Criterion 2 asked to confirm — not build — that offline/domain models stay
+independent of wire models. Traced one concrete pair end to end:
+`apps/mobile/lib/db.ts`'s `activities` table —
+
+```sql
+CREATE TABLE IF NOT EXISTS activities (
+  id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL,
+  occurred_at TEXT NOT NULL, notes TEXT, synced INTEGER NOT NULL DEFAULT 0
+);
+```
+
+against the wire `Activity` schema (`id, user_id, kind, occurred_at, notes,
+details, request_id, trace_id, created_at` — `contracts/public.openapi.yaml`
+line ~5081, mirrored by `activity.Activity` in
+`backend/internal/modules/activity/activity.go`). They are not the same
+shape: the local row carries `synced` (a sync-state flag with no wire
+equivalent) and has no `details`/`request_id`/`trace_id`/`created_at`
+columns at all. `apps/mobile/lib/activities.ts`'s `LocalActivity` type is the
+local domain type (`id, kind, occurred_at, notes, synced`), and
+`syncPendingActivities` is the adapter: it reads a `LocalActivity` row and
+builds the wire POST body inline (`{id, kind, occurred_at, notes}`),
+translating between the two shapes rather than serializing the local row
+directly. `apps/mobile/lib/db.ts`'s `local_sessions` table (a `dirty`
+outbox flag and a denormalized `sets_json` blob, neither of which exists on
+the wire `Session`) is a second, corroborating instance of the same pattern.
+This is exactly the independence the criterion asks for, already true
+architecturally, and no new adapter code was written for this ticket.
+
+### `verify` wiring
+
+`lint:openapi` was already in `verify` (confirmed, not duplicated — it's
+`redocly lint contracts/public.openapi.yaml`, already the structural-only
+check `api-conventions.md` described). The new contract test needed its own
+script: `internal/contract`'s tests need no `TEST_DATABASE_URL` (they read
+the real spec file and the real Go structs, nothing else), so unlike
+`test:api` — deliberately excluded from `verify` because most of the backend
+suite skips silently without a database — this package can run in the fast
+local gate. Added `"test:contract": "cd backend && go test -timeout 1m
+./internal/contract/..."` and wired it into the `verify` chain right after
+`build:api`. `pnpm run check:verify-chain` (itself part of `verify`)
+confirms it's reachable: `47 gates, 44 in the chain, 3 excluded and run by CI
+(build:admin, build:web, test:api)` — the count rising from the prior
+baseline is expected (`check-verify-chain.py`'s own `MIN_GATES` is a floor,
+not a target) and `test:api` staying in the excluded-with-a-reason list is
+unaffected, since `internal/contract`'s tests run either way (both inside
+`test:api`'s `go test ./...` in CI, and standalone via the new
+`test:contract` in `verify`).
+
+### Does the narrow scope satisfy the ticket?
+
+Yes, on the literal checkboxes. The one place the "Recommended" full
+architecture would add something this doesn't: a live-API contract test
+would also catch drift between the spec and infrastructure the in-process
+test never touches — response compression, gzip/`ETag` behavior, CORS
+headers, TLS — none of which is a "handler's response shape" divergence, and
+none of which N168's four checkboxes mention. If a future ticket wants that
+coverage, it's a genuinely separate piece of work (a real running server, a
+real HTTP client, a staging or CI-provisioned instance) rather than an
+extension of this test, which is scoped to exactly the layer the ticket's
+checkboxes describe: does the Go value a handler serializes match the field
+names and required set the spec declares for that route.
+
+### Left open / follow-up
+
+- Seven endpoints, not the whole API — see the endpoint-sample section
+  above. Extending coverage to more routes is additive: the mechanism
+  (`Load`, `ResponseSchema`, `Diff`) doesn't change, only the number of
+  `contract_test.go` subtests.
+- This test only exercises 200-family success responses. Error-response
+  shapes (`{"error": {"code", "message"}}`) are structurally uniform across
+  the whole API per `api-conventions.md` and aren't spec-drift-prone the same
+  way a domain object's field list is, so they weren't included in this
+  first pass — but nothing stops a future addition from checking a 400/404
+  body against its own declared schema the same way.
+- `Diff` deliberately does not check value types, formats, or enum
+  membership — only field names and required-ness. A handler that returns
+  `sport: 123` where the spec says `type: string` would not be caught today.
+  Adding that is a natural extension of `diffValue`'s scalar branch if it's
+  ever worth the complexity; it wasn't needed to satisfy N168's actual
+  acceptance criteria (which are about field presence, not value validity).
+
+`docs/testing/functional-scenarios.md` was deliberately **not** updated —
+this ticket is internal contract-checking tooling with no new endpoint, no
+changed response shape, and no new user-facing or API-surface behavior (the
+seven routes it tests already existed and are unchanged), which is exactly
+that doc's own stated skip criterion.
+
+
 ## Open items / known gaps as of this entry
 
 
