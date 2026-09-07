@@ -103,10 +103,35 @@ MIN_CI_COMMAND_LEN = 12
 # script exists to close, one level up — so every entry is a sentence somebody
 # had to write, and there are none today.
 ALLOWED_OUTSIDE: dict[str, str] = {
-    "test:api": "needs TEST_DATABASE_URL; skips silently without it, so it would "
-                "pass vacuously in `verify`. CI provisions Postgres and runs it.",
+    "test:api:unit": "needs TEST_DATABASE_URL for its Postgres-backed tests, which "
+                     "skip silently without it — that is deliberate for this one "
+                     "(a human running `go test` locally without Postgres set up "
+                     "must not be forced to provision one), so it would pass "
+                     "vacuously in `verify`. CI provisions Postgres and runs the "
+                     "same suite via `test:api:all` (see SUBSUMED_BY below).",
+    "test:api:integration": "needs a real Postgres and FAILS (rather than skips) "
+                     "without one — see #546 — which is exactly what must not "
+                     "happen inside `verify` for a contributor with no local "
+                     "Postgres. CI runs `test:api:all`, the superset that also "
+                     "covers this (see SUBSUMED_BY below).",
+    "test:api:all": "same reason as `test:api:integration` (superset of it: also "
+                     "fails on any unexpected skip, see #546). CI runs it directly.",
     "build:web": "slow, and CI runs it. `verify` is the fast local gate.",
     "build:admin": "slow, and CI runs it. `verify` is the fast local gate.",
+}
+
+# Some ALLOWED_OUTSIDE gates run the exact same underlying `go test` invocation
+# as another gate this dict ALSO lists — CI runs the superset once rather than
+# the same backend suite twice for no new information. Checking each gate's
+# OWN command text against CI would therefore report both as orphaned, which
+# is wrong: the work genuinely happens in CI, just under a different name.
+# Mapped explicitly, gate -> the gate whose CI coverage vouches for it, so
+# this stays honest about *which* command was actually found — an inferred or
+# fuzzy relationship here would be exactly the kind of check that cries wolf
+# on a correct setup, or worse, stops crying wolf on a real one.
+SUBSUMED_BY: dict[str, str] = {
+    "test:api:unit": "test:api:all",
+    "test:api:integration": "test:api:all",
 }
 
 
@@ -143,11 +168,13 @@ def strip_comments(text: str) -> str:
 def gate_runs_in_ci(gate: str, body: str, ci_text: str) -> bool:
     """Whether CI runs this gate — by alias OR by the command behind it.
 
-    CI mostly says `pnpm run <gate>`, but not always: the backend job runs
-    `go test -p 1 -timeout 3m ./...` directly, which IS `test:api` — it just
-    never names it. Matching only the alias reports that as an orphan, and a
-    checker that cries wolf on a correct setup is one somebody eventually
-    silences. Found on this script's very first run.
+    CI mostly says `pnpm run <gate>`, but not always: the backend job's Test
+    step runs `python3 scripts/check-api-tests.py --mode all` directly (#546),
+    which IS `test:api:all` — it just never names it via `pnpm run`. Matching
+    only the alias reports that as an orphan, and a checker that cries wolf on
+    a correct setup is one somebody eventually silences. Found on this
+    script's very first run, against the backend job's previous bare
+    `go test -p 1 -timeout 3m ./...`.
 
     The command comparison strips a leading `cd <dir> &&`, since CI sets a
     working directory instead. It is a heuristic and it fails SAFE: a command
@@ -215,13 +242,29 @@ def main() -> int:
             continue
         if gate not in ALLOWED_OUTSIDE:
             missing.append(gate)
-        elif not gate_runs_in_ci(gate, scripts[gate], ci_text):
+            continue
+        # A gate whose CI coverage is vouched for by another gate's command
+        # (see SUBSUMED_BY) is checked against THAT gate's body instead of its
+        # own — CI genuinely runs the work, just once, under the other name.
+        vouching_gate = SUBSUMED_BY.get(gate, gate)
+        if vouching_gate not in scripts:
+            unrun.append(gate)
+        elif not gate_runs_in_ci(vouching_gate, scripts[vouching_gate], ci_text):
             # Excluded from `verify` AND absent from CI: the exclusion has
             # become the hole. This is what stops ALLOWED_OUTSIDE turning into
             # the place inconvenient gates go to die.
             unrun.append(gate)
 
     stale = sorted(g for g in ALLOWED_OUTSIDE if g not in scripts)
+    # A SUBSUMED_BY entry pointing at a gate that no longer exists (or that
+    # ALLOWED_OUTSIDE no longer excludes) is the same silent weakening as a
+    # stale ALLOWED_OUTSIDE entry, one level removed: the vouching-for
+    # relationship would quietly stop meaning anything.
+    stale += sorted(
+        f"{gate} -> {target} (target missing or not itself excluded)"
+        for gate, target in SUBSUMED_BY.items()
+        if target not in ALLOWED_OUTSIDE or target not in scripts
+    )
 
     if missing or unrun or stale:
         if missing:

@@ -141,6 +141,40 @@ func TestTheWaitDoesNotLeaveALockTimeoutOnTheConnection(t *testing.T) {
 	}
 }
 
+// shouldFailRatherThanSkip is MainWithFixtures's require-mode decision, pulled
+// out into a pure function precisely so it can be tested without a real
+// *testing.M or a database — see #546. It needs no TEST_DATABASE_URL of its
+// own and never skips.
+func TestShouldFailRatherThanSkip(t *testing.T) {
+	cases := []struct {
+		name            string
+		databaseURL     string
+		requireEnv      string
+		wantFailNotSkip bool
+	}{
+		{"no database, not required: skip as always", "", "", false},
+		{"no database, required: fail loudly", "", "1", true},
+		// "0" and "false" spell OFF, not "any non-empty string" — found in
+		// review: a direct `REQUIRE_TEST_DATABASE=0 go test ./...` should
+		// disable the flag, not trip it.
+		{"no database, required=0: still just skip", "", "0", false},
+		{"no database, required=false: still just skip", "", "false", false},
+		{"database present, not required: never even asked", "postgres://x", "", false},
+		// A real TEST_DATABASE_URL always wins, however RequireEnv is set —
+		// there is a database, so there is nothing to fail about.
+		{"database present, required: still fine", "postgres://x", "1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldFailRatherThanSkip(tc.databaseURL, tc.requireEnv)
+			if got != tc.wantFailNotSkip {
+				t.Errorf("shouldFailRatherThanSkip(%q, %q) = %v, want %v",
+					tc.databaseURL, tc.requireEnv, got, tc.wantFailNotSkip)
+			}
+		})
+	}
+}
+
 // Scoping is the difference between "a branch with its own database never
 // queues" and "every per-branch database on this Postgres serialises against
 // every other" — and CLAUDE.md tells everyone to use their own database, so

@@ -61322,6 +61322,198 @@ prove).
   such module is ever needed, that is the point to extract a shared one.
 
 
+## 2026-09-07 — N169/#546: an autonomous run can no longer mistake "no database" for "all green" on the backend integration suite
+
+**The gap.** `backend/internal/platform/testdb.Main` — every Postgres-backed
+package's `TestMain` routes through it — has always done exactly one thing
+with `TEST_DATABASE_URL` unset: run `m.Run()` untouched, so every individual
+Postgres test skips itself via its own `if url == "" { t.Skip(...) }` check.
+The package still prints `ok`. `go test`'s exit code is still 0. That has
+never bitten a human contributor, because CI has always provisioned a real
+Postgres and set the variable at job level (the `Backend (Go)` job's `env:`
+block) — but it is exactly the trap an autonomous worker cannot see past if
+all it reads is the exit code: "ran with real integration coverage" and
+"silently skipped all of it" are, from the outside, the identical signal.
+
+**Read the actual mechanism before designing anything, per the ticket's own
+instruction — the numbers it cited had drifted.** `testdb.go` is 396 lines
+now, not the ~290 the ticket quoted, and there is no existing
+`test:api:unit`/`test:api:integration`/`test:api:all` split in
+`package.json` — there was one script, `test:api` (`cd backend && go test -p
+1 -timeout 3m ./...`), unchanged since it was introduced. Grepping
+`t.Skip(` across `backend/` found 58 call sites across ~40 files, not one
+central choke point: every module's `postgres_test.go`-family file checks
+`TEST_DATABASE_URL` for itself and skips independently. But **every one of
+those files sits in a package that already has a `main_test.go` (or, for
+`session`, a `TestMain` inside `postgres_test.go` itself) calling
+`testdb.Main`/`MainWithFixtures`** — the #454 advisory-lock convention
+already put one `TestMain` per Postgres-backed package in place, and
+`TestMain` gates the *whole binary*: if it fails before calling `m.Run()`,
+none of that package's tests run at all, individual skip-guards included.
+The only exception in the whole tree is `internal/platform/testdb` itself,
+which deliberately has no `TestMain` (it is the apparatus, and needs raw,
+uncoordinated connections to test the lock directly — see its own
+"Deliberately NO TestMain here" comment). So the ~40 individual skip-guards
+never needed touching; the one choke point the ticket assumed exists, it is
+just at the package level (`TestMain`) rather than a single shared
+function's early return.
+
+**Build tags were the other candidate design and don't cleanly apply here.**
+`cmd/api/readyz_test.go` interleaves DB-requiring tests
+(`TestReadyz_LiveDatabase_ReportsReady`, gated on `testDatabaseURL(t)`) and
+pure-logic ones (the unreachable-DB-503 tests) in the SAME FILE — a
+per-file `//go:build integration` tag cannot split one file's tests into two
+groups. Every other package keeps the two cleanly apart by naming
+convention (`*_postgres_test.go` vs. everything else), but `readyz_test.go`
+alone is enough to rule build tags out: the runtime-mode-check the ticket's
+own design guidance flagged as the fallback is the only design that works
+uniformly across the whole tree without a file-by-file audit and split.
+
+**The mechanism, three pieces:**
+
+1. **`testdb.RequireEnv` (`REQUIRE_TEST_DATABASE`)** — new in `testdb.go`.
+   `MainWithFixtures`, on finding `TEST_DATABASE_URL` unset, now asks a pure
+   function, `shouldFailRatherThanSkip(databaseURL, requireEnv string) bool`
+   (`return databaseURL == "" && requireEnv != ""`), pulled out specifically
+   so it is unit-testable without a real `*testing.M` — `MainWithFixtures`
+   itself can't be table-tested, since a usable `*testing.M` only ever comes
+   from the generated test main. If true, it prints a message naming both
+   the missing variable and the exact `createdb`/`migrate`/`export` sequence
+   to fix it, and returns 1 — `m.Run()` is never called, so none of that
+   package's tests get a chance to skip. Off by default, so a human running
+   `go test ./somepackage` (or `test:api:unit`) without Postgres configured
+   is completely unaffected — this is defense in depth from *inside*
+   `TestMain`, for a future caller that invokes `go test` directly with the
+   env var rather than going through the wrapper script.
+   `TestShouldFailRatherThanSkip` in `testdb_test.go` is a four-case table
+   test against the pure function (no database needed, never skips) and was
+   mutation-checked directly: flipping `!=` to `==` in the real function
+   turned two of its four cases red as test failures (not a compile error),
+   restored and re-run green.
+
+2. **`scripts/check-api-tests.py`** — the actual `test:api:integration`
+   (`--mode integration`) and `test:api:all` (`--mode all`) implementation,
+   and the primary enforcement point, for a reason worth stating precisely:
+   the Go-side `RequireEnv` check only fires from *inside* a package's
+   `TestMain`, and `internal/platform/testdb` has none. Relying solely on
+   the Go-side check would let that one package's three tests skip silently
+   under `--mode all` with no database configured. The wrapper's own
+   precondition — `TEST_DATABASE_URL` unset → print the missing variable and
+   the fix, exit 1, **before `go test` is invoked at all** — has no such
+   gap, because it is one process-wide check that runs before any package
+   gets a chance to skip anything. Both modes set `REQUIRE_TEST_DATABASE=1`
+   on the `go test` subprocess anyway, so the Go-side guard still fires for
+   the ~39 packages it covers if the wrapper is ever bypassed.
+
+   `--mode all` additionally runs `go test -p 1 -timeout 3m -json ./...`,
+   streams each JSON event's `Output` straight through (so the console
+   output is unchanged from a plain `go test` run), and collects every
+   `Action: "skip"` event that names a `Test`. Design choice, argued rather
+   than assumed: a hardcoded expected-test-count was rejected as brittle —
+   this repo's suite grows constantly, and a count has to be bumped on every
+   PR that adds a test, which is exactly the kind of maintenance tax that
+   gets silenced. Counting **skips** instead reuses an invariant the
+   vola-testing skill already measures and documents repeatedly: the
+   backend suite has had exactly one legitimate skip for a long time —
+   `TestLiveComplete` (`internal/platform/llm`), gated on `LLM_LIVE=1`
+   because it spends real money on a live API call. `ALLOWED_SKIP_TESTS =
+   {"TestLiveComplete"}` is the entire allowlist; any other skip (matched on
+   the top-level test name, so a mutation nested under an allowed test can't
+   hide behind it) fails the run and names the exact package and test.
+
+3. **`.github/workflows/ci.yml`'s `Backend (Go)` job** now runs
+   `python3 scripts/check-api-tests.py --mode all` (`working-directory: .`,
+   overriding the job's `backend` default, since the script lives at the
+   repo root and `cd`s into `backend` itself) in place of the bare `go test
+   -p 1 -timeout 3m ./...` it ran before. CI has always provisioned a real
+   database, so its own runs were never at risk from the original gap — this
+   is a genuine ADDITIONAL guarantee (the skip-floor check) landing for
+   free, not a fix for something that was broken there.
+
+**`package.json`:** `test:api` is gone; `test:api:unit` is it, verbatim,
+renamed. `test:api:integration` and `test:api:all` both call the new
+script. None of the three is in `verify` — same reasoning `test:api` always
+had (a Postgres-requiring script would break `verify` for a contributor
+without one), now sharper for the two new ones: `test:api:integration`/
+`test:api:all` don't merely skip without a database, they **fail**, which is
+precisely the thing that must never happen inside the fast local gate.
+`scripts/check-verify-chain.py`'s `ALLOWED_OUTSIDE` carries all three with
+that reasoning; a new `SUBSUMED_BY` mapping
+(`test:api:unit`/`test:api:integration` → `test:api:all`) lets the checker
+credit CI-coverage correctly, since CI now runs the literal `test:api:all`
+command once rather than three overlapping backend-test invocations for no
+new information — `SUBSUMED_BY` says explicitly which gate vouches for
+which, rather than inferring the relationship, so it can't quietly start
+crediting something CI stopped running.
+
+**The mutation-check the acceptance criteria's own "Steps to test" asked
+for, done for real, not argued:**
+
+1. `TEST_DATABASE_URL` unset, `pnpm run test:api:integration` (and `--mode
+   all`): immediate failure, naming `TEST_DATABASE_URL` by name, before any
+   `go test` process starts — verified by running both against a real
+   per-branch database (`vola_test_n169`, migrated to head) present but with
+   the variable unexported.
+2. Real database in place (`vola_test_n169`), baseline run green: 39
+   packages, `go test -p 1 -timeout 3m -json ./...` reporting exactly 1
+   skip total (`TestLiveComplete`) — confirmed by parsing the JSON stream
+   directly before writing the check, not assumed. Then
+   `internal/modules/body/postgres_test.go`'s
+   `TestSaveCheckin_IsAnUpsertOnTheDay` had `t.Skip("N169 MUTATION CHECK: ...")`
+   inserted as its first line — simulating "one integration test file
+   renamed/disabled to skip" exactly as the ticket's steps describe.
+   `test:api:all` failed, exit 1, naming
+   `github.com/.../internal/modules/body  TestSaveCheckin_IsAnUpsertOnTheDay`
+   as the unexpected skip. Reverted; `git diff` on the file confirmed clean;
+   re-ran — green again, 1 skip, `TestLiveComplete`, exit 0. Re-running
+   rather than grepping the restored file, per the standing "a restore is
+   confirmed by re-running the thing that fails" rule.
+
+**`TestLiveComplete` confirmed unaffected, under both new modes, both ways
+it can go:** with `LLM_LIVE` unset, `--mode all` still reports it as the
+sole skip (it is the one name `ALLOWED_SKIP_TESTS` contains). With
+`LLM_LIVE=1` set and no API key exported, `TestLiveComplete` still **fails**
+exactly as already documented (`live_smoke_test.go` fatals before building a
+client) — confirmed under `--mode all` specifically, so the run's overall
+failure comes from `go test`'s own exit code, not from the skip-floor logic
+misfiring on a test that stopped skipping. Nothing in this ticket touches
+`internal/platform/llm`.
+
+**Milestone-C runbook: explicitly deferred, by the ticket's own wording.**
+Milestone C's AI-SDLC prerequisites don't exist as working infrastructure
+yet, so there is no runbook to wire up. What this ticket delivers instead is
+the thing that runbook should call once it exists: `pnpm run test:api:all`
+(or `python3 scripts/check-api-tests.py --mode all` directly) is the
+ready-to-use, single command that provisions nothing itself but fails loudly
+if handed a run with no real Postgres, and fails loudly if any integration
+test silently lost coverage along the way. Whoever builds that runbook
+should provision an ephemeral Postgres, migrate it, export
+`TEST_DATABASE_URL`, and call this — never a bare `go test ./...`.
+
+**Docs touched**: `CLAUDE.md`'s "Local dev setup" section (the three new
+scripts, in place of the old single `test:api` line, with the reasoning
+inline). `README.md`'s "Run the backend tests" and "Deliberately not in
+[`verify`]" sections. `.claude/agents/pre-merge-checker.md`'s "Everything CI
+runs" listing and its backend-skip-silently paragraph. The `vola-testing`
+skill's two `test:api` mentions. `docs/testing/functional-scenarios.md` was
+deliberately **not** touched — this is test-infrastructure/tooling with no
+user-facing or API surface, which is exactly the doc's own stated
+skip-condition ("changes with no user-facing or API-surface behavior").
+
+**Left open:** the ~40 individual `if url == "" { t.Skip(...) }` guards
+inside each package's own test files are now provably dead code on the
+"unset and required" path (their package's `TestMain` fails first), but
+they were deliberately left in place rather than removed — they are still
+exactly correct on the ordinary "unset and NOT required" path every human
+contributor uses, and stripping ~40 files of a guard that still does its
+job for the common case was out of scope for a ticket about the autonomous
+path. `internal/platform/testdb`'s own three tests remain the one package
+where an unset database with `REQUIRE_TEST_DATABASE=1` and no wrapper
+script in front of it would still skip rather than fail — documented above,
+and inert in practice because the wrapper's precondition check catches an
+unset `TEST_DATABASE_URL` process-wide before any package, `testdb`
+included, gets a chance to run.
+
 ## Open items / known gaps as of this entry
 
 

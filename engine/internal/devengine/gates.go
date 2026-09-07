@@ -94,7 +94,13 @@ type gateGroup struct {
 // Empty sets are deliberate placeholders: those groups add nothing beyond
 // the always floor today.
 func groupGates() []gateGroup {
-	backendTests := Gate{Name: "backend-tests", Command: []string{"pnpm", "run", "test:api"}}
+	// test:api:all, never a bare `go test ./...` or the old `test:api`: it
+	// fails immediately if TEST_DATABASE_URL is unset (rather than silently
+	// skipping every Postgres-backed test) and fails on any integration test
+	// that skips for some OTHER reason too — exactly the guarantee an
+	// autonomous gate run needs and a human `verify` run must not be forced
+	// into. See #546.
+	backendTests := Gate{Name: "backend-tests", Command: []string{"pnpm", "run", "test:api:all"}}
 	return []gateGroup{
 		{"backend", nil},
 		{"backend-db", []Gate{backendTests}},

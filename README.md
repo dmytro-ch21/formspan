@@ -110,7 +110,7 @@ docker compose exec postgres createdb -U vola vola_test
 cd backend && DATABASE_URL='postgres://vola:vola_dev_only@localhost:5432/vola_test?sslmode=disable' go run ./cmd/migrate up
 ```
 
-Then set `TEST_DATABASE_URL` in `backend/.env` (see `backend/.env.example`) and run `pnpm run test:api`. Expect `PASS`, not `SKIP`.
+Then set `TEST_DATABASE_URL` in `backend/.env` (see `backend/.env.example`) and run `pnpm run test:api:all`. Expect `PASS`, not `SKIP` — and if you leave `TEST_DATABASE_URL` unset, `test:api:all` (and `test:api:integration`) now fail immediately rather than skip (#546); `pnpm run test:api:unit` is the one that still runs fine without a database.
 
 **One test binary at a time owns a test database.** These tests seed shared rows with fixed ids and assert some counts they do not scope, so two suites running against the same database used to delete each other's fixtures — nine packages failing across four concurrent runs. Every Postgres-backed package now takes a database-scoped advisory lock in `TestMain` (`backend/internal/platform/testdb`), so a second suite queues instead of interfering; if you see `testdb: another test binary holds this database's fixture lock`, that is a colleague's run, not a failure. Queueing costs about 17% of wall clock, so **give a branch its own database** (`createdb -U vola vola_test_<branch>`) when you can — the lock is scoped per database, so that has no contention at all.
 
@@ -155,9 +155,11 @@ lose the convenience, never correctness. Install it by hand with
 Deliberately **not** in it — each is slow or needs setup, and CI runs them:
 
 ```bash
-pnpm run test:api                            # needs TEST_DATABASE_URL (see above)
-pnpm run build:web && pnpm run build:admin   # slow
-docker build -f backend/Dockerfile backend   # needs Docker/Colima
+pnpm run test:api:unit                                 # skips gracefully without TEST_DATABASE_URL
+pnpm run test:api:integration                          # needs TEST_DATABASE_URL — fails, doesn't skip, if unset (#546)
+pnpm run test:api:all                                  # test:api:integration + fails on any unexpected skip; CI runs this one
+pnpm run build:web && pnpm run build:admin             # slow
+docker build -f backend/Dockerfile backend             # needs Docker/Colima
 ```
 
 ### Score a model on the dictation corpus

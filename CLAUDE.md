@@ -214,10 +214,36 @@ before pushing.
 Deliberately not included — each is slow or needs setup, and CI covers them:
 
 ```bash
-pnpm run test:api                            # needs TEST_DATABASE_URL
-pnpm run build:web && pnpm run build:admin   # slow; CI runs both
-docker build -f backend/Dockerfile backend   # if Docker/Colima is available
+pnpm run test:api:unit                                 # skips gracefully without TEST_DATABASE_URL
+pnpm run test:api:integration                          # needs TEST_DATABASE_URL — FAILS (not skips) if unset, see #546
+pnpm run test:api:all                                  # test:api:integration + fails on any unexpected skip; CI runs this one
+pnpm run build:web && pnpm run build:admin             # slow; CI runs both
+docker build -f backend/Dockerfile backend             # if Docker/Colima is available
 ```
+
+**Three backend test gates, not one, since N169 (#546).** `go test ./...`
+against a package whose `TestMain` routes through `internal/platform/testdb`
+looks IDENTICAL whether every Postgres-backed test genuinely ran or every one
+of them silently skipped for want of `TEST_DATABASE_URL` — same `ok`, same
+exit 0. That has never bitten a human contributor, because CI has always
+provided a database; it is exactly the trap an autonomous run cannot see past
+if it only reads the exit code. `test:api:unit` is the old `test:api`,
+renamed, unchanged, and still deliberately silent about a missing database.
+`test:api:integration` fails immediately, naming `TEST_DATABASE_URL`, if it is
+unset — no `go test` invocation even starts. `test:api:all` is that plus a
+parse of `go test`'s own `-json` skip events: the backend suite has exactly
+one legitimate skip (`TestLiveComplete`, gated on `LLM_LIVE=1` because it
+spends real money), and any OTHER skip — a renamed or newly-disabled
+integration test, say — fails the gate rather than reading as green. **Any
+agent or automated run doing backend integration work must call
+`test:api:all`, never a bare `go test ./...`.** `scripts/check-api-tests.py`
+is both scripts' implementation; `backend/internal/platform/testdb`'s
+`RequireEnv` (`REQUIRE_TEST_DATABASE`) is the same "fail rather than skip"
+enforced a second time, from inside `TestMain`, as defense in depth if a
+future caller invokes `go test` directly with that variable rather than going
+through the wrapper. None of the three belongs in `verify`, for the same
+reason `test:api` never did — see the reasoning already given for it just
+above this list, which the `check:verify-chain` script now checks for.
 
 **`typecheck:mobile` starts a Metro dev server first, and that is not a
 mistake.** `pnpm run routes:mobile` (`scripts/generate_route_types.mjs`) boots

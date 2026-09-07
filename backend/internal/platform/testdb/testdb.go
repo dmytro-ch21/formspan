@@ -82,6 +82,25 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// RequireEnv is the env var that turns "TEST_DATABASE_URL is unset" from a
+// silent, green `m.Run()` into an immediate, loud failure — see #546.
+//
+// Every Postgres-backed package's TestMain already routes through Main (or
+// MainWithFixtures), and with TEST_DATABASE_URL unset that has always meant
+// "run the pure-logic tests, skip the rest" — the right default for a human
+// running `go test ./...` locally without Postgres set up. It is the WRONG
+// default for an autonomous run: `go test`'s own exit code and `ok` summary
+// line are identical whether every Postgres test genuinely ran or every one
+// of them silently skipped, so a worker that only reads the exit code cannot
+// tell "verified" from "assumed."
+//
+// Opt-in and off by default for exactly that reason — this must never punish
+// the ordinary local workflow of running one package's tests without a
+// database configured. `test:api:integration` and `test:api:all`
+// (package.json, via scripts/check-api-tests.py) set it; a bare
+// `go test ./...` and `test:api:unit` never do.
+const RequireEnv = "REQUIRE_TEST_DATABASE"
+
 // LockKey identifies "the shared test fixtures in this database". Arbitrary but
 // fixed; it is the issue number.
 const LockKey = 454
@@ -279,14 +298,41 @@ type Fixtures struct {
 //
 // With TEST_DATABASE_URL unset every Postgres test skips, so there are no rows
 // to own and nothing to lock; m runs untouched and the package's pure-logic
-// tests are unaffected.
+// tests are unaffected — UNLESS RequireEnv is also set, in which case this
+// package's entire Postgres-backed coverage is about to skip silently and
+// Main fails the whole binary outright instead. See RequireEnv and #546.
 func Main(m *testing.M) int { return MainWithFixtures(m, Fixtures{}) }
+
+// shouldFailRatherThanSkip is the require-mode decision MainWithFixtures acts
+// on, pulled out as a pure function of two strings so it can be unit-tested
+// without a *testing.M or a database — MainWithFixtures itself cannot be
+// exercised in a table test, since a real *testing.M only ever comes from the
+// generated test main.
+//
+// requireEnv is "on" for anything but "" or "0" — not just "1" — so a direct
+// `REQUIRE_TEST_DATABASE=0 go test ./...` (or "false") reads as OFF rather
+// than as a truthy non-empty string. Found in review: the obvious `!= ""`
+// check would have made that spelling of "off" turn it on instead.
+func shouldFailRatherThanSkip(databaseURL, requireEnv string) bool {
+	return databaseURL == "" && requireEnv != "" && requireEnv != "0" && requireEnv != "false"
+}
 
 // MainWithFixtures is Main plus a seed/remove pair that belongs to the process
 // rather than to each test. Both run on the lock-holding connection.
 func MainWithFixtures(m *testing.M, fx Fixtures) int {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
+		if shouldFailRatherThanSkip(url, os.Getenv(RequireEnv)) {
+			fmt.Fprintf(os.Stderr,
+				"testdb: TEST_DATABASE_URL is not set, but %s=1 requires a real "+
+					"Postgres for this run (see #546) — failing this binary rather than "+
+					"silently skipping its Postgres-backed tests.\n"+
+					"Provision one and set TEST_DATABASE_URL, e.g.:\n"+
+					"  docker compose exec postgres createdb -U vola vola_test\n"+
+					"  cd backend && DATABASE_URL=<the vola_test URL> go run ./cmd/migrate up\n"+
+					"  export TEST_DATABASE_URL=<the same URL>\n", RequireEnv)
+			return 1
+		}
 		return m.Run()
 	}
 	ctx := context.Background()
