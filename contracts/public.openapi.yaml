@@ -704,6 +704,27 @@ components:
                 nothing else — see `NutritionFoodInput.source`.
             external_id: { type: string, nullable: true }
             barcode: { type: string, nullable: true }
+            shared_by:
+              type: string
+              nullable: true
+              description: >
+                Share provenance (N532): the CURRENT handle of the athlete who
+                shared this food, resolved live so a rename propagates — or
+                null. Null both when the food was never shared AND when the
+                sharer no longer has a handle, so key "was this shared" on
+                `shared_at`, not on this. Read-only: ignored on a PUT, and
+                never blanked by one.
+            shared_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: >
+                When a share of this food was accepted; null for a food the
+                athlete saved themselves. Set by the server alone when a share
+                is accepted (every resource type that copies into saved foods:
+                `nutrition_entry`, `nutrition_food`, `nutrition_day`). `source`
+                stays `user` on such a copy — provenance is a separate fact
+                from editability.
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
 

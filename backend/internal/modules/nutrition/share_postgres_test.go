@@ -14,6 +14,7 @@ package nutrition
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -287,6 +288,228 @@ func TestDayCopierDescribeAndCopyOnAnEmptyDayAreBothNotFound(t *testing.T) {
 	})
 	if err != nil || ok {
 		t.Fatalf("copy empty day: ok=%v err=%v, want false", ok, err)
+	}
+}
+
+// handle seeds a profile with a username, the way share/postgres_test.go's
+// `person` does — this package's repoFor already deletes profiles on the way
+// out, so no extra cleanup is registered here.
+func handle(t *testing.T, pool *pgxpool.Pool, userID, username string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO profiles (user_id, username) VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET username = $2`, userID, username); err != nil {
+		t.Fatalf("seed profile %s: %v", userID, err)
+	}
+}
+
+// assertSharedBy is the one assertion N532/#963 adds per Copier: the copy
+// says who it came from (resolved to the CURRENT handle) and when.
+func assertSharedBy(t *testing.T, f Food, wantHandle string, notBefore time.Time) {
+	t.Helper()
+	if f.SharedAt == nil {
+		t.Fatalf("%s: shared_at is nil — the copy does not say it was shared", f.Name)
+	}
+	if f.SharedAt.Before(notBefore.Add(-time.Second)) || f.SharedAt.After(time.Now().Add(time.Minute)) {
+		t.Fatalf("%s: shared_at = %v, want about now (test started %v)", f.Name, *f.SharedAt, notBefore)
+	}
+	if f.SharedBy == nil || *f.SharedBy != wantHandle {
+		t.Fatalf("%s: shared_by = %v, want %q", f.Name, f.SharedBy, wantHandle)
+	}
+	// Provenance is a SEPARATE fact from source: the copy is still the
+	// receiver's own editable row.
+	if f.Source != SourceUser {
+		t.Fatalf("%s: source = %q, want user — provenance must not change what source means", f.Name, f.Source)
+	}
+}
+
+// N532/#963: every Copier kind — a logged entry, a plain saved food, a saved
+// recipe, and a whole day — records who shared it and when. One test rather
+// than four, because the property is "the ONE insertFood every Copier ends
+// with records it", and a per-Copier test would let a fifth Copier that
+// bypasses insertFood ship untested; here a new kind gets added to the table.
+func TestEveryCopierRecordsWhoSharedItAndWhen(t *testing.T) {
+	pool := testPool(t)
+	r := repoFor(t, "sh_pva", "sh_pvb")
+	ctx := context.Background()
+	handle(t, pool, "sh_pva", "alice_shares")
+	started := time.Now()
+
+	entry, err := r.SaveEntry(ctx, Entry{
+		ID: "77777777-7777-4777-8777-777777777701", UserID: "sh_pva",
+		EatenOn: "2026-09-01", Meal: MealLunch, Name: "Shared entry",
+		Servings: 1, ServingLabel: "100 g", Macros: Macros{Kcal: 100, ProteinG: 10},
+	})
+	if err != nil {
+		t.Fatalf("save entry: %v", err)
+	}
+	plain, err := r.SaveFood(ctx, Food{
+		ID: "77777777-7777-4777-8777-777777777702", UserID: "sh_pva",
+		Kind: KindFood, Name: "Shared plain food", ServingLabel: "1 egg",
+		Macros: Macros{Kcal: 70, ProteinG: 6},
+	})
+	if err != nil {
+		t.Fatalf("save plain: %v", err)
+	}
+	recipe, err := r.SaveFood(ctx, Food{
+		ID: "77777777-7777-4777-8777-777777777703", UserID: "sh_pva",
+		Kind: KindRecipe, Name: "Shared recipe", ServingLabel: "1 bowl", YieldServings: f(1),
+		Items: []RecipeItem{{Name: "Rice", Quantity: 1, ServingLabel: "100 g", Macros: Macros{Kcal: 130}}},
+	})
+	if err != nil {
+		t.Fatalf("save recipe: %v", err)
+	}
+
+	kinds := []struct {
+		name string
+		copy func(tx pgx.Tx) (string, bool, error)
+	}{
+		{"nutrition_entry", func(tx pgx.Tx) (string, bool, error) {
+			return NewEntryCopier(pool).CopyTo(ctx, tx, entry.ID, "sh_pva", "sh_pvb")
+		}},
+		{"nutrition_food (plain)", func(tx pgx.Tx) (string, bool, error) {
+			return NewFoodCopier(pool).CopyTo(ctx, tx, plain.ID, "sh_pva", "sh_pvb")
+		}},
+		{"nutrition_food (recipe)", func(tx pgx.Tx) (string, bool, error) {
+			return NewFoodCopier(pool).CopyTo(ctx, tx, recipe.ID, "sh_pva", "sh_pvb")
+		}},
+		{"nutrition_day", func(tx pgx.Tx) (string, bool, error) {
+			return NewDayCopier(pool).CopyTo(ctx, tx, "2026-09-01", "sh_pva", "sh_pvb")
+		}},
+	}
+	for _, k := range kinds {
+		newID, ok, err := withTx(t, pool, k.copy)
+		if err != nil || !ok {
+			t.Fatalf("%s: copy ok=%v err=%v", k.name, ok, err)
+		}
+		// Through GetFood AND ListFoods — the two reads a client actually
+		// uses, and the two SELECTs foodCols has to agree with itself in.
+		got, err := r.GetFood(ctx, "sh_pvb", newID)
+		if err != nil {
+			t.Fatalf("%s: receiver cannot read the copy: %v", k.name, err)
+		}
+		assertSharedBy(t, got, "alice_shares", started)
+		listed, err := r.ListFoods(ctx, "sh_pvb", got.Name, 10)
+		if err != nil || len(listed) == 0 {
+			t.Fatalf("%s: list: %v %v", k.name, listed, err)
+		}
+		assertSharedBy(t, listed[0], "alice_shares", started)
+	}
+
+	// The SENDER's originals gained no provenance: sharing something is not
+	// being shared something.
+	mine, err := r.GetFood(ctx, "sh_pva", plain.ID)
+	if err != nil || mine.SharedAt != nil || mine.SharedBy != nil {
+		t.Fatalf("sender's own food acquired provenance: %+v %v", mine, err)
+	}
+
+	// The handle is resolved LIVE: rename the sharer and every copy follows,
+	// which is the whole reason the user id is stored and not the handle.
+	handle(t, pool, "sh_pva", "alice_renamed")
+	after, err := r.ListFoods(ctx, "sh_pvb", "", 10)
+	if err != nil || len(after) != 4 {
+		t.Fatalf("receiver's list after rename: %d foods, %v", len(after), err)
+	}
+	for _, g := range after {
+		if g.SharedBy == nil || *g.SharedBy != "alice_renamed" {
+			t.Fatalf("%s: shared_by = %v after rename, want alice_renamed", g.Name, g.SharedBy)
+		}
+	}
+}
+
+// THE RESTORE PATH — the guard this repo has paid for three times on
+// exercise.updateWithin and once on nutrition_foods.source. The receiver
+// corrects the copy's macros through the ordinary client write, which never
+// mentions provenance, and the provenance survives. A SaveFood that listed
+// shared_at in its SET clause would pass every other test in this file and
+// fail this one.
+func TestEditingACopyKeepsWhoSharedIt(t *testing.T) {
+	pool := testPool(t)
+	r := repoFor(t, "sh_rpa", "sh_rpb")
+	ctx := context.Background()
+	handle(t, pool, "sh_rpa", "alice_rp")
+	original, err := r.SaveFood(ctx, Food{
+		ID: "77777777-7777-4777-8777-777777777711", UserID: "sh_rpa",
+		Kind: KindFood, Name: "Oats", ServingLabel: "50 g", Macros: Macros{Kcal: 180},
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	newID, ok, err := withTx(t, pool, func(tx pgx.Tx) (string, bool, error) {
+		return NewFoodCopier(pool).CopyTo(ctx, tx, original.ID, "sh_rpa", "sh_rpb")
+	})
+	if err != nil || !ok {
+		t.Fatalf("copy: ok=%v err=%v", ok, err)
+	}
+	copied, err := r.GetFood(ctx, "sh_rpb", newID)
+	if err != nil {
+		t.Fatalf("read copy: %v", err)
+	}
+	sharedAt := *copied.SharedAt
+
+	// What a client PUT carries: the fields, no provenance at all.
+	edited := Food{
+		ID: newID, UserID: "sh_rpb", Kind: KindFood, Name: "Oats (corrected)",
+		ServingLabel: "50 g", Macros: Macros{Kcal: 190},
+	}
+	saved, err := r.SaveFood(ctx, edited)
+	if err != nil {
+		t.Fatalf("edit copy: %v", err)
+	}
+	if saved.Kcal != 190 || saved.Name != "Oats (corrected)" {
+		t.Fatalf("edit did not apply: %+v", saved)
+	}
+	assertSharedBy(t, saved, "alice_rp", sharedAt)
+	if !saved.SharedAt.Equal(sharedAt) {
+		t.Fatalf("shared_at moved on edit: %v -> %v", sharedAt, *saved.SharedAt)
+	}
+	// And a client cannot CLAIM provenance either: a food the athlete saves
+	// themselves with the fields set on the struct is stored without any.
+	claimed := "somebody"
+	now := time.Now()
+	own, err := r.SaveFood(ctx, Food{
+		ID: "77777777-7777-4777-8777-777777777712", UserID: "sh_rpb",
+		Kind: KindFood, Name: "My own", ServingLabel: "1", Macros: Macros{Kcal: 1},
+		SharedBy: &claimed, SharedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("save own: %v", err)
+	}
+	if own.SharedBy != nil || own.SharedAt != nil {
+		t.Fatalf("a client write set provenance: %+v", own)
+	}
+}
+
+// A sharer whose profile has no username (or no profile at all any more)
+// still leaves a shared_at behind: the row says it was shared, just not by
+// whom. The client keys presence on shared_at for exactly this case.
+func TestACopyFromASharerWithoutAHandleStillSaysItWasShared(t *testing.T) {
+	pool := testPool(t)
+	r := repoFor(t, "sh_nha", "sh_nhb")
+	ctx := context.Background()
+	// No handle() call for sh_nha — no profiles row exists.
+	original, err := r.SaveFood(ctx, Food{
+		ID: "77777777-7777-4777-8777-777777777721", UserID: "sh_nha",
+		Kind: KindFood, Name: "Anonymous oats", ServingLabel: "50 g", Macros: Macros{Kcal: 180},
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	newID, ok, err := withTx(t, pool, func(tx pgx.Tx) (string, bool, error) {
+		return NewFoodCopier(pool).CopyTo(ctx, tx, original.ID, "sh_nha", "sh_nhb")
+	})
+	if err != nil || !ok {
+		t.Fatalf("copy: ok=%v err=%v", ok, err)
+	}
+	copied, err := r.GetFood(ctx, "sh_nhb", newID)
+	if err != nil {
+		t.Fatalf("read copy: %v", err)
+	}
+	if copied.SharedAt == nil {
+		t.Fatalf("shared_at nil for a copy — a missing profile must not erase that it was shared")
+	}
+	if copied.SharedBy != nil {
+		t.Fatalf("shared_by = %q with no profile to resolve it from", *copied.SharedBy)
 	}
 }
 

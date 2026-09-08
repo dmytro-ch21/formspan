@@ -73,6 +73,18 @@ package nutrition
 // carry a UNIQUE constraint (`nutrition_foods_external_idx`) scoped globally
 // rather than per-athlete, so copying either across users risks colliding
 // with the recipient's own scanned history.
+//
+// # What all three DO record (N532/#963)
+//
+// `shared_by_user_id` and `shared_at` — who sent it and when the copy was
+// made — on every row a Copier produces, through the one insertFood below.
+// This is a separate fact from `source`: 'user' still says "the receiver may
+// edit these numbers", and the provenance says "this arrived from @handle
+// on the 3rd". Until this landed, the inbox card knew the sender and that
+// knowledge died at accept, so the receiver's list could not tell a shared
+// food from their own. The handle is NOT stored — the user id is, and
+// `foodCols` resolves it live, the same way the inbox's `from` does, so a
+// rename propagates.
 
 import (
 	"context"
@@ -128,9 +140,18 @@ func scaleMacros(m Macros, factor float64) Macros {
 
 // insertFood is the one INSERT every Copier's CopyTo below ends with — a new,
 // server-generated id, always 'user'-sourced, always private to newOwnerID,
-// external_id/barcode always nulled. Shared so the "what we deliberately do
-// not copy" list above is enforced in exactly one place.
-func insertFood(ctx context.Context, tx pgx.Tx, newOwnerID, kind, name, brand, servingLabel string,
+// external_id/barcode always nulled, and the share provenance
+// (shared_by_user_id = sharerID, shared_at = now()) always set. Shared so the
+// "what we deliberately do not copy" AND "what we always record" lists above
+// are enforced in exactly one place: a fourth Copier cannot forget the
+// provenance, because there is no other INSERT for it to call.
+//
+// sharerID is the `from_user_id` the share module read off the share row
+// under FOR UPDATE, not anything the receiver sent — it is the same value
+// every CopyTo already scopes its source read by, so a copy that succeeded
+// is by construction attributed to the account that actually owned the
+// original.
+func insertFood(ctx context.Context, tx pgx.Tx, newOwnerID, sharerID, kind, name, brand, servingLabel string,
 	servingGrams *float64, m Macros, yieldServings *float64) (string, error) {
 	var newID string
 	err := tx.QueryRow(ctx, `
@@ -139,16 +160,18 @@ func insertFood(ctx context.Context, tx pgx.Tx, newOwnerID, kind, name, brand, s
 			serving_label, serving_grams,
 			kcal, protein_g, carb_g, fat_g, fibre_g,
 			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-			yield_servings, source, external_id, barcode)
+			yield_servings, source, external_id, barcode,
+			shared_by_user_id, shared_at)
 		VALUES (gen_random_uuid(), $1, $2, $3, $4,
 		        $5, $6, $7, $8, $9, $10, $11,
 		        $12, $13, $14, $15, $16,
-		        $17, 'user', NULL, NULL)
+		        $17, 'user', NULL, NULL,
+		        $18, now())
 		RETURNING id::text`,
 		newOwnerID, kind, name, brand,
 		servingLabel, servingGrams, m.Kcal, m.ProteinG, m.CarbG, m.FatG, m.FibreG,
 		m.SaturatedFatG, m.SugarG, m.AddedSugarG, m.SodiumMG, m.CholesterolMG,
-		yieldServings).Scan(&newID)
+		yieldServings, sharerID).Scan(&newID)
 	return newID, err
 }
 
@@ -224,7 +247,7 @@ func (c EntryCopier) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID
 	}
 	per := scaleMacros(m, 1/servings)
 
-	newID, err := insertFood(ctx, tx, newOwnerID, string(KindFood), name, "", servingLabel, nil, per, nil)
+	newID, err := insertFood(ctx, tx, newOwnerID, sharerID, string(KindFood), name, "", servingLabel, nil, per, nil)
 	if err != nil {
 		return "", false, fmt.Errorf("nutrition: copy entry insert: %w", err)
 	}
@@ -293,7 +316,7 @@ func (c FoodCopier) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID,
 		return "", false, fmt.Errorf("nutrition: copy food read: %w", err)
 	}
 
-	newID, err := insertFood(ctx, tx, newOwnerID, kind, name, brand, servingLabel, servingGrams, m, yieldServings)
+	newID, err := insertFood(ctx, tx, newOwnerID, sharerID, kind, name, brand, servingLabel, servingGrams, m, yieldServings)
 	if err != nil {
 		return "", false, fmt.Errorf("nutrition: copy food insert: %w", err)
 	}
@@ -426,7 +449,7 @@ func (c DayCopier) CopyTo(ctx context.Context, tx pgx.Tx, resourceID, sharerID, 
 	}
 
 	yield := 1.0
-	newID, err := insertFood(ctx, tx, newOwnerID, string(KindRecipe),
+	newID, err := insertFood(ctx, tx, newOwnerID, sharerID, string(KindRecipe),
 		fmt.Sprintf("Shared day — %s", resourceID), "", "1 day", nil, total, &yield)
 	if err != nil {
 		return "", false, fmt.Errorf("nutrition: copy day insert: %w", err)

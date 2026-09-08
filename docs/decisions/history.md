@@ -64498,6 +64498,142 @@ saying why.
   cannot say WHICH source is waiting is the thing that comment exists to
   prevent.
 
+## 2026-09-08 — N532 (#963): a saved food remembers who shared it — "Recently shared", compact rows, sort chips
+
+**The user's words.** *"we should have an option to distinguish shared food
+items, its hard to find them so we could have recently shared with it"* and
+*"the list gets large in saved food - lets make rows more compact and
+sortable."* Both are `apps/mobile/app/food/saved/index.tsx`; filed as one
+ticket so they could not collide on the file.
+
+**The first was a data gap, not a UI one.** When a share is accepted, the
+server copies the food into the receiver's own `nutrition_foods`
+(`share.go`'s three Copiers) with `source='user'`, and the copy carried
+NOTHING saying it came from somebody else. The inbox card knew the sender
+(`shares.from_user_id`, joined live to `profiles.username`), and that
+knowledge died the moment the share was accepted — so "distinguish shared
+foods" could not be a filter, because there was nothing to filter on.
+
+### Backend — provenance on the row, handle resolved live
+
+- **Migration `20260908210544_add_food_share_provenance`** (timestamp-
+  versioned per N149; `check:migration-versions` passes): `nutrition_foods`
+  gains `shared_by_user_id TEXT` and `shared_at TIMESTAMPTZ`, with a CHECK
+  that both are null or both set — a half-written provenance is a state the
+  database refuses, so no read has to decide what "shared, but by nobody"
+  means. No FK to `profiles`, for the reasons `shares` carries none: a
+  deleted sharer must not make the receiver's own food unreadable.
+- **The sharer's USER ID is stored, never the handle**, and `foodCols`
+  resolves the handle on every read with a correlated scalar subquery on
+  `profiles` — a subquery rather than a LEFT JOIN because `foodCols` is also
+  the `RETURNING` list of `SaveFood`'s upsert, where a JOIN cannot be
+  expressed, and two column lists is the "a new column was forgotten in one
+  of them" hazard. This is the same design as the share inbox's `from`:
+  rename the sharer and every copy follows on the next read (asserted in
+  `TestEveryCopierRecordsWhoSharedItAndWhen`, which renames mid-test).
+- **`source` is untouched.** `'user'` still means "editable by this athlete";
+  provenance is a separate fact. Folding it into `source` would have needed
+  a new value that every source-reading branch (the AI badge, the editor's
+  provenance guard, the catalog match) would then have to learn about.
+- **Written by the one `insertFood` every Copier ends with** — entry, plain
+  food, recipe, day — so a fourth Copier cannot forget it; there is no other
+  INSERT for it to call. `sharerID` is the `from_user_id` the share module
+  read under `FOR UPDATE`, the same value every `CopyTo` scopes its source
+  read by, so a copy that succeeded is by construction attributed to the
+  account that owned the original.
+- **On the wire**: `NutritionFood.shared_by` (nullable string, the live
+  handle) and `shared_at` (nullable date-time). **`shared_at` is the
+  presence test**, because `shared_by` is null in two states a client must
+  treat the same way — never shared, and shared by an account that no longer
+  has a username. Both are read-only: `SaveFood` neither decodes nor SETs
+  them, so an athlete cannot claim a food was shared to them, and — the
+  restore-path guard this repo has paid for three times on
+  `exercise.updateWithin` — an edit cannot blank what the accept recorded.
+  `TestEditingACopyKeepsWhoSharedIt` pins it; a SaveFood that listed
+  `shared_at` in its SET clause passes every other test in the file and
+  fails that one (mutation-verified, along with the no-provenance and
+  wrong-user-id mutations of `insertFood` and `foodCols`).
+- `test:api:all` against a real database: green, the one legitimate skip.
+
+### Mobile — show it, spotlight it, sort it
+
+- **SQLite v39**: `foods.shared_by`, `foods.shared_at`, nullable, no
+  backfill — nothing on the device knows which cached rows were shared; the
+  next pull carries the answer for every row (N428's fresh-install scenario
+  is a fixture test: a clean database syncs and reads the handle off the
+  pulled row).
+- **The pull's UPDATE arm uses a CASE on "did the server speak", NOT the
+  COALESCE `source` uses**, and the difference is the one thing the design
+  promises. A server that knows the row sends both fields on every pull and
+  its answer replaces the cached one *even when it is null* — a sender who
+  lost their handle must stop being named, and COALESCE would name them
+  forever. A server that sends NEITHER (older, mid-rollout) is told apart by
+  `undefined`, and only that case keeps the stored value. Both directions
+  are fixture-tested and mutation-verified (CASE→COALESCE and flag-always-on
+  each go red on exactly one test).
+- **The server's `created_at` now rides the pull too.** The cache used to
+  stamp every pulled row with the moment this device first saw it — one
+  instant for a fresh install's whole list — which would have made "Recent"
+  a sort on nothing. `Food.created_at` is optional on the type for the same
+  older-server reason as `source`.
+- **"Recently shared"** (`recentlySharedFoods`): shared in the last **30
+  days**, newest share first, capped at **10**. Thirty because a food a
+  friend sent last week should still be spotlighted and the section must
+  stay "recent" rather than become a permanent second list; ten because it
+  sits ABOVE the full list and has to stay a glance. Keyed on `shared_at`.
+  Timestamps compared through `datetime()`, not as text — the server's
+  RFC3339 may carry an offset and a text comparison at the window's edge
+  drops a row that is inside it (the first test vector sat mid-window and
+  survived that mutation; the corrected one is at the edge and does not).
+  **The section renders ONLY when non-empty and only while the search box
+  is empty**; mutation `showRecent = true` and mutation "ignore the search"
+  each go red.
+- **"from @handle · 5 Sep"** on every row with provenance — the spotlight,
+  the full list, a search result — via `sharedFromLine`, which says "Shared
+  with you · 5 Sep" when the handle is null but `shared_at` is set. The
+  handle is the server's live resolution; the phone never derives one.
+- **Compact rows.** One line — name, the `Recipe` mark, `kcal · P/C/F` —
+  and a second only when there is something to say (provenance, brand).
+  **Computed from the styles, not device-measured**: the old card was
+  padding 28 + three text lines (≈20 + 16 + 18) + gaps (14) + a 36pt
+  hold-to-delete button + 2 ≈ **134pt, plus the 12pt list gap = 146pt per
+  row**; the new row is **41pt** (10 + 20 + 10 + a hairline) or **59pt** with
+  its second line — roughly a third of the old height, against the ticket's
+  "roughly half". The `Makes N × … · N ingredients` meta line is gone from
+  the list (it is on the recipe's own screen); brand moved to the second
+  line.
+- **Delete moved off the row, behind three gestures, all ending in one
+  platform confirm** (`Alert.alert`): **swipe left** reveals Delete
+  (`SwipeToDelete`, the session screen's reveal-then-tap component, never
+  full-swipe); **long-press** the row for anyone who does not find the
+  swipe; and the **`delete` accessibility action**, because a screen-reader
+  user can do neither and `SwipeToDelete` deliberately hides its button from
+  assistive tech while closed. The dialog replaces `HoldToConfirm` because
+  the hold's whole point was "no dialog for sighted users", and a dialog is
+  the honest cost of taking a destructive control off the row. All three
+  paths, and Cancel as the negative control, are in the screen test.
+- **Sort chips — Recent / Name / Most used — default Recent**, remembered per
+  athlete in `PREF_SAVED_FOODS_SORT` (the Library sport filter's precedent;
+  the search box is deliberately not remembered, for the Library's reason).
+  "Recent" is `created_at DESC`; "Most used" is the same `COUNT(entries by
+  source_food_id)` `recentsFor` already builds — the join rather than the
+  local `use_count` column, because `use_count` is this device's own tally
+  and starts at zero on a fresh install while `food_entries` is backfilled.
+  Search filters WITHIN the sort: both go to the same `localFoods(userId, q,
+  sort)` read, so nothing re-sorts in memory. Every order ends on
+  `lower(name)` so ties are stable. `localFoods`'s default stays `name`, so
+  the quick-add search (#962's file, untouched) is unaffected. The value set
+  and parser live in `lib/savedFoodsSort.ts`, a module of its own, because
+  the screen test mocks `@/lib/foodLog` wholesale and a parser living there
+  would be mocked away with it.
+
+**Left open.** `apps/web`'s `nutrition/recipes` page does not yet show the
+provenance the API now returns — a one-line addition, out of this ticket's
+mobile scope. Row heights are computed, not measured on a phone; the ticket's
+two `NEEDS HUMAN EVIDENCE` items (a real share landing in "Recently shared"
+with the handle, and a 40-row list reading as scannable with the chips
+reading as sort rather than filters) are still owed.
+
 ## Open items / known gaps as of this entry
 
 

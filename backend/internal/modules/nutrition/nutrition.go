@@ -437,6 +437,27 @@ type Food struct {
 	ExternalID *string `json:"external_id"`
 	Barcode    *string `json:"barcode"`
 
+	// SharedBy and SharedAt are share PROVENANCE (N532/#963): set by every
+	// Copier in share.go when a share is accepted, nil on a food the athlete
+	// saved themselves. A separate fact from Source, which stays 'user' on a
+	// copy because the receiver may edit it freely — see the migration's
+	// comment for why the two are not folded together.
+	//
+	// SharedBy is the sharer's CURRENT handle, resolved at read time from
+	// profiles the way the share inbox's `from` already is, so a rename
+	// propagates. It is nil in two states a client must treat the same way:
+	// never shared (SharedAt nil too), and shared by an account that no
+	// longer has a username (SharedAt set). SharedAt is therefore the
+	// presence test; SharedBy is the label, and may be missing.
+	//
+	// READ-ONLY on the wire. Neither is decoded from a client's PUT: SaveFood
+	// never writes either column, so an athlete cannot claim a food was
+	// shared to them, and an edit cannot blank the provenance the accept
+	// recorded — the restore-path guard `TestEditingACopyKeepsWhoSharedIt`
+	// pins.
+	SharedBy *string    `json:"shared_by"`
+	SharedAt *time.Time `json:"shared_at"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

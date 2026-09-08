@@ -222,6 +222,26 @@ export type Food = Macros & {
    * the same as sending `'user'`.
    */
   source?: FoodSource;
+  /**
+   * Share provenance (N532/#963) — who this arrived from, and when a share of
+   * it was accepted. Both optional on the TYPE for the same reason `source`
+   * is: a server older than this sends neither, and the cache must read that
+   * as "keep what is stored" rather than as "never shared".
+   *
+   * `shared_at` is the presence test; `shared_by` is the label and may be
+   * null on a shared food whose sender has no handle any more. The server
+   * resolves the handle live on every read, so a rename shows up on the next
+   * pull — nothing on this device should ever cache a handle it derived.
+   */
+  shared_by?: string | null;
+  shared_at?: string | null;
+  /**
+   * The server's own creation time. Optional for the same older-server
+   * reason; carried into the cache so "Recent" on a fresh install (N428's
+   * scenario) orders by when a food was actually saved, not by the moment
+   * this device first pulled it — which is one instant for every row.
+   */
+  created_at?: string;
 };
 
 /**

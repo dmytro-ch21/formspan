@@ -15008,9 +15008,10 @@ on screen. That, and only that, is what moved.
 #### Happy path
 
 - Open "Manage your saved foods" from the Food tab's Add sheet. Confirm every
-  saved food and recipe appears (name, per-serving kcal/macros), sorted by
-  name, with a recipe visibly marked and showing its yield and ingredient
-  count instead of a serving line.
+  saved food and recipe appears as ONE compact row (name, `kcal · P/C/F`),
+  newest-saved first (the default sort since N532), with a recipe visibly
+  marked `Recipe`. (Before N532 the list was sorted by name and each row was
+  a card with a yield/ingredient line and a hold-to-delete button.)
 - Type into the search field. Confirm the list narrows to matching names as
   you type, and clearing the field restores the full list.
 - Tap a plain food's row. Confirm it opens `food/saved/[id]` (the per-serving
@@ -15019,9 +15020,11 @@ on screen. That, and only that, is what moved.
 - Tap a recipe's row. Confirm it opens `food/recipe/[id]` (the ingredient
   editor) rather than the plain-food form — the same routing split
   `food/add.tsx`'s own Edit button uses.
-- Hold a row's Delete control to completion. Confirm the row disappears from
-  the list, and that a food already logged from it (check the day it was
-  eaten on) still shows the exact numbers it was logged with.
+- Swipe a row left, tap the revealed Delete, confirm the dialog. Confirm the
+  row disappears from the list, and that a food already logged from it
+  (check the day it was eaten on) still shows the exact numbers it was
+  logged with. Repeat via long-press on a row — same dialog, same result.
+  Tap Cancel on the dialog: nothing is deleted.
 - Delete a food that has never been logged from at all. Confirm no error and
   a clean removal from the list.
 - With the phone offline, delete a food, then reconnect and let sync run
@@ -15040,9 +15043,11 @@ on screen. That, and only that, is what moved.
 - Force the delete request to fail (airplane mode mid-hold, or a forced
   500). Confirm the row is NOT removed from the list and an error message
   appears — no silent "looks deleted, isn't."
-- A screen-reader user cannot perform the hold gesture. Confirm VoiceOver /
-  TalkBack gets a tap-and-confirm dialog instead (`HoldToConfirm`'s built-in
-  fallback), asks before deleting, and the delete only fires on confirm.
+- A screen-reader user can neither swipe nor long-press. Confirm VoiceOver /
+  TalkBack expose a `Delete` action on the row (the actions rotor), that it
+  opens the same confirm dialog, and that the delete only fires on confirm.
+  The swiped-open Delete button must NOT be announced on a row nobody has
+  swiped.
 - Delete the same food twice in quick succession (e.g. a double-tap on the
   confirm). Confirm the second attempt is a harmless no-op, not an error.
 - Two devices: delete a food on the phone while `apps/web`'s recipes page is
@@ -15057,6 +15062,63 @@ on screen. That, and only that, is what moved.
   404/no-op rather than delete A's row).
 - Confirm the list itself only ever shows the signed-in athlete's own saved
   foods — no cross-account leakage through `GET /v1/nutrition/foods`.
+
+### Who shared a food, "Recently shared", and sorting (N532 — `food/saved/index.tsx`, `share.go`, `lib/foodLog.ts`)
+
+#### Happy path
+
+- Have a friend share you a food (an entry, a saved food, a recipe, or a
+  day — every kind in the N116 section above). Accept it. Open Saved foods:
+  confirm a **Recently shared** section at the top lists it, newest share
+  first, with `from @<their handle> · <date>` under the name, AND that the
+  same row appears in the full list below with the same line.
+- Search for it by name: confirm the Recently shared section disappears
+  while the search box has text, the result row still carries
+  `from @handle`, and clearing the search brings the section back.
+- `GET /v1/nutrition/foods` and `GET /v1/nutrition/foods/{id}` on the
+  receiver's account return `shared_by` (the sharer's handle) and
+  `shared_at` (an RFC3339 time near the accept) on the copy; the SENDER's
+  original returns null for both. `source` on the copy is still `user`.
+- The sharer renames their handle. Reload the receiver's list (or hit the
+  API): confirm the line follows the new handle — nothing was stored.
+- Tap **Name** / **Recent** / **Most used**. Confirm the order changes
+  accordingly (alphabetical; newest saved first; entries-logged-from-it
+  count descending, never-used last), that a search typed before the tap
+  stays in effect, and that the choice survives closing and relaunching
+  the app. **Recent** is the default on a fresh install.
+- Accept a share, then edit the copy's numbers on the phone (or via PUT).
+  Confirm `from @handle` is still there afterwards — an edit never blanks
+  provenance.
+
+#### Edge cases and errors
+
+- A share accepted more than 30 days ago is NOT in Recently shared but is
+  still in the full list, with its `from @handle` line, and findable by
+  search.
+- Nothing shared, ever: confirm there is NO "Recently shared" heading at
+  all — not an empty section.
+- More than 10 shares in 30 days: the section shows the newest 10; the rest
+  are in the full list.
+- The sharer deletes their account / loses their username: the row reads
+  `Shared with you · <date>` rather than `from @` with nothing after it, and
+  it still appears in Recently shared.
+- Fresh install on a second device (N428's scenario): after the first sync,
+  the shared foods already carry their `from @handle` — the provenance
+  arrives by pull, not by anything the device did.
+- A stored sort preference the build does not recognise (hand-edited, or
+  from a build with a fourth option) opens the list on Recent rather than
+  failing.
+- A `PUT /v1/nutrition/foods/{id}` body carrying `shared_by`/`shared_at`
+  neither sets them on the athlete's own food nor clears them on a copy —
+  both are read-only.
+
+#### Auth / security
+
+- `shared_by` is the sharer's public handle only — never their user id,
+  email, or anything else off `profiles`. Confirm the response carries no
+  other field about the sharer.
+- Provenance can only be written by the accept path: an athlete cannot
+  make a food look shared-to-them through any client write.
 
 
 ## N90 — quantity editing finishes: an existing entry, and web (`apps/mobile/app/food/entry/[id].tsx`, `apps/mobile/lib/foodQuantity.ts`, `apps/web/src/lib/foodQuantity.ts`, `apps/web/src/lib/UnitsProvider.tsx`, `apps/web/src/app/dashboard/nutrition/FoodQuantityInput.tsx`, `apps/web/src/app/dashboard/nutrition/recipes/RecipeEditor.tsx`, `apps/web/src/app/dashboard/nutrition/days/[date]/DayEditor.tsx`, `PATCH /v1/profile`)
