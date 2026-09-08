@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Avatar } from '@/components/Avatar';
@@ -17,6 +17,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { isHealthKitSupported } from '@/lib/healthkit';
+import { healthSourceFor, healthSourceLabel } from '@/lib/vo2MaxSource';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts, listFriends } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
@@ -530,15 +531,25 @@ export default function YouScreen() {
                   further gate the trend screen states in words rather than
                   hiding the pill over, matching `you-sports`'/`you-phase`'s own
                   "explain yourself, don't disappear" rule. */}
-              {isHealthKitSupported() && (
-                <NavRow
-                  icon="heart"
-                  label="VO2max"
-                  detail="Your cardio fitness trend, read from Apple Health"
-                  onPress={() => router.push('/vo2max/trend')}
-                  testID="you-vo2max"
-                />
-              )}
+              {/* W16/#945 — gated on whether this DEVICE has a health source,
+                  not on the iOS SDK: Android has Health Connect, uploads
+                  VO2max from it on every sync pass, and was hidden here behind
+                  a check that could only ever be true on iOS. The one case
+                  the row still hides is an iOS build with no HealthKit linked
+                  (and web) — the only case in which there is genuinely
+                  nothing to read from. See `lib/vo2MaxSource.ts`. */}
+              {(() => {
+                const source = healthSourceFor(Platform.OS, isHealthKitSupported());
+                return source ? (
+                  <NavRow
+                    icon="heart"
+                    label="VO2max"
+                    detail={`Your cardio fitness trend, read from ${healthSourceLabel(source)}`}
+                    onPress={() => router.push('/vo2max/trend')}
+                    testID="you-vo2max"
+                  />
+                ) : null;
+              })()}
 
               {/* The position map used to be a row here and is on Progress now
                   (N178, #583) — "where you score and where you get stuck" is a

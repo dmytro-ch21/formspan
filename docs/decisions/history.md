@@ -63711,6 +63711,79 @@ not sign in on it. What the emulator DID establish is the half that was
 checkable: the permission is in the manifest, and the code that used to
 hide a refusal no longer can.
 
+## 2026-09-08 — W16 (#945): VO₂max was uploaded from Android and then hidden behind "isn't available on this device"
+
+Found on the first Android emulator run this repo ever had, alongside W15.
+It is a **W** because the app contradicted itself about data it held:
+`lib/healthConnectSync.ts` uploads VO₂max from Health Connect on every sync
+pass, and the two screens that show VO₂max — the row on `app/(tabs)/you.tsx`
+and `app/vo2max/trend.tsx` — both gated on `isHealthKitSupported()`, which
+can only ever be true on iOS. So on Android the row was hidden, and an
+athlete who reached the trend screen by deep link was told "VO2max reading
+isn't available on this device" while their readings sat on the server.
+
+**Where the data actually comes from, which is what made the fix small.**
+`useVo2MaxTrend` reads from the backend via `listBiometricSamples`, and the
+backend's `ListSamples` has no platform filter — `WHERE user_id AND
+metric_type AND measured_at…`, read directly from `postgres.go`. Health
+Connect samples come back exactly like HealthKit ones. The hook would have
+returned them; a vendor-SDK check hid them, behind copy that named the wrong
+vendor ("Turn on Sync with Apple Health", "An Apple Watch … needs to have
+written one to Health"). Three separate sentences on two screens, each
+written for one platform and shown on both.
+
+**The fix is one pure decision, made once.** `lib/vo2MaxSource.ts`:
+
+- `healthSourceFor(platform, healthKitLinked)` — which source THIS device
+  has: HealthKit on iOS if the module is linked, Health Connect on Android
+  unconditionally, nothing elsewhere. Platform is a parameter, never read
+  in the module, for the reason `lib/tabIconPlan.ts` gives: `jest-expo`
+  reports `ios`, which is the one platform the bug did NOT show on, so the
+  Android branch would otherwise be permanently untested.
+- `vo2MaxScreenState(…)` — **readings first.** If the server has readings,
+  the screen shows them, and no check of which SDK is linked, which provider
+  is installed, or whether a sync toggle is on is allowed to hide them. The
+  gates only choose a SENTENCE when there is nothing to show, in the order an
+  athlete can act on them: no source on this build → the source this device
+  has is not usable (Android with no Health Connect provider) → the toggle is
+  off → nothing read yet. Each sentence names the source the device actually
+  has, so the copy is true whenever it is on screen.
+- `healthSyncSettingLabel` returns the `label` prop of the matching
+  `<Toggle>` in `app/settings.tsx` verbatim, so "turn on X in Settings" points
+  at a switch that exists under exactly that name.
+
+`trend.tsx` reads the toggle that governs ITS source — it had been reading
+`readHealthKitImportEnabled` on Android, which is always off there, so a
+Health Connect athlete was told to turn on Apple Health — and asks
+`isHealthConnectSupported()` (async) for the provider, answering in words
+rather than by hiding the screen. `you.tsx` shows the row when the device has
+a source at all; the one case it still hides is an iOS build with no
+HealthKit linked, which is the only case the old sentence was ever true in.
+That is the N61 principle its own comment cites: an athlete cannot tell "not
+enabled" from "not built" when the entry point disappears, and the fix for
+that is a sentence, not an absence.
+
+**Tested where it can be, and the screens are not where it can be.** No test
+in the repo renders either VO₂max screen, and none did before this ticket —
+`grep vo2 __tests__` was empty, which is itself worth recording. The decision
+is pure and `lib/__tests__/vo2MaxSource.test.ts` pins it: 15 tests, the
+Android branch exercised directly. **Mutation-verified from a green
+baseline, one mutation per half of the bug**: removing the readings-first
+precedence (gates hide data — the original bug) fails exactly the test
+written for it; judging Android by the iOS flag (the other half) fails
+exactly its test; making the sync-off copy name the wrong vendor fails the
+two copy tests. Restored, re-run green each time. `__tests__/app/youScreen.test.tsx`
+(34 tests, renders the changed screen) still passes; typecheck clean; the
+lint ratchet unchanged at every cap.
+
+**What this does not do.** Nothing here changes what is uploaded — W15's
+`notPermitted` covers a refused VO₂max grant on the sync side, and N527
+(#949) is the Settings surface for it. And the last criterion is still a
+device: an Android account with VO₂max in Health Connect seeing it in the
+app. The emulator has no Health Connect data and this session did not sign
+in on it; what this ticket verified is that the code no longer hides the
+readings, not that a real phone shows them.
+
 ## Open items / known gaps as of this entry
 
 
