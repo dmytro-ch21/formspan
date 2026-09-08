@@ -18,7 +18,7 @@ import type { ZoneNumber } from './hrZones';
  * A deliberate, reversible call, recorded so nobody re-derives it. Every other
  * catalog in this app is server-owned (`techniques`, `exercises`) and
  * console-editable, so the default expectation would be a `runtype` module, a
- * migration, a seed file and a `/v1` route. This is eleven rows of stable
+ * migration, a seed file and a `/v1` route. This is twelve rows of stable
  * domain knowledge — what a fartlek is has not changed since Gösta Holmér —
  * with no per-user state and nothing an admin needs to edit per deployment.
  * Against that, a local constant buys the thing the server-owned catalogs

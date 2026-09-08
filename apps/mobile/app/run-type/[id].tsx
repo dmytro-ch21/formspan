@@ -129,7 +129,12 @@ export default function RunTypeScreen() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <RNView style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      {/* Matches `technique/[id].tsx`'s section labels: a screen reader can
+          jump between headings, and without the role these read as loose
+          uppercase text between paragraphs. */}
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        {title}
+      </Text>
       {children}
     </RNView>
   );

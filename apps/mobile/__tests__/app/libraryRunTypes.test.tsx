@@ -207,6 +207,28 @@ describe('the sport filter', () => {
   });
 });
 
+describe('the focus filter', () => {
+  it('narrows the list to one focus, and does not touch the others', async () => {
+    render(<LibraryScreen />);
+    await waitFor(() => expect(screen.getByTestId('run-type-easy')).toBeTruthy());
+
+    // The Focus control only exists under the Running chip — `usesFacet` keys
+    // on the SELECTED sport, exactly as muscle/movement do for strength. Under
+    // "All" there is deliberately no control, so the chip comes first.
+    fireEvent.press(screen.getByTestId('library-filter-running'));
+    fireEvent.press(await screen.findByTestId('library-facet-focus'));
+    fireEvent.press(await screen.findByTestId('library-option-focus-Speed'));
+
+    await waitFor(() => expect(screen.queryByTestId('run-type-easy')).toBeNull());
+    // Speed is strides and sprints; everything else must be gone, and both of
+    // those must remain — a filter that emptied the list entirely would pass a
+    // test that only asserted the excluded rows had disappeared.
+    expect(screen.getByTestId('run-type-strides')).toBeTruthy();
+    expect(screen.getByTestId('run-type-sprints')).toBeTruthy();
+    expect(screen.queryByTestId('run-type-long')).toBeNull();
+  });
+});
+
 describe('the merge', () => {
   it('interleaves runs with exercises alphabetically rather than appending them', async () => {
     mockModules = [RUNNING_ON, STRENGTH_ON];
