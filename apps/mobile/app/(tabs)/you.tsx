@@ -188,7 +188,8 @@ export default function YouScreen() {
   */
   const [friendCount, setFriendCount] = useState<number | null>(null);
   // W16/#945 — does this ACCOUNT have any VO2max reading on the server, over
-  // the same three-year window the trend screen fetches? Read on focus like
+  // the same window the trend screen fetches (the most the server allows,
+  // ~13 months — see `vo2MaxFetchWindow`)? Read on focus like
   // the phase and friend count, so the row below can be data-first: readings
   // from a previous phone, or from the other platform, are the athlete's
   // whatever this handset can read from. `false` until answered — a fetch

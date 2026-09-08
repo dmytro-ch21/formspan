@@ -128,7 +128,8 @@ export default function Vo2MaxTrendScreen() {
         {(() => {
           const state = vo2MaxScreenState({
             loading,
-            // The server's answer over the whole three-year fetch window —
+            // The server's answer over the whole fetch window (the most the
+            // server allows, ~13 months — see `vo2MaxFetchWindow`) —
             // NOT `!series.empty`, which is also set when readings exist but
             // none fall in the selected range, and would let a gate hide the
             // chart and the range picker from an athlete who has data.

@@ -20923,9 +20923,9 @@ on every sync pass — were hidden behind "isn't available on this device".
   reads "read from Apple Health", chart shows.
 - **Readings exist but the toggle is now off** (either platform): the chart
   still shows, AND the range picker with it. Data the athlete has is never
-  hidden by a setting — over the whole three-year fetch window, not only the
-  selected range (the first version of this fix got that wrong; review
-  caught it).
+  hidden by a setting — over the whole fetch window (the most the server
+  allows, ~13 months), not only the selected range (the first version of
+  this fix got that wrong; review caught it).
 - **Readings exist only outside the selected range** (e.g. fourteen months
   of history, default six-month view): the range picker is present and
   switching to `1Y`/`All` shows them; the "Nothing in this range" sentence

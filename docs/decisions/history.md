@@ -63866,6 +63866,22 @@ fetch pulls up to the endpoint's row cap to answer a boolean; the endpoint
 has no `limit`, and with a thirteen-month window of daily-ish estimates the
 cost is bounded. A `limit=1` on the backend is the right follow-up.
 
+**And one false red, which is the N91 incident with the sign flipped.** The
+`verify` run on the round-two commit failed `typecheck:mobile` with
+`you.tsx(20,46): 'vo2MaxFetchWindow' is declared but its value is never
+read` — on a commit in which line 312 calls it. The third `ac-verifier` pass
+was running at the same time, and it had been asked to mutate exactly that
+call site (swap the helper for date-only bounds) and restore it; `tsc` sits
+late in the chain and read the file inside that window. The committed file
+was fine, the working tree was clean by the time anyone looked, and the
+apparatus reported a defect that existed for about a minute in a reviewer's
+scratch state. N91 shipped a mutation because `git add -A` overlapped a
+reviewer; this reported one because `verify` did. Same rule, other
+direction: **nothing that reads the tree as evidence runs while a mutating
+reviewer is in it** — confirmed by `git show HEAD:…` before believing either
+the red or the green, and `verify` re-run alone on a tree `git status`
+showed clean.
+
 **What this does not do.** Nothing here changes what is uploaded — W15's
 `notPermitted` covers a refused VO₂max grant on the sync side, and N527
 (#949) is the Settings surface for it. And the last criterion is still a
