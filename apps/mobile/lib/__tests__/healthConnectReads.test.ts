@@ -20,6 +20,20 @@
  * is the contract.
  */
 
+import {
+  HealthConnectPermissionError,
+  isHealthConnectPermissionError,
+  queryHeartRateSamples,
+  queryOtherExerciseSessions,
+  queryVo2MaxReadings,
+} from '../healthConnect';
+
+// Real import first, jest.mock calls after — the same shape as
+// `healthConnectSync.test.ts`, and for the same reason: babel-jest HOISTS
+// every `jest.mock` above every import regardless of where it sits in the
+// file, so the Platform and native-module fakes below are in place before
+// `../healthConnect` evaluates either way. Writing it in source order would
+// be a lie about execution order, and it is what `import/first` flags.
 // Platform first, before anything imports `react-native` — `load()` reads
 // `Platform.OS` at module scope, so the override has to be in place before
 // `../healthConnect` is evaluated. This is jest-expo's own Platform module,
@@ -55,14 +69,6 @@ jest.mock('react-native-health-connect', () => ({
   requestPermission: (perms: unknown[]) => Promise.resolve(perms),
   readRecords: (recordType: string, options: unknown) => mockReadRecords(recordType, options),
 }));
-
-import {
-  HealthConnectPermissionError,
-  isHealthConnectPermissionError,
-  queryHeartRateSamples,
-  queryOtherExerciseSessions,
-  queryVo2MaxReadings,
-} from '../healthConnect';
 
 /** The exact shape the RN bridge hands JS for a rejected native promise:
  *  an `Error` carrying the vendor `code`. */
