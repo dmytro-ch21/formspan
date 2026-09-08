@@ -21031,3 +21031,55 @@ on every sync pass — were hidden behind "isn't available on this device".
 
 1. Upload a bluetooth/hr_monitor sample for a finished session via the API, recompute its metrics: `hr_direct_count` ≥ 1 in the response and on a subsequent GET.
 2. Recompute a session that has only Apple Health samples: `hr_direct_count: 0`, every other field unchanged from the pre-N528 value.
+
+## N530 — "+ Set" after a drop is a working set; per-exercise Done folds a group (`apps/mobile/app/session/[id].tsx`, `apps/mobile/lib/sessions.ts`'s `emptyWorkingSet`, `apps/mobile/lib/sessionCollapse.ts`, `apps/mobile/lib/sessionStore.ts`'s `readCollapsedGroups`/`saveCollapsedGroups`, `apps/mobile/lib/db.ts` v39, #961)
+
+### Automated (`lib/__tests__/addSetAfterDrop.test.ts`, `lib/__tests__/sessionCollapse.test.ts`, `lib/__tests__/collapsedGroupsStore.test.ts`, `lib/__tests__/schema.test.ts`, `__tests__/app/strengthSessionCollapse.test.ts`)
+
+**"+ Set" after a drop**
+
+- Golden, permanent: `[working 100×8, drop 80×8]` → "+ Set" yields `working`, weight 100, reps 8, `completed: false`, `performed_at: null`, at position 2.
+- After a warmup `[warmup 60×10]` → `working`, carrying 60×10 (the decided behaviour — type from the user's rule, numbers from `emptyDropSet`'s reasoning).
+- `[working 100×8, drop 80, drop 60]` → the carry walks back past every drop to 100×8.
+- Group boundary: a squat group that is all drops does not borrow the bench above it; it falls back to its own drop's numbers, typed `working`.
+- `afterIndex` pointing at another exercise carries nothing (blank row) rather than the wrong exercise's numbers.
+- `backoff` / `amrap` / `failure` / `working` all carry; only `drop` is skipped.
+- "+ Drop" (`emptyDropSet`) still yields a drop; `emptySet` itself still carries `set_type` (pinned, so a default change is noticed as a change to the drop path).
+- Screen: `addSet` calls `emptyWorkingSet`, the screen no longer imports `emptySet`, `addDropSet` still calls `emptyDropSet`.
+
+**Done / collapse — pure**
+
+- `groupKeys`: `squat / bench / squat` → `squat#0, bench#0, squat#1`; adding a set above a group leaves its key unchanged; empty session → `[]`.
+- `toggleGroup`: collapse, re-expand, other keys untouched, input never mutated.
+- `parseCollapsed`: round-trips its own output; `null` / `undefined` / `''` / non-JSON / an object / a number → `[]`; a mixed array keeps only its strings.
+- `summariseGroup`: `2 of 3 done` with two ticked; `0 of N` with none (Done ticks nothing); `N of N` only when all are; singular "1 set"; headline is the last NON-drop row while the total counts the drop; a trailing drop is skipped for the headline; an all-drop group uses the drop; nothing-recorded rows omit the middle term; units and duration scale honoured; the input rows are byte-identical after the call.
+
+**Done / collapse — stored (real SQLite fixture)**
+
+- Fresh session → `[]` and `collapsed_json = '[]'`.
+- Round-trip, then toggle back to `[]`.
+- **Writes nothing to any set**: after `saveCollapsedGroups`, `sets_json`, `dirty` and `updated_at` are byte-identical, and the session read back has exactly the `completed` flags written at start (one true, one false).
+- A `saveLocalSets` after Done leaves the fold in place.
+- A pull (`upsert` with the server's copy, `dirty = 0`) lands the new sets AND leaves `collapsed_json` alone.
+- Unknown session / another user's read → `[]`; another user's save changes nothing; an unreadable blob → `[]`.
+- Schema: fresh install at v39; a device stamped 38 gains `collapsed_json` defaulting to `'[]'` for every existing session.
+
+**Screen (structural)**
+
+- The `collapsed` `useState` precedes the first early return (hook order).
+- The collapsed branch (`summary-*`, `expand-*`) returns before `done-*`, the set rows, `add-set-*` and `add-drop-*`.
+- `toggleCollapsed` contains none of `setSets`, `completed`, `commit(`, `persist`, `saveLocalSets`, `stopTimerForStructureChange`; exactly two call sites (the Done chip, the folded header).
+- The 2-tap path's two `onPress` wirings (`addSet(...)`, `toggleDone(...)`) are verbatim unchanged.
+
+### Mutation checks (all confirmed applied, red on the named test, restored, baseline green)
+
+M1a old carry restored · M1b numbers from the drop · M2 summary claims all ticked · M2b headline from the drop · M3 save marks dirty · M3b save touches `sets_json` · M3c save bumps `updated_at` · M4 upsert resets `collapsed_json` · M5 `SCHEMA_VERSION` back to 38 · M5b column removed from CREATE and ALTER · M6 screen back to `emptySet` · M7 Done ticks every set · M8 hook moved below the early return (also `react-hooks/rules-of-hooks` error).
+
+### Needs a device — NEEDS HUMAN EVIDENCE (latched on #961)
+
+- Log a working set, add a drop, tap "+ Set" — the new row is a normal set prefilled with the WORKING weight, not the drop weight, and reads "set N", not "drop off set N".
+- Tap Done on an exercise; background the app 30 s; return — still collapsed, the summary's ticked-of-total matches the rows, tapping the header re-expands and every row is unchanged (same numbers, same ticks).
+- Kill the app (swipe up) mid-session with a group folded; relaunch and open the session — the group is still folded on the first paint, with no flash of the open rows.
+- Fold a group with an unticked set in it: the summary says "N-1 of N done", and expanding it shows the unticked set still unticked.
+- With a group folded, "+ Set" / "+ Drop" / Rest / the unit chips are absent for that exercise and present for the others; the rest timer bar, Finish and the two-tap "+ Set" → ✓ path on an open group are unchanged.
+- A finished session with a folded group: the Done chip is gone, the header still opens the group.

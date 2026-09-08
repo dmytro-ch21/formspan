@@ -64110,6 +64110,190 @@ cap, and it is the one that grows with it — at eight, an assignee only means
 A dependent chain is still dispatched a batch at a time, and a slot is freed
 by a merge plus an unassign, not by a merge alone.
 
+## 2026-09-08 — N530 (#961): "+ Set" after a drop minted another drop, and Done now folds an exercise to one honest line (#973)
+
+Two of the user's 2026-09-08 items, 8 and 7, both in
+`apps/mobile/app/session/[id].tsx` and filed together so they could not
+collide. One is a bug with a one-call-site root cause; the other is the first
+piece of per-exercise view state this screen has ever had, and the interesting
+decision in it is what it must NOT do.
+
+### 8 — the bug, and why the fix is a wrapper rather than a default
+
+**User's words:** *"when we have a drop set and we click on create a new set it
+creates a drop automatically. If we click set it should create a normal set, if
+drop it should create drop."*
+
+`addSet` built its row with `emptySet(exerciseID, afterIndex + 1,
+sets[afterIndex])`, and `emptySet` carries `set_type: from?.set_type ??
+'working'`. The carry of weight and reps is the deliberate two-tap saver N184
+measured; the carry of the TYPE was never intended by anyone and was simply
+what a spread of the previous row does. So the set after a drop was born a
+drop, and "+ Set" was a second "+ Drop" wearing the wrong label.
+
+**The fix is `emptyWorkingSet(sets, exerciseID, afterIndex)` in
+`lib/sessions.ts`, and `emptySet` itself is untouched.** Every other caller of
+`emptySet` (template start, the run/HealthKit/detected-activity paths, the
+picker) passes no `from` at all, so the type carry is only ever observable
+through two wrappers: `emptyDropSet`, which relies on the carry and then
+overrides it to `drop`, and now this one, which overrides it to `working`.
+Changing `emptySet`'s default would have changed `emptyDropSet`'s input for no
+gain; a wrapper changes exactly the one call site that was wrong. A comment on
+`emptySet`'s `set_type` line now names the trap, and `addSetAfterDrop.test.ts`
+pins that `emptySet` STILL carries the type — so a future tidy-up that "fixes"
+the default finds out it is changing the drop path too.
+
+**Numbers carry from the nearest preceding NON-drop row, not from the drop.**
+The ticket called the alternative "the same surprise in a different coat", and
+it is: a drop's weight is the one the athlete just lowered TO, so a normal set
+prefilled with 80 after a 100 kg working set is wrong in the same way the
+drop-typed row was. The walk back stops at the group boundary — a squat group
+does not borrow the bench above it (tested).
+
+**The decision the issue left open — "+ Set" after a warmup — is `working`,
+carrying the warmup's numbers.** The TYPE follows the user's rule (a "normal"
+set). The NUMBERS follow `emptyDropSet`'s own reasoning, quoted from its doc:
+an invented 80% "looks helpful and is a guess about somebody's training", and
+editing up from the number just lifted is cheaper than clearing a blank. A
+jump from 60 to "probably 100" would be exactly that guess. `backoff`, `amrap`
+and `failure` rows are performed sets at a real weight and carry the same way;
+only `drop` is skipped, because only a drop's weight is wrong by construction.
+An orphaned all-drop group (see `setOrdinals`) has no honest source and falls
+back to the drop's numbers, still typed `working` — the only numbers on screen
+beat a row typed from nothing. All three of these are one branch each in
+`emptyWorkingSet` and trivially reversible; they are stated here so the next
+person knows they were chosen, not defaulted into.
+
+**Golden test, permanent** (`lib/__tests__/addSetAfterDrop.test.ts`): `[working
+100×8, drop 80×8]` + "+ Set" → `working`, weight 100, reps 8, `completed:
+false`, `performed_at: null`, position 2. Mutation-verified two ways, both
+confirmed applied by a non-empty diff before the run and confirmed restored by
+an empty one after: restore the exact old carry (M1a) → four tests red
+including the golden one; force the type but copy the drop's numbers (M1b) →
+the weight assertion red on its own. The screen's own structural test
+(`__tests__/app/strengthSessionCollapse.test.ts`) pins that `addSet` calls
+`emptyWorkingSet` and that the screen no longer imports `emptySet` at all
+(M6).
+
+### 7 — Done, and the thing it must not do
+
+**User's words:** *"Sets should be collapsable with done button - this exercise
+is done."*
+
+Each exercise header gets a **Done** chip beside Rest. Tapping it renders the
+group as one `Pressable`: the name, a summary line — `3 sets · 8 × 100kg · 2 of
+3 done` — and a chevron. Tapping that header re-expands. While folded, "+ Set",
+"+ Drop", every set row, every per-set chip, the reorder/swap/remove row and
+the suggestion hint are simply not rendered: the collapsed branch sits BEFORE
+the full header in the group `map` and returns, so a folded group costs one
+`Pressable` rather than a tree of hidden controls.
+
+**Done writes nothing to any set. It is view state, not a data write.** This
+is the whole design, and it is the sentence the ticket asked to have written
+down: the tempting version marks every row `completed: true` on the way down,
+and that fabricates performed sets — precisely what N473 spent a ticket
+preventing (its `completed` flag "written but never read back" was the bug that
+zeroed every session's volume; inventing `completed: true` here would be the
+same mechanism pointed the other way). So an unticked set under a folded
+header STAYS unticked, and the summary counts the ticks it *finds*: "2 of 3
+done", never "done". The screen's `toggleCollapsed` touches the `collapsed`
+state and its own column only — not `sets`, not `completed`, not `commit`,
+not `persist`, not the timer (it is not a structural change: no index moves,
+so a running countdown is left alone). Asserted three ways, each mutation-
+tested: `summariseGroup` is pure and counts real ticks (M2 — making it claim
+"all ticked" goes red on four tests); `saveCollapsedGroups` leaves
+`sets_json`, `dirty` and `updated_at` byte-identical against a real SQLite
+fixture (M3, M3b, M3c — adding any of the three to the UPDATE goes red); and
+the screen's `toggleCollapsed` body is pinned to contain none of the words
+that could reach a set (M7 — inserting a `setSets(...completed: true)` line
+goes red).
+
+**Where the state lives, and why it is a column and not a pref.** Per session,
+local, survives an app kill mid-workout, never synced — the issue said
+`sessionStore`, and that is where it went: `local_sessions.collapsed_json`
+(schema v38 → v39, `addColumnIfMissing`, default `'[]'`; the v38-upgrade case
+has its own test in `schema.test.ts`, M5 reverts the version and goes red, M5b
+deletes the column from both the CREATE and the ALTER branch and goes red).
+The `prefs` table was the alternative — `PREF_GOALS_COLLAPSED` is a precedent
+for a collapsed flag — but a key per session would leak forever, and a
+session's view state should die with the session row, which a column does for
+free. Three things are deliberately true of it:
+
+- **It is not on `Session`.** `toSession` ignores the column, so it can never
+  ride out on a push. Read and written only by `readCollapsedGroups` /
+  `saveCollapsedGroups`.
+- **The upsert's SET list leaves it alone**, so the pull's copy of a session
+  cannot unfold what the athlete folded (M4 adds `collapsed_json = '[]'` to the
+  SET list and the "pull does not reset it" test goes red).
+- **`saveCollapsedGroups` touches neither `dirty` nor `updated_at`.** Not
+  `dirty`, because folding an exercise is not an edit the server needs and
+  marking the row dirty would push an unchanged set list for nothing. Not
+  `updated_at`, because the pull's newer-than guard reads it, and a view-state
+  tap must not be able to block a legitimate pull.
+
+**Keys, not indices.** A group has no id (a set has none either, and a
+group's first index moves every time a set is added above it), so the state is
+keyed `exerciseID#occurrence` — `squat#0`, `bench#0`, `squat#1` for a squat /
+bench / squat session. That survives every index shift (tested: adding a set
+above a group leaves its key unchanged) and keeps the two squat blocks of a
+circuit independently collapsible, which keying on the exercise alone would
+not. What it does not survive is two same-exercise blocks swapping relative
+order; `moveGroup` moves by one place and two adjacent same-exercise groups
+have already merged, so the screen's own controls cannot produce that.
+
+**The summary's shape** is `N sets · <describeSet of the last non-drop row> ·
+ticked of N done`. The headline is the last non-drop row for the same reason
+`emptyWorkingSet` skips drops — it is the number the athlete is working at.
+`total` and `ticked` count every row INCLUDING drops, because each drop has its
+own tick on this screen: "2 of 3 done" over `[working, drop, working]` is what
+the athlete sees on expanding it, whereas counting ordinals would say "2 of 2"
+over the same rows, which is a lie about the drop. The middle term is omitted
+when the headline row has nothing recorded yet ("3 sets · 0 of 3 done") —
+"Not recorded" in the middle of a summary is noise. Every one of those states
+is constructed directly in `sessionCollapse.test.ts` from a set list, with no
+rendering, so there is no collapsed/expanded/summary state a test asserts that
+the screen could not reach.
+
+**Read before first paint.** `load` reads the folded keys before `setSession`,
+so a session opened cold does not flash every group open and then snap shut.
+A read failure reads as "nothing collapsed" — the worst case of that is one
+tap on Done; the worst case of the opposite default is every exercise shut on
+a screen the athlete is trying to log into. Writes are fire-and-forget: the
+screen state is the source of truth while the screen is up, and the column
+exists for the next cold start.
+
+**Done is gated on `finished` like every other header control** — a finished
+session is a record, not a workspace — but a group folded before Finish stays
+folded and its header still opens it. And Done is `textMuted` like Rest, not
+`accent.ink`: N184's rule is that the accent is for what was EARNED, and
+folding a group earns nothing — it ticks nothing.
+
+### The non-regressions, re-measured
+
+- **Logging a normal set: two taps before, two taps after.** Measured the way
+  N184 measured it — by reading the path — and then pinned: "+ Set"
+  (`addSet` → `commit`) and the row's ✓ (`toggleDone`). Neither handler
+  changed; Done is a third control on the header, not a step on that path,
+  and the structural test asserts both `onPress` wirings verbatim.
+- **Rest timer, Finish, `KeyboardAwareScrollView`, `sessionStore`'s sync
+  paths: untouched.** The `sessionStore.ts` diff is two additive functions and
+  one `Row` field; `db.ts` is one column and one migration branch.
+- **Hook order.** `useState` for `collapsed` sits with the other hooks, above
+  the early returns, with a comment saying why. M8 moved it below `groups` and
+  both guards fired: `react-hooks/rules-of-hooks` as an error, and the
+  structural test red. The typechecker, as this file's history records,
+  would have said nothing.
+- **Lint ratchet** within budget; no new warnings.
+
+### What the suite cannot see
+
+A static source test proves where the collapsed branch sits in the file, not
+that it renders; "the folded branch draws the rows anyway" (M9) would survive
+every automated check here. That is exactly the shape of the two evidence
+items latched on #961: "+ Set" after a drop carrying the working weight on a
+real phone, and Done surviving a 30-second background with the summary
+correct and the header re-expanding.
+
 ## Open items / known gaps as of this entry
 
 
