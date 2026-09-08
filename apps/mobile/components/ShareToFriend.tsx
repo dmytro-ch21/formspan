@@ -55,9 +55,91 @@ export function ShareToFriend({
   disabledReason?: string;
   testID?: string;
 }) {
-  const getToken = useAuthToken();
   const accent = useAccent();
   const [open, setOpen] = useState(false);
+
+  // Reset rather than merely hide, matching web's copy: `visible={open &&
+  // !disabled}` alone leaves `open` true behind a hidden sheet, so re-enabling
+  // the button pops it open again with nobody having asked. During render, not
+  // in an effect — this is derivation, and `react-hooks/set-state-in-effect`
+  // is right to object to the effect version.
+  if (open && disabled) setOpen(false);
+
+  return (
+    <>
+      <Pressable
+        onPress={() => setOpen(true)}
+        disabled={disabled}
+        style={[styles.trigger, { borderColor: accent.accent }, disabled && styles.disabled]}
+        accessibilityRole="button"
+        // The reason is IN THE LABEL, not only in a hint. A disabled control
+        // with no explanation is indistinguishable from a broken one, and a
+        // `accessibilityHint` on a disabled element is not reliably announced.
+        accessibilityLabel={disabled && disabledReason ? `Share. ${disabledReason}` : 'Share'}
+        accessibilityState={{ disabled }}
+        testID={testID ?? 'share-open'}
+      >
+        <Text style={[styles.triggerText, { color: accent.ink }]}>Share</Text>
+      </Pressable>
+      {/* Said where it applies rather than inside a sheet you cannot open. */}
+      {disabled && disabledReason && (
+        <Text
+          style={styles.reason}
+          // The button's accessibilityLabel already carries this sentence, and
+          // it has to — a `title`-style hint is not reliably announced on a
+          // disabled control. Left visible here for everyone else, and hidden
+          // from assistive tech so it is not read out twice in a row.
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          testID="share-disabled-reason"
+        >
+          {disabledReason}
+        </Text>
+      )}
+
+      <ShareSheet
+        resourceType={resourceType}
+        resourceId={resourceId}
+        // `open && !disabled` rather than `open`, so going disabled while the
+        // sheet is up does not leave it over a control that can no longer
+        // close it. The render-time reset above is what stops `open` going
+        // stale behind it.
+        open={open && !disabled}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  );
+}
+
+/**
+ * The sheet on its own, without the trigger — N531/#962.
+ *
+ * `ShareToFriend` above is trigger + sheet, which is the right shape for a
+ * detail screen with room for a bordered Share button. The food day view's
+ * per-row menu (`EntryMenuSheet`) is a different shape: its Share is a row
+ * inside another sheet, and the friend picker has to open from there once
+ * that sheet has closed. So the picker is controlled by the caller here —
+ * `open`/`onClose` — and the gating (`disabled` + reason) stays with whoever
+ * owns the trigger, since it is the trigger that has to explain a refusal.
+ *
+ * Friend list, sent-to state and the error live INSIDE this component, so
+ * a caller that mounts one sheet per resource (keyed on the resource id) gets
+ * a clean "Sent ✓" ledger per thing shared, and a caller that keeps one
+ * mounted across opens keeps the list it already fetched.
+ */
+export function ShareSheet({
+  resourceType,
+  resourceId,
+  open,
+  onClose,
+}: {
+  resourceType: string;
+  resourceId: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const getToken = useAuthToken();
+  const accent = useAccent();
   const [friends, setFriends] = useState<FriendCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
@@ -116,190 +198,147 @@ export function ShareToFriend({
     [getToken, resourceType, resourceId],
   );
 
-  // Reset rather than merely hide, matching web's copy: `visible={open &&
-  // !disabled}` alone leaves `open` true behind a hidden sheet, so re-enabling
-  // the button pops it open again with nobody having asked. During render, not
-  // in an effect — this is derivation, and `react-hooks/set-state-in-effect`
-  // is right to object to the effect version.
-  if (open && disabled) setOpen(false);
-
   return (
-    <>
+    <Modal
+      visible={open}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      {/*
+        The backdrop is a SIBLING of the sheet, not its parent, and that is
+        not a style choice.
+
+        The first version wrapped everything in one `Pressable` scrim with
+        `accessibilityRole="button"` and a "Close" label. An accessibility
+        element does not expose its descendants on iOS, so VoiceOver reads
+        the whole sheet as a single screen-sized "Close" button — friend
+        rows, retry and Done all unreachable. `app/library.tsx`
+        records this exact bug and this exact fix ("opening the sheet
+        announced 'Close filter options, button' instead of the sheet").
+
+        A dimming view is not an element by Apple's own convention.
+        Dismissal is the Done button and the two-finger escape, both of which
+        this sheet has. As a sibling it also needs no
+        `onStartShouldSetResponder` trick to stop taps falling through.
+      */}
       <Pressable
-        onPress={() => setOpen(true)}
-        disabled={disabled}
-        style={[styles.trigger, { borderColor: accent.accent }, disabled && styles.disabled]}
-        accessibilityRole="button"
-        // The reason is IN THE LABEL, not only in a hint. A disabled control
-        // with no explanation is indistinguishable from a broken one, and a
-        // `accessibilityHint` on a disabled element is not reliably announced.
-        accessibilityLabel={disabled && disabledReason ? `Share. ${disabledReason}` : 'Share'}
-        accessibilityState={{ disabled }}
-        testID={testID ?? 'share-open'}
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        testID="share-backdrop"
+      />
+      <RNView
+        style={styles.sheetWrap}
+        // `box-none` so the wrapper itself does not eat the taps meant for
+        // the backdrop behind it.
+        pointerEvents="box-none"
+        // `transparent` is an over-full-screen presentation, so the screen
+        // behind stays in the hierarchy. This is the prop that makes focus
+        // containment certain rather than likely — and it works HERE
+        // because the wrapper now has a sibling to hide.
+        accessibilityViewIsModal
+        onAccessibilityEscape={onClose}
       >
-        <Text style={[styles.triggerText, { color: accent.ink }]}>Share</Text>
-      </Pressable>
-      {/* Said where it applies rather than inside a sheet you cannot open. */}
-      {disabled && disabledReason && (
-        <Text
-          style={styles.reason}
-          // The button's accessibilityLabel already carries this sentence, and
-          // it has to — a `title`-style hint is not reliably announced on a
-          // disabled control. Left visible here for everyone else, and hidden
-          // from assistive tech so it is not read out twice in a row.
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          testID="share-disabled-reason"
-        >
-          {disabledReason}
-        </Text>
-      )}
+          <View style={styles.sheet} testID="share-sheet">
+            <Text style={styles.heading}>Send a copy to</Text>
 
-      <Modal
-        // `visible={open && !disabled}` rather than `open`, so going disabled
-        // while the sheet is up does not leave it over a control that can no
-        // longer close it. The render-time reset above is what stops `open`
-        // going stale behind it.
-        visible={open && !disabled}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-      >
-        {/*
-          The backdrop is a SIBLING of the sheet, not its parent, and that is
-          not a style choice.
-
-          The first version wrapped everything in one `Pressable` scrim with
-          `accessibilityRole="button"` and a "Close" label. An accessibility
-          element does not expose its descendants on iOS, so VoiceOver reads
-          the whole sheet as a single screen-sized "Close" button — friend
-          rows, retry and Done all unreachable. `app/library.tsx`
-          records this exact bug and this exact fix ("opening the sheet
-          announced 'Close filter options, button' instead of the sheet").
-
-          A dimming view is not an element by Apple's own convention.
-          Dismissal is the Done button and the two-finger escape, both of which
-          this sheet has. As a sibling it also needs no
-          `onStartShouldSetResponder` trick to stop taps falling through.
-        */}
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => setOpen(false)}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          testID="share-backdrop"
-        />
-        <RNView
-          style={styles.sheetWrap}
-          // `box-none` so the wrapper itself does not eat the taps meant for
-          // the backdrop behind it.
-          pointerEvents="box-none"
-          // `transparent` is an over-full-screen presentation, so the screen
-          // behind stays in the hierarchy. This is the prop that makes focus
-          // containment certain rather than likely — and it works HERE
-          // because the wrapper now has a sibling to hide.
-          accessibilityViewIsModal
-          onAccessibilityEscape={() => setOpen(false)}
-        >
-            <View style={styles.sheet} testID="share-sheet">
-              <Text style={styles.heading}>Send a copy to</Text>
-
-              {error && (
-                <RNView style={styles.errorBlock}>
-                  <Text style={styles.error} accessibilityLiveRegion="polite">
-                    {error}
-                  </Text>
-                  {friends === null && (
-                    // Reachable only for a failed LOAD. Without it the only
-                    // retry is close-and-reopen, which nothing announces.
-                    <Pressable
-                      onPress={() => setAttempt((n) => n + 1)}
-                      accessibilityRole="button"
-                      testID="share-retry"
-                    >
-                      <Text style={[styles.retry, { color: accent.ink }]}>Try again</Text>
-                    </Pressable>
-                  )}
-                </RNView>
-              )}
-
-              {/* null is LOADING and [] is "no friends yet". A failed load must
-                  render as NEITHER — it renders as the error above, because
-                  "you have no friends" is a cruel way to say "we could not
-                  ask". */}
-              {friends === null && !error && (
-                <ActivityIndicator style={styles.loader} accessibilityLabel="Loading friends" />
-              )}
-
-              {friends?.length === 0 && (
-                <Text style={styles.muted}>
-                  Nobody yet. Add a training partner from your profile, then send them this.
+            {error && (
+              <RNView style={styles.errorBlock}>
+                <Text style={styles.error} accessibilityLiveRegion="polite">
+                  {error}
                 </Text>
-              )}
+                {friends === null && (
+                  // Reachable only for a failed LOAD. Without it the only
+                  // retry is close-and-reopen, which nothing announces.
+                  <Pressable
+                    onPress={() => setAttempt((n) => n + 1)}
+                    accessibilityRole="button"
+                    testID="share-retry"
+                  >
+                    <Text style={[styles.retry, { color: accent.ink }]}>Try again</Text>
+                  </Pressable>
+                )}
+              </RNView>
+            )}
 
-              {/* BOUNDED AND SCROLLABLE, matching web's `max-h-64 overflow-y-auto`.
-                  Unbounded, a long enough list pushes the top rows off the top
-                  of the screen — not merely cramped, unreachable, since the
-                  sheet is anchored to the bottom and has no scroll of its own.
-                  The footnote and Done must stay visible for the same reason. */}
-              <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-                {friends?.map((f) => {
-                  const sent = sentTo.includes(f.username);
-                  return (
-                    <Pressable
-                      key={f.username}
-                      onPress={() => send(f.username)}
-                      disabled={sending !== null || sent}
-                      style={[styles.row, (sending !== null || sent) && styles.rowBusy]}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        sent ? `Sent to ${f.username}` : `Send to ${f.username}`
-                      }
-                      accessibilityState={{
-                        disabled: sending !== null || sent,
-                        busy: sending === f.username,
-                      }}
-                      testID={`share-to-${f.username}`}
-                    >
-                      <RNView style={styles.rowBody}>
-                        <Text style={styles.handle} numberOfLines={1}>
-                          @{f.username}
-                        </Text>
-                        {f.display_name && (
-                          <Text style={styles.muted} numberOfLines={1}>
-                            {f.display_name}
-                          </Text>
-                        )}
-                      </RNView>
-                      <Text
-                        style={[styles.state, sent && { color: accent.ink }]}
-                        accessibilityLiveRegion="polite"
-                      >
-                        {sending === f.username ? 'Sending…' : sent ? 'Sent ✓' : ''}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+            {/* null is LOADING and [] is "no friends yet". A failed load must
+                render as NEITHER — it renders as the error above, because
+                "you have no friends" is a cruel way to say "we could not
+                ask". */}
+            {friends === null && !error && (
+              <ActivityIndicator style={styles.loader} accessibilityLabel="Loading friends" />
+            )}
 
-              {/* Said once, here, rather than in a hint nobody opens: it is the
-                  property that makes a share safe to accept. */}
-              <Text style={styles.footnote}>
-                They get their own copy. Your later edits stay yours.
+            {friends?.length === 0 && (
+              <Text style={styles.muted}>
+                Nobody yet. Add a training partner from your profile, then send them this.
               </Text>
+            )}
 
-              <Pressable
-                onPress={() => setOpen(false)}
-                style={styles.close}
-                accessibilityRole="button"
-                testID="share-close"
-              >
-                <Text style={styles.closeText}>Done</Text>
-              </Pressable>
-            </View>
-        </RNView>
-      </Modal>
-    </>
+            {/* BOUNDED AND SCROLLABLE, matching web's `max-h-64 overflow-y-auto`.
+                Unbounded, a long enough list pushes the top rows off the top
+                of the screen — not merely cramped, unreachable, since the
+                sheet is anchored to the bottom and has no scroll of its own.
+                The footnote and Done must stay visible for the same reason. */}
+            <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+              {friends?.map((f) => {
+                const sent = sentTo.includes(f.username);
+                return (
+                  <Pressable
+                    key={f.username}
+                    onPress={() => send(f.username)}
+                    disabled={sending !== null || sent}
+                    style={[styles.row, (sending !== null || sent) && styles.rowBusy]}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      sent ? `Sent to ${f.username}` : `Send to ${f.username}`
+                    }
+                    accessibilityState={{
+                      disabled: sending !== null || sent,
+                      busy: sending === f.username,
+                    }}
+                    testID={`share-to-${f.username}`}
+                  >
+                    <RNView style={styles.rowBody}>
+                      <Text style={styles.handle} numberOfLines={1}>
+                        @{f.username}
+                      </Text>
+                      {f.display_name && (
+                        <Text style={styles.muted} numberOfLines={1}>
+                          {f.display_name}
+                        </Text>
+                      )}
+                    </RNView>
+                    <Text
+                      style={[styles.state, sent && { color: accent.ink }]}
+                      accessibilityLiveRegion="polite"
+                    >
+                      {sending === f.username ? 'Sending…' : sent ? 'Sent ✓' : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {/* Said once, here, rather than in a hint nobody opens: it is the
+                property that makes a share safe to accept. */}
+            <Text style={styles.footnote}>
+              They get their own copy. Your later edits stay yours.
+            </Text>
+
+            <Pressable
+              onPress={onClose}
+              style={styles.close}
+              accessibilityRole="button"
+              testID="share-close"
+            >
+              <Text style={styles.closeText}>Done</Text>
+            </Pressable>
+          </View>
+      </RNView>
+    </Modal>
   );
 }
 

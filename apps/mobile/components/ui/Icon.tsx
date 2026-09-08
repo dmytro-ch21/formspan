@@ -84,6 +84,18 @@ const EXTRA = {
   /** Collapse the timer to the top bar; the chevron the other way expands it. */
   minimise: [{ t: 'p', d: 'M5 14h14M12 4v6M9 7l3 3 3-3' }],
   expand: [{ t: 'p', d: 'M5 10h14M12 20v-6M9 17l3-3 3 3' }],
+  /**
+   * "More" — the three-dot overflow on a food entry row (N531/#962). Chrome
+   * in the same sense as the chevrons: every operating system draws this
+   * glyph, and the kit has no equivalent. Three tiny circles rather than one
+   * path: this renderer strokes with no fill, and a stroked circle of radius
+   * 1 at stroke 1.8 reads as a solid dot, which is the whole drawing.
+   */
+  more: [
+    { t: 'c', cx: 5, cy: 12, r: 1 },
+    { t: 'c', cx: 12, cy: 12, r: 1 },
+    { t: 'c', cx: 19, cy: 12, r: 1 },
+  ],
 } as const satisfies Record<string, readonly Primitive[]>;
 
 /**

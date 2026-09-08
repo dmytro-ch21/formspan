@@ -218,6 +218,63 @@ export async function removeEntry(userId: string, id: string): Promise<void> {
 }
 
 /**
+ * Duplicate an entry — N531/#962's row-menu "Duplicate".
+ *
+ * A NEW row in the SAME meal on the SAME day, with the same nutrition and the
+ * same `source_food_id`: provenance carries because it is the same food eaten
+ * again, not a different one. Goes through {@link logFood} rather than a
+ * bespoke INSERT so it gets everything a fresh log gets — a client-generated
+ * id, `dirty = 1` in the outbox, the caffeine link, and the saved food's
+ * `use_count` bump — and nothing a fresh log would not.
+ *
+ * Local-first like every write in this file: SQLite has it before this
+ * resolves, the network is never awaited, and it works in airplane mode.
+ *
+ * Reads the LOCAL row, not the screen's copy of it — `toEntry` drops nothing,
+ * but a caller holding a stale `Entry` (the day view mid-refresh) would
+ * otherwise duplicate what it last saw rather than what is there.
+ */
+export async function duplicateEntry(userId: string, id: string): Promise<string> {
+  const src = await localEntry(userId, id);
+  if (!src) throw new Error('That entry no longer exists on this device.');
+  // `Entry` is structurally a `NewEntry` plus an id, and `logFood` mints its
+  // own id — so the source row is the input, unchanged.
+  return logFood(userId, src);
+}
+
+/**
+ * Move an entry to another meal on the same day — the drop half of
+ * N531/#962's drag.
+ *
+ * ONLY `meal` changes. Not `logged_at`: that is when the athlete ate it, and
+ * a lunch dragged to breakfast was still eaten when it was eaten. (It is also
+ * what `localEntries` orders by, so a moved row sorts into its new section by
+ * its log time rather than landing at the bottom — this file has no order
+ * column to persist a position with, see `docs/decisions/history.md`'s N531
+ * entry for why the drag deliberately does not offer one.)
+ *
+ * A drop on the section the entry is already in is a NO-OP, and that is a
+ * guard rather than an optimisation: an edit marks the row `dirty`, and a
+ * dirty row is one `entrySyncState` reports as `owed` — which disables
+ * sharing with "Save your changes first". A finger that lifted where it
+ * started must not cost the athlete a share for nothing.
+ */
+export async function moveEntry(userId: string, id: string, meal: Meal): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ meal: string }>(
+    `SELECT meal FROM food_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id, userId,
+  );
+  if (!row) throw new Error('That entry no longer exists on this device.');
+  if (row.meal === meal) return;
+  await db.runAsync(
+    `UPDATE food_entries SET meal = ?, dirty = 1, updated_at = ?, last_error = NULL
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    meal, stamp(), id, userId,
+  );
+}
+
+/**
  * Whether an entry or a saved food is safe to hand `shareBlockedReason`
  * (`lib/shares.ts`) — N116/#505.
  *

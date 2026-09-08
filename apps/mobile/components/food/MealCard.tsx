@@ -84,18 +84,32 @@
  * forces itself open (`effectiveExpanded = selecting || expanded`) and the
  * header's own toggle stops responding, so a section mid-selection cannot be
  * collapsed out from under it by a stray tap on its own header.
+ *
+ * ## Per-row menu and drag — N531/#962
+ *
+ * Each row is an `EntryRow` now (its own file, because a draggable row needs
+ * hooks of its own and this component maps over entries). `onEntryMenu` puts
+ * the 3-dot control on every row; `drag` hands each row the day view's drag
+ * coordinator (`useEntryDrag`). This card's part in a drag is small and
+ * visual: `containerRef` lets the day view measure where this section is,
+ * `isDropTarget` draws the accent border while a lifted row is over it, and
+ * a card whose own row is lifted paints over the cards after it (`cardLifted`)
+ * so the row is not hidden under the next section as it crosses in.
+ *
+ * Both are inert while `selecting` — the row is a checkbox then, and neither
+ * an overflow menu nor a lift belongs on a checkbox. `EntryRow` enforces it;
+ * this card only passes `selecting` down.
  */
 
-import { useState } from 'react';
+import { useState, type Ref } from 'react';
 import { Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
+import { EntryRow, type EntryDragHandlers } from '@/components/food/EntryRow';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { glyphFor } from '@/lib/foodGlyph';
-import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { macroColor } from '@/lib/macroModel';
 import { fmtAmount, type Entry, type Macros, type Meal } from '@/lib/nutrition';
 import { useUnits } from '@/lib/useUnits';
@@ -130,6 +144,10 @@ export function MealCard({
   onStartCombine,
   onCancelCombine,
   onConfirmCombine,
+  onEntryMenu,
+  drag,
+  containerRef,
+  isDropTarget = false,
   testID,
 }: {
   meal: Meal;
@@ -160,6 +178,14 @@ export function MealCard({
   onStartCombine?: () => void;
   onCancelCombine?: () => void;
   onConfirmCombine?: () => void;
+  /** N531 — the 3-dot menu on every row. No control is rendered without it. */
+  onEntryMenu?: (id: string) => void;
+  /** N531 — the day view's drag coordinator. Rows do not lift without it. */
+  drag?: EntryDragHandlers;
+  /** N531 — so the day view can `measureInWindow` this section at drag start. */
+  containerRef?: Ref<RNView>;
+  /** N531 — a lifted row is over this section right now. */
+  isDropTarget?: boolean;
   testID?: string;
 }) {
   const hasEntries = entries.length > 0;
@@ -184,8 +210,22 @@ export function MealCard({
   // toggle from closing a section combine-select is already using.
   const effectiveExpanded = selecting || expanded;
 
+  // A card carrying the lifted row paints over its later siblings; zIndex is
+  // per-parent, so `EntryRow`'s own `lifted` style alone would still leave
+  // the row under the NEXT card once it crossed into it.
+  const carriesLifted = !!drag?.activeId && entries.some((e) => e.id === drag.activeId);
+
   return (
-    <RNView style={styles.card} testID={testID}>
+    <RNView
+      ref={containerRef}
+      style={[
+        styles.card,
+        carriesLifted && styles.cardLifted,
+        isDropTarget && { borderColor: addColor },
+      ]}
+      testID={testID}
+      accessibilityState={isDropTarget ? { selected: true } : undefined}
+    >
       <RNView style={styles.headerRow}>
         <Pressable
           style={styles.headerToggle}
@@ -273,58 +313,28 @@ export function MealCard({
             )
           )}
 
-          {entries.map((e) => {
-            const isSelected = selecting && !!selectedIds?.has(e.id);
-            return (
-              <SwipeToDelete
-                key={e.id}
-                onDelete={() => onDelete(e.id)}
-                accessibilityLabel={e.name}
-                enabled={!selecting}
-                closeOn={entries.length}
-                testID={`food-entry-${e.id}`}
-              >
-                <Pressable
-                  style={styles.row}
-                  onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
-                  // Selecting: a checkbox, not a button — `{ checked }` is what
-                  // announces "toggleable, currently on/off" rather than the
-                  // generic "button, selected" a `selected` state on a button
-                  // role reads as. Found in review.
-                  accessibilityRole={selecting ? 'checkbox' : 'button'}
-                  accessibilityLabel={`${e.name}, ${Math.round(e.kcal)} calories`}
-                  accessibilityState={selecting ? { checked: isSelected } : undefined}
-                  testID={selecting ? `food-entry-${e.id}-select` : undefined}
-                >
-                  {selecting ? (
-                    <RNView
-                      style={[
-                        styles.checkbox,
-                        isSelected && { backgroundColor: addColor, borderColor: addColor },
-                      ]}
-                      accessibilityElementsHidden
-                      importantForAccessibility="no"
-                    >
-                      {isSelected ? (
-                        <Text style={[styles.checkboxTick, { color: accent.on }]}>✓</Text>
-                      ) : null}
-                    </RNView>
-                  ) : (
-                    <Text style={styles.glyph} accessibilityElementsHidden importantForAccessibility="no">
-                      {glyphFor(e.category)}
-                    </Text>
-                  )}
-                  <RNView style={styles.rowMain}>
-                    <Text style={styles.rowName} numberOfLines={1}>
-                      {e.name}
-                    </Text>
-                    <Text style={styles.rowServing}>{loggedAmountLabel(e.servings, e.serving_label, foodUnit)}</Text>
-                  </RNView>
-                  <Text style={styles.rowKcal}>{Math.round(e.kcal)}</Text>
-                </Pressable>
-              </SwipeToDelete>
-            );
-          })}
+          {entries.map((e) => (
+            <SwipeToDelete
+              key={e.id}
+              onDelete={() => onDelete(e.id)}
+              accessibilityLabel={e.name}
+              enabled={!selecting}
+              closeOn={entries.length}
+              testID={`food-entry-${e.id}`}
+            >
+              <EntryRow
+                entry={e}
+                selecting={selecting}
+                isSelected={selecting && !!selectedIds?.has(e.id)}
+                addColor={addColor}
+                checkColor={accent.on}
+                foodUnit={foodUnit}
+                onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
+                onMenu={onEntryMenu ? () => onEntryMenu(e.id) : undefined}
+                drag={drag}
+              />
+            </SwipeToDelete>
+          ))}
         </>
       )}
 
@@ -412,31 +422,8 @@ const styles = StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3 },
   macroText: { fontSize: 12, color: vola.textMuted },
 
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: vola.surfaceRaised,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  glyph: { fontSize: 20 },
-  rowMain: { flex: 1, gap: 2 },
-  rowName: { fontSize: 14, fontWeight: '600' },
-  rowServing: { fontSize: 12, color: vola.textDim },
-  rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
-
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: vola.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxTick: { fontSize: 12, fontWeight: '700' },
+  // The row's own styles moved to `EntryRow.tsx` with the row (N531).
+  cardLifted: { zIndex: 10, elevation: 10 },
 
   add: {
     flexDirection: 'row',

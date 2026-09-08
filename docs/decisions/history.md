@@ -65098,6 +65098,205 @@ say what the food is. `ValidateEstimate` refuses such an estimate outright
 reaches the client, and defaulting one would ADD a saved food the athlete
 cannot identify rather than prevent a ghost.
 
+## 2026-09-08 — N531 (#962): the food day view gets a 3-dot menu per entry and drag-between-meals, and the entry screen loses its large Share button
+
+**User's words (item 6 of the 2026-09-08 list):** *"lets make that any item
+in food view can be draggable and we can click 3 dots on it and make a
+duplicate or remove or share from that position and delete large share button
+from item view itself."*
+
+**What shipped, all mobile.**
+
+1. **A 3-dot control on every entry row** (`components/food/EntryRow.tsx`,
+   the row pulled out of `MealCard` because a draggable row needs hooks of
+   its own and `MealCard` maps over entries). It opens
+   `components/food/EntryMenuSheet.tsx` — the same bottom-sheet structure and
+   tokens as `library.tsx`'s N469 facet/extras sheets (transparent `Modal`,
+   backdrop as a SIBLING of the sheet, glass sheet, grabber, head + Done,
+   46pt rows), not a fourth sheet convention — offering exactly **Duplicate /
+   Remove / Share** and nothing else. Labelled per row: "More for Greek
+   yoghurt". Hidden while combine-select (N115) has turned the row into a
+   checkbox.
+   - **Duplicate** — `duplicateEntry` in `lib/foodLog.ts`: reads the LOCAL
+     row and hands it to `logFood`, so the copy is a new client-generated id
+     in the same meal on the same day with the same nutrition, the same
+     `source_food_id` and `category`, `dirty = 1` in the outbox, the caffeine
+     link and the saved food's `use_count` bump — everything a fresh log gets
+     and nothing else. Local-first; no network on the path; works in airplane
+     mode. The day re-reads and the row is there.
+   - **Remove** — the existing `removeEntry` via the screen's existing
+     `onDelete`, same push request. (There was no undo/confirm on the swipe
+     to preserve, so there is none here either.)
+   - **Share** — the friend picker, with **the same gate the entry screen
+     had, moved**: `entrySyncState` → `shareBlockedReason`, re-read on
+     `lastSyncAt` so a background push finishing turns "Not synced yet" into
+     shareable without leaving the screen. The row is disabled with the
+     reason under it AND in its label (a hint on a disabled control is not
+     reliably announced — `ShareToFriend`'s own rule). "Still reading" reads
+     as blocked ("Loading…"), never as permitted. `ShareToFriend.tsx` was
+     split so the picker exists without its bordered trigger: `ShareSheet`
+     (controlled, `open`/`onClose`) is the Modal; `ShareToFriend` is
+     trigger + `ShareSheet`, behaviour unchanged, every existing testID kept.
+     `food.tsx` keys the `ShareSheet` on the entry id, so a picker opened for
+     a different row is a fresh instance with no borrowed "Sent ✓".
+
+2. **Long-press a row and drag it to another meal section**
+   (`lib/useEntryDrag.ts` + the `PanResponder` in `EntryRow`). The long-press
+   ARMS the drag; the wrapper's responder claims on the next move only while
+   armed — taking the touch from the row's `Pressable` exactly the way
+   `SwipeToDelete` already does for a horizontal swipe. Dropping on a
+   different section is `moveEntry`: one column (`meal`), `dirty = 1`,
+   `updated_at` bumped, then `requestSync('food moved')` and a re-read.
+   `logged_at` is deliberately NOT touched — it is when the athlete ate it,
+   and a lunch dragged to breakfast was still eaten when it was eaten.
+   - **Inert while combining**: `useEntryDrag`'s `enabled` is
+     `combining === null`, and `EntryRow` does not even wire `onLongPress`
+     while `selecting`, so nothing arms and nothing claims.
+   - **The day view's scroll is locked for the length of the drag**
+     (`scrollEnabled={drag.active === null}`). This is the load-bearing
+     line for "drag must not fight the scroll": on iOS a JS responder cannot
+     refuse the native scroll view (`SwipeToDelete`'s doc comment measured
+     this), so the only thing that stops a lifted row from scrolling the
+     page under itself is turning the scroll off while a row is lifted. The
+     lift happens with the finger still, before any scroll has begun. A
+     long-press released without moving un-lifts and unlocks (`onPressOut`
+     with the pan never granted — and the responder system grants the new
+     responder BEFORE terminating the old one, so the flag is already set on
+     a real drag).
+   - **Sections are measured at drag START** (`measureInWindow`), not via
+     `onLayout`: a collapse (N468) or a day switch changes every frame, and
+     the scroll is locked so frames measured at start stay true until the
+     drop. The drop target is `dropTargetFor(pageY, frames)` — half-open
+     ranges, `null` outside every card (the day pill, the summary): a drop
+     there is a cancel, never "the nearest section". The pill and the
+     collapse state are untouched by a drop; the collapsed card is still a
+     valid target (its header is its frame).
+   - The card under the finger draws the accent border and reports
+     `accessibilityState.selected`; the card carrying the lifted row gets
+     `zIndex` so the row paints over the NEXT card as it crosses in (zIndex
+     is per-parent — the row's own `zIndex` alone leaves it under the next
+     section).
+   - **Drag has no assistive-tech equivalent, and none was invented**: moving
+     an entry between meals is already reachable from the entry screen's
+     meal picker, which is where a screen-reader user changes a meal today.
+
+3. **The large Share button left `app/food/entry/[id].tsx`**, with the
+   `shareSync` state and its `lastSyncAt` effect (nothing read them any
+   more). Sharing is now row → 3-dot → Share: one tap FEWER than row → entry
+   screen → Share. Save and Delete stay. `saved/[id].tsx` and
+   `recipe/[id].tsx` keep their own `ShareToFriend` — the ticket names the
+   ENTRY screen as "the item view", and a saved food / recipe detail page has
+   the room and the different job (it is the thing being shared, not a dated
+   log row).
+
+**The persistence decision the ticket left open — within-meal ORDER is NOT
+persistable, and the drag deliberately does not offer it.** Checked, not
+assumed: `nutrition_entries` (migration `000059`) has no position/order
+column; `food_entries` in `lib/db.ts` has none either; both list a meal by
+`logged_at, id` (`localEntries`; the server's `ORDER BY` in
+`nutrition/postgres.go`). So there is nothing a within-meal reorder could be
+written to, and a drag that let the athlete "put the eggs above the toast"
+would snap back on the next pull — the exact "drag that silently forgets" the
+ticket forbids. Two honest options: add an order column (a timestamp-versioned
+migration, `nutrition_entries.position`, the Go module's create/update/list,
+OpenAPI, the mobile schema branch, the push payload and the pull, plus web's
+own list) — or drop on SECTIONS only and say so. **This entry does the
+second.** The reasons, in order: (a) the user's words are "draggable" and
+"from that position" in the sense of acting on a row where it sits, not a
+request to curate order within a meal; (b) another agent is in the backend
+right now (#963 provenance, #964 describe.tsx) and this ticket was scoped to
+stay out of it; (c) an order column is a real cross-surface change that
+deserves its own ticket rather than riding in on a mobile gesture. What the
+athlete gets: a drop target is the whole card, the highlight is the whole
+card, and a moved row sorts into its new section by its log time. What they
+do not get: reordering inside a meal — and the UI does not pretend to offer
+it (no within-card insertion line, no per-row drop zone). If within-meal order
+is wanted, file it as its own N-ticket; the drag's drop side is one function
+(`onDropMove`) and would take a position from the same `dropTargetFor` shape
+extended to row frames.
+
+**Tests, and what each pins** (all mobile, `pnpm run test:mobile`):
+
+- `lib/__tests__/foodLog.test.ts` (real SQLite): Duplicate makes a NEW row
+  in the same meal/day with the same nutrition, `source_food_id` and
+  `category`, leaves the original untouched, owes a push with **no network
+  call** (airplane mode), sends the copy under its own id with the same
+  `meal` and `source_food_id`, refuses a deleted entry and another athlete's.
+  Move changes only `meal` (same `logged_at`), owes a push, sends the new meal,
+  **persists across a pull** (push, then the server echoing the new meal keeps
+  it), and — the trap named in the ticket — **a pull that arrives BEFORE the
+  push does not snap the entry back** (`cacheEntries`' `WHERE dirty = 0` is
+  pinned, not argued). A same-section drop is a no-op that does not dirty the
+  row, so `entrySyncState` still reads shareable.
+- `lib/__tests__/useEntryDrag.test.ts`: `dropTargetFor` (half-open, null
+  outside, null with nothing measured); the hook via `renderHook` — different
+  section drops, same section does not, outside every section does not,
+  inert while disabled (and `measure` is never even called), measures at
+  start not mount, a release before the measurement lands is a cancel and a
+  late measurement cannot arm the NEXT drag with stale frames.
+- `components/food/__tests__/MealCard.test.tsx`: the 3-dot on every row with
+  its label, absent without a handler, hidden while selecting, a sibling of
+  the row press (tap still opens); long-press reports id + meal, inert while
+  selecting even with drag enabled, inert when the coordinator says disabled,
+  a lift released without moving cancels, a plain tap never cancels; the drop
+  target card says so to assistive tech.
+- `components/food/__tests__/EntryMenuSheet.test.tsx`: exactly three action
+  buttons (asserted on the list, so a fourth fails); Share enabled/disabled
+  with the reason in the label and under the row; `undefined` reads blocked.
+- `__tests__/app/foodEntryMenu.test.tsx` (the screen): the control on every
+  row in every section; the sheet names the row; Duplicate calls
+  `duplicateEntry('user_1', 'e1')`, requests `'food duplicated'`, re-reads
+  the day, and never touches the token getter; Remove calls `removeEntry`;
+  Share refused with "Not synced yet" for `unsynced`, "Save your changes
+  first" for `owed`, and on a synced entry closes the menu and opens
+  `share-sheet` (the friend list loads).
+- `__tests__/app/editEntryScreen.test.tsx`: no `entry-share-open`, no
+  `share-disabled-reason`; Save and Delete still there.
+
+**Mutation-tested, each mutation confirmed applied and the named test
+confirmed the one that went red** (eight guards): `moveEntry`'s same-meal
+no-op; `useEntryDrag`'s `enabled` gate, same-section drop, and stale-measure
+sequence; `EntryRow`'s `!selecting` on `dragEnabled` and the un-lift on
+release-without-move; `EntryMenuSheet`'s `disabled={shareDisabled}`; and
+`cacheEntries`' `dirty = 0` clause. The harness itself needed two goes, and
+the record matters more than the tidy version: its first pass flagged every
+mutation as caught AND "filter matched nothing" at once — the
+matched-nothing check was a substring test for `0 total`, which matches
+`130 total`. Its second pass computed "tests run" from the FIRST `N total`
+in the output, which is the `Test Suites:` line, and its "named test failed"
+check was trivially true because jest echoes the `-t` filter at the end of
+every run. What was actually measured, and is enough: under a `-t` filter
+naming exactly one test, each mutation produced `Tests: 1 failed` and a
+non-zero exit; a control run with a filter matching nothing produced
+`13 skipped, 13 total` and exit 0, so the two states are distinguishable
+and the one test that ran was the named one.
+
+**A lint-ratchet note worth keeping.** The first `EntryRow` held its gesture
+flags in `useRef`s and its `Animated.Value` as `useRef(new Animated.Value(0))
+.current`, matching `SwipeToDelete` — and cost six `react-hooks/refs`
+warnings, against a cap of 24 that `SwipeToDelete` alone already spends 6
+of. Moving them to `useState` values and mutating properties traded those for
+five `react-hooks/immutability` ERRORS. What holds both rules quiet without
+lying to either is a small closure controller (`gestureFlags()` — `arm`,
+`grant`, `reset`, `isArmed`, `wasGranted`) held in a `useState` initialiser:
+imperative bookkeeping in the same sense an `Animated.Value` is, and never
+read in render. Ratchet: `react-hooks/refs 24 / 24`, unchanged.
+
+**Icon.** The kit has no "more" glyph; `Icon.tsx`'s `EXTRA` gained `more` —
+three stroked circles of radius 1, which at stroke 1.8 render as dots. Chrome
+in the same sense as the chevrons, and documented there as such.
+
+**What is NOT verified here, and is on the ticket as device evidence:**
+the drag on a real touch screen — that the long-press lifts without the
+scroll starting first, that the lifted row does not scroll the page, that it
+does not fight a collapsed header; a breakfast → lunch drag surviving a
+kill-and-reopen; and a Duplicate doubling the section's totals on screen.
+Jest has no gesture system, so `PanResponder`'s claim ordering against
+`SwipeToDelete` and the native scroll view is argued from RN's responder
+plugin (grant-before-terminate, bubble-from-lowest-common-ancestor) rather
+than measured — the same standing `SwipeToDelete` has had since it shipped.
+Android is unrun, as it was for `SwipeToDelete`.
+
 ## Open items / known gaps as of this entry
 
 
