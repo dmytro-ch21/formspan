@@ -152,6 +152,11 @@ import { OptionSelect } from '@/components/ui/OptionSelect';
 import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
+import { LiveHRIndicator } from '@/components/LiveHRIndicator';
+import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
+import { useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
+import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 
 /**
  * Attaches the real exercise name to each record, from the catalog already
@@ -914,6 +919,18 @@ export default function SessionScreen() {
     },
   });
 
+  // N528/#958: live heart rate from a paired monitor — the chip under the
+  // header while the session runs, and every reading recorded for the report.
+  const liveHRStatus = useLiveHR().status;
+  const liveHROn = liveHRStatus !== 'off' && liveHRStatus !== 'unsupported';
+  const liveHRActive = !!session && session.ended_at === null;
+  // Only once a monitor is actually connected — HRmax exists to colour a
+  // LIVE number by zone, and an athlete who has never paired one must not
+  // pay a profile fetch on every session start (review finding: "a session
+  // without a monitor is unchanged" is a stated constraint of this ticket).
+  const liveHRMax = useHRMax(getToken, liveHRActive && liveHROn);
+  useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
+
   useEffect(() => {
     if (!id || !session?.ended_at) return;
     let cancelled = false;
@@ -1589,6 +1606,7 @@ export default function SessionScreen() {
         // overridden. The wrapper is the authority — see
         // `needsPlatformKeyboardInset`.
       >
+        {!finished && <LiveHRIndicator hrMaxBPM={liveHRMax} testID="session-live-hr" />}
         {/* Three numbers while you train — time, sets, reps — and volume
             on top once you finish.
             "Top RPE" is gone entirely: mid-session it only repeated the
@@ -1737,6 +1755,7 @@ export default function SessionScreen() {
             absence={hrSync.absence}
             sourceLabel={hrSync.sourceLabel}
             onSyncNow={hrSync.syncNow}
+            hrSourceLine={hrSourceSentence(hrMetrics, hrSync.monitorName, hrSync.sourceLabel)}
             exerciseHR={exerciseHR}
             exerciseNames={Object.fromEntries(
               exerciseHR.map((e) => [e.exercise_id, catalog.get(e.exercise_id)?.name ?? e.exercise_id]),

@@ -218,7 +218,7 @@ const ZONE_LABELS: Record<number, string> = {
  * depends on, and adding a redundant assertion of "these are the same four
  * values" would test that a constant equals itself.
  */
-function zoneColor(zone: number): string {
+export function zoneColor(zone: number): string {
   switch (zone) {
     case 1:
       return vola.textDim;

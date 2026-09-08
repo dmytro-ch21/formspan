@@ -21227,3 +21227,35 @@ M1a old carry restored · M1b numbers from the drop · M2 summary claims all tic
 - A ghost card (404/410) after Accept all stays on screen with its reason
   until a pull-to-refresh — by design, so the message is readable; there is
   no test that a subsequent pull clears it beyond the existing load tests.
+
+## N528 (part 2) — live heart rate from a Bluetooth monitor: pairing, the live indicator on every session screen and Today, recording for the report (`apps/mobile/lib/hrMonitor/*`, `components/LiveHRIndicator.tsx`, `components/today/LiveHRCard.tsx`, `components/settings/HRMonitorPairing.tsx`, `app/settings.tsx`, `app/session/[id].tsx`, `app/bjj/session/[id].tsx`, `app/running/[id].tsx`, `app/(tabs)/index.tsx`, `app.config.js`, #958)
+
+### Automated (`lib/__tests__/heartRateProfile.test.ts`, `hrRecorder.test.ts`, `hrMonitorStore.test.ts`, `hrSourceLine.test.ts`, `components/__tests__/LiveHRIndicator.test.tsx`, `HRSessionReport.test.tsx`)
+
+- Heart Rate Measurement decoding per HRS §3.1.1 — 8/16-bit, contact bits, energy skipped, RR intervals converted; too-short frames are null; base64 from the BLE library decodes.
+- Zone floors equal the backend's; no HRmax → no zone. Reconnect ladder monotonic and capped. State machine: connecting → connected → reading resets attempts; dropped keeps the last number; gave_up ends it; stop/unsupported reset.
+- Recorder: one row per reading, bpm rounded, nonsense refused; flush uploads every pending row as `bluetooth`/`hr_monitor`, stamps them, a second flush sends nothing; a failed upload stamps nothing; prune removes only uploaded rows past 7 days, never pending ones.
+- Indicator: nothing when off/unsupported; "Connecting to <name>…"; fresh reading shows number + zone; no HRmax → no zone; a drop keeps the number, says "disconnected — reconnecting", no zone; gave up → "disconnected" + Reconnect; card variant carries the same number and the monitor's name.
+- Report: the source line renders in the full and limited states, never on the unavailable card.
+
+### Manual / device — the ticket's evidence (16 Pro Max + Amazfit with heart-rate broadcasting on in Zepp; then Android)
+
+1. Settings → Integrations → Heart-rate monitor → Scan: the Amazfit appears by name within ~10 s (headphones and other peripherals do not); tap Use — it reads as remembered and "Connecting…" then the monitor's name.
+2. Today: a **Live heart rate** card appears with the bpm updating about once a second, the zone, and the monitor's name. Kill the app and reopen: the card is back within a few seconds without touching Settings.
+3. Start a strength session: the chip under the header shows the live number and zone; the heart beats per reading. Same on a BJJ session and a run.
+4. Walk out of range mid-session: within seconds the chip says "Monitor disconnected — reconnecting…" and the number dims; walk back: it resumes on its own. Stay away ~30 s: after the ladder gives up, "Monitor disconnected" with a Reconnect button; tap it back in range — it reconnects.
+5. Finish the session: the report appears with "From your Amazfit …". If the link dropped during the session and Zepp has synced to Apple Health, the line reads "… N readings from Apple Health filled gaps".
+6. Forget the monitor in Settings: the Today card disappears; a session shows no chip; Apple Health remains the only source (the W18 behaviour, unchanged).
+7. Android: 1–6 with the Health Connect fallback; the first scan asks for "Nearby devices" (Android 12+) and declining it yields the Settings-pointing note, not silence.
+
+### Automated, added after review (`lib/__tests__/liveHRConnection.test.ts`, `hrReportWiring.test.ts`)
+
+- Connect/disconnect ordering against a scripted peripheral: a background stop and an immediate foreground start do not overlap (the reconnect is issued only after the disconnect is acknowledged); two racing starts issue their connects one at a time; a monitor swap releases the old device.
+- A disconnect the OS never acknowledges does not wedge live HR — a later monitor still connects, and the stalled cancel, when it finally answers, does not switch off the link that replaced it.
+- A dropped link says so immediately (`reconnecting`, last number kept) and re-attempts on its own after the backoff, with no athlete action.
+- All three session screens pass the same `absence`/`sourceLabel`/`onSyncNow`/`hrSourceLine` props to `HRSessionReport` — a cross-file invariant no single-component test can see, added because the running screen silently had none of them.
+
+### Manual, added after review
+
+8. **Quick background/foreground mid-session**, with the monitor connected: switch to another app and straight back. PASS: the chip is still live within a second or two. FAIL: it goes dark, or sticks on "Connecting…". (This is the exact race review found; step 2's "kill and reopen" is a cold start and does not exercise it.)
+9. **Running specifically**: finish a run recorded with the monitor and confirm the report names its source, and that a run with no HR shows the same honest card and Sync button as strength and BJJ.

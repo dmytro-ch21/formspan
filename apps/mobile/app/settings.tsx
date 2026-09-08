@@ -33,6 +33,7 @@ import { environmentLabel } from '@/lib/environmentLabel';
 import { getProfile, updateProfile } from '@/lib/profile';
 import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { HRMonitorPairing } from '@/components/settings/HRMonitorPairing';
 
 /**
  * Settings as grouped rows that drill down, rather than one flat screen of
@@ -413,6 +414,7 @@ export default function SettingsScreen() {
             testID="settings-health-connect-import"
           />
         )}
+        <HRMonitorPairing userId={userId} />
       </Section>
 
       {/* Its own section, because it is not a display preference like the ones

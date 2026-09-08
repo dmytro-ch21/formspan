@@ -64679,6 +64679,146 @@ two `NEEDS HUMAN EVIDENCE` items (a real share landing in "Recently shared"
 with the handle, and a 40-row list reading as scannable with the chips
 reading as sort rather than filters) are still owed.
 
+## 2026-09-08 — N528 (#958), part 2 of 2: live heart rate on the phone — pair a Bluetooth monitor, see the number everywhere a session runs and on Today, record it for the report
+
+**What the athlete gets.** Settings → Integrations gains "Heart-rate monitor":
+scan, pick, remember, forget (one per phone). From then on, whenever VOLA is
+open and the monitor is in range, the app holds the link: a beating-heart
+chip under the header on the strength, BJJ and running screens with the live
+bpm and zone; a **Live heart rate** card on Today with the big number, the
+zone and the monitor's name — *"a nice module in today showing my current
+HR"* — that simply is not there without a monitor; and every reading
+recorded while a session runs, uploaded as the `bluetooth`/`hr_monitor`
+samples part 1 taught the server to prefer. The report then says **"From
+your Amazfit GTR 4 · 3 readings from Apple Health filled gaps"**, or "From
+Apple Health" when there was no monitor. A dropped link is a sentence
+("Monitor disconnected — reconnecting…"), a stale number dims within five
+seconds, and after six failed reconnects there is a Reconnect button — never
+a frozen value pretending to be live, never silence.
+
+**Shape — one link, one store, many readers** (`apps/mobile/lib/hrMonitor/`):
+
+- `heartRateProfile.ts` — pure: the GATT Heart Rate Measurement decoder
+  (HRS §3.1.1: 8/16-bit value, sensor-contact bits, energy-expended skipped,
+  RR intervals in 1/1024 s → ms; a frame shorter than its flags claim is
+  `null`, never a fabricated number), base64 decoding for what
+  `react-native-ble-plx` hands over, the reconnect ladder (1/2/4/8/15 s), the
+  zone floors **identical to the backend's** (`ZoneForHR`), the live-state
+  machine (`reduceLiveHR`), staleness, and the status copy.
+- `liveHR.ts` — the app-wide store (`subscribeLiveHR` / `getLiveHR`, plus a
+  raw readings fan-out for the recorder) and the only code that talks to
+  Bluetooth: `react-native-ble-plx` is **`require`d lazily on first use**, so
+  a Simulator build and the jest suite never crash at import — the
+  `expo-camera` lesson from the `vola-mobile-build` skill — and a missing
+  module reads as `unsupported`, which every screen renders as nothing.
+  Scan filtered on the service UUID at the radio (an athlete's headphones
+  never appear); connect by remembered id; subscribe to `0x2A37`; on
+  disconnect, reconnect with backoff up to six times then `disconnected`;
+  Android 12+ runtime `BLUETOOTH_SCAN`/`CONNECT` (older Android: location).
+- `orchestrator.ts` — the fourth identity/orchestrator pair in
+  `app/_layout.tsx`, same shape as the biometric ones: connect to the
+  remembered monitor on foreground, drop on background, flush pending
+  samples. Foreground only, by the config plugin's
+  `isBackgroundEnabled: false` — a session runs with the screen on.
+- `hrRecorder.ts` — `hr_monitor_samples` in the phone's SQLite (offline
+  first: a gym with no signal records exactly as well), one row per reading
+  coalesced to 1/s, flushed in chunks as `source_platform: 'bluetooth'`,
+  `source: 'hr_monitor'` — the exact pair part 1's `Validate()` insists on —
+  and pruned seven days after upload. `useHRRecording` mounts on the three
+  session screens; on the active→finished edge it flushes and kicks the
+  existing enrichment pass, so the report is computed with the direct
+  samples already there.
+- `LiveHRIndicator` (chip + card variants of one component, so mid-set and
+  Today show the same number in the same zone colour), `LiveHRCard`
+  (self-contained — reads its own token for HRmax — so Today needed one
+  line), `HRMonitorPairing` in Settings, `hrSourceSentence` for the report.
+- `app.config.js`: the `react-native-ble-plx` plugin, foreground only,
+  `neverForLocation: true` (Android 12+'s way of saying a BLE scan is not a
+  location scan, keeping fine-location out of the manifest), permission
+  string in the athlete's words.
+
+**Decisions worth recording.** The zone floors are copied from the backend
+rather than imported from anywhere, with a test pinning them — a live "zone
+4" must be the report's zone 4. The monitor's name never reaches the server
+(part 1's `hr_monitor` is closed); the phone remembers it, and a session
+recorded with a since-forgotten monitor reads "your heart-rate monitor". The
+hook-lint ratchet caught `useRef(new Animated.Value())` in the indicator;
+it is `useState` now, the idiom `MacroRings` already uses.
+
+**Tests.** `heartRateProfile.test.ts` (byte layouts from the spec, zones,
+ladder, state machine, staleness, copy), `hrRecorder.test.ts` (real SQLite:
+record/round/refuse, upload+stamp, a failed upload stamps nothing, prune
+never touches pending rows), `hrMonitorStore.test.ts`, `hrSourceLine.test.ts`,
+`LiveHRIndicator.test.tsx` (each state's sentence, driven through the
+store's test seam), three report cases. Twelve mutations, in-file anchor
+asserted, all caught — one (prune deleting pending rows) survived the first
+pass because no test had a pending row present when pruning ran; it got
+one. No new lint warnings; the two in `app/session/[id].tsx` and the Clerk
+double-import in Settings predate this branch.
+
+**What review found, and it was the important half of this ticket.**
+
+`ac-verifier` caught that **the running screen was never wired** — no source
+line on its finished report, and (further back) none of W18's honest no-HR
+copy or its "Sync heart rate" button either, so running alone still showed
+the pre-W18 catch-all sentence. The cause is worth recording because it is
+this repo's own named trap: the wiring script guarded that edit with
+`if count == 1`, so a count of **0** did nothing, silently — a step that
+could not fail, where an assertion belonged. Running is now wired (it keeps
+`started_at`/`ended_at` in state, which it deliberately did not before), and
+`lib/__tests__/hrReportWiring.test.ts` asserts all three screens pass the
+same props, since no unit test can see that three call sites disagree.
+
+`frontend-reviewer` reproduced **two concurrency defects in `liveHR.ts`** —
+the one file in this feature that had no tests, which is why nothing caught
+them: a `stopLiveHR` whose late-resolving cancel switched off a link that
+had since reconnected (an ordinary background/foreground away from the
+athlete's chip going dark mid-session), and two racing `startLiveHR` calls
+leaking a native BLE connection plus a reconnect timer. Both are fixed at
+the root rather than per-symptom: **every connect and disconnect now runs
+through one promise chain** (`serialized`), with the disconnect's
+acknowledgement **bounded** (`cancelAckTimeoutMs`) so a BLE stack that stops
+answering cannot wedge live HR for the life of the app — the risk
+serializing introduces, and the worse of the two failures.
+
+**Three things were removed rather than kept, and the reason is the same
+each time.** A first fix added a `releaseSupersededConnection` helper and a
+generation guard on the trailing "off" dispatch; once operations were
+serialized, no test could reach either, and mutating them out changed
+nothing. Unreachable code that looks like a safety net provides none, so
+both went. A third change — routing the reconnect timer through the queue —
+was reverted for the same reason: `stopLiveHRInner` clears `active`
+synchronously, so a late reconnect bails at the top of `connectAttempt`
+whether queued or not, and an unobservable difference is not worth the
+machinery. The remaining `generation !== gen` comparisons are likewise
+unreachable-by-construction today; they are kept as documented
+defence-in-depth (the same posture as `testdb`'s `RequireEnv`), and the
+comments say so rather than implying they are load-bearing.
+
+**The tests were rewritten once, mid-fix, for exactly the reason this repo
+keeps a section about.** The first version asserted only the final status
+behind a drain loop that settled every pending call in lockstep — and it
+passed *identically* with the bugs present and absent. Three of four
+mutations survived it. What separates fixed from broken here is *when* the
+app issues its next connect relative to the previous disconnect being
+acknowledged, so the tests now assert the ORDER of calls against a scripted
+peripheral. Seven mutations, all caught, baseline green after each restore.
+
+Three review suggestions were also taken: a dead ternary in the indicator; a
+`useHRMax` call that fired a profile fetch on **every** session start even
+for an athlete who has never paired a monitor (against this ticket's own
+"a session without a monitor is unchanged" constraint), now gated on a
+connected monitor; and a comment saying why `useHRRecording`'s flush effect
+is deliberately not keyed on `sessionID`.
+
+**What remains device-only, and is the ticket's `NEEDS HUMAN EVIDENCE`:** a
+real run with an Amazfit broadcasting — pairing in Settings, the live number
+during the session, the report naming the monitor, a deliberate Bluetooth
+drop mid-run filled from Apple Health once Zepp syncs; then Android. The
+Bluetooth contract was verified against the spec, not against a live monitor
+in this session, which is exactly the "a stub built from an assumption"
+case CLAUDE.md warns about — the device run is the only thing that closes it.
+
 ## Open items / known gaps as of this entry
 
 
