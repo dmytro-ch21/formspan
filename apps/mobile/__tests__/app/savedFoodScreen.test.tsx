@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import EditSavedFoodScreen from '../../app/food/saved/[id]';
 
@@ -26,11 +27,13 @@ configure({ asyncUtilTimeout: 10_000 });
 
 const mockLocalFood = jest.fn();
 const mockSaveFood = jest.fn();
+const mockSyncState = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
   localFood: (...a: unknown[]) => mockLocalFood(...a),
   saveFoodLocally: (...a: unknown[]) => mockSaveFood(...a),
-  // N116/#505: unblocked by default — synced, and nothing owed.
-  foodSyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
+  // N116/#505: unblocked by default — synced, and nothing owed. Reset per
+  // test below; N533's rejected case overrides it.
+  foodSyncState: (...a: unknown[]) => mockSyncState(...a),
 }));
 // N116/#505: `useSyncState` is new on this screen — a static, never-changing
 // value is enough here, since nothing in this file exercises a re-fetch on a
@@ -85,6 +88,7 @@ async function open(food = saved()) {
 }
 
 beforeEach(() => {
+  mockSyncState.mockReset().mockResolvedValue({ unsynced: false, owed: false, rejected: null });
   mockLocalFood.mockReset();
   mockSaveFood.mockReset().mockResolvedValue('food-abc');
   mockBack.mockReset();
@@ -153,6 +157,64 @@ it('says what a correction changes and what it leaves alone', async () => {
   const scope = screen.getByTestId('saved-scope').props.children;
   expect(String(scope)).toContain('from now on');
   expect(String(scope)).toContain('keep the numbers they were logged with');
+});
+
+/**
+ * N533/#964 — the screen an athlete opens to FIX a food is where a server
+ * refusal has to be readable, with the reason, so the edit they are about to
+ * make is the right one. Nothing is shown for a food that was accepted.
+ */
+it('says when the server refused this food, with the reason', async () => {
+  mockSyncState.mockResolvedValue({
+    unsynced: true,
+    owed: false,
+    rejected: 'serving_label must be between 1 and 40 characters',
+  });
+  await open();
+  await waitFor(() => expect(screen.getByTestId('saved-rejected')).toBeTruthy());
+  const copy = String(screen.getByTestId('saved-rejected').props.children);
+  expect(copy).toContain('serving_label must be between 1 and 40 characters');
+  expect(copy).toContain('this phone only');
+
+  screen.unmount();
+  mockSyncState.mockResolvedValue({ unsynced: false, owed: false, rejected: null });
+  await open();
+  expect(screen.queryByTestId('saved-rejected')).toBeNull();
+});
+
+/**
+ * Found in review. `accessibilityLiveRegion` on that notice is ANDROID-ONLY —
+ * iOS has no live regions — and iOS is this app's primary platform, so a
+ * VoiceOver user opened the food they believed was saved and heard nothing
+ * about it having been refused. The same gap `goals.tsx`, `sign-up.tsx`,
+ * `forgot-password.tsx` and `food/scan.tsx` each closed the same way.
+ */
+it('SPEAKS the refusal, because iOS has no live regions', async () => {
+  const announce = jest
+    .spyOn(AccessibilityInfo, 'announceForAccessibility')
+    .mockImplementation(() => {});
+  try {
+    mockSyncState.mockResolvedValue({
+      unsynced: true,
+      owed: false,
+      rejected: 'serving_label must be between 1 and 40 characters',
+    });
+    await open();
+    await waitFor(() => expect(announce).toHaveBeenCalled());
+    const spoken = String(announce.mock.calls[0][0]);
+    expect(spoken).toContain('serving_label must be between 1 and 40 characters');
+    expect(spoken).toContain('this phone only');
+
+    // A food with nothing wrong says nothing — silence is the correct output.
+    screen.unmount();
+    announce.mockClear();
+    mockSyncState.mockResolvedValue({ unsynced: false, owed: false, rejected: null });
+    await open();
+    await waitFor(() => expect(screen.getByTestId('saved-name')).toBeTruthy());
+    expect(announce).not.toHaveBeenCalled();
+  } finally {
+    announce.mockRestore();
+  }
 });
 
 it('says when the numbers were drafted rather than measured', async () => {

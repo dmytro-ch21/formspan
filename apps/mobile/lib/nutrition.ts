@@ -1005,3 +1005,24 @@ export function profileGap(missing: string[]): ProfileGap | null {
   // stranded with no idea why. Server vocabulary can lead the app.
   return null;
 }
+
+/**
+ * What a saved food the server REFUSED says about itself (N533/#964).
+ *
+ * `onServer` is the whole difference between the two sentences, and it is
+ * the difference the athlete needs: a food the server has never accepted
+ * exists on this phone ONLY and is lost with it, whereas a refused EDIT of
+ * a food it already holds leaves an earlier version safely there. Both end
+ * with the action that actually clears the state — `saveFoodLocally` sets
+ * `dirty = 1` and clears `last_error`, so an edit is the retry.
+ *
+ * The reason is the server's own message (`serving_label must be between 1
+ * and 40 characters`), quoted rather than paraphrased: it names the field to
+ * fix, and paraphrasing a validator's vocabulary is how a screen ends up
+ * describing a rule the server does not have.
+ */
+export function savedFoodProblemCopy(problem: { reason: string; onServer: boolean }): string {
+  return problem.onServer
+    ? `Your last change was refused: ${problem.reason}. Your account still has the earlier version. Edit it to try again.`
+    : `Not saved to your account — the server refused it: ${problem.reason}. It is on this phone only until an edit is accepted.`;
+}

@@ -25,10 +25,12 @@ const mockUseEffect = useEffect;
 const mockLocalFoods = jest.fn();
 const mockRecentlyShared = jest.fn();
 const mockRemoveFood = jest.fn();
+const mockProblems = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
   localFoods: (...a: unknown[]) => mockLocalFoods(...a),
   recentlySharedFoods: (...a: unknown[]) => mockRecentlyShared(...a),
   removeFood: (...a: unknown[]) => mockRemoveFood(...a),
+  foodSyncProblems: (...a: unknown[]) => mockProblems(...a),
 }));
 
 const mockReadPref = jest.fn();
@@ -123,6 +125,7 @@ function lastAlertButton(label: string) {
 }
 
 beforeEach(() => {
+  mockProblems.mockReset().mockResolvedValue(new Map());
   mockLocalFoods.mockReset().mockResolvedValue([]);
   mockRecentlyShared.mockReset().mockResolvedValue([]);
   mockRemoveFood.mockReset().mockResolvedValue(undefined);
@@ -144,6 +147,36 @@ it('lists a saved food with its per-serving macros on one line', async () => {
   expect(screen.getByText(/250 kcal · 22P\/0C\/18F/)).toBeTruthy();
   // No second line for an unbranded, unshared food — the row stays one line.
   expect(screen.queryByTestId('saved-foods-from-f1')).toBeNull();
+});
+
+/**
+ * N533/#964 — a food the server REFUSED is not allowed to sit in this list
+ * looking like every other row. Before this, the only way to learn that a
+ * described food had never been saved anywhere but this phone was to
+ * reinstall the app and watch it vanish.
+ */
+it('says when a food was refused by the server, and which way', async () => {
+  mockLocalFoods.mockResolvedValue([
+    food({ id: 'ghost', name: 'Burrito bowl' }),
+    food({ id: 'held', name: 'Chicken thigh' }),
+    food({ id: 'fine', name: 'Oats' }),
+  ]);
+  mockProblems.mockResolvedValue(
+    new Map([
+      ['ghost', { reason: 'serving_label must be between 1 and 40 characters', onServer: false }],
+      ['held', { reason: 'name must be between 1 and 120 characters', onServer: true }],
+    ]),
+  );
+  render(<SavedFoodsScreen />);
+  await waitFor(() => expect(screen.getByTestId('saved-foods-problem-ghost')).toBeTruthy());
+
+  const ghost = String(screen.getByTestId('saved-foods-problem-ghost').props.children);
+  expect(ghost).toContain('serving_label must be between 1 and 40 characters');
+  expect(ghost).toContain('this phone only');
+  const held = String(screen.getByTestId('saved-foods-problem-held').props.children);
+  expect(held).toContain('name must be between 1 and 120 characters');
+  expect(held).toContain('earlier version');
+  expect(screen.queryByTestId('saved-foods-problem-fine')).toBeNull();
 });
 
 it('marks a recipe distinctly from a plain food', async () => {
@@ -426,4 +459,45 @@ describe('sort', () => {
     expect(mockWritePref).not.toHaveBeenCalled();
     expect(mockLocalFoods).not.toHaveBeenCalled();
   });
+});
+
+/**
+ * Found in review. A container's `accessibilityLabel` REPLACES everything
+ * nested inside it for a screen reader, so the refusal notice this ticket adds
+ * to the row is text a VoiceOver user never reaches — on the app's primary
+ * platform, for the athlete least able to notice "it looks saved and is not"
+ * any other way.
+ */
+it('puts the refusal in the row label, where a screen reader will reach it', async () => {
+  mockLocalFoods.mockResolvedValue([
+    food({ id: 'ghost', name: 'Burrito bowl' }),
+    food({ id: 'fine', name: 'Oats' }),
+  ]);
+  mockProblems.mockResolvedValue(
+    new Map([['ghost', { reason: 'serving_label must be between 1 and 40 characters', onServer: false }]]),
+  );
+  render(<SavedFoodsScreen />);
+  await waitFor(() => expect(screen.getByTestId('saved-foods-edit-ghost')).toBeTruthy());
+
+  const label = String(screen.getByTestId('saved-foods-edit-ghost').props.accessibilityLabel);
+  expect(label).toContain('Edit Burrito bowl');
+  expect(label).toContain('this phone only');
+  // A food with nothing wrong keeps the plain label — no notice to announce.
+  expect(screen.getByTestId('saved-foods-edit-fine').props.accessibilityLabel).toBe('Edit Oats');
+});
+
+/**
+ * Also found in review: reading the two together under one `Promise.all` made
+ * a failure of the ANNOTATION blank the whole list — a strictly worse screen
+ * than the one that existed before this ticket. Losing the warning costs a
+ * warning; losing the list costs the screen.
+ */
+it('still lists the foods when the refusal read fails', async () => {
+  mockLocalFoods.mockResolvedValue([food({ name: 'Chicken thigh' })]);
+  mockProblems.mockRejectedValue(new Error('could not read the outbox'));
+  render(<SavedFoodsScreen />);
+
+  await waitFor(() => expect(screen.getByText('Chicken thigh')).toBeTruthy());
+  expect(screen.queryByTestId('saved-foods-error')).toBeNull();
+  expect(screen.queryByTestId('saved-foods-problem-f1')).toBeNull();
 });

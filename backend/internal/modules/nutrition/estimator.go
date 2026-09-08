@@ -127,6 +127,14 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, C
 	if len(out.Items) == 1 {
 		out.MealName = ""
 	}
+	// Before ValidateEstimate so the label default is in place for anything
+	// downstream that reads it. The order is NOT a correctness guard —
+	// ValidateEstimate trims the name itself before its "has no name" check,
+	// so a whitespace name is refused either way (measured: swapping these
+	// two calls leaves every test green). What `estimate_fit_test.go` pins
+	// is that the fit never DEFAULTS a blank name the way it defaults a
+	// blank label.
+	out.fitToFood()
 
 	if err := ValidateEstimate(out); err != nil {
 		return Estimate{}, meta, err

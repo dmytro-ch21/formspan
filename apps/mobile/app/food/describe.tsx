@@ -761,6 +761,22 @@ export default function DescribeMealScreen() {
                 {estimate.match.food_source === 'ai' ? ', drafted by AI' : ', saved by you'}
                 {savedAgo(estimate.match.saved_at)}. No estimate used.
               </Text>
+              {/* N533/#964, the issue's hypothesis 1, and the decision it asked
+                  for: an EDITED reused draft neither becomes a new saved food
+                  nor rewrites the matched one. It logs today's entry with the
+                  edited numbers against the existing row, unchanged. A new
+                  row would be the duplicate-per-log N114 was reported about;
+                  updating the stored food from a one-off portion edit would
+                  silently redefine what "one skewer" contains for every future
+                  log, from a screen whose fields are about TODAY's plate. The
+                  stored food has its own editor, one tap below. What was
+                  missing was the sentence saying so — without it, "I fixed
+                  the numbers and it didn't save" is the honest reading. */}
+              <Text style={styles.note} testID="describe-reused-scope">
+                Changing the numbers below changes today’s entry only — the saved
+                food keeps its own. Use “Fix these numbers for next time” to
+                change what it stores.
+              </Text>
               {/* The escape hatch, and it is not optional. Without it a saved
                   food with wrong numbers is one the athlete can never ask to be
                   read again — the feature would have replaced one complaint

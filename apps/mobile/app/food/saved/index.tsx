@@ -85,8 +85,8 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { localFoods, recentlySharedFoods, removeFood } from '@/lib/foodLog';
-import type { Food } from '@/lib/nutrition';
+import { foodSyncProblems, localFoods, recentlySharedFoods, removeFood } from '@/lib/foodLog';
+import { savedFoodProblemCopy, type Food } from '@/lib/nutrition';
 import { PREF_SAVED_FOODS_SORT, readPref, writePref } from '@/lib/prefs';
 import {
   DEFAULT_SAVED_FOODS_SORT,
@@ -110,6 +110,17 @@ export default function SavedFoodsScreen() {
   const [sort, setSortState] = useState<SavedFoodsSort>(DEFAULT_SAVED_FOODS_SORT);
   const [foods, setFoods] = useState<Food[] | null>(null);
   const [recent, setRecent] = useState<Food[]>([]);
+  /**
+   * N533/#964 — the foods the server refused, by id, with its reason. Read
+   * beside the list rather than folded into `localFoods`, because that read
+   * feeds the quick-add picker too and a ghost there is still a food the
+   * athlete can log (an entry owns its own numbers). Here, where the list is
+   * the athlete's picture of what is saved, a row that is NOT saved anywhere
+   * but this phone has to say so.
+   */
+  const [problems, setProblems] = useState<Map<string, { reason: string; onServer: boolean }>>(
+    () => new Map(),
+  );
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -153,6 +164,22 @@ export default function SavedFoodsScreen() {
       } catch (err) {
         if (seq !== loadSeq.current) return;
         setError(err instanceof Error ? err.message : 'Could not read your saved foods.');
+        return;
+      }
+      // **Read SECOND and swallowed, not folded into the read above.** Found in
+      // review: a `Promise.all` of the two makes a failure of THIS read blank
+      // the entire saved-foods list, which is a strictly worse screen than the
+      // one that existed before this ticket — the list is the athlete's picture
+      // of what they have saved, and the refusal notice is an annotation on it.
+      // Losing the annotation costs a warning; losing the list costs the
+      // screen. Same "an accelerator, not a requirement" posture `foodLog.ts`
+      // gives its caffeine sync.
+      try {
+        const refused = await foodSyncProblems(userId);
+        if (seq !== loadSeq.current) return;
+        setProblems(refused);
+      } catch {
+        if (seq === loadSeq.current) setProblems(new Map());
       }
     },
     [userId],
@@ -277,7 +304,16 @@ export default function SavedFoodsScreen() {
           onLongPress={() => confirmDelete(f)}
           style={styles.row}
           accessibilityRole="button"
-          accessibilityLabel={`Edit ${f.name}${from ? `, ${from}` : ''}`}
+          // **The refusal has to be IN the label, not merely under it.** A
+          // container with an `accessibilityLabel` replaces everything nested
+          // inside it for a screen reader, so the red line this ticket added to
+          // the row is text a VoiceOver user never reaches — the one athlete
+          // for whom "it looks saved but is not" is hardest to notice
+          // otherwise. Appended rather than made its own focusable element so
+          // the row is still one swipe.
+          accessibilityLabel={`Edit ${f.name}${from ? `, ${from}` : ''}${
+            problems.has(f.id) ? `. ${savedFoodProblemCopy(problems.get(f.id)!)}` : ''
+          }`}
           accessibilityHint="Long press, or swipe left, to delete"
           accessibilityActions={DELETE_ACTIONS}
           onAccessibilityAction={(e) => {
@@ -302,6 +338,11 @@ export default function SavedFoodsScreen() {
               testID={from ? `${keyPrefix}saved-foods-from-${f.id}` : undefined}
             >
               {second}
+            </Text>
+          ) : null}
+          {problems.has(f.id) ? (
+            <Text style={styles.problem} testID={`${keyPrefix}saved-foods-problem-${f.id}`}>
+              {savedFoodProblemCopy(problems.get(f.id)!)}
             </Text>
           ) : null}
         </Pressable>
@@ -461,4 +502,5 @@ const styles = StyleSheet.create({
   macros: { fontSize: 12, lineHeight: 20, color: vola.textMuted, flexShrink: 0 },
   second: { fontSize: 12, lineHeight: 16, marginTop: 2, color: vola.textDim },
   from: { color: vola.textMuted },
+  problem: { fontSize: 12, lineHeight: 16, marginTop: 2, color: vola.warn },
 });

@@ -217,8 +217,27 @@ components:
         [name, serving_label, servings, kcal, protein_g, carb_g, fat_g,
          fibre_g, portion_confidence, assumption]
       properties:
-        name: { type: string, example: Scrambled eggs }
-        serving_label: { type: string, example: 1 medium egg }
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: Scrambled eggs
+          description: >
+            Fitted by the server to what `NutritionFoodInput.name` and
+            `NutritionEntryInput.name` accept (N533), so a confirmed draft
+            can always be saved and logged as-is.
+        serving_label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          example: 1 medium egg
+          description: >
+            How the quantity is counted, as a short phrase. Fitted by the
+            server to the same 1–40 characters `NutritionFoodInput` and
+            `NutritionEntryInput` require (N533): a label the model returned
+            longer than that is cut, and an empty one becomes `1 serving`.
+            Before this, a draft could carry a label the save would then
+            refuse with a 400 — the food lived on one phone only.
         servings: { type: number, example: 2 }
         kcal: { type: number }
         protein_g: { type: number }

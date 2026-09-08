@@ -31,8 +31,8 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ShareToFriend } from '@/components/ShareToFriend';
@@ -40,7 +40,7 @@ import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { foodSyncState, localFood, saveFoodLocally } from '@/lib/foodLog';
-import type { Food } from '@/lib/nutrition';
+import { savedFoodProblemCopy, type Food } from '@/lib/nutrition';
 import { shareBlockedReason } from '@/lib/shares';
 import { request, useSyncState } from '@/lib/sync';
 
@@ -82,7 +82,13 @@ export default function EditSavedFoodScreen() {
   // sharing sends what the SERVER holds, and an athlete mid-correction on
   // this exact screen is the one case that is never true.
   const [touched, setTouched] = useState(false);
-  const [shareSync, setShareSync] = useState<{ unsynced: boolean; owed: boolean } | null>(null);
+  const [shareSync, setShareSync] = useState<{
+    unsynced: boolean;
+    owed: boolean;
+    rejected: string | null;
+  } | null>(null);
+  /** The refusal already announced, so an unrelated sync tick does not repeat it. */
+  const announcedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!userId || !id) return;
@@ -147,7 +153,25 @@ export default function EditSavedFoodScreen() {
     if (!userId || !id) return;
     let live = true;
     foodSyncState(userId, id).then((s) => {
-      if (live) setShareSync(s);
+      if (!live) return;
+      setShareSync(s);
+      // **SPOKEN, not only rendered.** `accessibilityLiveRegion` on the notice
+      // below is ANDROID-ONLY — iOS has no live regions — and this app's
+      // primary platform is iOS, so without this a VoiceOver user opens the
+      // food they think is saved and hears nothing about it having been
+      // refused. Exactly the gap `goals.tsx`, `sign-up.tsx`,
+      // `forgot-password.tsx` and `food/scan.tsx` each closed the same way;
+      // caught in review before it became the fifth.
+      //
+      // Guarded on the reason CHANGING so a re-read triggered by an unrelated
+      // sync tick does not re-announce a notice already on screen.
+      if (s?.rejected && s.rejected !== announcedRef.current) {
+        announcedRef.current = s.rejected;
+        AccessibilityInfo.announceForAccessibility(
+          savedFoodProblemCopy({ reason: s.rejected, onServer: !s.unsynced }),
+        );
+      }
+      if (!s?.rejected) announcedRef.current = null;
     });
     return () => {
       live = false;
@@ -276,6 +300,16 @@ export default function EditSavedFoodScreen() {
       {food.source === 'ai' ? (
         <Text style={styles.provenance} testID="saved-provenance">
           Drafted by AI, not measured. Worth checking against the packet.
+        </Text>
+      ) : null}
+
+      {/* N533/#964 — a food the server REFUSED says so here, on the screen
+          the athlete opens to fix it, rather than sitting as a local ghost
+          that only a reinstall reveals. Saving from this screen sets
+          `dirty = 1` and clears the reason, which is the retry. */}
+      {shareSync?.rejected ? (
+        <Text style={styles.problem} accessibilityLiveRegion="polite" testID="saved-rejected">
+          {savedFoodProblemCopy({ reason: shareSync.rejected, onServer: !shareSync.unsynced })}
         </Text>
       ) : null}
 

@@ -64819,6 +64819,285 @@ Bluetooth contract was verified against the spec, not against a live monitor
 in this session, which is exactly the "a stub built from an assumption"
 case CLAUDE.md warns about — the device run is the only thing that closes it.
 
+## 2026-09-08 — N533 (#964): "some foods from AI generation don't get saved" — a draft the server could never accept, and a refusal nothing on the phone ever showed
+
+**The report was one sentence and it was accurate.** *"some foods from ai
+generation doesn't get saved."* The ticket carried four grounded hypotheses
+and asked for each to be tested with something that would fail if it were
+the cause, not picked by reading. Three were exercised and did not
+reproduce; one reproduced end to end, against the real validator, from an
+ordinary description. The user has not yet named the foods, so the
+reproduction below is constructed rather than taken from their account —
+the `NEEDS HUMAN EVIDENCE` criterion on the issue is what closes that gap.
+
+### What reproduced (hypothesis 3, with a specific shape)
+
+`Food.Validate` and `Entry.Validate` both refuse a `serving_label` outside
+**1–40 runes** and a `name` outside 1–120. `ValidateEstimate` — what a
+model's answer passes through before it becomes a draft — bounds the
+numbers and the name's *emptiness* and never looks at the label at all: not
+its length, not whether it is empty. The JSON schema the model is held to
+says `"type": "string"` and, under structured outputs, cannot say
+`maxLength`. So a model asked about a burrito bowl can answer with
+`serving_label: "1 restaurant bowl with rice, beans, salsa and sour cream
+(about 400 g)"` — 68 runes — and that is a **valid estimate that can never
+be saved**.
+
+What happened next is the whole bug, and every step was individually
+correct:
+
+1. `describe.tsx` confirms the draft: `saveFoodLocally` writes the food to
+   SQLite with `dirty = 1`, `logFood` writes the entry naming it. Both
+   succeed — the local write has no validator.
+2. `push()` sends the food. The server answers 400 `serving_label must be
+   between 1 and 40 characters`. `classify` reads a 400 as permanent —
+   correctly, a 4xx will not become a 2xx — clears `dirty`, keeps
+   `last_error`. `remote` stays 0.
+3. The entry queue runs next and sends the entry with `source_food_id`
+   pointing at a food the server never accepted. The composite foreign key
+   refuses it (23503 → 400). Permanent again; `dirty` cleared.
+4. `cacheFoods` pulls. It deletes only `remote = 1` rows absent from the
+   server, so the ghost survives locally. Every read of `foods` (the saved
+   list, the quick-add picker, the editor) shows it like any other row.
+   `pendingFoodCount` is 0 — nothing is owed — so the sync screen has
+   nothing to say.
+
+**The food and the meal exist on one phone and nowhere else, and the phone
+says nothing.** A reinstall shows what the server has (N428), which is why
+"it was there yesterday and gone today" was the household's experience the
+week several phones were reinstalled. Measured rather than argued:
+`estimate_fit_test.go`'s `TestAnUnfittedLongLabelIsWhatTheServerRefuses`
+feeds that exact label through `ValidateEstimate` (accepts) and then
+`Food.Validate` and `Entry.Validate` (both refuse), and
+`TestTheWireRefusesTheUnfittedLabelWithA400` sends the phone-shaped PUT
+through the real `SaveFood` handler.
+
+Two more members of the same class were found on the way and are recorded
+rather than fixed, because they are not AI-generation paths: `sane()` in
+`estimate.go` accepts `servings = 0` (`>= 0`), and `parseOr` on the
+describe screen lets an athlete type `0` — `Entry.Validate` refuses
+`servings <= 0`, so both would ghost an entry the same way. Neither has
+been reported; both should be closed by the same "fit the draft to what
+the server accepts" rule if they ever are.
+
+### What did not reproduce, and how it was tested
+
+- **Hypothesis 1 — an edited reused draft writes nothing new.** True, and
+  now deliberate rather than accidental. The decision the ticket asked for:
+  an edited reused draft becomes **neither** a new saved food **nor** an
+  update to the matched one. It logs today's entry with the edited numbers
+  against the existing row, unchanged. A new row per edit is the
+  duplicate-per-log N114 was reported about; rewriting the stored food
+  from a portion edit on a screen whose fields are about *today's plate*
+  would silently redefine what "one skewer" contains for every future log.
+  The stored food has its own editor one tap away ("Fix these numbers for
+  next time"). What was missing was the sentence saying so — without it,
+  *"I fixed the numbers and it didn't save"* is the honest reading of that
+  screen. `describe.tsx` now says it (`describe-reused-scope`), and
+  `describeReuse.test.tsx` pins both halves: the entry carries the edit,
+  `saveFoodLocally` is never called.
+- **Hypothesis 2 — `replacing` pointing at a deleted row.** Reproduced as a
+  narrower defect than described: `saveFoodLocally`'s upsert left
+  `deleted_at` alone on conflict, so a regenerate confirmed after the
+  matched food had been deleted on the same phone wrote the fresh numbers
+  into a tombstone every read filters out, and `push()` then sent a DELETE
+  for it — with the entry refused on the FK straight after. The upsert now
+  lifts the tombstone: a save is a claim that the food exists.
+  `foodRejected.test.ts` "brings the food back rather than writing into its
+  tombstone" — mutation `M1` (drop `deleted_at = NULL`) goes red.
+- **Hypothesis 4 — multi-item drafts.** Does not reproduce. The loop saves
+  each item and logs its entry in the same iteration, save first, and a
+  throw aborts before the log. Pinned by a new `describeReuse.test.tsx`
+  case: second item's save rejects → one entry logged (the first), the
+  first row trimmed, the second still on screen, error shown.
+
+### What changed
+
+**Backend — the real fix.** `Estimate.fitToFood()` (`estimate.go`) runs on
+every model answer before `ValidateEstimate`: name and label trimmed and
+cut to `maxNameRunes`/`maxLabelRunes` — now named constants shared with
+`validateName`/`validateLabel` rather than two literals that had to agree —
+and an empty label defaulted to `DefaultServingLabel` (`"1 serving"`).
+**Clamped, not refused**, and that is a product call: refusing would spend
+one of the athlete's daily estimates on an error about a field the describe
+screen does not even let them edit. An empty *name* is deliberately not
+defaulted — "1 serving" is what an empty label honestly means, but no
+default is honest for a food the model could not name; `ValidateEstimate`
+still refuses it. Runes, not bytes, because the validators count runes. The
+schema descriptions now ask the model for ≤40/≤120 too, so the cut is the
+rare case rather than the common one. Mutation-tested: removing the call
+fails 8 subtests; making the fit default a blank name fails
+`TestAWhitespaceNameIsStillRefusedAfterTheFit`. **One mutation survived and
+corrected a comment rather than the code**: swapping the fit and the
+validate call leaves everything green, because `ValidateEstimate` trims
+before its own emptiness check — the ordering is a preference, and the
+comment that had called it a guard was rewritten to say so.
+
+**Mobile — the same fit on the way into the outbox.** `savedFoodFrom` and
+`itemToEntry` now pass name and label through `fitName`/`fitServingLabel`
+(`estimateApi.ts`, constants `NAME_MAX_RUNES = 120`,
+`SERVING_LABEL_MAX_RUNES = 40`, `DEFAULT_SERVING_LABEL`). Defence for a
+phone talking to a deploy that predates the estimator fit, and because a
+value that must agree with a validator is safer clamped at both ends than
+trusted across the wire. `Array.from`, not `slice`, so a surrogate pair is
+never split (mutation `M6`).
+
+**Mobile — the meal must still reach the server.** In `push()`'s permanent
+branch, a food the server has **never** accepted (`remote = 0`, not a
+tombstone) now has its still-owed entries' `source_food_id` severed before
+the entry queue runs — the same thing `removeFood` already does for a
+deleted food, for the same reason. The entry is then pushed without the
+link instead of refused on the FK and ghosted beside the food. It costs the
+provenance pointer only: an entry owns its own copied macros, nothing reads
+nutrition back through `source_food_id`, and a day eaten is worth more than
+a link to a row that does not exist. **Only `remote = 0`**: a refused
+*edit* of a food the server already holds leaves the earlier version there,
+and an entry may keep naming it — mutation `M3` (sever on every permanent
+rejection) goes red on exactly that. The `SELECT` feeding the loop now
+reads `remote`, which `FOOD_COLS` deliberately does not carry; without it
+the guard would have been vacuously true, which is the "check that your
+apparatus can fail" trap in a `WHERE` clause.
+
+**Mobile — the refusal is visible.** `foodSyncProblems(userId)` returns
+every `dirty = 0 AND last_error IS NOT NULL` food with the server's reason
+and whether the server holds an earlier version; `foodSyncState` gains
+`rejected`. Both surface only once the phone has *stopped* trying — a
+`last_error` on a still-owed row is a transient failure the next pass
+retries, and reporting it as a refusal would be wrong the moment the signal
+came back (mutation `M7`). The saved-foods list shows the reason under the
+row (`saved-foods-problem-<id>`); the food editor shows it above the form
+(`saved-rejected`). Copy is `savedFoodProblemCopy` in `lib/nutrition.ts`,
+which quotes the server's message rather than paraphrasing it — it names
+the field to fix. Editing the food (`saveFoodLocally`) sets `dirty = 1` and
+clears the reason, which is the retry, so both sentences can honestly end
+with "edit it".
+
+**Where the surfacing stops, written down.** For a food the server already
+holds, the existing pull design (`cacheFoods`: "after a permanent rejection
+the server's copy IS the truth") takes the server's version over the
+`dirty = 0` row *and clears `last_error`* in the same pass — so a refused
+edit is silently reverted to the earlier version on the phone and is **not**
+reported. The "your last change was refused" sentence appears only while
+that pull is failing. `foodRejected.test.ts` pins both facts so the limit is
+visible. Whether a reverted edit should say so is left open below; it is
+not this ticket's case, and changing a documented sync invariant in passing
+is how this repo's `T` traps get written.
+
+**OpenAPI.** `EstimatedItem.name`/`serving_label` now declare the limits
+(`maxLength: 120`/`40`, `minLength: 1`) with a description saying a draft
+always fits `NutritionFoodInput`/`NutritionEntryInput` — the contract
+previously let a client believe a draft might not.
+
+### Test discipline
+
+Backend: `estimate_fit_test.go`, 5 tests, real `Food.Validate`/
+`Entry.Validate`/`SaveFood` handler, three mutations run. Mobile:
+`foodRejected.test.ts` (12, real SQLite via `migratedFixture`, a fake
+server whose two refusals are the exact messages the Go test measured —
+not a stub that returns 200); additions to `describeReuse.test.tsx`,
+`savedFoodsScreen.test.tsx`, `savedFoodScreen.test.tsx`; twelve mutations,
+each with exactly one targeted failure, each restored from a byte copy and
+byte-compared (a `git checkout` restore earlier in the session had silently
+discarded a legitimate edit to the same file — the restore was verified by
+recompiling, not by reading). `savedFoods.test.ts` — N114's "describing the
+same one-item food twice reuses one saved row" — untouched and green.
+
+### Open items this leaves
+
+- The two `servings = 0` paths above (`sane()`, `parseOr`) — same class,
+  unreported.
+- A refused edit of a server-held food is reverted silently by the pull; the
+  reason is cleared with it. Deliberate today; worth a sentence on screen.
+- Ghost rows that already exist on a phone from before this fix are not
+  repaired retroactively — they are `dirty = 0, remote = 0, last_error`
+  set, so they now *show* as refused in the saved list, and an edit
+  re-queues them; the entries they were logged with were already refused
+  and cleared and stay local. The user's reinstalled phones have none.
+- The `NEEDS HUMAN EVIDENCE` item on #964: the user names two foods; each
+  is described, confirmed, and survives a reinstall.
+
+### What review found afterwards, and the shape of the second fix
+
+`frontend-reviewer` caught the bug **recurring one log later**, which is the
+part worth writing down: the first fix severed a doomed `source_food_id` at
+the FAILURE SITE — inside the catch for the food's own push — so it only ever
+saw foods still `dirty = 1`. A refused food then settles at `remote = 0,
+dirty = 0` and drops out of that queue permanently, while `localFoods` and
+`recentsFor` filter on `deleted_at IS NULL` alone and keep offering it from
+Today's quick-add, the recents chips and search. Every subsequent tap logged
+a fresh entry naming a food the server had never accepted → 23503 → 400 →
+permanent → `dirty` cleared. An athlete who had ALREADY SEEN the refusal
+banner and re-logged the same meal lost it silently, indefinitely.
+
+The reviewer offered two fixes: filter ghosts out of the quick-add surfaces,
+or key the sever off the food's current `remote` rather than off which foods
+happened to be mid-push. **The second was taken**, at the one choke point
+where a `source_food_id` is put on the wire — just before the entries queue,
+which runs after the foods queue, so `foods.remote` there is already this
+pass's answer. Filtering the surfaces would have meant enumerating every
+screen that can feed a food id into a log (three today), and would have
+fought the requirement that the saved-foods list still SHOW the ghost.
+
+Writing that guard forced a question the first fix never asked, and it turned
+up a second silent loss. For a food the server does not have, there are two
+cases, not one:
+
+- **it will never arrive** — settled (`dirty = 0`) or a TOMBSTONE (what is
+  owed is a DELETE). Sever: the link is dead, and the meal must not die with
+  it.
+- **it is still coming** — `dirty = 1` and not deleted, i.e. a food whose
+  push failed for a TRANSIENT reason (a 503) and which the next pass will
+  send. Severing here destroys a link that is about to become valid; sending
+  the entry anyway has it refused on the foreign key and refused
+  PERMANENTLY. **Before this, the transient case lost the meal** — the foods
+  loop only sets `stalled` on `offline`, so a 503 on the food let the entries
+  queue run straight into the FK. The entry now WAITS: skipped, left
+  `dirty = 1`, still counted by `pendingFoodCount`, sent by the pass after
+  the food lands.
+
+The two predicates are exact complements over `remote = 0`, which is the
+property that makes the pair reviewable.
+
+**Six mutations, five caught, one deliberately not.** Removing the sever,
+dropping either of its clauses, dropping the tombstone arm, and removing the
+wait skip each produced exactly one targeted failure. The sixth — dropping
+`deleted_at IS NULL` from the WAIT set — **survives**, because the sever runs
+before the entry rows are read and has already nulled every tombstone
+pointer, so it cannot reach the test. Kept and documented in place rather
+than trimmed, per this file's own rule that a redundant guard reads as dead
+code to the next person: what it defends is the ORDERING, and a reader who
+moves the read above the UPDATE gets the complement property back.
+
+Three of the reviewer's four suggestions were taken. The saved-foods row's
+`accessibilityLabel` now carries the refusal — a container label REPLACES
+nested text for a screen reader, so this ticket's own red line was invisible
+to exactly the athlete least able to notice the problem otherwise. The
+editor's `accessibilityLiveRegion` gained the matching
+`AccessibilityInfo.announceForAccessibility`, since live regions are
+Android-only and iOS is the primary platform (the fifth time this repo has
+closed that same gap). And the list's `Promise.all` was split, so a failure
+of the ANNOTATION read no longer blanks the whole list — a strictly worse
+screen than the one before this ticket.
+
+A second review round, after the fix above, found one more surface and took
+it: the RECIPE editor (`app/food/recipe/[id].tsx`) already read `foodSyncState`
+and never surfaced `rejected`, unlike its sibling. A recipe is a `foods` row
+and is refused exactly the same way — a name over 120 runes, say — and the
+saved-foods LIST already flagged it, because `foodSyncProblems` reads every
+`foods` row regardless of `kind`. So the one screen that said nothing was the
+screen an athlete opens to FIX one. Not a data-loss gap; an inconsistent
+surface, and a one-line-per-half fix. Both mutations caught.
+
+**The fourth was declined, with the reason recorded at the call site.**
+`fitName` has no empty floor while `fitServingLabel` does, and that asymmetry
+is deliberate on BOTH sides of the wire: `fitToFood` makes the same choice in
+Go for the same reason — an empty label means "counted in servings" and
+`1 serving` says that honestly, while an empty name means the model could not
+say what the food is. `ValidateEstimate` refuses such an estimate outright
+(`TestAWhitespaceNameIsStillRefusedAfterTheFit`), so a blank name never
+reaches the client, and defaulting one would ADD a saved food the athlete
+cannot identify rather than prevent a ghost.
+
 ## Open items / known gaps as of this entry
 
 
