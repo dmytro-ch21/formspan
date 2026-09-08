@@ -64090,6 +64090,26 @@ requirements mid-flight and both are in scope:**
   `hr_direct_count` and the locally remembered monitor name.
 - Android parity throughout, Health Connect as the fallback.
 
+## 2026-09-08 — the parallel-agent cap is 8, not 3
+
+**Set by the user, in these words: *"increase the allowed agents from 3 to 8."***
+`.vola-agent/policy.json` now carries `max_parallel_agents: 8` and
+`max_tickets_in_progress: 8`; CLAUDE.md's section is retitled and tells readers
+to take the number from the file rather than its own heading.
+
+**What the original three was for is unchanged.** The 2026-08-25 cap answered a
+board that lied — a dozen `In Progress` claims with nothing behind them. Raising
+the ceiling does not touch that mechanism; it moves the point at which it
+bites. Measured the same day this landed: **63 of 65 assigned tickets were
+already merged**, sitting in `evidence-outstanding`, still assigned because the
+merging session never unassigned. That is a hygiene failure independent of the
+cap, and it is the one that grows with it — at eight, an assignee only means
+"somebody is on it" if unassign-after-merge is performed every single time.
+
+**Consequence for coordinators:** eight is the ceiling for *independent* work.
+A dependent chain is still dispatched a batch at a time, and a slot is freed
+by a merge plus an unassign, not by a merge alone.
+
 ## Open items / known gaps as of this entry
 
 
