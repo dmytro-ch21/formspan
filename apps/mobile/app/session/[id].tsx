@@ -132,7 +132,9 @@ import {
   DEFAULT_TIMER_SECONDS,
   workSecondsFor,
   offeredGrips,
+  applyEffortEntry,
   SET_TYPES,
+  type EffortKey,
   type LoggedSet,
   type Measure,
   type Grip,
@@ -2739,16 +2741,36 @@ function SetRow({
   // VoiceOver user cannot tell which they are about to press.
   const setName = isDrop ? `the drop off set ${ordinal}` : `set ${ordinal}`;
 
-  const num = (key: keyof LoggedSet, whole = false) => (text: string) => {
-    const raw = text.trim() === '' ? null : Number(text.replace(',', '.'));
-    if (raw === null || !Number.isFinite(raw)) {
-      onChange({ ...set, [key]: null });
-      return;
-    }
-    // reps/seconds/distance are integers on the wire; a fractional one fails
-    // Go's decode and returns a generic "invalid JSON body" that says nothing
-    // about which field was wrong.
-    onChange({ ...set, [key]: whole ? Math.round(raw) : raw });
+  /*
+   * The generic `num(key, whole)` handler that used to live here is gone as of
+   * N525/#940. Its only two callers were the RIR and RPE fields below, which
+   * now go through `applyEffortEntry` instead; every other numeric field on
+   * this row (reps, weight, distance, the timer target) already had its own
+   * inline handler, because each needs its own unit conversion or edit rule.
+   * Its one piece of documented reasoning — that reps/seconds/distance are
+   * integers on the wire and a fractional one fails Go's decode with a generic
+   * "invalid JSON body" — is not lost with it: `lib/sessions.ts` carries that
+   * same finding at greater length (N507/#884), next to the rounding helper
+   * the write paths share.
+   */
+
+  /**
+   * RIR and RPE, mutually exclusive — N525/#940. The rule itself lives in
+   * `lib/sessions.ts`'s `applyEffortEntry` (pure, so it is tested without
+   * rendering this screen); see its doc comment for the measurement that
+   * produced it and for why clearing deliberately displaces nothing.
+   *
+   * `Field` resyncs its own text from `value` when it changes underneath
+   * (its `lastSeen` check), so the displaced number visibly empties with
+   * nothing extra needed here.
+   *
+   * Deliberately not a segmented RIR/RPE mode toggle: a strength set is
+   * logged standing up, one-handed, in the ~20 seconds between sets.
+   * Displacing on input costs zero extra taps; a mode switch would cost one
+   * per set, every set, forever.
+   */
+  const effort = (key: EffortKey) => (text: string) => {
+    onChange(applyEffortEntry(set, key, text));
   };
 
   return (
@@ -3044,16 +3066,18 @@ function SetRow({
           )}
 
           {/* Effort, side by side. Two views of the same thing — record
-              whichever you think in rather than converting mid-session.
-              Hidden entirely when effort tracking is off: greying the
-              fields out would still cost the space and still read as
-              something you're failing to fill in. */}
+              whichever you think in rather than converting mid-session, and
+              since N525/#940 that "whichever" is enforced: filling one
+              clears the other (see `effort` above for why, and for what it
+              measured). Hidden entirely when effort tracking is off:
+              greying the fields out would still cost the space and still
+              read as something you're failing to fill in. */}
           {showEffort && (
           <View style={styles.fieldRow}>
             <Field
               label="RIR"
               value={set.rir}
-              onChangeText={num('rir', true)}
+              onChangeText={effort('rir')}
               hint="Reps left"
               integer
               accessibilityLabel={`Reps in reserve for ${setName} of ${exerciseName}`}
@@ -3062,7 +3086,7 @@ function SetRow({
             <Field
               label="RPE"
               value={set.rpe}
-              onChangeText={num('rpe')}
+              onChangeText={effort('rpe')}
               hint="1–10"
               accessibilityLabel={`RPE for set ${ordinal} of ${exerciseName}`}
               testID={`set-${index}-rpe`}
