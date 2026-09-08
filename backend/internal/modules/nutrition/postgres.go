@@ -248,12 +248,29 @@ func (r *PostgresRepository) DayTotals(ctx context.Context, userID, from, to str
 	return out, translate(rows.Err())
 }
 
+// foodCols is every column a Food is read with, and it is used in a RETURNING
+// clause as well as in SELECTs — which is why the sharer's handle is a
+// correlated scalar subquery on `nutrition_foods.shared_by_user_id` rather
+// than a LEFT JOIN: a JOIN cannot be expressed in `INSERT ... RETURNING`, and
+// two column lists (one joined, one not) is exactly the "a new column was
+// forgotten in one of them" hazard the mobile cache's own FOOD_COL_NAMES
+// comment describes. The qualified name resolves in all four callers because
+// none of them aliases the table.
+//
+// Resolved LIVE, never stored (N532/#963): profiles.username is renameable,
+// and a handle copied at accept time would be wrong from the first rename on
+// with nothing to correct it. Same reasoning, same shape, as the share
+// inbox's `from` (share/postgres.go). A sharer whose profile is gone, or who
+// has no username, reads as NULL — the CHECK constraint guarantees shared_at
+// still says the food was shared, so a client keys presence on that.
 const foodCols = `
 	id::text, user_id, kind, name, brand,
 	serving_label, serving_grams,
 	kcal, protein_g, carb_g, fat_g, fibre_g,
 	saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
 	yield_servings, source, external_id, barcode,
+	(SELECT p.username FROM profiles p WHERE p.user_id = nutrition_foods.shared_by_user_id),
+	shared_at,
 	created_at, updated_at`
 
 func scanFood(row pgx.Row) (Food, error) {
@@ -264,6 +281,7 @@ func scanFood(row pgx.Row) (Food, error) {
 		&f.Kcal, &f.ProteinG, &f.CarbG, &f.FatG, &f.FibreG,
 		&f.SaturatedFatG, &f.SugarG, &f.AddedSugarG, &f.SodiumMG, &f.CholesterolMG,
 		&f.YieldServings, &f.Source, &f.ExternalID, &f.Barcode,
+		&f.SharedBy, &f.SharedAt,
 		&f.CreatedAt, &f.UpdatedAt,
 	)
 	return f, err
@@ -540,6 +558,14 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			source = COALESCE(NULLIF($19::text, ''), nutrition_foods.source),
 			external_id = EXCLUDED.external_id,
 			barcode = EXCLUDED.barcode,
+			-- shared_by_user_id / shared_at are DELIBERATELY ABSENT from this
+			-- SET clause, and from the INSERT's column list above (N532/#963).
+			-- They are written by share.go's insertFood alone. Listing them
+			-- here — even as "EXCLUDED.shared_at", which would be NULL on
+			-- every client write — is the exact fourth instance of the
+			-- exercise.updateWithin wipe CLAUDE.md warns about: the receiver
+			-- correcting a shared recipe's macros would silently erase who
+			-- sent it. Pinned by TestEditingACopyKeepsWhoSharedIt.
 			updated_at = now()
 		WHERE nutrition_foods.user_id = $2
 		RETURNING `+foodCols,

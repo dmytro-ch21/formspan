@@ -1,69 +1,157 @@
 /**
- * "Saved foods" — the phone half of N79.
+ * "Saved foods" — the phone half of N79, made findable by N532.
  *
- * ## The gap this closes
+ * ## The gap N79 closed
  *
  * `apps/web`'s `nutrition/recipes` page could list, edit and delete an
  * athlete's own saved things; the phone could create them (`food/add.tsx`,
  * `food/describe.tsx`, the barcode flow — collectively N78) and, since N114,
  * correct one it already knew the id of (`food/saved/[id].tsx`,
  * `food/recipe/[id].tsx`) — but nothing let an athlete BROWSE the whole list
- * or remove one. `deleteFood` in `lib/nutritionApi.ts` had been sitting there
- * since the wire contract was written with a comment saying, literally, "no
- * production caller." This screen is that caller's other half — `removeFood`
- * in `lib/foodLog.ts` is the one that actually calls it, through the same
- * outbox every other mutation here goes through.
+ * or remove one. `removeFood` in `lib/foodLog.ts` is the caller `deleteFood`
+ * had been waiting for, through the same outbox every other mutation uses.
+ *
+ * ## What N532 (#963) changed, and why
+ *
+ * The user's two complaints, verbatim: *"we should have an option to
+ * distinguish shared food items, its hard to find them so we could have
+ * recently shared with it"* and *"the list gets large in saved food - lets
+ * make rows more compact and sortable."*
+ *
+ * - **"Recently shared"** sits above the list: foods a friend sent in the
+ *   last {@link RECENTLY_SHARED_DAYS} days, newest first. It renders ONLY
+ *   when there is something in it — an empty "Recently shared" heading would
+ *   be a section that can never be non-empty in a test, and a screen that
+ *   announces an absence. Shown only while the search box is empty: a search
+ *   is one question, and a spotlight on top of its answer is noise.
+ * - **"from @handle · 3 Sep"** on any row with provenance, wherever it
+ *   appears — the spotlight, the full list, a search result. The handle is
+ *   the server's LIVE resolution (`lib/nutrition.ts`'s `Food.shared_by`), so
+ *   a rename shows up on the next pull; this screen never derives one.
+ * - **Compact rows.** One line — name, the recipe mark, kcal · P/C/F — and a
+ *   second only when there is something to say (provenance, brand). The old
+ *   card was ≈134pt plus a 12pt gap (padding 28, three text lines, a 36pt
+ *   hold-to-delete button); this row is 41pt, or 59pt with its second line —
+ *   computed from the styles below, not measured on a device. Roughly a
+ *   third of the old height, against the ticket's "roughly half".
+ * - **Sort chips — Recent / Name / Most used**, default Recent, remembered
+ *   per athlete (`PREF_SAVED_FOODS_SORT`, the Library sport filter's
+ *   precedent). Search filters WITHIN the chosen sort: both go to the same
+ *   `localFoods` read, so there is no in-memory re-sort to drift from it.
  *
  * ## Editing is not duplicated here
  *
- * A row's edit affordance pushes straight to the screens that already do this
- * correctly — `food/saved/[id]` for a plain food, `food/recipe/[id]` for a
- * recipe, exactly the split `food/add.tsx`'s own Edit button uses and for the
+ * A row's tap pushes straight to the screens that already do this correctly
+ * — `food/saved/[id]` for a plain food, `food/recipe/[id]` for a recipe,
+ * exactly the split `food/add.tsx`'s own Edit button uses and for the
  * identical reason (N87): a recipe edited through the plain-food form loses
- * its ingredient list. This screen does not re-implement either editor, it
- * only has to route to the right one.
+ * its ingredient list.
  *
- * ## Deleting: a hold, not a swipe or a dialog
+ * ## Deleting: off the row, behind a gesture, always confirmed
  *
- * `HoldToConfirm` is what every other irreversible-on-this-screen delete in
- * this app uses (`trackers/archived.tsx`, `curriculum/edit/[id].tsx`) — a
- * screen-reader user gets the tap-and-confirm-dialog fallback it already
- * carries, so this screen does not need a second confirmation path. The body
- * says what survives: a day already logged keeps its own copied numbers,
- * because `source_food_id` is `ON DELETE SET NULL` and an entry never reads
- * nutrition back through it. Same sentence `apps/web`'s recipes page prints
- * under its own list.
+ * The per-row `HoldToConfirm` was the tallest thing on the old card and the
+ * one thing a compact row cannot carry. Delete now lives behind THREE
+ * gestures, all ending in the same platform confirm dialog:
+ *
+ *   - **swipe left** reveals Delete (`SwipeToDelete`, the session screen's
+ *     own reveal-then-tap component — never a full-swipe delete);
+ *   - **long-press** the row, for anyone who does not discover the swipe;
+ *   - the **`delete` accessibility action**, because a screen-reader user
+ *     can do neither, and `SwipeToDelete` deliberately hides its button from
+ *     assistive tech while closed. VoiceOver/TalkBack expose it in the
+ *     actions rotor.
+ *
+ * `Alert.alert` rather than the hold, because the hold's whole point was
+ * "no dialog for sighted users", and a dialog is the honest cost of taking a
+ * destructive control off the row. Its body says what survives: a day
+ * already logged keeps its own copied numbers, because `source_food_id` is
+ * `ON DELETE SET NULL` and an entry never reads nutrition back through it.
  */
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View as RNView } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View as RNView,
+} from 'react-native';
 
-import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
+import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { localFoods, removeFood } from '@/lib/foodLog';
+import { useAccent } from '@/lib/AccentProvider';
+import { localFoods, recentlySharedFoods, removeFood } from '@/lib/foodLog';
 import type { Food } from '@/lib/nutrition';
+import { PREF_SAVED_FOODS_SORT, readPref, writePref } from '@/lib/prefs';
+import {
+  DEFAULT_SAVED_FOODS_SORT,
+  RECENTLY_SHARED_DAYS,
+  SAVED_FOODS_SORTS,
+  SAVED_FOODS_SORT_LABELS,
+  parseSavedFoodsSort,
+  sharedFromLine,
+  type SavedFoodsSort,
+} from '@/lib/savedFoodsSort';
 import { request as requestSync } from '@/lib/sync';
+
+const DELETE_ACTIONS = [{ name: 'delete', label: 'Delete' }] as const;
 
 export default function SavedFoodsScreen() {
   const { userId } = useAuth();
   const router = useRouter();
+  const accent = useAccent();
 
   const [q, setQ] = useState('');
+  const [sort, setSortState] = useState<SavedFoodsSort>(DEFAULT_SAVED_FOODS_SORT);
   const [foods, setFoods] = useState<Food[] | null>(null);
+  const [recent, setRecent] = useState<Food[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * A generation counter, so a SLOWER EARLIER load can never overwrite a
+   * faster later one.
+   *
+   * Two loads are in flight on almost every mount: the focus effect fires
+   * immediately with the default sort, and the stored-preference effect
+   * fires again with the remembered one as soon as `readPref` answers.
+   * Nothing orders their two `localFoods` promises, so without this the
+   * chips could settle on "Name" while the rows on screen were still the
+   * "Recent" answer — the sort control silently lying about the list under
+   * it, which is the one thing this ticket exists to get right. Measured,
+   * not theorised: resolving the two out of order reproduces it.
+   *
+   * `food/add.tsx` guards its own two concurrent reads the same way and for
+   * the same reason; this is that pattern, not a new one. It also covers
+   * the search box for free — a fast typist's earlier keystroke can no
+   * longer land after a later one.
+   */
+  const loadSeq = useRef(0);
+
   const load = useCallback(
-    async (query: string) => {
+    async (query: string, order: SavedFoodsSort) => {
       if (!userId) return;
+      const seq = ++loadSeq.current;
       try {
-        const rows = await localFoods(userId, query);
+        // The spotlight is read only while there is no search — see the doc
+        // comment. `[]` rather than a stale list, so a search typed after a
+        // load can never leave last time's spotlight sitting above it.
+        const [rows, shared] = await Promise.all([
+          localFoods(userId, query, order),
+          query.trim() ? Promise.resolve([]) : recentlySharedFoods(userId),
+        ]);
+        // A newer load started while this one was reading; its answer is
+        // the current one, and this is last time's.
+        if (seq !== loadSeq.current) return;
         setFoods(rows);
+        setRecent(shared);
         setError(null);
       } catch (err) {
+        if (seq !== loadSeq.current) return;
         setError(err instanceof Error ? err.message : 'Could not read your saved foods.');
       }
     },
@@ -71,35 +159,71 @@ export default function SavedFoodsScreen() {
   );
 
   /**
-   * The CURRENT query, read by the focus effect below without being a
-   * dependency of it.
+   * The CURRENT query and sort, read by the focus effect below without being
+   * dependencies of it.
    *
    * `useFocusEffect` needs a memoised callback — an unmemoised one would give
    * it a new identity on every render, and its own effect re-runs whenever
    * that identity changes, which turns "reload on focus" into "reload after
    * every keystroke sets state and re-renders": a loop. So the callback can
-   * only depend on `load` (stable unless `userId` changes) — and reading `q`
-   * from a ref rather than from that closure is what keeps the value current
-   * without needing `q` back in the dependency array to get there.
+   * only depend on `load` (stable unless `userId` changes) — and reading the
+   * two values from refs is what keeps them current without needing either
+   * back in the dependency array to get there.
    */
   const qRef = useRef('');
+  const sortRef = useRef<SavedFoodsSort>(DEFAULT_SAVED_FOODS_SORT);
   useEffect(() => {
     qRef.current = q;
   }, [q]);
 
   // On focus, not on mount — deleting one and coming straight back here has to
   // show the list without it, the same reason `curriculum/index.tsx` reloads
-  // on focus rather than once. Reads `qRef` so a search typed before leaving
+  // on focus rather than once. Reads the refs so a search typed before leaving
   // (to edit a row, say) is still the search in effect on the way back.
   useFocusEffect(
     useCallback(() => {
-      void load(qRef.current);
+      void load(qRef.current, sortRef.current);
     }, [load]),
   );
 
+  /**
+   * The sort is remembered; the search box is not — the Library's split, for
+   * the Library's reason: "I like newest first" is a standing preference,
+   * "rice" is a question you asked once and already got the answer to.
+   *
+   * Only reloads when the stored value DIFFERS from what the focus effect
+   * already loaded with, so the common case (default, or no row) costs one
+   * read and no second render.
+   */
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    readPref(userId, PREF_SAVED_FOODS_SORT)
+      .then((stored) => {
+        if (cancelled) return;
+        const parsed = parseSavedFoodsSort(stored);
+        if (parsed === sortRef.current) return;
+        sortRef.current = parsed;
+        setSortState(parsed);
+        void load(qRef.current, parsed);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, load]);
+
+  function setSort(next: SavedFoodsSort) {
+    if (next === sortRef.current) return;
+    sortRef.current = next;
+    setSortState(next);
+    if (userId) writePref(userId, PREF_SAVED_FOODS_SORT, next).catch(() => {});
+    void load(qRef.current, next);
+  }
+
   async function onSearch(text: string) {
     setQ(text);
-    await load(text);
+    await load(text, sortRef.current);
   }
 
   async function onDelete(f: Food) {
@@ -108,10 +232,21 @@ export default function SavedFoodsScreen() {
       await removeFood(userId, f.id);
       requestSync('saved food deleted');
       setError(null);
-      await load(q);
+      await load(qRef.current, sortRef.current);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That could not be deleted.');
     }
+  }
+
+  function confirmDelete(f: Food) {
+    Alert.alert(
+      `Delete ${f.name}?`,
+      'This removes it from your saved list. Days you have already logged it on keep the numbers they were logged with — a logged entry owns its own numbers.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void onDelete(f) },
+      ],
+    );
   }
 
   function edit(f: Food) {
@@ -125,15 +260,65 @@ export default function SavedFoodsScreen() {
     }
   }
 
+  function row(f: Food, keyPrefix: string) {
+    const from = sharedFromLine(f);
+    // Provenance first, brand second: who sent it is the fact this ticket
+    // exists for, and the brand was already searchable.
+    const second = [from, f.brand || null].filter(Boolean).join(' · ');
+    return (
+      <SwipeToDelete
+        key={`${keyPrefix}${f.id}`}
+        accessibilityLabel={f.name}
+        onDelete={() => confirmDelete(f)}
+        testID={`${keyPrefix}saved-foods-row-${f.id}`}
+      >
+        <Pressable
+          onPress={() => edit(f)}
+          onLongPress={() => confirmDelete(f)}
+          style={styles.row}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${f.name}${from ? `, ${from}` : ''}`}
+          accessibilityHint="Long press, or swipe left, to delete"
+          accessibilityActions={DELETE_ACTIONS}
+          onAccessibilityAction={(e) => {
+            if (e.nativeEvent.actionName === 'delete') confirmDelete(f);
+          }}
+          testID={`${keyPrefix}saved-foods-edit-${f.id}`}
+        >
+          <RNView style={styles.rowMain}>
+            <Text style={styles.name} numberOfLines={1}>
+              {f.name}
+            </Text>
+            {f.kind === 'recipe' ? <Text style={styles.mark}>Recipe</Text> : null}
+            <Text style={styles.macros} numberOfLines={1}>
+              {Math.round(f.kcal)} kcal · {Math.round(f.protein_g)}P/{Math.round(f.carb_g)}C/
+              {Math.round(f.fat_g)}F
+            </Text>
+          </RNView>
+          {second ? (
+            <Text
+              style={[styles.second, from ? styles.from : null]}
+              numberOfLines={1}
+              testID={from ? `${keyPrefix}saved-foods-from-${f.id}` : undefined}
+            >
+              {second}
+            </Text>
+          ) : null}
+        </Pressable>
+      </SwipeToDelete>
+    );
+  }
+
+  const showRecent = recent.length > 0 && !q.trim();
+
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: 'Saved foods' }} />
       <KeyboardAwareScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
-          Everything you have saved from logging, describing or scanning — plus
-          any recipe you built here or on the web. Edit one to fix a number for
-          next time; delete one to clear it off this list. Days you have
-          already logged keep the numbers they were logged with.
+          Everything you have saved or been sent. Tap a row to edit it; swipe
+          left or long-press to delete. Days you have already logged keep the
+          numbers they were logged with.
         </Text>
 
         <TextInput
@@ -154,6 +339,42 @@ export default function SavedFoodsScreen() {
           </Text>
         ) : null}
 
+        {showRecent ? (
+          <RNView style={styles.section} testID="saved-foods-recently-shared">
+            <RNView style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>Recently shared</Text>
+              <Text style={styles.sectionMeta}>Last {RECENTLY_SHARED_DAYS} days</Text>
+            </RNView>
+            {recent.map((f) => row(f, 'recent-'))}
+          </RNView>
+        ) : null}
+
+        {/* The sort chips double as the full list's heading. `accessibilityRole`
+            "button" with `selected`, not "tab": these reorder one list, they
+            do not switch between views. */}
+        <RNView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Sort saved foods">
+          <Text style={styles.chipRowLabel}>Sort</Text>
+          {SAVED_FOODS_SORTS.map((s) => {
+            const active = s === sort;
+            return (
+              <Pressable
+                key={s}
+                onPress={() => setSort(s)}
+                style={[styles.chip, active && { backgroundColor: accent.accent, borderColor: accent.accent }]}
+                hitSlop={8}
+                accessibilityRole="radio"
+                accessibilityLabel={`Sort by ${SAVED_FOODS_SORT_LABELS[s]}`}
+                accessibilityState={{ selected: active, checked: active }}
+                testID={`saved-foods-sort-${s}`}
+              >
+                <Text style={[styles.chipText, active && { color: accent.on }]}>
+                  {SAVED_FOODS_SORT_LABELS[s]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </RNView>
+
         {foods === null && !error ? (
           <ActivityIndicator style={styles.loading} accessibilityLabel="Loading your saved foods" />
         ) : null}
@@ -166,53 +387,9 @@ export default function SavedFoodsScreen() {
           </Text>
         ) : null}
 
-        {(foods ?? []).map((f) => (
-          <RNView key={f.id} style={styles.card} testID={`saved-foods-row-${f.id}`}>
-            <Pressable
-              onPress={() => edit(f)}
-              style={styles.tap}
-              accessibilityRole="button"
-              accessibilityLabel={`Edit ${f.name}`}
-              testID={`saved-foods-edit-${f.id}`}
-            >
-              <RNView style={styles.head}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {f.name}
-                </Text>
-                {f.kind === 'recipe' ? (
-                  <RNView style={styles.badge}>
-                    <Text style={styles.badgeText}>Recipe</Text>
-                  </RNView>
-                ) : null}
-              </RNView>
-              <Text style={styles.meta}>
-                {f.kind === 'recipe'
-                  ? `Makes ${f.yield_servings ?? '?'} × ${f.serving_label} · ${f.items.length} ${
-                      f.items.length === 1 ? 'ingredient' : 'ingredients'
-                    }`
-                  : `per ${f.serving_label}`}
-                {f.brand ? ` · ${f.brand}` : ''}
-              </Text>
-              <Text style={styles.macros}>
-                {Math.round(f.kcal)} kcal · {Math.round(f.protein_g)}P / {Math.round(f.carb_g)}C /{' '}
-                {Math.round(f.fat_g)}F
-              </Text>
-            </Pressable>
-
-            <HoldToConfirm
-              label={`Delete ${f.name}`}
-              holdingLabel="Keep holding to delete…"
-              onConfirm={() => void onDelete(f)}
-              confirmTitle={`Delete ${f.name}?`}
-              confirmBody="This removes it from your saved list. Days you have already logged it on keep the numbers they were logged with — a logged entry owns its own numbers."
-              destructive
-              fillColor={vola.danger}
-              style={styles.delete}
-              textStyle={styles.deleteText}
-              testID={`saved-foods-delete-${f.id}`}
-            />
-          </RNView>
-        ))}
+        {foods && foods.length > 0 ? (
+          <RNView style={styles.list}>{foods.map((f) => row(f, ''))}</RNView>
+        ) : null}
       </KeyboardAwareScrollView>
     </View>
   );
@@ -235,26 +412,53 @@ const styles = StyleSheet.create({
   error: { color: vola.danger, fontSize: 13 },
   loading: { marginTop: 24 },
   empty: { fontSize: 13, color: vola.textMuted, lineHeight: 19, paddingVertical: 16 },
-  card: {
+
+  section: { gap: 0 },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    paddingBottom: 6,
+  },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: vola.text, letterSpacing: 0.3 },
+  sectionMeta: { fontSize: 11, color: vola.textDim },
+
+  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  chipRowLabel: { fontSize: 12, color: vola.textDim, marginRight: 2 },
+  chip: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    backgroundColor: vola.surface,
-    padding: 14,
-    gap: 8,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
-  tap: { gap: 3 },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { fontSize: 15, fontWeight: '700', color: vola.text, flexShrink: 1 },
-  badge: {
+  chipText: { color: vola.textMuted, fontSize: 12, fontWeight: '600' },
+
+  list: { gap: 0 },
+  // 41pt for a one-line row: 10 + 20 (name lineHeight) + 10 + a hairline.
+  // 59pt with the second line: + 2 margin + 16 lineHeight.
+  row: {
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.line,
+    // Opaque: SwipeToDelete's Delete button sits BEHIND the row and slides
+    // into view; a transparent row would show it through at rest.
+    backgroundColor: vola.bg,
+  },
+  rowMain: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name: { flex: 1, fontSize: 15, lineHeight: 20, fontWeight: '600', color: vola.text },
+  mark: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: vola.textMuted,
     borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     backgroundColor: vola.line,
+    overflow: 'hidden',
   },
-  badgeText: { fontSize: 10, fontWeight: '700', color: vola.textMuted },
-  meta: { fontSize: 12, color: vola.textDim },
-  macros: { fontSize: 13, color: vola.textMuted },
-  delete: { alignItems: 'center', paddingVertical: 10, marginTop: 2 },
-  deleteText: { color: vola.danger, fontWeight: '600', fontSize: 13 },
+  macros: { fontSize: 12, lineHeight: 20, color: vola.textMuted, flexShrink: 0 },
+  second: { fontSize: 12, lineHeight: 16, marginTop: 2, color: vola.textDim },
+  from: { color: vola.textMuted },
 });

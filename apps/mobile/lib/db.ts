@@ -380,6 +380,13 @@ const CREATE_FOODS = `
     -- Every read parses this, so a null here would make each caller invent its
     -- own answer to what the absence meant.
     items TEXT NOT NULL DEFAULT '[]',
+    -- N532: who shared this food (their CURRENT handle, as the server last
+    -- resolved it) and when the share was accepted. Pulled, never pushed —
+    -- the server sets both at accept time and ignores them on a PUT. NULL on
+    -- a food the athlete saved themselves. "shared_at" is the presence test;
+    -- "shared_by" can be NULL on a shared food whose sender has no handle.
+    shared_by TEXT,
+    shared_at TEXT,
     last_used_at TEXT,
     use_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -724,7 +731,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 39;
+const SCHEMA_VERSION = 40;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1454,6 +1461,22 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // the device, which is the only honest backfill: no athlete has tapped
     // Done on any of them yet.
     await addColumnIfMissing(db, 'local_sessions', 'collapsed_json', "TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  if (current < 40) {
+    // N532/#963: share provenance on a saved food — see CREATE_FOODS's own
+    // comment on `shared_by`/`shared_at`. Real ALTERs, same reason as every
+    // branch above: `CREATE TABLE IF NOT EXISTS` is a no-op against the
+    // existing table, so a device already stamped 39 would keep a `foods`
+    // with neither column and the next pull's upsert would throw on the
+    // first row — which, per `cacheFoods`'s own history, is exactly the
+    // failure that once went unnoticed in production.
+    //
+    // Nullable, no backfill: nothing on this device knows which cached rows
+    // were shared. The next foods pull carries the answer for every row the
+    // server holds, and the pull runs on every sync.
+    await addColumnIfMissing(db, 'foods', 'shared_by', 'TEXT');
+    await addColumnIfMissing(db, 'foods', 'shared_at', 'TEXT');
   }
 
   // The day query the card runs on every render of Today.

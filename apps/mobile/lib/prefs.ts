@@ -228,6 +228,17 @@ export const PREF_TRACK_EFFORT_OWED = 'track_effort_owed';
  *  deliberately isn't — see the Library screen for the reasoning. */
 export const PREF_LIBRARY_SPORT = 'library_sport';
 /**
+ * The Saved foods list's sort — `name` | `recent` | `used` (N532/#963).
+ *
+ * Remembered like {@link PREF_LIBRARY_SPORT} and for the same reason: how you
+ * like a long list ordered is a standing preference, not a question you asked
+ * once. Its search box is deliberately NOT remembered, same as the Library's.
+ * Absent means the default (`recent`), so the common case needs no write.
+ * Device-local, never `owed` — how this phone arranges a list, not a fact
+ * about the athlete. `lib/savedFoodsSort.ts` owns the value set.
+ */
+export const PREF_SAVED_FOODS_SORT = 'saved_foods_sort';
+/**
  * The Library tab's belt cap for BJJ techniques.
  *
  * Remembered like the sport filter, and deliberately NOT cleared when the

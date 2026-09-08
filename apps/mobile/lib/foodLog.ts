@@ -37,6 +37,7 @@ import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from '
 import { localTrackers, removeFoodCaffeineEntry, syncFoodCaffeineEntry } from './trackers';
 import * as api from './nutritionApi';
 import { PREF_FOOD_BACKFILL_DONE_AT, PREF_TARGETS_FETCHED_AT, readPref, writePref } from './prefs';
+import { RECENTLY_SHARED_DAYS, RECENTLY_SHARED_LIMIT, type SavedFoodsSort } from './savedFoodsSort';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -568,6 +569,10 @@ const FOOD_COL_NAMES = [
   'kcal', 'protein_g', 'carb_g', 'fat_g', 'fibre_g',
   'saturated_fat_g', 'sugar_g', 'added_sugar_g', 'sodium_mg', 'cholesterol_mg',
   'source', 'yield_servings', 'items',
+  // N532: share provenance and the server's creation time — the three columns
+  // the Saved foods list sorts and labels by. Here, in the one list, so no
+  // read can forget them (the exact hazard this constant's comment records).
+  'shared_by', 'shared_at', 'created_at',
 ] as const;
 
 const FOOD_COLS = FOOD_COL_NAMES.join(', ');
@@ -598,10 +603,58 @@ function hydrate(row: FoodRow): Food {
       items = [];
     }
   }
-  return { ...row, yield_servings: row.yield_servings ?? null, items };
+  return {
+    ...row,
+    yield_servings: row.yield_servings ?? null,
+    items,
+    // Read back as `null`, never `undefined`: on a row the store holds, the
+    // absence of provenance is a fact ("this is your own"), and `undefined`
+    // is reserved for "the server never said" on the WRITE side (see
+    // `cacheFoods`). Collapsing the two here would let a read's answer be
+    // mistaken for a server that had not spoken.
+    shared_by: row.shared_by ?? null,
+    shared_at: row.shared_at ?? null,
+  };
 }
 
-export async function localFoods(userId: string, q = ''): Promise<Food[]> {
+/**
+ * ORDER BY for each {@link SavedFoodsSort}. A lookup rather than a branch so
+ * the sort can only ever be one of the three the type names — a typo is a
+ * type error, not a fall-through to whichever branch came last.
+ *
+ * `datetime(...)` on the timestamp columns, not the raw text: `created_at`
+ * is `stamp()`'s UTC ISO string on a row saved here and the server's RFC3339
+ * on a pulled one, and RFC3339 permits an offset. Two rows in different
+ * notations compare wrongly as text and correctly once SQLite has parsed
+ * them, and a list that mostly-sorts is worse than one that does not, since
+ * nobody notices.
+ *
+ * Every order ends on `lower(f.name)` so ties are stable — a fresh install
+ * whose whole cache arrived in one pull has hundreds of rows within the same
+ * second, and a sort that shuffled them between visits would read as broken.
+ */
+const SAVED_FOODS_ORDER: Record<SavedFoodsSort, string> = {
+  name: 'lower(f.name)',
+  recent: 'datetime(f.created_at) DESC, lower(f.name)',
+  used: 'uses DESC, lower(f.name)',
+};
+
+/**
+ * The athlete's saved foods, searched and sorted — the Saved foods list's
+ * one read, and the quick-add search's (which keeps the `name` default it
+ * always had).
+ *
+ * `uses` is the same count `recentsFor` builds — entries logged FROM this
+ * food, by `source_food_id` — rather than the local `use_count` column, and
+ * the difference matters on a fresh install (N428): `use_count` is this
+ * device's own tally and starts at zero for every row, while `food_entries`
+ * is backfilled from the server, so the join answers "most used" honestly
+ * from the first sync. A LEFT JOIN, so a food never logged from is still
+ * listed, at zero.
+ */
+export async function localFoods(
+  userId: string, q = '', sort: SavedFoodsSort = 'name',
+): Promise<Food[]> {
   const db = await getDb();
   // `%` and `_` are LIKE metacharacters, so a search for "100%" would otherwise
   // match every saved food. The backend's own search escapes them for the same
@@ -609,12 +662,41 @@ export async function localFoods(userId: string, q = ''): Promise<Food[]> {
   // than either being wrong.
   const escaped = q.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
   const like = `%${escaped}%`;
+  const rows = await db.getAllAsync<FoodRow & { uses: number }>(
+    `SELECT ${foodColsFrom('f')}, COUNT(e.id) AS uses
+       FROM foods f
+       LEFT JOIN food_entries e
+         ON e.source_food_id = f.id AND e.user_id = f.user_id AND e.deleted_at IS NULL
+      WHERE f.user_id = ? AND f.deleted_at IS NULL AND lower(f.name) LIKE ? ESCAPE '\\'
+      GROUP BY f.id
+      ORDER BY ${SAVED_FOODS_ORDER[sort]}`,
+    userId, like,
+  );
+  // Destructured, as `recentsFor` does, so the aggregate cannot ride along
+  // into the food object as a property the type never mentions.
+  return rows.map(({ uses: _uses, ...row }) => hydrate(row));
+}
+
+/**
+ * The "Recently shared" spotlight (N532/#963): foods a friend sent in the
+ * last {@link RECENTLY_SHARED_DAYS} days, newest share first, capped at
+ * {@link RECENTLY_SHARED_LIMIT}.
+ *
+ * Keyed on `shared_at`, never on `shared_by` — a sender who has since lost
+ * their handle still shared it, and the row should still be found here.
+ * `now` is a parameter so the window's edge can be tested without a clock.
+ */
+export async function recentlySharedFoods(userId: string, now = new Date()): Promise<Food[]> {
+  const db = await getDb();
+  const since = new Date(now.getTime() - RECENTLY_SHARED_DAYS * 86_400_000).toISOString();
   const rows = await db.getAllAsync<FoodRow>(
     `SELECT ${FOOD_COLS}
        FROM foods
-      WHERE user_id = ? AND deleted_at IS NULL AND lower(name) LIKE ? ESCAPE '\\'
-      ORDER BY lower(name)`,
-    userId, like,
+      WHERE user_id = ? AND deleted_at IS NULL
+        AND shared_at IS NOT NULL AND datetime(shared_at) >= datetime(?)
+      ORDER BY datetime(shared_at) DESC, lower(name)
+      LIMIT ?`,
+    userId, since, RECENTLY_SHARED_LIMIT,
   );
   return rows.map(hydrate);
 }
@@ -1295,9 +1377,9 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
            id, user_id, kind, name, brand, serving_label, serving_grams,
            kcal, protein_g, carb_g, fat_g, fibre_g,
            saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg, source,
-           yield_servings, items,
+           yield_servings, items, shared_by, shared_at,
            created_at, updated_at, cached_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, name = excluded.name, brand = excluded.brand,
            serving_label = excluded.serving_label, serving_grams = excluded.serving_grams,
@@ -1325,6 +1407,22 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
            -- can never be null here, and reading it would quietly overwrite a
            -- stored "ai" with "user" on every pull from an older deploy.
            source = COALESCE(?, foods.source),
+           -- N532 share provenance. A CASE on "did the server speak", NOT a
+           -- COALESCE like "source" above, and the difference is the one
+           -- thing this design promises: the handle is resolved LIVE. A
+           -- server that knows this row (any deploy since N532) sends BOTH
+           -- fields on every pull, and its answer replaces the cached one
+           -- even when that answer is null — a sender who lost their handle
+           -- must stop being named, and COALESCE would keep naming them
+           -- forever. A server that sends NEITHER (older, mid-rollout) is the
+           -- only case that keeps the stored value, and it is told apart by
+           -- "undefined" rather than by "null" — the flag bound below.
+           shared_by = CASE WHEN ? = 1 THEN ? ELSE foods.shared_by END,
+           shared_at = CASE WHEN ? = 1 THEN ? ELSE foods.shared_at END,
+           -- The server's creation time wins over the moment this device
+           -- first pulled the row, which is what an older cache stamped here.
+           -- A server that does not send one leaves the stored value.
+           created_at = COALESCE(?, foods.created_at),
            cached_at = excluded.cached_at, remote = 1,
            -- The row now holds the server's numbers, so a reason that described
            -- the local ones is no longer about anything in it.
@@ -1343,11 +1441,24 @@ async function cacheFoods(userId: string, foods: Food[]): Promise<void> {
         // is — and `items` gets a real `'[]'` for the same NOT NULL reason as
         // `source` above.
         f.yield_servings ?? null, JSON.stringify(f.items ?? []),
-        now, now, now,
+        // The INSERT arm for provenance: nullable columns, so an unsent value
+        // is simply "none" on a brand-new row.
+        f.shared_by ?? null, f.shared_at ?? null,
+        // `created_at` is the server's when it sends one — a fresh install's
+        // whole cache lands in one pull, and stamping every row with THAT
+        // instant would make "Recent" sort by nothing (N428's scenario).
+        f.created_at ?? now, now, now,
         // The UPDATE arm's own binding, nullable: silence means "keep what is
         // stored", which is the opposite of the default above and the reason
         // these are two bindings rather than one.
         f.source ?? null,
+        // The provenance flag and values for the UPDATE arm's CASEs. One flag
+        // for both columns: the server sends them as a pair (the database
+        // CHECKs that they are both null or both set), so "shared_at was
+        // sent" is "the server spoke about provenance".
+        f.shared_at !== undefined ? 1 : 0, f.shared_by ?? null,
+        f.shared_at !== undefined ? 1 : 0, f.shared_at ?? null,
+        f.created_at ?? null,
       );
     }
   });
