@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +13,10 @@ import {
   View as RNView,
 } from 'react-native';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { fabBottom } from '@/lib/tabBarChrome';
 
 import { Text, View } from '@/components/Themed';
 
@@ -856,6 +860,9 @@ export default function TodayScreen() {
 
   const { fontScale } = useWindowDimensions();
   const fabPad = fabClearance(fontScale);
+  // N504/#876: the native tab bar floats over content, so the pill's own
+  // offset has to clear it — see `fabBottom`.
+  const insets = useSafeAreaInsets();
 
   /**
    * The one suggestion, and the offer that precedes it.
@@ -1028,7 +1035,7 @@ export default function TodayScreen() {
           styles.container,
           { paddingBottom: TAB_BAR_CLEARANCE + (startable.length > 0 ? fabPad : 0) },
         ]}
-        contentInsetAdjustmentBehavior="never"
+        contentInsetAdjustmentBehavior="automatic"
         testID="today-screen"
       >
         {/* Inside the ScrollView, so it scrolls away with the content and
@@ -1573,7 +1580,7 @@ export default function TodayScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: accent.accent },
+            { backgroundColor: accent.accent, bottom: fabBottom(Platform.OS, insets.bottom) },
             pressed && styles.fabPressed,
           ]}
           onPress={() => setPicking(true)}

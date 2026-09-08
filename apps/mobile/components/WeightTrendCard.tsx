@@ -18,7 +18,7 @@ import { useWeightTrend } from '@/lib/useWeightTrend';
  * first request. See the hook.
  *
  * It still fetches its own check-ins rather than taking them from Goals, on
- * purpose: `app/(tabs)/goals.tsx` is 1190 lines, several sessions edit it, and
+ * purpose: `app/goals.tsx` is 1190 lines, several sessions edit it, and
  * it loads neither check-ins nor phases — so it gains two lines instead of
  * three requests and their failure states. The projection IS a prop, because
  * Goals already holds it and fetching it twice was a real duplicate request.

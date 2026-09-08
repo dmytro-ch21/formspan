@@ -20665,3 +20665,122 @@ Entry is now exclusive: a real value in one field clears the other.
 - Re-running the shadow replay immediately after this ships will show a largely
   unchanged abstention count for that reason; the number should fall only as new
   sessions accumulate.
+
+## N504 — bottom tab bar: `expo-router` NativeTabs, iOS 26 Liquid Glass + Android Material 3 (`apps/mobile/app/(tabs)/_layout.tsx`, `apps/mobile/lib/tabs.ts`, `apps/mobile/lib/tabIconPlan.ts`, `apps/mobile/lib/tabIconRaster.tsx`, `apps/mobile/app/train.tsx`, `apps/mobile/app/goals.tsx`)
+
+Simulator-verified (iOS 26.5, see `docs/decisions/history.md`'s N504 entry
+for exactly what was checked and how); real-device and Android are both
+still outstanding — see "Needs a device" below.
+
+- On any tab screen, sighted: the bar reads Today · Food · Progress · Plan ·
+  You, in that order, each with VOLA's own brand icon shape (not an Apple SF
+  Symbol or Android Material Symbol) and a label.
+- Tap each tab in turn: the tapped tab's icon AND label switch to the
+  account's accent colour; every other tab's icon and label stay a neutral
+  dim colour. Change the account's accent in Settings and repeat: the
+  active-tab colour follows the new choice on iOS. (Android's active-tab
+  colour does NOT follow the account's accent — see "Needs a device" below,
+  this is an accepted, documented platform difference, not a bug to file.)
+- On a screen with scrollable content (e.g. You/Profile), scroll down: the
+  tab bar minimizes/hides. Scroll back up: it reappears, with the
+  previously-active tab still shown as active.
+- From Food's `Daily target` row (or Progress's target row, or Food's
+  macro-rings screen), tap through to the target/derivation screen: it opens
+  with its own header and a working back button (no tab bar visible while
+  it's open, since it's a pushed screen, not a tab) — confirm the back button
+  returns to the SAME tab that was active before, still marked active.
+- Any `vola://train` or `vola://goals` deep link, or an in-flight
+  `router.push` to either, while the app is cold-starting: both still
+  resolve exactly as before this ticket (Train redirects to Today; Goals
+  opens the target screen) — this ticket changed where the two files live on
+  disk, not their URLs.
+- Restart the app (cold start): the tab bar's icons appear correctly on the
+  very first frame the bar is visible — no flash of missing/blank icons
+  while they're being captured off-screen (the frame-hold in
+  `(tabs)/_layout.tsx` exists specifically to prevent this).
+
+### Edge cases and errors
+
+- A locale/appearance change (light/dark mode, if the OS-level setting is
+  ever wired up) or a Fast Refresh during development: tab icons are not
+  re-captured or re-flashed — they're cached in memory once per process.
+- Exactly five tabs, always — module state (nutrition on/off, etc.) must not
+  add, remove, or reorder any of them (unchanged property from N176/N180,
+  now asserted against `NativeTabs`' actual props rather than the old
+  `<Tabs>`'s).
+
+### Needs a device
+
+- **iOS**: the Liquid Glass appearance itself (translucency/blur reads
+  correctly against real content, not just the mostly-dark screens checked
+  in the Simulator), the minimize-on-scroll feel, and any haptic feedback
+  the system gives for the interaction — none of these are something a
+  screenshot can fully confirm.
+- **Android**: not touched in this verification pass at all — Material 3
+  bottom-navigation appearance, and specifically whether Android's tab bar
+  reading a FIXED colour for the active icon (rather than the account's own
+  accent, which iOS gets) looks like an acceptable, intentional platform
+  difference in practice rather than a visual bug. This is the single
+  biggest open question this ticket leaves for a human to judge.
+
+### N504 follow-up — chrome geometry under the native bar (2026-09-07)
+
+Three defects found by looking at the running Simulator after the migration
+was already reviewed and green. All three are geometry, and **none is
+reachable by the jest suite**: it runs no Yoga pass, so no rendered
+assertion can observe where anything actually lands. These are the checks
+that replace it.
+
+**Happy path**
+- **Every tab's header sits directly below the status bar** — on a cold
+  start, open each of Today / Food / Progress / Plan / You in turn and
+  confirm the screen name and wordmark clear the clock and Dynamic Island
+  with no blank band above them. The regression this catches is one screen
+  disagreeing with the other four, so **check all five, and check them
+  after a cold launch specifically** (see the ordering trap below).
+- **Tab icons are the size of the labels beside them**, sitting inside the
+  bar rather than overflowing it or overlapping their own text.
+- **The floating "New log" pill clears the tab bar** on Today, and Plan's
+  pill sits at the same height — the bar is glass drawn OVER the content, so
+  a pill positioned in flow coordinates lands inside it.
+- **A pushed screen still clears the status bar**: open Library (and Goals
+  from Food's target row), and confirm the header and its back button are
+  BELOW the clock, not colliding with it. These routes sit outside the tab
+  group and must keep the inset the tab screens no longer add.
+
+**Edge cases & errors**
+- **Mount order is the whole trap, so exercise it.** The original bug was
+  visible only on the tab selected FIRST after a cold start, from code
+  identical to the four that were correct. Force-quit and relaunch between
+  checks rather than tabbing around one session, and if the app is ever
+  changed to open on a different initial tab, re-check all five again.
+- **A device with no notch or cutout** (an SE-class phone, and Android):
+  `insets.top` is 0 there, so a screen that double-counted the inset looks
+  correct — the bug hides completely on exactly the hardware most likely to
+  be used for a quick check.
+- **Accessibility text sizes**: the header measures rather than computes, so
+  raise the system text size to an accessibility setting and confirm the
+  wordmark hides rather than colliding, and that the top spacing still looks
+  deliberate.
+- **Rotation and split-view/iPad multitasking**, if reachable: the inset
+  changes under both, and the platform-supplied value must still be the only
+  one applied.
+
+**NEEDS HUMAN EVIDENCE**
+- All of the above on a real iOS 26 device rather than the Simulator —
+  Liquid Glass behaviour over live content, and whether the top spacing reads
+  as intentional in hand.
+- **Android**: the same five-tab sweep under Material 3. **Corrected after
+  review**: the top inset is NOT claimed on Android any more. Reading
+  `expo-router`'s own `NativeTabsView.android.js` showed it applies
+  `edges={{ bottom: true }}` only, so `PlatformTopInsetContext` is gated to
+  iOS and `ScreenHeader` keeps adding the inset itself on Android, exactly as
+  it did before this ticket. What to check is therefore that Android is
+  UNCHANGED from `main`: header directly below the status bar on all five
+  tabs, no blank band above the title and no title tucked under the clock.
+- **Android, the floating pills**: `lib/tabBarChrome.ts` assumes Material 3's
+  default `NavigationBar` height of 80dp, taken from the spec and **not
+  measured on a device**. Confirm Today's "New log" and Plan's "New workout"
+  both sit fully clear of the bottom navigation bar and neither is tucked
+  behind it. Floating a little high is the accepted error direction; touching
+  or overlapping the bar is a failure and means the constant is wrong.

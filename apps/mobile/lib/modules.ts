@@ -375,7 +375,7 @@ export function serverHasFoodLog(modules: Module[]): boolean {
  * What a food-log SCREEN needs to know: should it draw its off-state, and which
  * module should that off-state name?
  *
- * One function because `(tabs)/food.tsx` and `(tabs)/goals.tsx` ask exactly
+ * One function because `(tabs)/food.tsx` and `app/goals.tsx` ask exactly
  * this, and a two-part condition written twice is how one copy ends up checking
  * only half — the reason `hasFoodLog` itself exists.
  *

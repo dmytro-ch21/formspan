@@ -24,7 +24,7 @@
  * ## Where the keyboard handling comes from
  *
  * Five `TextInput`s and deliberately **no scroll container of its own** — the
- * one call site, `app/(tabs)/goals.tsx`, already renders this inside its
+ * one call site, `app/goals.tsx`, already renders this inside its
  * `KeyboardAwareScrollView`, and nesting a second vertical scroller inside it
  * would be worse than the bug the rule prevents.
  *

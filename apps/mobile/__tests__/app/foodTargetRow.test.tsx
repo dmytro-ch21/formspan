@@ -4,7 +4,7 @@ import FoodScreen from '../../app/(tabs)/food';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import type { Module } from '@/lib/modules';
 import type { EatenView, Target, TargetView } from '@/lib/nutrition';
-import { TABS, offBar } from '@/lib/tabs';
+import { TABS } from '@/lib/tabs';
 
 /**
  * N180 / #585 — the daily target, two taps from anywhere.
@@ -177,11 +177,15 @@ beforeEach(() => {
  * **Tap one.** The row is worth nothing if the screen holding it is not on the
  * bar — which was the entire complaint. Read from `lib/tabs.ts` rather than
  * mocked, so this fails if a later ticket takes the slot away again.
+ *
+ * N504 retired the separate `offBar` check this used to also assert: `TABS`
+ * is now the WHOLE bar (`train`/`goals` moved out of `app/(tabs)/` entirely,
+ * see `lib/tabs.ts`'s top-of-file comment), so membership in `TABS` already
+ * says everything "holds a button" used to say.
  */
 describe('tap one — Food is a bar slot', () => {
   it('holds a button in the tab bar', () => {
     expect(TABS.map((t) => t.name)).toContain('food');
-    expect(offBar('food')).toBe(false);
   });
 });
 
@@ -211,7 +215,7 @@ describe('tap two — the target row', () => {
       'Opens your target, how it was worked out, and past targets',
     );
     fireEvent.press(row);
-    expect(mockPush).toHaveBeenCalledWith('/(tabs)/goals');
+    expect(mockPush).toHaveBeenCalledWith('/goals');
   });
 
   // **The assertion the ticket asks for, stated as the property it is about.**
@@ -228,7 +232,7 @@ describe('tap two — the target row', () => {
     expect(row).toBeTruthy();
     fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledTimes(1);
-    expect(mockPush).toHaveBeenCalledWith('/(tabs)/goals');
+    expect(mockPush).toHaveBeenCalledWith('/goals');
   });
 
   it('does not print the target twice on one screen', async () => {

@@ -342,7 +342,11 @@ export default function ProgressScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.scroll} testID="progress-screen">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        contentInsetAdjustmentBehavior="automatic"
+        testID="progress-screen"
+      >
         {/* Inside the ScrollView, so it scrolls away with the content and
             nothing passes under it — no bottom rule. See `ScreenHeader`, and
             N498: this used to be a pinned sibling above the ScrollView with
@@ -485,7 +489,7 @@ export default function ProgressScreen() {
             <Row
               title="Targets and adherence"
               note="What you are eating to, and why that number."
-              onPress={() => router.push('/(tabs)/goals')}
+              onPress={() => router.push('/goals')}
               testID="progress-nutrition"
             />
             {/* N84, row 6 of the phone-impossible audit: the reduced phone form

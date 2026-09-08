@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SyncChip } from '@/components/SyncChip';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { headerTopPadding, usePlatformOwnsTopInset } from '@/lib/headerInset';
 import { Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 
@@ -338,6 +339,14 @@ export function ScreenHeader({
   contentScrollsUnder?: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  // Under `NativeTabs` (N504/#876) the five tab screens' scrollers take the
+  // PLATFORM's own safe-area top content inset, so adding `insets.top` here
+  // as well states it twice and opens a blank band above the title. The
+  // decision lives in `lib/headerInset.ts` — pure, so both branches are
+  // actually testable — and that file carries the full account of the bug,
+  // including why the tab layout declares this once instead of eight callers
+  // each passing a flag.
+  const platformOwnsTop = usePlatformOwnsTopInset();
 
   const [rowWidth, onRowLayout] = useMeasuredWidth();
   const [leftWidth, onLeftLayout] = useMeasuredWidth();
@@ -358,7 +367,7 @@ export function ScreenHeader({
       style={[
         styles.wrap,
         contentScrollsUnder && styles.scrollEdge,
-        { paddingTop: insets.top + 14 },
+        { paddingTop: headerTopPadding(platformOwnsTop, insets.top) },
       ]}
       testID="screen-header"
     >
@@ -490,7 +499,25 @@ const styles = StyleSheet.create({
 /**
  * Bottom breathing room for a scrolling screen.
  *
- * Small now: the tab bar sits in normal flow rather than floating over the
- * content, so this is margin rather than the clearance it used to be.
+ * **The premise this was written on is gone (N504/#876), and the value is
+ * kept deliberately rather than by omission.** It used to read "the tab bar
+ * sits in normal flow rather than floating over the content, so this is
+ * margin rather than the clearance it used to be" — true of the old custom
+ * JS `<Tabs>` bar, and false of `NativeTabs`, which is a real
+ * `UITabBarController` drawing iOS 26's Liquid Glass OVER the content. So
+ * this is clearance again, not margin.
+ *
+ * It stays at 28 because the platform now supplies the real clearance
+ * itself: every tab scroller says `contentInsetAdjustmentBehavior="automatic"`
+ * (see `lib/headerInset.ts`), so UIKit insets the content for the bar's own
+ * height and the home indicator, and this sits on top of that as the visual
+ * gap between the last row and the glass. Verified on the iOS 26.5 Simulator
+ * — the last card clears the bar on all five tabs.
+ *
+ * What does NOT come from here is the floating pill on Today and Plan: it is
+ * a sibling of the scroller, not content inside it, so no content inset
+ * reaches it and it positions itself against the bar explicitly — see
+ * `fabBottom` in `app/(tabs)/index.tsx`, added in this same ticket after the
+ * pill was found sitting on top of the You tab.
  */
 export const TAB_BAR_CLEARANCE = 28;

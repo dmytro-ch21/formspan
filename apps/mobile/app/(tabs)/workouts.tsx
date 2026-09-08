@@ -6,6 +6,7 @@ import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -18,7 +19,10 @@ import {
   KeyboardAwareScrollView,
 } from '@/components/KeyboardAwareScroll';
 import { PlanHero } from '@/components/PlanHero';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { fabBottom } from '@/lib/tabBarChrome';
 import { Text, View } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { CurriculaStrip } from '@/components/CurriculaStrip';
@@ -95,6 +99,7 @@ export default function WorkoutsScreen() {
   // For the sport label on each card — the registry carries the acronym, so
   // this renders "BJJ" rather than the "Bjj" that capitalising a key gives.
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { modules } = useModules();
   // A technique discipline this server HAS, which this athlete has turned off.
   // Distinct from "no such discipline exists" — see the Roadmaps strip below,
@@ -304,6 +309,7 @@ export default function WorkoutsScreen() {
         data={workouts}
         keyExtractor={(w) => w.id}
         contentContainerStyle={[styles.list, listPad]}
+        contentInsetAdjustmentBehavior="automatic"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -626,7 +632,10 @@ export default function WorkoutsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: accent.accent },
+            // Same reason as Today's pill, and now literally the same helper:
+            // the native bar floats over the content, so this cannot be a
+            // static `bottom`. See `lib/tabBarChrome.ts`.
+            { backgroundColor: accent.accent, bottom: fabBottom(Platform.OS, insets.bottom) },
             pressed && styles.fabPressed,
           ]}
           onPress={() => setComposing(true)}
@@ -1214,7 +1223,11 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: 16,
-    bottom: 16,
+    // NO `bottom` here — the call site sets it from `fabBottom()`, because the
+    // native tab bar floats over the content and the clearance depends on the
+    // device's own bottom inset. A static value here would be dead but would
+    // read as the effective one.
+
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
@@ -1228,8 +1241,11 @@ const styles = StyleSheet.create({
     // want haze anywhere"), and the user reported the mismatch directly:
     // "New Log one has glow another doesnt - they both should be more
     // modern". N108's flat answer wins for both, so this pill now matches
-    // Today's exactly — same radius, same padding, same `bottom`, and now
-    // the same absence of a shadow, not just the first three.
+    // Today's exactly — same radius, same padding, the same absence of a
+    // shadow, and the same computed `bottom`, now that both take it from
+    // `lib/tabBarChrome.ts`. N504's first pass fixed Today's `bottom` and
+    // left this one at a static 16 — under the native bar — while this very
+    // comment went on claiming they matched. Caught in review.
   },
   fabPressed: { opacity: 0.85 },
   // No `color` here: the call site always sets it from `accent.on`, and a

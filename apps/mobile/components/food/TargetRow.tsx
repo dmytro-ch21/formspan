@@ -5,7 +5,7 @@
  *
  * N180, decided by the user on 2026-08-26 alongside returning Food to the tab
  * bar: the target belongs **next to the thing it constrains**. It was three
- * taps away on `(tabs)/goals`, which is the same failure the mobile-first rule
+ * taps away on `/goals`, which is the same failure the mobile-first rule
  * in `CLAUDE.md` was written for, one size down — `nutrition-design.md` §5 put
  * target-setting on "one web screen", so an athlete could read the reasoning
  * for 2,700 kcal on their phone and had no way to act on it. Making the action
@@ -103,7 +103,7 @@ export function TargetRow({
 }: {
   /** Everything the screen knows about the day's target. See {@link TargetView}. */
   view: TargetView;
-  /** Opens the derivation and the history — `(tabs)/goals`. */
+  /** Opens the derivation and the history — `/goals`. */
   onPress: () => void;
   testID?: string;
 }) {

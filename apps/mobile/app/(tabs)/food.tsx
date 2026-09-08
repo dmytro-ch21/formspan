@@ -453,7 +453,7 @@ export default function FoodScreen() {
     <RNView style={styles.screen}>
       <ScrollView
         contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + 40 }]}
-        contentInsetAdjustmentBehavior="never"
+        contentInsetAdjustmentBehavior="automatic"
       >
         {/* Inside the ScrollView, so it scrolls away with the content and
             nothing passes under it — no bottom rule. See `ScreenHeader`. */}
@@ -500,7 +500,7 @@ export default function FoodScreen() {
               row is unambiguously about the day named directly above it. */}
           <TargetRow
             view={view}
-            onPress={() => router.push('/(tabs)/goals')}
+            onPress={() => router.push('/goals')}
             testID="food-target"
           />
 

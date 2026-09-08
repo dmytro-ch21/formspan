@@ -63108,6 +63108,275 @@ the two displacement tests red, and making clearing displace turns the two
 clearing tests red — each restored and re-run to green rather than re-read.
 
 
+## 2026-09-05 — N504 (#876): the bottom tab bar is now the real platform one — Liquid Glass on iOS 26, Material 3 on Android
+
+User request: adopt iOS 26's native Liquid Glass tab bar and Android's
+Material 3 bottom navigation via `expo-router/unstable-native-tabs`, in place
+of VOLA's fully custom `<Tabs>`-based bar (`apps/mobile/app/(tabs)/_layout.tsx`,
+hand-drawn icons, a hand-drawn active-tab underline). User confirmed both
+platforms should move (not iOS-only), and that VOLA's own brand icons should
+be kept on the bar rather than switching to SF Symbols/Material Symbols.
+
+**Two real constraints surfaced by reading `expo-router`'s actual SDK 57
+source and current docs, not the snippet the user pasted (which named a
+different, uninstalled package — React Navigation's own native-tabs, not
+Expo Router's).** Both changed the shape of the work, not just its cost:
+
+1. **A `NativeTabs` tab with no button cannot be navigated to at all** — Expo's
+   own docs are explicit: *"Hidden tabs cannot be navigated to!"* VOLA's
+   `OFF_BAR_ROUTES` mechanism kept `train.tsx` and `goals.tsx` inside
+   `app/(tabs)/` with `href: null` — no button, still reachable via
+   `router.push`/`vola://train`. That mechanism has no equivalent here. Fix:
+   `train.tsx` and `goals.tsx` moved OUT of `app/(tabs)/` to the app root,
+   pushed as ordinary stack screens — the exact pattern `library.tsx` and
+   `phase/index.tsx` already used (N484). Because `(tabs)` is a route GROUP,
+   its parentheses were already stripped from the URL, so the move changed
+   no route: `app/(tabs)/goals.tsx` and `app/goals.tsx` both resolved to
+   `/goals` before and after. Every literal `/(tabs)/goals` route string
+   (`food.tsx`, `progress.tsx`, `food/rings.tsx`, `food/target.tsx`'s
+   redirect) was updated to `/goals` — `foodTargetRow.test.tsx` had a real,
+   now-fixed assertion against the old string, so this was not purely
+   cosmetic. `goals.tsx` gained its own `ScreenHeader` `leading` back button
+   (N484/N493's pattern), since it no longer has a tab button to return to a
+   screen from.
+2. **Android cannot dynamically tint a custom (non-Material-Symbol) tab
+   icon** — `renderingMode: 'template'`, which lets iOS recolour a single
+   neutral raster at render time via `iconColor`/`selectedIconColor`, is
+   iOS-only; Android always renders a custom image source with its own
+   baked-in colour. Keeping VOLA's brand icons on Android's bar therefore
+   costs per-account accent personalisation there specifically: Android's
+   active-tab icon colour is `vola.accent` (the app's DEFAULT brand accent,
+   the same "before anyone has expressed a preference" value
+   `constants/Colors.ts` already documents it for) rather than whatever
+   accent the signed-in athlete picked. Decided with the user as an accepted
+   platform asymmetry, not discovered later and quietly shipped.
+
+**VOLA's brand icons are rasterised at runtime, not via a new build-time
+pipeline.** `react-native-view-shot` was already a dependency
+(`lib/shareCard.ts`'s session-share card), already establishing the
+"off-screen, `position: absolute; left: -10000`, `pointerEvents: none`,
+hidden from VoiceOver" mounting convention this reuses exactly
+(`lib/tabIconRaster.tsx`'s `useRasterizedIcons`). Each of the five icons is
+rendered off-screen once (via the SAME `Icon` component/`icons.generated.ts`
+pipeline every other icon in the app uses — no second copy of the brand kit
+to drift), captured as a data-URI PNG on `onLayout`, and cached in memory for
+the process's life; `(tabs)/_layout.tsx` holds a frame (`if (!sources) return
+host`) until every icon has landed, the same "hold a frame, don't guess"
+convention `useModules()`'s `ready` already used one line above it. No new
+dependency, no new `pnpm-workspace.yaml` `allowBuilds` entry.
+
+**The per-platform decision logic (`lib/tabIconPlan.ts`) is pure and takes
+`platform` as a parameter, rather than reading `Platform.OS` inline** — the
+same convention `lib/shareCard.ts`'s `cardCaptureSize` already established,
+and for the identical reason: `jest-expo` reports `Platform.OS === 'ios'`, so
+a function reading it directly would leave the Android branch untested by
+anything in the suite rather than merely untested by this one file.
+`lib/__tests__/tabIconPlan.test.ts` exercises both branches directly.
+
+**What is genuinely gone, by design rather than oversight**: the custom
+active-tab underline (native tab bars mark the active tab their own way —
+label weight, icon fill, a Material 3 pill — and there is no API to draw
+VOLA's own rule under it any more), and the old iOS/Android visual parity
+(the two platforms' native tab bars do not look like each other, which is
+the point of this ticket, not a bug in it).
+
+**Verified live on the iOS Simulator (Xcode 26.6, a freshly-created iPhone 17
+Pro on iOS 26.5 — the primary checkout's existing simulators were all on iOS
+17.x)**, not just read from the type definitions: created a throwaway account,
+confirmed all five tabs (Today · Food · Progress · Plan · You) render in
+order with VOLA's own icon shapes (not SF Symbols), confirmed the active
+tab's icon AND label are tinted with the account's accent colour while
+inactive tabs stay `vola.textDim`, confirmed `minimizeBehavior="onScrollDown"`
+genuinely hides the bar on scroll-down and restores it on scroll-up, and
+confirmed `goals.tsx` is reachable from Food's target row, renders its own
+header with a working back button, and returns to the tab bar (with the
+previously active tab still selected) on back. `lib/__tests__/tabBar.test.ts`,
+`lib/__tests__/tabIconPlan.test.ts` and the rewritten
+`__tests__/app/tabLayout.test.tsx` mutation-verify the wiring; full mobile
+suite re-run clean at 274 suites / 4364 tests after the change.
+
+**Open**: NEEDS HUMAN EVIDENCE — a real iOS 26 device (Liquid Glass
+appearance, minimize-on-scroll feel, haptics: a Simulator confirms it
+renders, not that it feels right in hand) and Android (Material 3 appearance,
+and whether the fixed non-personalised icon colour reads as an acceptable
+tradeoff rather than a bug) — neither attempted here. `Ready PRs contain
+work`/CI covers the build compiling; it does not cover either of those.
+
+
+## 2026-09-07 — N504 follow-up: three defects a Simulator found and no test could (#876)
+
+The NativeTabs migration was already merged-ready and reviewed when the user
+looked at the running app and asked two questions — *"make sure that icons
+look good and in proper scale"*, then *"what is that space on top of screen
+???? why so much is blank"*. Each was a real defect. None of the three below
+is reachable by any test in this repo, and all three had a green suite, a
+green `verify` and passing reviews sitting on top of them.
+
+**1. The tab icons rendered about three times too large.** `useRasterizedIcons`
+captures each brand SVG with `captureRef`, which renders at the DEVICE PIXEL
+RATIO — a 44pt off-screen box comes back as a 132px PNG on an @3x phone. An
+`ImageSourcePropType` given only a `uri` carries no scale, so React Native
+reads those 132 pixels as 132 POINTS and the bar draws each icon at triple
+size, overflowing the bar and its own labels. `scale: PixelRatio.get()` is
+what maps pixels back to points. Worth recording as a class rather than a
+typo: every `captureRef` consumer has this exposure, and `lib/shareCard.ts`
+avoids it only because a share card is consumed as an image at natural size
+rather than placed in a points-based layout.
+
+**2. The floating "New log" pill sat on top of the You tab.** The old JS tab
+bar occupied flow; the native bar is glass drawn OVER the content, so the
+pill's `bottom: 16` put it inside the bar rather than above it. Fixed by
+positioning it against the bar explicitly (`fabBottom`). The same premise
+inversion left `TAB_BAR_CLEARANCE`'s doc comment asserting the bar "sits in
+normal flow rather than floating over the content", which is now false; the
+comment is corrected rather than the constant changed, because the platform
+now supplies the real clearance itself (see below).
+
+**3. Every tab screen stated the top safe-area inset twice** — the blank band
+the user reported. This one is worth the detail, because the shape of the
+evidence was actively misleading.
+
+**It presented as ONE broken screen out of five, from identical code.**
+Measured on the iOS 26.5 Simulator by giving `ScreenHeader`'s wrap a
+temporary background and reading its bounds off a screenshot: the header box
+began at **62.0pt on Today and 0.0pt on Food**, two screens that render
+structurally identical trees — same `ScrollView`, same
+`contentContainerStyle`, same `<ScreenHeader …contentScrollsUnder={false}/>`
+as the first child. 62 is exactly `insets.top` on a Dynamic Island phone,
+measured the same way.
+
+The cause is mount ORDER, not styling. Today is simply the tab selected
+first, so its scroll view is created while UIKit is still standing the
+`UITabBarController` up, and it comes out holding an inset the later-mounted
+tabs never get. Forcing that one scroll view to remount (a throwaway `key`)
+moved it to 0.0pt with nothing else changed, which is what identified the
+cause; a second colour probe on the scroll view itself established the frame
+starts at 0.0pt while its content starts at 62.0pt, ruling out an offset
+container.
+
+**Four fixes were tried against the running Simulator and each did nothing**,
+which is the part worth keeping: `contentInsetAdjustmentBehavior="never"`
+(already set on Today — it is silently ineffective on the first-mounted
+screen, so the screen that opted out hardest was the only one wrong),
+`automaticallyAdjustContentInsets={false}`, an explicit zero `contentInset`
+plus `contentOffset`, and rendering the navigator on the very first frame so
+no screen mounts into a subtree about to be replaced. That last one was
+written, measured, disproved and reverted rather than kept — it had a comment
+claiming it fixed the inset, and leaving that in the tree would have been a
+false explanation next to working code.
+
+So the platform owns the top inset EVERYWHERE rather than only where it
+insists: all five tab scrollers now say
+`contentInsetAdjustmentBehavior="automatic"`, all five verified reporting the
+same 62.0pt, and `ScreenHeader` adds nothing on top inside the tab group. The
+point is determinism rather than the number — a screen laid out differently
+depending on which tab the athlete opened first cannot be reasoned about, and
+nothing in the suite can see it.
+
+**The tab layout declares this once, via `PlatformTopInsetContext`, rather
+than eight callers each passing a flag.** `ScreenHeader`'s own history is a
+list of layout contracts its callers could not keep (an `action` slot with no
+width contract collided with the centred wordmark twice, and the fix both
+times was to stop asking callers), so a `platformOwnsTopInset` prop would
+have been the same mistake with a new name. The default is `false` — add the
+inset — for two reasons: the failures are not symmetrical (a surplus gap gets
+reported, which is how this was found; a title under the status bar cannot be
+read at all, which is what removing `library`'s inset looked like when
+measured), and it means no existing test changes behaviour. A router-derived
+answer (`useSegments()`) was implemented first and abandoned on that second
+point: **59 test files mock `expo-router` locally**, so it needed a line in
+every one of them plus a fresh landmine for the sixtieth.
+
+`lib/headerInset.ts` keeps the arithmetic pure and parameterised, the same
+convention as `wordmarkFits` and `lib/tabIconPlan.ts`, because jest runs no
+Yoga pass: the padding a screen actually receives is unobservable in a test,
+but the decision behind it can be pinned exactly. Mutation-verified —
+inverting its ternary fails 4 tests as assertion failures, not compile
+errors.
+
+**One process note, since it cost real time.** An early run of the mobile
+suite was piped through `tail`, so the reported exit code was `tail`'s: 276
+failing tests read as exit 0. The repo's own rule covers this ("count the
+check runs, never the failures") and it still happened. Separately, two
+suites then failed for want of `TZ=America/Los_Angeles` — invoking `jest`
+directly rather than through `pnpm run test:mobile`, which sets it. Both are
+the same error: trusting an apparatus that was not the one the repo uses.
+Full suite via the real script: 285 suites / 4580 tests, exit 0.
+
+### What review caught in the fix itself, which is the point of the gate
+
+The three fixes above went to `frontend-reviewer` and `ac-verifier` green —
+`verify` exit 0, 285 suites / 4580 tests, every one of the ticket's
+code-checkable criteria MET — and **both reviewers independently found the
+same class of defect in the fix: an iOS measurement applied to Android
+without a platform check.** Two were blocking, and neither is reachable by
+any test in this repo.
+
+**1. The top-inset fix would have broken Android worse than the bug it
+fixed.** `PlatformTopInsetContext.Provider` was set to `true`
+unconditionally, on the strength of an iOS measurement. Read out of the
+installed library rather than argued: `expo-router@57.0.19`'s
+`NativeTabsView.android.js` wraps its content in
+`<SafeAreaView edges={{ bottom: true }}>` — **top deliberately excluded** —
+while `NativeTabsView.ios.js` sets
+`overrideScrollViewContentInsetAdjustmentBehavior`, and
+`contentInsetAdjustmentBehavior` is declared in RN 0.86.3's
+`ScrollViewPropsIOS`, i.e. iOS-only. So on Android nothing supplied a top
+inset, the five scrollers' `"automatic"` did nothing, and telling
+`ScreenHeader` the platform had it covered would have removed the only
+source — putting every Android tab title under the status bar. That is the
+UNREADABLE direction, against an iOS bug that was merely an ugly gap, and it
+is exactly the asymmetry `lib/headerInset.ts` had already written down as
+its reason for defaulting to `false`. The provider is now
+`value={Platform.OS === 'ios'}`.
+
+Worth separating two things the docs had run together: this was recorded as
+"asserted for Android by symmetry, not by measurement", which was honest but
+too generous to itself. It was not unverifiable — it was **derivable from
+the library source in about a minute**, without a device. "Unverified" and
+"unverified because nobody looked" are different claims, and only the second
+was true.
+
+**2. The pill fix was applied to Today and not to Plan.** `workouts.tsx`'s
+identical "New workout" pill kept `bottom: 16` and stayed under the native
+bar, while its own style comment went on asserting parity with Today's —
+"same radius, same padding, same `bottom`" — a claim this ticket had made
+false in the same commit. The new `functional-scenarios.md` entry then
+listed "Plan's pill sits at the same height" as a happy-path FACT, so the
+documentation asserted the thing the code had stopped doing.
+
+The fix is `lib/tabBarChrome.ts`, shared by both screens, and the split is
+deliberate: the two screens should NOT share their clearance constants —
+that is a per-screen decision about content padding, and each file's
+comments say so — but the height of the platform's bar is a fact about the
+platform, not a choice either screen gets to make. Keeping it private to
+`index.tsx` is precisely what let Plan drift.
+
+That helper is platform-parameterised for the same reason `tabIconPlan.ts`
+is: `jest-expo` reports `ios`, so a helper reading `Platform.OS` itself
+leaves the Android branch permanently untested. Android's Material 3
+`NavigationBar` is 80dp against UIKit's 49pt — **taken from the Material 3
+spec, not measured on a device**, and stated that way. The error direction
+is what makes it shippable unmeasured: too large floats the pill harmlessly
+high, too small puts it back under the bar. Mutation-tested, including the
+exact defect review found — collapsing the height to a single 49 fails three
+tests.
+
+**3. Noted, not fixed: a `Modal` inherits this context from its React
+ancestry, not from its native container.** A modal presented from a tab
+screen is a separate presentation and is not inside `UITabBarController`, so
+nothing insets it — but a `ScreenHeader` inside one would still read `true`
+from the tab group above and skip the inset. No modal in the app renders a
+`ScreenHeader` today (`food.tsx`'s and `workouts.tsx`'s sheets draw their
+own chrome), so this is a recorded trap in `lib/headerInset.ts` with the
+one-line remedy, not a change.
+
+**The general lesson, since this is the second time in one ticket.** Every
+defect here — the original three and these two — is a number or a behaviour
+measured on one platform and then applied everywhere without the check. The
+Simulator is what found the first three and it is also what cannot find
+these: it only ever reports `ios`.
+
 ## Open items / known gaps as of this entry
 
 
