@@ -28,7 +28,7 @@ import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { AnimatedSplash } from '@/components/AnimatedSplash';
-import { EnvironmentBadge } from '@/components/EnvironmentBadge';
+import { setShareInboxIdentity, startShareInboxOrchestrator } from '@/lib/shareInbox';
 
 import { tokenCache } from '@/lib/tokenCache';
 import { vola } from '@/constants/Colors';
@@ -202,6 +202,17 @@ function RootLayoutNav() {
     setHealthConnectSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
   }, [isSignedIn, userId, getToken]);
 
+  // N529 (#960): the bell's count. A fifth "own AppState listener, own
+  // identity" pair, and a separate one for the same reason the four above
+  // are: it is one small read with nothing to retry, and folding it into the
+  // outbox's backoff would delay a badge behind a session that cannot push.
+  // `getToken` alone — no `userId` — because the read is only ever about
+  // whoever the token is for. See lib/shareInbox.ts for the schedule.
+  useEffect(() => startShareInboxOrchestrator(), []);
+  useEffect(() => {
+    setShareInboxIdentity(isSignedIn ? getToken : null);
+  }, [isSignedIn, getToken]);
+
   // Catch what nobody catches: unhandled JS errors and unhandled promise
   // rejections. Installed once for the process, at the root, because an error
   // thrown outside a component tree — which is where the sync path throws,
@@ -311,10 +322,10 @@ function RootLayoutNav() {
       {splashDone ? null : (
         <AnimatedSplash ready={isLoaded} onFinish={() => setSplashDone(true)} />
       )}
-      {/* N132 (#536) — visible from the very first frame, over the splash
-          included: a build that can talk to the wrong backend should say so
-          before the athlete gets anywhere near a screen that matters. */}
-      <EnvironmentBadge />
+      {/* The `DEV` pill (N132/#536) used to be mounted here, over the splash
+          included. N529 (#960) moved the environment label to the Settings
+          footer (`lib/environmentLabel.ts` says why, and what the move gives
+          up) and gave this corner to the share bell in `ScreenHeader`. */}
     </View>
   );
 }

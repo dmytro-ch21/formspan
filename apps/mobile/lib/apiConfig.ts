@@ -17,8 +17,8 @@
  *
  * **Why `__DEV__`, not `EXPO_PUBLIC_APP_ENV`, gates the fallback.**
  * `EXPO_PUBLIC_APP_ENV` (N132/#536) is the established convention for
- * *labelling* which build this is — it drives the on-screen
- * `EnvironmentBadge` — but it is itself just another `EXPO_PUBLIC_*` value
+ * *labelling* which build this is — it drives the Settings footer's
+ * environment line (`lib/environmentLabel.ts`) — but it is itself just another `EXPO_PUBLIC_*` value
  * that can be missing or wrong, and a build that forgot to set
  * `EXPO_PUBLIC_API_URL` has no better reason to have correctly set
  * `EXPO_PUBLIC_APP_ENV` either. Gating the fallback on it would mean a

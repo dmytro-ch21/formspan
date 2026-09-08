@@ -7,6 +7,8 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { request as requestSync } from '@/lib/sync';
+import { acceptAllShares, acceptAllSummary } from '@/lib/shareAcceptAll';
+import { publishShareInboxCount } from '@/lib/shareInbox';
 import { playSound } from '@/lib/sounds';
 import { useAuthToken } from '@/lib/useAuthToken';
 import {
@@ -90,6 +92,16 @@ const DESTINATION: Record<string, (id: string) => Href> = {
  */
 const LANDED_MESSAGE = 'Accepted — the copy is yours now.';
 
+/**
+ * The `busy` value while Accept all runs (N529/#960). `busy` was already a
+ * share id or null, and every control already disables on `busy !== null`,
+ * so a sentinel that is not an id disables all of them — per-card Accept,
+ * Decline, and Accept all itself — without a second flag. It also keeps
+ * `busy === card.id` false for every card, so no single row claims to be the
+ * one being accepted while all of them are.
+ */
+const ACCEPT_ALL = 'accept-all';
+
 const KIND_LABEL: Record<string, string> = {
   sequence: 'Sequence',
   workout: 'Workout',
@@ -110,6 +122,20 @@ export default function SharedScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [landed, setLanded] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // N529: what went wrong per card, after an Accept all that did not land
+  // every one. Keyed by share id so the message sits on the card it is
+  // about; a card with no entry has nothing to say. Cleared by every action
+  // and by every reload, the same way `actionError` is.
+  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
+
+  // N529: the bell's count is THIS list's length, published whenever it
+  // changes — after a load, after an accept, after a dismiss's reload. The
+  // store does not have to ask again for a number this screen already knows,
+  // and the badge cannot lag a card that just vanished. `null` is loading,
+  // not zero, so it is not published.
+  useEffect(() => {
+    if (inbox !== null) publishShareInboxCount(inbox.length);
+  }, [inbox]);
 
   // Single-flight: a slow first load must not resolve after an accept and
   // repaint the row that was just cleared.
@@ -133,6 +159,7 @@ export default function SharedScreen() {
         setInbox(incoming);
         setSent(outgoing);
         setLoadError(null);
+        setCardErrors({});
       })
       .catch((err: unknown) => {
         if (c.signal.aborted || (err as Error)?.name === 'AbortError') return;
@@ -198,6 +225,49 @@ export default function SharedScreen() {
     },
     [getToken, router, reload],
   );
+
+  /**
+   * N529 (#960) — every waiting card, one after another.
+   *
+   * What it deliberately does NOT do, against the single-card `accept` above:
+   * navigate. Four accepts cannot land on four copies, so this ends on the
+   * inbox with a summary, and `requestSync` fires ONCE at the end rather than
+   * per card — one pull brings every copy down.
+   *
+   * Partial failure is the state this exists to get right. `onAccepted`
+   * drops each card as it lands, so what is left on screen when the loop
+   * ends is exactly the set that failed, each with its own error under it
+   * (`cardErrors`), and `acceptAllSummary` says "N of M" rather than "N".
+   * No `reload()` afterwards, on purpose: a reload would repaint the list
+   * from the server and take the failed cards' messages with it — the
+   * athlete can pull to refresh once they have read them.
+   */
+  const acceptAll = useCallback(async () => {
+    if (inbox === null || inbox.length < 2) return;
+    setBusy(ACCEPT_ALL);
+    setActionError(null);
+    setLanded(null);
+    setCardErrors({});
+    try {
+      const { accepted, failed } = await acceptAllShares(
+        inbox.map((c) => c.id),
+        (id) => acceptShare(getToken, id),
+        { onAccepted: (id) => setInbox((prev) => prev?.filter((s) => s.id !== id) ?? prev) },
+      );
+      if (accepted.length > 0) {
+        playSound('success');
+        requestSync('share-accepted');
+      }
+      if (failed.length > 0) {
+        setCardErrors(Object.fromEntries(failed.map((f) => [f.id, f.error])));
+      }
+      const summary = acceptAllSummary(accepted.length, failed.length);
+      setLanded(summary.landed);
+      setActionError(summary.error);
+    } finally {
+      setBusy(null);
+    }
+  }, [inbox, getToken]);
 
   // One verb for declining and for the sender taking it back — DELETE
   // /v1/shares/{id} covers both, because both are "this, gone".
@@ -267,6 +337,28 @@ export default function SharedScreen() {
         {inbox !== null && (
           <>
             <Text style={styles.sectionLabel}>Shared with you</Text>
+            {/* Only at two or more: "Accept all" over one card is a second
+                button for the same tap. Dismiss-all is deliberately absent —
+                declining is a per-card decision and nobody asked for it. */}
+            {inbox.length >= 2 && (
+              <Pressable
+                onPress={() => void acceptAll()}
+                disabled={busy !== null}
+                style={[
+                  styles.acceptAll,
+                  { borderColor: accent.accent },
+                  busy !== null && styles.disabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Accept all ${inbox.length} shares`}
+                accessibilityState={{ busy: busy === ACCEPT_ALL, disabled: busy !== null }}
+                testID="share-accept-all"
+              >
+                <Text style={[styles.acceptText, { color: accent.ink }]}>
+                  {busy === ACCEPT_ALL ? 'Accepting…' : `Accept all ${inbox.length}`}
+                </Text>
+              </Pressable>
+            )}
             {inbox.length === 0 ? (
               <Text style={styles.muted} testID="shared-inbox-empty">
                 Nothing waiting. When a training partner sends you something, it lands here.
@@ -314,6 +406,18 @@ export default function SharedScreen() {
                       <Text style={styles.declineText}>Decline</Text>
                     </Pressable>
                   </View>
+                  {/* N529: this card's own failure from Accept all, ON the
+                      card — the summary line at the top says how many, this
+                      says which and why. */}
+                  {cardErrors[card.id] !== undefined && (
+                    <Text
+                      style={styles.error}
+                      accessibilityLiveRegion="polite"
+                      testID={`share-card-error-${card.id}`}
+                    >
+                      {cardErrors[card.id]}
+                    </Text>
+                  )}
                 </View>
               ))
             )}
@@ -409,6 +513,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   acceptText: { fontSize: 14, fontWeight: '700' },
+  // The per-card Accept's own shape, sized to its label rather than stretched
+  // full-width: it is one more action over the list, not a headline.
+  acceptAll: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
   decline: { paddingVertical: 10, paddingHorizontal: 14 },
   declineText: { fontSize: 14, color: vola.textMuted },
   disabled: { opacity: 0.4 },

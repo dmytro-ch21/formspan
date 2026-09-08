@@ -21083,3 +21083,72 @@ M1a old carry restored · M1b numbers from the drop · M2 summary claims all tic
 - Fold a group with an unticked set in it: the summary says "N-1 of N done", and expanding it shows the unticked set still unticked.
 - With a group folded, "+ Set" / "+ Drop" / Rest / the unit chips are absent for that exercise and present for the others; the rest timer bar, Finish and the two-tap "+ Set" → ✓ path on an open group are unchanged.
 - A finished session with a folded group: the Done chip is gone, the header still opens the group.
+
+
+## N529/#960 — the share bell replaces the `DEV` pill, and Accept all on the inbox (`apps/mobile/components/ShareBell.tsx`, `apps/mobile/lib/shareInbox.ts`, `apps/mobile/lib/shareAcceptAll.ts`, `apps/mobile/lib/environmentLabel.ts`, `apps/mobile/components/ScreenHeader.tsx`, `apps/mobile/app/shared/index.tsx`, `apps/mobile/app/settings.tsx`)
+
+### Automated (`lib/__tests__/shareInbox.test.ts`, `lib/__tests__/shareAcceptAll.test.ts`, `lib/__tests__/environmentLabel.test.ts`, `components/__tests__/shareBell.test.tsx`, `__tests__/app/settingsEnvironment.test.tsx`, `__tests__/app/sharedScreen.test.tsx`)
+
+- **The bell is always there; the badge is not.** Unknown (`null`) and zero
+  both render the bell with no badge and the label "Shares"; a count renders
+  the badge ("3") and the label "Shares, 3 waiting"; at the cap the badge
+  reads "99+" and the label "over 99". A failed read (rejection,
+  `OfflineError`) publishes unknown, never zero — assert no badge AND no
+  "0" text, with `includeHiddenElements` because the badge is hidden from
+  assistive technology on purpose.
+- **Tapping the bell opens `/shared`.**
+- **Refresh schedule.** Identity set → one read. Focus inside the 15s window
+  → skipped; forced (foreground return) → not skipped; after the window →
+  read again; after a FAILED read → the next focus reads again (the window
+  does not start on a failure). Single-flight: two calls while one is in the
+  air are one request. A count published by the inbox screen replaces the
+  fetched one with no request and starts a fresh window.
+- **Identity.** Sign-out clears the count; a read that lands after sign-out
+  is discarded; a throwing subscriber does not silence the others. The
+  orchestrator refreshes on background/inactive → active only, not on
+  active → inactive, and `stop()` removes the listener.
+- **The inbox screen publishes what it shows**: after loading two cards the
+  store says 2; after Accept all it says 0.
+- **Accept all**: absent with one card, present with two ("Accept all 3");
+  accepts every card **sequentially** (the second `acceptShare` is not called
+  until the first resolves); navigates nowhere; `requestSync('share-accepted')`
+  and the chime fire exactly once; every card and the button are gone; the
+  landed line reads "Accepted 3 — the copies are yours now."
+- **Partial failure**: one card rejects → it stays with its own message under
+  it, the others are gone, the landed line reads "Accepted 2 of 3 …" (assert
+  it does NOT read "Accepted 2 —"), the error line names "1 didn't go
+  through", sync fires once, the surviving card's Accept is enabled again.
+  All reject → no landed line, "None of the 2 went through", both cards keep
+  their errors, no sync, no chime.
+- **Busy**: while Accept all runs, its label is "Accepting…" and every
+  per-card Accept and Decline is disabled.
+- **`acceptAllSummary`**: full success singular/plural; partial "N of M";
+  zero success confirms nothing; failures pluralised.
+- **Environment label**: `production` → null; `staging` → "STAGING";
+  `undefined`/`""` → "DEV"; `Production`/`prod` → shown (fail-safe). The
+  real Settings screen renders `settings-environment` for `development` and
+  for nothing set, and renders NOTHING on `production`.
+
+### Device-only (the two `NEEDS HUMAN EVIDENCE` items on #960)
+
+1. Two foods shared to a real phone from another account: the bell in the
+   header shows **2** on every tab; tap it; **Accept all 2**; both land in
+   Saved foods; back on the tabs the badge is gone without a reload.
+2. Airplane mode, cold open: the bell is drawn with no badge, no error toast
+   anywhere, the app is usable. Turn the radio on, background and foreground:
+   the badge appears if anything is waiting.
+3. The `DEV` pill is gone from every screen on a dev build. You → Settings →
+   footer reads "Build environment: DEVELOPMENT …" (or whatever the profile
+   says). On a production build the line is absent.
+4. VoiceOver/TalkBack on the bell reads "Shares, 2 waiting", not "2".
+5. The bell's target: tapping just outside the 22pt glyph still opens the
+   inbox (44pt via hitSlop); the header row did not grow.
+
+### Known gaps this does NOT cover
+
+- The You screen's Sharing pill (`getPendingCounts`) and the bell
+  (`listShareInbox`) are two server reads of one number; a scenario that
+  makes them disagree would need a server that answers them differently.
+- A ghost card (404/410) after Accept all stays on screen with its reason
+  until a pull-to-refresh — by design, so the message is readable; there is
+  no test that a subsequent pull clears it beyond the existing load tests.

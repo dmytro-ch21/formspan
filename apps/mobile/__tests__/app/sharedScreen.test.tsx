@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import SharedScreen from '../../app/shared/index';
+import { shareInboxCount } from '@/lib/shareInbox';
 
 /**
  * The share inbox, which is what makes the Share button a whole feature.
@@ -231,6 +232,131 @@ it('confirms an accept out loud, because the row vanishing is otherwise the whol
   fireEvent.press(await screen.findByTestId('share-accept-s1'));
 
   await waitFor(() => expect(mockPlay).toHaveBeenCalledWith('success'));
+});
+
+describe('Accept all (N529/#960)', () => {
+  it('is absent with one waiting, present with two', async () => {
+    // "Accept all" over a single card is a second button for the same tap.
+    mockInbox.mockResolvedValue([card({ id: 's1' })]);
+    render(<SharedScreen />);
+    await screen.findByTestId('share-card-s1');
+    expect(screen.queryByTestId('share-accept-all')).toBeNull();
+  });
+
+  it('accepts every card, navigates NOWHERE, syncs once, and reports the count', async () => {
+    mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' }), card({ id: 's3' })]);
+
+    render(<SharedScreen />);
+    const all = await screen.findByTestId('share-accept-all');
+    expect(all).toHaveTextContent('Accept all 3');
+    fireEvent.press(all);
+
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(3));
+    expect(await screen.findByTestId('shared-landed')).toHaveTextContent(
+      'Accepted 3 — the copies are yours now.',
+    );
+    // Three accepts cannot land on three copies, so nobody is sent anywhere.
+    expect(mockPush).not.toHaveBeenCalled();
+    // ONE pull for all of them, not one per card.
+    expect(mockRequestSync).toHaveBeenCalledTimes(1);
+    expect(mockRequestSync).toHaveBeenCalledWith('share-accepted');
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    // Every card is gone, and so is the button.
+    expect(screen.queryByTestId('share-card-s1')).toBeNull();
+    expect(screen.queryByTestId('share-card-s3')).toBeNull();
+    expect(screen.queryByTestId('share-accept-all')).toBeNull();
+    expect(screen.queryByTestId('shared-action-error')).toBeNull();
+  });
+
+  it('accepts one after another, never in parallel', async () => {
+    // Hold the first accept open and check the second has not been asked for.
+    let releaseFirst: (() => void) | undefined;
+    mockAccept.mockImplementation((_t: unknown, id: unknown) =>
+      id === 's1'
+        ? new Promise((res) => {
+            releaseFirst = () => res({ resource_type: 'workout', resource_id: 'c1' });
+          })
+        : Promise.resolve({ resource_type: 'workout', resource_id: 'c2' }),
+    );
+    mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' })]);
+
+    render(<SharedScreen />);
+    fireEvent.press(await screen.findByTestId('share-accept-all'));
+
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(1));
+    expect(mockAccept.mock.calls[0][1]).toBe('s1');
+    // Both rows are disabled while it runs, and the button says so.
+    expect(screen.getByTestId('share-accept-all')).toHaveTextContent('Accepting…');
+    expect(screen.getByTestId('share-accept-s2')).toBeDisabled();
+    expect(screen.getByTestId('share-decline-s2')).toBeDisabled();
+
+    releaseFirst!();
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(2));
+    expect(mockAccept.mock.calls[1][1]).toBe('s2');
+  });
+
+  it('keeps a failed card on screen with its error, and reports only what succeeded', async () => {
+    // The state this feature exists to get right. s2 is a ghost — taken
+    // back a minute ago — and the athlete wants the other two regardless.
+    mockAccept.mockImplementation((_t: unknown, id: unknown) =>
+      id === 's2'
+        ? Promise.reject(new Error('share is gone'))
+        : Promise.resolve({ resource_type: 'workout', resource_id: `copy-${String(id)}` }),
+    );
+    mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' }), card({ id: 's3' })]);
+
+    render(<SharedScreen />);
+    fireEvent.press(await screen.findByTestId('share-accept-all'));
+
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(3));
+    // The count on screen is the count that happened — "2 of 3", never "2".
+    const landed = await screen.findByTestId('shared-landed');
+    expect(landed).toHaveTextContent('Accepted 2 of 3 — the copies are yours now.');
+    expect(landed).not.toHaveTextContent(/Accepted 2 —/);
+    expect(screen.getByTestId('shared-action-error')).toHaveTextContent(/1 didn't go through/);
+    // The failed card is still there, wearing its own reason; the others are not.
+    expect(screen.getByTestId('share-card-s2')).toBeTruthy();
+    expect(screen.getByTestId('share-card-error-s2')).toHaveTextContent('share is gone');
+    expect(screen.queryByTestId('share-card-s1')).toBeNull();
+    expect(screen.queryByTestId('share-card-s3')).toBeNull();
+    // And it is usable again: the loop did not leave the screen stuck busy.
+    expect(screen.getByTestId('share-accept-s2')).not.toBeDisabled();
+    // The sync still fires once — two copies were made.
+    expect(mockRequestSync).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('claims nothing, syncs nothing and stays silent when nothing went through', async () => {
+    mockAccept.mockRejectedValue(new Error('offline'));
+    mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' })]);
+
+    render(<SharedScreen />);
+    fireEvent.press(await screen.findByTestId('share-accept-all'));
+
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('shared-action-error')).toHaveTextContent(
+      /None of the 2 went through/,
+    );
+    expect(screen.queryByTestId('shared-landed')).toBeNull();
+    expect(screen.getByTestId('share-card-error-s1')).toHaveTextContent('offline');
+    expect(screen.getByTestId('share-card-error-s2')).toHaveTextContent('offline');
+    expect(mockRequestSync).not.toHaveBeenCalled();
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it('publishes what it shows to the bell, after loading and after accepting', async () => {
+    // The badge on every other screen is this list's length — no second
+    // request, and no lag behind a card that just vanished.
+    mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' })]);
+
+    render(<SharedScreen />);
+    await screen.findByTestId('share-accept-all');
+    expect(shareInboxCount()).toBe(2);
+
+    fireEvent.press(screen.getByTestId('share-accept-all'));
+    await waitFor(() => expect(screen.queryByTestId('share-card-s2')).toBeNull());
+    await waitFor(() => expect(shareInboxCount()).toBe(0));
+  });
 });
 
 it('stays silent when the accept fails', async () => {

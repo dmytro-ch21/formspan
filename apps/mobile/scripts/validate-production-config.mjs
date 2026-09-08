@@ -169,7 +169,7 @@ export function checkEasJson(easJson) {
     // original check only asserted production said "production", so a
     // typo'd preview/development value (e.g. preview accidentally set to
     // "development") would go undetected. It's inert metadata for the
-    // on-screen EnvironmentBadge, never a backend address, so it's safe to
+    // on-screen environment label (lib/environmentLabel.ts), never a backend address, so it's safe to
     // commit literally — it still has to say the right thing for each
     // profile, not just for the one this ticket's bug was actually in.
     const appEnv = cfg.env?.EXPO_PUBLIC_APP_ENV;

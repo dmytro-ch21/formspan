@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, View as RNView, type LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ShareBell } from '@/components/ShareBell';
 import { SyncChip } from '@/components/SyncChip';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -423,6 +424,16 @@ export function ScreenHeader({
         <RNView style={styles.rightCluster} onLayout={onRightLayout} testID="screen-header-actions">
           <SyncChip />
           {action}
+          {/* N529 (#960) — the bell is the LAST thing in the cluster, so it
+              holds the corner the `DEV` pill used to float over, on every
+              screen that draws this header. Inside the measured cluster
+              rather than absolutely positioned like the pill was, for the
+              reason the file comment gives: `wordmarkFits` reads `right`
+              from this box, so a bell that lived outside it would be one
+              more thing the arithmetic could not see. The measured width
+              grows by 28pt + a gap; `you.tsx`, the one crowded caller,
+              already hides the wordmark. */}
+          <ShareBell />
         </RNView>
       </View>
     </View>
