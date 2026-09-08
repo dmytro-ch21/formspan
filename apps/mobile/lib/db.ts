@@ -60,7 +60,14 @@ const CREATE_SESSIONS = `
     -- hard-deleted for real. Reads filter it out, so it is invisible from the
     -- moment the athlete taps Delete.
     deleted_at TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    -- Which exercise groups the athlete folded shut with "Done" (N530/#961).
+    -- A JSON array of group keys — see lib/sessionCollapse.ts. VIEW STATE,
+    -- LOCAL ONLY: never pushed, never pulled, and deliberately absent from
+    -- sessionStore's upsert SET list so the server's copy of a session cannot
+    -- clobber it. It is written by its own UPDATE that touches neither dirty
+    -- nor updated_at -- folding an exercise is not an edit to the session.
+    collapsed_json TEXT NOT NULL DEFAULT '[]'
   );
 `;
 
@@ -717,7 +724,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 38;
+const SCHEMA_VERSION = 39;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1433,6 +1440,20 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // genuinely has no time to give it — the honest answer is "day only",
     // not a guessed clock reading.
     await addColumnIfMissing(db, 'planned_sessions', 'time_of_day_minutes', 'INTEGER');
+  }
+
+  if (current < 39) {
+    // N530/#961: per-exercise "Done" folds a group shut, and that has to
+    // survive an app kill mid-workout — see CREATE_SESSIONS's own comment on
+    // `collapsed_json`. Real ALTER, same reason as every branch above:
+    // `CREATE TABLE IF NOT EXISTS` is a no-op against the existing table, so
+    // a device already stamped 38 would keep a `local_sessions` with no
+    // `collapsed_json` and the first read of it would throw.
+    //
+    // Defaults to '[]' — nothing collapsed — for every session already on
+    // the device, which is the only honest backfill: no athlete has tapped
+    // Done on any of them yet.
+    await addColumnIfMissing(db, 'local_sessions', 'collapsed_json', "TEXT NOT NULL DEFAULT '[]'");
   }
 
   // The day query the card runs on every render of Today.

@@ -104,16 +104,19 @@ import {
   finishLocalSession,
   hydrateSession,
   readLocalSession,
+  readCollapsedGroups,
   pushSession,
+  saveCollapsedGroups,
   saveLocalSets,
 } from '@/lib/sessionStore';
+import { groupKeys, summariseGroup, toggleGroup } from '@/lib/sessionCollapse';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
 import * as Haptics from 'expo-haptics';
 import { report } from '@/lib/report';
 import {
   describeSet,
   emptyDropSet,
-  emptySet,
+  emptyWorkingSet,
   groupSets,
   setOrdinals,
   localVolume,
@@ -211,6 +214,19 @@ export default function SessionScreen() {
   // server's copy arrives asynchronously and would otherwise overwrite
   // whatever's being typed at the moment a save lands.
   const [sets, setSets] = useState<LoggedSet[]>([]);
+  /**
+   * Exercise groups folded shut with "Done" (N530/#961) — group keys from
+   * `groupKeys`, never set indices. VIEW STATE: nothing in here is ever
+   * written to a set, and it is not part of `Session`. Persisted through
+   * `saveCollapsedGroups` so an app kill mid-workout does not unfold
+   * everything; read back in `load`.
+   *
+   * Declared up here with the other hooks, ABOVE the early returns below —
+   * a `useState` placed after `if (!session) return` has shipped a black
+   * screen on this file before, and only `react-hooks/rules-of-hooks`
+   * notices.
+   */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
@@ -701,8 +717,14 @@ export default function SessionScreen() {
         setEverLoaded(true);
         return;
       }
+      // Read BEFORE the session is put on screen, so the first paint already
+      // has the folded groups folded rather than flashing them open. Local
+      // only, so there is no offline case to worry about — and a read that
+      // fails reads as "nothing collapsed", which costs one tap on Done.
+      const folded = await readCollapsedGroups(userId, id).catch(() => []);
       setSession(s);
       setSets(s.sets);
+      setCollapsed(new Set(folded));
       setVolume(localVolume(s.sets));
       setError(null);
       setEverLoaded(true);
@@ -980,13 +1002,38 @@ export default function SessionScreen() {
     // passes and the wrong-row write is silent. "+ Set" during a run's rest step
     // is an ordinary thing to do: the bar is minimised and the list is live.
     stopTimerForStructureChange();
+    // ALWAYS a working set (N530/#961). This used to pass `sets[afterIndex]`
+    // straight to `emptySet`, which carries `set_type`, so "+ Set" after a
+    // drop minted another drop. `emptyWorkingSet` forces the type and copies
+    // the numbers from the last NON-drop row of this exercise — see its doc.
     commit(
       [
         ...sets.slice(0, afterIndex + 1),
-        emptySet(exerciseID, afterIndex + 1, sets[afterIndex]),
+        emptyWorkingSet(sets, exerciseID, afterIndex),
         ...sets.slice(afterIndex + 1),
       ].map((s, i) => ({ ...s, position: i })),
     );
+  }
+
+  /**
+   * Fold an exercise shut, or open it back up (N530/#961).
+   *
+   * **Writes nothing to any set.** This is the one place the collapsed state
+   * changes, and it touches `collapsed` and its own column only — never
+   * `sets`, never `completed`, never `dirty`. An unticked set under a folded
+   * header stays unticked, and the summary line says so. Not a structural
+   * change either: no index moves, so a running countdown is left alone.
+   *
+   * Persisted fire-and-forget: the screen state is the source of truth while
+   * the screen is up, and the write exists for the next cold start. A failed
+   * write costs one tap on Done after an app kill, which is not worth an
+   * alert mid-set.
+   */
+  function toggleCollapsed(key: string) {
+    const next = toggleGroup(collapsed, key);
+    setCollapsed(next);
+    if (userId && id) saveCollapsedGroups(userId, id, [...next]).catch(() => {});
+    Haptics.selectionAsync().catch(() => {});
   }
 
   /**
@@ -1383,6 +1430,8 @@ export default function SessionScreen() {
   // `groupSets`'s own doc comment for why it is deliberately blind to
   // `set_type` — the orphaned-drop handling lives in `setOrdinals` below.
   const groups = groupSets(sets);
+  // One stable key per group, for the collapsed state — see `groupKeys`.
+  const keys = groupKeys(groups);
 
   /**
    * Switch a whole exercise between reps and time.
@@ -1759,10 +1808,70 @@ export default function SessionScreen() {
           // the duration chip arrived beside it and the two read as a pair.
           const weighted = measures.includes('weight');
           const runnable = !finished && !timerState.run && canRun(sets, g.indices, runContext({}));
+          const key = keys[gi];
+          if (collapsed.has(key)) {
+            // Folded shut by "Done" (N530/#961): the whole group is one line.
+            // Every row is still in `sets` — nothing was written, nothing was
+            // ticked — and the summary counts the ticks honestly, so an
+            // exercise folded with a set still open reads "2 of 3 done", not
+            // "done". "+ Set" / "+ Drop" and every per-set chip are hidden
+            // with the rows; the header is the only control, and it opens the
+            // group back up. Rendered before the full header so a folded group
+            // costs one Pressable, not a tree of hidden controls.
+            const summary = summariseGroup(
+              g.indices.map((i) => sets[i]),
+              unitFor(g.exerciseID),
+              durationUnit,
+            );
+            return (
+              <View key={g.exerciseID + g.indices[0]} style={styles.group}>
+                <Pressable
+                  onPress={() => toggleCollapsed(key)}
+                  style={styles.collapsedHead}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: false }}
+                  accessibilityLabel={`${exercise?.name ?? 'This exercise'} is done: ${
+                    summary.text
+                  }. Show its sets.`}
+                  testID={`expand-${g.exerciseID}`}
+                >
+                  <View style={styles.collapsedBody}>
+                    <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
+                    <Text style={styles.collapsedSummary} testID={`summary-${g.exerciseID}`}>
+                      {summary.text}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-down" size={16} color={vola.textMuted} strokeWidth={2} />
+                </Pressable>
+              </View>
+            );
+          }
           return (
             <View key={g.exerciseID + g.indices[0]} style={styles.group}>
               <View style={styles.groupHead}>
                 <Text style={styles.groupName}>{exercise?.name ?? g.exerciseID}</Text>
+                {/* "Done" folds this exercise to one line (N530/#961). A view
+                    action, not a data one: it ticks nothing, so it sits with
+                    Rest and the unit chips rather than looking like the ✓ on
+                    a row. Gated on `finished` like every header control — a
+                    finished session is a record, not a workspace, though a
+                    group folded before Finish stays folded and its header
+                    still opens it. */}
+                {!finished && (
+                  <Pressable
+                    onPress={() => toggleCollapsed(key)}
+                    hitSlop={10}
+                    style={styles.restChip}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: true }}
+                    accessibilityLabel={`Mark ${
+                      exercise?.name ?? 'this exercise'
+                    } done and fold its sets away. Nothing is ticked for you.`}
+                    testID={`done-${g.exerciseID}`}
+                  >
+                    <Text style={styles.restChipText}>Done</Text>
+                  </Pressable>
+                )}
                 {!finished && (
                   <Pressable
                     onPress={() => startRest(g.exerciseID)}
@@ -3379,6 +3488,18 @@ const styles = StyleSheet.create({
     columnGap: Spacing.smPlus,
   },
   groupName: { flex: 1, minWidth: 140, fontSize: 16, fontWeight: '700' },
+  // A group folded shut by "Done" (N530/#961): name and summary on the left,
+  // a chevron on the right, the whole row one tap target. `minHeight` keeps
+  // the target the size of the header it replaces so re-expanding is not a
+  // precision tap between sets.
+  collapsedHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.smPlus,
+    minHeight: 44,
+  },
+  collapsedBody: { flex: 1, gap: Spacing.xs },
+  collapsedSummary: { ...Typography.meta, color: vola.textMuted },
   // The structural row below the name: reorder, swap, remove. Left-aligned
   // and wrapping independently of `groupHead`, so a long name pushing the
   // per-set chips to a second line does not also reflow these.

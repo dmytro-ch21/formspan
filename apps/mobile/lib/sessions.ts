@@ -689,6 +689,13 @@ export function emptySet(exerciseID: string, position: number, from?: LoggedSet)
   return {
     exercise_id: exerciseID,
     position,
+    // Carried, and that is a TRAP for a caller adding a plain set: a row copied
+    // from a drop is born a drop. `emptyDropSet` relies on this carry and then
+    // overrides it; "+ Set" must NOT reach here directly — it goes through
+    // `emptyWorkingSet` below, which forces `working` and picks a non-drop row
+    // to copy the numbers from (N530/#961). Left as-is rather than defaulted
+    // to `working` because every other caller passes no `from` at all, so the
+    // carry is only ever observable through those two wrappers.
     set_type: from?.set_type ?? 'working',
     reps: from?.reps ?? null,
     weight_kg: from?.weight_kg ?? null,
@@ -1656,6 +1663,59 @@ export function emptyDropSet(from: LoggedSet, position: number): LoggedSet {
     reps: null,
     rir: null,
     rpe: null,
+  };
+}
+
+/**
+ * The row "+ Set" adds after `afterIndex` — always a WORKING set (N530/#961).
+ *
+ * "+ Set" used to hand `sets[afterIndex]` straight to `emptySet`, which carries
+ * `set_type` forward, so the set after a drop was born a drop. The user's rule
+ * is the whole spec: *"If we click set it should create a normal set, if drop
+ * it should create drop."* `emptyDropSet` is the only thing that mints a drop.
+ *
+ * **The numbers still carry — from the nearest preceding NON-DROP row of this
+ * exercise, not from the drop.** A drop's weight is the one the athlete just
+ * lowered to, so copying it into a "normal" set after a 100 kg working set is
+ * the same surprise in a different coat. Walking back past drops to the row
+ * they hang off recovers the number the athlete is actually working at. The
+ * walk stops at the group boundary (a different exercise), because a squat
+ * group must not borrow from the bench above it.
+ *
+ * **After a warmup, the new set is `working` and carries the warmup's
+ * numbers.** The type follows the user's rule (a "normal" set); the numbers
+ * follow `emptyDropSet`'s reasoning — an invented jump from 60 to "probably
+ * 100" is a guess about somebody's training, and editing UP from the number
+ * just lifted is cheaper than clearing a blank. `backoff`/`amrap`/`failure`
+ * rows are performed sets at a real weight and carry the same way; only
+ * `drop` is skipped, because only a drop's weight is wrong by construction.
+ *
+ * **A group that is all drops** (an orphan — see `setOrdinals`) has no honest
+ * source, so it carries from `afterIndex` itself, still typed `working`: the
+ * only numbers on screen beat an empty row that has to be typed from nothing.
+ */
+export function emptyWorkingSet(
+  sets: LoggedSet[],
+  exerciseID: string,
+  afterIndex: number,
+): LoggedSet {
+  let source: LoggedSet | undefined;
+  for (let j = afterIndex; j >= 0; j--) {
+    const s = sets[j];
+    if (s === undefined || s.exercise_id !== exerciseID) break;
+    if (s.set_type !== 'drop') {
+      source = s;
+      break;
+    }
+  }
+  // The orphan fallback only applies to a row of THIS exercise. If
+  // `afterIndex` points at some other exercise (a caller passing the wrong
+  // index), carrying its numbers would be worse than a blank row.
+  const at = sets[afterIndex];
+  const from = source ?? (at?.exercise_id === exerciseID ? at : undefined);
+  return {
+    ...emptySet(exerciseID, afterIndex + 1, from),
+    set_type: 'working',
   };
 }
 

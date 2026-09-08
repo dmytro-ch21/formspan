@@ -12,6 +12,7 @@ import {
 } from './apiError';
 import { getDb, withTransaction } from './db';
 import type { Exercise } from './exercises';
+import { parseCollapsed } from './sessionCollapse';
 import type { Workout, WorkoutItem } from './workouts';
 import {
   createWorkout,
@@ -99,6 +100,12 @@ type Row = {
   /** Set once the athlete deleted it; the row survives until the server agrees. */
   deleted_at: string | null;
   updated_at: string;
+  /**
+   * Which exercise groups are folded shut — local view state, never synced.
+   * Read/written only by `readCollapsedGroups`/`saveCollapsedGroups` below;
+   * `toSession` ignores it on purpose so it can never ride out on `Session`.
+   */
+  collapsed_json: string;
 };
 
 /**
@@ -584,6 +591,51 @@ export async function sessionsSince(
       ORDER BY started_at DESC`,
     userID,
     sinceISO,
+  );
+}
+
+/**
+ * Which exercise groups the athlete has folded shut with "Done" (N530/#961).
+ *
+ * Group keys, not set indices — see `lib/sessionCollapse.ts`'s `groupKeys` for
+ * why. Returns `[]` for a session this device does not hold, and for a blob it
+ * cannot read: the failure mode of a wrong answer here is every exercise shut
+ * on a screen the athlete is trying to log into.
+ */
+export async function readCollapsedGroups(userID: string, id: string): Promise<string[]> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ collapsed_json: string }>(
+    `SELECT collapsed_json FROM local_sessions
+     WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    id,
+    userID,
+  );
+  return parseCollapsed(row?.collapsed_json);
+}
+
+/**
+ * Persist the folded-shut groups for one session.
+ *
+ * **Touches ONLY `collapsed_json`.** Not `sets_json` — Done writes nothing to
+ * any set, that is the whole point (see `lib/sessionCollapse.ts`). Not `dirty`
+ * — folding an exercise is not an edit the server needs to hear about, and
+ * marking the row dirty would push the unchanged set list for nothing. Not
+ * `updated_at` — the pull's newer-than guard reads it to decide whether the
+ * server's copy may land, and bumping it here would let a view-state tap
+ * block a legitimate pull. The upsert's SET list leaves this column alone for
+ * the mirror reason: a pull must not reset what the athlete folded.
+ */
+export async function saveCollapsedGroups(
+  userID: string,
+  id: string,
+  keys: readonly string[],
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE local_sessions SET collapsed_json = ? WHERE id = ? AND user_id = ?`,
+    JSON.stringify(keys),
+    id,
+    userID,
   );
 }
 
