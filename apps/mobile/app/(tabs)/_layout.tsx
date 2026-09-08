@@ -3,6 +3,7 @@ import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { PlatformTopInsetContext } from '@/lib/headerInset';
 import { useModules } from '@/lib/ModulesProvider';
 import { TABS } from '@/lib/tabs';
 import { useRasterizedIcons } from '@/lib/tabIconRaster';
@@ -86,25 +87,33 @@ export default function TabLayout() {
   if (!sources) return host;
 
   return (
-    <NativeTabs
-      minimizeBehavior="onScrollDown"
-      backgroundColor={vola.bg}
-      tintColor={accent.accent}
-      iconColor={{ default: vola.textDim, selected: accent.accent }}
-      labelStyle={{
-        default: { fontFamily: 'BarlowSemiBold', fontSize: 11, color: vola.textDim },
-        selected: { fontFamily: 'BarlowSemiBold', fontSize: 11, color: accent.accent },
-      }}
-    >
-      {TABS.map(({ name, title, icon }) => (
-        <NativeTabs.Trigger key={name} name={name}>
-          <NativeTabs.Trigger.Icon
-            src={tabIconSource(icon, sources, Platform.OS)}
-            renderingMode={tabIconRenderingMode(Platform.OS)}
-          />
-          <NativeTabs.Trigger.Label>{title}</NativeTabs.Trigger.Label>
-        </NativeTabs.Trigger>
-      ))}
-    </NativeTabs>
+    // `NativeTabs` is a real `UITabBarController`, and UIKit applies the top
+    // safe-area inset to the screens inside it. This says so once, for
+    // everything beneath, so `ScreenHeader` does not add a second copy and
+    // open a blank band above the title — see `lib/headerInset.ts` for the
+    // measured account, including why this is declared here rather than
+    // passed by each screen.
+    <PlatformTopInsetContext.Provider value>
+      <NativeTabs
+        minimizeBehavior="onScrollDown"
+        backgroundColor={vola.bg}
+        tintColor={accent.accent}
+        iconColor={{ default: vola.textDim, selected: accent.accent }}
+        labelStyle={{
+          default: { fontFamily: 'BarlowSemiBold', fontSize: 11, color: vola.textDim },
+          selected: { fontFamily: 'BarlowSemiBold', fontSize: 11, color: accent.accent },
+        }}
+      >
+        {TABS.map(({ name, title, icon }) => (
+          <NativeTabs.Trigger key={name} name={name}>
+            <NativeTabs.Trigger.Icon
+              src={tabIconSource(icon, sources, Platform.OS)}
+              renderingMode={tabIconRenderingMode(Platform.OS)}
+            />
+            <NativeTabs.Trigger.Label>{title}</NativeTabs.Trigger.Label>
+          </NativeTabs.Trigger>
+        ))}
+      </NativeTabs>
+    </PlatformTopInsetContext.Provider>
   );
 }

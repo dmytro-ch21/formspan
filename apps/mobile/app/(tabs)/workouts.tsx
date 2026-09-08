@@ -304,6 +304,7 @@ export default function WorkoutsScreen() {
         data={workouts}
         keyExtractor={(w) => w.id}
         contentContainerStyle={[styles.list, listPad]}
+        contentInsetAdjustmentBehavior="automatic"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

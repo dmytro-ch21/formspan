@@ -342,7 +342,11 @@ export default function ProgressScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.scroll} testID="progress-screen">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        contentInsetAdjustmentBehavior="automatic"
+        testID="progress-screen"
+      >
         {/* Inside the ScrollView, so it scrolls away with the content and
             nothing passes under it — no bottom rule. See `ScreenHeader`, and
             N498: this used to be a pinned sibling above the ScrollView with

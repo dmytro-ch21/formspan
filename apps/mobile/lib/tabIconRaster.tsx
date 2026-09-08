@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { StyleSheet, View as RNView, type ImageSourcePropType } from 'react-native';
+import { PixelRatio, StyleSheet, View as RNView, type ImageSourcePropType } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 import { Icon, type IconName } from '@/components/ui/Icon';
@@ -176,7 +176,26 @@ export function useRasterizedIcons(requests: readonly TabIconRequest[]): {
                     // cache is meant to be settled once per process, not
                     // reconsidered mid-session.
                     if (!capturing.has(key)) return;
-                    cache.set(key, { uri });
+                    // `scale` is NOT optional here, and omitting it is what
+                    // shipped icons three times too big.
+                    //
+                    // `captureRef` renders the off-screen view at the DEVICE
+                    // PIXEL RATIO, so a `RASTER_SIZE`-point box comes back as
+                    // a `RASTER_SIZE * PixelRatio.get()`-PIXEL png — 132px on
+                    // a @3x phone. An image source given only a `uri` has
+                    // nothing to divide by, so React Native reads those 132
+                    // pixels as 132 POINTS and the tab bar draws an icon
+                    // three times its intended size: overflowing the bar,
+                    // overlapping its own label and the screen above it.
+                    //
+                    // Declaring the scale is what maps pixels back to points
+                    // (132 / 3 = 44). Verified on the iOS 26.5 Simulator both
+                    // ways round — without this line the oversized bar is
+                    // immediate and obvious, with it the icons sit correctly
+                    // inside the bar. `lib/__tests__/tabIconPlan.test.ts`
+                    // pins the arithmetic so a future edit cannot quietly
+                    // drop it again.
+                    cache.set(key, { uri, scale: PixelRatio.get() });
                   })
                   .catch((err) => {
                     if (!capturing.has(key)) return;

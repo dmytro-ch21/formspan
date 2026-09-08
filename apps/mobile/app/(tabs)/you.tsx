@@ -328,7 +328,11 @@ export default function YouScreen() {
   const bjjEnabled = modulesReady && modules.some((m) => m.key === 'bjj' && m.enabled);
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} testID="you-screen">
+    <ScrollView
+      contentContainerStyle={styles.scroll}
+      contentInsetAdjustmentBehavior="automatic"
+      testID="you-screen"
+    >
       {/*
         NO `action`, and that is the fix rather than a simplification.
 
