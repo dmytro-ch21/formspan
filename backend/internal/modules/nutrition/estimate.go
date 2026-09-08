@@ -323,6 +323,64 @@ func ValidateEstimate(e Estimate) error {
 	return nil
 }
 
+// DefaultServingLabel is what a drafted item is counted in when the model
+// returned no label at all. "1 serving" is the honest neutral phrasing — it
+// claims nothing about weight or size, which is exactly what an empty label
+// means.
+const DefaultServingLabel = "1 serving"
+
+// fitToFood trims what the model returned down to what a SAVED FOOD and a
+// LOGGED ENTRY will accept (N533/#964).
+//
+// A draft is not the end of its own life: the phone confirms it by writing a
+// `Food` and an `Entry` from the item, both of which pass through
+// `validateName` (1–maxNameRunes) and `validateLabel` (1–maxLabelRunes). The
+// JSON schema the model is held to can say "string" and nothing about
+// length, and `ValidateEstimate` above bounds the NUMBERS and the name's
+// emptiness — so an item with a 60-rune serving label, or an empty one, was
+// a perfectly valid estimate that could never be saved. The phone writes it
+// locally first, the push is refused 400, `classify` reads that as
+// permanent, and the row and its entry become a local ghost that a reinstall
+// removes: "some foods from AI generation don't get saved", verbatim.
+//
+// CLAMPED rather than refused, and that is a product decision: refusing would
+// spend one of the athlete's daily estimates on an error about a label they
+// cannot even edit on the describe screen. A label cut to forty runes is
+// still a readable phrase; an estimate thrown away is not. The name is cut
+// to its own limit for the same reason, though a model has never been seen
+// to produce a 120-rune food name — that half is defence, the label half is
+// the reported bug.
+//
+// An empty NAME is deliberately NOT defaulted, unlike the label: an empty
+// label means "counted in servings" and "1 serving" says exactly that, while
+// an empty name means the model could not say what the food is, and no
+// default is honest there — ValidateEstimate refuses it. Pinned by
+// `estimate_fit_test.go`.
+//
+// Runes, not bytes, because the validators count runes: a label in Cyrillic
+// or with an accented gram sign is two bytes a character, and a byte cut
+// would both refuse labels the validator accepts and split a character.
+func (e *Estimate) fitToFood() {
+	for i := range e.Items {
+		it := &e.Items[i]
+		it.Name = clampRunes(strings.TrimSpace(it.Name), maxNameRunes)
+		it.ServingLabel = clampRunes(strings.TrimSpace(it.ServingLabel), maxLabelRunes)
+		if it.ServingLabel == "" {
+			it.ServingLabel = DefaultServingLabel
+		}
+	}
+}
+
+// clampRunes cuts s to at most n runes, trimming any whitespace the cut
+// exposes so a label never ends in a dangling space.
+func clampRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(r[:n]))
+}
+
 // The magnitudes above which a number is not food.
 //
 // These are ABSURDITY bounds, not correctness ones, and the distinction is why
@@ -381,11 +439,18 @@ func EstimateSchema() map[string]any {
 			"name": map[string]any{
 				"type": "string",
 				"description": "What this component is, as an athlete would say it. 'Scrambled eggs', not 'Egg, whole, cooked, scrambled'. " +
-					"Never empty and never a placeholder — if you cannot name it, leave it out of the list entirely and say so in the note.",
+					"Never empty and never a placeholder — if you cannot name it, leave it out of the list entirely and say so in the note. " +
+					"At most 120 characters.",
 			},
 			"serving_label": map[string]any{
-				"type":        "string",
-				"description": "How the quantity is counted: '1 slice', '100 g', '1 medium egg'. Human phrasing, not a unit code.",
+				"type": "string",
+				// The length is asked for here AND enforced by `fitToFood`
+				// (N533/#964): the prompt makes a short label the common case,
+				// the clamp makes it the only case. Neither alone is enough —
+				// a schema cannot express maxLength under structured outputs,
+				// and a clamp with no request produces cut-off phrases.
+				"description": "How the quantity is counted: '1 slice', '100 g', '1 medium egg'. Human phrasing, not a unit code. " +
+					"Short — at most 40 characters — and never empty. Put any explanation of the portion in 'assumption', not here.",
 			},
 			"servings": map[string]any{
 				"type":        "number",

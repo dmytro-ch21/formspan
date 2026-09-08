@@ -675,18 +675,34 @@ type DayTotals struct {
 	TargetProteinG *int `json:"target_protein_g"`
 }
 
+// The rune limits on a food's or entry's name and serving label.
+//
+// Named rather than inlined (N533/#964) because a SECOND place now has to
+// agree with them: the estimator's `fitToFood`, which trims what the model
+// returned down to what these two validators will accept. Before that, an
+// AI-drafted `serving_label` such as "1 restaurant bowl with rice, beans and
+// salsa (about 400 g)" passed `ValidateEstimate` (which never looked at the
+// label), reached the phone as a draft, was written to the local outbox, and
+// was then refused here with a 400 that the phone reads as permanent — the
+// food and the entry naming it lived on that one phone until a reinstall
+// removed them. Two literals that must be equal are one literal.
+const (
+	maxNameRunes  = 120
+	maxLabelRunes = 40
+)
+
 func validateName(v, what string) error {
 	n := strings.TrimSpace(v)
-	if n == "" || len([]rune(n)) > 120 {
-		return fmt.Errorf("%w: %s must be between 1 and 120 characters", ErrInvalidInput, what)
+	if n == "" || len([]rune(n)) > maxNameRunes {
+		return fmt.Errorf("%w: %s must be between 1 and %d characters", ErrInvalidInput, what, maxNameRunes)
 	}
 	return nil
 }
 
 func validateLabel(v, what string) error {
 	n := strings.TrimSpace(v)
-	if n == "" || len([]rune(n)) > 40 {
-		return fmt.Errorf("%w: %s must be between 1 and 40 characters", ErrInvalidInput, what)
+	if n == "" || len([]rune(n)) > maxLabelRunes {
+		return fmt.Errorf("%w: %s must be between 1 and %d characters", ErrInvalidInput, what, maxLabelRunes)
 	}
 	return nil
 }
