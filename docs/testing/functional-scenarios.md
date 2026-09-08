@@ -20922,7 +20922,21 @@ on every sync pass — were hidden behind "isn't available on this device".
 - **iOS, HealthKit linked, sync on, readings present**: unchanged — row
   reads "read from Apple Health", chart shows.
 - **Readings exist but the toggle is now off** (either platform): the chart
-  still shows. Data the athlete has is never hidden by a setting.
+  still shows, AND the range picker with it. Data the athlete has is never
+  hidden by a setting — over the whole three-year fetch window, not only the
+  selected range (the first version of this fix got that wrong; review
+  caught it).
+- **Readings exist only outside the selected range** (e.g. fourteen months
+  of history, default six-month view): the range picker is present and
+  switching to `1Y`/`All` shows them; the "Nothing in this range" sentence
+  appears, never a sync or source sentence.
+- **The fetch fails** (airplane mode): the screen says "Couldn't load your
+  VO2max trend…" — never a sentence about a grant or a toggle, because
+  nothing about either was learned.
+- **An account with readings, on a device with no source at all** (an iOS
+  build without HealthKit, after switching phones): the VO2max row still
+  appears on You and the chart still shows — the readings are the
+  athlete's, whatever this handset can read from.
 
 **Edge cases & errors**
 - **Android with no Health Connect provider installed** (an older phone

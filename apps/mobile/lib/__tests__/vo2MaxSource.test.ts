@@ -2,6 +2,7 @@ import {
   healthSourceFor,
   healthSourceLabel,
   healthSyncSettingLabel,
+  vo2MaxRowVisible,
   vo2MaxScreenState,
   vo2MaxStateCopy,
 } from '@/lib/vo2MaxSource';
@@ -79,11 +80,36 @@ describe('vo2MaxScreenState — readings first, gates only when there is nothing
     expect(vo2MaxScreenState({ ...base, syncOn: false })).toBe('sync_off');
   });
 
-  it('treats an unanswered availability or sync read as not-yet-blocking', () => {
-    // `null` means "still asking" — the screen falls through to the plain
-    // empty state rather than asserting a gate it has not read yet.
-    expect(vo2MaxScreenState({ ...base, sourceAvailable: null })).toBe('empty');
-    expect(vo2MaxScreenState({ ...base, syncOn: null })).toBe('empty');
+  it('keeps the spinner while an availability or sync read is still unanswered', () => {
+    // `null` means "still asking". Review caught the first version falling
+    // through to "nothing read yet" here, which then flipped to a different
+    // sentence once the bridge replied — a screen that changes its mind is
+    // worse than one that waits a moment. Monotonic: spinner until known.
+    expect(vo2MaxScreenState({ ...base, sourceAvailable: null })).toBe('loading');
+    expect(vo2MaxScreenState({ ...base, syncOn: null })).toBe('loading');
+    // ...but only for the reads this source actually needs: HealthKit has no
+    // async availability question, so a null there must not stall iOS.
+    expect(vo2MaxScreenState({ ...base, source: 'healthkit', sourceAvailable: null })).toBe('empty');
+  });
+
+  it('shows the chart for readings ANYWHERE on the account, not only in the selected window', () => {
+    // The reviewer's catch: the first version derived hasReadings from
+    // `!series.empty`, which is also set for 'none-in-range' — fourteen
+    // months of readings, a six-month default window, toggle off → the gate
+    // fired and hid the chart AND the range picker. `hasReadings` is now the
+    // server's answer over the whole fetch window; this pins that a caller
+    // passing it correctly gets the chart even with every gate against it.
+    expect(vo2MaxScreenState({ ...base, hasReadings: true, syncOn: false, sourceAvailable: false })).toBe('chart');
+  });
+
+  it('lets a FAILED fetch speak for itself rather than through a gate', () => {
+    // Nothing is known when the fetch failed, so no gate may assert a grant
+    // or a toggle state. 'empty' routes to the screen's own "Couldn't load"
+    // sentence on the chart path.
+    expect(vo2MaxScreenState({ ...base, fetchFailed: true, syncOn: false })).toBe('empty');
+    expect(vo2MaxScreenState({ ...base, fetchFailed: true, source: null })).toBe('empty');
+    // Readings still win over a failed re-fetch (stale data beats no data).
+    expect(vo2MaxScreenState({ ...base, fetchFailed: true, hasReadings: true })).toBe('chart');
   });
 
   it('is empty when everything is on and nothing has been read', () => {
@@ -115,5 +141,26 @@ describe('vo2MaxStateCopy — true whenever it is on screen', () => {
 
   it('keeps the original sentence for the one case it was always true in', () => {
     expect(vo2MaxStateCopy('no_source', null)).toBe("VO2max reading isn't available on this device.");
+  });
+});
+
+describe('vo2MaxRowVisible — the You-tab row is data-first too', () => {
+  it('shows the row on ANY device when the account has readings', () => {
+    // Readings from a previous phone, or from the other platform on the same
+    // account, are the athlete's regardless of what this handset can read.
+    // This is the case the AC verifier caught the first version missing.
+    expect(vo2MaxRowVisible({ hasReadings: true, source: null })).toBe(true);
+    expect(vo2MaxRowVisible({ hasReadings: true, source: 'healthkit' })).toBe(true);
+  });
+
+  it('shows the row whenever the device has a source, so the screen can explain itself', () => {
+    expect(vo2MaxRowVisible({ hasReadings: false, source: 'health_connect' })).toBe(true);
+    expect(vo2MaxRowVisible({ hasReadings: false, source: 'healthkit' })).toBe(true);
+  });
+
+  it('hides it only with no readings AND no source', () => {
+    // An iOS build with no HealthKit linked, for an athlete who has never
+    // had a reading uploaded — the one case there is genuinely nothing.
+    expect(vo2MaxRowVisible({ hasReadings: false, source: null })).toBe(false);
   });
 });

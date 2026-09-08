@@ -63768,13 +63768,51 @@ in the repo renders either VO₂max screen, and none did before this ticket —
 `grep vo2 __tests__` was empty, which is itself worth recording. The decision
 is pure and `lib/__tests__/vo2MaxSource.test.ts` pins it: 15 tests, the
 Android branch exercised directly. **Mutation-verified from a green
-baseline, one mutation per half of the bug**: removing the readings-first
-precedence (gates hide data — the original bug) fails exactly the test
-written for it; judging Android by the iOS flag (the other half) fails
-exactly its test; making the sync-off copy name the wrong vendor fails the
-two copy tests. Restored, re-run green each time. `__tests__/app/youScreen.test.tsx`
+baseline**, one mutation per guard: the readings-first precedence removed
+(gates hide data — the original bug) fails the test written for it; Android
+judged by the iOS flag fails its test; the sync-off copy naming the wrong
+vendor fails the two copy tests; the row ignoring readings fails its test; a
+failed fetch falling through to the gates fails its test; unanswered async
+reads no longer holding the spinner fails its test. Restored, re-run green
+each time. The first attempt at the first of these is described below. `__tests__/app/youScreen.test.tsx`
 (34 tests, renders the changed screen) still passes; typecheck clean; the
 lint ratchet unchanged at every cap.
+
+**What review caught in the fix, and it was this ticket's own bug in a
+narrower shape.** The first version derived "has readings" from
+`!series.empty`. `frontend-reviewer` read `lib/trendSeries.ts`'s
+`emptinessOf` and showed that `series.empty` is ALSO set for
+`'none-in-range'` — readings exist, none fall in the selected window — and
+for `'unavailable'`, a failed fetch. So an Android athlete with fourteen
+months of readings, opening the default six-month view with the toggle now
+off, had `hasReadings === false`, hit the `sync_off` gate, and lost the chart
+AND the range picker they would have needed to reach the data they have.
+The history entry as first written asserted the opposite as tested fact.
+`hasReadings` is now the server's answer over the hook's whole three-year
+window (`samples.length > 0`), a failed fetch is its own input that routes
+to the screen's existing "Couldn't load" sentence rather than to any gate,
+and — the reviewer's second point, taken — an unanswered async read keeps
+the spinner rather than showing a sentence that flips a moment later.
+
+`ac-verifier` graded criterion 1 PARTIAL: the trend screen asked "do
+readings exist", the You row still asked a platform question. The strict
+reading catches a real case the row's "its job is to be reachable" framing
+missed — an athlete whose readings are on the account from a previous phone,
+on an iOS build with no HealthKit linked: data exists, row hidden. The row is
+now data-first too, via a fifth focus-fetch chain on the You screen mirroring
+the phase and friend-count ones: `vo2MaxRowVisible` shows it when the account
+has readings OR the device has a source, and hides it only with neither.
+
+Twenty tests now, five mutations. One of them was wrong the first time and
+worth recording: the script meant to move the readings check below the
+no-source gate moved it below the failed-fetch check instead — still above
+the gate it was meant to test — and the only failure it produced was the
+failed-fetch test's. That run proved nothing about readings-first. It was
+caught by reading which test had failed, redone with an assertion in the
+mutation script that the applied order in the file is the intended one, and
+then it failed the readings-first test as it should. CLAUDE.md's "a mutation
+that did not apply as intended proves nothing" is not a rule about other
+people's mutations.
 
 **What this does not do.** Nothing here changes what is uploaded — W15's
 `notPermitted` covers a refused VO₂max grant on the sync side, and N527

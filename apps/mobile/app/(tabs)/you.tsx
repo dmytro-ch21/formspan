@@ -17,7 +17,10 @@ import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { isHealthKitSupported } from '@/lib/healthkit';
-import { healthSourceFor, healthSourceLabel } from '@/lib/vo2MaxSource';
+import { healthSourceFor, healthSourceLabel, vo2MaxRowVisible } from '@/lib/vo2MaxSource';
+import { listBiometricSamples } from '@/lib/biometric';
+import { shiftDate } from '@/lib/anthropometry';
+import { dayString } from '@/lib/calendar';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts, listFriends } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
@@ -185,6 +188,13 @@ export default function YouScreen() {
     emptied. Only ever set by a successful read; a failure leaves both alone.
   */
   const [friendCount, setFriendCount] = useState<number | null>(null);
+  // W16/#945 — does this ACCOUNT have any VO2max reading on the server, over
+  // the same three-year window the trend screen fetches? Read on focus like
+  // the phase and friend count, so the row below can be data-first: readings
+  // from a previous phone, or from the other platform, are the athlete's
+  // whatever this handset can read from. `false` until answered — a fetch
+  // failure leaves the row to the device-source rule, never hides it.
+  const [vo2HasReadings, setVo2HasReadings] = useState(false);
   const [friendCountAnswered, setFriendCountAnswered] = useState(false);
   /*
     The last counts we actually saw, so a rise can be told from a first look.
@@ -287,6 +297,25 @@ export default function YouScreen() {
           // is a fact about the athlete; failing to re-read it is not evidence
           // that it ended.
         });
+
+      // A FIFTH independent chain (W16/#945) — whether the account holds any
+      // VO2max reading, so the row below shows on the strength of DATA and not
+      // only of what this device can read. Same `alive` guard as the phase
+      // chain, same silence on failure: not being able to ask is not
+      // evidence there is nothing.
+      {
+        const today = dayString(new Date());
+        // The trend screen's own window: three years plus its lookback slack.
+        const from = shiftDate(today, -(365 * 3 + 14));
+        listBiometricSamples(getToken, 'vo2_max', from, today)
+          .then((samples) => {
+            if (!alive) return;
+            setVo2HasReadings(samples.length > 0);
+          })
+          .catch(() => {
+            // Leave whatever was known; the source rule still shows the row.
+          });
+      }
 
       // A FOURTH independent chain — the friend count behind the header's
       // entry point into `/friends` (N509). Independent for the same reason
@@ -540,15 +569,20 @@ export default function YouScreen() {
                   nothing to read from. See `lib/vo2MaxSource.ts`. */}
               {(() => {
                 const source = healthSourceFor(Platform.OS, isHealthKitSupported());
-                return source ? (
+                if (!vo2MaxRowVisible({ hasReadings: vo2HasReadings, source })) return null;
+                return (
                   <NavRow
                     icon="heart"
                     label="VO2max"
-                    detail={`Your cardio fitness trend, read from ${healthSourceLabel(source)}`}
+                    detail={
+                      source
+                        ? `Your cardio fitness trend, read from ${healthSourceLabel(source)}`
+                        : 'Your cardio fitness trend'
+                    }
                     onPress={() => router.push('/vo2max/trend')}
                     testID="you-vo2max"
                   />
-                ) : null;
+                );
               })()}
 
               {/* The position map used to be a row here and is on Progress now

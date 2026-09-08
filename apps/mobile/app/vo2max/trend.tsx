@@ -103,7 +103,7 @@ export default function Vo2MaxTrendScreen() {
     }, [userId, source]),
   );
 
-  const { loading, series } = useVo2MaxTrend(getToken, range, FETCH_DAYS);
+  const { loading, series, samples } = useVo2MaxTrend(getToken, range, FETCH_DAYS);
   const fmt = (v: number) => v.toFixed(1);
 
   return (
@@ -118,7 +118,13 @@ export default function Vo2MaxTrendScreen() {
         {(() => {
           const state = vo2MaxScreenState({
             loading,
-            hasReadings: !series.empty,
+            // The server's answer over the whole three-year fetch window —
+            // NOT `!series.empty`, which is also set when readings exist but
+            // none fall in the selected range, and would let a gate hide the
+            // chart and the range picker from an athlete who has data.
+            // Caught in review; see `vo2MaxScreenState`'s own doc comment.
+            hasReadings: samples.length > 0,
+            fetchFailed: series.empty?.kind === 'unavailable',
             source,
             sourceAvailable,
             syncOn,

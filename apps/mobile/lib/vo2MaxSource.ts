@@ -85,7 +85,23 @@ export type Vo2MaxScreenState =
 
 export function vo2MaxScreenState(input: {
   loading: boolean;
+  /**
+   * Whether the SERVER returned any VO₂max sample for this athlete at all —
+   * `samples.length > 0` from `useVo2MaxTrend`, over its whole fetch window.
+   *
+   * NOT `!series.empty`. That was the first version, and review caught it as
+   * this ticket's own bug in a narrower shape: `series.empty` is also set
+   * for `'none-in-range'` (readings exist, none fall in the selected
+   * window) and `'unavailable'` (the fetch failed), so an athlete with
+   * fourteen months of readings opening the default six-month view with the
+   * toggle now off had `hasReadings === false`, hit the `sync_off` gate, and
+   * lost the chart AND the range picker they would have needed to see the
+   * data they have. "Has readings" means the account has readings, not that
+   * the current window has enough of them to draw.
+   */
   hasReadings: boolean;
+  /** The fetch itself failed — nothing is known, so no gate may speak. */
+  fetchFailed?: boolean;
   source: HealthSource | null;
   /** Only meaningful when `source` is set. `null` while still being asked. */
   sourceAvailable: boolean | null;
@@ -95,10 +111,37 @@ export function vo2MaxScreenState(input: {
   if (input.loading) return 'loading';
   // Data the athlete has beats every gate below — see the file comment.
   if (input.hasReadings) return 'chart';
+  // A failed fetch is not "no data": the screen's own `'unavailable'` empty
+  // copy ("Couldn't load…") is the true sentence, and it lives on the chart
+  // path, so fall through to it rather than let a gate assert something
+  // about a grant or a toggle that this pass never got far enough to test.
+  if (input.fetchFailed) return 'empty';
   if (input.source === null) return 'no_source';
+  // The two async reads below are `null` until answered. While either is,
+  // keep showing the spinner rather than a sentence that may flip a moment
+  // later — a monotonic screen, not one that says "nothing read yet" and
+  // then "Health Connect isn't available" once the bridge replies.
+  if (input.source === 'health_connect' && input.sourceAvailable === null) return 'loading';
   if (input.sourceAvailable === false) return 'source_unavailable';
+  if (input.syncOn === null) return 'loading';
   if (input.syncOn === false) return 'sync_off';
   return 'empty';
+}
+
+/**
+ * Whether the VO₂max row on the You tab is shown at all.
+ *
+ * Readings first, same rule as the screen: an account with readings shows
+ * the row on ANY device — the readings came from a previous phone, or from
+ * the other platform on the same account, and they are the athlete's
+ * regardless of what this handset can read from. Otherwise the row shows
+ * whenever this device has a health source, so the trend screen can explain
+ * itself in words (its own N61 reasoning) rather than the feature vanishing.
+ * The one case that hides it: no readings AND no source — an iOS build with
+ * no HealthKit linked, for an athlete who has never had a reading uploaded.
+ */
+export function vo2MaxRowVisible(input: { hasReadings: boolean; source: HealthSource | null }): boolean {
+  return input.hasReadings || input.source !== null;
 }
 
 /** The sentence for each no-data state, naming the source this device has. */
