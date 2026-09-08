@@ -47,7 +47,65 @@
  * device" is a true statement the athlete can act on; a missing row is not.
  */
 
+import { shiftDate } from './anthropometry';
+
 export type HealthSource = 'healthkit' | 'health_connect';
+
+/**
+ * -----------------------------------------------------------------------
+ * The fetch window — ONE definition, because two callers built their own
+ * and both were wrong in ways no test could see
+ * -----------------------------------------------------------------------
+ *
+ * `GET /v1/biometric/samples` parses `from`/`to` as RFC3339 and refuses a
+ * span over `maxListRangeDays` — 400, read from
+ * `backend/internal/modules/biometric/handler.go`, not assumed. Two things
+ * were true before this helper existed, and review found both:
+ *
+ * - `useVo2MaxTrend` asked for THREE YEARS plus slack (1,109 days). Every
+ *   VO₂max trend fetch this app has ever made was refused with a 400,
+ *   `apiRequest` threw, the hook's catch set `failed`, and the screen showed
+ *   "Couldn't load…" — on every load, for every athlete, since N477. The
+ *   chart this ticket exists to show had never rendered on any platform.
+ * - The You screen's own fetch (added for this ticket) passed date-only
+ *   strings, which `time.Parse(time.RFC3339, …)` refuses outright. Its catch
+ *   swallowed the 400 and the "account has readings" branch was dead code
+ *   behind a green test, because the test did not mock the network and an
+ *   absent server fails exactly like an absent reading.
+ *
+ * So the window is built here, once: the span is clamped so `to - from`
+ * stays strictly under the cap even with the end-of-day tail, and both
+ * bounds carry a time component. Pure, so both properties are pinned by a
+ * test rather than by a server that only answers on a device.
+ */
+
+/** `maxListRangeDays` in the backend's ListSamples handler. If that constant
+ *  moves, this one must follow — the test below pins the arithmetic, not the
+ *  number's truth, which only the server knows. */
+export const SERVER_MAX_LIST_RANGE_DAYS = 400;
+
+/** Slack past the visible window, for parity with `useWeightTrend.ts` —
+ *  see `useVo2MaxTrend.ts`'s own note on why it is kept. */
+export const LOOKBACK_SLACK_DAYS = 14;
+
+/** The most the trend screen may ask for: the server cap, less the slack the
+ *  helper adds back, less one day for the `T23:59:59Z` tail on `to`. Was
+ *  `365 * 3`, which is how every fetch came back 400. */
+export const VO2MAX_FETCH_DAYS = SERVER_MAX_LIST_RANGE_DAYS - LOOKBACK_SLACK_DAYS - 1;
+
+/**
+ * `[from, to]` for a VO₂max samples fetch ending today, as the RFC3339 strings
+ * the endpoint requires. `windowDays` is clamped to `VO2MAX_FETCH_DAYS` — a
+ * caller cannot ask for a span the server will refuse.
+ */
+export function vo2MaxFetchWindow(
+  today: string,
+  windowDays: number = VO2MAX_FETCH_DAYS,
+): { from: string; to: string } {
+  const days = Math.max(0, Math.min(windowDays, VO2MAX_FETCH_DAYS));
+  const from = shiftDate(today, -(days + LOOKBACK_SLACK_DAYS));
+  return { from: `${from}T00:00:00Z`, to: `${today}T23:59:59Z` };
+}
 
 /** Which health data source this device has, if any. `healthKitLinked` is
  *  `isHealthKitSupported()` — meaningful only on iOS, ignored elsewhere. */

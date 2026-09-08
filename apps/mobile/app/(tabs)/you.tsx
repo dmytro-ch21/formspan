@@ -17,9 +17,8 @@ import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { isHealthKitSupported } from '@/lib/healthkit';
-import { healthSourceFor, healthSourceLabel, vo2MaxRowVisible } from '@/lib/vo2MaxSource';
+import { healthSourceFor, healthSourceLabel, vo2MaxFetchWindow, vo2MaxRowVisible } from '@/lib/vo2MaxSource';
 import { listBiometricSamples } from '@/lib/biometric';
-import { shiftDate } from '@/lib/anthropometry';
 import { dayString } from '@/lib/calendar';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts, listFriends } from '@/lib/friends';
@@ -304,10 +303,14 @@ export default function YouScreen() {
       // chain, same silence on failure: not being able to ask is not
       // evidence there is nothing.
       {
-        const today = dayString(new Date());
-        // The trend screen's own window: three years plus its lookback slack.
-        const from = shiftDate(today, -(365 * 3 + 14));
-        listBiometricSamples(getToken, 'vo2_max', from, today)
+        // The trend screen's own window, built by the one helper that knows
+        // the endpoint's two rules — RFC3339 bounds, and a span under the
+        // server's cap. The first version hand-built date-only strings here,
+        // was refused with a 400 on every call, and swallowed it: the
+        // "account has readings" branch below was dead code behind a green
+        // test. See `vo2MaxFetchWindow`'s doc comment.
+        const { from, to } = vo2MaxFetchWindow(dayString(new Date()));
+        listBiometricSamples(getToken, 'vo2_max', from, to)
           .then((samples) => {
             if (!alive) return;
             setVo2HasReadings(samples.length > 0);

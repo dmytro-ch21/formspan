@@ -63814,6 +63814,58 @@ then it failed the readings-first test as it should. CLAUDE.md's "a mutation
 that did not apply as intended proves nothing" is not a rule about other
 people's mutations.
 
+**The second review round found the fix's own fix was dead code — and a
+bug older than the ticket that meant the chart had never rendered at all.**
+Both reviewers, independently: the You screen's new fetch passed date-only
+strings, the endpoint parses `from`/`to` with `time.Parse(time.RFC3339, …)`
+(confirmed by both with a live Go parse), the 400 was swallowed by the
+chain's own catch, and so `vo2HasReadings` could never become true — the row
+was source-only in practice, the exact partial the fetch had been added to
+close. The You-screen test stayed green because it never mocked the network,
+and an absent server fails exactly like a refused request. That is CLAUDE.md's
+"a stub built from an assumption cannot falsify it", with the stub being no
+server at all.
+
+Then the larger one, from `frontend-reviewer`: `useVo2MaxTrend` asked for
+`365 * 3 + 14` days, and `backend/internal/modules/biometric/handler.go`
+caps `ListSamples` at `maxListRangeDays = 400`. **Every VO₂max trend fetch
+this app has ever made was refused with a 400**, the hook's catch turned it
+into "Couldn't load your VO2max trend", and the chart this ticket exists to
+show had never rendered on any platform, since N477. It is consistent with
+what the user reported earlier the same day ("vo2 max is still not
+available") and with #939's empty-state ticket. Not this ticket's bug, but
+the W cannot be true until it is fixed — a readings-first screen behind a
+fetch that always fails is a screen that says "Couldn't load" forever.
+
+Both are one defect: two callers each built their own request, and nothing
+pinned what either sent. `vo2MaxFetchWindow` in `lib/vo2MaxSource.ts` now
+builds the window once for both — RFC3339 on both bounds, the span clamped
+under the server cap with the end-of-day tail accounted for — and
+`SERVER_MAX_LIST_RANGE_DAYS = 400` carries its provenance. The trend screen's
+`FETCH_DAYS` drops from three years to what the server allows, which means
+the `All` range preset now shows roughly thirteen months; the honest reading
+is that the server cap was always the limit and the label over-promised.
+Filed as F34 (#955) rather than widened here.
+
+What now pins it, at the call sites rather than the helper alone: a
+rendered You-screen case that mocks `listBiometricSamples`, shows the row
+from readings alone on a device with no source, and asserts the request's
+bounds are RFC3339 and under the cap; and `lib/__tests__/useVo2MaxTrend.test.ts`
+(`renderHook`, the `useDetectedActivity.test.ts` idiom) asserting the same
+of the hook, including when a caller asks for the old three years.
+Mutation-verified, applied state asserted in the file before each run: the
+You call reverted to date-only bounds fails its rendered assertion; the
+helper's time suffix dropped fails two module tests; its clamp removed fails
+one; the hook reverted to hand-built three-year bounds fails both of its span
+tests. Restored, re-run green each time.
+
+One review suggestion taken: a failed preference read on the trend screen
+now resolves the toggle as off rather than holding the spinner, since an
+unanswered read now means "still loading". One noted, not taken: the You
+fetch pulls up to the endpoint's row cap to answer a boolean; the endpoint
+has no `limit`, and with a thirteen-month window of daily-ish estimates the
+cost is bounded. A `limit=1` on the backend is the right follow-up.
+
 **What this does not do.** Nothing here changes what is uploaded — W15's
 `notPermitted` covers a refused VO₂max grant on the sync side, and N527
 (#949) is the Settings surface for it. And the last criterion is still a

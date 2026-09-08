@@ -12,6 +12,7 @@ import { readHealthConnectImportEnabled } from '@/lib/healthConnectSync';
 import { isHealthKitSupported } from '@/lib/healthkit';
 import {
   type HealthSource,
+  VO2MAX_FETCH_DAYS,
   healthSourceFor,
   healthSourceLabel,
   vo2MaxScreenState,
@@ -54,7 +55,9 @@ import { useVo2MaxTrend } from '@/lib/useVo2MaxTrend';
  * named plainly, rather than guessed at from an empty chart.
  */
 
-const FETCH_DAYS = 365 * 3;
+// W16/#945 — was `365 * 3`, which is more than the server allows and is why
+// every fetch this screen made was refused; the helper owns the cap now.
+const FETCH_DAYS = VO2MAX_FETCH_DAYS;
 /** Smallest y-axis span, in mL/kg/min. A flat run of readings would
  *  otherwise divide by zero — see `TrendChart`'s own `minSpan` doc. */
 const MIN_SPAN = 2;
@@ -86,9 +89,16 @@ export default function Vo2MaxTrendScreen() {
         // told a Health Connect athlete to turn on Apple Health.
         const read =
           source === 'healthkit' ? readHealthKitImportEnabled : readHealthConnectImportEnabled;
-        read(userId).then((on) => {
-          if (live) setSyncOn(on);
-        });
+        read(userId)
+          .then((on) => {
+            if (live) setSyncOn(on);
+          })
+          .catch(() => {
+            // A failed preference read must not hold the spinner forever now
+            // that an unanswered read means "still loading" (review). Same
+            // answer as the signed-out branch above: treat as off.
+            if (live) setSyncOn(false);
+          });
       } else {
         setSyncOn(false);
       }

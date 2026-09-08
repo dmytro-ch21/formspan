@@ -20932,7 +20932,15 @@ on every sync pass — were hidden behind "isn't available on this device".
   appears, never a sync or source sentence.
 - **The fetch fails** (airplane mode): the screen says "Couldn't load your
   VO2max trend…" — never a sentence about a grant or a toggle, because
-  nothing about either was learned.
+  nothing about either was learned. **Until W16 this was every load**: the
+  hook requested three years against the server's 400-day cap and was
+  refused every time, so "Couldn't load" was the only thing this screen had
+  ever shown. If it shows on a connected device now, the window arithmetic
+  has drifted from the cap — check `SERVER_MAX_LIST_RANGE_DAYS` against
+  `maxListRangeDays` in the biometric handler.
+- **The `All` range preset** shows roughly the last thirteen months, not
+  all time — the server cap is the limit. That is a known over-promise in
+  the label, ticketed as F34 (#955); it is not a missing-data bug.
 - **An account with readings, on a device with no source at all** (an iOS
   build without HealthKit, after switching phones): the VO2max row still
   appears on You and the chart still shows — the readings are the

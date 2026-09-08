@@ -1,9 +1,13 @@
 import {
+  LOOKBACK_SLACK_DAYS,
+  SERVER_MAX_LIST_RANGE_DAYS,
+  VO2MAX_FETCH_DAYS,
   healthSourceFor,
   healthSourceLabel,
   healthSyncSettingLabel,
   vo2MaxRowVisible,
   vo2MaxScreenState,
+  vo2MaxFetchWindow,
   vo2MaxStateCopy,
 } from '@/lib/vo2MaxSource';
 
@@ -162,5 +166,52 @@ describe('vo2MaxRowVisible — the You-tab row is data-first too', () => {
     // An iOS build with no HealthKit linked, for an athlete who has never
     // had a reading uploaded — the one case there is genuinely nothing.
     expect(vo2MaxRowVisible({ hasReadings: false, source: null })).toBe(false);
+  });
+});
+
+
+/**
+ * The fetch window — the two properties the server enforces and no rendered
+ * test can see, because an absent server fails exactly like a refused one.
+ */
+describe('vo2MaxFetchWindow — what the samples endpoint will actually accept', () => {
+  const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+  const spanDays = (w: { from: string; to: string }) =>
+    (Date.parse(w.to) - Date.parse(w.from)) / 86_400_000;
+
+  it('emits RFC3339 with a time component on BOTH bounds', () => {
+    // The You screen's first fetch sent `YYYY-MM-DD` and got a 400 from
+    // `time.Parse(time.RFC3339, …)` on every call — swallowed, so the row's
+    // "account has readings" branch was dead code behind a green test.
+    const w = vo2MaxFetchWindow('2026-09-08');
+    expect(w.from).toMatch(RFC3339);
+    expect(w.to).toMatch(RFC3339);
+    expect(w.to).toBe('2026-09-08T23:59:59Z');
+  });
+
+  it('never spans more than the server cap, tail included', () => {
+    // `useVo2MaxTrend` asked for 365*3 + 14 days; the server caps at 400 and
+    // refused every request the trend screen ever made. The `to` bound sits
+    // at 23:59:59, so the span is a day less than whole days would suggest.
+    const w = vo2MaxFetchWindow('2026-09-08');
+    expect(spanDays(w)).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
+    expect(spanDays(w)).toBeGreaterThan(SERVER_MAX_LIST_RANGE_DAYS - 3);
+  });
+
+  it('clamps a caller that asks for more than the cap allows', () => {
+    // The old three-year request, made against the helper, is silently
+    // narrowed rather than refused by the server.
+    const w = vo2MaxFetchWindow('2026-09-08', 365 * 3);
+    expect(spanDays(w)).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
+  });
+
+  it('adds the lookback slack on top of the requested window', () => {
+    const w = vo2MaxFetchWindow('2026-09-08', 30);
+    expect(w.from).toBe(`2026-${String(7).padStart(2, '0')}-${String(26).padStart(2, '0')}T00:00:00Z`);
+    expect(30 + LOOKBACK_SLACK_DAYS).toBe(44);
+  });
+
+  it('keeps the default within the cap by construction', () => {
+    expect(VO2MAX_FETCH_DAYS + LOOKBACK_SLACK_DAYS).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
   });
 });

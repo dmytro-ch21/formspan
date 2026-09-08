@@ -2,8 +2,8 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 
 import { listBiometricSamples, type BiometricSample } from './biometric';
-import { shiftDate } from './anthropometry';
 import { dayString } from './calendar';
+import { vo2MaxFetchWindow } from './vo2MaxSource';
 import { buildTrend, type Reading, type TrendRangeKey, type TrendSeries } from './trendSeries';
 import type { TokenGetter } from './useAuthToken';
 
@@ -43,7 +43,6 @@ export type Vo2MaxTrend = {
  *  smoothed line, so nothing here actually needs the lookback today, but
  *  keeping the fetch window's shape identical means a future smoother has
  *  somewhere to read from without a second fetch-window change. */
-const LOOKBACK_SLACK_DAYS = 14;
 
 export function useVo2MaxTrend(
   getToken: TokenGetter,
@@ -59,9 +58,14 @@ export function useVo2MaxTrend(
   useFocusEffect(
     useCallback(() => {
       let live = true;
-      const from = shiftDate(today, -(windowDays + LOOKBACK_SLACK_DAYS));
+      // W16/#945 — the window is built by `vo2MaxFetchWindow`, which clamps
+      // it under the server's 400-day cap. This hook used to ask for
+      // `365 * 3 + 14` days, and every request it ever made was refused with
+      // a 400 that its catch below turned into "Couldn't load" — the trend
+      // chart had never rendered. See the helper's own doc comment.
+      const { from, to } = vo2MaxFetchWindow(today, windowDays);
 
-      listBiometricSamples(getToken, 'vo2_max', `${from}T00:00:00Z`, `${today}T23:59:59Z`)
+      listBiometricSamples(getToken, 'vo2_max', from, to)
         .then((rows) => {
           if (!live) return;
           setSamples(rows);
