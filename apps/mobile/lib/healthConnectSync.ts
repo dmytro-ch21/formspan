@@ -293,7 +293,10 @@ export async function syncHealthConnectBiometrics(
     if (!(err instanceof HealthConnectPermissionError)) return false;
     if (!notPermitted.includes(err.recordType)) notPermitted.push(err.recordType);
     if (__DEV__) {
-      console.warn(`healthConnectSync: ${err.recordType} read refused — is its permission in app.config.js?`);
+      console.warn(
+        `healthConnectSync: ${err.recordType} read refused — permission missing from app.config.js, or revoked in Health Connect?`,
+        err,
+      );
     }
     return true;
   };
