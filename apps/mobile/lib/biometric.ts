@@ -480,7 +480,45 @@ export type EnrichmentLedgerEntry = {
  * logged, is real ongoing cost with no plausible upside.
  */
 export const RETRY_WINDOW_DAYS = 3;
+/** The LONG-TAIL cadence — what a day-old session settles into. Kept under
+ *  its pre-W18 name because it is still that; the first day is now faster,
+ *  see `retryCooldownMs`. */
 export const RETRY_COOLDOWN_HOURS = 12;
+
+/**
+ * W18/#957: the cooldown is a function of how long ago the session ENDED,
+ * not a constant.
+ *
+ * A flat 12h was designed for "the watch may not have synced yet" and got
+ * the timing exactly backwards for the case the athlete actually notices:
+ * they finish a workout, open the session, and the first (foreground) pass
+ * finds nothing because a third-party watch's companion app hasn't pushed
+ * its samples into Apple Health / Health Connect yet — that push runs on
+ * the companion's own schedule, minutes to hours later. The 12h cooldown
+ * then guaranteed the screen stayed empty for the rest of the day even
+ * once the data had long since arrived, which read as "it will never show".
+ *
+ * So: while the session is fresh, every foreground return re-asks (the
+ * data is likeliest to land in the first hour or two, and each check is
+ * one local Health read); for the rest of the day, hourly; after that, the
+ * original 12h until `RETRY_WINDOW_DAYS` ends the retries for good. The
+ * boundaries are session AGE at the moment of the decision, so a session
+ * crosses them on its own as time passes — no per-session state needed
+ * beyond the `attemptedAt` the ledger already keeps.
+ */
+export const RETRY_IMMEDIATE_UNDER_HOURS = 2;
+export const RETRY_HOURLY_UNDER_HOURS = 24;
+export const RETRY_SHORT_COOLDOWN_HOURS = 1;
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Minimum gap between two attempts for a session that ended `sessionAgeMs`
+ *  ago. `0` means "on every pass". Never negative. */
+export function retryCooldownMs(sessionAgeMs: number): number {
+  if (sessionAgeMs < RETRY_IMMEDIATE_UNDER_HOURS * HOUR_MS) return 0;
+  if (sessionAgeMs < RETRY_HOURLY_UNDER_HOURS * HOUR_MS) return RETRY_SHORT_COOLDOWN_HOURS * HOUR_MS;
+  return RETRY_COOLDOWN_HOURS * HOUR_MS;
+}
 
 /** A finished session, reduced to what enrichment needs to know about it. */
 export type EnrichmentCandidate = {
@@ -509,12 +547,14 @@ export function needsEnrichmentAttempt(
 
   const endedMs = new Date(session.endedAt).getTime();
   if (!Number.isFinite(endedMs)) return false;
-  const stillWorthRetrying = now.getTime() - endedMs <= RETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const ageMs = now.getTime() - endedMs;
+  const stillWorthRetrying = ageMs <= RETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   if (!stillWorthRetrying) return false;
 
   const attemptedMs = new Date(ledgerEntry.attemptedAt).getTime();
   if (!Number.isFinite(attemptedMs)) return true;
-  return now.getTime() - attemptedMs >= RETRY_COOLDOWN_HOURS * 60 * 60 * 1000;
+  // Age-based, not flat — see `retryCooldownMs` (W18/#957).
+  return now.getTime() - attemptedMs >= retryCooldownMs(ageMs);
 }
 
 /**

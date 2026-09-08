@@ -20971,3 +20971,49 @@ on every sync pass — were hidden behind "isn't available on this device".
   Google Fit estimate) sees its readings in the app — the row on You and the
   chart behind it. Needs a build after this change and a phone with real
   data; the emulator holds none.
+
+## W18 — a session's heart rate that "never shows": age-based retry cadence + "Sync heart rate" on the session screen (`apps/mobile/lib/biometric.ts`'s `retryCooldownMs`/`needsEnrichmentAttempt`, `apps/mobile/lib/hrAbsence.ts`, `apps/mobile/lib/biometricSync.ts`'s `enrichSessionNow`, `apps/mobile/lib/healthConnectSync.ts`'s `enrichHealthConnectSessionNow`, `apps/mobile/lib/useSessionHRSync.ts`, `apps/mobile/components/HRSessionReport.tsx`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/app/bjj/session/[id].tsx`, #957)
+
+### Automated (`lib/__tests__/hrRetryCadence.test.ts`, `lib/__tests__/hrAbsence.test.ts`, `lib/__tests__/biometricSync.test.ts`, `lib/__tests__/healthConnectSync.test.ts`, `components/__tests__/HRSessionReport.test.tsx`)
+
+- **Cadence by age.** A session that ended an hour ago, last attempted a
+  minute ago → attempted again (cooldown 0 under 2h). Five hours old → not
+  within the hour, yes after it. A day old → the 12h long tail. Boundaries at
+  exactly 2h and 24h are exclusive (the slower tier already applies). The 3-day
+  window still ends everything; `'window'` stays terminal at every age.
+- **Sync now bypasses the cadence AND the window** (both platforms): the
+  attempt the pass just refused runs, finds the data, uploads once, computes
+  once, and the ledger row flips to `'window'`; a session past the 3-day
+  window the pass no longer offers can still be asked about by hand.
+- **Sync now outcomes**, each honest and each recorded correctly: `none`
+  (attempt recorded, so the pass's cadence restarts from now), `sync_off`
+  (toggle off — Health is never read, nothing recorded), `no_hrmax` (no date of
+  birth; Android still uploads the samples it found, as its pass always did),
+  `error` (upload/compute failed — nothing recorded), an unfinished session
+  refused before any read, and on Android a refused HeartRate grant → `error`.
+- **The card says which absence**: no `absence` → generic sentence, no button
+  even with a handler; `checking` → names the source, says "yet", shows the
+  button; `sync_off` → Settings, no button regardless of handler; `gave_up` →
+  button still offered; no handler → sentence but no button. A tap = exactly
+  one attempt; its outcome appears under the button as a sentence — `found` says
+  "Found N heart-rate samples" until the report replaces the card; a handler
+  that throws lands as the error sentence.
+
+### Manual / device (iPhone with a third-party watch whose companion app feeds Apple Health — the Amazfit/Zepp shape that produced #957; Android with Health Connect)
+
+1. Finish a session with the watch on. Open it **before** the companion app
+   has pushed. The card reads "Apple Health doesn't have heart rate for this
+   session yet … VOLA keeps checking for 3 days" with **Sync heart rate**
+   under it — not the old "turn on Health sync in Settings" sentence.
+2. Tap Sync heart rate immediately: "Still nothing in Apple Health for this
+   session …" appears under the button; the button is tappable again.
+3. Open the companion app so it syncs, come back, tap again: "Found N
+   heart-rate samples" appears, then the report (avg/max, zones, TRIMP)
+   replaces the card. Kill and reopen the app: the
+   report is still there (ledger says `window`; nothing re-asks).
+4. On a second session, do NOT tap: background the app after the companion
+   has synced, foreground it — the report appears on its own within that
+   first foreground (cooldown 0 under 2h).
+5. Turn Health sync off in Settings; open a session with no HR: the sentence
+   points at Settings and there is no button.
+6. Android: the same four steps with "Health Connect" in every sentence.

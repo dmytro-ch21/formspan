@@ -63890,6 +63890,91 @@ app. The emulator has no Health Connect data and this session did not sign
 in on it; what this ticket verified is that the code no longer hides the
 readings, not that a real phone shows them.
 
+## 2026-09-08 — W18 (#957): a workout's heart rate that "never shows" — the retry cadence was backwards, and there was no way to ask
+
+**What the athlete saw.** Finished a strength session on 2026-09-07, opened it,
+no heart rate — and still none hours later. The watch is an Amazfit; Apple
+Health gets its samples from Zepp's companion app on Zepp's own polling
+schedule, minutes to hours after the session. So at the moment VOLA's
+foreground pass ran (N477's `syncBiometricEnrichment`), Apple Health genuinely
+had nothing for that window, the pass recorded `'none'` in the ledger — and
+N511's retry cooldown then refused to look again for **12 hours**. The data
+landed in Apple Health within the hour; the screen stayed empty all day. The
+card's copy, "turn on Health sync in Settings, or it may not have synced yet",
+was the same sentence whether sync was off or the watch simply hadn't pushed,
+and nothing on the screen let the athlete make VOLA look now.
+
+**Three changes, all mobile, both platforms.**
+
+1. **The cooldown is a function of the session's AGE, not a constant**
+   (`retryCooldownMs` in `lib/biometric.ts`; `needsEnrichmentAttempt` reads it
+   in place of the flat `RETRY_COOLDOWN_HOURS`). Under two hours since the
+   session ended: **zero** — every foreground return re-asks, because that is
+   exactly when a companion app's push is likeliest to land, and each check is
+   one local Health read. Two to twenty-four hours: hourly. After that: the
+   original 12 hours, until `RETRY_WINDOW_DAYS` (still 3) ends it. The
+   boundaries are evaluated against age at decision time, so a session crosses
+   them on its own — no new per-session state; the ledger's `attemptedAt` is
+   enough. Both platforms get it for free: Android's `healthConnectSync.ts` was
+   already deciding through the same `needsEnrichmentAttempt`
+   (`selectEnrichmentCandidates`).
+
+2. **"Sync heart rate" on the session screen** — strength and BJJ — runs ONE
+   enrichment attempt for THAT session, now, ignoring the cadence AND the
+   3-day window (a tap is the "I just synced my watch" signal the clock-based
+   guess lacks). This is `enrichSessionNow` (`lib/biometricSync.ts`) and
+   `enrichHealthConnectSessionNow` (`lib/healthConnectSync.ts`), each a thin
+   caller of the per-session body carved out of its platform's pass loop —
+   `enrichSessionWindow` / `enrichHealthConnectSession` — so a found result
+   from the button is byte-for-byte what the orchestrator would have found:
+   same N522 wide-window fit, same server-decided `hr_source`, same ledger
+   row. Never throws; every failure is a `SyncNowOutcome` the card can put in
+   a sentence. `lib/useSessionHRSync.ts` is the one place the platform switch
+   lives, so both screens wire it identically. On `found` the screen re-reads
+   its metrics and the report replaces the card.
+
+3. **The card says WHICH absence this is** (`lib/hrAbsence.ts`, pure): sync
+   off → Settings, no button; sync on and inside the window → "Apple Health
+   doesn't have heart rate for this session *yet* … VOLA keeps checking for 3
+   days. Synced your watch? Check now." with the button; window closed →
+   "checked for 3 days and found none", button still offered because nothing
+   else will look again. The source is named ("Apple Health"/"Health Connect",
+   via W16's `healthSourceLabel`). The button reports its outcome inline, always in words —
+   found N samples (then the report replaces the card) / still nothing / turn
+   sync on / add your date of birth / couldn't check.
+
+**One behaviour change inside the iOS pass that is not a side effect.** The
+HealthKit read used to run *outside* the per-session `try`, so a read error
+aborted the WHOLE pass silently via `runPass`. Extracting the body put the read
+inside it: a read that fails for one session now counts as that session's
+failure (visible via N502's Settings counter) and the remaining candidates
+still get their turn. Deliberate, and noted in the code.
+
+**Tests.** `hrRetryCadence.test.ts` (schedule + every boundary),
+`hrAbsence.test.ts` (state machine, copy, outcome copy), seven
+`enrichSessionNow` and seven `enrichHealthConnectSessionNow` tests against the
+real SQLite ledgers (bypasses cooldown, bypasses window, none/sync_off/
+no_hrmax/error, unfinished refused), eight card tests (which sentence, when the
+button shows, one tap = one attempt, outcome under the button, `found` says
+how many, a throwing handler lands as the error sentence). Two existing
+`biometricSync` tests were the OLD behaviour stated as a spec — "does NOT retry
+within the cooldown" for a one-hour-old session — and were rewritten to the new
+one (a one-hour-old session IS retried on the next pass; a five-hour-old one is
+not). Nine mutations, each applied with an in-file anchor assertion, all caught
+as test failures, baseline re-run green after restore.
+
+**What this does not do — N528 (#958), sequenced after it.** It makes Health
+the *reliable* path; it does not make it the *fast* one. Direct Bluetooth HR
+(GATT Heart Rate Profile — Amazfit broadcasts it, Zepp has no public cloud API)
+would have had the samples during the session. N528 carries that, the
+`bluetooth` `SourcePlatform`, and the direct-wins/Health-fills-gaps priority
+rule the user described; nothing here pre-empts its shape.
+
+**Evidence still owed on a device** (the ticket's own criterion): finish a
+session with the watch on, open it before Zepp has pushed, see the "not yet"
+sentence, tap Sync heart rate after Zepp syncs, watch the report appear —
+and confirm the automatic pass finds it without the tap on a later foreground.
+
 ## Open items / known gaps as of this entry
 
 
