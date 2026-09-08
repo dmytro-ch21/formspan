@@ -63479,6 +63479,125 @@ shipped because only one platform was ever exercised. A cross-platform app
 that is only ever built for one platform is a single-platform app with
 untested extra config.
 
+## 2026-09-08 — H15 (#950): Expo's compatibility matrix moved under `main`, and two of this repo's guards turned out to contradict each other for a day
+
+At 13:47–13:50Z Expo published nine patch releases. `check:expo-compat`
+(N133) resolves the compatibility matrix over the network on every run, so
+by 17:00Z it was red on clean `main` with no commit in between — CI's last
+green on that check was 04:35Z — and red on every open branch. That is the
+check doing precisely what it was built for: the 2026-08-09 incident it
+closes was a stale dependency that `expo install --check` had been reporting
+for weeks while nothing read it.
+
+**What was tried first, and why it was stopped.** The obvious fix is the one
+the check's own failure text prescribes: `expo install --fix`. Done in its
+own worktree, on the `vola-mobile-build` skill's reasoning that a bump of
+this class is "a deliberate change, not a reflex" — the 08-09 crash was a
+`dyld` symbol-not-found abort before any JavaScript ran, invisible to every
+check. The bump was sound on every axis that can be measured: `verify` green
+(one flake, confirmed as #878 by alone-green plus two full-suite greens), a
+clean `expo prebuild --platform ios` whose `Podfile.lock` resolved
+`ExpoModulesCore (57.0.17)` and `ExpoModulesJSI (57.1.0)` — read, not
+assumed, since a binary linking against what the lockfile did NOT say was
+the 08-09 trap — and a Release build launched on the iOS 26.5 Simulator,
+alive at 15 seconds with no crash report, rendering the real Today screen.
+
+Then `git status` showed a file the bump had no business touching.
+
+**`expo install --fix` had silently written a `minimumReleaseAgeExclude`
+block into `pnpm-workspace.yaml`.** pnpm 11.17 enforces a 24-hour
+`minimumReleaseAge` BY DEFAULT — a bundled `"minimum-release-age": 24 * 60`
+in its own config schema, set nowhere in this repo — and every one of the
+nine packages was published inside that window. Measured by reverting the
+block and running `pnpm install --frozen-lockfile`:
+`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`, all nine named, cutoff
+`2026-09-07T17:38:36Z`, exactly 24 hours before the run. So the only way to
+make the first guard green on release day was to defeat the second, and the
+tool had done that as a side effect, with no prompt and no output. The block
+was one `git add -A` from landing as an unexamined artefact of "fix the red
+check".
+
+**Nine packages, not six — and the three missed were the three that
+mattered.** A first extraction of "what actually moved" from the lockfile
+diff reported six: `expo`, `expo-router`, `expo-modules-core`,
+`expo-modules-jsi`, `expo-glass-effect`, `babel-preset-expo`. It could not
+see `@expo/cli`, `@expo/metro-file-map` or `@expo/ui`, because scoped
+package keys in `pnpm-lock.yaml` are quoted and the regex began at the
+quote. Those three appear in the tool-written exemption list and nowhere in
+`package.json` — the exact packages a diff read against `package.json` alone
+would never show. An apparatus returning a confident, wrong count is the
+trap CLAUDE.md's "verify that a check can fail" section names, and this was
+its second appearance in one ticket. Recorded on #950 as a correction.
+
+**Two guards, one contradiction, and whose call it is.** The release-age
+guard exists for the opposite failure from N133's: a too-FRESH dependency
+that is compromised or broken and gets unpublished within a day. Both are
+real. A workflow that resolves every Expo release by exempting it from the
+second guard has chosen one risk over the other, every time, by default,
+recorded nowhere — a policy decision made by whichever session hits the red
+check first. Filed as H17 (#952) and put to the board owner as a question
+with three answers: ship the exemption deliberately, wait a day, or make
+`check:expo-compat` tolerate a version pnpm will not yet install.
+
+**Decision, by the board owner, 2026-09-08 ~17:50Z: relax the check, keep
+the guard, land the bump tomorrow.** So what lands under H15 is not the bump.
+It is:
+
+- `scripts/check-expo-compat.py` now parses `expo install --check --json`,
+  resolves each `expectedVersionOrRange` to the concrete version npm would
+  install (`npm view <name>@<range> version --json` — a string for one match,
+  an ascending array for several; the highest is what matters), reads that
+  version's publish time from the registry, and applies pnpm's window.
+  **Tolerated only when EVERY outdated package's target is still inside the
+  window** — then it prints a WARNING naming each package, its publish time
+  and the moment it becomes installable, and exits 0. **Any package whose
+  target is installable now is a real drift and fails exactly as before.**
+  A same-day Expo release must not become cover for a genuinely stale
+  dependency, and the quantifier is where that lives.
+- The window is `PNPM_DEFAULT_MINIMUM_RELEASE_AGE_MINUTES = 24 * 60`, a
+  documented constant rather than a query, because pnpm exposes no reliable
+  way to read the effective value: `pnpm config get minimum-release-age`
+  prints `undefined` for a defaulted value — and, measured, prints
+  `undefined` even with a project `.npmrc` that sets it. An explicit
+  `VOLA_MINIMUM_RELEASE_AGE_MINUTES` overrides it; `0` disables the
+  tolerance, matching what a disabled guard means. If pnpm ever shortens its
+  default this is too tolerant only in the harmless direction (the refusal it
+  anticipates simply stops happening sooner); if pnpm lengthens it, the
+  check fails a day early, which is loud.
+- `--self-test` pins the pure classification against fixtures including the
+  measured 2026-09-08 case, and is chained ahead of the real check in
+  `package.json` the way `check:migration-versions` is; CI inherits it
+  through `pnpm run check:expo-compat` with no workflow edit.
+- The `vola-mobile-build` skill gains the trap, in the terms that would have
+  caught it: after any `expo install --fix`, `pnpm-workspace.yaml` must show
+  unchanged in `git status`, or a policy exemption is about to be committed
+  as a side effect.
+
+**Verified that it can fail — on the real path, not only the self-test.**
+`--self-test`: baseline green; inverting the window comparison fails four
+groups; changing the quantifier from ALL to ANY fails exactly the one group
+written for it. Restored, re-run green. Then end to end against the live
+registry, on `main`'s lockfile: (a) as-is → WARNING, exit 0, both packages
+named with `installable after 2026-09-09T13:50:37Z` / `…13:48:35Z`; (b)
+`VOLA_MINIMUM_RELEASE_AGE_MINUTES=0` → the same drift FAILS, exit 1; (c) the
+original N133 mutation — pin `expo-camera` to an older 57.0.3 and reinstall
+— FAILS, exit 1, with `expo-camera@57.0.4 … installable now` listed above
+the two same-day entries: the mixed case, proven against real data.
+Restored and reinstalled, back to WARNING and exit 0, tree showing only the
+three intended files.
+
+**The bump itself is deferred, not abandoned.** `expo@57.0.21`,
+`expo-router@57.0.20` and the seven transitive moves become installable
+after ~2026-09-09T13:50Z; a routine `expo install --fix` then, with
+`pnpm-workspace.yaml` checked before commit. The Simulator launch proof done
+today stands for that bump when it lands — the resolved pods are identical.
+
+**What this does not settle.** The check still cannot tell "the matrix moved
+upstream" from "someone edited `package.json`" — and it should not try: same
+outcome, same remedy, and a distinction nobody acts on differently is only
+another branch to get wrong. And nothing yet fails a commit that carries a
+tool-written `minimumReleaseAgeExclude`; that is H17's remaining criterion.
+
 ## Open items / known gaps as of this entry
 
 

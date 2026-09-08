@@ -17,7 +17,7 @@
     "check:doc-merge": "python3 scripts/append-only-merge.py --check",
     "check:eas-production-safety": "node apps/mobile/scripts/validate-production-config.mjs --self-test && node apps/mobile/scripts/validate-production-config.mjs --check",
     "check:evals": "python3 scripts/check-dictation-evals.py",
-    "check:expo-compat": "python3 scripts/check-expo-compat.py",
+    "check:expo-compat": "python3 scripts/check-expo-compat.py --self-test && python3 scripts/check-expo-compat.py",
     "check:expo-config": "python3 scripts/check-expo-config.py",
     "check:expo-native-config": "python3 scripts/check-expo-native-config.py --self-test && python3 scripts/check-expo-native-config.py",
     "check:govulncheck-api": "cd backend && go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...",
