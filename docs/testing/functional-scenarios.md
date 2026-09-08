@@ -21259,3 +21259,99 @@ M1a old carry restored · M1b numbers from the drop · M2 summary claims all tic
 
 8. **Quick background/foreground mid-session**, with the monitor connected: switch to another app and straight back. PASS: the chip is still live within a second or two. FAIL: it goes dark, or sticks on "Connecting…". (This is the exact race review found; step 2's "kill and reopen" is a cold start and does not exercise it.)
 9. **Running specifically**: finish a run recorded with the monitor and confirm the report names its source, and that a run with no HR shows the same honest card and Sync button as strength and BJJ.
+
+## N533 — some AI-described foods never get saved (`backend/internal/modules/nutrition/estimate.go`'s `fitToFood`, `apps/mobile/lib/estimateApi.ts`'s `fitName`/`fitServingLabel`, `apps/mobile/lib/foodLog.ts`'s `push`/`saveFoodLocally`/`foodSyncProblems`/`foodSyncState`, `apps/mobile/app/food/saved/index.tsx`, `apps/mobile/app/food/saved/[id].tsx`, `apps/mobile/app/food/describe.tsx`, #964)
+
+The cause: a drafted item's `serving_label` (or, in principle, `name`) could
+exceed what `Food.Validate`/`Entry.Validate` accept (1–40 / 1–120 runes),
+the phone wrote it locally anyway, the push was refused 400 → permanent,
+and the food and its entry lived on one phone only with nothing on screen
+saying so. Full account: `docs/decisions/history.md`, 2026-09-08 N533.
+
+### Backend (`POST /v1/nutrition/estimate`)
+
+- **Happy path — a long label is fitted, not refused.** Stub the provider to
+  return an item with a 68-character `serving_label`. The response is 200,
+  the item's `serving_label` is ≤ 40 characters, a prefix of what the
+  model said, trimmed, and not empty. Then `PUT /v1/nutrition/foods/{id}`
+  and `PUT /v1/nutrition/entries/{id}` built from that item are both 200.
+  (`estimate_fit_test.go`.)
+- **An empty label becomes `1 serving`; a given one is kept verbatim.**
+- **A multibyte label** (Cyrillic, an emoji at the cut point) is cut on
+  characters, never mid-character: the result is valid UTF-8 and ≤ 40
+  characters.
+- **A whitespace-only name is still refused** (422/400 as before) — the fit
+  never invents a name. Guards against a future "default the name too".
+- **The contract:** `EstimatedItem.serving_label` declares `maxLength: 40`
+  and `name` `maxLength: 120`; a client may rely on a draft being
+  saveable without its own clamp.
+- **Negative — the trap is real.** Feed the unfitted 68-character label
+  straight to `PUT /v1/nutrition/foods/{id}`: 400 `invalid_input`, message
+  names `serving_label`. If this ever returns 200, the validator's limits
+  have moved and the fit is doing nothing.
+
+### Mobile — the outbox (`lib/__tests__/foodRejected.test.ts`, real SQLite)
+
+- **A refused food does not take its meal down with it.** Save a food with
+  a 68-character label locally, log an entry naming it, sync. Expect: the
+  food row `dirty = 0, remote = 0, last_error = "serving_label must be
+  between 1 and 40 characters"`, absent from the server; the entry PUT was
+  sent **with `source_food_id: null`**, accepted, and its row is
+  `dirty = 0, remote = 1, last_error = NULL`. `syncFood` reports
+  `failed: 1, errorKind: 'permanent'`.
+- **Severing is only for a food the server never accepted.** Save a food,
+  sync (accepted). Edit it to a bad label, log an entry naming it, sync.
+  The entry PUT carries `source_food_id = <id>` and is accepted — the
+  server still holds the earlier version.
+- **A refused edit of a server-held food is reverted by the pull** (existing
+  design, now pinned): after that sync, the local row carries the server's
+  label and `last_error = NULL`, and it is **not** in `foodSyncProblems`.
+  With the foods list endpoint failing (500), the reason survives and it
+  **is** reported with `onServer: true`.
+- **`foodSyncProblems` / `foodSyncState().rejected`** report a refused food
+  with the server's reason and `onServer: false`; are **empty/null** for a
+  still-owed row with a transient `last_error` (a 503 — the next pass
+  retries); and are cleared the moment the food is edited
+  (`saveFoodLocally` → `dirty = 1`, `last_error = NULL`). The edited food
+  then pushes and lands `remote = 1`.
+- **A regenerate over a food deleted in the meantime resurrects it.** Save,
+  sync, `removeFood` (tombstone), `saveFoodLocally` with the same id: the
+  food is readable again with the new numbers, and the next sync sends
+  exactly one `PUT` for it, no `DELETE`.
+- **`savedFoodFrom` / `itemToEntry`** fit name and label: ≤ 40 characters,
+  a prefix, no trailing space; empty → `1 serving`; code points not UTF-16
+  units (an emoji run of 43 becomes exactly 40 emoji); an acceptable label
+  is untouched.
+
+### Mobile — the screens
+
+- **Saved foods list (`/food/saved`).** With one refused-never-saved food,
+  one refused-edit food (pull failing) and one fine food: the first shows
+  `saved-foods-problem-<id>` containing the server's reason and "this phone
+  only"; the second contains the reason and "earlier version"; the third
+  has no problem line. Copy from `savedFoodProblemCopy`.
+- **Food editor (`/food/saved/[id]`).** `foodSyncState` returning
+  `rejected` renders `saved-rejected` above the form with the reason;
+  `rejected: null` renders nothing. Saving from this screen is the retry.
+- **Describe (`/food/describe`), reused draft.** The reused banner is
+  followed by `describe-reused-scope`: "changes today's entry only … Fix
+  these numbers for next time". Editing kcal to 400 and logging calls
+  `logFood` with `kcal: 400, source_food_id: <matched id>` and never calls
+  `saveFoodLocally` — the decision on hypothesis 1.
+- **Describe, multi-item draft, second save fails** (hypothesis 4): exactly
+  one `logFood` (the first item, `source_food_id` set), `describe-error`
+  shown, the first row gone, the second still listed for a retry.
+
+### Manual / device (the ticket's `NEEDS HUMAN EVIDENCE`)
+
+1. On the user's account, describe each of the two foods they name as
+   "didn't save"; confirm the draft; open Saved foods — it is listed with
+   **no** red line under it; wait for a sync (or pull to refresh on web's
+   recipes page) — it appears on web.
+2. Reinstall the app, sign in — both foods are still in Saved foods.
+3. Regression check on N114: describe the same one-item food twice — the
+   second draft says "From your saved foods … No estimate used".
+4. Provoke a refusal deliberately (a build predating the fit, or `add.tsx`
+   with a 41-character serving label): the saved list shows the red reason
+   line; tap the row, fix the label, save; the line is gone and the food
+   reaches web after the next sync.
