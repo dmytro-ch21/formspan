@@ -64294,6 +64294,210 @@ items latched on #961: "+ Set" after a drop carrying the working weight on a
 real phone, and Done surviving a 30-second background with the summary
 correct and the header re-expanding.
 
+## 2026-09-08 — N529 (#960): a bell with a badge replaces the `DEV` pill, and Accept all on the share inbox
+
+**The user's words, two items from the 2026-09-08 list.** *"We need to have
+instead of the DEV pill a bell showing if any notifications are there if
+someone shared something with us."* And: *"WHEN THERE ARE multiple items to
+accept we should have something that can accept all."* Filed as one ticket
+because both live on the share surface and would have collided in parallel.
+
+**What was on screen.** `components/EnvironmentBadge.tsx` (N132/#536) — a
+`pointerEvents="none"` overlay in the top-right corner of every screen,
+mounted once in `app/_layout.tsx` over the splash included, rendering
+`EXPO_PUBLIC_APP_ENV` uppercased and hidden only on a real production
+profile. The household builds are all dev-env builds, so the athlete saw
+`DEV` in that corner forever. Meanwhile the share inbox (`app/shared/index.tsx`)
+accepted one card per tap and navigated to the copy each time; four shares
+meant four taps and four screens.
+
+### 1. The bell — `components/ShareBell.tsx`, `lib/shareInbox.ts`
+
+**Where it lives, and why it is not where the pill was.** The pill sat in a
+fixed corner as a root-level overlay because it was untouchable. A bell an
+athlete TAPS cannot float over every screen — it would sit on top of a
+modal's close button, a native header's Save, the sign-in form. So it is the
+**last child of `ScreenHeader`'s trailing cluster**, after `SyncChip` and the
+screen's own `action`: the same corner, on every tab and on the three pushed
+screens that draw their own header (`library`, `goals`, `phase`), and inside
+the box `wordmarkFits` already measures, so the wordmark-clearance arithmetic
+sees it without a new constant. Screens with a native header (`/shared`
+itself, `settings`, `workout/[id]`) do not carry it, and that is fine — the
+tab shell is where an athlete learns where shares arrive. 44pt target via
+`hitSlop` on a 28pt box, so the header row does not grow. The glyph is the
+brand kit's own `notification` icon through `components/ui/Icon`, recoloured
+with `currentColor`, not a forked SVG.
+
+**Pending means the cards `listShareInbox` returns.** `lib/friends.ts`'s
+`getPendingCounts` also carries a `shares` number (it feeds the Sharing pill
+on You), and the obvious move was to read that. Not done: the bell and the
+inbox screen must never disagree, and reading the same list the screen
+renders is what guarantees it. It also lets the screen **publish its own
+count** (`publishShareInboxCount`) whenever its list changes — after a load,
+after an accept, after a dismiss's reload — so the badge follows a vanished
+card with no second request racing the first. The You pill keeps its own
+source; the two are both server-derived and were not unified here.
+
+**One store, not a fetch per header.** `ScreenHeader` is mounted once per tab
+— five at once under `NativeTabs` — plus the three pushed screens. A hook
+that fetched on mount would ask eight times for one number. So
+`lib/shareInbox.ts` is the same shape as `lib/sync.ts`'s `SyncState`: module
+state, a listener set, `useShareInboxCount()`, and
+`startShareInboxOrchestrator()` owning the AppState listener, started once
+from the root layout as the fifth "own listener, own identity" pair
+(`setShareInboxIdentity(getToken | null)`). The schedule: forced on
+identity; forced on a genuine return to the foreground (background/inactive
+→ active, compared not regex-matched, same as `startBiometricSyncOrchestrator`);
+**throttled** on focus of any screen carrying the bell — one read per 15s
+window, so a tab flip three seconds after the last answer costs nothing;
+and published, not fetched, after accept/dismiss. **No timer.** A polling
+loop is a battery cost on every phone for a number that changes a few times
+a week.
+
+**`null` is "we do not know", and it is not zero.** A failed read — offline,
+a 500, `OfflineError` from `lib/session.ts` — publishes `null`, which renders
+as no badge exactly as zero does; it never renders "0" and never throws.
+`badgeLabel(n)` is where that rule is enforced, pure so it is pinned without
+a screen (`null → null`, `0 → null`, `n → "n"`, `≥100 → "99+"`, mirroring
+the server's `friend.maxBadgeCount`). The throttle window is deliberately
+NOT started on a failure, so the next focus asks again rather than sitting
+inside the window with nothing to show. A read that lands after the identity
+it was for is gone is discarded — the previous athlete's inbox must not badge
+the next one's bell on a shared phone. One design choice worth stating:
+`you.tsx` keeps its LAST-KNOWN count on a failed refresh; the bell clears to
+unknown instead. The ticket's criterion says the badge is *absent* on a
+failed read, so that is what it does; both satisfy "never assert zero", and
+the ticket text was the tiebreaker.
+
+**The environment label moved to the Settings footer**
+(`lib/environmentLabel.ts`, `settings-environment` testID, under the crash-
+reporting diagnostic, in `warn` colour because it is still a safety
+instrument): "Build environment: DEV. This is not a production build — it
+may be talking to a non-production backend." Same fail-safe as the pill —
+unset, empty, misspelled or mis-cased all SHOW; only exactly `"production"`
+hides — and `validate-production-config.mjs` still asserts eas.json's
+production profile says exactly that. **What is given up is the first-frame
+guarantee**: a build talking to the wrong backend no longer says so before
+the athlete reaches a screen. That trade was the user's own call, made in as
+many words, and the label is one tap from You (You → Settings) rather than
+zero. Both arms — shown on `development`, shown on nothing, absent on
+`production` — are pinned by rendering the real Settings screen
+(`__tests__/app/settingsEnvironment.test.tsx`), not only by the pure
+function, because a label nobody wired in would leave the pure test green.
+
+### 2. Accept all — `lib/shareAcceptAll.ts`, `app/shared/index.tsx`
+
+**A client loop, not a bulk endpoint.** `POST /v1/shares/{id}/accept`
+already makes each copy inside its own transaction, and the one property a
+bulk call would add — all-or-nothing — is the property the screen must NOT
+have. An athlete with four shares, one of which was taken back a minute ago,
+wants the other three. So `acceptAllShares(ids, acceptOne, { onAccepted })`
+runs them **sequentially** (four server-side copies in parallel from gym
+wifi is four transactions racing one athlete's rows), keeps going past a
+failure, and returns both lists with each failure's own message. Pure of
+React and of the network, so the ordering and the partial-failure
+bookkeeping are pinned with a stub that can be held open and one that can be
+made to reject.
+
+**On screen:** an `Accept all N` control above the list, **only at two or
+more** (over one card it is a second button for the same tap). While it
+runs, `busy` is the sentinel `'accept-all'` — not an id — so the existing
+`busy !== null` disables every per-card Accept, every Decline and the button
+itself with no second flag, and no single row claims to be the one being
+accepted. `onAccepted` drops each card as it lands. **No navigation** — four
+accepts cannot land on four copies — and `requestSync('share-accepted')`
+fires **once** at the end, only if anything landed; the chime likewise.
+
+**Partial failure is the first-class state.** What is left on screen when
+the loop ends is exactly the set that failed, each wearing its own error
+under its actions (`share-card-error-<id>`), and `acceptAllSummary` says
+"Accepted 2 of 3 — the copies are yours now." with "1 didn't go through —
+it's still below, with what went wrong." on the error line — **never
+"Accepted 2"** over a partial result. Zero successes confirm nothing, sync
+nothing, chime nothing. Deliberately **no `reload()` afterwards**: a reload
+would repaint the list from the server and take the failed cards' messages
+with it; the athlete can pull to refresh once they have read them. (A ghost
+card — 404/410 — therefore stays until then, with its reason; the per-card
+Accept still reloads on failure as before.) **Dismiss-all was not asked for
+and was not added**; declining is a per-card decision.
+
+### What review caught, and it was not a small one
+
+`frontend-reviewer` found a **blocking** defect in the first cut of
+`lib/shareInbox.ts`, and the shape of it is worth keeping because the guard
+LOOKED right and read right in its own comment. Staleness was judged by
+comparing the `getToken` a read had captured against the current
+`getTokenRef` — the obvious check, and the one whose comment said *"whatever
+it says is about somebody else now"*. It can never fire in this app.
+`useAuthToken()` returns a `useCallback(…, [])` — **"a token getter whose
+identity never changes"**, deliberately, because a getter that DID change
+identity turned every screen's fetch effect into an infinite refetch loop
+(that is what the hook exists for). The root layout holds one of those and
+hands the same object back on every sign-in, so `getTokenRef !== getToken` is
+`false` for two different athletes.
+
+Two bugs wore that one shape, and the reviewer reproduced both against the
+real module before reporting: athlete A signs in and a read goes out; A signs
+out; B signs in — `refreshShareInbox({ force: true })` hits the single-flight
+guard **first**, is handed A's still-open promise, and no read is ever issued
+for B at all; then A's read lands, the reference comparison says "same
+identity", and **A's pending count is published under B's bell**, silently.
+
+The fix is an `epoch` integer bumped in `setShareInboxIdentity`, plus dropping
+`inflight` there so the next caller starts its own read rather than inheriting
+the previous athlete's. `lib/session.ts` already carries exactly this counter
+for exactly this reason ("a refresh that started before sign-out can settle
+after it"), so this is that mechanism reused rather than a second one
+invented. `shareInbox.test.ts` pins it with the reviewer's own scenario, and
+it is mutation-tested both ways: drop the `inflight` reset and the second read
+is never issued (red); put the reference comparison back in place of the epoch
+and A's three cards publish under B (red, and ONLY that test — which is the
+evidence the existing sign-out test could not have caught this).
+
+**The general lesson, and it is this repo's own "a state that cannot be
+constructed" in a new costume**: the sign-out test that was already there
+passes under the broken code, because it never signs anyone back IN. A guard
+is only exercised by the input it is meant to reject, and "identity changed"
+had only ever been tested as "identity became null".
+
+`ac-verifier` separately noted that the badge-publish criterion names
+dismissing as well as accepting, and only the accept route had an assertion on
+`shareInboxCount()`. The two routes differ (accept filters `inbox` in place,
+dismiss goes through `reload()`), so that is now pinned as well.
+
+### What the suite pins, and what was mutation-tested
+
+`lib/__tests__/shareInbox.test.ts` (18), `lib/__tests__/shareAcceptAll.test.ts`
+(10), `lib/__tests__/environmentLabel.test.ts` (4),
+`components/__tests__/shareBell.test.tsx` (7),
+`__tests__/app/settingsEnvironment.test.tsx` (3), and six Accept-all cases
+added to `__tests__/app/sharedScreen.test.tsx`. Mutations applied, confirmed
+in the diff, run red, restored and run green — the list is in the PR body.
+Two test-apparatus findings worth recording: the badge is hidden from
+assistive technology on purpose (the pressable's label already says
+"3 waiting"), and RNTL excludes hidden elements by default, so every badge
+query — including the ones asserting ABSENCE — opts in with
+`includeHiddenElements`, or `queryByText('0')` could not see a hidden "0"
+and the failed-read test would pass for the wrong reason. And
+`youScreen.test.tsx`'s `useFocusEffect` mock captures the LAST caller's
+callback as its `refocus`; the bell inside the header now calls it after
+the screen does, so that file mocks `ShareBell` to null with a comment
+saying why.
+
+### Open
+
+- **Device evidence outstanding** (the two `NEEDS HUMAN EVIDENCE` items on
+  #960): two foods shared to a real phone → bell shows 2 → Accept all → both
+  in Saved foods, badge clears; and airplane-mode cold open → no badge, no
+  error, app usable.
+- The You screen's Sharing pill and the bell read two different server
+  numbers for the same thing. They should agree; nothing forces them to.
+- Unread notifications of other kinds (friend requests) do not reach the
+  bell. It is a share bell, per the ticket; if it ever becomes a general one,
+  `you.tsx`'s per-source `anyArrived` reasoning applies — a single badge that
+  cannot say WHICH source is waiting is the thing that comment exists to
+  prevent.
+
 ## Open items / known gaps as of this entry
 
 

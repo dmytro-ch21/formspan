@@ -51,9 +51,24 @@ jest.mock('@/lib/sync', () => ({
   useSyncState: () => mockSyncState,
 }));
 
+// `useFocusEffect` is what the share bell (N529) inside the header's trailing
+// cluster calls; without a stub every render here dies with "useFocusEffect
+// is not a function". A no-op rather than an effect: nothing in this file is
+// about the bell's refresh, and `@/lib/shareInbox` does no network without an
+// identity set anyway.
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+  useFocusEffect: () => {},
 }));
+
+it('carries the share bell in its trailing cluster, on every screen (N529)', () => {
+  // The bell is how an athlete learns where shares arrive, so it is not a
+  // per-screen opt-in like `action` — it is here, or it is nowhere. Inside
+  // the measured cluster, so `wordmarkFits` sees its width.
+  render(<ScreenHeader title="Today" />);
+  const actions = screen.getByTestId('screen-header-actions');
+  expect(within(actions).getByTestId('share-bell')).toBeTruthy();
+});
 
 beforeEach(() => {
   mockSyncState.online = true;

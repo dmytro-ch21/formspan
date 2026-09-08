@@ -112,6 +112,12 @@ jest.mock('@/lib/sync', () => ({
 // pass against a You screen that still rendered them, because the stub draws
 // nothing either way.
 jest.mock('@/components/RoadmapSummary', () => ({ RoadmapSummary: () => null }));
+// N529: the header's share bell calls `useFocusEffect` too, and it renders
+// AFTER this screen's own call — so with the real component mounted, the
+// `refocus` this file captures below would be the bell's callback, not the
+// screen's, and every test that re-focuses to re-count would time out. The
+// bell has its own suite (`components/__tests__/shareBell.test.tsx`).
+jest.mock('@/components/ShareBell', () => ({ ShareBell: () => null }));
 // Rendered as a real (stub) element rather than `() => null`, deliberately —
 // the whole point of N181's device-pass fix is WHERE this renders relative to
 // the athlete's name, and a component that renders nothing can never fail an

@@ -29,6 +29,7 @@ import { MONO_ACCENT, monoNeedsRelaunch } from '@/lib/palette';
 import { readVoiceEnabled, speak, writeVoiceEnabled } from '@/lib/voice';
 import { useTrackEffort } from '@/lib/useTrackEffort';
 import { isNotFound } from '@/lib/apiError';
+import { environmentLabel } from '@/lib/environmentLabel';
 import { getProfile, updateProfile } from '@/lib/profile';
 import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -174,6 +175,13 @@ export default function SettingsScreen() {
       live = false;
     };
   }, [getToken]);
+
+  // N529 (#960): the environment instrument, relocated here from the `DEV`
+  // pill that used to float over every screen. Read at render, not at module
+  // load, only so a test can exercise both arms; on a device the value is
+  // inlined at bundle time and never changes. `null` is production, and
+  // production renders nothing — see `lib/environmentLabel.ts`.
+  const envLabel = environmentLabel(process.env.EXPO_PUBLIC_APP_ENV);
 
   return (
     <ScrollView contentContainerStyle={styles.scroll} testID="settings-screen">
@@ -497,6 +505,15 @@ export default function SettingsScreen() {
         Crash & error reporting:{' '}
         {crashReportingActive ? 'active on this device.' : 'not yet confirmed on this device.'}
       </Text>
+      {/* In `unsynced`'s warn colour rather than `note`'s dim, on purpose:
+          this is the one line on the screen that is a safety instrument, and
+          the pill it replaced was warn-coloured for the same reason. */}
+      {envLabel !== null && (
+        <Text style={styles.unsynced} testID="settings-environment">
+          Build environment: {envLabel}. This is not a production build — it may be talking to a
+          non-production backend.
+        </Text>
+      )}
     </ScrollView>
   );
 }
