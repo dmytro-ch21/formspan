@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import RecipeScreen from '../../app/food/recipe/[id]';
 
@@ -23,12 +24,13 @@ configure({ asyncUtilTimeout: 10_000 });
 
 const mockLocalFood = jest.fn();
 const mockSaveFoodLocally = jest.fn();
+const mockSyncState = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
   localFood: (...a: unknown[]) => mockLocalFood(...a),
   localFoods: jest.fn(async () => []),
   saveFoodLocally: (...a: unknown[]) => mockSaveFoodLocally(...a),
   // N116/#505: unblocked by default — synced, and nothing owed.
-  foodSyncState: jest.fn(async () => ({ unsynced: false, owed: false })),
+  foodSyncState: (...a: unknown[]) => mockSyncState(...a),
 }));
 
 jest.mock('@/lib/catalogApi', () => {
@@ -91,6 +93,54 @@ beforeEach(() => {
   mockBack.mockReset();
   mockLocalFood.mockReset().mockResolvedValue(recipe());
   mockSaveFoodLocally.mockReset().mockResolvedValue('r1');
+  mockSyncState.mockReset().mockResolvedValue({ unsynced: false, owed: false, rejected: null });
+});
+
+/**
+ * N533/#964, found in review. A RECIPE is a `foods` row and is refused the
+ * same way a plain food is — so the screen an athlete opens to FIX one has to
+ * say it was refused, exactly as `saved/[id].tsx` does. The saved-foods list
+ * already flagged it (`foodSyncProblems` reads every `foods` row regardless of
+ * `kind`); this editor said nothing.
+ */
+describe('a recipe the server refused', () => {
+  it('says so on the screen, with the reason, and speaks it', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    try {
+      mockSyncState.mockResolvedValue({
+        unsynced: true,
+        owed: false,
+        rejected: 'name must be between 1 and 120 characters',
+      });
+      render(<RecipeScreen />);
+
+      await waitFor(() => expect(screen.getByTestId('recipe-rejected')).toBeTruthy());
+      const copy = String(screen.getByTestId('recipe-rejected').props.children);
+      expect(copy).toContain('name must be between 1 and 120 characters');
+      expect(copy).toContain('this phone only');
+      // iOS has no live regions — rendering it is not enough.
+      await waitFor(() => expect(announce).toHaveBeenCalled());
+      expect(String(announce.mock.calls[0][0])).toContain('this phone only');
+    } finally {
+      announce.mockRestore();
+    }
+  });
+
+  it('says nothing for a recipe the server accepted', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    try {
+      render(<RecipeScreen />);
+      await waitFor(() => expect(screen.getByTestId('recipe-name')).toBeTruthy());
+      expect(screen.queryByTestId('recipe-rejected')).toBeNull();
+      expect(announce).not.toHaveBeenCalled();
+    } finally {
+      announce.mockRestore();
+    }
+  });
 });
 
 describe('which state the screen is in', () => {

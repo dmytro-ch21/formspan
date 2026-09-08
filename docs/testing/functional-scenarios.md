@@ -21366,6 +21366,10 @@ saying so. Full account: `docs/decisions/history.md`, 2026-09-08 N533.
   `AccessibilityInfo.announceForAccessibility` with the reason copy;
   opening a fine one announces nothing. `accessibilityLiveRegion` is
   Android-only and iOS is the primary platform.
+- **Recipe editor (`/food/recipe/[id]`).** `foodSyncState` returning
+  `rejected` renders `recipe-rejected` above the form with the reason and
+  announces it; `rejected: null` renders nothing and announces nothing. A
+  recipe is a `foods` row and is refused the same way a plain food is.
 - **The list survives a failing problems read.** With `localFoods`
   resolving and `foodSyncProblems` rejecting, the foods are still listed,
   no `saved-foods-error` is shown, and no problem line appears. Losing the

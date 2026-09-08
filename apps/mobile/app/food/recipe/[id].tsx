@@ -45,8 +45,8 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ShareToFriend } from '@/components/ShareToFriend';
@@ -65,6 +65,7 @@ import {
   recipeProblem,
   type RecipeDraft,
 } from '@/lib/recipe';
+import { savedFoodProblemCopy } from '@/lib/nutrition';
 import { shareBlockedReason } from '@/lib/shares';
 import { request, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -118,7 +119,13 @@ export default function RecipeScreen() {
   // `touched` covers this screen's own unsaved edits, `shareSync` covers
   // what the server has (or has not) confirmed.
   const [touched, setTouched] = useState(false);
-  const [shareSync, setShareSync] = useState<{ unsynced: boolean; owed: boolean } | null>(null);
+  const [shareSync, setShareSync] = useState<{
+    unsynced: boolean;
+    owed: boolean;
+    rejected: string | null;
+  } | null>(null);
+  /** The refusal already announced, so an unrelated sync tick does not repeat it. */
+  const announcedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!userId || !id) return;
@@ -154,7 +161,23 @@ export default function RecipeScreen() {
     if (!userId || !id || fresh === '1') return;
     let live = true;
     foodSyncState(userId, id).then((s) => {
-      if (live) setShareSync(s);
+      if (!live) return;
+      setShareSync(s);
+      // N533/#964 — a RECIPE is a `foods` row and fails exactly the same way
+      // (a name over 120 runes, say): refused 400, `classify` reads that as
+      // permanent, and it lives on this phone alone. Found in review: the
+      // saved-foods LIST already flagged it, because `foodSyncProblems` reads
+      // every `foods` row regardless of `kind` — but this editor, the screen
+      // an athlete opens to FIX one, said nothing. Spoken as well as rendered
+      // for the reason its sibling `saved/[id].tsx` documents: live regions
+      // are Android-only and iOS is the primary platform.
+      if (s?.rejected && s.rejected !== announcedRef.current) {
+        announcedRef.current = s.rejected;
+        AccessibilityInfo.announceForAccessibility(
+          savedFoodProblemCopy({ reason: s.rejected, onServer: !s.unsynced }),
+        );
+      }
+      if (!s?.rejected) announcedRef.current = null;
     });
     return () => {
       live = false;
@@ -243,6 +266,12 @@ export default function RecipeScreen() {
       <Stack.Screen
         options={{ title: load.status === 'fresh' ? 'New recipe' : 'Edit recipe' }}
       />
+
+      {shareSync?.rejected ? (
+        <Text style={styles.problem} accessibilityLiveRegion="polite" testID="recipe-rejected">
+          {savedFoodProblemCopy({ reason: shareSync.rejected, onServer: !shareSync.unsynced })}
+        </Text>
+      ) : null}
 
       <Field
         label="Recipe"

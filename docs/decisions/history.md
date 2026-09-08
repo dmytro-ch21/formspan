@@ -65079,6 +65079,15 @@ closed that same gap). And the list's `Promise.all` was split, so a failure
 of the ANNOTATION read no longer blanks the whole list — a strictly worse
 screen than the one before this ticket.
 
+A second review round, after the fix above, found one more surface and took
+it: the RECIPE editor (`app/food/recipe/[id].tsx`) already read `foodSyncState`
+and never surfaced `rejected`, unlike its sibling. A recipe is a `foods` row
+and is refused exactly the same way — a name over 120 runes, say — and the
+saved-foods LIST already flagged it, because `foodSyncProblems` reads every
+`foods` row regardless of `kind`. So the one screen that said nothing was the
+screen an athlete opens to FIX one. Not a data-loss gap; an inconsistent
+surface, and a one-line-per-half fix. Both mutations caught.
+
 **The fourth was declined, with the reason recorded at the call site.**
 `fitName` has no empty floor while `fitServingLabel` does, and that asymmetry
 is deliberate on BOTH sides of the wire: `fitToFood` makes the same choice in
