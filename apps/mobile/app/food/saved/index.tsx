@@ -112,9 +112,30 @@ export default function SavedFoodsScreen() {
   const [recent, setRecent] = useState<Food[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * A generation counter, so a SLOWER EARLIER load can never overwrite a
+   * faster later one.
+   *
+   * Two loads are in flight on almost every mount: the focus effect fires
+   * immediately with the default sort, and the stored-preference effect
+   * fires again with the remembered one as soon as `readPref` answers.
+   * Nothing orders their two `localFoods` promises, so without this the
+   * chips could settle on "Name" while the rows on screen were still the
+   * "Recent" answer — the sort control silently lying about the list under
+   * it, which is the one thing this ticket exists to get right. Measured,
+   * not theorised: resolving the two out of order reproduces it.
+   *
+   * `food/add.tsx` guards its own two concurrent reads the same way and for
+   * the same reason; this is that pattern, not a new one. It also covers
+   * the search box for free — a fast typist's earlier keystroke can no
+   * longer land after a later one.
+   */
+  const loadSeq = useRef(0);
+
   const load = useCallback(
     async (query: string, order: SavedFoodsSort) => {
       if (!userId) return;
+      const seq = ++loadSeq.current;
       try {
         // The spotlight is read only while there is no search — see the doc
         // comment. `[]` rather than a stale list, so a search typed after a
@@ -123,10 +144,14 @@ export default function SavedFoodsScreen() {
           localFoods(userId, query, order),
           query.trim() ? Promise.resolve([]) : recentlySharedFoods(userId),
         ]);
+        // A newer load started while this one was reading; its answer is
+        // the current one, and this is last time's.
+        if (seq !== loadSeq.current) return;
         setFoods(rows);
         setRecent(shared);
         setError(null);
       } catch (err) {
+        if (seq !== loadSeq.current) return;
         setError(err instanceof Error ? err.message : 'Could not read your saved foods.');
       }
     },

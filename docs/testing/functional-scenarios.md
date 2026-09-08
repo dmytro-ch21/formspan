@@ -15111,6 +15111,12 @@ on screen. That, and only that, is what moved.
 - A `PUT /v1/nutrition/foods/{id}` body carrying `shared_by`/`shared_at`
   neither sets them on the athlete's own food nor clears them on a copy —
   both are read-only.
+- Open Saved foods on an athlete whose remembered sort is NOT the default,
+  on a slow or loaded device: the sort chips and the order of the rows
+  underneath them must agree. Two reads race on mount (the focus effect's
+  default sort, the stored preference's remembered one), and the screen must
+  show the newer answer even when the older one arrives last — never a chip
+  saying "Name" above a list still in "Recent" order.
 
 #### Auth / security
 

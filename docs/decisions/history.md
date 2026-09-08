@@ -64627,6 +64627,31 @@ foods" could not be a filter, because there was nothing to filter on.
   the screen test mocks `@/lib/foodLog` wholesale and a parser living there
   would be mocked away with it.
 
+**Review caught a race the tests did not, and it was reproduced before it was
+fixed.** Two loads run on almost every mount of the saved-foods screen: the
+focus effect fires immediately with the DEFAULT sort, and the stored-preference
+effect fires again with the REMEMBERED one as soon as `readPref` answers.
+Nothing ordered their two `localFoods` promises, and both wrote the same state
+unconditionally — so whichever resolved LAST won, regardless of which sort it
+was for. Resolved out of order, the chips settled on "Name" while the rows on
+screen were still the "Recent" answer: a sort control lying about the list
+underneath it, which is precisely the thing this ticket exists to get right.
+
+The window is narrow — only on a return visit whose stored sort differs from
+the default, and only when the SQLite queue happens to answer out of call
+order — which is exactly why no test caught it and why reading the code did
+not either. `frontend-reviewer` found it and settled it empirically with a
+throwaway probe that resolved the two reads backwards; the fix is a generation
+counter in `load`, the same guard `food/add.tsx` already applies to its own two
+concurrent reads for the identical reason. It covers the search box for free:
+a fast typist's earlier keystroke can no longer land after a later one, which
+had the same shape and predates this ticket.
+
+Pinned by `savedFoodsScreen.test.tsx`'s "ignores a stale load that lands after
+a newer one", which holds both reads open and resolves them backwards on
+purpose — and mutation-tested: remove the counter and that test alone goes
+red, as a test failure rather than a compile error.
+
 **Left open.** `apps/web`'s `nutrition/recipes` page does not yet show the
 provenance the API now returns — a one-line addition, out of this ticket's
 mobile scope. Row heights are computed, not measured on a phone; the ticket's

@@ -374,6 +374,50 @@ describe('sort', () => {
     expect(screen.getByTestId('saved-foods-sort-used').props.accessibilityState.selected).toBe(true);
   });
 
+  /**
+   * The stored-sort read and the focus effect BOTH load on mount, and nothing
+   * orders their two reads. Resolved out of order — the remembered sort's
+   * answer first, the default's second — the screen used to keep the LAST
+   * answer to arrive, so the chips said "Name" while the rows were still the
+   * "Recent" list. A sort control that lies about the list under it is the
+   * one thing this ticket cannot ship.
+   *
+   * Found by review, reproduced before it was fixed. The guard is a
+   * generation counter in `load`; remove it and this test goes red.
+   */
+  it('ignores a stale load that lands after a newer one, so the chips never lie about the order', async () => {
+    mockReadPref.mockResolvedValue('name');
+
+    // Hold both reads open so their resolution order is ours to choose.
+    const pending: { order: string; resolve: (v: Food[]) => void }[] = [];
+    mockLocalFoods.mockImplementation(
+      (_u: string, _q: string, order: string) =>
+        new Promise<Food[]>((resolve) => pending.push({ order, resolve })),
+    );
+
+    render(<SavedFoodsScreen />);
+
+    // The focus effect's default-sort read, then the remembered-sort read.
+    await waitFor(() => expect(pending.length).toBe(2));
+    const stale = pending.find((c) => c.order === 'recent')!;
+    const fresh = pending.find((c) => c.order === 'name')!;
+    expect(stale).toBeDefined();
+    expect(fresh).toBeDefined();
+
+    // The NEWER read answers first...
+    await act(async () => {
+      fresh.resolve([food({ id: 'fresh', name: 'Name-sorted food' })]);
+    });
+    // ...and the older one answers second. Its answer is last time's.
+    await act(async () => {
+      stale.resolve([food({ id: 'stale', name: 'Recent-sorted food' })]);
+    });
+
+    expect(screen.getByTestId('saved-foods-sort-name').props.accessibilityState.selected).toBe(true);
+    expect(screen.getByText('Name-sorted food')).toBeTruthy();
+    expect(screen.queryByText('Recent-sorted food')).toBeNull();
+  });
+
   it('tapping the chip already selected does nothing', async () => {
     render(<SavedFoodsScreen />);
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'recent'));
