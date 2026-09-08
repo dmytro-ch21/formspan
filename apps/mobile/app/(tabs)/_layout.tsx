@@ -87,13 +87,28 @@ export default function TabLayout() {
   if (!sources) return host;
 
   return (
-    // `NativeTabs` is a real `UITabBarController`, and UIKit applies the top
-    // safe-area inset to the screens inside it. This says so once, for
-    // everything beneath, so `ScreenHeader` does not add a second copy and
-    // open a blank band above the title — see `lib/headerInset.ts` for the
-    // measured account, including why this is declared here rather than
-    // passed by each screen.
-    <PlatformTopInsetContext.Provider value>
+    // iOS ONLY, and the platform check is the whole point of this line.
+    //
+    // On iOS `NativeTabs` is a real `UITabBarController` and expo-router sets
+    // `overrideScrollViewContentInsetAdjustmentBehavior`, so the tab screens'
+    // scrollers genuinely take UIKit's top inset and `ScreenHeader` must not
+    // add a second copy — that is the blank band this ticket fixed.
+    //
+    // **Android does NOT do this, and shipping `value` unconditionally would
+    // have been a worse bug than the one being fixed.** Read from the
+    // installed library rather than assumed: `NativeTabsView.android.js`
+    // wraps its content in `<SafeAreaView edges={{ bottom: true }}>` — top is
+    // deliberately excluded — and `contentInsetAdjustmentBehavior` is an
+    // iOS-only prop (declared in RN 0.86.3's `ScrollViewPropsIOS`), so the
+    // five scrollers' `"automatic"` does nothing there either. Claiming the
+    // platform had supplied the inset would therefore have removed the ONLY
+    // thing supplying it and put every Android tab screen's title under the
+    // status bar — unreadable, where the iOS bug was merely an ugly gap.
+    // Caught in review; the first version of this line was unconditional.
+    //
+    // See `lib/headerInset.ts` for the full measured account, including why
+    // this is declared once here rather than passed by each screen.
+    <PlatformTopInsetContext.Provider value={Platform.OS === 'ios'}>
       <NativeTabs
         minimizeBehavior="onScrollDown"
         backgroundColor={vola.bg}

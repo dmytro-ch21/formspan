@@ -78,7 +78,23 @@ import { createContext, useContext } from 'react';
 /**
  * Set to `true` by a layout whose platform chrome already applies the top
  * safe-area inset to the screens beneath it. Only `app/(tabs)/_layout.tsx`
- * does, and only because `NativeTabs` is a real `UITabBarController`.
+ * does — and only on iOS, because only there is `NativeTabs` a real
+ * `UITabBarController` that insets its children. Android's `NativeTabs`
+ * applies a BOTTOM edge only (`NativeTabsView.android.js`:
+ * `<SafeAreaView edges={{ bottom: true }}>`), and `contentInsetAdjustment-
+ * Behavior` is iOS-only, so nothing supplies a top inset there and the
+ * header must keep adding its own. See that file's own comment.
+ *
+ * **Latent trap, flagged in review and not yet a live bug: a `Modal` inherits
+ * this from its React ancestry, not from its native container.** A modal
+ * presented from a tab screen is a separate native presentation and is NOT
+ * inside `UITabBarController`, so nothing applies the inset to it — but a
+ * `ScreenHeader` rendered inside one would still read `true` from the tab
+ * group above it and skip the inset, putting its title under the status bar.
+ * No modal in the app renders a `ScreenHeader` today (`food.tsx`'s and
+ * `workouts.tsx`'s sheets both draw their own chrome), which is why this is
+ * a note rather than a fix. If you add one, wrap it in
+ * `<PlatformTopInsetContext.Provider value={false}>`.
  */
 export const PlatformTopInsetContext = createContext(false);
 

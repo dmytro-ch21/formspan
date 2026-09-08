@@ -20770,9 +20770,17 @@ that replace it.
 - All of the above on a real iOS 26 device rather than the Simulator —
   Liquid Glass behaviour over live content, and whether the top spacing reads
   as intentional in hand.
-- **Android**: the same five-tab sweep under Material 3. The top inset is
-  supplied by a different platform (Jetpack Compose, not UIKit), so whether
-  the tab group's "the platform already applied it" declaration holds there
-  is genuinely unverified — it is asserted for Android by symmetry, not by
-  measurement, and a wrong answer shows up as either a doubled band or a
-  header under the status bar.
+- **Android**: the same five-tab sweep under Material 3. **Corrected after
+  review**: the top inset is NOT claimed on Android any more. Reading
+  `expo-router`'s own `NativeTabsView.android.js` showed it applies
+  `edges={{ bottom: true }}` only, so `PlatformTopInsetContext` is gated to
+  iOS and `ScreenHeader` keeps adding the inset itself on Android, exactly as
+  it did before this ticket. What to check is therefore that Android is
+  UNCHANGED from `main`: header directly below the status bar on all five
+  tabs, no blank band above the title and no title tucked under the clock.
+- **Android, the floating pills**: `lib/tabBarChrome.ts` assumes Material 3's
+  default `NavigationBar` height of 80dp, taken from the spec and **not
+  measured on a device**. Confirm Today's "New log" and Plan's "New workout"
+  both sit fully clear of the bottom navigation bar and neither is tucked
+  behind it. Floating a little high is the accepted error direction; touching
+  or overlapping the bar is a failure and means the constant is wrong.

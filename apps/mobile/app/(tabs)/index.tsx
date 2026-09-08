@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { fabBottom } from '@/lib/tabBarChrome';
 
 import { Text, View } from '@/components/Themed';
 
@@ -118,36 +120,6 @@ import { countsAsSet } from '@/lib/sessions';
  */
 function fabClearance(fontScale: number): number {
   return 44 + 20 * fontScale;
-}
-
-/**
- * How far the floating New Log pill has to sit above the bottom of the screen
- * to clear the tab bar — N504/#876.
- *
- * **This is new because the tab bar stopped being in normal flow.** The old
- * custom bar was a laid-out view, so `bottom: 16` on an absolutely-positioned
- * pill measured from above it. `NativeTabs` renders the platform's own bar,
- * which on iOS 26 FLOATS OVER the content (that is what makes the Liquid Glass
- * translucency mean anything), so the same `bottom: 16` puts the pill
- * underneath it — measured on the iOS 26.5 Simulator, where New Log landed on
- * top of the You tab and its label.
- *
- * The height is the standard UIKit tab bar (49pt) plus whatever the device's
- * own bottom inset is, which is why this takes the inset rather than being one
- * number: a home-indicator phone and a button phone differ by ~34pt and
- * hardcoding either is wrong on the other.
- *
- * **Known imprecision, stated rather than hidden:** with
- * `minimizeBehavior="onScrollDown"` the bar SHRINKS as you scroll, so once
- * minimized the pill sits higher above it than it strictly needs to. Floating
- * slightly high is the harmless direction of that error — the alternative is
- * tracking a native bar's animated height from JS every frame, which is a lot
- * of machinery to buy back a few points of spacing.
- */
-const NATIVE_TAB_BAR_HEIGHT = 49;
-
-function fabBottom(bottomInset: number): number {
-  return NATIVE_TAB_BAR_HEIGHT + bottomInset + 12;
 }
 
 /**
@@ -1608,7 +1580,7 @@ export default function TodayScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.fab,
-            { backgroundColor: accent.accent, bottom: fabBottom(insets.bottom) },
+            { backgroundColor: accent.accent, bottom: fabBottom(Platform.OS, insets.bottom) },
             pressed && styles.fabPressed,
           ]}
           onPress={() => setPicking(true)}

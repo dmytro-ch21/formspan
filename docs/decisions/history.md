@@ -63303,6 +63303,80 @@ directly rather than through `pnpm run test:mobile`, which sets it. Both are
 the same error: trusting an apparatus that was not the one the repo uses.
 Full suite via the real script: 285 suites / 4580 tests, exit 0.
 
+### What review caught in the fix itself, which is the point of the gate
+
+The three fixes above went to `frontend-reviewer` and `ac-verifier` green —
+`verify` exit 0, 285 suites / 4580 tests, every one of the ticket's
+code-checkable criteria MET — and **both reviewers independently found the
+same class of defect in the fix: an iOS measurement applied to Android
+without a platform check.** Two were blocking, and neither is reachable by
+any test in this repo.
+
+**1. The top-inset fix would have broken Android worse than the bug it
+fixed.** `PlatformTopInsetContext.Provider` was set to `true`
+unconditionally, on the strength of an iOS measurement. Read out of the
+installed library rather than argued: `expo-router@57.0.19`'s
+`NativeTabsView.android.js` wraps its content in
+`<SafeAreaView edges={{ bottom: true }}>` — **top deliberately excluded** —
+while `NativeTabsView.ios.js` sets
+`overrideScrollViewContentInsetAdjustmentBehavior`, and
+`contentInsetAdjustmentBehavior` is declared in RN 0.86.3's
+`ScrollViewPropsIOS`, i.e. iOS-only. So on Android nothing supplied a top
+inset, the five scrollers' `"automatic"` did nothing, and telling
+`ScreenHeader` the platform had it covered would have removed the only
+source — putting every Android tab title under the status bar. That is the
+UNREADABLE direction, against an iOS bug that was merely an ugly gap, and it
+is exactly the asymmetry `lib/headerInset.ts` had already written down as
+its reason for defaulting to `false`. The provider is now
+`value={Platform.OS === 'ios'}`.
+
+Worth separating two things the docs had run together: this was recorded as
+"asserted for Android by symmetry, not by measurement", which was honest but
+too generous to itself. It was not unverifiable — it was **derivable from
+the library source in about a minute**, without a device. "Unverified" and
+"unverified because nobody looked" are different claims, and only the second
+was true.
+
+**2. The pill fix was applied to Today and not to Plan.** `workouts.tsx`'s
+identical "New workout" pill kept `bottom: 16` and stayed under the native
+bar, while its own style comment went on asserting parity with Today's —
+"same radius, same padding, same `bottom`" — a claim this ticket had made
+false in the same commit. The new `functional-scenarios.md` entry then
+listed "Plan's pill sits at the same height" as a happy-path FACT, so the
+documentation asserted the thing the code had stopped doing.
+
+The fix is `lib/tabBarChrome.ts`, shared by both screens, and the split is
+deliberate: the two screens should NOT share their clearance constants —
+that is a per-screen decision about content padding, and each file's
+comments say so — but the height of the platform's bar is a fact about the
+platform, not a choice either screen gets to make. Keeping it private to
+`index.tsx` is precisely what let Plan drift.
+
+That helper is platform-parameterised for the same reason `tabIconPlan.ts`
+is: `jest-expo` reports `ios`, so a helper reading `Platform.OS` itself
+leaves the Android branch permanently untested. Android's Material 3
+`NavigationBar` is 80dp against UIKit's 49pt — **taken from the Material 3
+spec, not measured on a device**, and stated that way. The error direction
+is what makes it shippable unmeasured: too large floats the pill harmlessly
+high, too small puts it back under the bar. Mutation-tested, including the
+exact defect review found — collapsing the height to a single 49 fails three
+tests.
+
+**3. Noted, not fixed: a `Modal` inherits this context from its React
+ancestry, not from its native container.** A modal presented from a tab
+screen is a separate presentation and is not inside `UITabBarController`, so
+nothing insets it — but a `ScreenHeader` inside one would still read `true`
+from the tab group above and skip the inset. No modal in the app renders a
+`ScreenHeader` today (`food.tsx`'s and `workouts.tsx`'s sheets draw their
+own chrome), so this is a recorded trap in `lib/headerInset.ts` with the
+one-line remedy, not a change.
+
+**The general lesson, since this is the second time in one ticket.** Every
+defect here — the original three and these two — is a number or a behaviour
+measured on one platform and then applied everywhere without the check. The
+Simulator is what found the first three and it is also what cannot find
+these: it only ever reports `ios`.
+
 ## Open items / known gaps as of this entry
 
 
