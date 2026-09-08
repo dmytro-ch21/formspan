@@ -21017,3 +21017,17 @@ on every sync pass — were hidden behind "isn't available on this device".
 5. Turn Health sync off in Settings; open a session with no HR: the sentence
    points at Settings and there is no button.
 6. Android: the same four steps with "Health Connect" in every sentence.
+
+## N528 (part 1) — heart-rate monitor samples on the backend: `source_platform: bluetooth`, `source: hr_monitor`, and the direct-wins / Health-fills-gaps rule (`backend/internal/modules/biometric/merge.go`, `biometric.go`, `postgres.go`, migration `20260908204400_session_metrics_hr_direct`, `contracts/public.openapi.yaml`, #958)
+
+### Automated (`merge_test.go`, `merge_postgres_test.go`)
+
+- `POST /v1/biometric/samples` accepts `{source_platform: bluetooth, source: hr_monitor}` and still refuses an unknown `source` (the vocabulary stays closed).
+- `MergeHRSources`: no direct samples → input returned unchanged (same slice); direct samples always kept; a health sample between two direct samples ≤ 30 s apart dropped; exactly 30 s is not a gap, 31 s is; a health sample at a direct sample's instant dropped; head and tail gaps (window edge to first/last direct) filled when longer than 30 s; result sorted; input not mutated.
+- `ComputeSessionMetrics`: direct stream then dead link → `hr_direct_count` = direct count, `sample_count` = direct + gap-filled, max taken from the health tail; a health spike inside a dense direct stream never becomes the max; a no-monitor session's TRIMP/zones identical to before N528; `GET /v1/biometric/sessions/{id}/metrics` returns `hr_direct_count`.
+- `ListExerciseHR`: the same rule per exercise window — a health spike inside a live stream does not become an exercise's max.
+
+### Manual / API
+
+1. Upload a bluetooth/hr_monitor sample for a finished session via the API, recompute its metrics: `hr_direct_count` ≥ 1 in the response and on a subsequent GET.
+2. Recompute a session that has only Apple Health samples: `hr_direct_count: 0`, every other field unchanged from the pre-N528 value.

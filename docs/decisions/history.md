@@ -63975,6 +63975,121 @@ session with the watch on, open it before Zepp has pushed, see the "not yet"
 sentence, tap Sync heart rate after Zepp syncs, watch the report appear —
 and confirm the automatic pass finds it without the tap on a later foreground.
 
+## 2026-09-08 — N528 (#958), part 1 of 2: the backend learns a heart-rate monitor exists — `bluetooth` samples, and the direct-wins / Health-fills-gaps rule
+
+**Why a backend PR first.** The user's ask, the same day W18 landed: *"make
+amazfit direct integration so we can streamline hr directly especially for
+running… we prioritize specific integration over general apple health and if
+no data available in amazfit we take from apple health… same goes for
+android."* Zepp has no public cloud API; what an Amazfit — and every Garmin,
+Polar, Coros and chest strap — does expose is the standard **Bluetooth Heart
+Rate Profile** (GATT `0x180D`), so "direct Amazfit" is really "connect a
+heart-rate monitor", vendor-neutral, identical on both platforms. #958's
+sequence is two PRs: this one gives the server a way to store and rank those
+samples; the next adds the pairing, the live stream and the screens. Landing
+the contract first means the mobile PR ships against an API already deployed,
+and this half is small enough to review on its own.
+
+**What changed (backend + contract only; no mobile file touched).**
+
+1. **`source_platform` gains `bluetooth`** — a sample this app recorded
+   itself, live, with no health store in between (`biometric.go`, contract
+   enum). No migration for that: `source_platform` has never had a CHECK
+   (000089 chose Go validation for a growing vocabulary, deliberately).
+2. **`source` gains `hr_monitor`** — and this is a deviation from the ticket's
+   own sketch, which said the sample's `source` would carry the device's
+   advertised name. `Source` is a **closed** vocabulary (`Validate()` refuses
+   anything outside `sources`), and opening it to free text for one platform
+   would have broken the trend-by-`(metric_type, source)` grouping the column
+   exists for. One vendor-neutral value instead; the monitor's *name* stays on
+   the phone that paired it, which is also the only place it is ever needed
+   ("from your Amazfit GTR 4" is a sentence the report builds locally).
+   `Validate()` also pairs the two: `bluetooth` ⇔ `hr_monitor`, both ways —
+   the platform alone now drives real behaviour, so a sample claiming one
+   half without the other is refused (backend review's suggestion; neither
+   value predates N528, so no existing client is affected).
+3. **The priority rule, stated once, as code** — `MergeHRSources` in
+   `merge.go`, pure, with `DirectGapFillThreshold = 30s` a named constant.
+   For a session window: direct samples always win; a health-store sample is
+   kept only inside a gap in the direct stream **strictly longer** than the
+   threshold, where the gaps are the intervals between consecutive direct
+   samples *and* the two window edges (a link that connected late or died
+   early gets those minutes from the health store). A health sample at the
+   exact instant of a direct one is covered outright — the first draft got
+   that wrong and the table test caught it. With no direct samples the input
+   is returned as it came, same slice, so every pre-N528 session and every
+   session without a monitor is computed **exactly** as before (pinned by a
+   test that checks slice identity, not just equality). "Take whichever is
+   more accurate" is not a measurable rule; "which one arrived without a sync
+   in the middle" is, and that is what the threshold encodes.
+4. **`ComputeSessionMetrics` and `ListExerciseHR` both apply it** — the
+   per-exercise numbers must not disagree with the session's about their
+   source. `queryHRSamples` now reads `source_platform` (it read only time
+   and value before), and `HRSample` carries `Platform`; the zone/TRIMP
+   arithmetic never looks at it.
+5. **`session_metrics.hr_direct_count`** (migration `20260908204400`,
+   `INTEGER NOT NULL DEFAULT 0 CHECK (>= 0)`): how many of `sample_count` came
+   direct. `sample_count - hr_direct_count` is what the health store filled;
+   derived, not stored. No device column — see 2. Every reader/writer of the
+   row (insert, `ON CONFLICT` set, `RETURNING`, `GetSessionMetrics`, the scan
+   helper) carries it; the contract's `SessionMetrics` gains the field as
+   `readOnly`.
+
+**Tests.** `merge_test.go` — a table over the rule (pass-through, drop inside
+a covered span, threshold exactly-equal is not a gap, one second past is,
+same-instant, head gap, tail gap, short head gap, unsorted input, empty), plus
+slice-identity pass-through, unknown-window behaviour, input not mutated, the
+two vocabulary additions via `Validate()`, and the threshold pinned at 30s.
+`merge_postgres_test.go` — through the real repository on a migrated database:
+`PutSamples` accepts the pair; a five-minute direct stream then a dead link
+yields `hr_direct_count 4` of `sample_count 8` with the health tail's max
+honoured; a health spike inside a dense direct stream never leaks into the
+session max nor the per-exercise max; a no-monitor session is byte-for-byte
+the HappyPath fixture's result. Ten mutations (threshold `>=`, same-instant
+guard removed, edges ignored, copy-instead-of-input, platform check inverted,
+compute ignoring the merge, count never stored, either vocabulary value
+removed, per-exercise merge removed) each applied with an in-file anchor
+assertion; **two survived the first pass** — `PutSamples` does not validate
+(the handler does), so the vocabulary needed a `Validate()` test, and nothing
+exercised the per-exercise merge — both got a test and were re-run caught.
+`test:api:all` green, one accounted skip.
+
+**Test database note.** The shared `vola_test` was found **dirty at version
+92** — some earlier session's migration failed part-way. Not repaired here
+(not this session's failure to guess at), and irrelevant to this branch: it
+adds a migration, which is the case the `vola-testing` skill says must use a
+per-branch database anyway (`vola_test_n528`, migrated from `origin/main` +
+this branch). Whoever owns the dirty state should run `migrate status` and
+follow its instructions.
+
+**Part 2 (mobile), designed here so it is decided once — the user added two
+requirements mid-flight and both are in scope:**
+
+- **Pairing in Settings → Integrations**, beside the Apple Health / Health
+  Connect toggles: scan for Heart Rate Profile devices, pick, remember (name
+  + id, locally), forget. Copy names the Amazfit step ("turn on heart-rate
+  broadcasting in Zepp first"). `react-native-ble-plx` 3.5.1 (200 days old —
+  clears the 24h supply-chain guard; ships an Expo config plugin; the one
+  established cross-platform library, Expo has no first-party BLE). A NEW
+  native dependency: `pod install` verified in `Podfile.lock`, permission
+  strings reviewed, Release build launched before merge.
+- **Live HR everywhere a session runs** — *"when the device with hr is
+  connected we have live hr we should show nice indicators and current hr
+  data for any session we do"*: one live-HR source (a small store fed by the
+  BLE subscription) and a shared indicator component — current bpm, zone
+  colour, a beat pulse, connection state (connected / reconnecting /
+  disconnected, never silent) — on the strength, BJJ and running session
+  screens alike. Samples recorded on receipt with `source_platform:
+  bluetooth`, `source: hr_monitor`, uploaded through the existing outbox.
+- **A Today module** — *"even make a nice module in today showing my current
+  HR… it should look nice"*: when a remembered monitor is in range, Today
+  gets a card with the live number, resting-vs-now context and the zone, in
+  the design-token language (N508) and the momentum-card shape; absent
+  without a monitor, so a Today without one is unchanged.
+- The session report says which source its numbers came from, from
+  `hr_direct_count` and the locally remembered monitor name.
+- Android parity throughout, Health Connect as the fallback.
+
 ## Open items / known gaps as of this entry
 
 

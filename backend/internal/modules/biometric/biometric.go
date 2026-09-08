@@ -124,10 +124,17 @@ const (
 	// doc comment on MetricType: "growing this list is a one-line Go
 	// change."
 	SourceAndroidWearable Source = "android_wearable"
+	// SourceHRMonitor (N528/#958): any Bluetooth Heart Rate Profile device —
+	// an Amazfit, a Garmin, a Polar strap — read live by this app. One value
+	// on purpose: the profile is vendor-neutral and the app never learns the
+	// vendor from it; the monitor's advertised name stays on the phone that
+	// paired it, which is where the report names it from.
+	SourceHRMonitor Source = "hr_monitor"
 )
 
 var sources = []Source{
 	SourceAppleWatch, SourceOura, SourceWhoop, SourceGarmin, SourceManual, SourceAndroidWearable,
+	SourceHRMonitor,
 }
 
 func Sources() []Source {
@@ -152,9 +159,15 @@ const (
 	PlatformHealthKit     SourcePlatform = "healthkit"
 	PlatformHealthConnect SourcePlatform = "health_connect"
 	PlatformManual        SourcePlatform = "manual"
+	// PlatformBluetooth (N528/#958): recorded by this app itself, live, from a
+	// Bluetooth Heart Rate Profile monitor (GATT 0x180D) — no health store in
+	// between. The one platform whose samples ComputeSessionMetrics prefers
+	// over the rest for the same window; see MergeHRSources. `source` is
+	// SourceHRMonitor for these.
+	PlatformBluetooth SourcePlatform = "bluetooth"
 )
 
-var sourcePlatforms = []SourcePlatform{PlatformHealthKit, PlatformHealthConnect, PlatformManual}
+var sourcePlatforms = []SourcePlatform{PlatformHealthKit, PlatformHealthConnect, PlatformManual, PlatformBluetooth}
 
 func SourcePlatforms() []SourcePlatform {
 	out := make([]SourcePlatform, len(sourcePlatforms))
@@ -233,6 +246,15 @@ func (s Sample) Validate() error {
 		return ErrInvalidInput
 	}
 	if !s.SourcePlatform.Valid() {
+		return ErrInvalidInput
+	}
+	// N528/#958: `bluetooth` and `hr_monitor` go together, both ways. The
+	// platform alone now decides real behaviour (MergeHRSources' priority,
+	// hr_direct_count), so a sample claiming one half without the other
+	// would take part in — or be excluded from — that priority on a field
+	// that contradicts its own `source`. Neither value existed before N528,
+	// so no client can have been sending either legitimately.
+	if (s.SourcePlatform == PlatformBluetooth) != (s.Source == SourceHRMonitor) {
 		return ErrInvalidInput
 	}
 	if s.Unit == "" || len(s.Unit) > maxUnitLength {
@@ -446,6 +468,14 @@ type SessionMetrics struct {
 	// (never the empty string) once this leaves Compute.
 	HRSource    HRSource `json:"hr_source"`
 	SampleCount int      `json:"sample_count"`
+
+	// N528/#958 — provenance of the samples above. HRDirectCount is how many
+	// of SampleCount were recorded straight from a Bluetooth monitor by this
+	// app (source_platform bluetooth); SampleCount - HRDirectCount is what
+	// Apple Health / Health Connect contributed (gap fill only, once a direct
+	// stream exists — MergeHRSources). The monitor's NAME is not here: the
+	// phone that paired it remembers it, and the report names it from there.
+	HRDirectCount int `json:"hr_direct_count"`
 
 	// HRWindowStart and HRWindowEnd are the ACTUAL [start, end] this row's
 	// samples were queried from — always populated once a row exists, never

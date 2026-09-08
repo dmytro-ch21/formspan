@@ -83,6 +83,10 @@ func TRIMP(minutesInZone [5]float64) float64 {
 type HRSample struct {
 	MeasuredAt time.Time
 	BPM        float64
+	// Platform (N528/#958): where the sample came from. Read only by
+	// MergeHRSources; the zone/TRIMP arithmetic below never looks at it, so
+	// tests that build samples without it are unaffected.
+	Platform SourcePlatform
 }
 
 // maxSampleGapForZoneAttribution bounds how long a gap between two
