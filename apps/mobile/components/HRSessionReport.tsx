@@ -16,6 +16,16 @@ import {
 } from '@/lib/hrSessionReport';
 import type { HRTimelinePoint } from '@/lib/hrTimeline';
 import type { ExerciseHR, SessionMetrics } from '@/lib/biometric';
+import { useEffect, useRef, useState } from 'react';
+
+import { Button } from '@/components/ui/Button';
+import {
+  hrAbsenceCopy,
+  syncNowButtonVisible,
+  syncNowOutcomeCopy,
+  type HRAbsenceState,
+  type SyncNowOutcome,
+} from '@/lib/hrAbsence';
 
 /**
  * The per-session heart-rate report — N488/#849. One component, reused
@@ -70,6 +80,9 @@ export function HRSessionReport({
   exerciseNames = {},
   sessionStartedAt,
   sessionEndedAt,
+  absence = null,
+  sourceLabel = 'Apple Health',
+  onSyncNow,
   testID = 'hr-session-report',
 }: {
   metrics: SessionMetrics | null;
@@ -96,9 +109,49 @@ export function HRSessionReport({
    *  line, e.g. a caller with no convenient RFC3339 pair on hand yet. */
   sessionStartedAt?: string;
   sessionEndedAt?: string;
+  /** W18/#957: WHICH absence this is, when there is no HR data — decided by
+   *  `lib/hrAbsence.ts` from the sync toggle and the session's age (the
+   *  `useSessionHRSync` hook does that for a screen). `null` renders the
+   *  generic sentence and no button — a caller with nothing to say yet. */
+  absence?: HRAbsenceState | null;
+  /** "Apple Health" / "Health Connect" — `healthSourceLabel`. */
+  sourceLabel?: string;
+  /** One on-demand attempt for THIS session, cooldown ignored. Omit to
+   *  render no button at all. The card reports the outcome in a sentence
+   *  under the button; a `found` outcome is the caller's to act on (re-read
+   *  the metrics, and this card is replaced by the report). */
+  onSyncNow?: () => Promise<SyncNowOutcome>;
   testID?: string;
 }) {
+  // Hooks before the early return below — the rules of hooks, not taste.
+  const [syncing, setSyncing] = useState(false);
+  const [outcomeCopy, setOutcomeCopy] = useState<string | null>(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const handleSyncNow = () => {
+    if (!onSyncNow || syncing) return;
+    setSyncing(true);
+    setOutcomeCopy(null);
+    onSyncNow()
+      .then((outcome) => {
+        if (live.current) setOutcomeCopy(syncNowOutcomeCopy(outcome, sourceLabel));
+      })
+      .catch(() => {
+        // `onSyncNow` is contracted never to throw; this is the belt.
+        if (live.current) setOutcomeCopy(syncNowOutcomeCopy({ status: 'error' }, sourceLabel));
+      })
+      .finally(() => {
+        if (live.current) setSyncing(false);
+      });
+  };
   const report = buildHRSessionReport(metrics, sessionRPE, exerciseHR, exerciseNames);
+  const absenceState: HRAbsenceState = absence ?? 'loading';
+  const showSyncNow = onSyncNow != null && syncNowButtonVisible(absenceState);
 
   if (report.state === 'unavailable') {
     return (
@@ -106,11 +159,31 @@ export function HRSessionReport({
         <SectionHeader label="Heart rate" />
         <RNView style={styles.emptyCard} testID={`${testID}-unavailable`}>
           <Icon name="heart" size={18} color={vola.textDim} />
-          <Text style={styles.emptyText}>
-            No heart-rate data for this session — turn on Health sync in Settings, or it may not
-            have synced yet.
+          {/* W18/#957: one sentence per KIND of absence, never the old
+              catch-all that read the same whether sync was off or the
+              watch simply hadn't pushed yet. `testID` carries the state so
+              a test can assert which sentence, not just that one exists. */}
+          <Text style={styles.emptyText} testID={`${testID}-absence-${absenceState}`}>
+            {hrAbsenceCopy(absenceState, sourceLabel)}
           </Text>
         </RNView>
+        {showSyncNow && (
+          <RNView style={syncStyles.row} testID={`${testID}-sync-now`}>
+            <Button
+              label={syncing ? 'Checking…' : 'Sync heart rate'}
+              variant="secondary"
+              disabled={syncing}
+              onPress={handleSyncNow}
+              accessibilityHint={`Asks ${sourceLabel} for this session's heart rate right now`}
+              testID={`${testID}-sync-now-button`}
+            />
+            {outcomeCopy != null && (
+              <Text style={syncStyles.outcome} accessibilityLiveRegion="polite" testID={`${testID}-sync-outcome`}>
+                {outcomeCopy}
+              </Text>
+            )}
+          </RNView>
+        )}
       </RNView>
     );
   }
@@ -297,6 +370,12 @@ function ExerciseHRRow({ row, testID }: { row: HRExerciseRow; testID: string }) 
     </RNView>
   );
 }
+
+/** W18/#957 — the "Sync heart rate" row under the empty card. */
+const syncStyles = StyleSheet.create({
+  row: { marginTop: 10, gap: 8, alignItems: 'flex-start' },
+  outcome: { color: vola.textDim, fontSize: 13, lineHeight: 18 },
+});
 
 const styles = StyleSheet.create({
   wrap: { gap: 10, marginTop: 12, marginBottom: 4 },

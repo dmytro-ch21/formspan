@@ -58,6 +58,7 @@ import {
   fetchAccomplishments,
 } from '@/lib/accomplishments';
 import { milestoneForSession, type Milestone } from '@/lib/milestones';
+import { useSessionHRSync } from '@/lib/useSessionHRSync';
 
 /**
  * Reading a BJJ session back.
@@ -352,6 +353,26 @@ export default function BjjSessionScreen() {
   // bug `components/TrendCard.tsx`'s own tests exist to catch, one screen
   // over.
   const [hrLoaded, setHrLoaded] = useState(false);
+  // W18/#957 — which kind of "no HR" this is, and the on-demand attempt.
+  // `onFound` re-reads the metrics so the report replaces the empty card.
+  const hrSync = useSessionHRSync({
+    userId,
+    getToken,
+    sessionID: id,
+    startedAt: session?.started_at,
+    endedAt: session?.ended_at,
+    onFound: () => {
+      if (!id) return;
+      getSessionMetrics(getToken, id)
+        .then((m) => setHrMetrics(m))
+        // Deliberately silent: the samples are uploaded and the ledger
+        // already says 'window', so a failed re-read (offline again) loses
+        // nothing — the card keeps its "Found N samples" sentence and the
+        // report arrives on the next mount or foreground.
+        .catch(() => {});
+    },
+  });
+
   useEffect(() => {
     // No synchronous reset here on purpose (react-hooks/set-state-in-effect):
     // `hrMetrics` already starts `null`, and nothing on this screen ever
@@ -770,6 +791,9 @@ export default function BjjSessionScreen() {
         <HRSessionReport
           metrics={hrMetrics}
           sessionRPE={detail?.session_rpe ?? null}
+          absence={hrSync.absence}
+          sourceLabel={hrSync.sourceLabel}
+          onSyncNow={hrSync.syncNow}
           hrTimeline={hrTimeline}
           // N522/#934: lets the report show a diagnostic line when the
           // heart-rate window it actually queried differs meaningfully

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import { HRSessionReport } from '../HRSessionReport';
 import type { SessionMetrics } from '@/lib/biometric';
@@ -211,5 +211,77 @@ describe('the HR timeline (N491/#852)', () => {
       />,
     );
     expect(screen.getByTestId('running-hr-timeline')).toBeTruthy();
+  });
+});
+
+describe('W18/#957 — the no-HR card says WHICH absence this is, and offers "Sync heart rate"', () => {
+  const none = async () => ({ status: 'none' as const });
+
+  test('no absence given: the generic sentence, and no button even with a handler', () => {
+    render(<HRSessionReport metrics={null} onSyncNow={none} />);
+    expect(screen.getByTestId('hr-session-report-absence-loading')).toBeTruthy();
+    expect(screen.queryByTestId('hr-session-report-sync-now')).toBeNull();
+  });
+
+  test("'checking': names the source, says the data is not there YET, and shows the button", () => {
+    render(<HRSessionReport metrics={null} absence="checking" sourceLabel="Apple Health" onSyncNow={none} />);
+    const copy = screen.getByTestId('hr-session-report-absence-checking');
+    expect(copy.props.children).toMatch(/Apple Health doesn't have heart rate for this session yet/);
+    expect(screen.getByTestId('hr-session-report-sync-now-button')).toBeTruthy();
+    expect(screen.getByText('Sync heart rate')).toBeTruthy();
+  });
+
+  test("'sync_off': points at Settings and hides the button, handler or not", () => {
+    render(<HRSessionReport metrics={null} absence="sync_off" sourceLabel="Health Connect" onSyncNow={none} />);
+    expect(screen.getByTestId('hr-session-report-absence-sync_off').props.children).toMatch(/Health Connect sync in Settings/);
+    expect(screen.queryByTestId('hr-session-report-sync-now')).toBeNull();
+  });
+
+  test("'gave_up' still offers the button — nothing else will look again", () => {
+    render(<HRSessionReport metrics={null} absence="gave_up" sourceLabel="Apple Health" onSyncNow={none} />);
+    expect(screen.getByTestId('hr-session-report-absence-gave_up')).toBeTruthy();
+    expect(screen.getByTestId('hr-session-report-sync-now-button')).toBeTruthy();
+  });
+
+  test('no handler: the sentence still names the state, but there is no button to press', () => {
+    render(<HRSessionReport metrics={null} absence="checking" sourceLabel="Apple Health" />);
+    expect(screen.getByTestId('hr-session-report-absence-checking')).toBeTruthy();
+    expect(screen.queryByTestId('hr-session-report-sync-now')).toBeNull();
+  });
+
+  test('tapping runs exactly one attempt and reports its outcome, in a sentence, under the button', async () => {
+    const onSyncNow = jest.fn(none);
+    render(<HRSessionReport metrics={null} absence="checking" sourceLabel="Apple Health" onSyncNow={onSyncNow} />);
+
+    fireEvent.press(screen.getByTestId('hr-session-report-sync-now-button'));
+
+    expect(onSyncNow).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByTestId('hr-session-report-sync-outcome')).toBeTruthy());
+    expect(screen.getByTestId('hr-session-report-sync-outcome').props.children).toMatch(/Still nothing in Apple Health/);
+    // Back to tappable once the attempt has answered.
+    expect(screen.getByText('Sync heart rate')).toBeTruthy();
+  });
+
+  test("a 'found' outcome says how many, in words, until the caller's metrics re-read replaces this card", async () => {
+    const onSyncNow = jest.fn(async () => ({ status: 'found' as const, sampleCount: 40 }));
+    render(<HRSessionReport metrics={null} absence="checking" sourceLabel="Apple Health" onSyncNow={onSyncNow} />);
+
+    fireEvent.press(screen.getByTestId('hr-session-report-sync-now-button'));
+
+    await waitFor(() => expect(screen.getByTestId('hr-session-report-sync-outcome')).toBeTruthy());
+    expect(onSyncNow).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('hr-session-report-sync-outcome').props.children).toMatch(/^Found 40 heart-rate samples/);
+  });
+
+  test('a handler that throws anyway lands as the error sentence, not a crash', async () => {
+    const onSyncNow = jest.fn(async () => {
+      throw new Error('should have been an outcome');
+    });
+    render(<HRSessionReport metrics={null} absence="checking" sourceLabel="Apple Health" onSyncNow={onSyncNow} />);
+
+    fireEvent.press(screen.getByTestId('hr-session-report-sync-now-button'));
+
+    await waitFor(() => expect(screen.getByTestId('hr-session-report-sync-outcome')).toBeTruthy());
+    expect(screen.getByTestId('hr-session-report-sync-outcome').props.children).toMatch(/Couldn't check right now/);
   });
 });

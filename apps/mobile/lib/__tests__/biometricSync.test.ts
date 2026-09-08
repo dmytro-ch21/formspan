@@ -12,7 +12,7 @@
 
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 import type { HealthKitQuantitySample } from '../healthkit';
-import { readBiometricSyncFailureCount, syncBiometricEnrichment } from '../biometricSync';
+import { enrichSessionNow, readBiometricSyncFailureCount, syncBiometricEnrichment } from '../biometricSync';
 import { writeHealthKitImportEnabled } from '../healthkitSync';
 import { finishLocalSession, sessionsNeedingBiometricSync, startLocalSession } from '../sessionStore';
 
@@ -192,12 +192,15 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     expect(hrSource).toBe('window');
   });
 
-  it("N511/#893: does NOT retry a zero-sample session again within the retry cooldown", async () => {
-    // A recent session, not the fixed 2026-09-01 default other tests in
-    // this file use — `needsEnrichmentAttempt`'s RETRY_WINDOW_DAYS check
-    // needs this session's `ended_at` to be recent relative to REAL
-    // `Date.now()` (this test does not mock the clock), or the retry-window
-    // check rejects it before the cooldown check ever runs.
+  it('W18/#957: a session that ended an HOUR ago is re-asked on the very next pass — the watch has usually pushed by then', async () => {
+    // Pre-W18 this was the "does NOT retry within the cooldown" test, with
+    // this exact session: ended an hour ago, first pass found nothing, the
+    // next pass moments later was refused for 12 hours. That is the
+    // athlete-visible bug — the data had long since landed in Apple Health
+    // and the screen stayed empty all day. A recent session, not the fixed
+    // 2026-09-01 default other tests here use, because RETRY_WINDOW_DAYS
+    // is checked against REAL `Date.now()` (this test does not mock the
+    // clock).
     const recentEnd = new Date(Date.now() - 60 * 60 * 1000);
     const recentStart = new Date(recentEnd.getTime() - 30 * 60 * 1000);
     mockHRSamples = [];
@@ -205,8 +208,25 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     await syncBiometricEnrichment(USER, getToken);
     expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
 
-    // The Watch data has since arrived, but the very next pass — moments
-    // later — is still inside RETRY_COOLDOWN_HOURS.
+    // The Watch data has since arrived; the very next pass finds it.
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+    mockHRSamples = [hrSample()];
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('W18/#957: a session that ended FIVE hours ago is NOT re-asked moments later — the hourly cadence holds', async () => {
+    const recentEnd = new Date(Date.now() - 5 * 60 * 60 * 1000);
+    const recentStart = new Date(recentEnd.getTime() - 30 * 60 * 1000);
+    mockHRSamples = [];
+    await finishedSession({ started_at: recentStart.toISOString(), ended_at: recentEnd.toISOString() });
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+
     mockComputeMetrics.mockClear();
     mockPutSamples.mockClear();
     mockHRSamples = [hrSample()];
@@ -218,10 +238,13 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
   });
 
   it('N511/#893: retries a zero-sample session once the retry cooldown has elapsed, and this time finds real data', async () => {
-    // Same reasoning as the cooldown test above — a recent session, not the
-    // fixed 2026-09-01 default, so RETRY_WINDOW_DAYS does not itself reject
-    // it before the cooldown check gets a chance to run.
-    const recentEnd = new Date(Date.now() - 60 * 60 * 1000);
+    // A recent session, not the fixed 2026-09-01 default, so
+    // RETRY_WINDOW_DAYS does not itself reject it before the cooldown check
+    // gets a chance to run. FIVE hours old, not one (W18/#957): a session
+    // under two hours old has NO cooldown any more, so backdating its
+    // ledger row would prove nothing — this one sits on the hourly tier,
+    // where the backdate below is what makes the retry happen.
+    const recentEnd = new Date(Date.now() - 5 * 60 * 60 * 1000);
     const recentStart = new Date(recentEnd.getTime() - 30 * 60 * 1000);
     mockHRSamples = [];
     const session = await finishedSession({
@@ -231,12 +254,12 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     await syncBiometricEnrichment(USER, getToken);
     expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
 
-    // Simulate RETRY_COOLDOWN_HOURS (12h) having elapsed by backdating the
-    // ledger row directly — this is the real `biometric_hr_synced` table
-    // migrated by the same fixture, not a mock.
+    // Simulate the hourly cooldown having elapsed by backdating the ledger
+    // row directly — this is the real `biometric_hr_synced` table migrated
+    // by the same fixture, not a mock.
     await mockFixture.runAsync(
       `UPDATE biometric_hr_synced SET attempted_at = ? WHERE user_id = ? AND session_id = ?`,
-      new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+      new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       USER,
       session.id,
     );
@@ -636,5 +659,118 @@ describe('syncBiometricEnrichment — VO2max', () => {
 
     expect(mockComputeMetrics).not.toHaveBeenCalled();
     expect(mockPutSamples).toHaveBeenCalled();
+  });
+});
+
+describe('enrichSessionNow — W18/#957, the "Sync heart rate" button', () => {
+  // An hourly-tier session (five hours old): the pass refuses a second
+  // attempt moments after the first; the button must not.
+  const end = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const start = new Date(end.getTime() - 30 * 60 * 1000);
+  const enrichable = (id: string) => ({ id, started_at: start.toISOString(), ended_at: end.toISOString() });
+
+  async function ledgerRow(sessionID: string): Promise<{ hr_source: string } | null> {
+    return mockFixture.getFirstAsync<{ hr_source: string }>(
+      `SELECT hr_source FROM biometric_hr_synced WHERE user_id = ? AND session_id = ?`,
+      USER,
+      sessionID,
+    );
+  }
+
+  it('bypasses the cooldown: the attempt the pass just refused runs, finds the data, and the ledger records window', async () => {
+    mockHRSamples = [];
+    const session = await finishedSession({ started_at: start.toISOString(), ended_at: end.toISOString() });
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    expect((await ledgerRow(session.id))?.hr_source).toBe('none');
+
+    // The Watch pushed in the meantime. The pass is inside its cooldown …
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+    mockHRSamples = [hrSample()];
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).not.toHaveBeenCalled();
+
+    // … the button is not.
+    const outcome = await enrichSessionNow(USER, getToken, enrichable(session.id));
+
+    expect(outcome).toEqual({ status: 'found', sampleCount: 1 });
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    expect((await ledgerRow(session.id))?.hr_source).toBe('window');
+  });
+
+  it('bypasses the retry WINDOW too: a session the orchestrator has given up on can still be asked about by hand', async () => {
+    // `finishedSession`'s default dates are 2026-09-01 — past RETRY_WINDOW_DAYS
+    // relative to real now. First pass writes a 'none' row; from then on the
+    // pass never offers it again.
+    mockHRSamples = [];
+    const session = await finishedSession();
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    mockComputeMetrics.mockClear();
+    mockHRSamples = [hrSample()];
+    await syncBiometricEnrichment(USER, getToken);
+    expect(mockComputeMetrics).not.toHaveBeenCalled();
+
+    const outcome = await enrichSessionNow(USER, getToken, {
+      id: session.id,
+      started_at: '2026-09-01T07:00:00.000Z',
+      ended_at: '2026-09-01T07:30:00.000Z',
+    });
+
+    expect(outcome.status).toBe('found');
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports 'none' honestly when Health still has nothing — and records the attempt, so the pass's cadence restarts from now", async () => {
+    mockHRSamples = [];
+    const session = await finishedSession({ started_at: start.toISOString(), ended_at: end.toISOString() });
+
+    const outcome = await enrichSessionNow(USER, getToken, enrichable(session.id));
+
+    expect(outcome).toEqual({ status: 'none' });
+    expect(mockPutSamples).not.toHaveBeenCalled();
+    expect((await ledgerRow(session.id))?.hr_source).toBe('none');
+  });
+
+  it("reports 'sync_off' with the toggle off, and never touches HealthKit", async () => {
+    await writeHealthKitImportEnabled(USER, false);
+    mockHRSamples = [hrSample()];
+    const session = await finishedSession({ started_at: start.toISOString(), ended_at: end.toISOString() });
+
+    const outcome = await enrichSessionNow(USER, getToken, enrichable(session.id));
+
+    expect(outcome).toEqual({ status: 'sync_off' });
+    expect(mockQueryHeartRateSamples).not.toHaveBeenCalled();
+    expect(await ledgerRow(session.id)).toBeNull();
+  });
+
+  it("reports 'no_hrmax' with no date of birth on the profile — the honest reason nothing can be computed", async () => {
+    mockDateOfBirth = null;
+    mockHRSamples = [hrSample()];
+    const session = await finishedSession({ started_at: start.toISOString(), ended_at: end.toISOString() });
+
+    const outcome = await enrichSessionNow(USER, getToken, enrichable(session.id));
+
+    expect(outcome).toEqual({ status: 'no_hrmax' });
+    expect(mockComputeMetrics).not.toHaveBeenCalled();
+  });
+
+  it("reports 'error' when the upload fails, and records nothing — the next pass decides fresh", async () => {
+    mockHRSamples = [hrSample()];
+    mockPutSamples.mockRejectedValue(new Error('simulated network failure'));
+    const session = await finishedSession({ started_at: start.toISOString(), ended_at: end.toISOString() });
+
+    const outcome = await enrichSessionNow(USER, getToken, enrichable(session.id));
+
+    expect(outcome).toEqual({ status: 'error' });
+    expect(await ledgerRow(session.id)).toBeNull();
+  });
+
+  it('an unfinished session is refused up front, without a HealthKit read', async () => {
+    const outcome = await enrichSessionNow(USER, getToken, { id: 'x', started_at: start.toISOString(), ended_at: null });
+    expect(outcome).toEqual({ status: 'error' });
+    expect(mockQueryHeartRateSamples).not.toHaveBeenCalled();
   });
 });

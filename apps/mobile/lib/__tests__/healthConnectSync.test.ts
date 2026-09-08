@@ -21,6 +21,7 @@ import { upsert, type LocalSession } from '../sessionStore';
 import { HealthConnectPermissionError, type HeartRateReading, type Vo2MaxReading } from '../healthConnect';
 import type { SessionMetrics } from '../biometric';
 import {
+  enrichHealthConnectSessionNow,
   readHealthConnectImportEnabled,
   syncHealthConnectBiometrics,
   writeHealthConnectImportEnabled,
@@ -516,5 +517,107 @@ describe('syncHealthConnectBiometrics — a refused grant is reported, not swall
     const result = await syncHealthConnectBiometrics(USER, getToken);
 
     expect(result.notPermitted).toEqual(['ExerciseSession', 'HeartRate']);
+  });
+});
+
+describe('enrichHealthConnectSessionNow — W18/#957, the "Sync heart rate" button on Android', () => {
+  // Hourly-tier session (five hours old): the pass refuses a second attempt
+  // moments after the first; the button must not.
+  const ended = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+  const started = new Date(new Date(ended).getTime() - 30 * 60 * 1000).toISOString();
+  const enrichable = (id: string) => ({ id, started_at: started, ended_at: ended });
+
+  async function ledgerRow(sessionID: string): Promise<{ hr_source: string; sample_count: number } | null> {
+    return mockFixture.getFirstAsync<{ hr_source: string; sample_count: number }>(
+      `SELECT hr_source, sample_count FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
+      USER,
+      sessionID,
+    );
+  }
+
+  beforeEach(async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+  });
+
+  it('bypasses the cooldown: the attempt the pass just refused runs, finds the data, and the ledger records window', async () => {
+    await seedFinishedRemoteSession('hc-now-1', started, ended);
+    mockHeartRateReadings = [];
+    await syncHealthConnectBiometrics(USER, getToken);
+    expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
+    expect((await ledgerRow('hc-now-1'))?.hr_source).toBe('none');
+
+    // The watch's companion pushed in the meantime. The pass is inside its
+    // cooldown …
+    mockComputeSessionMetrics.mockClear();
+    mockPutSamples.mockClear();
+    mockHeartRateReadings = [heartRateReading()];
+    mockComputedMetrics = { hr_source: 'window', sample_count: 1 };
+    await syncHealthConnectBiometrics(USER, getToken);
+    expect(mockComputeSessionMetrics).not.toHaveBeenCalled();
+
+    // … the button is not.
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, enrichable('hc-now-1'));
+
+    expect(outcome).toEqual({ status: 'found', sampleCount: 1 });
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
+    expect((await ledgerRow('hc-now-1'))?.hr_source).toBe('window');
+  });
+
+  it("reports 'none' when Health Connect still has nothing, and records the attempt", async () => {
+    await seedFinishedRemoteSession('hc-now-2', started, ended);
+    mockHeartRateReadings = [];
+
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, enrichable('hc-now-2'));
+
+    expect(outcome).toEqual({ status: 'none' });
+    expect(mockPutSamples).not.toHaveBeenCalled();
+    expect((await ledgerRow('hc-now-2'))?.hr_source).toBe('none');
+  });
+
+  it("reports 'sync_off' with the toggle off, and never reads Health Connect", async () => {
+    await writeHealthConnectImportEnabled(USER, false);
+    mockHeartRateReadings = [heartRateReading()];
+
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, enrichable('hc-now-3'));
+
+    expect(outcome).toEqual({ status: 'sync_off' });
+    expect(mockQueryHeartRate).not.toHaveBeenCalled();
+  });
+
+  it("reports 'no_hrmax' without a date of birth — but still uploads the samples it found, exactly as the pass does", async () => {
+    mockDateOfBirth = null;
+    mockHeartRateReadings = [heartRateReading()];
+
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, enrichable('hc-now-4'));
+
+    expect(outcome).toEqual({ status: 'no_hrmax' });
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    expect(mockComputeSessionMetrics).not.toHaveBeenCalled();
+    expect(await ledgerRow('hc-now-4')).toEqual({ hr_source: 'none', sample_count: 1 });
+  });
+
+  it("reports 'error' when the compute fails, and records nothing", async () => {
+    mockHeartRateReadings = [heartRateReading()];
+    mockComputeThrows = 'hc-now-5';
+
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, enrichable('hc-now-5'));
+
+    expect(outcome).toEqual({ status: 'error' });
+    expect(await ledgerRow('hc-now-5')).toBeNull();
+  });
+
+  it("a refused HeartRate grant is an 'error' here too — the pass's Settings message is where that gets explained", async () => {
+    mockHeartRateRejectsWith = new HealthConnectPermissionError('HeartRate');
+
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, enrichable('hc-now-6'));
+
+    expect(outcome).toEqual({ status: 'error' });
+  });
+
+  it('an unfinished session is refused up front, without a Health Connect read', async () => {
+    const outcome = await enrichHealthConnectSessionNow(USER, getToken, { id: 'x', started_at: started, ended_at: null });
+    expect(outcome).toEqual({ status: 'error' });
+    expect(mockQueryHeartRate).not.toHaveBeenCalled();
   });
 });

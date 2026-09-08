@@ -11,6 +11,7 @@ import {
   type EnrichmentLedgerEntry,
 } from './biometric';
 import { getDb } from './db';
+import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
 import { fitHRWindow, wideHRQueryWindow } from './hrWindowFit';
 import { isHealthKitSupported, queryHeartRateSamples, queryVO2MaxSamples } from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
@@ -368,87 +369,155 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
   if (hrMaxBPM == null) return;
 
   for (const session of toEnrich) {
-    const window = sessionHRWindow(session.started_at, session.ended_at);
-    if (!window) continue; // should not happen — the query already filters on ended_at set.
-
-    let raw = await queryHeartRateSamples(window.start, window.end);
-    // N522/#934: the exact session window found NOTHING — before giving up
-    // and letting this land as `hr_source: 'none'`, try a wide-window fit.
-    // This is exactly the post-hoc-logged-session shape (design doc in
-    // `lib/hrWindowFit.ts`): the exact window can be wrong even though the
-    // watch has real evidence nearby the same day. A session whose exact
-    // window DID find samples never reaches this — the fit only ever
-    // FALLS BACK, it never overrides a plain read that already worked.
-    let windowOverride: { start: string; end: string } | null = null;
-    if (raw.length === 0) {
-      const wide = wideHRQueryWindow(session.started_at);
-      const wideRaw = await queryHeartRateSamples(wide.start, wide.end);
-      const durationMs = window.end.getTime() - window.start.getTime();
-      const fit = fitHRWindow(
-        wideRaw.map((s) => ({ measuredAt: s.measuredAt, bpm: s.value })),
-        durationMs,
-        // `window.start`/`window.end` rather than `session.started_at`/
-        // `session.ended_at` directly — identical values (sessionHRWindow
-        // just parses them to Date), but already known non-null here (the
-        // `if (!window) continue` above), where the session's own field is
-        // still typed `string | null`.
-        { start: window.start.toISOString(), end: window.end.toISOString() },
-      );
-      if (fit) {
-        const fitStartMs = new Date(fit.start).getTime();
-        const fitEndMs = new Date(fit.end).getTime();
-        raw = wideRaw.filter((s) => {
-          const t = new Date(s.measuredAt).getTime();
-          return t >= fitStartMs && t <= fitEndMs;
-        });
-        // Only claim the fit as the query window once it actually produced
-        // real samples to upload — an empty intersection here would mean
-        // the fit and the filter disagree, which should not happen but
-        // must not silently claim an override with nothing behind it.
-        if (raw.length > 0) windowOverride = { start: fit.start, end: fit.end };
-      }
-    }
-
-    const samples = raw.map((s) => toBiometricSample(s, 'heart_rate', 'healthkit'));
-    const plan = planHRSync(samples);
-
     try {
-      if (plan.kind === 'upload-and-compute') {
-        await putBiometricSamples(getToken, plan.samples);
-      }
-      // 'estimated' — hrMaxBPM above only ever comes from
-      // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
-      // HRMaxSource doc comment for why nothing in this app produces
-      // 'observed' yet. `plan.hrSource` is always the CLAIM 'window' (see
-      // `planHRSync`'s own doc comment) — the backend is authoritative on
-      // the actual RESULT, downgrading to `hr_source: 'none'` itself once
-      // it sees zero heart_rate samples for the window. N511/#893's fix is
-      // reading THAT back (`metrics.hr_source` below) rather than — as the
-      // pre-N511 code did — ignoring the response and marking the ledger
-      // "done" unconditionally. `windowOverride` (N522/#934) is null on
-      // every path except a trusted wide-window fit — see above.
-      const metrics = await computeSessionMetrics(
-        getToken,
-        session.id,
-        hrMaxBPM,
-        'estimated',
-        plan.hrSource,
-        windowOverride,
-      );
-      await recordBiometricHRAttempt(
-        userID,
-        session.id,
-        metrics.hr_source === 'window' ? 'window' : 'none',
-        now,
-      );
+      await enrichSessionWindow(userID, getToken, session, hrMaxBPM, now);
     } catch {
       // Leave this session's ledger row exactly as it was (absent, or its
       // previous attempt) — the next pass's `needsEnrichmentAttempt` decides
       // fresh whether to retry it. One session's network failure must not
       // abort every other candidate in this pass.
+      //
+      // W18/#957: the HealthKit read itself now sits inside this try too
+      // (it used to run before it, so a read error aborted the WHOLE pass,
+      // silently, via `runPass`). A read that fails for one session now
+      // counts as that session's failure — visible in Settings via the
+      // N502 counter — and the remaining candidates still get their turn.
       await recordBiometricSyncFailure(userID);
       continue;
     }
+  }
+}
+
+/**
+ * ONE session's enrichment attempt, HealthKit read to ledger row — the body
+ * `syncSessionWindows` runs per candidate, carved out (W18/#957) so the
+ * session screen's "Sync heart rate" (`enrichSessionNow` below) runs exactly
+ * the same attempt for exactly one session, cooldown or not. Throws when the
+ * read, upload or compute fails — nothing is recorded then, and the caller
+ * decides what a failure means to it. Resolves to what the SERVER decided
+ * (`metrics.hr_source`), never to the claim that was sent.
+ */
+async function enrichSessionWindow(
+  userID: string,
+  getToken: TokenGetter,
+  session: EnrichableSession,
+  hrMaxBPM: number,
+  now: Date,
+): Promise<{ hrSource: 'window' | 'none'; sampleCount: number }> {
+  const window = sessionHRWindow(session.started_at, session.ended_at);
+  // Unfinished — nothing to ask about, and nothing to record. The pass's
+  // query already filters on ended_at set, so only `enrichSessionNow` can
+  // reach this, and it guards for it too.
+  if (!window) return { hrSource: 'none', sampleCount: 0 };
+
+  let raw = await queryHeartRateSamples(window.start, window.end);
+  // N522/#934: the exact session window found NOTHING — before giving up
+  // and letting this land as `hr_source: 'none'`, try a wide-window fit.
+  // This is exactly the post-hoc-logged-session shape (design doc in
+  // `lib/hrWindowFit.ts`): the exact window can be wrong even though the
+  // watch has real evidence nearby the same day. A session whose exact
+  // window DID find samples never reaches this — the fit only ever
+  // FALLS BACK, it never overrides a plain read that already worked.
+  let windowOverride: { start: string; end: string } | null = null;
+  if (raw.length === 0) {
+    const wide = wideHRQueryWindow(session.started_at);
+    const wideRaw = await queryHeartRateSamples(wide.start, wide.end);
+    const durationMs = window.end.getTime() - window.start.getTime();
+    const fit = fitHRWindow(
+      wideRaw.map((s) => ({ measuredAt: s.measuredAt, bpm: s.value })),
+      durationMs,
+      // `window.start`/`window.end` rather than `session.started_at`/
+      // `session.ended_at` directly — identical values (sessionHRWindow
+      // just parses them to Date), but already known non-null here (the
+      // `if (!window) return` above), where the session's own field is
+      // still typed `string | null`.
+      { start: window.start.toISOString(), end: window.end.toISOString() },
+    );
+    if (fit) {
+      const fitStartMs = new Date(fit.start).getTime();
+      const fitEndMs = new Date(fit.end).getTime();
+      raw = wideRaw.filter((s) => {
+        const t = new Date(s.measuredAt).getTime();
+        return t >= fitStartMs && t <= fitEndMs;
+      });
+      // Only claim the fit as the query window once it actually produced
+      // real samples to upload — an empty intersection here would mean
+      // the fit and the filter disagree, which should not happen but
+      // must not silently claim an override with nothing behind it.
+      if (raw.length > 0) windowOverride = { start: fit.start, end: fit.end };
+    }
+  }
+
+  const samples = raw.map((s) => toBiometricSample(s, 'heart_rate', 'healthkit'));
+  const plan = planHRSync(samples);
+
+  if (plan.kind === 'upload-and-compute') {
+    await putBiometricSamples(getToken, plan.samples);
+  }
+  // 'estimated' — hrMaxBPM above only ever comes from
+  // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
+  // HRMaxSource doc comment for why nothing in this app produces
+  // 'observed' yet. `plan.hrSource` is always the CLAIM 'window' (see
+  // `planHRSync`'s own doc comment) — the backend is authoritative on
+  // the actual RESULT, downgrading to `hr_source: 'none'` itself once
+  // it sees zero heart_rate samples for the window. N511/#893's fix is
+  // reading THAT back (`metrics.hr_source` below) rather than — as the
+  // pre-N511 code did — ignoring the response and marking the ledger
+  // "done" unconditionally. `windowOverride` (N522/#934) is null on
+  // every path except a trusted wide-window fit — see above.
+  const metrics = await computeSessionMetrics(
+    getToken,
+    session.id,
+    hrMaxBPM,
+    'estimated',
+    plan.hrSource,
+    windowOverride,
+  );
+  const hrSource = metrics.hr_source === 'window' ? 'window' : 'none';
+  await recordBiometricHRAttempt(userID, session.id, hrSource, now);
+  return { hrSource, sampleCount: metrics.sample_count };
+}
+
+/**
+ * W18/#957 — "Sync heart rate" on the session screen: ONE enrichment
+ * attempt for THIS session, right now, ignoring the retry cadence and the
+ * retry window both. A tap is explicit intent ("I just synced my watch"),
+ * which is exactly the information `needsEnrichmentAttempt`'s clock-based
+ * guess lacks. The attempt is the same `enrichSessionWindow` the pass runs
+ * — same wide-window fit, same server-decided result, same ledger row — so
+ * a found result here is indistinguishable from one the orchestrator found.
+ *
+ * The session comes from the caller (the screen already holds it) rather
+ * than from a store read, so this works for any session the screen can
+ * show. Never throws: every failure is an outcome the card can put into a
+ * sentence (`syncNowOutcomeCopy`).
+ */
+export async function enrichSessionNow(
+  userID: string,
+  getToken: TokenGetter,
+  session: EnrichableSession,
+): Promise<SyncNowOutcome> {
+  if (!isHealthKitSupported()) return { status: 'sync_off' };
+  if (!(await readHealthKitImportEnabled(userID))) return { status: 'sync_off' };
+  if (!session.ended_at) return { status: 'error' };
+
+  const now = new Date();
+  let hrMaxBPM: number | null = null;
+  try {
+    const profile = await getProfile(getToken);
+    hrMaxBPM = hrMaxFromDateOfBirth(profile.date_of_birth, now);
+  } catch {
+    return { status: 'error' };
+  }
+  if (hrMaxBPM == null) return { status: 'no_hrmax' };
+
+  try {
+    const result = await enrichSessionWindow(userID, getToken, session, hrMaxBPM, now);
+    return result.hrSource === 'window'
+      ? { status: 'found', sampleCount: result.sampleCount }
+      : { status: 'none' };
+  } catch {
+    return { status: 'error' };
   }
 }
 

@@ -148,6 +148,7 @@ import { finishTimestampFor } from '@/lib/calendar';
 import { OptionSelect } from '@/components/ui/OptionSelect';
 import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
+import { useSessionHRSync } from '@/lib/useSessionHRSync';
 
 /**
  * Attaches the real exercise name to each record, from the catalog already
@@ -871,6 +872,26 @@ export default function SessionScreen() {
   // comment on this exact distinction.
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
   const [hrLoaded, setHrLoaded] = useState(false);
+  // W18/#957 — which kind of "no HR" this is, and the on-demand attempt.
+  // `onFound` re-reads the metrics so the report replaces the empty card.
+  const hrSync = useSessionHRSync({
+    userId,
+    getToken,
+    sessionID: id,
+    startedAt: session?.started_at,
+    endedAt: session?.ended_at,
+    onFound: () => {
+      if (!id) return;
+      getSessionMetrics(getToken, id)
+        .then((m) => setHrMetrics(m))
+        // Deliberately silent: the samples are uploaded and the ledger
+        // already says 'window', so a failed re-read (offline again) loses
+        // nothing — the card keeps its "Found N samples" sentence and the
+        // report arrives on the next mount or foreground.
+        .catch(() => {});
+    },
+  });
+
   useEffect(() => {
     if (!id || !session?.ended_at) return;
     let cancelled = false;
@@ -1664,6 +1685,9 @@ export default function SessionScreen() {
           <HRSessionReport
             metrics={hrMetrics}
             sessionRPE={null}
+            absence={hrSync.absence}
+            sourceLabel={hrSync.sourceLabel}
+            onSyncNow={hrSync.syncNow}
             exerciseHR={exerciseHR}
             exerciseNames={Object.fromEntries(
               exerciseHR.map((e) => [e.exercise_id, catalog.get(e.exercise_id)?.name ?? e.exercise_id]),

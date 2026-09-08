@@ -21,6 +21,7 @@ import {
   requestHealthConnectReadAuthorization,
   sourceFromDataOrigin,
 } from './healthConnect';
+import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
 import { PREF_HEALTH_CONNECT_IMPORT, readPref, writePref } from './prefs';
 import { getProfile } from './profile';
 import type { TokenGetter } from './useAuthToken';
@@ -335,43 +336,7 @@ export async function syncHealthConnectBiometrics(
     // moved on, nothing later in `toEnrich` should run under it either.
     if (!stillCurrent()) break;
     try {
-      // `endedAt` is guaranteed non-null here — `selectEnrichmentCandidates`
-      // only keeps sessions `needsEnrichmentAttempt` already confirmed are
-      // finished.
-      const readings = await queryHeartRateSamples(session.startedAt, session.endedAt as string);
-      if (readings.length > 0) {
-        await putBiometricSamples(getToken, readings.map(toHeartRateSample));
-      }
-
-      if (hrMaxBPM != null) {
-        // Always claimed as 'window' — this app does no anchor refinement
-        // (design doc §2's second tier), so 'workout' is never a truthful
-        // claim to make. The backend is authoritative on the RESULT: it
-        // downgrades to `hr_source: 'none'` itself when it finds zero
-        // heart_rate samples in the window, regardless of this claim (see
-        // `ComputeSessionMetrics`'s own doc comment) — so the ledger below
-        // records what the server actually decided, not what was claimed.
-        // 'estimated' — hrMaxBPM above only ever comes from
-        // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
-        // HRMaxSource doc comment for why nothing in this app produces
-        // 'observed' yet.
-        const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', 'window');
-        await recordAttempt(
-          userID,
-          session.id,
-          metrics.hr_source === 'window' ? 'window' : 'none',
-          metrics.sample_count,
-          now,
-        );
-      } else {
-        // No HRmax to compute with (no date of birth on file yet) — samples
-        // are still uploaded above for whenever that changes, but there is
-        // no server-confirmed 'window' result to record. Left as 'none' so
-        // `needsEnrichmentAttempt`'s retry window keeps trying for a few
-        // more days rather than treating a missing profile field as
-        // permanent.
-        await recordAttempt(userID, session.id, 'none', readings.length, now);
-      }
+      await enrichHealthConnectSession(userID, getToken, session, hrMaxBPM, now);
       attempted++;
     } catch (err) {
       // Leave this session's ledger row exactly as it was (absent, or its
@@ -403,6 +368,100 @@ export async function syncHealthConnectBiometrics(
   }
 
   return { attempted, notPermitted };
+}
+
+/**
+ * ONE session's enrichment attempt, Health Connect read to ledger row — the
+ * body `syncHealthConnectBiometrics` runs per candidate, carved out
+ * (W18/#957) so the session screen's "Sync heart rate"
+ * (`enrichHealthConnectSessionNow` below) runs exactly the same attempt for
+ * exactly one session, cooldown or not. Throws when the read, upload or
+ * compute fails — nothing is recorded then. `hrMaxBPM` may be null (no date
+ * of birth yet): samples are still uploaded and the attempt recorded as
+ * `'none'`, exactly as the pass always did, so the retry window keeps
+ * trying rather than treating a missing profile field as permanent.
+ */
+async function enrichHealthConnectSession(
+  userID: string,
+  getToken: TokenGetter,
+  session: EnrichmentCandidate,
+  hrMaxBPM: number | null,
+  now: Date,
+): Promise<{ hrSource: 'window' | 'none'; sampleCount: number }> {
+  // `endedAt` is guaranteed non-null here — `selectEnrichmentCandidates`
+  // only keeps sessions `needsEnrichmentAttempt` already confirmed are
+  // finished, and `enrichHealthConnectSessionNow` guards for it itself.
+  const readings = await queryHeartRateSamples(session.startedAt, session.endedAt as string);
+  if (readings.length > 0) {
+    await putBiometricSamples(getToken, readings.map(toHeartRateSample));
+  }
+
+  if (hrMaxBPM == null) {
+    // No HRmax to compute with (no date of birth on file yet) — samples
+    // are still uploaded above for whenever that changes, but there is
+    // no server-confirmed 'window' result to record.
+    await recordAttempt(userID, session.id, 'none', readings.length, now);
+    return { hrSource: 'none', sampleCount: readings.length };
+  }
+
+  // Always claimed as 'window' — this app does no anchor refinement
+  // (design doc §2's second tier), so 'workout' is never a truthful
+  // claim to make. The backend is authoritative on the RESULT: it
+  // downgrades to `hr_source: 'none'` itself when it finds zero
+  // heart_rate samples in the window, regardless of this claim (see
+  // `ComputeSessionMetrics`'s own doc comment) — so the ledger below
+  // records what the server actually decided, not what was claimed.
+  // 'estimated' — hrMaxBPM above only ever comes from
+  // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
+  // HRMaxSource doc comment for why nothing in this app produces
+  // 'observed' yet.
+  const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', 'window');
+  const hrSource = metrics.hr_source === 'window' ? 'window' : 'none';
+  await recordAttempt(userID, session.id, hrSource, metrics.sample_count, now);
+  return { hrSource, sampleCount: metrics.sample_count };
+}
+
+/**
+ * W18/#957 — Health Connect twin of `lib/biometricSync.ts`'s
+ * `enrichSessionNow`, same contract: one attempt for this session, now,
+ * cadence and window ignored, never throws. The session comes from the
+ * caller in the screen's own `started_at`/`ended_at` shape.
+ */
+export async function enrichHealthConnectSessionNow(
+  userID: string,
+  getToken: TokenGetter,
+  session: EnrichableSession,
+): Promise<SyncNowOutcome> {
+  if (!(await isHealthConnectSupported())) return { status: 'sync_off' };
+  if (!(await readHealthConnectImportEnabled(userID))) return { status: 'sync_off' };
+  if (!session.ended_at) return { status: 'error' };
+
+  const now = new Date();
+  let dateOfBirth: string | null = null;
+  try {
+    dateOfBirth = (await getProfile(getToken)).date_of_birth;
+  } catch {
+    return { status: 'error' };
+  }
+  const hrMaxBPM = hrMaxFromDateOfBirth(dateOfBirth, now);
+
+  try {
+    const result = await enrichHealthConnectSession(
+      userID,
+      getToken,
+      { id: session.id, startedAt: session.started_at, endedAt: session.ended_at },
+      hrMaxBPM,
+      now,
+    );
+    // Samples (if any) are uploaded either way; the honest sentence when
+    // there is no HRmax is about the profile, not about the watch.
+    if (hrMaxBPM == null) return { status: 'no_hrmax' };
+    return result.hrSource === 'window'
+      ? { status: 'found', sampleCount: result.sampleCount }
+      : { status: 'none' };
+  } catch {
+    return { status: 'error' };
+  }
 }
 
 // --- orchestration: when a pass runs -------------------------------------
