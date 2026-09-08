@@ -64421,6 +64421,50 @@ card — 404/410 — therefore stays until then, with its reason; the per-card
 Accept still reloads on failure as before.) **Dismiss-all was not asked for
 and was not added**; declining is a per-card decision.
 
+### What review caught, and it was not a small one
+
+`frontend-reviewer` found a **blocking** defect in the first cut of
+`lib/shareInbox.ts`, and the shape of it is worth keeping because the guard
+LOOKED right and read right in its own comment. Staleness was judged by
+comparing the `getToken` a read had captured against the current
+`getTokenRef` — the obvious check, and the one whose comment said *"whatever
+it says is about somebody else now"*. It can never fire in this app.
+`useAuthToken()` returns a `useCallback(…, [])` — **"a token getter whose
+identity never changes"**, deliberately, because a getter that DID change
+identity turned every screen's fetch effect into an infinite refetch loop
+(that is what the hook exists for). The root layout holds one of those and
+hands the same object back on every sign-in, so `getTokenRef !== getToken` is
+`false` for two different athletes.
+
+Two bugs wore that one shape, and the reviewer reproduced both against the
+real module before reporting: athlete A signs in and a read goes out; A signs
+out; B signs in — `refreshShareInbox({ force: true })` hits the single-flight
+guard **first**, is handed A's still-open promise, and no read is ever issued
+for B at all; then A's read lands, the reference comparison says "same
+identity", and **A's pending count is published under B's bell**, silently.
+
+The fix is an `epoch` integer bumped in `setShareInboxIdentity`, plus dropping
+`inflight` there so the next caller starts its own read rather than inheriting
+the previous athlete's. `lib/session.ts` already carries exactly this counter
+for exactly this reason ("a refresh that started before sign-out can settle
+after it"), so this is that mechanism reused rather than a second one
+invented. `shareInbox.test.ts` pins it with the reviewer's own scenario, and
+it is mutation-tested both ways: drop the `inflight` reset and the second read
+is never issued (red); put the reference comparison back in place of the epoch
+and A's three cards publish under B (red, and ONLY that test — which is the
+evidence the existing sign-out test could not have caught this).
+
+**The general lesson, and it is this repo's own "a state that cannot be
+constructed" in a new costume**: the sign-out test that was already there
+passes under the broken code, because it never signs anyone back IN. A guard
+is only exercised by the input it is meant to reject, and "identity changed"
+had only ever been tested as "identity became null".
+
+`ac-verifier` separately noted that the badge-publish criterion names
+dismissing as well as accepting, and only the accept route had an assertion on
+`shareInboxCount()`. The two routes differ (accept filters `inbox` in place,
+dismiss goes through `reload()`), so that is now pinned as well.
+
 ### What the suite pins, and what was mutation-tested
 
 `lib/__tests__/shareInbox.test.ts` (18), `lib/__tests__/shareAcceptAll.test.ts`

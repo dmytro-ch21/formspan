@@ -188,6 +188,36 @@ describe('identity', () => {
     expect(shareInboxCount()).toBeNull();
   });
 
+  it('does not hand a NEW identity the previous one’s in-flight read', async () => {
+    // The test above passes for the wrong reason if staleness is judged by
+    // comparing token getters: `useAuthToken()` returns a `useCallback(…, [])`
+    // whose identity NEVER changes, and the root layout hands that same object
+    // back on the next sign-in — so `getTokenRef !== getToken` is false for two
+    // different athletes on a shared phone. Two failures follow, and this pins
+    // both: the single-flight guard hands B the promise for A's read (so no
+    // read is ever issued for B), and A's answer then publishes under B.
+    const d = deferred<unknown[]>();
+    mockList.mockReturnValue(d.promise);
+    setShareInboxIdentity(token); // athlete A, read in the air
+    await settle();
+    expect(mockList).toHaveBeenCalledTimes(1);
+
+    setShareInboxIdentity(null); // A signs out
+    mockList.mockResolvedValue([]); // B's inbox is empty
+    setShareInboxIdentity(token); // B signs in — the SAME getter object
+    await settle();
+
+    // A real read went out for B rather than A's being handed back.
+    expect(mockList).toHaveBeenCalledTimes(2);
+    expect(shareInboxCount()).toBe(0);
+
+    d.resolve([{ id: 'a' }, { id: 'b' }, { id: 'c' }]); // A's read lands late
+    await settle();
+
+    // B's own answer, not A's three.
+    expect(shareInboxCount()).toBe(0);
+  });
+
   it('a subscriber that throws does not silence the others', async () => {
     const heard = jest.fn();
     const off1 = subscribeShareInbox(() => {

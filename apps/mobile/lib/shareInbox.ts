@@ -59,6 +59,32 @@ let count: number | null = null;
 let getTokenRef: TokenGetter | null = null;
 let inflight: Promise<void> | null = null;
 let lastReadAt = 0;
+/**
+ * Bumped on every identity change, and the ONLY thing a read's staleness is
+ * judged by.
+ *
+ * The obvious guard — compare the `getToken` a read captured against the
+ * current `getTokenRef` — cannot work in this app, and `frontend-reviewer`
+ * caught it here (N529/#960). `useAuthToken()` returns a
+ * `useCallback(…, [])`: "a token getter whose identity never changes", by
+ * design, because a getter that changed identity turned every screen's fetch
+ * effect into an infinite refetch loop. The root layout holds ONE of those
+ * and hands the same object back on every sign-in — so `getTokenRef !==
+ * getToken` is `false` for two DIFFERENT athletes on a shared phone, and the
+ * guard it looked like never fired.
+ *
+ * Reproduced before fixing, and it was two bugs wearing one shape: A signs in
+ * and a read goes out; A signs out; B signs in — `refreshShareInbox({force:
+ * true})` hits the single-flight guard, is handed A's still-open promise, and
+ * **no read is ever issued for B**; then A's read lands, the reference
+ * comparison says "same identity", and A's count is published under B's bell.
+ *
+ * An integer has no such problem, and `lib/session.ts` already carries the
+ * same counter for the same reason ("a refresh that started before sign-out
+ * can settle after it"). Rather than invent a second mechanism, this is that
+ * one.
+ */
+let epoch = 0;
 const listeners = new Set<(n: number | null) => void>();
 let appStateSub: { remove(): void } | null = null;
 
@@ -87,10 +113,17 @@ export function subscribeShareInbox(fn: (n: number | null) => void): () => void 
  * Who to ask as. `null` on sign-out clears the count — the next athlete on a
  * shared phone must not see the previous one's badge — and a read still in
  * flight for the old identity is ignored when it lands.
+ *
+ * `inflight` is dropped rather than awaited: the request itself cannot be
+ * recalled, but it stops being THIS store's read, so the next caller starts a
+ * fresh one instead of being handed the previous athlete's. The orphan still
+ * settles; the epoch check is what makes it a no-op.
  */
 export function setShareInboxIdentity(getToken: TokenGetter | null): void {
   getTokenRef = getToken;
   lastReadAt = 0;
+  epoch += 1;
+  inflight = null;
   if (!getToken) {
     publish(null);
     return;
@@ -112,16 +145,20 @@ export function refreshShareInbox(opts: { force?: boolean } = {}): Promise<void>
   if (!getToken) return Promise.resolve();
   if (!opts.force && Date.now() - lastReadAt < REFRESH_MIN_INTERVAL_MS) return Promise.resolve();
 
+  const startedAt = epoch;
+
   const run: Promise<void> = listShareInbox(getToken)
     .then((cards) => {
       // The identity changed underneath this read: whatever it says is about
-      // somebody else now.
-      if (getTokenRef !== getToken) return;
+      // somebody else now. Judged by the epoch, never by the getter's
+      // reference — see the `epoch` comment for why the reference cannot tell
+      // two athletes apart in this app.
+      if (epoch !== startedAt) return;
       lastReadAt = Date.now();
       publish(cards.length);
     })
     .catch(() => {
-      if (getTokenRef !== getToken) return;
+      if (epoch !== startedAt) return;
       // Unknown, not zero. `lastReadAt` is deliberately NOT advanced, so the
       // next focus asks again rather than sitting inside the throttle window
       // with nothing to show.

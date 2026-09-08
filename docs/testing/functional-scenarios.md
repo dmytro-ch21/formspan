@@ -21103,6 +21103,13 @@ M1a old carry restored · M1b numbers from the drop · M2 summary claims all tic
   does not start on a failure). Single-flight: two calls while one is in the
   air are one request. A count published by the inbox screen replaces the
   fetched one with no request and starts a fresh window.
+- **Identity, the case a sign-out test cannot reach.** A signs in and a read
+  is held open; A signs out; **B signs in with the same token getter** (the
+  app's getter is identity-stable by design) — a NEW read must be issued for
+  B rather than A's in-flight promise being handed back, and A's answer,
+  landing late, must not publish under B. Both halves fail independently:
+  drop the `inflight` reset and no read goes out for B; judge staleness by
+  the getter's reference and A's count lands on B's bell.
 - **Identity.** Sign-out clears the count; a read that lands after sign-out
   is discarded; a throwing subscriber does not silence the others. The
   orchestrator refreshes on background/inactive → active only, not on

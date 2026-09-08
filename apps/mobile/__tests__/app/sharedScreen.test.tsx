@@ -357,6 +357,25 @@ describe('Accept all (N529/#960)', () => {
     await waitFor(() => expect(screen.queryByTestId('share-card-s2')).toBeNull());
     await waitFor(() => expect(shareInboxCount()).toBe(0));
   });
+
+  it('publishes to the bell after a DISMISS too, not only after an accept', async () => {
+    // The criterion names dismissing as well as accepting, and the two take
+    // different routes to the same state: accept filters `inbox` in place,
+    // dismiss goes through `reload()`. Only the accept route was pinned, so a
+    // change that published from that path alone would have left half the
+    // criterion green by accident.
+    mockInbox
+      .mockResolvedValueOnce([card({ id: 's1' }), card({ id: 's2' })])
+      .mockResolvedValue([card({ id: 's1' })]);
+
+    render(<SharedScreen />);
+    await screen.findByTestId('share-card-s2');
+    expect(shareInboxCount()).toBe(2);
+
+    fireEvent.press(screen.getByTestId('share-decline-s2'));
+    await waitFor(() => expect(mockDismiss).toHaveBeenCalled());
+    await waitFor(() => expect(shareInboxCount()).toBe(1));
+  });
 });
 
 it('stays silent when the accept fails', async () => {
