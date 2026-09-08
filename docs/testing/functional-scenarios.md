@@ -20784,3 +20784,42 @@ that replace it.
   both sit fully clear of the bottom navigation bar and neither is tucked
   behind it. Floating a little high is the accepted error direction; touching
   or overlapping the bar is a failure and means the constant is wrong.
+
+### N526 — Android splash and the first Android build (`apps/mobile/app.config.js`)
+
+Until this ticket, **no Android build of VOLA had ever been produced** — the
+first attempt failed at resource linking. These scenarios exist so that stays
+found rather than becoming folklore.
+
+**Happy path**
+- **A clean checkout builds for Android.** `rm -rf apps/mobile/android`, then
+  `npx expo prebuild --platform android`, then `./gradlew :app:assembleDebug`
+  — it links and produces an APK. This is the check that was failing.
+- **The splash shows the VOLA tick, whole**, centred on the dark ground
+  (`#080B12`), with both points of the tick intact and no circular clipping —
+  Android 12+ masks the splash icon, and the mark spans nearly its full
+  canvas.
+- **The app launches past the splash** rather than dying on it.
+
+**Edge cases & errors**
+- **The drawable must exist, not merely be referenced.** The failure mode is a
+  style that names `@drawable/splashscreen_logo` while nothing generates it,
+  so the useful assertion is a count, not a grep for the reference:
+  `find apps/mobile/android/app/src/main/res -name 'splashscreen_logo*'`
+  should return 5 (mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi), never 0.
+- **iOS must stay image-less.** The fix is scoped under `android`, and
+  `getAndroidSplashConfig.js` merges that sub-object over the root props. If
+  someone moves `image` to the root "for symmetry", iOS silently gains a
+  splash image it was never designed to have. `expo config --type prebuild`
+  is what answers this.
+- **A dark-mode / light-mode device**: the splash background is a fixed dark
+  value, so confirm the tick still reads under both system themes.
+- **`eas build --platform android`** goes through the same prebuild and had
+  therefore never worked either — worth running once end to end, not just the
+  local Gradle path.
+
+**NEEDS HUMAN EVIDENCE**
+- The splash on a REAL Android phone rather than an emulator: correct colour,
+  no letterboxing, no wrong-density artefact, and a sensible duration rather
+  than a flash or a hang. A successful resource link is not the same as a
+  splash that looks right, and only the second one is what an athlete sees.
