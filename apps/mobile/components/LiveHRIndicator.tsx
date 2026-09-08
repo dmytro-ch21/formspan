@@ -71,7 +71,7 @@ export function LiveHRIndicator({
           </Text>
         )}
         <Text style={styles.chipStatus} numberOfLines={1} testID={`${testID}-status`}>
-          {state.status === 'connected' ? label : label}
+          {label}
         </Text>
         {state.status === 'disconnected' && <RetryButton testID={testID} />}
       </RNView>

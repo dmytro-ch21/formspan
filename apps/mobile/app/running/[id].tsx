@@ -49,8 +49,11 @@ import { formatElapsed } from '@/lib/rest';
 import { formatDistance, formatPace } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { LiveHRIndicator } from '@/components/LiveHRIndicator';
+import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
 import { useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
+import { useSessionHRSync } from '@/lib/useSessionHRSync';
 import { useUnits } from '@/lib/useUnits';
 import { announce } from '@/lib/voice';
 import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
@@ -150,6 +153,7 @@ export default function RunningSessionScreen() {
   // finishes VIA this screen (`finish()` navigates away immediately rather
   // than re-rendering the finished branch off freshly-computed local state).
   const [finishedDetail, setFinishedDetail] = useState<RunningDetail | null>(null);
+  const [sessionTimes, setSessionTimes] = useState<{ startedAt: string; endedAt: string | null } | null>(null);
 
   const mapRef = useRef<MapView | null>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
@@ -273,6 +277,10 @@ export default function RunningSessionScreen() {
         return;
       }
       setSessionName(session.name);
+      // N528/#958: the HR machinery needs this session's own window
+      // (`useSessionHRSync`), and this screen deliberately keeps `status`
+      // rather than the session object — so keep just the two timestamps.
+      setSessionTimes({ startedAt: session.started_at, endedAt: session.ended_at });
 
       if (session.ended_at) {
         // Already finished — reopening this screen (a killed app, a stray
@@ -519,11 +527,36 @@ export default function RunningSessionScreen() {
 
   // N528/#958: live heart rate from a paired monitor — the chip under the
   // header while the session runs, and every reading recorded for the report.
+  const liveHRStatus = useLiveHR().status;
+  const liveHROn = liveHRStatus !== 'off' && liveHRStatus !== 'unsupported';
   const liveHRActive = status === 'tracking' || status === 'paused';
-  const liveHRMax = useHRMax(getToken, liveHRActive);
+  // Only once a monitor is actually connected — HRmax exists to colour a
+  // LIVE number by zone, and an athlete who has never paired one must not
+  // pay a profile fetch on every session start (review finding: "a session
+  // without a monitor is unchanged" is a stated constraint of this ticket).
+  const liveHRMax = useHRMax(getToken, liveHRActive && liveHROn);
   useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
   const [hrLoaded, setHrLoaded] = useState(false);
+  // W18/#957 + N528/#958 — which kind of "no HR" this is, the on-demand
+  // attempt, and the monitor's name for the report's source line. This
+  // screen was missed when W18 wired the strength and BJJ screens; the
+  // athlete's own report named running first, so it gets both here.
+  const hrSync = useSessionHRSync({
+    userId,
+    getToken,
+    sessionID: id,
+    startedAt: sessionTimes?.startedAt,
+    endedAt: sessionTimes?.endedAt,
+    onFound: () => {
+      if (!id) return;
+      getSessionMetrics(getToken, id)
+        .then((m) => setHrMetrics(m))
+        // Deliberately silent: the samples are uploaded and the ledger
+        // already says 'window', so a failed re-read loses nothing.
+        .catch(() => {});
+    },
+  });
   useEffect(() => {
     if (!id || status !== 'finished') return;
     let cancelled = false;
@@ -715,7 +748,17 @@ export default function RunningSessionScreen() {
               reflection captured for this sport at all today), so
               `sessionRPE` is `null` and the effectiveness card does not
               render; see `lib/hrSessionReport.ts`'s doc comment. */}
-          {hrLoaded && <HRSessionReport metrics={hrMetrics} sessionRPE={null} testID="running-hr" />}
+          {hrLoaded && (
+            <HRSessionReport
+              metrics={hrMetrics}
+              sessionRPE={null}
+              absence={hrSync.absence}
+              sourceLabel={hrSync.sourceLabel}
+              onSyncNow={hrSync.syncNow}
+              hrSourceLine={hrSourceSentence(hrMetrics, hrSync.monitorName, hrSync.sourceLabel)}
+              testID="running-hr"
+            />
+          )}
 
           {/* N463: "is my distance climbing over the last few weeks" — reachable
               from every run, not only the one just finished, since this same

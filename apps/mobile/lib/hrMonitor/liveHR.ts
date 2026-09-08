@@ -64,6 +64,23 @@ export function __dispatchLiveHRForTests(event: LiveHREvent): void {
   dispatch(event);
 }
 
+/**
+ * Test seam — installs a fake BLE manager and resets every module-level
+ * connection state, so a test can drive the real `startLiveHR`/`stopLiveHR`
+ * against a scripted peripheral. `null` restores "no Bluetooth in this
+ * binary". Never called outside tests.
+ */
+export function __setBleManagerForTests(m: unknown, cancelAckMs = 2_000): void {
+  cancelAckTimeoutMs = cancelAckMs;
+  manager = (m as BleManagerLike | null) ?? null;
+  if (active?.retryTimer) clearTimeout(active.retryTimer);
+  active = null;
+  generation++;
+  state = LIVE_HR_INITIAL;
+  readingListeners.clear();
+  opChain = Promise.resolve();
+}
+
 // ------------------------------------------------------------ bluetooth ---
 
 type Subscription = { remove(): void };
@@ -185,18 +202,60 @@ let generation = 0;
 export const MAX_RECONNECT_ATTEMPTS = 6;
 
 /**
+ * Every connect/disconnect runs one at a time, in call order.
+ *
+ * Without this, two overlapping calls both pass their own guards and the
+ * loser's `connectToDevice` still resolves afterwards — a native BLE
+ * connection nobody holds a handle to any more, plus a reconnect timer for
+ * a link that was superseded. The `generation` counter below protects the
+ * JS state machine; it cannot protect a native handle a stale continuation
+ * already opened. Found by review, pinned by `liveHRConnection.test.ts`.
+ *
+ * The callers make this necessary rather than theoretical:
+ * `connectIfRemembered()` is invoked, unserialized, from the AppState
+ * listener, from `setHRMonitorIdentity`, and from Settings' pick/forget —
+ * a phone call arriving mid-connect is enough to overlap two of them.
+ */
+let opChain: Promise<unknown> = Promise.resolve();
+function serialized<T>(op: () => Promise<T>): Promise<T> {
+  const run = opChain.then(op, op);
+  // Never let one failed op poison the chain for the next.
+  opChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * How long to wait for the OS to acknowledge a disconnect before moving on.
+ *
+ * Serializing means a `stopLiveHR` that never resolves would wedge every
+ * later connect — live HR would silently never come back for the rest of
+ * the app's life, which is worse than the race it fixes. A BLE stack that
+ * has stopped answering is exactly the case: we stop waiting, having
+ * already dropped our own listeners, and let the next op proceed.
+ */
+let cancelAckTimeoutMs = 2_000;
+
+/**
  * Connects to the remembered monitor and streams readings into the store
  * until `stopLiveHR`. Idempotent for the same device; switching devices
  * stops the old link first. Never throws — every failure is a state.
+ * Serialized against every other connect/disconnect (see `serialized`).
  */
-export async function startLiveHR(device: { id: string; name: string }): Promise<void> {
+export function startLiveHR(device: { id: string; name: string }): Promise<void> {
+  return serialized(() => startLiveHRInner(device));
+}
+
+async function startLiveHRInner(device: { id: string; name: string }): Promise<void> {
   const m = bleManager();
   if (!m) {
     dispatch({ type: 'unsupported' });
     return;
   }
   if (active && active.device.id === device.id) return;
-  await stopLiveHR();
+  await stopLiveHRInner();
   const gen = ++generation;
   active = { device, monitor: null, disconnect: null, retryTimer: null, generation: gen };
   dispatch({ type: 'start', device });
@@ -209,6 +268,9 @@ async function connectAttempt(gen: number): Promise<void> {
   if (!m || !a || a.generation !== gen) return;
   try {
     const dev = await m.connectToDevice(a.device.id, { timeout: 10_000 });
+    // Still ours? Every caller of `connectAttempt` goes through `serialized`,
+    // so nothing can move the generation while this await is in flight —
+    // these two checks are belt to that braces, not the mechanism.
     if (!active || active.generation !== gen) return;
     await dev.discoverAllServicesAndCharacteristics();
     if (!active || active.generation !== gen) return;
@@ -252,19 +314,32 @@ function scheduleReconnect(gen: number): void {
   if (a.retryTimer) clearTimeout(a.retryTimer);
   a.retryTimer = setTimeout(() => {
     a.retryTimer = null;
+    // NOT through `serialized`, deliberately. A reconnect that fires after
+    // a stop finds `active` already null (stopLiveHRInner clears it
+    // synchronously) and bails at the top of `connectAttempt`, so queueing
+    // it changes nothing any test can observe — and an unobservable
+    // difference is not worth the extra machinery. The generation guard
+    // there is what does the work, and the "reconnect while backgrounding"
+    // test is what holds it honest.
     void connectAttempt(gen);
   }, reconnectDelayMs(state.attempt - 1));
 }
 
 /** Manual retry after `disconnected` — the athlete's own tap. */
-export async function retryLiveHR(): Promise<void> {
-  const a = active;
-  if (!a) return;
-  dispatch({ type: 'start', device: a.device });
-  await connectAttempt(a.generation);
+export function retryLiveHR(): Promise<void> {
+  return serialized(async () => {
+    const a = active;
+    if (!a) return;
+    dispatch({ type: 'start', device: a.device });
+    await connectAttempt(a.generation);
+  });
 }
 
-export async function stopLiveHR(): Promise<void> {
+export function stopLiveHR(): Promise<void> {
+  return serialized(() => stopLiveHRInner());
+}
+
+async function stopLiveHRInner(): Promise<void> {
   const a = active;
   active = null;
   generation++;
@@ -272,11 +347,26 @@ export async function stopLiveHR(): Promise<void> {
     if (a.retryTimer) clearTimeout(a.retryTimer);
     a.monitor?.remove();
     a.disconnect?.remove();
-    try {
-      await bleManager()?.cancelDeviceConnection(a.device.id);
-    } catch {
-      // Already gone — that is the state we wanted.
+    const m = bleManager();
+    if (m) {
+      try {
+        // Bounded: see `cancelAckTimeoutMs`. Our own listeners are already
+        // gone by here, so proceeding early costs nothing but a native
+        // handle the OS will reap.
+        await Promise.race([
+          m.cancelDeviceConnection(a.device.id),
+          new Promise((resolve) => setTimeout(resolve, cancelAckTimeoutMs)),
+        ]);
+      } catch {
+        // Already gone — that is the state we wanted.
+      }
     }
   }
+  // No generation guard here on purpose. An earlier draft had one, against
+  // a later start overtaking a stalled cancel — but every connect and
+  // disconnect now goes through `serialized`, so no newer operation can be
+  // running while this one is, and the guard could never fire. A test could
+  // not reach it either; an unreachable safety net that nothing exercises
+  // reads as protection and provides none.
   dispatch({ type: 'stop' });
 }

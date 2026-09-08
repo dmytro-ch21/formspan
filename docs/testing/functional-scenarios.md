@@ -21247,3 +21247,15 @@ M1a old carry restored · M1b numbers from the drop · M2 summary claims all tic
 5. Finish the session: the report appears with "From your Amazfit …". If the link dropped during the session and Zepp has synced to Apple Health, the line reads "… N readings from Apple Health filled gaps".
 6. Forget the monitor in Settings: the Today card disappears; a session shows no chip; Apple Health remains the only source (the W18 behaviour, unchanged).
 7. Android: 1–6 with the Health Connect fallback; the first scan asks for "Nearby devices" (Android 12+) and declining it yields the Settings-pointing note, not silence.
+
+### Automated, added after review (`lib/__tests__/liveHRConnection.test.ts`, `hrReportWiring.test.ts`)
+
+- Connect/disconnect ordering against a scripted peripheral: a background stop and an immediate foreground start do not overlap (the reconnect is issued only after the disconnect is acknowledged); two racing starts issue their connects one at a time; a monitor swap releases the old device.
+- A disconnect the OS never acknowledges does not wedge live HR — a later monitor still connects, and the stalled cancel, when it finally answers, does not switch off the link that replaced it.
+- A dropped link says so immediately (`reconnecting`, last number kept) and re-attempts on its own after the backoff, with no athlete action.
+- All three session screens pass the same `absence`/`sourceLabel`/`onSyncNow`/`hrSourceLine` props to `HRSessionReport` — a cross-file invariant no single-component test can see, added because the running screen silently had none of them.
+
+### Manual, added after review
+
+8. **Quick background/foreground mid-session**, with the monitor connected: switch to another app and straight back. PASS: the chip is still live within a second or two. FAIL: it goes dark, or sticks on "Connecting…". (This is the exact race review found; step 2's "kill and reopen" is a cold start and does not exercise it.)
+9. **Running specifically**: finish a run recorded with the monitor and confirm the report names its source, and that a run with no HR shows the same honest card and Sync button as strength and BJJ.

@@ -52,5 +52,10 @@ export function useHRRecording(input: {
       .catch(() => {
         // Offline — the rows stay pending; the orchestrator flushes later.
       });
+    // Deliberately not keyed on `sessionID`: this fires on the active-to-
+    // finished EDGE, and `flushHRMonitorSamples` is user-scoped rather than
+    // session-scoped -- it uploads everything this athlete still owes,
+    // whichever session recorded it. Adding `sessionID` would re-run the
+    // effect on a route-param change and flush twice for no benefit.
   }, [active, userId, getToken]);
 }

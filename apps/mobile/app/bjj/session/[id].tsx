@@ -62,6 +62,7 @@ import { useSessionHRSync } from '@/lib/useSessionHRSync';
 import { LiveHRIndicator } from '@/components/LiveHRIndicator';
 import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
 import { useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 
 /**
@@ -379,8 +380,14 @@ export default function BjjSessionScreen() {
 
   // N528/#958: live heart rate from a paired monitor — the chip under the
   // header while the session runs, and every reading recorded for the report.
+  const liveHRStatus = useLiveHR().status;
+  const liveHROn = liveHRStatus !== 'off' && liveHRStatus !== 'unsupported';
   const liveHRActive = !!session && !session.ended_at;
-  const liveHRMax = useHRMax(getToken, liveHRActive);
+  // Only once a monitor is actually connected — HRmax exists to colour a
+  // LIVE number by zone, and an athlete who has never paired one must not
+  // pay a profile fetch on every session start (review finding: "a session
+  // without a monitor is unchanged" is a stated constraint of this ticket).
+  const liveHRMax = useHRMax(getToken, liveHRActive && liveHROn);
   useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
 
   useEffect(() => {
