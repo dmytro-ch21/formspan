@@ -64557,7 +64557,7 @@ foods" could not be a filter, because there was nothing to filter on.
 
 ### Mobile — show it, spotlight it, sort it
 
-- **SQLite v39**: `foods.shared_by`, `foods.shared_at`, nullable, no
+- **SQLite v40**: `foods.shared_by`, `foods.shared_at`, nullable, no
   backfill — nothing on the device knows which cached rows were shared; the
   next pull carries the answer for every row (N428's fresh-install scenario
   is a fixture test: a clean database syncs and reads the handle off the
@@ -64651,6 +64651,26 @@ Pinned by `savedFoodsScreen.test.tsx`'s "ignores a stale load that lands after
 a newer one", which holds both reads open and resolves them backwards on
 purpose — and mutation-tested: remove the counter and that test alone goes
 red, as a test failure rather than a compile error.
+
+**Two branches claimed SQLite v39, and only half of that collision was
+noisy.** N530 (#973) landed first with `local_sessions.collapsed_json` at v39;
+this branch had also written 39. Rebasing surfaced the two `if (current < 39)`
+blocks and the two "a device already stamped 38" tests as ordinary textual
+conflicts — but `SCHEMA_VERSION = 39` itself merged **cleanly**, because both
+sides wrote the same digit, and a clean merge is exactly the outcome nobody
+inspects. Had the version-expectation assertions not been spread through
+`schema.test.ts`, the branch would have shipped a v40 migration block behind a
+version stamp of 39, which `migrate()`'s `current >= SCHEMA_VERSION` early
+return makes a silent no-op on every device already at 39.
+
+This is the mobile-schema twin of the `000043` migration-number collision that
+retired sequential backend migration numbering — same mechanism (a shared
+counter two branches increment independently), and it survives here because a
+SQLite `user_version` genuinely is a single integer and cannot be a timestamp.
+The guard is therefore the test, not the numbering: share provenance is now
+**v40**, a device stamped 38 runs both upgrade blocks and lands on 40, and a
+device stamped 39 gains only the two `foods` columns. Both paths are pinned,
+and reverting `SCHEMA_VERSION` to 39 turns the v39-upgrade test red.
 
 **Left open.** `apps/web`'s `nutrition/recipes` page does not yet show the
 provenance the API now returns — a one-line addition, out of this ticket's
