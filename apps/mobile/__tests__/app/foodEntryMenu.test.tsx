@@ -95,7 +95,9 @@ jest.mock('@/lib/useUnits', () => ({
 }));
 
 // The friend picker's own data, so Share can actually open it here.
-const mockListFriends = jest.fn(async () => [{ username: 'sam', display_name: 'Sam' }]);
+const mockListFriends = jest.fn(async (..._a: unknown[]) => [
+  { username: 'sam', display_name: 'Sam' },
+]);
 jest.mock('@/lib/friends', () => ({ listFriends: (...a: unknown[]) => mockListFriends(...a) }));
 jest.mock('@/lib/sounds', () => ({ playSound: jest.fn() }));
 jest.mock('@/lib/shares', () => ({

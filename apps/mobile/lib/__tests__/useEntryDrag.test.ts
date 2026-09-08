@@ -42,7 +42,7 @@ function setup(over: { enabled?: boolean; frames?: SectionFrame[] } = {}) {
   const onDrop = jest.fn();
   const measure = jest.fn(async () => over.frames ?? FRAMES);
   const hook = renderHook(
-    ({ enabled }) => useEntryDrag({ enabled, measure, onDrop }),
+    ({ enabled }: { enabled: boolean }) => useEntryDrag({ enabled, measure, onDrop }),
     { initialProps: { enabled: over.enabled ?? true } },
   );
   return { ...hook, onDrop, measure };
