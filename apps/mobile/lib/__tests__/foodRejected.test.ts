@@ -323,6 +323,143 @@ describe('a food the server refuses', () => {
   });
 });
 
+/**
+ * The recurrence found in review: the eager sever in the foods loop only ever
+ * sees foods that were in ITS queue (`dirty = 1`). Once a refused food settles
+ * it is invisible there forever, while `localFoods`/`recentsFor` keep offering
+ * it from quick-add, recents and search — so the SECOND log of the same meal
+ * ghosted exactly as the first one used to.
+ */
+describe('logging a food the server already refused, again', () => {
+  /** Reduces the fixture to the settled ghost state the surfaces still offer. */
+  async function settledGhost(): Promise<string> {
+    const foodId = await saveFoodLocally(USER, draft({ serving_label: longLabel }));
+    await syncFood(USER, token);
+    expect(await foodRow(foodId)).toMatchObject({ dirty: 0, remote: 0, last_error: REFUSED_LABEL });
+    return foodId;
+  }
+
+  it('still reaches the server, from quick-add, days later', async () => {
+    const foodId = await settledGhost();
+
+    // Quick-add on Today, a recents chip, a search result: all three call
+    // `logFood` with this id, and the food is not in the foods queue at all.
+    const entryId = await logFood(USER, meal({ eaten_on: '2026-09-11', source_food_id: foodId }));
+    calls.length = 0;
+    const result = await syncFood(USER, token);
+
+    const sent = calls.find((c) => c.method === 'PUT' && c.path === `/nutrition/entries/${entryId}`);
+    expect(sent).toBeDefined();
+    expect(sent!.body.source_food_id).toBeNull();
+    expect(serverEntries.has(entryId)).toBe(true);
+    expect(await entryRow(entryId)).toMatchObject({
+      dirty: 0, remote: 1, last_error: null, source_food_id: null,
+    });
+    // Nothing failed this pass: the food is no longer owed, and the entry went.
+    expect(result.failed).toBe(0);
+  });
+
+  it('is still the refused food on the list, so it can be corrected and retried', async () => {
+    const foodId = await settledGhost();
+    await logFood(USER, meal({ source_food_id: foodId }));
+    await syncFood(USER, token);
+
+    // Severing the entry must not quietly resolve the food's own problem —
+    // the saved-foods list is where the athlete finds out and fixes it.
+    expect((await foodSyncProblems(USER)).get(foodId)).toEqual({ reason: REFUSED_LABEL, onServer: false });
+    expect(await localFood(USER, foodId)).not.toBeNull();
+  });
+
+  it('leaves a food still queued for this pass alone, so N114 still holds', async () => {
+    // The mutation target for `dirty = 0` in the guard: drop it and this food,
+    // owed and about to be sent, is severed before it ever gets its chance.
+    const foodId = await saveFoodLocally(USER, draft());
+    const entryId = await logFood(USER, meal({ source_food_id: foodId }));
+
+    await syncFood(USER, token);
+
+    const sent = calls.find((c) => c.method === 'PUT' && c.path === `/nutrition/entries/${entryId}`);
+    expect(sent!.body.source_food_id).toBe(foodId);
+    expect(await entryRow(entryId)).toMatchObject({ remote: 1, source_food_id: foodId });
+    expect(serverFoods.has(foodId)).toBe(true);
+  });
+
+  /**
+   * The other half of the split, and the `dirty = 0` mutation target. A food
+   * that failed for a TRANSIENT reason is still owed — the next pass sends it
+   * and the link becomes valid. Severing it here would throw away a good
+   * pointer; sending the entry anyway would have it refused on the foreign key
+   * and refused PERMANENTLY, which is the meal lost. So the entry waits.
+   */
+  it('waits for a food that merely lost signal, rather than severing or losing the meal', async () => {
+    const foodId = await saveFoodLocally(USER, draft());
+    const entryId = await logFood(USER, meal({ source_food_id: foodId }));
+
+    // A 503 on the food only: transient, so the queue carries on to entries.
+    mockApi.mockImplementationOnce(async () => {
+      throw new ApiError('try later', 'internal', 503);
+    });
+    const first = await syncFood(USER, token);
+
+    expect(first.errorKind).toBe('transient');
+    expect(await foodRow(foodId)).toMatchObject({ dirty: 1, remote: 0 });
+    // The entry did NOT go, was NOT severed, and is still owed.
+    expect(calls.some((c) => c.path === `/nutrition/entries/${entryId}`)).toBe(false);
+    expect(await entryRow(entryId)).toMatchObject({ dirty: 1, remote: 0, source_food_id: foodId });
+
+    // The pass after the signal comes back sends both, link intact.
+    await syncFood(USER, token);
+    expect(serverFoods.has(foodId)).toBe(true);
+    expect(serverEntries.get(entryId)).toMatchObject({ source_food_id: foodId });
+    expect(await entryRow(entryId)).toMatchObject({ dirty: 0, remote: 1, source_food_id: foodId });
+  });
+
+  /**
+   * A tombstoned food is the other id the server will never hold, so it is
+   * severed rather than waited for — waiting on a DELETE would strand the
+   * meal until the food row disappeared, which is not a thing it can wait for.
+   */
+  it('severs a meal logged against a food being deleted, rather than waiting on the delete', async () => {
+    // A never-synced food that is nonetheless still OWED (`dirty = 1`) is
+    // tombstoned rather than hard-deleted, so `remote = 0, dirty = 1,
+    // deleted_at` is a real state — and it is the one shape where "still
+    // owed" must NOT mean "wait", because what is owed is a DELETE.
+    const foodId = await saveFoodLocally(USER, draft());
+    await removeFood(USER, foodId);
+    const t = await foodRow(foodId);
+    expect(t).toMatchObject({ remote: 0, dirty: 1 });
+    expect(t?.deleted_at).not.toBeNull();
+
+    // `describe.tsx`'s regenerate carries the id of the food it replaces, so a
+    // caller can still hold one after the row became a tombstone.
+    const entryId = await logFood(USER, meal({ source_food_id: foodId }));
+    // The DELETE fails transiently, so the tombstone survives this pass —
+    // without it the row is gone and there is nothing left to sever against.
+    mockApi.mockImplementationOnce(async () => {
+      throw new ApiError('try later', 'internal', 503);
+    });
+    await syncFood(USER, token);
+
+    const sent = calls.find((c) => c.method === 'PUT' && c.path === `/nutrition/entries/${entryId}`);
+    expect(sent).toBeDefined();
+    expect(sent!.body.source_food_id).toBeNull();
+    expect(await entryRow(entryId)).toMatchObject({ dirty: 0, remote: 1, source_food_id: null });
+  });
+
+  it('leaves an id this device has no food row for alone, and lets the server rule', async () => {
+    // A pulled entry can name a food this phone has not pulled yet. Nothing
+    // local says the server lacks it, so the honest move is to send it.
+    const entryId = await logFood(USER, meal({ source_food_id: 'authored-on-web' }));
+    serverFoods.set('authored-on-web', { id: 'authored-on-web' });
+
+    await syncFood(USER, token);
+
+    const sent = calls.find((c) => c.method === 'PUT' && c.path === `/nutrition/entries/${entryId}`);
+    expect(sent!.body.source_food_id).toBe('authored-on-web');
+    expect(await entryRow(entryId)).toMatchObject({ remote: 1, source_food_id: 'authored-on-web' });
+  });
+});
+
 describe('a refused EDIT of a food the server already holds', () => {
   /**
    * The severing above is ONLY for a food the server has never accepted. A
@@ -357,6 +494,29 @@ describe('a refused EDIT of a food the server already holds', () => {
    * below, where that pull fails. Whether a reverted edit should say so is
    * an open item, recorded in history.md.
    */
+  /**
+   * The `remote = 0` mutation target for the general sever below the foods
+   * queue: drop that clause and this food — held by the server, merely
+   * carrying a refused correction — is severed off every meal logged against
+   * it, throwing away provenance the server would have accepted.
+   */
+  it('keeps the link for a meal logged after that refusal settled', async () => {
+    const foodId = await saveFoodLocally(USER, draft());
+    await syncFood(USER, token);
+    await saveFoodLocally(USER, draft({ id: foodId, serving_label: longLabel }));
+    listFails = true; // so the refusal settles rather than being reverted by the pull
+    await syncFood(USER, token);
+    expect(await foodRow(foodId)).toMatchObject({ dirty: 0, remote: 1, last_error: REFUSED_LABEL });
+
+    const entryId = await logFood(USER, meal({ source_food_id: foodId }));
+    calls.length = 0;
+    await syncFood(USER, token);
+
+    const sent = calls.find((c) => c.method === 'PUT' && c.path === `/nutrition/entries/${entryId}`);
+    expect(sent!.body.source_food_id).toBe(foodId);
+    expect(await entryRow(entryId)).toMatchObject({ remote: 1, source_food_id: foodId });
+  });
+
   it('is reverted to the server\'s version by the pull, and is then no longer reported', async () => {
     const foodId = await saveFoodLocally(USER, draft());
     await syncFood(USER, token);

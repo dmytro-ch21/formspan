@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import EditSavedFoodScreen from '../../app/food/saved/[id]';
 
@@ -179,6 +180,41 @@ it('says when the server refused this food, with the reason', async () => {
   mockSyncState.mockResolvedValue({ unsynced: false, owed: false, rejected: null });
   await open();
   expect(screen.queryByTestId('saved-rejected')).toBeNull();
+});
+
+/**
+ * Found in review. `accessibilityLiveRegion` on that notice is ANDROID-ONLY —
+ * iOS has no live regions — and iOS is this app's primary platform, so a
+ * VoiceOver user opened the food they believed was saved and heard nothing
+ * about it having been refused. The same gap `goals.tsx`, `sign-up.tsx`,
+ * `forgot-password.tsx` and `food/scan.tsx` each closed the same way.
+ */
+it('SPEAKS the refusal, because iOS has no live regions', async () => {
+  const announce = jest
+    .spyOn(AccessibilityInfo, 'announceForAccessibility')
+    .mockImplementation(() => {});
+  try {
+    mockSyncState.mockResolvedValue({
+      unsynced: true,
+      owed: false,
+      rejected: 'serving_label must be between 1 and 40 characters',
+    });
+    await open();
+    await waitFor(() => expect(announce).toHaveBeenCalled());
+    const spoken = String(announce.mock.calls[0][0]);
+    expect(spoken).toContain('serving_label must be between 1 and 40 characters');
+    expect(spoken).toContain('this phone only');
+
+    // A food with nothing wrong says nothing — silence is the correct output.
+    screen.unmount();
+    announce.mockClear();
+    mockSyncState.mockResolvedValue({ unsynced: false, owed: false, rejected: null });
+    await open();
+    await waitFor(() => expect(screen.getByTestId('saved-name')).toBeTruthy());
+    expect(announce).not.toHaveBeenCalled();
+  } finally {
+    announce.mockRestore();
+  }
 });
 
 it('says when the numbers were drafted rather than measured', async () => {

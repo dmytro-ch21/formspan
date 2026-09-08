@@ -31,8 +31,8 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ShareToFriend } from '@/components/ShareToFriend';
@@ -87,6 +87,8 @@ export default function EditSavedFoodScreen() {
     owed: boolean;
     rejected: string | null;
   } | null>(null);
+  /** The refusal already announced, so an unrelated sync tick does not repeat it. */
+  const announcedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!userId || !id) return;
@@ -151,7 +153,25 @@ export default function EditSavedFoodScreen() {
     if (!userId || !id) return;
     let live = true;
     foodSyncState(userId, id).then((s) => {
-      if (live) setShareSync(s);
+      if (!live) return;
+      setShareSync(s);
+      // **SPOKEN, not only rendered.** `accessibilityLiveRegion` on the notice
+      // below is ANDROID-ONLY — iOS has no live regions — and this app's
+      // primary platform is iOS, so without this a VoiceOver user opens the
+      // food they think is saved and hears nothing about it having been
+      // refused. Exactly the gap `goals.tsx`, `sign-up.tsx`,
+      // `forgot-password.tsx` and `food/scan.tsx` each closed the same way;
+      // caught in review before it became the fifth.
+      //
+      // Guarded on the reason CHANGING so a re-read triggered by an unrelated
+      // sync tick does not re-announce a notice already on screen.
+      if (s?.rejected && s.rejected !== announcedRef.current) {
+        announcedRef.current = s.rejected;
+        AccessibilityInfo.announceForAccessibility(
+          savedFoodProblemCopy({ reason: s.rejected, onServer: !s.unsynced }),
+        );
+      }
+      if (!s?.rejected) announcedRef.current = null;
     });
     return () => {
       live = false;

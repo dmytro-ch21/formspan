@@ -1211,6 +1211,15 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
         // version in place, and an entry may keep naming it. Only still-owed
         // entries, because a synced one already reached the server naming
         // whatever it named.
+        //
+        // **This is the EAGER, same-pass half only.** It fires at the failure
+        // site, so it can only ever see foods that were in this queue — and a
+        // food that has already settled into the refused state is not. The
+        // general guard is the `UPDATE` just before the entries queue below,
+        // which asks the same question of the whole outbox instead. Kept here
+        // as well because it costs one statement and makes the local rows
+        // honest the instant the refusal happens, rather than at the start of
+        // the next pass.
         if (!f.deleted_at && f.remote === 0) {
           await db.runAsync(
             `UPDATE food_entries SET source_food_id = NULL
@@ -1229,6 +1238,98 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
     }
   }
 
+  // **THE GENERAL SEVER, AND THE ONE THAT CATCHES A GHOST LOGGED AGAIN LATER
+  // (N533/#964).**
+  //
+  // The foods loop above severs eagerly, in the pass that does the refusing —
+  // but only for a food that was in ITS queue, i.e. one still `dirty = 1`. Once
+  // a refused food settles (`remote = 0, dirty = 0`) it drops out of that query
+  // forever, and nothing severed anything for it again. Meanwhile it is still a
+  // perfectly ordinary row to `localFoods` and `recentsFor`, which filter on
+  // `deleted_at IS NULL` alone — so quick-add on Today, the recents chips and
+  // the search results on `food/add` all still offer it, and every tap logs a
+  // fresh entry naming a food the server has never accepted. That entry is
+  // refused on the composite foreign key with a 23503 → 400 → permanent, its
+  // `dirty` is cleared, and the meal is gone. The same silent loss this ticket
+  // exists to close, recurring on the SECOND log rather than the first.
+  //
+  // So the check moves to the choke point instead of the failure site: this is
+  // the only place a `source_food_id` is ever put on the wire, and it runs
+  // AFTER the foods queue, so `foods.remote` here is already this pass's
+  // answer. `remote = 0 AND dirty = 0` is the store's existing vocabulary for
+  // "the server does not have this row and this device is no longer sending
+  // it" — `removeFood`'s own doc comment names that exact state — which is
+  // precisely the set of ids no entry can name server-side.
+  //
+  // What it deliberately does NOT touch, each pinned by a test:
+  //   - `dirty = 1` — a food queued for THIS pass or the next one. Severing
+  //     that would undo N114's whole point, which is that the food goes first.
+  //   - `remote = 1` — a food the server holds, whose refused EDIT left the
+  //     earlier version in place. An entry may still name it there.
+  //   - an id with no local `foods` row at all. Nothing local can say the
+  //     server lacks it (a pulled entry can name a food this device has not
+  //     pulled yet), so the honest move is to send it and let the server rule.
+  //
+  // Losing the pointer costs provenance only: the entry owns its own copied
+  // macros, nothing reads nutrition back through it, and the food itself stays
+  // in the saved-foods list carrying its refusal so the athlete can edit it and
+  // have it try again.
+  // The two cases split on ONE question, and they are complements: for a food
+  // the server does not have (`remote = 0`), is it still coming?
+  //
+  //   - **No, and it never will be** — `dirty = 0` (settled after a permanent
+  //     refusal, the ghost above), or a TOMBSTONE (`deleted_at`, whose push is
+  //     a DELETE; the server will never hold this id again). Sever: the link is
+  //     dead, and the meal must not die with it.
+  //   - **Yes** — `dirty = 1` and not deleted: a food this pass failed to send
+  //     for a TRANSIENT reason, or one queued behind an `offline` break. It is
+  //     still owed and the next pass will send it, after which the link becomes
+  //     valid. Severing here would destroy a good link; sending the entry here
+  //     would have it refused on the foreign key and refused PERMANENTLY, which
+  //     is the meal lost. So the entry waits, exactly as `stalled` makes the
+  //     whole queue wait — see the skip in the loop below.
+  //
+  // An id with no local `foods` row at all falls through both: nothing local
+  // can say the server lacks it (a pulled entry may name a food this device
+  // has not pulled yet), so the honest move is to send it and let the server
+  // rule. Each of the four branches is pinned by its own test.
+  if (!stalled) {
+    await db.runAsync(
+      `UPDATE food_entries SET source_food_id = NULL
+        WHERE user_id = ? AND dirty = 1 AND source_food_id IS NOT NULL
+          AND source_food_id IN (
+            SELECT id FROM foods
+             WHERE user_id = ? AND remote = 0
+               AND (dirty = 0 OR deleted_at IS NOT NULL)
+          )`,
+      userId, userId,
+    );
+  }
+  /**
+   * Foods still owed to the server: an entry naming one waits for it.
+   *
+   * **`deleted_at IS NULL` here cannot currently change the outcome, and is
+   * kept deliberately rather than trimmed.** The sever above has already
+   * nulled every entry pointing at a tombstone, and `rows` is read AFTER it —
+   * so a tombstoned id can never reach the `awaitingFood.has(...)` test to
+   * begin with. Mutation-tested and confirmed surviving; documented instead of
+   * deleted, because without it this set says "every food still owed" while
+   * the sever says "every food that will never arrive", and those two stop
+   * being complements the moment anyone moves the read above the UPDATE. What
+   * it defends is the ordering, not the current behaviour: an entry that
+   * waited on a DELETE would wait forever, since the thing it is waiting for
+   * is the row's disappearance.
+   */
+  const awaitingFood = new Set(
+    stalled
+      ? []
+      : (await db.getAllAsync<{ id: string }>(
+        `SELECT id FROM foods
+          WHERE user_id = ? AND remote = 0 AND dirty = 1 AND deleted_at IS NULL`,
+        userId,
+      )).map((r) => r.id),
+  );
+
   // Entries SECOND — see the note on the foods queue above. Skipped entirely
   // when that queue found no connection: an entry whose food has not left the
   // phone would be refused, and refused permanently.
@@ -1239,6 +1340,12 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   );
 
   for (const r of rows) {
+    // **WAIT, do not send** — the "yes, still coming" half of the split above.
+    // Left `dirty = 1`, so it is still owed, still counted by
+    // `pendingFoodCount`, and sent by the pass that follows the food landing.
+    // A TOMBSTONE is exempt: a DELETE carries no `source_food_id` and the
+    // server answers 204 regardless, so there is nothing for it to wait on.
+    if (!r.deleted_at && r.source_food_id && awaitingFood.has(r.source_food_id)) continue;
     try {
       if (r.deleted_at) {
         await api.deleteEntry(getToken, r.id);

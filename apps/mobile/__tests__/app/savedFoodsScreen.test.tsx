@@ -460,3 +460,44 @@ describe('sort', () => {
     expect(mockLocalFoods).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Found in review. A container's `accessibilityLabel` REPLACES everything
+ * nested inside it for a screen reader, so the refusal notice this ticket adds
+ * to the row is text a VoiceOver user never reaches — on the app's primary
+ * platform, for the athlete least able to notice "it looks saved and is not"
+ * any other way.
+ */
+it('puts the refusal in the row label, where a screen reader will reach it', async () => {
+  mockLocalFoods.mockResolvedValue([
+    food({ id: 'ghost', name: 'Burrito bowl' }),
+    food({ id: 'fine', name: 'Oats' }),
+  ]);
+  mockProblems.mockResolvedValue(
+    new Map([['ghost', { reason: 'serving_label must be between 1 and 40 characters', onServer: false }]]),
+  );
+  render(<SavedFoodsScreen />);
+  await waitFor(() => expect(screen.getByTestId('saved-foods-edit-ghost')).toBeTruthy());
+
+  const label = String(screen.getByTestId('saved-foods-edit-ghost').props.accessibilityLabel);
+  expect(label).toContain('Edit Burrito bowl');
+  expect(label).toContain('this phone only');
+  // A food with nothing wrong keeps the plain label — no notice to announce.
+  expect(screen.getByTestId('saved-foods-edit-fine').props.accessibilityLabel).toBe('Edit Oats');
+});
+
+/**
+ * Also found in review: reading the two together under one `Promise.all` made
+ * a failure of the ANNOTATION blank the whole list — a strictly worse screen
+ * than the one that existed before this ticket. Losing the warning costs a
+ * warning; losing the list costs the screen.
+ */
+it('still lists the foods when the refusal read fails', async () => {
+  mockLocalFoods.mockResolvedValue([food({ name: 'Chicken thigh' })]);
+  mockProblems.mockRejectedValue(new Error('could not read the outbox'));
+  render(<SavedFoodsScreen />);
+
+  await waitFor(() => expect(screen.getByText('Chicken thigh')).toBeTruthy());
+  expect(screen.queryByTestId('saved-foods-error')).toBeNull();
+  expect(screen.queryByTestId('saved-foods-problem-f1')).toBeNull();
+});

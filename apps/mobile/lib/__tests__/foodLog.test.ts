@@ -226,7 +226,7 @@ describe('sync state, for the ShareToFriend gate (N116/#505)', () => {
       serving_grams: null, kcal: 100, protein_g: 1, carb_g: 1, fat_g: 1, fibre_g: null,
       saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
-    await expect(foodSyncState(USER, id)).resolves.toEqual({ unsynced: true, owed: true });
+    await expect(foodSyncState(USER, id)).resolves.toEqual({ unsynced: true, owed: true, rejected: null });
   });
 
   it('a pushed, unedited food is shareable', async () => {
@@ -236,7 +236,7 @@ describe('sync state, for the ShareToFriend gate (N116/#505)', () => {
       saturated_fat_g: null, sugar_g: null, added_sugar_g: null, sodium_mg: null, cholesterol_mg: null,
     });
     await db.runAsync(`UPDATE foods SET dirty = 0, remote = 1 WHERE id = ?`, id);
-    await expect(foodSyncState(USER, id)).resolves.toEqual({ unsynced: false, owed: false });
+    await expect(foodSyncState(USER, id)).resolves.toEqual({ unsynced: false, owed: false, rejected: null });
   });
 
   it('returns null for a food id this device holds no row for', async () => {

@@ -151,21 +151,35 @@ export default function SavedFoodsScreen() {
         // The spotlight is read only while there is no search — see the doc
         // comment. `[]` rather than a stale list, so a search typed after a
         // load can never leave last time's spotlight sitting above it.
-        const [rows, shared, refused] = await Promise.all([
+        const [rows, shared] = await Promise.all([
           localFoods(userId, query, order),
           query.trim() ? Promise.resolve([]) : recentlySharedFoods(userId),
-          foodSyncProblems(userId),
         ]);
         // A newer load started while this one was reading; its answer is
         // the current one, and this is last time's.
         if (seq !== loadSeq.current) return;
         setFoods(rows);
         setRecent(shared);
-        setProblems(refused);
         setError(null);
       } catch (err) {
         if (seq !== loadSeq.current) return;
         setError(err instanceof Error ? err.message : 'Could not read your saved foods.');
+        return;
+      }
+      // **Read SECOND and swallowed, not folded into the read above.** Found in
+      // review: a `Promise.all` of the two makes a failure of THIS read blank
+      // the entire saved-foods list, which is a strictly worse screen than the
+      // one that existed before this ticket — the list is the athlete's picture
+      // of what they have saved, and the refusal notice is an annotation on it.
+      // Losing the annotation costs a warning; losing the list costs the
+      // screen. Same "an accelerator, not a requirement" posture `foodLog.ts`
+      // gives its caffeine sync.
+      try {
+        const refused = await foodSyncProblems(userId);
+        if (seq !== loadSeq.current) return;
+        setProblems(refused);
+      } catch {
+        if (seq === loadSeq.current) setProblems(new Map());
       }
     },
     [userId],
@@ -290,7 +304,16 @@ export default function SavedFoodsScreen() {
           onLongPress={() => confirmDelete(f)}
           style={styles.row}
           accessibilityRole="button"
-          accessibilityLabel={`Edit ${f.name}${from ? `, ${from}` : ''}`}
+          // **The refusal has to be IN the label, not merely under it.** A
+          // container with an `accessibilityLabel` replaces everything nested
+          // inside it for a screen reader, so the red line this ticket added to
+          // the row is text a VoiceOver user never reaches — the one athlete
+          // for whom "it looks saved but is not" is hardest to notice
+          // otherwise. Appended rather than made its own focusable element so
+          // the row is still one swipe.
+          accessibilityLabel={`Edit ${f.name}${from ? `, ${from}` : ''}${
+            problems.has(f.id) ? `. ${savedFoodProblemCopy(problems.get(f.id)!)}` : ''
+          }`}
           accessibilityHint="Long press, or swipe left, to delete"
           accessibilityActions={DELETE_ACTIONS}
           onAccessibilityAction={(e) => {

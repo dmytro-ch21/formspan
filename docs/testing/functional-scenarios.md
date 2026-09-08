@@ -21323,6 +21323,31 @@ saying so. Full account: `docs/decisions/history.md`, 2026-09-08 N533.
   units (an emoji run of 43 becomes exactly 40 emoji); an acceptable label
   is untouched.
 
+- **Re-logging a food the server already refused (the review recurrence).**
+  Save a food with a bad label, sync (it settles `remote = 0, dirty = 0,
+  last_error` set). Days later, log a NEW entry naming it — the shape
+  Today's quick-add, the recents chips and search all produce — and sync.
+  Expect: the entry PUT is sent **with `source_food_id: null`**, accepted,
+  its row `dirty = 0, remote = 1`, and `syncFood` reports `failed: 0`. The
+  food itself is STILL in `foodSyncProblems` and still in the saved list, so
+  it can be corrected and retried. **Negative:** before the fix this entry
+  is refused on the foreign key, cleared, and lost with nothing on screen.
+- **A food that merely lost signal is WAITED for, not severed.** Save a
+  food, log an entry naming it, make the food's PUT fail 503 (transient).
+  Expect: no entry PUT is sent at all this pass, the entry stays
+  `dirty = 1, source_food_id = <id>`, and `errorKind` is `transient`. The
+  next sync sends both and the link survives: the entry is accepted
+  carrying `source_food_id = <id>`. **Negative:** severing here throws away
+  a link about to become valid; sending here loses the meal permanently.
+- **A tombstoned food is severed, not waited for.** Save a food, delete it
+  while still owed (`remote = 0, dirty = 1, deleted_at` set), log an entry
+  naming that id, and make the DELETE fail transiently so the tombstone
+  survives the pass. The entry PUT is sent with `source_food_id: null` and
+  accepted — waiting on a DELETE would strand the meal forever.
+- **An id with no local food row is left alone.** An entry naming a food
+  this device has not pulled is sent with the id intact and accepted — the
+  server rules on it, since nothing local can say the server lacks it.
+
 ### Mobile — the screens
 
 - **Saved foods list (`/food/saved`).** With one refused-never-saved food,
@@ -21333,6 +21358,18 @@ saying so. Full account: `docs/decisions/history.md`, 2026-09-08 N533.
 - **Food editor (`/food/saved/[id]`).** `foodSyncState` returning
   `rejected` renders `saved-rejected` above the form with the reason;
   `rejected: null` renders nothing. Saving from this screen is the retry.
+- **The refusal is in the ROW LABEL, not only under it.** A refused row's
+  `accessibilityLabel` reads `Edit <name>. <reason copy>`; a fine row's is
+  exactly `Edit <name>`. A container label replaces nested text for a screen
+  reader, so without this the red line is unreachable by VoiceOver.
+- **The refusal is SPOKEN on the editor.** Opening a refused food calls
+  `AccessibilityInfo.announceForAccessibility` with the reason copy;
+  opening a fine one announces nothing. `accessibilityLiveRegion` is
+  Android-only and iOS is the primary platform.
+- **The list survives a failing problems read.** With `localFoods`
+  resolving and `foodSyncProblems` rejecting, the foods are still listed,
+  no `saved-foods-error` is shown, and no problem line appears. Losing the
+  annotation must not cost the screen.
 - **Describe (`/food/describe`), reused draft.** The reused banner is
   followed by `describe-reused-scope`: "changes today's entry only … Fix
   these numbers for next time". Editing kcal to 400 and logging calls

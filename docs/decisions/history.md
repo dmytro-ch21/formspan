@@ -65016,6 +65016,79 @@ same one-item food twice reuses one saved row" — untouched and green.
 - The `NEEDS HUMAN EVIDENCE` item on #964: the user names two foods; each
   is described, confirmed, and survives a reinstall.
 
+### What review found afterwards, and the shape of the second fix
+
+`frontend-reviewer` caught the bug **recurring one log later**, which is the
+part worth writing down: the first fix severed a doomed `source_food_id` at
+the FAILURE SITE — inside the catch for the food's own push — so it only ever
+saw foods still `dirty = 1`. A refused food then settles at `remote = 0,
+dirty = 0` and drops out of that queue permanently, while `localFoods` and
+`recentsFor` filter on `deleted_at IS NULL` alone and keep offering it from
+Today's quick-add, the recents chips and search. Every subsequent tap logged
+a fresh entry naming a food the server had never accepted → 23503 → 400 →
+permanent → `dirty` cleared. An athlete who had ALREADY SEEN the refusal
+banner and re-logged the same meal lost it silently, indefinitely.
+
+The reviewer offered two fixes: filter ghosts out of the quick-add surfaces,
+or key the sever off the food's current `remote` rather than off which foods
+happened to be mid-push. **The second was taken**, at the one choke point
+where a `source_food_id` is put on the wire — just before the entries queue,
+which runs after the foods queue, so `foods.remote` there is already this
+pass's answer. Filtering the surfaces would have meant enumerating every
+screen that can feed a food id into a log (three today), and would have
+fought the requirement that the saved-foods list still SHOW the ghost.
+
+Writing that guard forced a question the first fix never asked, and it turned
+up a second silent loss. For a food the server does not have, there are two
+cases, not one:
+
+- **it will never arrive** — settled (`dirty = 0`) or a TOMBSTONE (what is
+  owed is a DELETE). Sever: the link is dead, and the meal must not die with
+  it.
+- **it is still coming** — `dirty = 1` and not deleted, i.e. a food whose
+  push failed for a TRANSIENT reason (a 503) and which the next pass will
+  send. Severing here destroys a link that is about to become valid; sending
+  the entry anyway has it refused on the foreign key and refused
+  PERMANENTLY. **Before this, the transient case lost the meal** — the foods
+  loop only sets `stalled` on `offline`, so a 503 on the food let the entries
+  queue run straight into the FK. The entry now WAITS: skipped, left
+  `dirty = 1`, still counted by `pendingFoodCount`, sent by the pass after
+  the food lands.
+
+The two predicates are exact complements over `remote = 0`, which is the
+property that makes the pair reviewable.
+
+**Six mutations, five caught, one deliberately not.** Removing the sever,
+dropping either of its clauses, dropping the tombstone arm, and removing the
+wait skip each produced exactly one targeted failure. The sixth — dropping
+`deleted_at IS NULL` from the WAIT set — **survives**, because the sever runs
+before the entry rows are read and has already nulled every tombstone
+pointer, so it cannot reach the test. Kept and documented in place rather
+than trimmed, per this file's own rule that a redundant guard reads as dead
+code to the next person: what it defends is the ORDERING, and a reader who
+moves the read above the UPDATE gets the complement property back.
+
+Three of the reviewer's four suggestions were taken. The saved-foods row's
+`accessibilityLabel` now carries the refusal — a container label REPLACES
+nested text for a screen reader, so this ticket's own red line was invisible
+to exactly the athlete least able to notice the problem otherwise. The
+editor's `accessibilityLiveRegion` gained the matching
+`AccessibilityInfo.announceForAccessibility`, since live regions are
+Android-only and iOS is the primary platform (the fifth time this repo has
+closed that same gap). And the list's `Promise.all` was split, so a failure
+of the ANNOTATION read no longer blanks the whole list — a strictly worse
+screen than the one before this ticket.
+
+**The fourth was declined, with the reason recorded at the call site.**
+`fitName` has no empty floor while `fitServingLabel` does, and that asymmetry
+is deliberate on BOTH sides of the wire: `fitToFood` makes the same choice in
+Go for the same reason — an empty label means "counted in servings" and
+`1 serving` says that honestly, while an empty name means the model could not
+say what the food is. `ValidateEstimate` refuses such an estimate outright
+(`TestAWhitespaceNameIsStillRefusedAfterTheFit`), so a blank name never
+reaches the client, and defaulting one would ADD a saved food the athlete
+cannot identify rather than prevent a ghost.
+
 ## Open items / known gaps as of this entry
 
 

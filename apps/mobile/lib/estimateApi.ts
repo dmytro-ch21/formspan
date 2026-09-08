@@ -375,7 +375,22 @@ function clampRunes(s: string, n: number): string {
   return runes.length <= n ? s : runes.slice(0, n).join('').trim();
 }
 
-/** A name the server will accept, or empty if there was nothing to fit. */
+/**
+ * A name the server will accept, or empty if there was nothing to fit.
+ *
+ * **No empty floor, and the asymmetry with `fitServingLabel` below is
+ * deliberate on both sides of the wire.** `fitToFood` in
+ * `backend/internal/modules/nutrition/estimate.go` makes exactly the same
+ * choice for exactly the same reason: an empty LABEL means "counted in
+ * servings" and `1 serving` says that honestly, while an empty NAME means the
+ * model could not say what the food is, and no default is honest there.
+ * `ValidateEstimate` refuses such an estimate outright — pinned by that
+ * package's `TestAWhitespaceNameIsStillRefusedAfterTheFit` — so a blank name
+ * never reaches this function from the only caller shape that exists, and
+ * inventing one here would ADD a saved food the athlete cannot identify
+ * rather than prevent a ghost. Raised in review and declined on this basis;
+ * written down so it is not re-raised.
+ */
 export function fitName(name: string): string {
   return clampRunes(name.trim(), NAME_MAX_RUNES);
 }
