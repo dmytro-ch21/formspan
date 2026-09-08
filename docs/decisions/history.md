@@ -63589,8 +63589,13 @@ three intended files.
 **The bump itself is deferred, not abandoned.** `expo@57.0.21`,
 `expo-router@57.0.20` and the seven transitive moves become installable
 after ~2026-09-09T13:50Z; a routine `expo install --fix` then, with
-`pnpm-workspace.yaml` checked before commit. The Simulator launch proof done
-today stands for that bump when it lands — the resolved pods are identical.
+`pnpm-workspace.yaml` checked before commit. Today's Simulator launch proves
+the dyld-link class for the identical resolved pods, and that is ALL it
+proves: the original #950 criterion says a Release DEVICE build launches, a
+Simulator is not a device (this repo's own mobile-build skill is careful
+about exactly that distinction), and `ac-verifier` caught this entry
+claiming more than it had measured. Tomorrow's bump PR still owes the
+device launch.
 
 **What this does not settle.** The check still cannot tell "the matrix moved
 upstream" from "someone edited `package.json`" — and it should not try: same
