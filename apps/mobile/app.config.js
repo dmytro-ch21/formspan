@@ -78,6 +78,50 @@ module.exports = () => ({
         "expo-splash-screen",
         {
           backgroundColor: "#080B12",
+          // ANDROID ONLY, and load-bearing rather than decorative: without an
+          // `image` here, no Android build links at all (N526/#943).
+          //
+          // `expo-splash-screen`'s Android plugin ALWAYS writes
+          //   <item name="windowSplashScreenAnimatedIcon">@drawable/splashscreen_logo</item>
+          // into res/values/styles.xml (withAndroidSplashStyles.js), but only
+          // GENERATES that drawable when an `image` is supplied
+          // (withAndroidSplashImages.js: "If path isn't provided then no new
+          // image is placed in drawable directories"). With no image the
+          // reference dangles and resource linking fails outright:
+          //   error: resource drawable/splashscreen_logo not found.
+          //   error: failed linking references.
+          // Reproduced on a clean checkout before fixing: styles.xml carried
+          // the reference and 0 splashscreen_logo files existed;
+          // `:app:processDebugResources` FAILED in 16s.
+          //
+          // iOS is unaffected and stays image-less — its half of the plugin
+          // emits a storyboard with no equivalent reference, which is why this
+          // survived unnoticed until the first Android build was ever
+          // attempted. Scoped under `android` so it stays that way:
+          // getAndroidSplashConfig.js merges this sub-object over the root
+          // props, and the root keeps only `backgroundColor`.
+          //
+          // The MARK, not `assets/brand/splash/*.svg`: those masters are
+          // whole 1080x1920 compositions (background, wordmark, tagline), and
+          // Android 12+'s `windowSplashScreenAnimatedIcon` slot takes a
+          // CENTRED ICON, not a full-screen image. The tick on the dark
+          // ground is what that slot is for.
+          //
+          // 160 because Android 12+ masks the splash icon to a 192dp inner
+          // circle of a 288dp canvas, and this tick spans nearly its whole
+          // square canvas, so its points sit at the very edge. 160dp keeps
+          // them inside that mask with room to spare.
+          //
+          // What was actually MEASURED is 160, on a Pixel 7 / API 36
+          // emulator: the tick renders whole and centred, both points
+          // intact, no clipping. Larger values were NOT tried — the safe-zone
+          // figure above is Android's documented geometry, not something
+          // observed failing here, and it is written that way deliberately
+          // rather than implying a comparison nobody ran.
+          android: {
+            image: "./assets/images/vola-mark.png",
+            imageWidth: 160,
+          },
         },
       ],
       "expo-image",

@@ -20784,3 +20784,71 @@ that replace it.
   both sit fully clear of the bottom navigation bar and neither is tucked
   behind it. Floating a little high is the accepted error direction; touching
   or overlapping the bar is a failure and means the constant is wrong.
+
+### N526 — Android splash and the first Android build (`apps/mobile/app.config.js`)
+
+Until this ticket, **no Android build of VOLA had ever been produced** — the
+first attempt failed at resource linking. These scenarios exist so that stays
+found rather than becoming folklore.
+
+**Happy path**
+- **A clean checkout builds for Android.** `rm -rf apps/mobile/android`, then
+  `npx expo prebuild --platform android`, then `./gradlew :app:assembleDebug`
+  — it links and produces an APK. This is the check that was failing.
+- **The splash shows the VOLA tick, whole**, centred on the dark ground
+  (`#080B12`), with both points of the tick intact and no circular clipping —
+  Android 12+ masks the splash icon, and the mark spans nearly its full
+  canvas.
+- **The app launches past the splash** rather than dying on it.
+
+**Edge cases & errors**
+- **The drawable must exist, not merely be referenced.** The failure mode is a
+  style that names `@drawable/splashscreen_logo` while nothing generates it,
+  so the useful assertion is a count, not a grep for the reference:
+  `find apps/mobile/android/app/src/main/res -name 'splashscreen_logo*'`
+  should return 5 (mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi), never 0.
+- **iOS must stay image-less.** The fix is scoped under `android`, and
+  `getAndroidSplashConfig.js` merges that sub-object over the root props. If
+  someone moves `image` to the root "for symmetry", iOS silently gains a
+  splash image it was never designed to have.
+
+  **Do NOT try to answer this with `expo config --type prebuild`.** That was
+  the recipe written here first, and it is worse than no recipe: measured on
+  this branch, neither `--type prebuild` nor `--type introspect` emits any
+  `splash` key under `ios` or `android` at all — the command echoes the
+  manifest and the raw `plugins` array, not what a config plugin computes
+  internally. It returns a clean, empty, reassuring answer whether iOS is
+  fine or broken, which is an apparatus that cannot fail.
+
+  Ask the plugin's own merge functions instead. **They take ONE argument —
+  the plugin's props** — and passing `(config, props)` the way most Expo
+  helpers read silently returns pure defaults (`#ffffff`, `imageWidth: 100`),
+  which is the same failure wearing a different hat. From `apps/mobile`:
+
+      node -e "
+      const A=require('./node_modules/expo-splash-screen/plugin/build/getAndroidSplashConfig.js');
+      const I=require('./node_modules/expo-splash-screen/plugin/build/getIosSplashConfig.js');
+      const p=require('./app.config.js')().expo.plugins.find(x=>Array.isArray(x)&&x[0]==='expo-splash-screen')[1];
+      console.log('ios     image =', JSON.stringify(I.getIosSplashConfig(p).image));
+      console.log('android image =', JSON.stringify(A.getAndroidSplashConfig(p).image));
+      "
+
+  Expected: iOS `undefined`, Android the mark's path. **Verified this can
+  fail**, which is the only reason to trust it: hoisting `image` from the
+  `android` sub-object to the root — the exact "for symmetry" edit this
+  guards against — flips iOS to `"./assets/images/vola-mark.png"` while
+  Android still reads correctly, so the regression is invisible from the
+  Android side alone. `getIosSplashConfig` destructures only `props.ios`, so
+  `props.android` sits inert in its `rest` spread; that is the whole reason
+  the current shape is safe.
+- **A dark-mode / light-mode device**: the splash background is a fixed dark
+  value, so confirm the tick still reads under both system themes.
+- **`eas build --platform android`** goes through the same prebuild and had
+  therefore never worked either — worth running once end to end, not just the
+  local Gradle path.
+
+**NEEDS HUMAN EVIDENCE**
+- The splash on a REAL Android phone rather than an emulator: correct colour,
+  no letterboxing, no wrong-density artefact, and a sensible duration rather
+  than a flash or a hang. A successful resource link is not the same as a
+  splash that looks right, and only the second one is what an athlete sees.
