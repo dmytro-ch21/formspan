@@ -1883,7 +1883,7 @@ components:
             any one session.
         source:
           type: string
-          enum: [apple_watch, oura, whoop, garmin, manual, android_wearable]
+          enum: [apple_watch, oura, whoop, garmin, manual, android_wearable, hr_monitor]
           description: >
             android_wearable (N478) is a Health Connect sample whose writing
             app isn't one of the named vendors above — Samsung Health chief
@@ -1891,7 +1891,13 @@ components:
             identifier this API could otherwise match against.
         source_platform:
           type: string
-          enum: [healthkit, health_connect, manual]
+          enum: [healthkit, health_connect, manual, bluetooth]
+          description: >
+            `bluetooth` (N528) is a sample this app recorded itself, live,
+            from a Bluetooth Heart Rate Profile monitor — no health store in
+            between; `source` is then `hr_monitor`.
+            For a session window, these are preferred over the health-store
+            platforms, which only fill gaps in the direct stream.
         value:
           type: number
           format: double
@@ -2006,6 +2012,14 @@ components:
         sample_count:
           type: integer
           description: How many heart_rate samples this row was computed from.
+        hr_direct_count:
+          type: integer
+          readOnly: true
+          description: >
+            N528: how many of `sample_count` were recorded by this app
+            straight from a Bluetooth monitor (`source_platform: bluetooth`).
+            `sample_count - hr_direct_count` is what Apple Health / Health
+            Connect contributed — gap fill only, once a direct stream exists.
         hr_window_start:
           type: string
           format: date-time

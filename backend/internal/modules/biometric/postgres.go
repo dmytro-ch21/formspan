@@ -241,7 +241,7 @@ type pgxQuerier interface {
 // call it).
 func queryHRSamples(ctx context.Context, q pgxQuerier, userID string, from, to time.Time) ([]HRSample, error) {
 	rows, err := q.Query(ctx, `
-		SELECT measured_at, value FROM biometric_samples
+		SELECT measured_at, value, source_platform FROM biometric_samples
 		WHERE user_id = $1 AND metric_type = $2 AND measured_at >= $3 AND measured_at <= $4
 		ORDER BY measured_at`,
 		userID, string(MetricHeartRate), from, to)
@@ -253,9 +253,11 @@ func queryHRSamples(ctx context.Context, q pgxQuerier, userID string, from, to t
 	var out []HRSample
 	for rows.Next() {
 		var s HRSample
-		if err := rows.Scan(&s.MeasuredAt, &s.BPM); err != nil {
+		var platform string
+		if err := rows.Scan(&s.MeasuredAt, &s.BPM, &platform); err != nil {
 			return nil, fmt.Errorf("biometric: scan hr sample: %w", err)
 		}
+		s.Platform = SourcePlatform(platform)
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -331,6 +333,10 @@ func (r *PostgresRepository) ListExerciseHR(
 		if err != nil {
 			return nil, err
 		}
+		// Same direct-wins rule as the session's own metrics (N528/#958), per
+		// exercise window — a per-exercise number must not disagree with the
+		// session's about which source it came from.
+		samples, _ = MergeHRSources(samples, start, end, DirectGapFillThreshold)
 		if len(samples) == 0 {
 			// Absent, not zero — no evidence for this exercise, so it is
 			// left out of the list entirely rather than reported at 0 bpm.
@@ -406,6 +412,11 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 	if err != nil {
 		return SessionMetrics{}, err
 	}
+	// N528/#958: a session recorded live from a Bluetooth monitor keeps
+	// those samples and uses Health-store ones only to bridge gaps in the
+	// direct stream — see MergeHRSources. A session with no direct samples
+	// passes through untouched, so nothing pre-N528 changes.
+	hrSamples, provenance := MergeHRSources(hrSamples, queryStart, queryEnd, DirectGapFillThreshold)
 
 	var activeKcal *int
 	var kcalSum float64
@@ -427,6 +438,7 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 
 	m := Compute(hrSamples, hrMaxBPM, hrMaxSource, hrSourceHint)
 	m.SessionID = sessionID
+	m.HRDirectCount = provenance.DirectCount
 	m.ActiveKcal = activeKcal
 	m.HRWindowStart = queryStart
 	m.HRWindowEnd = queryEnd
@@ -453,8 +465,9 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 		INSERT INTO session_metrics
 			(session_id, user_id, avg_hr_bpm, max_hr_bpm, active_kcal, trimp,
 			 time_in_zones, hr_source, sample_count, computed_at, rule_version,
-			 hr_max_bpm, hr_max_source, hr_window_start, hr_window_end)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			 hr_max_bpm, hr_max_source, hr_window_start, hr_window_end,
+			hr_direct_count)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (session_id) DO UPDATE SET
 			avg_hr_bpm      = excluded.avg_hr_bpm,
 			max_hr_bpm      = excluded.max_hr_bpm,
@@ -468,6 +481,7 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 			hr_max_bpm      = excluded.hr_max_bpm,
 			hr_max_source   = excluded.hr_max_source,
 			hr_window_start = excluded.hr_window_start,
+			hr_direct_count = excluded.hr_direct_count,
 			hr_window_end   = excluded.hr_window_end
 		-- Load-bearing exactly as in running.PutDetail: Postgres skips the
 		-- referencing FK check on DO UPDATE when session_id/user_id don't
@@ -477,10 +491,12 @@ func (r *PostgresRepository) ComputeSessionMetrics(
 		WHERE session_metrics.user_id = $2
 		RETURNING session_id, avg_hr_bpm, max_hr_bpm, active_kcal, trimp,
 			time_in_zones, hr_source, sample_count, computed_at, rule_version,
-			hr_max_bpm, hr_max_source, hr_window_start, hr_window_end`,
+			hr_max_bpm, hr_max_source, hr_window_start, hr_window_end,
+			hr_direct_count`,
 		sessionID, userID, m.AvgHRBPM, m.MaxHRBPM, m.ActiveKcal, m.TRIMP,
 		zonesJSON, string(m.HRSource), m.SampleCount, m.ComputedAt, m.RuleVersion,
-		m.HRMaxBPM, hrMaxSourceParam, m.HRWindowStart, m.HRWindowEnd)
+		m.HRMaxBPM, hrMaxSourceParam, m.HRWindowStart, m.HRWindowEnd,
+		m.HRDirectCount)
 
 	out, err := scanSessionMetrics(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -503,7 +519,8 @@ func (r *PostgresRepository) GetSessionMetrics(
 	row := r.pool.QueryRow(ctx, `
 		SELECT session_id, avg_hr_bpm, max_hr_bpm, active_kcal, trimp,
 			time_in_zones, hr_source, sample_count, computed_at, rule_version,
-			hr_max_bpm, hr_max_source, hr_window_start, hr_window_end
+			hr_max_bpm, hr_max_source, hr_window_start, hr_window_end,
+			hr_direct_count
 		FROM session_metrics
 		WHERE session_id = $1 AND user_id = $2`, sessionID, userID)
 
@@ -598,7 +615,8 @@ func scanSessionMetrics(s scanner) (SessionMetrics, error) {
 	)
 	err := s.Scan(&out.SessionID, &out.AvgHRBPM, &out.MaxHRBPM, &out.ActiveKcal, &out.TRIMP,
 		&zonesJSON, &hrSource, &out.SampleCount, &out.ComputedAt, &out.RuleVersion,
-		&out.HRMaxBPM, &hrMaxSource, &out.HRWindowStart, &out.HRWindowEnd)
+		&out.HRMaxBPM, &hrMaxSource, &out.HRWindowStart, &out.HRWindowEnd,
+		&out.HRDirectCount)
 	if err != nil {
 		return SessionMetrics{}, err
 	}
