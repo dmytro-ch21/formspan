@@ -176,7 +176,25 @@ var modules = []Module{
 		IsSport:   true,
 		DefaultOn: false,
 		Caps: Capabilities{
-			Catalog:     "exercises",
+			// N534: was "exercises". Running never had a catalog of its own —
+			// it borrowed the strength one so that the seeded `run` exercise
+			// row had somewhere to live for distance/duration PRs, which meant
+			// opening the Library as a runner showed nothing about running.
+			// "runs" names the run-type catalog (`apps/mobile/lib/runTypes.ts`).
+			//
+			// Safe to move, checked rather than assumed: nothing anywhere asks
+			// for the "exercises" catalog by name. Every `moduleWithCatalog` /
+			// `moduleOffWithCatalog` call site in all three clients asks for
+			// "techniques". And `RUN_EXERCISE_ID` — the thing that genuinely
+			// does still tie a run to a strength exercise row — is a SET's
+			// exercise_id on the sessions table, which this capability string
+			// has never had anything to do with.
+			Catalog: "runs",
+			// One axis, not two. "Focus" is what an athlete actually picks by
+			// ("I want a speed session"); intensity is derivable from it and
+			// would be a near-duplicate second control on a chip row that
+			// already carries every enabled sport.
+			Facets:      []string{"focus"},
 			RecordKinds: []string{"longest_time", "furthest_distance"},
 		},
 	},
