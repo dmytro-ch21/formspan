@@ -252,14 +252,53 @@ export async function entrySyncState(
 export async function foodSyncState(
   userId: string,
   id: string,
-): Promise<{ unsynced: boolean; owed: boolean } | null> {
+): Promise<{ unsynced: boolean; owed: boolean; rejected: string | null } | null> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ remote: number; dirty: number }>(
-    `SELECT remote, dirty FROM foods WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+  const row = await db.getFirstAsync<{ remote: number; dirty: number; last_error: string | null }>(
+    `SELECT remote, dirty, last_error FROM foods WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     id, userId,
   );
   if (!row) return null;
-  return { unsynced: row.remote === 0, owed: row.dirty === 1 };
+  return {
+    unsynced: row.remote === 0,
+    owed: row.dirty === 1,
+    // The server's reason, ONLY once the phone has stopped trying: a
+    // `last_error` on a row still owed (`dirty = 1`) is a transient failure
+    // the next pass will retry, and reporting it as a refusal would be
+    // wrong the moment the signal came back. See `foodSyncProblems`.
+    rejected: row.dirty === 0 && row.last_error ? row.last_error : null,
+  };
+}
+
+/**
+ * Every saved food the server REFUSED and the phone has stopped sending
+ * (N533/#964) — the local ghosts, keyed by id, with the server's reason.
+ *
+ * `dirty = 0 AND last_error IS NOT NULL` is exactly the state `push()`'s
+ * permanent branch leaves behind: a 4xx will not become a 2xx, so the row is
+ * no longer owed, but the reason is kept. Until this read existed, nothing
+ * on the phone ever displayed it — the food sat in the saved-foods list
+ * looking exactly like every other row, and only a reinstall (which shows
+ * what the SERVER has) revealed that it had never been saved anywhere else.
+ *
+ * `onServer` tells the two cases apart, because the athlete's situation is
+ * different in each: `false` is a food that exists on this phone ONLY and
+ * would be lost with it; `true` is a food the server holds an EARLIER
+ * version of, whose latest correction was refused. Editing the food again
+ * (`saveFoodLocally`) sets `dirty = 1` and clears `last_error`, which is how
+ * a refused row gets another try — so the copy built on this can honestly
+ * say "edit it to try again".
+ */
+export async function foodSyncProblems(
+  userId: string,
+): Promise<Map<string, { reason: string; onServer: boolean }>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string; remote: number; last_error: string }>(
+    `SELECT id, remote, last_error FROM foods
+      WHERE user_id = ? AND deleted_at IS NULL AND dirty = 0 AND last_error IS NOT NULL`,
+    userId,
+  );
+  return new Map(rows.map((r) => [r.id, { reason: r.last_error, onServer: r.remote === 1 }]));
 }
 
 /**
@@ -769,6 +808,15 @@ export async function saveFoodLocally(
        -- have been inserted as, i.e. already defaulted, so reading it here can
        -- never see the absent case — exactly the trap postgres.go documents.
        source = COALESCE(?, foods.source),
+       -- **A save is a claim that the food EXISTS, so it lifts a tombstone
+       -- (N533/#964, the issue's hypothesis 2).** A regenerate carries the id
+       -- of the food it replaces ("describe.tsx"'s "replacing"), and if that
+       -- row was deleted on this phone between the match and the confirm, an
+       -- upsert that left "deleted_at" alone would write the fresh numbers
+       -- into a row every read filters out — and "push()" would then send a
+       -- DELETE for it, with the entry naming it refused on the foreign key
+       -- straight after. The athlete confirmed a food and got nothing.
+       deleted_at = NULL,
        dirty = 1, updated_at = excluded.updated_at, last_error = NULL`,
     id, userId, input.kind, input.name, input.brand, input.serving_label, input.serving_grams,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
@@ -1051,14 +1099,19 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
   // much as a save does. Dropping the filter without adding the branch below
   // would silently strand every mobile delete on the phone forever — the
   // fixed version of the bug this ticket exists to close.
-  const foodRows = await db.getAllAsync<FoodRow & { updated_at: string; deleted_at: string | null }>(
-    `SELECT ${FOOD_COLS}, updated_at, deleted_at
+  // `remote` is read alongside, for the permanent branch below: whether the
+  // server has EVER accepted this row decides whether an entry may still
+  // name it there. Not part of `FOOD_COLS`, which is the athlete-facing shape.
+  const foodRows = await db.getAllAsync<
+    FoodRow & { updated_at: string; deleted_at: string | null; remote: number }
+  >(
+    `SELECT ${FOOD_COLS}, updated_at, deleted_at, remote
        FROM foods WHERE user_id = ? AND dirty = 1`,
     userId,
   );
   const foods = foodRows.map((r) => {
-    const { updated_at, deleted_at, ...row } = r;
-    return { ...hydrate(row), updated_at, deleted_at };
+    const { updated_at, deleted_at, remote, ...row } = r;
+    return { ...hydrate(row), updated_at, deleted_at, remote };
   });
   for (const f of foods) {
     try {
@@ -1141,6 +1194,30 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
           `UPDATE foods SET dirty = 0 WHERE id = ? AND user_id = ? AND updated_at = ?`,
           f.id, userId, f.updated_at,
         );
+        // **THE MEAL MUST STILL REACH THE SERVER (N533/#964).** A food the
+        // server has never accepted (`remote = 0`) is one no entry can name
+        // there: the composite foreign key refuses it with a 23503, the
+        // server maps that to a 400, and the branch below clears the ENTRY's
+        // `dirty` too. So a refused food used to take every meal logged
+        // against it down with it — both rows local ghosts, and a reinstall
+        // shows neither. Severing the reference is the same thing
+        // `removeFood` does for a deleted food, for the same reason, and it
+        // costs only the provenance pointer: an entry owns its own copied
+        // macros, nothing reads nutrition back through `source_food_id`, and
+        // a day eaten is worth more than a link to a row that does not exist.
+        //
+        // Only for a food the server has never had. A REJECTED EDIT of a
+        // food it already holds (`remote = 1`) leaves the server's earlier
+        // version in place, and an entry may keep naming it. Only still-owed
+        // entries, because a synced one already reached the server naming
+        // whatever it named.
+        if (!f.deleted_at && f.remote === 0) {
+          await db.runAsync(
+            `UPDATE food_entries SET source_food_id = NULL
+              WHERE user_id = ? AND source_food_id = ? AND dirty = 1`,
+            userId, f.id,
+          );
+        }
       }
       if (kind === 'offline') {
         // Sets `stalled` as well as breaking, so the ENTRY queue below is not

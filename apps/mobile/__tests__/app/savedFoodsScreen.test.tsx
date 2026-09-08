@@ -25,10 +25,12 @@ const mockUseEffect = useEffect;
 const mockLocalFoods = jest.fn();
 const mockRecentlyShared = jest.fn();
 const mockRemoveFood = jest.fn();
+const mockProblems = jest.fn();
 jest.mock('@/lib/foodLog', () => ({
   localFoods: (...a: unknown[]) => mockLocalFoods(...a),
   recentlySharedFoods: (...a: unknown[]) => mockRecentlyShared(...a),
   removeFood: (...a: unknown[]) => mockRemoveFood(...a),
+  foodSyncProblems: (...a: unknown[]) => mockProblems(...a),
 }));
 
 const mockReadPref = jest.fn();
@@ -123,6 +125,7 @@ function lastAlertButton(label: string) {
 }
 
 beforeEach(() => {
+  mockProblems.mockReset().mockResolvedValue(new Map());
   mockLocalFoods.mockReset().mockResolvedValue([]);
   mockRecentlyShared.mockReset().mockResolvedValue([]);
   mockRemoveFood.mockReset().mockResolvedValue(undefined);
@@ -144,6 +147,36 @@ it('lists a saved food with its per-serving macros on one line', async () => {
   expect(screen.getByText(/250 kcal · 22P\/0C\/18F/)).toBeTruthy();
   // No second line for an unbranded, unshared food — the row stays one line.
   expect(screen.queryByTestId('saved-foods-from-f1')).toBeNull();
+});
+
+/**
+ * N533/#964 — a food the server REFUSED is not allowed to sit in this list
+ * looking like every other row. Before this, the only way to learn that a
+ * described food had never been saved anywhere but this phone was to
+ * reinstall the app and watch it vanish.
+ */
+it('says when a food was refused by the server, and which way', async () => {
+  mockLocalFoods.mockResolvedValue([
+    food({ id: 'ghost', name: 'Burrito bowl' }),
+    food({ id: 'held', name: 'Chicken thigh' }),
+    food({ id: 'fine', name: 'Oats' }),
+  ]);
+  mockProblems.mockResolvedValue(
+    new Map([
+      ['ghost', { reason: 'serving_label must be between 1 and 40 characters', onServer: false }],
+      ['held', { reason: 'name must be between 1 and 120 characters', onServer: true }],
+    ]),
+  );
+  render(<SavedFoodsScreen />);
+  await waitFor(() => expect(screen.getByTestId('saved-foods-problem-ghost')).toBeTruthy());
+
+  const ghost = String(screen.getByTestId('saved-foods-problem-ghost').props.children);
+  expect(ghost).toContain('serving_label must be between 1 and 40 characters');
+  expect(ghost).toContain('this phone only');
+  const held = String(screen.getByTestId('saved-foods-problem-held').props.children);
+  expect(held).toContain('name must be between 1 and 120 characters');
+  expect(held).toContain('earlier version');
+  expect(screen.queryByTestId('saved-foods-problem-fine')).toBeNull();
 });
 
 it('marks a recipe distinctly from a plain food', async () => {

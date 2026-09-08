@@ -323,9 +323,9 @@ export function savedFoodFrom(it: EstimatedItem): {
   const n = it.servings > 0 ? it.servings : 1;
   return {
     kind: 'food',
-    name: it.name.trim(),
+    name: fitName(it.name),
     brand: '',
-    serving_label: it.serving_label,
+    serving_label: fitServingLabel(it.serving_label),
     serving_grams: null,
     // `ai`, never `user`. Nobody measured these numbers, and a model cannot
     // reliably say which of its own to distrust — so an AI-drafted food has to
@@ -344,15 +344,59 @@ export function savedFoodFrom(it: EstimatedItem): {
   };
 }
 
+/**
+ * The server's own limits on a food's or entry's name and serving label —
+ * `validateName` and `validateLabel` in
+ * `backend/internal/modules/nutrition/nutrition.go`, which count RUNES.
+ *
+ * Restated here (N533/#964) because the phone writes a drafted item to its
+ * outbox before the server ever sees it, so the phone is what decides
+ * whether the push can succeed. The server's estimator now fits every item
+ * to these limits itself (`fitToFood`), which is the real fix; this is the
+ * same fit applied again on the way into the outbox, for a phone talking to
+ * a deploy that predates it — and because a value that must agree with a
+ * validator is safer clamped at BOTH ends than trusted across the wire.
+ *
+ * What it prevents: an AI label such as "1 restaurant bowl with rice, beans
+ * and salsa (about 400 g)" is a perfectly valid draft that `Food.Validate`
+ * then refuses with a 400. `classify` reads a 400 as permanent and clears
+ * `dirty`, so the food — and the entry naming it, refused next on the
+ * foreign key — live on that one phone until a reinstall removes them.
+ * "Some foods from AI generation don't get saved", verbatim.
+ */
+export const NAME_MAX_RUNES = 120;
+export const SERVING_LABEL_MAX_RUNES = 40;
+/** What an item is counted in when the model gave no label. See the server's `DefaultServingLabel`. */
+export const DEFAULT_SERVING_LABEL = '1 serving';
+
+/** Cut to at most `n` code points — `Array.from`, not `slice`, so a surrogate pair is never split. */
+function clampRunes(s: string, n: number): string {
+  const runes = Array.from(s);
+  return runes.length <= n ? s : runes.slice(0, n).join('').trim();
+}
+
+/** A name the server will accept, or empty if there was nothing to fit. */
+export function fitName(name: string): string {
+  return clampRunes(name.trim(), NAME_MAX_RUNES);
+}
+
+/** A label the server will accept — never empty. */
+export function fitServingLabel(label: string): string {
+  return clampRunes(label.trim(), SERVING_LABEL_MAX_RUNES) || DEFAULT_SERVING_LABEL;
+}
+
 export function itemToEntry(it: EstimatedItem): Macros & {
   name: string;
   servings: number;
   serving_label: string;
 } {
   return {
-    name: it.name,
+    // Fitted exactly as `savedFoodFrom` fits them: `Entry.Validate` carries
+    // the same two limits, so an entry with an over-long label is a second
+    // ghost beside the food's, not a survivor of it.
+    name: fitName(it.name),
     servings: it.servings,
-    serving_label: it.serving_label,
+    serving_label: fitServingLabel(it.serving_label),
     kcal: it.kcal,
     protein_g: it.protein_g,
     carb_g: it.carb_g,

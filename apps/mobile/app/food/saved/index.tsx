@@ -85,8 +85,8 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
-import { localFoods, recentlySharedFoods, removeFood } from '@/lib/foodLog';
-import type { Food } from '@/lib/nutrition';
+import { foodSyncProblems, localFoods, recentlySharedFoods, removeFood } from '@/lib/foodLog';
+import { savedFoodProblemCopy, type Food } from '@/lib/nutrition';
 import { PREF_SAVED_FOODS_SORT, readPref, writePref } from '@/lib/prefs';
 import {
   DEFAULT_SAVED_FOODS_SORT,
@@ -110,6 +110,17 @@ export default function SavedFoodsScreen() {
   const [sort, setSortState] = useState<SavedFoodsSort>(DEFAULT_SAVED_FOODS_SORT);
   const [foods, setFoods] = useState<Food[] | null>(null);
   const [recent, setRecent] = useState<Food[]>([]);
+  /**
+   * N533/#964 — the foods the server refused, by id, with its reason. Read
+   * beside the list rather than folded into `localFoods`, because that read
+   * feeds the quick-add picker too and a ghost there is still a food the
+   * athlete can log (an entry owns its own numbers). Here, where the list is
+   * the athlete's picture of what is saved, a row that is NOT saved anywhere
+   * but this phone has to say so.
+   */
+  const [problems, setProblems] = useState<Map<string, { reason: string; onServer: boolean }>>(
+    () => new Map(),
+  );
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -140,15 +151,17 @@ export default function SavedFoodsScreen() {
         // The spotlight is read only while there is no search — see the doc
         // comment. `[]` rather than a stale list, so a search typed after a
         // load can never leave last time's spotlight sitting above it.
-        const [rows, shared] = await Promise.all([
+        const [rows, shared, refused] = await Promise.all([
           localFoods(userId, query, order),
           query.trim() ? Promise.resolve([]) : recentlySharedFoods(userId),
+          foodSyncProblems(userId),
         ]);
         // A newer load started while this one was reading; its answer is
         // the current one, and this is last time's.
         if (seq !== loadSeq.current) return;
         setFoods(rows);
         setRecent(shared);
+        setProblems(refused);
         setError(null);
       } catch (err) {
         if (seq !== loadSeq.current) return;
@@ -302,6 +315,11 @@ export default function SavedFoodsScreen() {
               testID={from ? `${keyPrefix}saved-foods-from-${f.id}` : undefined}
             >
               {second}
+            </Text>
+          ) : null}
+          {problems.has(f.id) ? (
+            <Text style={styles.problem} testID={`${keyPrefix}saved-foods-problem-${f.id}`}>
+              {savedFoodProblemCopy(problems.get(f.id)!)}
             </Text>
           ) : null}
         </Pressable>
@@ -461,4 +479,5 @@ const styles = StyleSheet.create({
   macros: { fontSize: 12, lineHeight: 20, color: vola.textMuted, flexShrink: 0 },
   second: { fontSize: 12, lineHeight: 16, marginTop: 2, color: vola.textDim },
   from: { color: vola.textMuted },
+  problem: { fontSize: 12, lineHeight: 16, marginTop: 2, color: vola.warn },
 });

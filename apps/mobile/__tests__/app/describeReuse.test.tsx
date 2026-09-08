@@ -151,6 +151,30 @@ describe('confirming a generated draft', () => {
     expect(mockSaveFood.mock.calls.map((c) => c[1].name)).toEqual(['Pork Shashlik', 'Flatbread']);
   });
 
+  /**
+   * N533/#964, hypothesis 4: on a multi-item draft, a failure saving the
+   * SECOND item must not log its entry anyway (an entry naming a food that
+   * was never saved), and must leave that item on screen for a retry while
+   * the first — which landed — is gone.
+   */
+  it('logs no entry for an item whose food failed to save, and keeps only that item', async () => {
+    mockDescribe.mockResolvedValue(generated([item(), item({ name: 'Flatbread' })]));
+    mockSaveFood.mockResolvedValueOnce('food-1').mockRejectedValueOnce(new Error('disk full'));
+    await draft();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-log'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('describe-error')).toBeTruthy());
+    expect(mockSaveFood).toHaveBeenCalledTimes(2);
+    expect(mockLogFood).toHaveBeenCalledTimes(1);
+    expect(mockLogFood.mock.calls[0][1].name).toBe('Pork Shashlik');
+    expect(mockLogFood.mock.calls[0][1].source_food_id).toBe('food-1');
+    // Only the un-logged item remains, so a retry logs only it.
+    expect(screen.queryByText('Pork Shashlik')).toBeNull();
+    expect(screen.getByText('Flatbread')).toBeTruthy();
+  });
+
   it('does not present itself as reused', async () => {
     mockDescribe.mockResolvedValue(generated());
     await draft();
@@ -177,6 +201,31 @@ describe('a reused draft', () => {
     // component that renders nothing at all.
     expect(screen.queryByText('CHECK THESE BEFORE LOGGING')).toBeNull();
     expect(screen.getByText('FROM YOUR SAVED FOODS')).toBeTruthy();
+  });
+
+  /**
+   * N533/#964, hypothesis 1 and the decision it asked for. An edited reused
+   * draft neither mints a new food nor rewrites the matched one: the entry
+   * takes the edited numbers, the saved row is untouched, and the screen SAYS
+   * so — "I fixed it and it didn't save" was the honest reading of a screen
+   * that changed today's entry silently and left the stored food alone.
+   */
+  it('logs an edited draft against the stored food without changing it, and says so', async () => {
+    mockDescribe.mockResolvedValue(reused());
+    await draft();
+    const scope = screen.getByTestId('describe-reused-scope').props.children;
+    expect(String(Array.isArray(scope) ? scope.join('') : scope)).toContain('today');
+    expect(String(Array.isArray(scope) ? scope.join('') : scope)).toContain('Fix these numbers for next time');
+
+    fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '400');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('describe-log'));
+    });
+
+    await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
+    expect(mockLogFood.mock.calls[0][1].kcal).toBe(400);
+    expect(mockLogFood.mock.calls[0][1].source_food_id).toBe('food-abc');
+    expect(mockSaveFood).not.toHaveBeenCalled();
   });
 
   it('does not mint a second food for the one it came from', async () => {
