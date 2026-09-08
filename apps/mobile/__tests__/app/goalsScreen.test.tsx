@@ -1,6 +1,6 @@
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
-import GoalsScreen from '../../app/(tabs)/goals';
+import GoalsScreen from '../../app/goals';
 import {
   cacheActivityLevel,
   readActivityChoice,
@@ -159,7 +159,16 @@ const mockPushLevel = setActivityLevel as jest.MockedFunction<typeof setActivity
  */
 const mockFocusCbs: (() => void | (() => void))[] = [];
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
+  // N504 — `canGoBack` added alongside the screen's new `leading` back
+  // button (it moved out of `(tabs)/`, see `lib/tabs.ts`); `true` is the
+  // ordinary case, matching `libraryControlsBoundary.test.tsx`'s mock for the
+  // identical control.
+  useRouter: () => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    replace: jest.fn(),
+    canGoBack: () => true,
+  }),
   // Keyed on the CALLBACK, not on []. React Navigation re-runs a focus effect
   // when its callback identity changes while the screen is focused, and the
   // screen relies on exactly that: `load` changes with the activity, so moving

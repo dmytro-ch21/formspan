@@ -1,8 +1,8 @@
+import { vola } from '@/constants/Colors';
 import type { IconName } from '@/components/ui/Icon';
 
 /**
- * The bottom bar's shape — which destinations it holds, in what order, and
- * which routes in `app/(tabs)/` deliberately have no button.
+ * The bottom bar's shape — which destinations it holds, and in what order.
  *
  * Lives here rather than inline in `app/(tabs)/_layout.tsx` so it can be
  * asserted directly: a route file is awkward to import from a test, and the
@@ -41,61 +41,60 @@ import type { IconName } from '@/components/ui/Icon';
  * **Goals stays off the bar, and that half of N176 is untouched.** The daily
  * target no longer needs a slot of its own because N180 puts it at the TOP OF
  * THE FOOD TAB, next to the thing it constrains — `components/food/TargetRow`,
- * two taps, linking to `(tabs)/goals` for the derivation and the history. That
+ * two taps, linking to `/goals` for the derivation and the history. That
  * is the mobile-first rule in `CLAUDE.md` applied to chrome: the reasoning was
  * reachable and the action was three taps behind it.
  *
- * ## What did NOT change: Train and Goals are still reachable
+ * ## Train and Goals moved OUT of `app/(tabs)/` (N504)
  *
- * They lose a button, not a route. Both stay declared below in
- * `OFF_BAR_ROUTES`, which the layout renders with `href: null` — the button
- * disappears and the route stays resolvable, which is what an in-flight
- * `router.push` and every deep link need.
+ * They used to live inside the tab folder as `href: null` `<Tabs.Screen>`s —
+ * declared, buttonless, still resolvable for `router.push` and a
+ * `vola://train` deep link. That mechanism does not exist under `NativeTabs`
+ * (`expo-router/unstable-native-tabs`): Expo's own docs are explicit —
+ * **"Hidden tabs cannot be navigated to!"** — and the same is true of a route
+ * file with no `<NativeTabs.Trigger>` at all. There is no native-tabs
+ * equivalent of "in the group, no button, still reachable".
  *
- * **`train.tsx` is deliberately NOT deleted**, and N182 (#587) settled what it
- * is for. N180 left an honest gap on the record — nothing in the app linked to
- * `(tabs)/train` any more, its tab having been its only entry point — and #587
- * audited the screen rather than re-homing it on faith. All four of its blocks
- * were already drawn elsewhere by a screen that has a button (`Resume`,
- * `Today`, `Quick start` and `Recent` by Today; `Later` by Plan's
- * `WeekPlanner`), so the file is now a `<Redirect>` to Today and the route
- * stays resolvable for `vola://train` and any in-flight `router.push`. The
- * audit table is in that file's docstring.
+ * The fix is `app/train.tsx` and `app/goals.tsx`, at the app root, pushed as
+ * ordinary stack screens over the tab navigator — the exact pattern
+ * `app/library.tsx` and `app/phase/index.tsx` already used before this ticket
+ * existed: `headerShown: false` on the `Stack.Screen` in `app/_layout.tsx`,
+ * the screen draws its own `ScreenHeader`, with `leading` for a back button.
+ * Because `(tabs)` is a route GROUP, its parentheses were already stripped
+ * from the URL — `app/(tabs)/goals.tsx` and `app/goals.tsx` both resolve to
+ * `/goals` — so this is a file-location and stack-wiring change only.
+ * `vola://train` and `vola://goals` are unaffected, and so is every
+ * `router.push('/goals')` call site (they read `/goals`, never
+ * `/(tabs)/goals`, once N504 lands — see that ticket's diff for the sites
+ * that had to be corrected from the older `/(tabs)/goals` spelling).
  *
- * **So the gap is closed by a ruling, not by a link.** Train is not
- * unreachable-and-undecided; it is retired, and the one thing Plan genuinely
- * lacked — a planned day beyond the week `WeekPlanner` is showing — is now a
- * block on Plan reading the same `lib/useTrainBoard.ts` Train read.
+ * `train.tsx`'s own content (a `<Redirect>` to Today) is untouched by the
+ * move — see that file for N180/N182's account of why it exists as a redirect
+ * rather than a deleted file or a signpost screen.
  *
- * ## The gate that used to live here, and why it is gone
+ * ## The two platform differences NativeTabs introduced (N504)
  *
- * `tabHidden(name, modules)` hid Food and Goals whenever this DEPLOYMENT had no
- * food-log module — the third state that `serverHasFoodLog` separates from
- * "turned off". N176 retired it because both tabs went unconditionally off-bar,
- * so there was nothing left for it to decide; the predicate it asked with is
- * still in `lib/modules.ts`.
+ * **iOS renders VOLA's own brand icons, dynamically tinted by the athlete's
+ * accent.** `lib/tabIconRaster.tsx` rasterises each icon from the same SVG
+ * source of truth (`assets/brand/icons/*.svg`) at runtime, once, into a
+ * neutral (colour-irrelevant) PNG; `lib/tabIconPlan.ts` decides which rasters
+ * each platform needs and hands each tab its `{default, selected}` image
+ * pair; `NativeTabs`' `renderingMode: 'template'` then treats the image as an
+ * alpha mask and fills it with `iconColor` / `selectedIconColor`, which
+ * `(tabs)/_layout.tsx` feeds from `useAccent()` — so the tab bar keeps
+ * following whatever the athlete chose, same as before.
  *
- * **N180 puts Food back on the bar and does NOT bring the gate back with it.**
- * That is the deliberate choice, not an omission. The screen behind the tab
- * already answers the question in words — `app/(tabs)/food.tsx` reads
- * `foodLogGate(modules, ready)` and renders `ModuleOffNotice` — so an athlete
- * whose deployment or account has nutrition off arrives somewhere that explains
- * itself, which is exactly what #370 concluded the fix was. A conditional slot
- * would instead make 20% of the primary navigation appear and disappear
- * depending on a server response, and reintroduce the cold-start flash the
- * layout holds a frame to prevent.
- *
- * **Do not read that retirement as licence to hide a tab again.** The gate it
- * replaced hid Food and Goals whenever nutrition was merely turned OFF — two of
- * five tabs, 40% of the primary navigation, erased with nothing left behind to
- * say why. An athlete with nutrition off did not see a reduced app, they saw a
- * different, smaller one, and they cannot report what they cannot see: the user
- * hit the BJJ equivalent on a real device and told us the features were "not
- * there". They were there. #370's answer, applied to chrome, was that the
- * destinations were never the problem — they already explain themselves — and
- * that nothing LINKED to them while the module was off. Every entry in `TABS`
- * below is therefore unconditional, and a conditional one is a decision to
- * re-argue, not a convenience.
+ * **Android renders the same brand icons, in a FIXED colour pair — not the
+ * athlete's accent.** `renderingMode: 'template'` is iOS-only; Android always
+ * renders a custom icon source with its own baked-in colour. Preserving VOLA's
+ * icon shapes on Android's tab bar (rather than falling back to Material
+ * Symbols) therefore costs per-account personalisation there specifically:
+ * `ANDROID_ACTIVE_ICON_COLOR` below is `vola.accent`, the app's DEFAULT brand
+ * accent — the same "before anyone has expressed a preference" value
+ * `constants/Colors.ts` already documents `vola.accent` as being for — not
+ * whatever accent the signed-in athlete picked. This is a deliberate, accepted
+ * platform asymmetry, decided with the user rather than discovered later: see
+ * `docs/decisions/history.md`'s N504 entry.
  */
 
 export type TabSpec = {
@@ -139,38 +138,15 @@ export const TABS = [
 ] as const satisfies readonly TabSpec[];
 
 /**
- * Routes that live in `app/(tabs)/` and deliberately hold no bar position.
+ * Android's fixed, non-personalised active-tab-icon colour (N504).
  *
- * They must still be DECLARED — `href: null` rather than omitting the
- * `<Tabs.Screen>`. Omitting one does not hide it: expo-router auto-injects
- * every route file in this folder whether it is declared or not, so an omitted
- * screen comes back as a sixth tab with a filename-derived title ("train").
- * That is the failure this list exists to make impossible, and it is why
- * `lib/__tests__/tabBar.test.ts`'s "is either a tab or deliberately off the
- * bar, and never neither" READS THE DIRECTORY rather than trusting this array.
- *
- * **`train` is here rather than deleted.** N180 retired its BUTTON; N182
- * retired its CONTENTS, having measured that every block was already drawn by a
- * screen with a button. What is left is a `<Redirect>` to Today, which is
- * exactly what this list is for: deleting the file would break every
- * `vola://train` link in flight, and omitting it from this array would put the
- * route back on the bar as a sixth tab titled "train".
+ * `vola.accent` — read its own doc comment in `constants/Colors.ts`: it is
+ * explicitly the value "someone gets before they have expressed [an accent]
+ * preference", which is exactly the role it plays here. Not `useAccent()`'s
+ * resolved value: see this file's top-of-file comment for why Android's tab
+ * icons cannot follow the athlete's own chosen accent the way iOS's do.
  */
-export const OFF_BAR_ROUTES: readonly string[] = ['train', 'goals'];
+export const ANDROID_ACTIVE_ICON_COLOR = vola.accent;
 
-/**
- * Does this route file sit in the tab folder without owning a bar slot?
- *
- * The layout does not need this — it maps `OFF_BAR_ROUTES` directly — but the
- * pair of lists has an invariant that does: every route in `app/(tabs)/` is in
- * exactly one of them. A file in neither is a tab nobody decided to add; a name
- * in both is a bar entry the layout would then null out.
- */
-export function offBar(name: string): boolean {
-  return OFF_BAR_ROUTES.includes(name);
-}
-
-/** Every name the two lists between them claim, for the invariant above. */
-export function declaredTabRoutes(): string[] {
-  return [...TABS.map((t) => t.name), ...OFF_BAR_ROUTES];
-}
+/** Android's fixed inactive-tab-icon colour — the same token every inactive icon elsewhere in the app uses. */
+export const ANDROID_INACTIVE_ICON_COLOR = vola.textDim;

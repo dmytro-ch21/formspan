@@ -58,7 +58,7 @@ function whatFor(verb: 'save' | 'remove' | 'put it back'): string {
  * this app has throws one of the two. But this is still an honest sentence
  * rather than silence if it ever does.
  *
- * Lifted out of `app/(tabs)/goals.tsx` when a second screen — the history —
+ * Lifted out of `app/goals.tsx` when a second screen — the history —
  * grew the same write paths. Two copies of this sentence is two chances for one
  * of them to drift back into blaming the network for a refusal.
  *

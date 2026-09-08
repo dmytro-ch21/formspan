@@ -31,9 +31,18 @@ import { Redirect } from 'expo-router';
  *
  * ## Why a redirect and not a deletion, and not a signpost
  *
- * **Not deleted**, because the route has to keep resolving — `lib/tabs.ts`
- * still lists it in `OFF_BAR_ROUTES`, and a route file that disappears takes
- * every `vola://train` link with it.
+ * **Not deleted**, because the route has to keep resolving. **Moved out of
+ * `app/(tabs)/` entirely by N504 (#876)**: this used to be declared there
+ * with `href: null`, kept off the bar but still reachable — the mechanism
+ * `lib/tabs.ts`'s `OFF_BAR_ROUTES` used to name. `NativeTabs`
+ * (`expo-router/unstable-native-tabs`) has no equivalent of that ("Hidden
+ * tabs cannot be navigated to!", per Expo's own docs), so this file now lives
+ * here, at the app root, as an ordinary pushed stack screen instead — see
+ * `app/_layout.tsx`'s `train` `Stack.Screen` entry. Because `(tabs)` is a
+ * route GROUP, its parentheses never appeared in the URL, so this move did
+ * not change the route: `vola://train` and every in-flight `router.push`
+ * still resolve to the same `/train`, and a route file that disappeared would
+ * still take them all with it — that half of the reasoning is unchanged.
  *
  * **Not a signpost screen** ("Train has moved…"), because the athlete who taps
  * an old link never knew the screen had a name. They wanted to train. Today is

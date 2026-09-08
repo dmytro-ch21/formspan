@@ -50,7 +50,7 @@ import type { StoredTarget } from './nutritionApi';
  * What a read of the target window produced — including "it did not".
  *
  * A discriminated union rather than `Target[] | null`, which is what
- * `app/(tabs)/goals.tsx` holds. There, `null` is set both before the first
+ * `app/goals.tsx` holds. There, `null` is set both before the first
  * fetch and in the `catch`, and that is survivable because the screen renders
  * nothing about history from it. A screen that OFFERS DELETION cannot afford
  * the same ambiguity: "you have no targets" and "we could not find out" lead to

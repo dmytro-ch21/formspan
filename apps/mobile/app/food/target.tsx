@@ -19,5 +19,5 @@ import { Redirect } from 'expo-router';
  * address, so the two can never drift into answering differently.
  */
 export default function TargetMoved() {
-  return <Redirect href="/(tabs)/goals" />;
+  return <Redirect href="/goals" />;
 }

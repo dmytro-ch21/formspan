@@ -80,11 +80,12 @@ import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { RoadmapOffer } from '@/components/RoadmapOffer';
-import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { WeightTrendCard } from '@/components/WeightTrendCard';
 import { Text } from '@/components/Themed';
 import { AdjustmentCard } from '@/components/nutrition/AdjustmentCard';
@@ -257,6 +258,22 @@ function derivationFailureMessage(err: unknown): string {
 
 export default function TargetScreen() {
   const router = useRouter();
+  // N504 — this screen's ONLY back control, now that it lives outside
+  // `(tabs)/` (see `lib/tabs.ts`'s top-of-file comment for why: a native tab
+  // with no button cannot be navigated to, so this moved from an `href: null`
+  // tab to a pushed stack screen). Same guard `app/library.tsx`'s `goBack`
+  // uses, for the same reason: this screen is always PUSHED (from Food's
+  // `TargetRow`, from Progress, from Food's rings, and from
+  // `app/food/target.tsx`'s redirect), but a fallback keeps this from
+  // throwing if that is ever not true — a deep link, say.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [router]);
+  // N504 — same reason `body`'s doc comment gives: pushed over the tab bar
+  // now rather than sitting inside it, so the real safe-area inset is what
+  // clears the home indicator, not a constant sized for a visible tab bar.
+  const insets = useSafeAreaInsets();
   const accent = useAccent();
   const getToken = useAuthToken();
   const { units, unitsReady } = useUnits();
@@ -1030,10 +1047,27 @@ export default function TargetScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Your target" />
+      <ScreenHeader
+        title="Your target"
+        leading={
+          // Inside `ScreenHeader`'s own measured `titleWrap` (its `leading`
+          // slot, N484) rather than an overlay — see `app/library.tsx`'s
+          // identical comment for why that matters for `wordmarkFits`.
+          <Pressable
+            onPress={goBack}
+            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            testID="goals-back"
+          >
+            <Icon name="back" size={20} color={vola.text} />
+          </Pressable>
+        }
+      />
 
       <KeyboardAwareScrollView
-        contentContainerStyle={styles.body}
+        contentContainerStyle={[styles.body, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]}
         keyboardShouldPersistTaps="handled"
       >
         {/* THE AUTHORITY, and it comes first for that reason. Everything below
@@ -1492,7 +1526,28 @@ function profileLabel(field: string): string {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
-  body: { paddingHorizontal: 20, paddingBottom: TAB_BAR_CLEARANCE + 20, gap: 12 },
+  // N504 — same shape as `app/library.tsx`'s identical pair: a flow child
+  // inside `ScreenHeader`'s `leading` slot, not an absolute overlay against
+  // `insets.top` (that positioning sat on top of the title text, because
+  // nothing told `wordmarkFits`'s measurement the left edge had grown).
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: vola.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonPressed: { opacity: 0.6 },
+  // N504 — bottom padding no longer `TAB_BAR_CLEARANCE`. This screen moved
+  // out of `(tabs)/` and is pushed over the tab bar rather than sitting
+  // inside it, so it runs to the physical bottom of the display now — the
+  // exact move `library.tsx` made in N484, whose review caught the identical
+  // trap: `TAB_BAR_CLEARANCE` (28pt) is less than the home indicator's inset
+  // on some devices, leaving the last row sitting under it. See `body`'s
+  // actual `paddingBottom` at the call site, which reads the real safe area
+  // instead (`useSafeAreaInsets`, matching `library.tsx`'s pattern).
+  body: { paddingHorizontal: 20, gap: 12 },
   gap: { gap: 12 },
   note: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
   historyLink: { fontSize: 14, fontWeight: '700', paddingVertical: 4 },

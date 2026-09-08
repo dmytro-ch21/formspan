@@ -134,7 +134,7 @@ export default function MacroRingsScreen() {
         </View>
 
         <Pressable
-          onPress={() => router.push('/(tabs)/goals')}
+          onPress={() => router.push('/goals')}
           accessibilityRole="button"
           style={({ pressed }) => [styles.link, pressed && styles.rowPressed]}
           testID="ring-open-targets"

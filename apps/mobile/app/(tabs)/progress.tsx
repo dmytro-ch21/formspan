@@ -485,7 +485,7 @@ export default function ProgressScreen() {
             <Row
               title="Targets and adherence"
               note="What you are eating to, and why that number."
-              onPress={() => router.push('/(tabs)/goals')}
+              onPress={() => router.push('/goals')}
               testID="progress-nutrition"
             />
             {/* N84, row 6 of the phone-impossible audit: the reduced phone form

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react-native';
 
-import TrainScreen from '../../app/(tabs)/train';
+import TrainScreen from '../../app/train';
 
 /**
  * Train is retired — the ABSENCE half of N182's pair.
@@ -13,11 +13,15 @@ import TrainScreen from '../../app/(tabs)/train';
  *
  * What must stay true:
  *
- * - the route still RESOLVES and still renders. `lib/tabs.ts` keeps `train` in
- *   `OFF_BAR_ROUTES`, so `vola://train` and any in-flight `router.push` land
- *   here; a screen that threw or rendered nothing would break both silently.
+ * - the route still RESOLVES and still renders. N504 moved this file from
+ *   `app/(tabs)/train.tsx` (declared `href: null`) to `app/train.tsx` (a
+ *   pushed stack screen, registered in `app/_layout.tsx`) — see
+ *   `lib/tabs.ts`'s top-of-file comment for why. `(tabs)` being a route GROUP
+ *   means the URL never changed, so `vola://train` and any in-flight
+ *   `router.push` still land here exactly as before; a screen that threw or
+ *   rendered nothing would break both silently.
  * - it renders none of the four blocks it used to. Each is drawn by a screen
- *   that has a tab button — see the audit table in `app/(tabs)/train.tsx`.
+ *   that has a tab button — see the audit table in `app/train.tsx`.
  *
  * `expo-router` is re-mocked here rather than leaning on `jest.setup.js`,
  * because the shared mock deliberately exports only what every screen needs and

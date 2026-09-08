@@ -358,18 +358,30 @@ function RootStack() {
             "Library" rather than the filename. `headerShown: false` —
             `library.tsx` draws its own `ScreenHeader` (N484): every
             `ScreenHeader` caller under `(tabs)` already gets this
-            suppression at the segment level, but `library` and
-            `phase/index.tsx` (its own inline `<Stack.Screen>`, not
-            registered here) both live OUTSIDE `(tabs)` and both needed it
-            said explicitly — this repo has exactly two such callers, not
-            one; grep for `ScreenHeader` outside `app/(tabs)/` before adding
-            a third without the same flag. Without it, the native header
-            stacked on top of `ScreenHeader` — its own title row, safe-area
-            padding and the VOLA wordmark — reading as a huge dead gap above
-            the search field. (`library.tsx` draws its own back button now,
-            since `ScreenHeader` has none — see the comment above its
-            `backButton` style.) */}
+            suppression at the segment level, but `library`, `phase/index.tsx`
+            (its own inline `<Stack.Screen>`, not registered here) and, as of
+            N504, `goals` below, all live OUTSIDE `(tabs)` and each needed it
+            said explicitly — grep for `ScreenHeader` outside `app/(tabs)/`
+            before adding a fourth without the same flag. Without it, the
+            native header stacked on top of `ScreenHeader` — its own title
+            row, safe-area padding and the VOLA wordmark — reading as a huge
+            dead gap above the content. (`library.tsx` draws its own back
+            button now, since `ScreenHeader` has none — see the comment above
+            its `backButton` style; `goals.tsx` does the same.) */}
         <Stack.Screen name="library" options={{ title: 'Library', headerShown: false }} />
+        {/* N504 — moved out of `(tabs)/` along with `goals` below (see
+            `lib/tabs.ts`'s top-of-file comment): a `NativeTabs` tab with no
+            button cannot be navigated to, so the old `href: null`
+            off-bar mechanism has no equivalent here. Redirects instantly to
+            Today and renders nothing itself (see `train.tsx`), so the header
+            is moot either way — hidden for consistency with every other
+            screen that draws its own chrome (here, none at all). */}
+        <Stack.Screen name="train" options={{ headerShown: false }} />
+        {/* N504 — moved out of `(tabs)/`, same reasoning as `train` above.
+            `goals.tsx` draws its own `ScreenHeader` with a `leading` back
+            button (N484's pattern, same as `library.tsx`), so `headerShown:
+            false` here for the same reason as `library`. */}
+        <Stack.Screen name="goals" options={{ title: 'Your target', headerShown: false }} />
         {/* N83: build/edit a curriculum on the phone. Titled here for the
             same reason `profile/edit` is — the file segment ("new",
             "[id]") would otherwise be what the back button reads. */}

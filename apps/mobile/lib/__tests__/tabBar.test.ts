@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { OFF_BAR_ROUTES, TABS, declaredTabRoutes, offBar } from '../tabs';
+import { TABS } from '../tabs';
 
 /**
  * The bottom bar's membership and order — N176, as revised by N180.
@@ -16,17 +16,23 @@ import { OFF_BAR_ROUTES, TABS, declaredTabRoutes, offBar } from '../tabs';
  *    Food is back in slot two and Train's slot is retired. Either way a
  *    reordering is a product decision, so it fails here rather than being
  *    noticed on a device.
- * 2. **Every route file in `app/(tabs)/` is accounted for exactly once.**
- *    expo-router auto-injects every route file in that folder whether the
- *    layout declares it or not, so a new file that nobody put in one of the two
- *    lists comes back as a SIXTH TAB titled after its filename. That is a bug
- *    that ships silently — it needs a device to see and nothing else in the
- *    pipeline looks at that directory.
+ * 2. **Every route file in `app/(tabs)/` is one of the five.** N504 moved
+ *    `train` and `goals` out of this folder entirely (a `NativeTabs` tab with
+ *    no button cannot be navigated to, so the old off-bar mechanism has no
+ *    equivalent — see this file's own top-of-file comment on `lib/tabs.ts`).
+ *    So the invariant this test now pins is simpler than it used to be: the
+ *    tab folder holds EXACTLY the five files `TABS` names, nothing else. A
+ *    stray file here is a tab nobody decided about — `NativeTabs` only shows
+ *    what a `<NativeTabs.Trigger>` declares, so an undeclared file would not
+ *    silently become a sixth tab the way it did under the old `<Tabs>`
+ *    navigator; it would instead be dead code sitting in the tab folder for
+ *    no reason. Both are worth catching, which is why this stayed a test
+ *    rather than being deleted along with `OFF_BAR_ROUTES`.
  *
- * The behavioural half — that the layout actually renders these, that Food and
- * Goals get `href: null` rather than disappearing, and that the bar does not
- * vary with the module set — is in `app/__tests__/tabLayout.test.tsx`. This
- * file pins the decision; that one pins the wiring.
+ * The behavioural half — that the layout actually hands `NativeTabs` this
+ * arrangement, with icons and accent tinting — is in
+ * `app/__tests__/tabLayout.test.tsx`. This file pins the decision; that one
+ * pins the wiring.
  */
 
 const TABS_DIR = join(__dirname, '..', '..', 'app', '(tabs)');
@@ -76,49 +82,25 @@ describe('the visible bar', () => {
   });
 });
 
-describe('the routes with no bar position', () => {
-  // **Train replaced Food here in N180**, and `train.tsx` is deliberately still
-  // on disk: its sections move into Plan in #587, so deleting the file to make
-  // that diff smaller would throw away N177's work. It has to be DECLARED with
-  // `href: null` — see the directory test at the foot of this file for what
-  // omitting it would actually do.
-  it('is Train and Goals, which lost a button and not a route', () => {
-    expect([...OFF_BAR_ROUTES].sort()).toEqual(['goals', 'train']);
-  });
-
-  it('never overlaps the bar', () => {
-    // A name in both lists is a bar entry the layout would then null out —
-    // the tab renders, and pressing it does nothing anyone can see.
-    expect(TABS.filter((t) => offBar(t.name))).toEqual([]);
-  });
-
-  it('does not answer yes to a tab that has a button', () => {
-    // Guards against `offBar` degenerating into a constant. Without this a
-    // mutation returning `true` unconditionally passes the overlap test above
-    // only by making it vacuous — and would strip the whole bar.
-    expect(offBar('index')).toBe(false);
-    expect(offBar('food')).toBe(false);
-    expect(offBar('train')).toBe(true);
-  });
-});
-
-describe('every route in the tab folder', () => {
+describe('the tab folder holds exactly the five tabs, and nothing else', () => {
   it('finds the folder at all', () => {
     // Guards the guard: a bad path would make the assertion below compare two
     // empty-ish sets and report that everything is accounted for.
     const files = routeFilesInTabFolder();
-    expect(files.length).toBeGreaterThanOrEqual(7);
+    expect(files.length).toBeGreaterThanOrEqual(5);
     expect(files).toContain('index');
-    expect(files).toContain('train');
   });
 
-  // **The one that catches a file nobody decided about.** expo-router injects
-  // every route file here whether it is declared or not, so an undeclared one
-  // arrives as an extra tab with a filename-derived title on a real device and
-  // nowhere else. Set comparison in both directions: an extra file is an
-  // unplanned tab, and a name in the lists with no file behind it is a tab
-  // pointing at nothing.
-  it('is either a tab or deliberately off the bar, and never neither', () => {
-    expect([...routeFilesInTabFolder()].sort()).toEqual([...declaredTabRoutes()].sort());
+  // **N504's replacement for the old "tab or deliberately off-bar" check.**
+  // `train` and `goals` left this folder for the app root, so there is no
+  // third category left to name — a file here that isn't one of the five is
+  // simply undeclared, and `NativeTabs` would never show it as a tab (unlike
+  // the old `<Tabs>` navigator, which auto-injected every route file whether
+  // declared or not). Still worth failing on: an undeclared file sitting in
+  // this folder is either a mistake or a tab nobody decided to add, and
+  // `NativeTabs.Trigger` requires every tab to be declared explicitly rather
+  // than tolerating one.
+  it('is exactly the five names TABS declares', () => {
+    expect([...routeFilesInTabFolder()].sort()).toEqual([...TABS.map((t) => t.name)].sort());
   });
 });

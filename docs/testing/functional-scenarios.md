@@ -20665,3 +20665,60 @@ Entry is now exclusive: a real value in one field clears the other.
 - Re-running the shadow replay immediately after this ships will show a largely
   unchanged abstention count for that reason; the number should fall only as new
   sessions accumulate.
+
+## N504 — bottom tab bar: `expo-router` NativeTabs, iOS 26 Liquid Glass + Android Material 3 (`apps/mobile/app/(tabs)/_layout.tsx`, `apps/mobile/lib/tabs.ts`, `apps/mobile/lib/tabIconPlan.ts`, `apps/mobile/lib/tabIconRaster.tsx`, `apps/mobile/app/train.tsx`, `apps/mobile/app/goals.tsx`)
+
+Simulator-verified (iOS 26.5, see `docs/decisions/history.md`'s N504 entry
+for exactly what was checked and how); real-device and Android are both
+still outstanding — see "Needs a device" below.
+
+- On any tab screen, sighted: the bar reads Today · Food · Progress · Plan ·
+  You, in that order, each with VOLA's own brand icon shape (not an Apple SF
+  Symbol or Android Material Symbol) and a label.
+- Tap each tab in turn: the tapped tab's icon AND label switch to the
+  account's accent colour; every other tab's icon and label stay a neutral
+  dim colour. Change the account's accent in Settings and repeat: the
+  active-tab colour follows the new choice on iOS. (Android's active-tab
+  colour does NOT follow the account's accent — see "Needs a device" below,
+  this is an accepted, documented platform difference, not a bug to file.)
+- On a screen with scrollable content (e.g. You/Profile), scroll down: the
+  tab bar minimizes/hides. Scroll back up: it reappears, with the
+  previously-active tab still shown as active.
+- From Food's `Daily target` row (or Progress's target row, or Food's
+  macro-rings screen), tap through to the target/derivation screen: it opens
+  with its own header and a working back button (no tab bar visible while
+  it's open, since it's a pushed screen, not a tab) — confirm the back button
+  returns to the SAME tab that was active before, still marked active.
+- Any `vola://train` or `vola://goals` deep link, or an in-flight
+  `router.push` to either, while the app is cold-starting: both still
+  resolve exactly as before this ticket (Train redirects to Today; Goals
+  opens the target screen) — this ticket changed where the two files live on
+  disk, not their URLs.
+- Restart the app (cold start): the tab bar's icons appear correctly on the
+  very first frame the bar is visible — no flash of missing/blank icons
+  while they're being captured off-screen (the frame-hold in
+  `(tabs)/_layout.tsx` exists specifically to prevent this).
+
+### Edge cases and errors
+
+- A locale/appearance change (light/dark mode, if the OS-level setting is
+  ever wired up) or a Fast Refresh during development: tab icons are not
+  re-captured or re-flashed — they're cached in memory once per process.
+- Exactly five tabs, always — module state (nutrition on/off, etc.) must not
+  add, remove, or reorder any of them (unchanged property from N176/N180,
+  now asserted against `NativeTabs`' actual props rather than the old
+  `<Tabs>`'s).
+
+### Needs a device
+
+- **iOS**: the Liquid Glass appearance itself (translucency/blur reads
+  correctly against real content, not just the mostly-dark screens checked
+  in the Simulator), the minimize-on-scroll feel, and any haptic feedback
+  the system gives for the interaction — none of these are something a
+  screenshot can fully confirm.
+- **Android**: not touched in this verification pass at all — Material 3
+  bottom-navigation appearance, and specifically whether Android's tab bar
+  reading a FIXED colour for the active icon (rather than the account's own
+  accent, which iOS gets) looks like an acceptable, intentional platform
+  difference in practice rather than a visual bug. This is the single
+  biggest open question this ticket leaves for a human to judge.

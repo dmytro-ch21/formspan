@@ -63108,6 +63108,101 @@ the two displacement tests red, and making clearing displace turns the two
 clearing tests red — each restored and re-run to green rather than re-read.
 
 
+## 2026-09-05 — N504 (#876): the bottom tab bar is now the real platform one — Liquid Glass on iOS 26, Material 3 on Android
+
+User request: adopt iOS 26's native Liquid Glass tab bar and Android's
+Material 3 bottom navigation via `expo-router/unstable-native-tabs`, in place
+of VOLA's fully custom `<Tabs>`-based bar (`apps/mobile/app/(tabs)/_layout.tsx`,
+hand-drawn icons, a hand-drawn active-tab underline). User confirmed both
+platforms should move (not iOS-only), and that VOLA's own brand icons should
+be kept on the bar rather than switching to SF Symbols/Material Symbols.
+
+**Two real constraints surfaced by reading `expo-router`'s actual SDK 57
+source and current docs, not the snippet the user pasted (which named a
+different, uninstalled package — React Navigation's own native-tabs, not
+Expo Router's).** Both changed the shape of the work, not just its cost:
+
+1. **A `NativeTabs` tab with no button cannot be navigated to at all** — Expo's
+   own docs are explicit: *"Hidden tabs cannot be navigated to!"* VOLA's
+   `OFF_BAR_ROUTES` mechanism kept `train.tsx` and `goals.tsx` inside
+   `app/(tabs)/` with `href: null` — no button, still reachable via
+   `router.push`/`vola://train`. That mechanism has no equivalent here. Fix:
+   `train.tsx` and `goals.tsx` moved OUT of `app/(tabs)/` to the app root,
+   pushed as ordinary stack screens — the exact pattern `library.tsx` and
+   `phase/index.tsx` already used (N484). Because `(tabs)` is a route GROUP,
+   its parentheses were already stripped from the URL, so the move changed
+   no route: `app/(tabs)/goals.tsx` and `app/goals.tsx` both resolved to
+   `/goals` before and after. Every literal `/(tabs)/goals` route string
+   (`food.tsx`, `progress.tsx`, `food/rings.tsx`, `food/target.tsx`'s
+   redirect) was updated to `/goals` — `foodTargetRow.test.tsx` had a real,
+   now-fixed assertion against the old string, so this was not purely
+   cosmetic. `goals.tsx` gained its own `ScreenHeader` `leading` back button
+   (N484/N493's pattern), since it no longer has a tab button to return to a
+   screen from.
+2. **Android cannot dynamically tint a custom (non-Material-Symbol) tab
+   icon** — `renderingMode: 'template'`, which lets iOS recolour a single
+   neutral raster at render time via `iconColor`/`selectedIconColor`, is
+   iOS-only; Android always renders a custom image source with its own
+   baked-in colour. Keeping VOLA's brand icons on Android's bar therefore
+   costs per-account accent personalisation there specifically: Android's
+   active-tab icon colour is `vola.accent` (the app's DEFAULT brand accent,
+   the same "before anyone has expressed a preference" value
+   `constants/Colors.ts` already documents it for) rather than whatever
+   accent the signed-in athlete picked. Decided with the user as an accepted
+   platform asymmetry, not discovered later and quietly shipped.
+
+**VOLA's brand icons are rasterised at runtime, not via a new build-time
+pipeline.** `react-native-view-shot` was already a dependency
+(`lib/shareCard.ts`'s session-share card), already establishing the
+"off-screen, `position: absolute; left: -10000`, `pointerEvents: none`,
+hidden from VoiceOver" mounting convention this reuses exactly
+(`lib/tabIconRaster.tsx`'s `useRasterizedIcons`). Each of the five icons is
+rendered off-screen once (via the SAME `Icon` component/`icons.generated.ts`
+pipeline every other icon in the app uses — no second copy of the brand kit
+to drift), captured as a data-URI PNG on `onLayout`, and cached in memory for
+the process's life; `(tabs)/_layout.tsx` holds a frame (`if (!sources) return
+host`) until every icon has landed, the same "hold a frame, don't guess"
+convention `useModules()`'s `ready` already used one line above it. No new
+dependency, no new `pnpm-workspace.yaml` `allowBuilds` entry.
+
+**The per-platform decision logic (`lib/tabIconPlan.ts`) is pure and takes
+`platform` as a parameter, rather than reading `Platform.OS` inline** — the
+same convention `lib/shareCard.ts`'s `cardCaptureSize` already established,
+and for the identical reason: `jest-expo` reports `Platform.OS === 'ios'`, so
+a function reading it directly would leave the Android branch untested by
+anything in the suite rather than merely untested by this one file.
+`lib/__tests__/tabIconPlan.test.ts` exercises both branches directly.
+
+**What is genuinely gone, by design rather than oversight**: the custom
+active-tab underline (native tab bars mark the active tab their own way —
+label weight, icon fill, a Material 3 pill — and there is no API to draw
+VOLA's own rule under it any more), and the old iOS/Android visual parity
+(the two platforms' native tab bars do not look like each other, which is
+the point of this ticket, not a bug in it).
+
+**Verified live on the iOS Simulator (Xcode 26.6, a freshly-created iPhone 17
+Pro on iOS 26.5 — the primary checkout's existing simulators were all on iOS
+17.x)**, not just read from the type definitions: created a throwaway account,
+confirmed all five tabs (Today · Food · Progress · Plan · You) render in
+order with VOLA's own icon shapes (not SF Symbols), confirmed the active
+tab's icon AND label are tinted with the account's accent colour while
+inactive tabs stay `vola.textDim`, confirmed `minimizeBehavior="onScrollDown"`
+genuinely hides the bar on scroll-down and restores it on scroll-up, and
+confirmed `goals.tsx` is reachable from Food's target row, renders its own
+header with a working back button, and returns to the tab bar (with the
+previously active tab still selected) on back. `lib/__tests__/tabBar.test.ts`,
+`lib/__tests__/tabIconPlan.test.ts` and the rewritten
+`__tests__/app/tabLayout.test.tsx` mutation-verify the wiring; full mobile
+suite re-run clean at 274 suites / 4364 tests after the change.
+
+**Open**: NEEDS HUMAN EVIDENCE — a real iOS 26 device (Liquid Glass
+appearance, minimize-on-scroll feel, haptics: a Simulator confirms it
+renders, not that it feels right in hand) and Android (Material 3 appearance,
+and whether the fixed non-personalised icon colour reads as an acceptable
+tradeoff rather than a bug) — neither attempted here. `Ready PRs contain
+work`/CI covers the build compiling; it does not cover either of those.
+
+
 ## Open items / known gaps as of this entry
 
 

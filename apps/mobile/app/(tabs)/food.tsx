@@ -500,7 +500,7 @@ export default function FoodScreen() {
               row is unambiguously about the day named directly above it. */}
           <TargetRow
             view={view}
-            onPress={() => router.push('/(tabs)/goals')}
+            onPress={() => router.push('/goals')}
             testID="food-target"
           />
 
