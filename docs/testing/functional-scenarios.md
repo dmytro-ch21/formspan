@@ -20722,3 +20722,57 @@ still outstanding — see "Needs a device" below.
   accent, which iOS gets) looks like an acceptable, intentional platform
   difference in practice rather than a visual bug. This is the single
   biggest open question this ticket leaves for a human to judge.
+
+### N504 follow-up — chrome geometry under the native bar (2026-09-07)
+
+Three defects found by looking at the running Simulator after the migration
+was already reviewed and green. All three are geometry, and **none is
+reachable by the jest suite**: it runs no Yoga pass, so no rendered
+assertion can observe where anything actually lands. These are the checks
+that replace it.
+
+**Happy path**
+- **Every tab's header sits directly below the status bar** — on a cold
+  start, open each of Today / Food / Progress / Plan / You in turn and
+  confirm the screen name and wordmark clear the clock and Dynamic Island
+  with no blank band above them. The regression this catches is one screen
+  disagreeing with the other four, so **check all five, and check them
+  after a cold launch specifically** (see the ordering trap below).
+- **Tab icons are the size of the labels beside them**, sitting inside the
+  bar rather than overflowing it or overlapping their own text.
+- **The floating "New log" pill clears the tab bar** on Today, and Plan's
+  pill sits at the same height — the bar is glass drawn OVER the content, so
+  a pill positioned in flow coordinates lands inside it.
+- **A pushed screen still clears the status bar**: open Library (and Goals
+  from Food's target row), and confirm the header and its back button are
+  BELOW the clock, not colliding with it. These routes sit outside the tab
+  group and must keep the inset the tab screens no longer add.
+
+**Edge cases & errors**
+- **Mount order is the whole trap, so exercise it.** The original bug was
+  visible only on the tab selected FIRST after a cold start, from code
+  identical to the four that were correct. Force-quit and relaunch between
+  checks rather than tabbing around one session, and if the app is ever
+  changed to open on a different initial tab, re-check all five again.
+- **A device with no notch or cutout** (an SE-class phone, and Android):
+  `insets.top` is 0 there, so a screen that double-counted the inset looks
+  correct — the bug hides completely on exactly the hardware most likely to
+  be used for a quick check.
+- **Accessibility text sizes**: the header measures rather than computes, so
+  raise the system text size to an accessibility setting and confirm the
+  wordmark hides rather than colliding, and that the top spacing still looks
+  deliberate.
+- **Rotation and split-view/iPad multitasking**, if reachable: the inset
+  changes under both, and the platform-supplied value must still be the only
+  one applied.
+
+**NEEDS HUMAN EVIDENCE**
+- All of the above on a real iOS 26 device rather than the Simulator —
+  Liquid Glass behaviour over live content, and whether the top spacing reads
+  as intentional in hand.
+- **Android**: the same five-tab sweep under Material 3. The top inset is
+  supplied by a different platform (Jetpack Compose, not UIKit), so whether
+  the tab group's "the platform already applied it" declaration holds there
+  is genuinely unverified — it is asserted for Android by symmetry, not by
+  measurement, and a wrong answer shows up as either a doubled band or a
+  header under the status bar.

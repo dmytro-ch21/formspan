@@ -63203,6 +63203,106 @@ tradeoff rather than a bug) — neither attempted here. `Ready PRs contain
 work`/CI covers the build compiling; it does not cover either of those.
 
 
+## 2026-09-07 — N504 follow-up: three defects a Simulator found and no test could (#876)
+
+The NativeTabs migration was already merged-ready and reviewed when the user
+looked at the running app and asked two questions — *"make sure that icons
+look good and in proper scale"*, then *"what is that space on top of screen
+???? why so much is blank"*. Each was a real defect. None of the three below
+is reachable by any test in this repo, and all three had a green suite, a
+green `verify` and passing reviews sitting on top of them.
+
+**1. The tab icons rendered about three times too large.** `useRasterizedIcons`
+captures each brand SVG with `captureRef`, which renders at the DEVICE PIXEL
+RATIO — a 44pt off-screen box comes back as a 132px PNG on an @3x phone. An
+`ImageSourcePropType` given only a `uri` carries no scale, so React Native
+reads those 132 pixels as 132 POINTS and the bar draws each icon at triple
+size, overflowing the bar and its own labels. `scale: PixelRatio.get()` is
+what maps pixels back to points. Worth recording as a class rather than a
+typo: every `captureRef` consumer has this exposure, and `lib/shareCard.ts`
+avoids it only because a share card is consumed as an image at natural size
+rather than placed in a points-based layout.
+
+**2. The floating "New log" pill sat on top of the You tab.** The old JS tab
+bar occupied flow; the native bar is glass drawn OVER the content, so the
+pill's `bottom: 16` put it inside the bar rather than above it. Fixed by
+positioning it against the bar explicitly (`fabBottom`). The same premise
+inversion left `TAB_BAR_CLEARANCE`'s doc comment asserting the bar "sits in
+normal flow rather than floating over the content", which is now false; the
+comment is corrected rather than the constant changed, because the platform
+now supplies the real clearance itself (see below).
+
+**3. Every tab screen stated the top safe-area inset twice** — the blank band
+the user reported. This one is worth the detail, because the shape of the
+evidence was actively misleading.
+
+**It presented as ONE broken screen out of five, from identical code.**
+Measured on the iOS 26.5 Simulator by giving `ScreenHeader`'s wrap a
+temporary background and reading its bounds off a screenshot: the header box
+began at **62.0pt on Today and 0.0pt on Food**, two screens that render
+structurally identical trees — same `ScrollView`, same
+`contentContainerStyle`, same `<ScreenHeader …contentScrollsUnder={false}/>`
+as the first child. 62 is exactly `insets.top` on a Dynamic Island phone,
+measured the same way.
+
+The cause is mount ORDER, not styling. Today is simply the tab selected
+first, so its scroll view is created while UIKit is still standing the
+`UITabBarController` up, and it comes out holding an inset the later-mounted
+tabs never get. Forcing that one scroll view to remount (a throwaway `key`)
+moved it to 0.0pt with nothing else changed, which is what identified the
+cause; a second colour probe on the scroll view itself established the frame
+starts at 0.0pt while its content starts at 62.0pt, ruling out an offset
+container.
+
+**Four fixes were tried against the running Simulator and each did nothing**,
+which is the part worth keeping: `contentInsetAdjustmentBehavior="never"`
+(already set on Today — it is silently ineffective on the first-mounted
+screen, so the screen that opted out hardest was the only one wrong),
+`automaticallyAdjustContentInsets={false}`, an explicit zero `contentInset`
+plus `contentOffset`, and rendering the navigator on the very first frame so
+no screen mounts into a subtree about to be replaced. That last one was
+written, measured, disproved and reverted rather than kept — it had a comment
+claiming it fixed the inset, and leaving that in the tree would have been a
+false explanation next to working code.
+
+So the platform owns the top inset EVERYWHERE rather than only where it
+insists: all five tab scrollers now say
+`contentInsetAdjustmentBehavior="automatic"`, all five verified reporting the
+same 62.0pt, and `ScreenHeader` adds nothing on top inside the tab group. The
+point is determinism rather than the number — a screen laid out differently
+depending on which tab the athlete opened first cannot be reasoned about, and
+nothing in the suite can see it.
+
+**The tab layout declares this once, via `PlatformTopInsetContext`, rather
+than eight callers each passing a flag.** `ScreenHeader`'s own history is a
+list of layout contracts its callers could not keep (an `action` slot with no
+width contract collided with the centred wordmark twice, and the fix both
+times was to stop asking callers), so a `platformOwnsTopInset` prop would
+have been the same mistake with a new name. The default is `false` — add the
+inset — for two reasons: the failures are not symmetrical (a surplus gap gets
+reported, which is how this was found; a title under the status bar cannot be
+read at all, which is what removing `library`'s inset looked like when
+measured), and it means no existing test changes behaviour. A router-derived
+answer (`useSegments()`) was implemented first and abandoned on that second
+point: **59 test files mock `expo-router` locally**, so it needed a line in
+every one of them plus a fresh landmine for the sixtieth.
+
+`lib/headerInset.ts` keeps the arithmetic pure and parameterised, the same
+convention as `wordmarkFits` and `lib/tabIconPlan.ts`, because jest runs no
+Yoga pass: the padding a screen actually receives is unobservable in a test,
+but the decision behind it can be pinned exactly. Mutation-verified —
+inverting its ternary fails 4 tests as assertion failures, not compile
+errors.
+
+**One process note, since it cost real time.** An early run of the mobile
+suite was piped through `tail`, so the reported exit code was `tail`'s: 276
+failing tests read as exit 0. The repo's own rule covers this ("count the
+check runs, never the failures") and it still happened. Separately, two
+suites then failed for want of `TZ=America/Los_Angeles` — invoking `jest`
+directly rather than through `pnpm run test:mobile`, which sets it. Both are
+the same error: trusting an apparatus that was not the one the repo uses.
+Full suite via the real script: 285 suites / 4580 tests, exit 0.
+
 ## Open items / known gaps as of this entry
 
 
