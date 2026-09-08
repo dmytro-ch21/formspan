@@ -20908,3 +20908,66 @@ that had never run. Two fixes: the permission, and the swallow.
   phone with the exercise grant given, appearing on Today. The emulator
   holds no Health Connect data and this ticket did not sign in on it; the
   manifest and the code path are what this ticket verified.
+
+## W16 — VO₂max on Android: readings are shown when they exist, and every sentence names the device's own source (`apps/mobile/lib/vo2MaxSource.ts`, `apps/mobile/app/(tabs)/you.tsx`, `apps/mobile/app/vo2max/trend.tsx`)
+
+Both VO₂max screens gated on an iOS-only check and named Apple Health in
+their copy, so an Android athlete's readings — uploaded from Health Connect
+on every sync pass — were hidden behind "isn't available on this device".
+
+**Happy path**
+- **Android, Health Connect sync on, VO₂max readings on the server**: the
+  You tab shows the VO₂max row with "read from Health Connect"; opening it
+  shows the chart. This is the case that was broken.
+- **iOS, HealthKit linked, sync on, readings present**: unchanged — row
+  reads "read from Apple Health", chart shows.
+- **Readings exist but the toggle is now off** (either platform): the chart
+  still shows, AND the range picker with it. Data the athlete has is never
+  hidden by a setting — over the whole fetch window (the most the server
+  allows, ~13 months), not only the selected range (the first version of
+  this fix got that wrong; review caught it).
+- **Readings exist only outside the selected range** (e.g. fourteen months
+  of history, default six-month view): the range picker is present and
+  switching to `1Y`/`All` shows them; the "Nothing in this range" sentence
+  appears, never a sync or source sentence.
+- **The fetch fails** (airplane mode): the screen says "Couldn't load your
+  VO2max trend…" — never a sentence about a grant or a toggle, because
+  nothing about either was learned. **Until W16 this was every load**: the
+  hook requested three years against the server's 400-day cap and was
+  refused every time, so "Couldn't load" was the only thing this screen had
+  ever shown. If it shows on a connected device now, the window arithmetic
+  has drifted from the cap — check `SERVER_MAX_LIST_RANGE_DAYS` against
+  `maxListRangeDays` in the biometric handler.
+- **The `All` range preset** shows roughly the last thirteen months, not
+  all time — the server cap is the limit. That is a known over-promise in
+  the label, ticketed as F34 (#955); it is not a missing-data bug.
+- **An account with readings, on a device with no source at all** (an iOS
+  build without HealthKit, after switching phones): the VO2max row still
+  appears on You and the chart still shows — the readings are the
+  athlete's, whatever this handset can read from.
+
+**Edge cases & errors**
+- **Android with no Health Connect provider installed** (an older phone
+  without the standalone app): the row still appears; the trend screen says
+  "Health Connect isn't available on this device, so there is nothing to
+  read VO2max from." — a true sentence about the device, and the row stays
+  so the athlete can learn that rather than never finding the feature.
+- **Android, provider present, toggle off, no readings**: the screen says
+  `Turn on "Sync with Health Connect" in Settings …` — the toggle's exact
+  label; on iOS the same sentence names "Sync with Apple Health". Neither
+  platform is ever told to turn on the other's switch.
+- **iOS build with no HealthKit linked**: the row is hidden and the screen
+  (by deep link) says "VO2max reading isn't available on this device." —
+  the one case that sentence was always true in, kept.
+- **Everything on, nothing read yet**: "No VO2max reading yet. A watch or
+  another device that estimates it needs to have written one to Health
+  Connect." (or "… to Apple Health") — the source named, not assumed.
+- **Deep link to `/vo2max/trend` on Android** — the screen must not assert
+  Apple Health anywhere: check the Stack title, the empty-state copy and
+  the sync-off copy.
+
+**NEEDS HUMAN EVIDENCE**
+- An Android account with VO₂max in Health Connect (a Garmin, Oura or
+  Google Fit estimate) sees its readings in the app — the row on You and the
+  chart behind it. Needs a build after this change and a phone with real
+  data; the emulator holds none.

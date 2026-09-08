@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
 import { Avatar } from '@/components/Avatar';
@@ -17,6 +17,9 @@ import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { isHealthKitSupported } from '@/lib/healthkit';
+import { healthSourceFor, healthSourceLabel, vo2MaxFetchWindow, vo2MaxRowVisible } from '@/lib/vo2MaxSource';
+import { listBiometricSamples } from '@/lib/biometric';
+import { dayString } from '@/lib/calendar';
 import { playSound } from '@/lib/sounds';
 import { anyArrived, getPendingCounts, listFriends } from '@/lib/friends';
 import { getProfile, type Profile } from '@/lib/profile';
@@ -184,6 +187,14 @@ export default function YouScreen() {
     emptied. Only ever set by a successful read; a failure leaves both alone.
   */
   const [friendCount, setFriendCount] = useState<number | null>(null);
+  // W16/#945 — does this ACCOUNT have any VO2max reading on the server, over
+  // the same window the trend screen fetches (the most the server allows,
+  // ~13 months — see `vo2MaxFetchWindow`)? Read on focus like
+  // the phase and friend count, so the row below can be data-first: readings
+  // from a previous phone, or from the other platform, are the athlete's
+  // whatever this handset can read from. `false` until answered — a fetch
+  // failure leaves the row to the device-source rule, never hides it.
+  const [vo2HasReadings, setVo2HasReadings] = useState(false);
   const [friendCountAnswered, setFriendCountAnswered] = useState(false);
   /*
     The last counts we actually saw, so a rise can be told from a first look.
@@ -286,6 +297,29 @@ export default function YouScreen() {
           // is a fact about the athlete; failing to re-read it is not evidence
           // that it ended.
         });
+
+      // A FIFTH independent chain (W16/#945) — whether the account holds any
+      // VO2max reading, so the row below shows on the strength of DATA and not
+      // only of what this device can read. Same `alive` guard as the phase
+      // chain, same silence on failure: not being able to ask is not
+      // evidence there is nothing.
+      {
+        // The trend screen's own window, built by the one helper that knows
+        // the endpoint's two rules — RFC3339 bounds, and a span under the
+        // server's cap. The first version hand-built date-only strings here,
+        // was refused with a 400 on every call, and swallowed it: the
+        // "account has readings" branch below was dead code behind a green
+        // test. See `vo2MaxFetchWindow`'s doc comment.
+        const { from, to } = vo2MaxFetchWindow(dayString(new Date()));
+        listBiometricSamples(getToken, 'vo2_max', from, to)
+          .then((samples) => {
+            if (!alive) return;
+            setVo2HasReadings(samples.length > 0);
+          })
+          .catch(() => {
+            // Leave whatever was known; the source rule still shows the row.
+          });
+      }
 
       // A FOURTH independent chain — the friend count behind the header's
       // entry point into `/friends` (N509). Independent for the same reason
@@ -530,15 +564,30 @@ export default function YouScreen() {
                   further gate the trend screen states in words rather than
                   hiding the pill over, matching `you-sports`'/`you-phase`'s own
                   "explain yourself, don't disappear" rule. */}
-              {isHealthKitSupported() && (
-                <NavRow
-                  icon="heart"
-                  label="VO2max"
-                  detail="Your cardio fitness trend, read from Apple Health"
-                  onPress={() => router.push('/vo2max/trend')}
-                  testID="you-vo2max"
-                />
-              )}
+              {/* W16/#945 — gated on whether this DEVICE has a health source,
+                  not on the iOS SDK: Android has Health Connect, uploads
+                  VO2max from it on every sync pass, and was hidden here behind
+                  a check that could only ever be true on iOS. The one case
+                  the row still hides is an iOS build with no HealthKit linked
+                  (and web) — the only case in which there is genuinely
+                  nothing to read from. See `lib/vo2MaxSource.ts`. */}
+              {(() => {
+                const source = healthSourceFor(Platform.OS, isHealthKitSupported());
+                if (!vo2MaxRowVisible({ hasReadings: vo2HasReadings, source })) return null;
+                return (
+                  <NavRow
+                    icon="heart"
+                    label="VO2max"
+                    detail={
+                      source
+                        ? `Your cardio fitness trend, read from ${healthSourceLabel(source)}`
+                        : 'Your cardio fitness trend'
+                    }
+                    onPress={() => router.push('/vo2max/trend')}
+                    testID="you-vo2max"
+                  />
+                );
+              })()}
 
               {/* The position map used to be a row here and is on Progress now
                   (N178, #583) — "where you score and where you get stuck" is a

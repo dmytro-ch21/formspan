@@ -63711,6 +63711,185 @@ not sign in on it. What the emulator DID establish is the half that was
 checkable: the permission is in the manifest, and the code that used to
 hide a refusal no longer can.
 
+## 2026-09-08 — W16 (#945): VO₂max was uploaded from Android and then hidden behind "isn't available on this device"
+
+Found on the first Android emulator run this repo ever had, alongside W15.
+It is a **W** because the app contradicted itself about data it held:
+`lib/healthConnectSync.ts` uploads VO₂max from Health Connect on every sync
+pass, and the two screens that show VO₂max — the row on `app/(tabs)/you.tsx`
+and `app/vo2max/trend.tsx` — both gated on `isHealthKitSupported()`, which
+can only ever be true on iOS. So on Android the row was hidden, and an
+athlete who reached the trend screen by deep link was told "VO2max reading
+isn't available on this device" while their readings sat on the server.
+
+**Where the data actually comes from, which is what made the fix small.**
+`useVo2MaxTrend` reads from the backend via `listBiometricSamples`, and the
+backend's `ListSamples` has no platform filter — `WHERE user_id AND
+metric_type AND measured_at…`, read directly from `postgres.go`. Health
+Connect samples come back exactly like HealthKit ones. The hook would have
+returned them; a vendor-SDK check hid them, behind copy that named the wrong
+vendor ("Turn on Sync with Apple Health", "An Apple Watch … needs to have
+written one to Health"). Three separate sentences on two screens, each
+written for one platform and shown on both.
+
+**The fix is one pure decision, made once.** `lib/vo2MaxSource.ts`:
+
+- `healthSourceFor(platform, healthKitLinked)` — which source THIS device
+  has: HealthKit on iOS if the module is linked, Health Connect on Android
+  unconditionally, nothing elsewhere. Platform is a parameter, never read
+  in the module, for the reason `lib/tabIconPlan.ts` gives: `jest-expo`
+  reports `ios`, which is the one platform the bug did NOT show on, so the
+  Android branch would otherwise be permanently untested.
+- `vo2MaxScreenState(…)` — **readings first.** If the server has readings,
+  the screen shows them, and no check of which SDK is linked, which provider
+  is installed, or whether a sync toggle is on is allowed to hide them. The
+  gates only choose a SENTENCE when there is nothing to show, in the order an
+  athlete can act on them: no source on this build → the source this device
+  has is not usable (Android with no Health Connect provider) → the toggle is
+  off → nothing read yet. Each sentence names the source the device actually
+  has, so the copy is true whenever it is on screen.
+- `healthSyncSettingLabel` returns the `label` prop of the matching
+  `<Toggle>` in `app/settings.tsx` verbatim, so "turn on X in Settings" points
+  at a switch that exists under exactly that name.
+
+`trend.tsx` reads the toggle that governs ITS source — it had been reading
+`readHealthKitImportEnabled` on Android, which is always off there, so a
+Health Connect athlete was told to turn on Apple Health — and asks
+`isHealthConnectSupported()` (async) for the provider, answering in words
+rather than by hiding the screen. `you.tsx` shows the row when the device has
+a source at all; the one case it still hides is an iOS build with no
+HealthKit linked, which is the only case the old sentence was ever true in.
+That is the N61 principle its own comment cites: an athlete cannot tell "not
+enabled" from "not built" when the entry point disappears, and the fix for
+that is a sentence, not an absence.
+
+**Tested where it can be, and the screens are not where it can be.** No test
+in the repo renders either VO₂max screen, and none did before this ticket —
+`grep vo2 __tests__` was empty, which is itself worth recording. The decision
+is pure and `lib/__tests__/vo2MaxSource.test.ts` pins it: 15 tests, the
+Android branch exercised directly. **Mutation-verified from a green
+baseline**, one mutation per guard: the readings-first precedence removed
+(gates hide data — the original bug) fails the test written for it; Android
+judged by the iOS flag fails its test; the sync-off copy naming the wrong
+vendor fails the two copy tests; the row ignoring readings fails its test; a
+failed fetch falling through to the gates fails its test; unanswered async
+reads no longer holding the spinner fails its test. Restored, re-run green
+each time. The first attempt at the first of these is described below. `__tests__/app/youScreen.test.tsx`
+(34 tests, renders the changed screen) still passes; typecheck clean; the
+lint ratchet unchanged at every cap.
+
+**What review caught in the fix, and it was this ticket's own bug in a
+narrower shape.** The first version derived "has readings" from
+`!series.empty`. `frontend-reviewer` read `lib/trendSeries.ts`'s
+`emptinessOf` and showed that `series.empty` is ALSO set for
+`'none-in-range'` — readings exist, none fall in the selected window — and
+for `'unavailable'`, a failed fetch. So an Android athlete with fourteen
+months of readings, opening the default six-month view with the toggle now
+off, had `hasReadings === false`, hit the `sync_off` gate, and lost the chart
+AND the range picker they would have needed to reach the data they have.
+The history entry as first written asserted the opposite as tested fact.
+`hasReadings` is now the server's answer over the hook's whole three-year
+window (`samples.length > 0`), a failed fetch is its own input that routes
+to the screen's existing "Couldn't load" sentence rather than to any gate,
+and — the reviewer's second point, taken — an unanswered async read keeps
+the spinner rather than showing a sentence that flips a moment later.
+
+`ac-verifier` graded criterion 1 PARTIAL: the trend screen asked "do
+readings exist", the You row still asked a platform question. The strict
+reading catches a real case the row's "its job is to be reachable" framing
+missed — an athlete whose readings are on the account from a previous phone,
+on an iOS build with no HealthKit linked: data exists, row hidden. The row is
+now data-first too, via a fifth focus-fetch chain on the You screen mirroring
+the phase and friend-count ones: `vo2MaxRowVisible` shows it when the account
+has readings OR the device has a source, and hides it only with neither.
+
+Twenty tests now, five mutations. One of them was wrong the first time and
+worth recording: the script meant to move the readings check below the
+no-source gate moved it below the failed-fetch check instead — still above
+the gate it was meant to test — and the only failure it produced was the
+failed-fetch test's. That run proved nothing about readings-first. It was
+caught by reading which test had failed, redone with an assertion in the
+mutation script that the applied order in the file is the intended one, and
+then it failed the readings-first test as it should. CLAUDE.md's "a mutation
+that did not apply as intended proves nothing" is not a rule about other
+people's mutations.
+
+**The second review round found the fix's own fix was dead code — and a
+bug older than the ticket that meant the chart had never rendered at all.**
+Both reviewers, independently: the You screen's new fetch passed date-only
+strings, the endpoint parses `from`/`to` with `time.Parse(time.RFC3339, …)`
+(confirmed by both with a live Go parse), the 400 was swallowed by the
+chain's own catch, and so `vo2HasReadings` could never become true — the row
+was source-only in practice, the exact partial the fetch had been added to
+close. The You-screen test stayed green because it never mocked the network,
+and an absent server fails exactly like a refused request. That is CLAUDE.md's
+"a stub built from an assumption cannot falsify it", with the stub being no
+server at all.
+
+Then the larger one, from `frontend-reviewer`: `useVo2MaxTrend` asked for
+`365 * 3 + 14` days, and `backend/internal/modules/biometric/handler.go`
+caps `ListSamples` at `maxListRangeDays = 400`. **Every VO₂max trend fetch
+this app has ever made was refused with a 400**, the hook's catch turned it
+into "Couldn't load your VO2max trend", and the chart this ticket exists to
+show had never rendered on any platform, since N477. It is consistent with
+what the user reported earlier the same day ("vo2 max is still not
+available") and with #939's empty-state ticket. Not this ticket's bug, but
+the W cannot be true until it is fixed — a readings-first screen behind a
+fetch that always fails is a screen that says "Couldn't load" forever.
+
+Both are one defect: two callers each built their own request, and nothing
+pinned what either sent. `vo2MaxFetchWindow` in `lib/vo2MaxSource.ts` now
+builds the window once for both — RFC3339 on both bounds, the span clamped
+under the server cap with the end-of-day tail accounted for — and
+`SERVER_MAX_LIST_RANGE_DAYS = 400` carries its provenance. The trend screen's
+`FETCH_DAYS` drops from three years to what the server allows, which means
+the `All` range preset now shows roughly thirteen months; the honest reading
+is that the server cap was always the limit and the label over-promised.
+Filed as F34 (#955) rather than widened here.
+
+What now pins it, at the call sites rather than the helper alone: a
+rendered You-screen case that mocks `listBiometricSamples`, shows the row
+from readings alone on a device with no source, and asserts the request's
+bounds are RFC3339 and under the cap; and `lib/__tests__/useVo2MaxTrend.test.ts`
+(`renderHook`, the `useDetectedActivity.test.ts` idiom) asserting the same
+of the hook, including when a caller asks for the old three years.
+Mutation-verified, applied state asserted in the file before each run: the
+You call reverted to date-only bounds fails its rendered assertion; the
+helper's time suffix dropped fails two module tests; its clamp removed fails
+one; the hook reverted to hand-built three-year bounds fails both of its span
+tests. Restored, re-run green each time.
+
+One review suggestion taken: a failed preference read on the trend screen
+now resolves the toggle as off rather than holding the spinner, since an
+unanswered read now means "still loading". One noted, not taken: the You
+fetch pulls up to the endpoint's row cap to answer a boolean; the endpoint
+has no `limit`, and with a thirteen-month window of daily-ish estimates the
+cost is bounded. A `limit=1` on the backend is the right follow-up.
+
+**And one false red, which is the N91 incident with the sign flipped.** The
+`verify` run on the round-two commit failed `typecheck:mobile` with
+`you.tsx(20,46): 'vo2MaxFetchWindow' is declared but its value is never
+read` — on a commit in which line 312 calls it. The third `ac-verifier` pass
+was running at the same time, and it had been asked to mutate exactly that
+call site (swap the helper for date-only bounds) and restore it; `tsc` sits
+late in the chain and read the file inside that window. The committed file
+was fine, the working tree was clean by the time anyone looked, and the
+apparatus reported a defect that existed for about a minute in a reviewer's
+scratch state. N91 shipped a mutation because `git add -A` overlapped a
+reviewer; this reported one because `verify` did. Same rule, other
+direction: **nothing that reads the tree as evidence runs while a mutating
+reviewer is in it** — confirmed by `git show HEAD:…` before believing either
+the red or the green, and `verify` re-run alone on a tree `git status`
+showed clean.
+
+**What this does not do.** Nothing here changes what is uploaded — W15's
+`notPermitted` covers a refused VO₂max grant on the sync side, and N527
+(#949) is the Settings surface for it. And the last criterion is still a
+device: an Android account with VO₂max in Health Connect seeing it in the
+app. The emulator has no Health Connect data and this session did not sign
+in on it; what this ticket verified is that the code no longer hides the
+readings, not that a real phone shows them.
+
 ## Open items / known gaps as of this entry
 
 

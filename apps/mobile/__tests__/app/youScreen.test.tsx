@@ -66,6 +66,27 @@ jest.mock('@/lib/friends', () => ({
   listFriends: (...a: unknown[]) => mockListFriends(...a),
 }));
 
+// W16/#945 — the VO2max row's own fetch. Spread the real module like the
+// friends mock above: this stubs the ONE network call the row makes and
+// nothing else. A `jest.fn` with a settable resolution so a test can say
+// whether the account has readings — and, more importantly, can ASSERT what
+// the screen actually sent: the first version of this fetch passed date-only
+// bounds, the server refused every call with a 400, the screen's catch
+// swallowed it, and this file stayed green because the network was never
+// mocked and an absent server fails exactly like an absent reading.
+const mockListVo2 = jest.fn((..._a: unknown[]): Promise<unknown[]> => Promise.resolve([]));
+jest.mock('@/lib/biometric', () => ({
+  ...jest.requireActual('@/lib/biometric'),
+  listBiometricSamples: (...a: unknown[]) => mockListVo2(...a),
+}));
+// No HealthKit under jest (the module is not linked), stated explicitly so
+// the premise of the tests below — this device has NO health source — is in
+// the file rather than an accident of the environment.
+jest.mock('@/lib/healthkit', () => ({
+  ...jest.requireActual('@/lib/healthkit'),
+  isHealthKitSupported: () => false,
+}));
+
 // Mutable so a test can turn a discipline ON. The factory is evaluated once,
 // at first require, so the arrow has to READ the variable rather than close
 // over its value — and `beforeEach` puts it back to the bare account every
@@ -140,6 +161,7 @@ jest.mock('expo-router', () => ({
 }));
 
 beforeEach(() => {
+  mockListVo2.mockReset().mockResolvedValue([]);
   mockGetProfile.mockReset().mockResolvedValue({ display_name: 'Rhonda', unit_system: 'metric' });
   mockCounts.mockReset().mockResolvedValue({});
   mockListFriends.mockReset().mockResolvedValue([]);
@@ -741,5 +763,53 @@ describe('what N178 moved to Progress', () => {
     // `libraryBjjEntries.test.tsx`, which is where a moved thing's presence is
     // supposed to be asserted from.
     expect(screen.getByTestId('you-library')).toBeTruthy();
+  });
+});
+
+
+/**
+ * W16/#945 — the VO2max row is data-first, and the fetch behind it is one
+ * the server will actually answer.
+ *
+ * Under jest there is no HealthKit and `Platform.OS` is `ios`, so this device
+ * has NO health source. That makes it the exact case the AC verifier caught
+ * the first version missing — readings on the account from a previous phone,
+ * on a build that cannot read them — and the exact case a source-only gate
+ * would hide. These render the real screen rather than the pure helper,
+ * because the helper cannot see the thing that was actually wrong: what the
+ * screen SENT.
+ */
+describe('the VO2max row shows on the strength of readings alone', () => {
+  it('appears when the account has readings, on a device with no source', async () => {
+    mockListVo2.mockResolvedValue([
+      { id: 'hk:vo2:1', metric_type: 'vo2_max', value: 44.1, unit: 'ml/kg/min', measured_at: '2026-09-01T07:00:00Z' },
+    ]);
+    render(<YouScreen />);
+    expect(await screen.findByTestId('you-vo2max')).toBeTruthy();
+  });
+
+  it('is absent when the account has no readings and the device no source', async () => {
+    mockListVo2.mockResolvedValue([]);
+    render(<YouScreen />);
+    // Let the focus fetches settle, then assert the absence — a `queryBy`
+    // before they resolve would pass vacuously.
+    await screen.findByTestId('you-shared');
+    await waitFor(() => expect(mockListVo2).toHaveBeenCalled());
+    expect(screen.queryByTestId('you-vo2max')).toBeNull();
+  });
+
+  it('asks the server in the shape it accepts: RFC3339 bounds, under the 400-day cap', async () => {
+    // THE assertion that would have caught the dead code. `from`/`to` are
+    // parsed with `time.Parse(time.RFC3339, …)` and refused past 400 days;
+    // a date-only bound or a three-year window is a 400 the screen's catch
+    // hides. Pinned at the call site, where the bug was.
+    render(<YouScreen />);
+    await waitFor(() => expect(mockListVo2).toHaveBeenCalled());
+    const [, metric, from, to] = mockListVo2.mock.calls[0] as [unknown, string, string, string];
+    const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+    expect(metric).toBe('vo2_max');
+    expect(from).toMatch(RFC3339);
+    expect(to).toMatch(RFC3339);
+    expect((Date.parse(to) - Date.parse(from)) / 86_400_000).toBeLessThan(400);
   });
 });

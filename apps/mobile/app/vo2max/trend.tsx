@@ -1,13 +1,23 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { isHealthConnectSupported } from '@/lib/healthConnect';
+import { readHealthConnectImportEnabled } from '@/lib/healthConnectSync';
 import { isHealthKitSupported } from '@/lib/healthkit';
+import {
+  type HealthSource,
+  VO2MAX_FETCH_DAYS,
+  healthSourceFor,
+  healthSourceLabel,
+  vo2MaxScreenState,
+  vo2MaxStateCopy,
+} from '@/lib/vo2MaxSource';
 import { readHealthKitImportEnabled } from '@/lib/healthkitSync';
 import { RANGES, type TrendEmpty, type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -45,7 +55,9 @@ import { useVo2MaxTrend } from '@/lib/useVo2MaxTrend';
  * named plainly, rather than guessed at from an empty chart.
  */
 
-const FETCH_DAYS = 365 * 3;
+// W16/#945 — was `365 * 3`, which is more than the server allows and is why
+// every fetch this screen made was refused; the helper owns the cap now.
+const FETCH_DAYS = VO2MAX_FETCH_DAYS;
 /** Smallest y-axis span, in mL/kg/min. A flat run of readings would
  *  otherwise divide by zero — see `TrendChart`'s own `minSpan` doc. */
 const MIN_SPAN = 2;
@@ -59,42 +71,92 @@ export default function Vo2MaxTrendScreen() {
 
   const [range, setRange] = useState<TrendRangeKey>('6M');
   const [syncOn, setSyncOn] = useState<boolean | null>(null);
+  // W16/#945 — which source THIS device has, decided once and purely (see
+  // `lib/vo2MaxSource.ts`). iOS: HealthKit if linked. Android: Health
+  // Connect, whose provider may still be absent — `sourceAvailable` below
+  // answers that in words rather than by hiding the screen.
+  const source = healthSourceFor(Platform.OS, isHealthKitSupported());
+  const [sourceAvailable, setSourceAvailable] = useState<boolean | null>(
+    source === 'health_connect' ? null : source !== null,
+  );
 
   useFocusEffect(
     useCallback(() => {
       let live = true;
-      if (userId) {
-        readHealthKitImportEnabled(userId).then((on) => {
-          if (live) setSyncOn(on);
-        });
+      if (userId && source) {
+        // The toggle that governs THIS source — reading the iOS one on
+        // Android was half of the bug: it is always off there, so the screen
+        // told a Health Connect athlete to turn on Apple Health.
+        const read =
+          source === 'healthkit' ? readHealthKitImportEnabled : readHealthConnectImportEnabled;
+        read(userId)
+          .then((on) => {
+            if (live) setSyncOn(on);
+          })
+          .catch(() => {
+            // A failed preference read must not hold the spinner forever now
+            // that an unanswered read means "still loading" (review). Same
+            // answer as the signed-out branch above: treat as off.
+            if (live) setSyncOn(false);
+          });
       } else {
         setSyncOn(false);
+      }
+      if (source === 'health_connect') {
+        isHealthConnectSupported().then((ok) => {
+          if (live) setSourceAvailable(ok);
+        });
       }
       return () => {
         live = false;
       };
-    }, [userId]),
+    }, [userId, source]),
   );
 
-  const { loading, series } = useVo2MaxTrend(getToken, range, FETCH_DAYS);
+  const { loading, series, samples } = useVo2MaxTrend(getToken, range, FETCH_DAYS);
   const fmt = (v: number) => v.toFixed(1);
 
   return (
     <>
       <Stack.Screen options={{ title: 'VO2max' }} />
       <ScrollView contentContainerStyle={styles.page}>
-        {!isHealthKitSupported() ? (
-          <Text style={styles.empty} testID="vo2max-unsupported">
-            VO2max reading isn&apos;t available on this device.
-          </Text>
-        ) : syncOn === false ? (
-          <Text style={styles.empty} testID="vo2max-sync-off">
-            Turn on &quot;Sync with Apple Health&quot; in Settings to read your VO2max trend from an
-            Apple Watch or another device that estimates it.
-          </Text>
-        ) : loading ? (
-          <ActivityIndicator />
-        ) : (
+        {/* W16/#945 — readings the server holds are shown whatever the gates
+            say; the gates only choose a sentence when there is nothing to
+            show, and each names the source this device actually has. The
+            old order checked an iOS-only SDK first and hid Health Connect
+            data behind "isn't available on this device". */}
+        {(() => {
+          const state = vo2MaxScreenState({
+            loading,
+            // The server's answer over the whole fetch window (the most the
+            // server allows, ~13 months — see `vo2MaxFetchWindow`) —
+            // NOT `!series.empty`, which is also set when readings exist but
+            // none fall in the selected range, and would let a gate hide the
+            // chart and the range picker from an athlete who has data.
+            // Caught in review; see `vo2MaxScreenState`'s own doc comment.
+            hasReadings: samples.length > 0,
+            fetchFailed: series.empty?.kind === 'unavailable',
+            source,
+            sourceAvailable,
+            syncOn,
+          });
+          if (state === 'loading') return <ActivityIndicator />;
+          if (state === 'no_source' || state === 'source_unavailable') {
+            return (
+              <Text style={styles.empty} testID="vo2max-unsupported">
+                {vo2MaxStateCopy(state, source)}
+              </Text>
+            );
+          }
+          if (state === 'sync_off') {
+            return (
+              <Text style={styles.empty} testID="vo2max-sync-off">
+                {vo2MaxStateCopy(state, source)}
+              </Text>
+            );
+          }
+          return null;
+        })() ?? (
           <>
             <RNView style={styles.ranges}>
               {VO2MAX_RANGES.map((r) => {
@@ -130,7 +192,7 @@ export default function Vo2MaxTrendScreen() {
 
             {series.empty ? (
               <Text style={styles.empty} testID="vo2max-empty">
-                {vo2MaxEmptyCopy(series.empty)}
+                {vo2MaxEmptyCopy(series.empty, source)}
               </Text>
             ) : (
               <TrendChart
@@ -166,12 +228,14 @@ export default function Vo2MaxTrendScreen() {
  * sentence names WHAT to do about it (a capable device, HealthKit sync)
  * rather than an action this screen has no control to offer.
  */
-function vo2MaxEmptyCopy(empty: TrendEmpty): string {
+function vo2MaxEmptyCopy(empty: TrendEmpty, source: HealthSource | null): string {
   switch (empty.kind) {
     case 'unavailable':
       return "Couldn't load your VO2max trend. It'll be here when the connection is back.";
     case 'none':
-      return 'No VO2max reading yet. An Apple Watch (or another device that estimates it) needs to have written one to Health.';
+      // W16/#945 — names the source THIS device reads from; "Apple Watch …
+      // Health" on an Android phone was a sentence about somebody else's device.
+      return `No VO2max reading yet. A watch or another device that estimates it needs to have written one to ${source ? healthSourceLabel(source) : 'your health app'}.`;
     case 'none-in-range':
       return `Nothing in this range — you have ${empty.totalReadings} ${
         empty.totalReadings === 1 ? 'reading' : 'readings'
