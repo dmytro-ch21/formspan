@@ -63603,6 +63603,114 @@ outcome, same remedy, and a distinction nobody acts on differently is only
 another branch to get wrong. And nothing yet fails a commit that carries a
 tool-written `minimumReleaseAgeExclude`; that is H17's remaining criterion.
 
+## 2026-09-08 — W15 (#944): walk/hike detection was dead on Android, and three layers of code agreed there was nothing to see
+
+Found on the first Android emulator run this repo ever had (the same session
+that found N526's build break), by an agent reading the generated manifest
+against what the code requests. It is a **W** because the screen was wrong:
+`app/settings.tsx`'s Health Connect toggle told the athlete "Other activity,
+like a walk or hike, appears on Today", and on Android it never had.
+
+**The mismatch, verified at both ends.** `lib/healthConnect.ts`'s
+`READ_RECORD_TYPES` asks Health Connect for `HeartRate`, `Vo2Max` and
+`ExerciseSession`. `app.config.js`'s `android.permissions` declared
+`READ_HEART_RATE` and `READ_VO2_MAX` — and not `READ_EXERCISE`. N479 added
+the third record type to the read list and nobody added the third
+permission to the manifest; nothing generates one from the other, and
+nothing fails when they drift. Confirmed in the generated
+`AndroidManifest.xml` before the fix: two health permissions, not three.
+
+**Why it was invisible, which is the actual finding.** A read Health
+Connect refuses throws a `SecurityException`, which
+`react-native-health-connect` rejects to JS as an error with
+`code: "PERMISSION_ERROR"` (its `ExceptionsUtils.kt`, read directly).
+`queryOtherExerciseSessions` caught it and returned `[]`. Then
+`detectOtherHealthConnectActivity` saw an empty list and returned. Then
+`syncHealthConnectBiometrics` returned `{ attempted }`, which `runSyncPass`
+discards. Three layers, each individually reasonable — "best-effort, never
+fail the heart-rate enrichment" is a correct posture — and together they
+turned "not allowed" into "not there" with no way to tell the two apart from
+any layer above, including the athlete's. **No test in this repo could see
+it, by construction: a test can only observe the `[]` the swallow produced,
+and `[]` is also the correct answer for an athlete with no walks.** The
+`requestHealthConnectReadAuthorization()` boolean that would have said
+"not all granted" was also discarded, at line 269 — a fourth layer, though
+its answer is not the ground truth anyway (a grant can be revoked between
+the ask and the read).
+
+**iOS has the identical `catch { return [] }` and it is CORRECT there.**
+HealthKit deliberately returns an empty result for a read the athlete
+denied — Apple treats "which types you refused" as itself private — so
+`healthkit.ts` cannot distinguish and should not try. Health Connect does
+say no out loud. Copying the iOS posture to Android threw that answer away.
+
+**The fix has two halves, and the second is the one that matters.**
+
+1. `READ_EXERCISE` declared, with a comment at the manifest list stating
+   the by-hand invariant against `READ_RECORD_TYPES` and what drifting
+   looks like. Verified in the GENERATED manifest after a clean prebuild
+   (the ticket's criterion says check the manifest, not the config): all
+   three health permissions present.
+
+2. **A refused read is now the one thing the three `query*` functions
+   throw.** `isHealthConnectPermissionError` (pure, exported) matches the
+   package's own `PERMISSION_ERROR` code exactly — a vendor-defined code,
+   not a message substring a package update could reword — and
+   `rethrowIfNotPermitted` turns it into a typed
+   `HealthConnectPermissionError` carrying the record type. Everything else
+   keeps the old "return `[]`" posture, because an IO error and an empty
+   window genuinely are the same to the caller: try again next pass. All
+   three reads, not just `ExerciseSession`: the ticket's audit criterion
+   asked whether the other reads had the same mismatch, and the answer is
+   that the *permissions* now match but the *swallow shape* was identical in
+   all three — fixing one and leaving two is the "guard you wrote vs. the
+   one you didn't" trap CLAUDE.md names.
+
+   `syncHealthConnectBiometrics` catches the typed error at each of its
+   three existing catches and records it into a new `notPermitted` list on
+   its return value — caught, still, because a refused VO2max must not fail
+   heart-rate enrichment; but caught into a value rather than into silence.
+   A refused `HeartRate` grant ends the per-session loop at the first
+   candidate rather than repeating the refusal once per session, and leaves
+   every ledger row untouched so a later grant picks them all up. A
+   `__DEV__` warning names the record type and points at `app.config.js`.
+
+**What this does NOT do, and the ticket for it.** Nothing in the UI reads
+`notPermitted` yet — `runSyncPass` still discards the return. The Settings
+copy is now TRUE (the permission exists), which is what the W required; a
+toggle that additionally says "…but Health Connect refused the exercise
+grant, tap to fix" is real product work, filed separately, and small
+precisely because the value now exists. The return is the honest minimal
+sink: observable, tested, and not hidden state.
+
+**Tests.** `lib/__tests__/healthConnectReads.test.ts` is new and runs as
+ANDROID — the existing `healthConnect.test.ts` deliberately runs as iOS to
+pin the platform guard, which means it can never reach the catches this
+ticket is about. The new file replaces jest-expo's Platform module (as an
+ES default export; a plain object breaks `react-native`'s own
+`Platform.select` calls at load) and the native package with a fake whose
+`readRecords` rejects with whatever a test says. Twelve tests: the
+classifier pinned exactly (including "does not match on the message" and
+the non-object shapes a catch can receive), each of the three reads
+throwing the typed error on `PERMISSION_ERROR` and still resolving `[]` on
+every other code, and the happy path unchanged. Five more in
+`healthConnectSync.test.ts` pin the sync layer: refusal reported by name
+while heart-rate enrichment still runs, a transient failure NOT reported as
+a refusal, a refused `HeartRate` ending the loop with the ledger untouched,
+and de-duplication.
+
+**Mutation-verified, three ways, baseline green first**: classifier
+inverted → 10 fail; the rethrow removed (the original bug, reintroduced) →
+3 fail, one per record type; the sync's `noteIfRefused` made a no-op → 3
+fail. Restored and re-run green each time.
+
+**Still needs a device.** A real walk recorded on an Android phone
+appearing on Today is the ticket's `NEEDS HUMAN EVIDENCE` criterion and
+remains so — the emulator has no Health Connect data and this session did
+not sign in on it. What the emulator DID establish is the half that was
+checkable: the permission is in the manifest, and the code that used to
+hide a refusal no longer can.
+
 ## Open items / known gaps as of this entry
 
 

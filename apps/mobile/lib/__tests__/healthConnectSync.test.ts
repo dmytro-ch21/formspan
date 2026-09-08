@@ -18,7 +18,7 @@
 */
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 import { upsert, type LocalSession } from '../sessionStore';
-import type { HeartRateReading, Vo2MaxReading } from '../healthConnect';
+import { HealthConnectPermissionError, type HeartRateReading, type Vo2MaxReading } from '../healthConnect';
 import type { SessionMetrics } from '../biometric';
 import {
   readHealthConnectImportEnabled,
@@ -42,6 +42,16 @@ const mockQueryHeartRate = jest.fn((_startedAt: string, _endedAt: string) =>
 const mockQueryVo2Max = jest.fn((_since: string, _until: string) =>
   Promise.resolve(mockVo2MaxReadings),
 );
+/** W15/#944 — what the walk/hike read does this pass: resolve empty, or
+ *  reject with whatever is set here (a `HealthConnectPermissionError` to
+ *  simulate a refused grant, a plain Error for anything transient). */
+let mockExerciseRejectsWith: unknown = null;
+const mockQueryExercise = jest.fn((_since: string, _until: string) =>
+  mockExerciseRejectsWith ? Promise.reject(mockExerciseRejectsWith) : Promise.resolve([]),
+);
+/** Same shape for the heart-rate read, so a refused HeartRate grant can be
+ *  simulated without disturbing `mockHeartRateReadings`'s happy path. */
+let mockHeartRateRejectsWith: unknown = null;
 jest.mock('../healthConnect', () => {
   const real = jest.requireActual('../healthConnect');
   return {
@@ -49,8 +59,11 @@ jest.mock('../healthConnect', () => {
     isHealthConnectSupported: () => Promise.resolve(mockSupported),
     requestHealthConnectReadAuthorization: () => mockRequestAuth(),
     queryHeartRateSamples: (startedAt: string, endedAt: string) =>
-      mockQueryHeartRate(startedAt, endedAt),
+      mockHeartRateRejectsWith
+        ? Promise.reject(mockHeartRateRejectsWith)
+        : mockQueryHeartRate(startedAt, endedAt),
     queryVo2MaxReadings: (since: string, until: string) => mockQueryVo2Max(since, until),
+    queryOtherExerciseSessions: (since: string, until: string) => mockQueryExercise(since, until),
   };
 });
 
@@ -153,6 +166,9 @@ beforeEach(async () => {
   mockPutSamplesThrows = false;
   mockDateOfBirth = '1996-01-15';
   mockProfileThrows = false;
+  mockExerciseRejectsWith = null;
+  mockHeartRateRejectsWith = null;
+  mockQueryExercise.mockClear();
   mockRequestAuth.mockClear();
   mockQueryHeartRate.mockClear();
   mockQueryVo2Max.mockClear();
@@ -414,5 +430,91 @@ describe('syncHealthConnectBiometrics', () => {
     await syncHealthConnectBiometrics('other_user', getToken);
 
     expect(mockComputeSessionMetrics).not.toHaveBeenCalled(); // s1 belongs to USER, not other_user
+  });
+});
+
+/**
+ * W15/#944 — a refused Health Connect grant is REPORTED, not swallowed.
+ *
+ * The bug: `READ_EXERCISE` was never declared in the manifest, so every
+ * `ExerciseSession` read threw a SecurityException that came back as `[]`,
+ * and this function correctly did nothing with nothing. Walk/hike detection
+ * was dead behind a Settings toggle that said it worked, and no assertion on
+ * `attempted`, on the ledger, or on any mock could have seen it — they all
+ * looked exactly like an athlete with no walks. These tests pin the one
+ * thing that now differs: the pass says which record type was refused.
+ */
+describe('syncHealthConnectBiometrics — a refused grant is reported, not swallowed (W15/#944)', () => {
+  it('reports ExerciseSession as not permitted, and still enriches heart rate in the same pass', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession('s1', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+    mockHeartRateReadings = [heartRateReading()];
+    mockComputedMetrics = { hr_source: 'window', sample_count: 1 };
+    mockExerciseRejectsWith = new HealthConnectPermissionError('ExerciseSession');
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    // The refusal is the pass's answer, by name...
+    expect(result.notPermitted).toEqual(['ExerciseSession']);
+    // ...and it cost the heart-rate half of the pass nothing: the walk read
+    // is best-effort by design, and a refused one must stay that way.
+    expect(result.attempted).toBe(1);
+    expect(mockPutSamples).toHaveBeenCalledTimes(1);
+    expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT report a transient exercise-read failure as a refusal', async () => {
+    // The distinction is the whole fix. An IO error and a refused grant used
+    // to be the same `[]`; they are now different, and only one of them is a
+    // permission problem for somebody to act on.
+    await writeHealthConnectImportEnabled(USER, true);
+    mockExerciseRejectsWith = new Error('simulated transient read failure');
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toEqual([]);
+  });
+
+  it('reports nothing when every read is permitted', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession('s1', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toEqual([]);
+    expect(mockQueryExercise).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a refused HeartRate grant ONCE and stops the per-session loop, leaving every ledger row untouched', async () => {
+    // A refused HeartRate grant is identical for every candidate, so the
+    // loop ends at the first rather than repeating the refusal per session
+    // — and leaves all of them un-attempted, so a later grant picks up
+    // every one.
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession('s1', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+    await seedFinishedRemoteSession('s2', '2026-09-02T07:00:00.000Z', '2026-09-02T08:00:00.000Z');
+    mockHeartRateRejectsWith = new HealthConnectPermissionError('HeartRate');
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toEqual(['HeartRate']);
+    expect(result.attempted).toBe(0);
+    expect(mockPutSamples).not.toHaveBeenCalled();
+    const ledger = await mockFixture.getAllAsync<{ session_id: string }>(
+      `SELECT session_id FROM health_connect_enrichment WHERE user_id = ?`,
+      USER,
+    );
+    expect(ledger).toEqual([]);
+  });
+
+  it('lists each refused record type once, in the order encountered', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession('s1', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+    mockExerciseRejectsWith = new HealthConnectPermissionError('ExerciseSession');
+    mockHeartRateRejectsWith = new HealthConnectPermissionError('HeartRate');
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toEqual(['ExerciseSession', 'HeartRate']);
   });
 });
