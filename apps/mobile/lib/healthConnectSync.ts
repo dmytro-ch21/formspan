@@ -13,6 +13,8 @@ import { getDb } from './db';
 import { upsertDetectedActivities, DETECTED_ACTIVITY_WINDOW_DAYS } from './detectedActivity';
 import {
   isHealthConnectSupported,
+  HealthConnectPermissionError,
+  type HealthConnectRecordType,
   queryHeartRateSamples,
   queryOtherExerciseSessions,
   queryVo2MaxReadings,
@@ -225,10 +227,23 @@ async function detectOtherHealthConnectActivity(userID: string, now: Date): Prom
  * Returns the count of sessions this pass attempted (not the count that
  * found data — see `docs/testing/functional-scenarios.md`'s "permission
  * granted but no data" scenario for why a session enriched to `hr_source:
- * 'none'` is a success, not a failure, of this function). Never throws: a
- * per-session failure is caught and simply leaves that session's ledger row
- * as it was, so the next pass retries it rather than the whole pass dying
- * over one bad session.
+ * 'none'` is a success, not a failure, of this function), and
+ * `notPermitted`: every record type Health Connect REFUSED to read this
+ * pass (W15/#944). Never throws: a per-session failure is caught and
+ * simply leaves that session's ledger row as it was, so the next pass
+ * retries it rather than the whole pass dying over one bad session.
+ *
+ * `notPermitted` exists because the alternative was the bug. A refused read
+ * used to come back as `[]` from `lib/healthConnect.ts`, and this function
+ * then correctly did nothing with nothing — so a permission missing from
+ * the manifest was a feature that silently never ran, behind a Settings
+ * toggle that said it did. A refusal is still not allowed to fail the pass
+ * (heart-rate enrichment must survive a refused VO2max, and vice versa) —
+ * it is CAUGHT, but it is caught into this list rather than into silence,
+ * so the answer to "is walk detection actually working on this phone" is
+ * one value rather than a debugger session. Nothing in the UI reads it yet;
+ * that is a separate ticket, and a value that exists is what makes that
+ * ticket small.
  */
 export async function syncHealthConnectBiometrics(
   userID: string,
@@ -260,13 +275,31 @@ export async function syncHealthConnectBiometrics(
      */
     stillCurrent?: () => boolean;
   } = {},
-): Promise<{ attempted: number }> {
+): Promise<{ attempted: number; notPermitted: HealthConnectRecordType[] }> {
   const stillCurrent = options.stillCurrent ?? (() => true);
 
-  if (!(await readHealthConnectImportEnabled(userID))) return { attempted: 0 };
-  if (!(await isHealthConnectSupported())) return { attempted: 0 };
+  if (!(await readHealthConnectImportEnabled(userID))) return { attempted: 0, notPermitted: [] };
+  if (!(await isHealthConnectSupported())) return { attempted: 0, notPermitted: [] };
 
+  // Result deliberately discarded — see this function's own doc comment in
+  // `lib/healthConnect.ts` (W15/#944): the read site is where a refused
+  // grant is actually detected, and `notPermitted` below is how it reports.
   await requestHealthConnectReadAuthorization();
+
+  const notPermitted: HealthConnectRecordType[] = [];
+  /** Records a refusal and says whether `err` was one. Everything else
+   *  stays the silent, retry-next-pass failure every catch below already was. */
+  const noteIfRefused = (err: unknown): boolean => {
+    if (!(err instanceof HealthConnectPermissionError)) return false;
+    if (!notPermitted.includes(err.recordType)) notPermitted.push(err.recordType);
+    if (__DEV__) {
+      console.warn(
+        `healthConnectSync: ${err.recordType} read refused — permission missing from app.config.js, or revoked in Health Connect?`,
+        err,
+      );
+    }
+    return true;
+  };
 
   const now = new Date();
 
@@ -275,8 +308,10 @@ export async function syncHealthConnectBiometrics(
   // file's loop below.
   try {
     await detectOtherHealthConnectActivity(userID, now);
-  } catch {
-    // The next foreground pass tries again.
+  } catch (err) {
+    // A refused grant is recorded; anything else, the next foreground pass
+    // tries again.
+    noteIfRefused(err);
   }
 
   const [candidates, ledger] = await Promise.all([candidateSessions(userID, now), readLedger(userID)]);
@@ -338,11 +373,17 @@ export async function syncHealthConnectBiometrics(
         await recordAttempt(userID, session.id, 'none', readings.length, now);
       }
       attempted++;
-    } catch {
+    } catch (err) {
       // Leave this session's ledger row exactly as it was (absent, or its
       // previous attempt) — the next pass's `needsEnrichmentAttempt` will
       // decide fresh whether to retry it. One session's network failure
       // must not abort every other candidate in this pass.
+      //
+      // A refused HeartRate grant is the one failure that IS the same for
+      // every remaining session, so it ends the loop rather than repeating
+      // the refusal once per candidate; the ledger is left untouched for all
+      // of them exactly as above, so a later grant picks them all up.
+      if (noteIfRefused(err)) break;
     }
   }
 
@@ -353,14 +394,15 @@ export async function syncHealthConnectBiometrics(
   if (stillCurrent()) {
     try {
       await importVo2Max(getToken, now);
-    } catch {
+    } catch (err) {
       // Best-effort, same reasoning as the per-session catch above — VO2max
       // failing must never block heart-rate enrichment, and there is no
-      // ledger for it to leave inconsistent.
+      // ledger for it to leave inconsistent. A refused grant is recorded.
+      noteIfRefused(err);
     }
   }
 
-  return { attempted };
+  return { attempted, notPermitted };
 }
 
 // --- orchestration: when a pass runs -------------------------------------

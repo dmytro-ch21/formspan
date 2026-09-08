@@ -114,6 +114,80 @@ const hc = load();
  * walk/hike detection shipped after it. */
 const READ_RECORD_TYPES = ['HeartRate', 'Vo2Max', 'ExerciseSession'] as const;
 
+export type HealthConnectRecordType = (typeof READ_RECORD_TYPES)[number];
+
+/**
+ * W15/#944 — a read that Health Connect REFUSED, as opposed to one that
+ * found nothing.
+ *
+ * The three `query*` functions below used to catch everything and return
+ * `[]`, and on Android that made a missing manifest permission — the
+ * `ExerciseSession` read was requested by `READ_RECORD_TYPES` while
+ * `READ_EXERCISE` was never declared in `app.config.js` — indistinguishable
+ * from an athlete who simply has no walks recorded. The feature was dead,
+ * Settings said it worked, and every layer above agreed there was nothing
+ * to show. That is the trap: a swallow that turns "not allowed" into "not
+ * there" cannot be caught by any test, because the tests can only ever see
+ * the empty array it produced.
+ *
+ * So a permission failure is now the ONE thing these reads throw. Every
+ * other failure keeps the old "return `[]`, never throw" posture — see the
+ * reasoning on `queryHeartRateSamples` — because a transient IO error and an
+ * empty window really are the same to the caller: try again next pass.
+ * A refused permission is not; it stays refused until somebody changes the
+ * manifest or the athlete changes the grant, and the caller needs to know
+ * which of those it is looking at.
+ *
+ * **iOS does not get an equivalent, and that is HealthKit's design, not an
+ * omission here.** HealthKit deliberately returns an empty result for a
+ * read the athlete denied — Apple treats "which data types you refused" as
+ * itself private — so `healthkit.ts`'s identical `catch { return [] }` is
+ * the correct and only possible posture there. Health Connect does say no
+ * out loud, and this class is what carries that answer up.
+ */
+export class HealthConnectPermissionError extends Error {
+  readonly recordType: HealthConnectRecordType;
+  constructor(recordType: HealthConnectRecordType) {
+    super(`Health Connect refused to read ${recordType}: permission not granted`);
+    this.name = 'HealthConnectPermissionError';
+    this.recordType = recordType;
+  }
+}
+
+/**
+ * `react-native-health-connect`'s own code for a native `SecurityException`
+ * — verified against the installed package's
+ * `android/.../utils/ExceptionsUtils.kt`, where `rejectWithException` maps
+ * `is SecurityException -> "PERMISSION_ERROR"` and rejects the bridge
+ * promise with that as the error's `code`. `readRecords` in the package's
+ * TypeScript returns the native promise directly (no wrapping — its
+ * `HealthConnectError` class is only thrown for `insertRecords` argument
+ * validation), so this is exactly the shape that reaches the `catch`
+ * blocks below. A vendor-defined code, matched exactly, rather than a
+ * substring of a human-readable message that a package update could
+ * reword.
+ */
+const PERMISSION_ERROR_CODE = 'PERMISSION_ERROR';
+
+/**
+ * Is this rejection Health Connect saying "not permitted"? Pure and exported
+ * so the classification is testable without a device — the native surface
+ * itself is not (see the file comment), but the decision about what its
+ * errors MEAN can be pinned exactly.
+ */
+export function isHealthConnectPermissionError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === PERMISSION_ERROR_CODE
+  );
+}
+
+/** The one exception to "return `[]`, never throw" — see `HealthConnectPermissionError`. */
+function rethrowIfNotPermitted(err: unknown, recordType: HealthConnectRecordType): void {
+  if (isHealthConnectPermissionError(err)) throw new HealthConnectPermissionError(recordType);
+}
+
 let sdkChecked = false;
 let sdkAvailable = false;
 let initialized = false;
@@ -161,10 +235,14 @@ async function ensureInitialized(): Promise<boolean> {
  * Never requests `write` — matches `healthkit.ts`'s stance and this
  * ticket's explicit scope. Safe to call on every sync pass, not only the
  * first: Health Connect answers from its own stored grant once the athlete
- * has responded to the system dialog once. Like HealthKit, a query that
- * comes back empty after this is indistinguishable from "nothing to read" —
- * `lib/healthConnectSync.ts` treats both the same way rather than guessing
- * at which.
+ * has responded to the system dialog once.
+ *
+ * **Its boolean is deliberately NOT how a refused grant is detected**, and
+ * `lib/healthConnectSync.ts` discards it on purpose (W15/#944). A grant can
+ * be revoked in the Health Connect app between this call and the read, and
+ * a permission absent from the MANIFEST — the actual bug — is refused at
+ * read time regardless of what this returned. The read site is the ground
+ * truth, and `HealthConnectPermissionError` is how it reports.
  */
 export async function requestHealthConnectReadAuthorization(): Promise<boolean> {
   if (!(await ensureInitialized())) return false;
@@ -232,7 +310,8 @@ export async function queryHeartRateSamples(
       timeRangeFilter: { operator: 'between', startTime: windowStart, endTime: windowEnd },
     });
     records = result.records as NativeHeartRateRecord[];
-  } catch {
+  } catch (err) {
+    rethrowIfNotPermitted(err, 'HeartRate');
     return [];
   }
 
@@ -268,7 +347,8 @@ export type Vo2MaxReading = {
  * session, so unlike `queryHeartRateSamples` this is not called per-session
  * at all; see `lib/healthConnectSync.ts` for when it runs.
  *
- * Same "return `[]`, never throw" posture as `queryHeartRateSamples`, for
+ * Same posture as `queryHeartRateSamples` — `[]` on anything transient, a
+ * `HealthConnectPermissionError` on a refused grant (W15/#944) — for
  * the same reasons.
  */
 export async function queryVo2MaxReadings(since: string, until: string): Promise<Vo2MaxReading[]> {
@@ -279,7 +359,8 @@ export async function queryVo2MaxReadings(since: string, until: string): Promise
       timeRangeFilter: { operator: 'between', startTime: since, endTime: until },
     });
     records = result.records as NativeVo2MaxRecord[];
-  } catch {
+  } catch (err) {
+    rethrowIfNotPermitted(err, 'Vo2Max');
     return [];
   }
 
@@ -346,8 +427,9 @@ export type HealthConnectOtherWorkout = {
  * Connect, for the `[since, until]` window — the Android counterpart to
  * `healthkit.ts`'s `queryOtherWorkouts`.
  *
- * Same "return `[]`, never throw" posture as `queryHeartRateSamples` above,
- * for the same reasons. Defensively re-checks `exerciseType` per record
+ * Same posture as `queryHeartRateSamples` above — `[]` on anything transient,
+ * a `HealthConnectPermissionError` on a refused grant, never anything else
+ * (W15/#944; see that class). Defensively re-checks `exerciseType` per record
  * rather than trusting `readRecords('ExerciseSession', ...)` to have filtered
  * by type at all — this package's `ReadRecordsOptions` has no type-narrowing
  * filter the way HealthKit's `queryWorkoutSamples` does, so every session of
@@ -364,7 +446,8 @@ export async function queryOtherExerciseSessions(
       timeRangeFilter: { operator: 'between', startTime: since, endTime: until },
     });
     records = result.records as NativeExerciseSessionRecord[];
-  } catch {
+  } catch (err) {
+    rethrowIfNotPermitted(err, 'ExerciseSession');
     return [];
   }
 

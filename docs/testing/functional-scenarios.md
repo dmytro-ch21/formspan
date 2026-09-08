@@ -18573,6 +18573,11 @@ otherwise surface, and offer it on Today as something to log or dismiss.
   no Health Connect provider: the detection query returns nothing (same
   "no module, no data" posture every other read in this feature takes) —
   no crash, no error surfaced to the athlete.
+  **Amended by W15/#944**: a Health Connect read that is REFUSED (a grant
+  missing or revoked) is no longer part of that "returns nothing" posture
+  on Android — see the W15 section for what it does instead. iOS is
+  unchanged, and cannot change: HealthKit returns empty for a denied read
+  by design.
 - Logging a detected activity and then deleting the resulting session: the
   original walk becomes detectable again on the next sync pass — this is
   the intended behaviour (see `lib/detectedActivity.ts`'s own doc comment on
@@ -20852,3 +20857,54 @@ found rather than becoming folklore.
   no letterboxing, no wrong-density artefact, and a sensible duration rather
   than a flash or a hang. A successful resource link is not the same as a
   splash that looks right, and only the second one is what an athlete sees.
+
+## W15 — Android: a refused Health Connect grant is reported, not read as "no data" (`apps/mobile/app.config.js`, `apps/mobile/lib/healthConnect.ts`, `apps/mobile/lib/healthConnectSync.ts`)
+
+`READ_EXERCISE` was never declared, so every walk/hike read threw a
+`SecurityException` that came back as `[]`, and Settings promised a feature
+that had never run. Two fixes: the permission, and the swallow.
+
+**Happy path**
+- **The permission is in the generated manifest, not just the config.**
+  `rm -rf apps/mobile/android && npx expo prebuild --platform android`, then
+  `grep -o 'android.permission.health.[A-Z_0-9]*' android/app/src/main/AndroidManifest.xml | sort -u`
+  lists exactly `READ_EXERCISE`, `READ_HEART_RATE`, `READ_VO2_MAX` — one per
+  entry in `READ_RECORD_TYPES`. (Note the `0-9` in the character class: a
+  `[A-Z_]*` grep truncates `READ_VO2_MAX` to `READ_VO` and reads as a
+  missing permission that is not missing.)
+- **Health Connect's consent screen lists exercise sessions** alongside heart
+  rate and VO2max the first time the Settings toggle is turned on — one
+  screen, three read grants, no write grant.
+- **A real walk appears on Today** within the 3-day window, tagged "via
+  Google Health" — the N479 happy path, now reachable on Android.
+
+**Edge cases & errors**
+- **A refused grant is the one failure that is not silent.** Turn the toggle
+  on and DENY exercise sessions on the consent screen (grant heart rate). On
+  a dev build, the next sync pass logs
+  `healthConnectSync: ExerciseSession read refused — is its permission in app.config.js?`,
+  and `syncHealthConnectBiometrics` resolves with
+  `notPermitted: ['ExerciseSession']` — while `attempted` still counts the
+  heart-rate sessions it enriched in the same pass. A refusal costs the
+  other reads nothing.
+- **A transient failure is NOT reported as a refusal.** Airplane mode, a
+  Health Connect provider mid-update, an IO error: the read resolves `[]`,
+  `notPermitted` stays empty, and the next foreground pass retries. Only the
+  package's `PERMISSION_ERROR` code counts; a message that merely contains
+  the word "permission" does not.
+- **A refused heart-rate grant ends the per-session loop at the first
+  candidate** rather than repeating the refusal once per session, and leaves
+  every candidate's ledger row untouched — grant it later and the next pass
+  picks all of them up.
+- **Revoke a grant in the Health Connect app AFTER the toggle is on**: the
+  next pass reports the refusal the same way. The
+  `requestHealthConnectReadAuthorization()` boolean is deliberately not the
+  signal (it can be stale by read time); the read site is.
+- **Nothing in the UI reads `notPermitted` yet** — the Settings hint does
+  not change on a refusal. That is the filed follow-up, not this ticket.
+
+**NEEDS HUMAN EVIDENCE**
+- A real walk or hike, recorded by a wearable or Google Fit on an Android
+  phone with the exercise grant given, appearing on Today. The emulator
+  holds no Health Connect data and this ticket did not sign in on it; the
+  manifest and the code path are what this ticket verified.

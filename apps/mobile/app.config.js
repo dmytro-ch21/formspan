@@ -62,9 +62,20 @@ module.exports = () => ({
       predictiveBackGestureEnabled: false,
       package: "com.vola.fitness",
       versionCode: 1,
+      // ONE ENTRY PER RECORD TYPE IN `READ_RECORD_TYPES` (lib/healthConnect.ts),
+      // and the two lists have to be kept in step BY HAND — nothing generates
+      // one from the other, and nothing fails when they drift. W15/#944 is what
+      // drifting looks like: `ExerciseSession` joined the read list for N479
+      // (walk/hike detection) and `READ_EXERCISE` never joined this one, so on
+      // Android every read of it threw a SecurityException that
+      // `queryOtherExerciseSessions` caught and returned as "no records". The
+      // feature was dead, Settings said it worked, and no check in the repo
+      // could see it — a manifest missing a permission prebuilds and builds
+      // cleanly. Health Connect's own naming for the three, one per record type:
       permissions: [
         "android.permission.health.READ_HEART_RATE",
         "android.permission.health.READ_VO2_MAX",
+        "android.permission.health.READ_EXERCISE",
       ],
     },
     web: {
