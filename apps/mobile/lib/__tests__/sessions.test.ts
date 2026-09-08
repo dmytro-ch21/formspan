@@ -1,4 +1,5 @@
 import {
+  applyEffortEntry,
   fillForward,
   pendingSuggestableIndices,
   repairSet,
@@ -453,5 +454,72 @@ describe('roundDistanceM', () => {
     expect(roundDistanceM(0.4)).toBeNull();
     expect(roundDistanceM(0)).toBeNull();
     expect(roundDistanceM(-5)).toBeNull();
+  });
+});
+
+/**
+ * N525/#940 — RIR and RPE are two views of one quantity, and letting a set
+ * carry both is what produced `effort_conflict` abstentions in the v2
+ * progression engine (599 of 944 real sets carried both; 139 disagreed by
+ * 2+ points of implied reserve, and v2 then refused to suggest anything on
+ * 26 of 100 athlete/exercise pairs). Entry is now exclusive.
+ */
+describe('applyEffortEntry — RIR and RPE are mutually exclusive (N525/#940)', () => {
+  const base = { rir: null as number | null, rpe: null as number | null };
+
+  it('a real RIR displaces an existing RPE', () => {
+    const got = applyEffortEntry({ ...base, rpe: 8 }, 'rir', '2');
+    expect(got).toEqual({ rir: 2, rpe: null });
+  });
+
+  it('a real RPE displaces an existing RIR', () => {
+    const got = applyEffortEntry({ ...base, rir: 2 }, 'rpe', '8');
+    expect(got).toEqual({ rir: null, rpe: 8 });
+  });
+
+  it('CLEARING a field displaces nothing — deleting RIR must not wipe an RPE', () => {
+    // The counterpart cannot normally be set at the same time any more, but a
+    // historical set (or a mid-edit state) can carry both, and emptying one
+    // is a correction rather than a choice of which scale to log in.
+    expect(applyEffortEntry({ rir: 2, rpe: 8 }, 'rir', '')).toEqual({ rir: null, rpe: 8 });
+    expect(applyEffortEntry({ rir: 2, rpe: 8 }, 'rpe', '   ')).toEqual({ rir: 2, rpe: null });
+  });
+
+  it('unparseable text clears its own field and still displaces nothing', () => {
+    expect(applyEffortEntry({ rir: 2, rpe: 8 }, 'rpe', 'hard')).toEqual({ rir: 2, rpe: null });
+  });
+
+  it('rounds RIR to whole reps but keeps RPE fractional', () => {
+    // You cannot leave 1.5 reps in the tank; RPE 7.5 is conventional.
+    expect(applyEffortEntry(base, 'rir', '1.6')).toEqual({ rir: 2, rpe: null });
+    expect(applyEffortEntry(base, 'rpe', '7.5')).toEqual({ rir: null, rpe: 7.5 });
+  });
+
+  it('accepts a comma decimal separator, as the other numeric fields do', () => {
+    expect(applyEffortEntry(base, 'rpe', '7,5')).toEqual({ rir: null, rpe: 7.5 });
+  });
+
+  it('keeps RIR 0 — "nothing left in the tank" is a real answer, not absence', () => {
+    const got = applyEffortEntry({ ...base, rpe: 9 }, 'rir', '0');
+    expect(got.rir).toBe(0);
+    expect(got.rpe).toBeNull();
+  });
+
+  it('preserves every other field on the set', () => {
+    const set = { exercise_id: 'squat', position: 1, reps: 5, rir: null, rpe: 8 };
+    expect(applyEffortEntry(set, 'rir', '2')).toEqual({
+      exercise_id: 'squat',
+      position: 1,
+      reps: 5,
+      rir: 2,
+      rpe: null,
+    });
+  });
+
+  it('a set that already carries both survives being opened and stays editable', () => {
+    // The 599 historical sets are not rewritten by this change; they are only
+    // reconciled when the athlete next touches one of the two fields.
+    const historical = { rir: 0, rpe: 8 };
+    expect(applyEffortEntry(historical, 'rir', '0')).toEqual({ rir: 0, rpe: null });
   });
 });

@@ -63008,6 +63008,106 @@ from sources that do not depend on it: Railway's request logs, direct
 Postgres queries, and one direct in-process call to the repository function.
 
 
+## 2026-09-07 — N525: RIR and RPE become mutually exclusive at entry, unblocking #753's rollout (#940)
+
+Chosen by the user from three options after the phase-5 shadow replay was run
+against real staging history (see #753's own comment for that run). This is the
+data-entry half of a defect #753 named in its very first list and only ever
+fixed on the engine side.
+
+### What the shadow replay found
+
+All five phases of the progression-engine rewrite had landed, but
+`new_recommendation_engine` was still `enabled=false` on staging — so the
+original "invents sets that were never performed" behaviour was still what a
+real athlete got. Running the replay before flipping it:
+
+    100 athlete/exercise pairs compared -> 63 agreed, 37 disagreed
+      abstention_divergence  26   (70% of all disagreements)
+      code_differs            6
+      target_differs          5
+
+Twenty-six of thirty-seven disagreements were one thing: v2 returning
+`effort_conflict` and suggesting nothing at all, where v1 happily progressed.
+
+### Root cause, measured rather than inferred
+
+`session_sets` on staging: 944 rows, of which **599 (63%) carried BOTH a RIR
+and an RPE**, and **139 of those conflicted** at `ProgressV2`'s real
+`conflictThreshold` of 2.0. Because `hasEffortConflict` trips when ANY set in
+an athlete/exercise cohort conflicts, ~15% of sets produced ~26% of exercises
+abstaining.
+
+**A correction worth recording, because the first number was wrong.** An
+initial pass used a proxy threshold of 1.0 and reported 423 conflicting sets —
+a 3x overstatement. v2's actual constant is 2.0. The error was caught by going
+back to read `progression_v2.go` rather than trusting the first query, which is
+the same "verify the apparatus, not just the result" discipline this file's own
+rule section describes; the corrected figure is 139.
+
+The conflicts are **systematic, not sloppy**: 103 of the 139 sit at exactly ±2
+implied reserve, consistently signed — `rir=0/rpe=8`, `rir=1/rpe=7`,
+`rir=2/rpe=6`. That reads as an athlete using RPE on a personal scale offset
+about two points from the textbook `RPE = 10 - RIR` mapping, not as erratic
+logging.
+
+### Why both fields were being filled
+
+`app/session/[id].tsx` rendered RIR and RPE as two independent `Field`s, with
+its own comment already stating the intent — *"Two views of the same thing —
+record whichever you think in rather than converting mid-session"* — and
+nothing whatsoever enforcing *whichever*. Both accepted input; both got used.
+
+### The fix, and the two alternatives that were declined
+
+`lib/sessions.ts` gains `applyEffortEntry`, a pure function: writing a real
+value to one effort field clears the other, so a set can only carry one. The
+session screen calls it instead of the generic `num()` handler.
+
+Two rules inside it are deliberate and separately tested:
+
+- **A real value displaces.** One scale per set, enforced at entry rather than
+  reconciled later.
+- **Clearing displaces NOTHING.** Deleting a RIR must not silently wipe an
+  RPE — emptying a field is a correction, not a choice of scale. This is the
+  half most likely to be "simplified" away by a later reader.
+
+Declined, with reasons, since both were live options the user chose between:
+
+- **Raising `conflictThreshold` 2.0 -> 3.0** would have cleared ~74% of
+  observed conflicts instantly, since they cluster at exactly ±2. Rejected as
+  tuning a safety guard to fit one athlete's calibration — the guard would
+  then be quieter without being more correct.
+- **Treating a consistent offset as calibration rather than conflict** is
+  arguably the most correct answer (a systematic, same-signed gap really is a
+  personal scale) and is much more work; it stays available if per-athlete
+  effort calibration is ever wanted.
+
+**Not a segmented RIR/RPE mode toggle**, and the reason is the logging speed
+floor this repo already holds itself to: a strength set is logged standing up,
+one-handed, in the ~20 seconds between sets. Displacing on input costs zero
+extra taps; a mode switch costs one per set, every set, forever.
+
+### What this does NOT fix
+
+**The 599 historical sets already carrying both.** This fixes the source, not
+history, so v2 will keep abstaining on any cohort containing one of them until
+they are either edited by hand or backfilled. Backfilling is genuinely
+undecided — dropping the RPE and dropping the RIR are both defensible and
+neither is obviously right — and it belongs to #753's rollout decision rather
+than here. Anyone reading the shadow replay again after this ships should
+expect the abstention count to fall only as new sessions accumulate.
+
+**Testing.** Eight cases in `lib/__tests__/sessions.test.ts` covering both
+directions of displacement, both non-displacing clears (empty string and
+unparseable text), RIR rounding vs RPE fractions, the comma decimal separator,
+`rir: 0` surviving as a real answer rather than being read as absence, other
+fields being preserved, and a historical both-populated set staying editable.
+Mutation-verified in both halves separately: removing the displacement turns
+the two displacement tests red, and making clearing displace turns the two
+clearing tests red — each restored and re-run to green rather than re-read.
+
+
 ## Open items / known gaps as of this entry
 
 

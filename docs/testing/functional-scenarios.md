@@ -20619,3 +20619,49 @@ newest-first.
   this account five days before the incident (last `heart_rate` upload
   2026-09-02, only `vo2_max` sample ever 2026-08-21) is a different question
   entirely — enrichment cannot find samples nobody uploaded.
+
+## N525/#940 — RIR and RPE are mutually exclusive at entry (`apps/mobile/lib/sessions.ts`'s `applyEffortEntry`, `apps/mobile/app/session/[id].tsx`)
+
+Two views of one quantity (reserve) were both accepting input independently, so
+both got filled and drifted apart: 599 of 944 real sets carried both, 139 of
+those conflicted by 2+ points of implied reserve, and `ProgressV2`'s
+`hasEffortConflict` then correctly refused to suggest anything on 26 of 100
+athlete/exercise pairs — the blocker on enabling `new_recommendation_engine`.
+Entry is now exclusive: a real value in one field clears the other.
+
+### Automated (`apps/mobile/lib/__tests__/sessions.test.ts`)
+
+- **Displacement, both directions**: entering a real RIR clears an existing
+  RPE, and entering a real RPE clears an existing RIR.
+- **Clearing displaces nothing**: deleting a RIR (empty string) or typing
+  something unparseable leaves the counterpart untouched. Emptying a field is a
+  correction, not a choice of scale — this is the half most likely to be
+  "simplified" away later, so it is asserted separately from displacement.
+- **Rounding differs per scale**: RIR rounds to whole reps (you cannot leave
+  1.5 reps in the tank); RPE keeps fractions (7.5 is conventional). A comma
+  decimal separator is accepted, matching the other numeric set fields.
+- **`rir: 0` survives** as a real answer ("nothing left in the tank") rather
+  than being collapsed into absence.
+- **Every other field on the set is preserved**, and a historical set that
+  already carries both values still renders and remains editable without data
+  loss when opened.
+- Mutation-verified in both halves independently: removing the displacement
+  turns the displacement tests red; making a clear also displace turns the
+  clearing tests red.
+
+### Device-only (not reachable by any automated suite in this repo)
+
+- **NEEDS HUMAN EVIDENCE**: mid-workout on a real device, enter an RIR on a set
+  and then an RPE on the same set — confirm the RIR visibly clears, that this
+  is not surprising in the moment, and that logging a set is no slower (the
+  ~20-second, one-handed, between-sets floor).
+
+### Known gaps this does NOT cover
+
+- **The 599 existing sets that already carry both are untouched.** This fixes
+  entry, not history, so v2 keeps abstaining on any cohort containing one until
+  it is edited or backfilled. Whether to backfill — and whether to drop the RPE
+  or the RIR, neither being obviously right — is #753's rollout decision.
+- Re-running the shadow replay immediately after this ships will show a largely
+  unchanged abstention count for that reason; the number should fall only as new
+  sessions accumulate.

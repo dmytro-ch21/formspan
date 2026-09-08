@@ -1500,6 +1500,58 @@ export function soloReps(set: { reps: number | null; assisted_reps?: number | nu
   return Math.max(0, set.reps - set.assisted_reps);
 }
 
+/** The two effort scales a set can carry. Exactly one of them, since N525. */
+export type EffortKey = 'rir' | 'rpe';
+
+/**
+ * Apply typed text to ONE of a set's two effort fields, clearing the other —
+ * N525/#940. Pure so the rule is testable without rendering the session
+ * screen (this repo's mobile tests are pure-logic and real-SQLite fixtures,
+ * deliberately not component tests).
+ *
+ * ## Why the two must be exclusive
+ *
+ * RIR and RPE are two views of one quantity — reserve — and the session
+ * screen has always framed them as "record whichever you think in". Nothing
+ * enforced *whichever*: both fields accepted input independently, so both
+ * got filled and then drifted. Measured on real staging data before this
+ * change: **599 of 944 sets (63%) carried both**, and 139 of those disagreed
+ * by 2 or more points of implied reserve.
+ *
+ * That is not cosmetic. `ProgressV2`'s `hasEffortConflict` refuses to
+ * progress a cohort containing a materially conflicting set — correctly,
+ * per #753's item 1 — so running the phase-5 shadow replay found v2
+ * abstaining outright on 26 of 100 athlete/exercise pairs, which is the
+ * blocker on enabling `new_recommendation_engine` at all.
+ *
+ * ## The rules, and why each one
+ *
+ * - A real value in one field **displaces** the other. One scale per set,
+ *   enforced where the value is entered rather than reconciled later.
+ * - **Clearing displaces nothing.** Deleting your RIR must not silently wipe
+ *   an RPE: emptying a field is a correction, not a choice of scale.
+ * - RIR is rounded to whole reps (you cannot leave 1.5 reps in the tank);
+ *   RPE keeps fractions, since the 1-10 scale is conventionally used with
+ *   halves.
+ *
+ * Fixing entry does NOT fix history — sets already carrying both are
+ * untouched, so v2 keeps abstaining on cohorts containing them. Backfilling
+ * those is #753's rollout decision, not this function's.
+ */
+export function applyEffortEntry<S extends { rir: number | null; rpe: number | null }>(
+  set: S,
+  key: EffortKey,
+  text: string,
+): S {
+  const raw = text.trim() === '' ? null : Number(text.replace(',', '.'));
+  if (raw === null || !Number.isFinite(raw)) {
+    // Clearing (or typing something unparseable) empties THIS field only.
+    return { ...set, [key]: null };
+  }
+  const other: EffortKey = key === 'rir' ? 'rpe' : 'rir';
+  return { ...set, [key]: key === 'rir' ? Math.round(raw) : raw, [other]: null };
+}
+
 /**
  * Apply a change to a set, keeping `assisted_reps` inside `reps`.
  *
