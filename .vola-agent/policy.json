@@ -10,8 +10,8 @@
   "base_branch": "main",
   "max_ci_fix_attempts": 3,
   "max_runtime_minutes": 60,
-  "max_parallel_agents": 3,
-  "max_tickets_in_progress": 3,
+  "max_parallel_agents": 8,
+  "max_tickets_in_progress": 8,
   "require_clean_tree": true,
   "require_acceptance_criteria": true,
   "auto_merge": {

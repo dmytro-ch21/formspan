@@ -681,16 +681,19 @@ sentinel it refuses on the way back in — both guards exist because the latch
 once attested to its own instructions and re-closed three tickets it had just
 reopened. Quote the gesture indented or inline, as this file does.
 
-### At most three at once (hard rule)
+### At most eight at once (hard rule)
 
-**Three agents in parallel. Three tickets `In Progress`. Set by the user on
-2026-08-25, in these words:** *"we need at most 3 agents working on parallel
-with 3 tickets at most in parallel. I dont want this flood of tickets 12 in
-progress doesnt make any sense."*
+**Eight agents in parallel. Eight tickets `In Progress`. Raised from three by
+the user on 2026-09-08, in these words:** *"increase the allowed agents from 3
+to 8."* The original cap was set on 2026-08-25: *"we need at most 3 agents
+working on parallel with 3 tickets at most in parallel. I dont want this flood
+of tickets 12 in progress doesnt make any sense."* — the number moved; the
+reasoning below did not, and it binds harder at eight than it did at three.
 
 Recorded machine-readably in `.vola-agent/policy.json` as
 `max_parallel_agents` and `max_tickets_in_progress`, so the number lives in one
-place and this section does not go stale quoting it.
+place and this section does not go stale quoting it. **Read the number from
+there, not from this heading.**
 
 **What produced it.** On 2026-08-20 roughly thirty PRs merged in a day across a
 dozen concurrent sessions, and the cost was not throughput — it was that
@@ -704,12 +707,18 @@ of those is not twelve times the work; it is a board that lies, twelve times.
 
 **The consequences, so this is not merely a number:**
 
-- **Do not dispatch a fourth.** Queue it. A queued ticket stays `Todo` and
+- **Do not dispatch past the cap.** Queue it. A queued ticket stays `Todo` and
   unassigned, which is true, rather than `In Progress`, which would not be.
-- **Interlocking work is a sequence, not a fan-out.** A twelve-ticket
-  workstream where each assumes the last is three tickets, then three more —
-  and the second three are dispatched when the first three land, not when the
-  first three are *nearly* done.
+- **Interlocking work is a sequence, not a fan-out.** A workstream where each
+  ticket assumes the last is a batch, then the next batch — and the next batch
+  is dispatched when the first lands, not when it is *nearly* done. The cap is
+  a ceiling on independent work, not a target to fill with dependent work.
+- **A bigger cap makes stale claims worse, not better.** Measured 2026-09-08,
+  the day the cap rose: **63 of 65 assigned tickets were already merged** and
+  sitting in `evidence-outstanding`, still assigned because nobody unassigned
+  after the merge. At three that is a nuisance; at eight, "assigned" stops
+  meaning anything unless the unassign-after-merge step in the
+  `vola-ticket-sdlc` pipeline is actually performed, every time.
 - **This binds the coordinator hardest.** The pressure to start one more comes
   from wanting the board to look busy, and a busy board that nobody is reading
   is worth less than a short one that is true.
