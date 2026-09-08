@@ -469,3 +469,10 @@ export const PREF_BIOMETRIC_SYNC_FAILURE_COUNT = 'biometric_sync_failure_count';
  * happens to be running.
  */
 export const PREF_HEALTH_CONNECT_IMPORT = 'health_connect_import_enabled';
+
+/**
+ * N528/#958: the remembered heart-rate monitor, as JSON
+ * `{ id, name, rememberedAt }` — see `lib/hrMonitor/hrMonitorStore.ts`. Absent
+ * means none paired; the live-HR machinery does nothing at all then.
+ */
+export const PREF_HR_MONITOR = 'hr_monitor';

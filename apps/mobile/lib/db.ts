@@ -481,6 +481,27 @@ const CREATE_NUTRITION_TARGETS = `
 `;
 
 /**
+ * N528/#958: heart-rate samples this app recorded itself from a Bluetooth
+ * monitor during a session, kept until uploaded (offline-first, like every
+ * other write here). uploaded_at NULL = still owed to the server; the flush
+ * uploads in chunks and stamps it. One row per received reading, ~1/s while
+ * connected, so a session is a few thousand rows at most; uploaded rows are
+ * pruned after a retention window. See lib/hrMonitor/hrRecorder.ts.
+ */
+const CREATE_HR_MONITOR_SAMPLES = `
+  CREATE TABLE IF NOT EXISTS hr_monitor_samples (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    measured_at TEXT NOT NULL,
+    bpm INTEGER NOT NULL,
+    uploaded_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS hr_monitor_samples_pending_idx
+    ON hr_monitor_samples (user_id, uploaded_at, measured_at);
+`;
+
+/**
  * Daily trackers: the DEFINITIONS, pulled from the server and pushed back.
  *
  * `dirty 0 / remote 1` by default, the `workout_cache`/`foods` direction, and
@@ -836,6 +857,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_BIOMETRIC_HR_SYNCED);
   await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
   await db.execAsync(CREATE_DETECTED_ACTIVITIES);
+  await db.execAsync(CREATE_HR_MONITOR_SAMPLES);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );

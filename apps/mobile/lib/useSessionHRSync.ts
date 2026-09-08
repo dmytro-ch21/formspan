@@ -6,6 +6,7 @@ import { enrichHealthConnectSessionNow, readHealthConnectImportEnabled } from '.
 import { isHealthKitSupported } from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
 import { hrAbsenceState, type HRAbsenceState, type SyncNowOutcome } from './hrAbsence';
+import { readRememberedMonitor } from './hrMonitor/hrMonitorStore';
 import type { TokenGetter } from './useAuthToken';
 import { healthSourceFor, healthSourceLabel } from './vo2MaxSource';
 
@@ -31,7 +32,13 @@ export function useSessionHRSync(input: {
   /** Called after a `found` outcome — the screen re-reads its metrics so the
    *  report replaces the card. */
   onFound: () => void;
-}): { absence: HRAbsenceState; sourceLabel: string; syncNow: () => Promise<SyncNowOutcome> } {
+}): {
+  absence: HRAbsenceState;
+  sourceLabel: string;
+  syncNow: () => Promise<SyncNowOutcome>;
+  /** The remembered heart-rate monitor's name on this phone, or null. */
+  monitorName: string | null;
+} {
   const { userId, getToken, sessionID, startedAt, endedAt, onFound } = input;
   // Same platform resolution as `app/vo2max/trend.tsx` (W16/#945) — iOS
   // without the HealthKit module (a Simulator build) resolves to Health
@@ -79,5 +86,21 @@ export function useSessionHRSync(input: {
     return outcome;
   }, [userId, getToken, sessionID, startedAt, endedAt, source, onFound]);
 
-  return { absence, sourceLabel: source === null ? 'Health' : healthSourceLabel(source), syncNow };
+  // N528/#958: the remembered monitor's name, for the report's source line
+  // ("From your Amazfit GTR 4"). Local to this phone by design.
+  const [monitorName, setMonitorName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    let live = true;
+    readRememberedMonitor(userId)
+      .then((m) => {
+        if (live) setMonitorName(m?.name ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [userId]);
+
+  return { absence, sourceLabel: source === null ? 'Health' : healthSourceLabel(source), syncNow, monitorName };
 }

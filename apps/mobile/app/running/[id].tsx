@@ -48,6 +48,9 @@ import { request as requestSync } from '@/lib/sync';
 import { formatElapsed } from '@/lib/rest';
 import { formatDistance, formatPace } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { LiveHRIndicator } from '@/components/LiveHRIndicator';
+import { useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 import { useUnits } from '@/lib/useUnits';
 import { announce } from '@/lib/voice';
 import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
@@ -513,6 +516,12 @@ export default function RunningSessionScreen() {
   // yet" and "asked, and there is genuinely nothing" — see the BJJ screen's
   // own comment on this exact distinction.
   const getToken = useAuthToken();
+
+  // N528/#958: live heart rate from a paired monitor — the chip under the
+  // header while the session runs, and every reading recorded for the report.
+  const liveHRActive = status === 'tracking' || status === 'paused';
+  const liveHRMax = useHRMax(getToken, liveHRActive);
+  useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
   const [hrLoaded, setHrLoaded] = useState(false);
   useEffect(() => {
@@ -780,6 +789,7 @@ export default function RunningSessionScreen() {
       )}
 
       <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+        <LiveHRIndicator hrMaxBPM={liveHRMax} testID="running-live-hr" />
         <StatRow>
           <Stat label="distance" value={formatDistance(distanceMeters, units)} icon="running" />
           <Stat label="time" value={formatElapsed(elapsedSeconds)} />

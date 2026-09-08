@@ -12,6 +12,7 @@ import { TrackEffortProvider } from '@/lib/TrackEffortProvider';
 import { setSyncIdentity, startSyncOrchestrator } from '@/lib/sync';
 import { setHealthKitSyncIdentity, startHealthKitImportOrchestrator } from '@/lib/healthkitSync';
 import { setBiometricSyncIdentity, startBiometricSyncOrchestrator } from '@/lib/biometricSync';
+import { setHRMonitorIdentity, startHRMonitorOrchestrator } from '@/lib/hrMonitor/orchestrator';
 import {
   setHealthConnectSyncIdentity,
   startHealthConnectSyncOrchestrator,
@@ -190,6 +191,14 @@ function RootLayoutNav() {
   useEffect(() => startBiometricSyncOrchestrator(), []);
   useEffect(() => {
     setBiometricSyncIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
+  }, [isSignedIn, userId, getToken]);
+
+  // N528/#958: the live heart-rate link — connect to the remembered monitor
+  // on foreground, drop it on background, flush recorded samples. Same
+  // identity/orchestrator pair as the three above.
+  useEffect(() => startHRMonitorOrchestrator(), []);
+  useEffect(() => {
+    setHRMonitorIdentity(isSignedIn ? (userId ?? null) : null, isSignedIn ? getToken : null);
   }, [isSignedIn, userId, getToken]);
 
   // N478: the Android equivalent of the pair above, and a separate

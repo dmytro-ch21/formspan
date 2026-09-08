@@ -157,6 +157,24 @@ module.exports = () => ({
       ],
       "expo-sharing",
       [
+        // N528/#958: live heart rate from a Bluetooth Heart Rate Profile
+        // monitor. Foreground only — no background mode, no `modes` — so the
+        // binary declares exactly the capability the feature uses: a session
+        // runs with the app open and on screen (mobile owns live logging).
+        // `neverForLocation` is Android 12+'s way of saying a BLE scan is not
+        // a location scan, which keeps ACCESS_FINE_LOCATION out of the
+        // manifest — the same "declare only what you use" discipline the
+        // expo-location entry below applies. Permission strings are the
+        // athlete's words for the feature, not the API's.
+        "react-native-ble-plx",
+        {
+          isBackgroundEnabled: false,
+          neverForLocation: true,
+          bluetoothAlwaysPermission:
+            "VOLA connects to your heart-rate monitor over Bluetooth to show your live heart rate during a session and record it for the session's report. Only while VOLA is open.",
+        },
+      ],
+      [
         "expo-location",
         {
           locationWhenInUsePermission:

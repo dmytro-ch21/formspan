@@ -104,10 +104,19 @@ export type MetricType =
  *  chief among them, since Health Connect exposes no stable per-vendor
  *  identifier this API could otherwise match against; see
  *  `lib/healthConnect.ts`'s `sourceFromDataOrigin`. */
-export type BiometricSource = 'apple_watch' | 'oura' | 'whoop' | 'garmin' | 'manual' | 'android_wearable';
+export type BiometricSource = 'apple_watch' | 'oura' | 'whoop' | 'garmin' | 'manual' | 'android_wearable'
+  // N528/#958: a Bluetooth Heart Rate Profile monitor read live by this app —
+  // vendor-neutral on purpose (the profile does not say which watch).
+  | 'hr_monitor';
 
 /** Mirrors `biometric.SourcePlatform`. */
-export type SourcePlatform = 'healthkit' | 'health_connect' | 'manual';
+export type SourcePlatform =
+  | 'healthkit'
+  | 'health_connect'
+  | 'manual'
+  // N528/#958: recorded by this app itself from a Bluetooth monitor — no
+  // health store in between. Always paired with `source: 'hr_monitor'`.
+  | 'bluetooth';
 
 /** Mirrors `biometric.HRSource`. Only `workout`/`window` are ever CLAIMED by
  *  a caller — `none` is the server's own derivation from an empty result
@@ -153,6 +162,12 @@ export type SessionMetrics = {
   time_in_zones: Record<string, number>;
   hr_source: HRSource;
   sample_count: number;
+  /** N528/#958: how many of `sample_count` this app recorded straight from a
+   *  Bluetooth monitor. `sample_count - hr_direct_count` is what Apple Health /
+   *  Health Connect filled in. `0` for every session without a monitor.
+   *  Optional on the wire so a server from before #976 still parses; read
+   *  it as `?? 0`. */
+  hr_direct_count?: number;
   /** The ACTUAL [start, end] this row's samples were queried from —
    *  N522/#934. Always present. Ordinarily equals the owning session's own
    *  started_at/ended_at (design doc §2's plain window read); it differs

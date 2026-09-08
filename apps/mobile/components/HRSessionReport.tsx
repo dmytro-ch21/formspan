@@ -83,6 +83,7 @@ export function HRSessionReport({
   absence = null,
   sourceLabel = 'Apple Health',
   onSyncNow,
+  hrSourceLine = null,
   testID = 'hr-session-report',
 }: {
   metrics: SessionMetrics | null;
@@ -121,6 +122,10 @@ export function HRSessionReport({
    *  under the button; a `found` outcome is the caller's to act on (re-read
    *  the metrics, and this card is replaced by the report). */
   onSyncNow?: () => Promise<SyncNowOutcome>;
+  /** N528/#958: where the numbers came from — "From your Amazfit GTR 4 · 3
+   *  readings from Apple Health filled gaps" — `hrSourceSentence`. Null hides
+   *  the line (no data, or a caller with nothing to say). */
+  hrSourceLine?: string | null;
   testID?: string;
 }) {
   // Hooks before the early return below — the rules of hooks, not taste.
@@ -200,6 +205,11 @@ export function HRSessionReport({
     return (
       <RNView style={styles.wrap} testID={testID}>
         <SectionHeader label="Heart rate" />
+        {hrSourceLine && (
+          <Text style={styles.sourceLine} testID={`${testID}-source`}>
+            {hrSourceLine}
+          </Text>
+        )}
         {hrStats.length > 0 && <StatRow testID={`${testID}-stats`}>{hrStats}</StatRow>}
         <RNView style={styles.limitedCard} testID={`${testID}-limited`}>
           <Text style={styles.limitedText}>
@@ -240,6 +250,11 @@ export function HRSessionReport({
         }
       />
 
+      {hrSourceLine && (
+        <Text style={styles.sourceLine} testID={`${testID}-source`}>
+          {hrSourceLine}
+        </Text>
+      )}
       <StatRow testID={`${testID}-stats`}>
         {hrStats}
         <Stat label="Training load" value={String(Math.round(report.trimp))} fit />
@@ -451,4 +466,5 @@ const styles = StyleSheet.create({
   // only ever appears to explain a mismatch, never to assert a normal
   // state, so it reads as a footnote rather than a warning.
   windowNote: { fontSize: 11, color: vola.textDim, paddingHorizontal: 2 },
+  sourceLine: { fontSize: 12, color: vola.textDim, paddingHorizontal: 2, marginBottom: 6 },
 });

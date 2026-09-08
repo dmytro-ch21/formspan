@@ -59,6 +59,10 @@ import {
 } from '@/lib/accomplishments';
 import { milestoneForSession, type Milestone } from '@/lib/milestones';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
+import { LiveHRIndicator } from '@/components/LiveHRIndicator';
+import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
+import { useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 
 /**
  * Reading a BJJ session back.
@@ -372,6 +376,12 @@ export default function BjjSessionScreen() {
         .catch(() => {});
     },
   });
+
+  // N528/#958: live heart rate from a paired monitor — the chip under the
+  // header while the session runs, and every reading recorded for the report.
+  const liveHRActive = !!session && !session.ended_at;
+  const liveHRMax = useHRMax(getToken, liveHRActive);
+  useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
 
   useEffect(() => {
     // No synchronous reset here on purpose (react-hooks/set-state-in-effect):
@@ -794,6 +804,7 @@ export default function BjjSessionScreen() {
           absence={hrSync.absence}
           sourceLabel={hrSync.sourceLabel}
           onSyncNow={hrSync.syncNow}
+          hrSourceLine={hrSourceSentence(hrMetrics, hrSync.monitorName, hrSync.sourceLabel)}
           hrTimeline={hrTimeline}
           // N522/#934: lets the report show a diagnostic line when the
           // heart-rate window it actually queried differs meaningfully
@@ -946,6 +957,7 @@ export default function BjjSessionScreen() {
           close the session. */}
       {!session.ended_at && (
         <>
+          <LiveHRIndicator hrMaxBPM={liveHRMax} testID="bjj-live-hr" />
           {/* N487/#848: optional, above the hold-to-confirm rather than
               inside it — correcting the end time and confirming Finish stay
               two separate gestures, so a mis-tap on the sheet can never also
