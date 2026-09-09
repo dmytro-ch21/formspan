@@ -159,6 +159,19 @@ export type Entry = Macros & {
    */
   category: string | null;
   notes: string;
+  /**
+   * Where this entry sits INSIDE its meal on its day — N553/#1019.
+   *
+   * Not a rank and not a count: neighbours are 1024 apart so that moving a
+   * row between two others writes ONE row instead of renumbering the meal.
+   * "3072" therefore does not mean "third", the numbers are meaningless
+   * across meals, and nothing may read 0 as "unset" — dragging the second row
+   * of a meal above the first produces exactly 0.
+   *
+   * `entryOrder.ts` owns every rule about this number, including what two
+   * offline devices converge to. Read it before writing arithmetic on it.
+   */
+  position: number;
 };
 
 /**

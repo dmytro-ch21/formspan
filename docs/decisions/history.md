@@ -67674,6 +67674,205 @@ flashes and then corrects itself, which is precisely the monotonic-screen rule
 `hrPath.ts` next to the guard that does land, and worth its own ticket rather
 than a widened guard here.
 
+## 2026-09-09 — N553 (#1019): press and hold a food entry to reorder it, and the order column that makes that possible
+
+**The athlete asked for this twice.** N531 (#962) shipped the drag; device-testing
+it, their words were *"there is no way to move it up and down as i requested when
+holding, on press hold it should enter a edit mode with movable items up and
+down."* N531 had shipped a cross-*meal* drag and explicitly declined the
+within-meal reorder — and `apps/mobile/lib/useEntryDrag.ts`'s own doc comment said
+so, in terms this entry now supersedes:
+
+> A drop lands on a SECTION, never on a position inside one. Neither
+> `nutrition_entries` on the server nor `food_entries` on the phone has an order
+> column — both list a meal by `logged_at, id` — so there is nothing a within-meal
+> reorder could be written to, and a drag that let the athlete "put the eggs above
+> the toast" would snap back on the next pull.
+
+That reasoning was right and it was also the answer to a different question. The
+correct move on a second request is not to decline more clearly; it is to build
+the half that was missing. All three code claims in the ticket were re-verified
+against `origin/main` before any of this was written, and all three still held
+(the file is at `apps/mobile/components/food/EntryRow.tsx`, not
+`components/nutrition/` as the ticket said).
+
+### Decision 1 — what long-press means now, and what happened to N531's gesture
+
+**Long-press puts the row's meal into EDIT MODE and picks that row up.** One
+gesture, one meaning, two consequences of the same intention:
+
+- Keep the finger down and move — the row drags immediately, exactly as N531
+  shipped it. That muscle memory is not broken by this ticket.
+- Lift without moving — the meal stays in edit mode, every row grows a grip
+  handle, and the second and third moves cost no hold at all. This is the part
+  the athlete asked for and the part that makes reordering three rows bearable.
+
+Edit mode is per CARD, at most one at a time, entered by a gesture on a row and
+left by a **Done** control in that card's header — in the slot "Combine" occupies,
+and never both at once. A mode entered by a gesture with no stated way out is one
+the athlete escapes by leaving the screen.
+
+**The alternative was considered and rejected in the ticket's own terms**: keep
+N531's immediate drag and hang edit mode off a separate button. That is two ways
+to move a row, and — worse — it leaves the gesture the athlete actually performed
+still doing the thing they said was wrong. N531's cross-meal drag is now a *case*
+of the one gesture rather than a rival to it: a drop names the meal **and** the
+slot inside it, and a drop that names a meal but no slot (a finger on a card's
+header, or on its Add Food row) appends, which is the honest reading of "this
+meal, unspecified where".
+
+**One-handed, twice over**, which the mobile-first rule makes a requirement rather
+than a nicety: the long-press works anywhere on the row (so a left thumb reaches
+it), and in edit mode the grip is a 44-point target at the row's end. Neither
+needs a second hand. VoiceOver cannot perform a drag at all, so the grip also
+carries `accessibilityActions` — **Move up** and **Move down** — routed through the
+same `plan()` as the drag, so a nudge and a drop cannot disagree about what "one
+place" means. N531's doc comment named that gap and could only point elsewhere for
+it; within-meal order had nowhere else to be set, so it is closed here.
+
+### Decision 2 — gapped integers, and the rebalance
+
+`position BIGINT` on `nutrition_entries`, `position INTEGER` on `food_entries`.
+**Neighbours are 1024 apart, not 0,1,2,…** Dropping a row between two others gives
+it the midpoint of the two, so **a reorder writes exactly one row** — the one that
+moved. A dense rank renumbers everything after it: a write per entry per drag, and
+offline that is not merely slow, it is a sync conflict per entry on rows the
+athlete never touched.
+
+Fractions (0.5, 0.25, …) are the classic alternative and were rejected: halving a
+float runs out of mantissa after ~50 moves at one spot and then two rows compare
+EQUAL with no warning anywhere, and the value additionally has to survive JSON,
+SQLite REAL and Postgres NUMERIC agreeing on the same bits. An integer either has
+room or does not, and `needsRebalance` is how it says which.
+
+**The rebalance**: 1024 buys ten successive drops at the same spot before two
+neighbours are adjacent. At that point that ONE meal on that ONE day is renumbered
+back onto the grid and every row in it is written. That is the only operation in
+the scheme touching more than one row, it is bounded by four or five rows in
+practice, and it is correct rather than a failure mode. `entryOrder.test.ts` walks
+ten drops at one spot and asserts zero rebalances and no collisions.
+
+Positions may be **negative** — dragging to the top of a meal is `min - 1024`,
+which is what keeps the most common reorder a one-row write. **0 is an ordinary
+position, never a sentinel**: drag the second row above the first and it is exactly
+0. Nothing anywhere reads 0 as "unset", and the phone's backfill deliberately has
+no `WHERE position = 0` guard for that reason — a guard that looked more careful
+would renumber precisely the row the athlete had just moved.
+
+The step lives in three places that must agree — `PositionStep` (Go),
+`POSITION_STEP` (TypeScript), and the literal in the migration — because the
+server and the phone each backfill their own copy of the column independently and
+never compare notes.
+
+### The offline-convergence rule, written down
+
+`position` is a per-entry scalar exactly like `meal` or `kcal`. It is pushed with
+that entry's own row through the existing outbox, so it **inherits** the conflict
+rule this app already has rather than inventing one. There is no reorder endpoint,
+and deliberately is not one: a drag made in a basement gym syncs by the same
+machinery as everything else done down there.
+
+- **Two devices move different rows in one meal** — both moves survive. Each wrote
+  one row; neither row is the other's.
+- **Two devices move the same row** — the later push wins, whole. The same
+  last-writer-wins every other field on that row already has.
+- **Two devices compute the same number for two different rows** — the sort key is
+  `(position, id)`, and `id` is a client-generated UUID. The phone's SQL, the
+  phone's `compareEntries`, and the server's `ORDER BY … position, created_at, id`
+  all break the tie identically, so **there is no state in which two synced devices
+  show a different order.** That is what makes "converges somewhere defined" a
+  property rather than a hope.
+
+**Not promised**, and stated in the code rather than left to be discovered: that
+two offline reorders combine into the arrangement either athlete pictured. Nothing
+can promise that without a list CRDT, and a CRDT so one person can reorder their
+own breakfast on two phones is not a trade this project makes.
+
+### The blanking trap, closed by design rather than by care
+
+`SaveEntry` is a create-or-replace, which is the exact shape that has cost this
+repository three columns' worth of authored data on `exercise`'s `updateWithin`.
+**Every existing caller of `PUT /v1/nutrition/entries/{id}` predates this column** —
+web's entry editor, web's halve/double button, every installed build of the phone.
+All send a body with no `position` key at all.
+
+So `position` is a **pointer** end to end (`*int64` in Go, optional in the OpenAPI
+input, absent entirely from web's `EntryInput`), and **omitting it means "leave the
+order alone"**. Had it been `position = EXCLUDED.position` like the eighteen lines
+above it, the first edit to any entry would have dropped it to 0 and a meal edited
+twice would have collapsed into id order — a reordering the athlete never made,
+looking exactly like the new feature misbehaving rather than like data loss.
+
+Per CLAUDE.md's rule, the restore-path test was written before the migration was
+applied anywhere, and **mutation-tested both ways**: replacing the CASE with
+`position = EXCLUDED.position` turns
+`TestAnEditThatNeverMentionsPositionDoesNotMoveTheEntry` red, and dropping the
+meal-change branch turns `TestAnEntryThatChangesMealLandsAtTheEndOfTheNewOne` red.
+
+The one case where a nil position does *not* preserve is a row that has **moved** —
+a different meal or a different day than the stored row. Its old number is a
+coordinate in a list it has left, so it is appended to the list it has joined.
+
+### The backfills, measured rather than asserted
+
+Both stores seed `position` from the order they were **already showing** — the
+server from `created_at, id`, the phone from `logged_at, id`, which is precisely
+what `ListEntries` and `localEntries` sorted by before this ticket. So the first
+load after the migration is identical to the last load before it: nobody's
+breakfast reshuffles on upgrade, which is the one thing that would make a new
+ordering feature read as a bug.
+
+Verified live rather than reasoned about: five rows arranged in a real Postgres
+with ids deliberately scrambled against their timestamps, the migration file itself
+executed, positions read back — breakfast 1024/2048/3072 in log order, dinner
+starting over at 1024. The phone's equivalent is `schema.test.ts`'s
+stamped-41 test, with the same scrambling, and its three scoping rules (per user,
+per day+meal, by `logged_at` then `id`) were each mutated individually and each
+turned the test red.
+
+Migration `20260909220933_nutrition_entry_position`, timestamp generated fresh.
+Mobile SQLite **41 → 42**, with both mandatory tests: a device already stamped 41
+gains the column backfilled, and re-running is not an error — plus a third
+asserting a fresh install's `CREATE TABLE` and the `ALTER` agree, which is the
+trap where a column exists on every upgraded device and on no new one while the
+suite stays green.
+
+### Web
+
+Web renders the same order and gains no reorder of its own — reordering is a
+phone gesture, and web's job here is to agree with what the phone was told.
+`entriesInMeal` was extracted from `DayEditor` for one reason: to make "this
+filters and does not sort" a testable rule. An inline `entries.filter(...)` in a
+Clerk-authenticated client component is reachable by no test in this repo, which
+is exactly how a later `.sort()` — added by somebody making the list tidy —
+would silently overrule a gesture made on a phone. Mutation-tested: adding an
+alphabetical sort turns two of the four cases red.
+
+### A pre-existing bug found in passing, and not fixed here
+
+`entryBody` in `handler.go` has no fields for the five N52 label macros
+(`saturated_fat_g`, `sugar_g`, `added_sugar_g`, `sodium_mg`, `cholesterol_mg`),
+while `SaveEntry`'s SET clause writes all five from `EXCLUDED`. So **every**
+`PUT /v1/nutrition/entries/{id}` on an existing entry nulls them — an entry logged
+from a barcode scan loses its label macros the first time anything re-saves it.
+It is the same silent-blanking mechanism this ticket spent its care avoiding,
+already live. Left alone deliberately (it is a different fix with a different
+restore-path test) and filed as its own ticket.
+
+### Open
+
+- The last acceptance criterion is `NEEDS HUMAN EVIDENCE` and cannot be met by
+  reading code: reorder a meal on the phone, force-quit, reopen, confirm the order
+  held, then confirm it on web. The evidence latch will reopen #1019 on merge,
+  which is the correct end state.
+- The drop gap is a 2pt accent rule between rows. Whether that reads clearly
+  enough under a moving finger on a real device is exactly the kind of thing the
+  simulator cannot answer.
+- No reorder on web. Correct per the mobile-first rule as it stands (the phone can
+  do the whole job), but if bulk re-arranging a past day ever becomes a real
+  desk activity, web needs the same midpoint arithmetic — not a number lifted off
+  a rendered row.
+
 ## Open items / known gaps as of this entry
 
 

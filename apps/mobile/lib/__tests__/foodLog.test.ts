@@ -28,6 +28,7 @@ import {
   localTargetView,
   logFood,
   moveEntry,
+  reorderEntries,
   pendingFoodCount,
   recentsFor,
   removeEntry,
@@ -91,6 +92,10 @@ function meal(over: Partial<Parameters<typeof logFood>[1]> = {}) {
     added_sugar_g: null,
     sodium_mg: null,
     cholesterol_mg: null,
+    // N553 — carried so a spread of this into a server-shaped `Entry` (for
+    // `cacheEntries`) satisfies the type. `logFood` ignores it and computes
+    // the real one; the tests that care about ordering state it explicitly.
+    position: 1024,
     ...over,
   };
 }
@@ -1188,5 +1193,171 @@ describe('move between meals (N531)', () => {
     const id = await logFood(USER, meal());
     await removeEntry(USER, id);
     await expect(moveEntry(USER, id, 'dinner')).rejects.toThrow(/no longer exists/);
+  });
+});
+
+describe('order inside a meal (N553/#1019)', () => {
+  /** Positions as they are on disk, by id. */
+  async function positions(): Promise<Record<string, number>> {
+    const rows = await db.getAllAsync<{ id: string; position: number }>(
+      `SELECT id, position FROM food_entries WHERE deleted_at IS NULL`,
+    );
+    return Object.fromEntries(rows.map((r) => [r.id, r.position]));
+  }
+
+  it('a new entry lands at the END of its meal, one step past the last', async () => {
+    const a = await logFood(USER, meal({ meal: 'breakfast', name: 'Eggs' }));
+    const b = await logFood(USER, meal({ meal: 'breakfast', name: 'Toast' }));
+    const p = await positions();
+    expect(p[a]).toBe(1024);
+    expect(p[b]).toBe(2048);
+  });
+
+  it('numbers each MEAL separately — two meals both start at one step', async () => {
+    const b = await logFood(USER, meal({ meal: 'breakfast' }));
+    const d = await logFood(USER, meal({ meal: 'dinner' }));
+    const p = await positions();
+    expect(p[b]).toBe(1024);
+    expect(p[d]).toBe(1024);
+  });
+
+  it('does not leave a gap behind a deleted row — a tombstone is not in the list', async () => {
+    const a = await logFood(USER, meal({ meal: 'breakfast' }));
+    const b = await logFood(USER, meal({ meal: 'breakfast' }));
+    await removeEntry(USER, b);
+    const c = await logFood(USER, meal({ meal: 'breakfast' }));
+    const p = await positions();
+    // 2048, not 3072: the numbers are not a count and nothing reads them as one.
+    expect(p[c]).toBe(p[a] + 1024);
+  });
+
+  it('reads a day back in POSITION order, not log order', async () => {
+    const eggs = await logFood(USER, meal({ meal: 'breakfast', name: 'Eggs' }));
+    const toast = await logFood(USER, meal({ meal: 'breakfast', name: 'Toast' }));
+    expect((await localEntries(USER, TODAY)).map((e) => e.name)).toEqual(['Eggs', 'Toast']);
+
+    // Drag the toast above the eggs: one write, the row that moved.
+    await reorderEntries(USER, [{ id: toast, position: 0 }]);
+
+    expect((await localEntries(USER, TODAY)).map((e) => e.name)).toEqual(['Toast', 'Eggs']);
+    expect((await positions())[eggs]).toBe(1024);
+  });
+
+  it('a reorder writes ONLY the row that moved, and dirties only that one', async () => {
+    const eggs = await logFood(USER, meal({ meal: 'breakfast', name: 'Eggs' }));
+    const toast = await logFood(USER, meal({ meal: 'breakfast', name: 'Toast' }));
+    const oats = await logFood(USER, meal({ meal: 'breakfast', name: 'Oats' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1`);
+    const before = await positions();
+
+    await reorderEntries(USER, [{ id: oats, position: 512 }]);
+
+    const after = await positions();
+    expect(after[eggs]).toBe(before[eggs]);
+    expect(after[toast]).toBe(before[toast]);
+    expect(await row(oats)).toMatchObject({ dirty: 1 });
+    expect(await row(eggs)).toMatchObject({ dirty: 0 });
+    expect(await row(toast)).toMatchObject({ dirty: 0 });
+    // The whole criterion, stated as the outbox sees it: three rows in the
+    // meal, ONE owed.
+    expect(await pendingFoodCount(USER)).toBe(1);
+  });
+
+  it('sends the position on the next push, so the order survives a reinstall', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await reorderEntries(USER, [{ id, position: 4096 }]);
+
+    await syncFood(USER, token);
+    const [, , init] = mockApi.mock.calls[0] as [unknown, string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ position: 4096 });
+  });
+
+  it('takes the SERVER position on a pull, which is how another device order arrives', async () => {
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ meal: 'breakfast', name: 'Eggs' }), id: 's1', source_food_id: null, category: null, notes: '', position: 2048 },
+      { ...meal({ meal: 'breakfast', name: 'Toast' }), id: 's2', source_food_id: null, category: null, notes: '', position: 1024 },
+    ]);
+    // The server sent them in one order and positioned them in another; the
+    // position is what decides. This is the reinstall case too — `cacheEntries`
+    // synthesises `logged_at` from a local stamp, so position is the ONLY
+    // surviving record of what the athlete arranged.
+    expect((await localEntries(USER, TODAY)).map((e) => e.name)).toEqual(['Toast', 'Eggs']);
+  });
+
+  it('a pull that arrives before the push does not snap a reorder back', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await reorderEntries(USER, [{ id, position: 77 }]);
+
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ meal: 'breakfast' }), id, source_food_id: null, category: null, notes: '', position: 1024 },
+    ]);
+
+    expect((await positions())[id]).toBe(77);
+    expect(await row(id)).toMatchObject({ dirty: 1 });
+  });
+
+  it('two rows on the same position still read back in ONE defined order, by id', async () => {
+    // The offline-convergence tiebreak, at the SQL level rather than in
+    // `entryOrder.ts` — `localEntries` must break the tie the same way
+    // `compareEntries` does, or two devices that agree in JavaScript still
+    // disagree on screen.
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ meal: 'breakfast', name: 'Zed' }), id: 'zzz', source_food_id: null, category: null, notes: '', position: 1024 },
+      { ...meal({ meal: 'breakfast', name: 'Abe' }), id: 'aaa', source_food_id: null, category: null, notes: '', position: 1024 },
+    ]);
+    expect((await localEntries(USER, TODAY)).map((e) => e.name)).toEqual(['Abe', 'Zed']);
+  });
+
+  it('a cross-meal move with a position lands where it was dropped', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+
+    await moveEntry(USER, id, 'dinner', 512);
+
+    expect((await positions())[id]).toBe(512);
+    const [e] = await localEntries(USER, TODAY);
+    expect(e.meal).toBe('dinner');
+  });
+
+  it('a cross-meal move with NO position appends to the meal it joined', async () => {
+    const steak = await logFood(USER, meal({ meal: 'dinner', name: 'Steak' }));
+    const eggs = await logFood(USER, meal({ meal: 'breakfast', name: 'Eggs' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1`);
+
+    await moveEntry(USER, eggs, 'dinner');
+
+    const p = await positions();
+    expect(p[eggs]).toBe(p[steak] + 1024);
+  });
+
+  it('a same-meal, same-position move is still a no-op — it does not dirty the row', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    const before = await row(id);
+
+    await moveEntry(USER, id, 'breakfast');
+
+    expect(await row(id)).toEqual(before);
+    expect(await entrySyncState(USER, id)).toEqual({ unsynced: false, owed: false });
+  });
+
+  it('an empty plan writes nothing at all', async () => {
+    const id = await logFood(USER, meal());
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await reorderEntries(USER, []);
+    expect(await row(id)).toMatchObject({ dirty: 0 });
+  });
+
+  it('cannot reorder another athlete row', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    const before = await positions();
+
+    await reorderEntries('someone-else', [{ id, position: 9 }]);
+
+    expect(await positions()).toEqual(before);
+    expect(await row(id)).toMatchObject({ dirty: 0 });
   });
 });

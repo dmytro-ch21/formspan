@@ -8,6 +8,7 @@ import { gramsBasisFromLabel } from "@/lib/foodQuantity";
 import { formatDayLong, today } from "@/lib/history";
 import {
   deleteEntry,
+  entriesInMeal,
   listEntries,
   listTargets,
   saveEntry,
@@ -413,7 +414,12 @@ export function DayEditor({ date }: { date: string }) {
       </section>
 
       {meals.map((meal) => {
-          const rows = entries.filter((e) => e.meal === meal);
+          // N553 — the athlete's own order, as arranged on the phone. Filter
+          // only; the server has already sorted by `position` within the meal
+          // and re-sorting here would overrule a gesture with a guess. See
+          // `entriesInMeal`'s own comment for why it is a function and not an
+          // inline filter.
+          const rows = entriesInMeal(entries, meal);
           if (rows.length === 0) return null;
           return (
             <section key={meal} className="flex flex-col gap-2">

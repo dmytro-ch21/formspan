@@ -310,6 +310,13 @@ const CREATE_FOOD_ENTRIES = `
     -- a template literal.)
     category TEXT,
     notes TEXT NOT NULL DEFAULT '',
+    -- N553/#1019: where this row sits INSIDE its meal. Gapped by 1024 rather
+    -- than dense, so moving a row between two others is the midpoint of the
+    -- two and writes ONE row -- a dense rank would renumber everything after
+    -- it, which offline is a sync conflict per entry on rows nobody touched.
+    -- May be negative: dragging to the top of a meal is min minus one step.
+    -- See lib/entryOrder.ts for the arithmetic and the convergence rule.
+    position INTEGER NOT NULL DEFAULT 0,
     logged_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     dirty INTEGER NOT NULL DEFAULT 1,
@@ -813,7 +820,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 41;
+const SCHEMA_VERSION = 42;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1589,6 +1596,58 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // re-check that either confirms its numbers or fixes them.
     await addColumnIfMissing(db, 'biometric_hr_synced', 'coverage', "TEXT NOT NULL DEFAULT 'unknown'");
     await addColumnIfMissing(db, 'health_connect_enrichment', 'coverage', "TEXT NOT NULL DEFAULT 'unknown'");
+  }
+
+  if (current < 42) {
+    // N553/#1019: `food_entries` gains `position` — where a row sits inside
+    // its meal, so press-and-hold-then-drag can actually persist "the eggs go
+    // above the toast". See CREATE_FOOD_ENTRIES's own comment on the column
+    // and `lib/entryOrder.ts` for the scheme.
+    //
+    // Real ALTER, same reason as every branch above: `CREATE TABLE IF NOT
+    // EXISTS` is a no-op against the existing table, so a device already
+    // stamped 41 would keep a `food_entries` with no `position` and the first
+    // read of the food day would throw "no such column".
+    await addColumnIfMissing(db, 'food_entries', 'position', 'INTEGER NOT NULL DEFAULT 0');
+
+    // THE BACKFILL IS THE POINT, and it is seeded from the order this device
+    // is ALREADY SHOWING — `logged_at, id`, which is exactly what
+    // `localEntries` sorted by before this ticket. So the first load after
+    // the update looks identical to the last load before it: nobody's
+    // breakfast reshuffles on upgrade, which is the one thing that would make
+    // a new ordering feature read as a bug.
+    //
+    // A correlated count rather than `row_number() OVER (...)`: the window
+    // form is the obvious one and needs SQLite 3.25+, and this runs on
+    // whatever SQLite the installed OS shipped rather than one this repo
+    // chose. The count is exact on every version and reads the same key.
+    //
+    // Scoped per (user_id, eaten_on, meal) — position is per MEAL, never per
+    // day, so two entries in different meals sharing 1024 is ordinary.
+    //
+    // Starts at 1024, not 0, matching the server's own backfill and
+    // `POSITION_STEP`: the two stores backfill independently and never
+    // compare notes, so they only agree if both use the same step.
+    //
+    // UNCONDITIONAL, and that is safe rather than sloppy. This branch runs
+    // once per device — `current < 42` — and at that moment the column has
+    // just come into existence, so every row is on the DEFAULT. A `WHERE
+    // position = 0` guard would look more careful and would be wrong: 0 is a
+    // LEGITIMATE position (drag the second row above the first and it is
+    // 1024 - 1024), so the guard would re-number a row the athlete had moved
+    // if this branch ever ran twice. Re-running it as written recomputes the
+    // same values from the same key, which is what idempotent means here.
+    await db.execAsync(
+      `UPDATE food_entries
+          SET position = 1024 * (1 + (
+                SELECT COUNT(*) FROM food_entries AS earlier
+                 WHERE earlier.user_id = food_entries.user_id
+                   AND earlier.eaten_on = food_entries.eaten_on
+                   AND earlier.meal = food_entries.meal
+                   AND (earlier.logged_at < food_entries.logged_at
+                        OR (earlier.logged_at = food_entries.logged_at
+                            AND earlier.id < food_entries.id))));`,
+    );
   }
 
   // The day query the card runs on every render of Today.

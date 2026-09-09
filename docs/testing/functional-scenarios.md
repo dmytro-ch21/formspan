@@ -22265,3 +22265,100 @@ nothing about a device that can never appear in one.
 - **The Android case where Health Connect is unavailable.** The copy can still
   point at a disabled toggle there — see the residual recorded in
   `lib/hrPath.ts` and in `docs/decisions/history.md`.
+
+## N553 (#1019) — reordering a food entry inside its meal
+
+The athlete's own request, twice: press and hold a row, get an edit mode, move
+items up and down. N531 shipped the cross-meal drag; this adds the position it
+had nowhere to write to. `apps/mobile/lib/entryOrder.ts` owns the arithmetic and
+its convergence rule.
+
+### Mobile — the gesture
+
+- Long-press a food row: the meal enters edit mode (every row shows a grip, the
+  header offers **Done**) and that row lifts, both from the one gesture.
+- Keep the finger down and drag: the row follows, a gap opens where it will
+  land, and releasing puts it there. This is N531's continuous gesture, now able
+  to land inside a meal rather than only on one.
+- Lift the finger without moving: the row settles and the meal STAYS in edit
+  mode. The next move needs no hold — drag straight from the grip.
+- Drag from the grip with no long-press at all, once in edit mode.
+- Tap **Done**: handles go, the 3-dot returns, swipe-to-delete works again.
+- Starting a Combine ends edit mode, and vice versa — a card is never both.
+- Switching day ends edit mode; yesterday's card is not still editing.
+- Combine-select mode disables the lift entirely, as it always has: a row that
+  is a checkbox does not drag.
+
+### Mobile — where a drop lands
+
+- Dropped between two rows of the SAME meal: it sits between them.
+- Dropped above the first row: it becomes first.
+- Dropped below the last row: it becomes last.
+- Dropped on ANOTHER meal, between two of its rows: it changes meal AND lands in
+  that slot.
+- Dropped on another meal's header or its "Add Food" row (over the card, over no
+  row): it changes meal and appends to the end.
+- Dropped outside every card (the day pill, the summary, the tab bar): nothing
+  moves. Not "the nearest card".
+- Released exactly where it started: nothing is written, and the entry is still
+  shareable — a no-op drag must not cost a share by dirtying the row.
+- A collapsed meal is not a drop target with slots — its rows have no extent.
+
+### Mobile — the order persists
+
+- Reorder, pull to refresh: order holds.
+- Reorder, force-quit, reopen: order holds.
+- Reorder while OFFLINE, come back online, let the sync run: order holds and the
+  server has it.
+- Reorder on phone A; phone B shows the same order after its next sync.
+- Delete the row above one you moved: the rest keep their order.
+- Log a new entry into a reordered meal: it lands at the END, not in the middle.
+- Duplicate an entry, and combine/split a meal: the new rows land at the end.
+
+### Mobile — accessibility
+
+- With VoiceOver on, the grip announces "Reorder <name>" and offers **Move up**
+  and **Move down** as actions; each moves the row one place and the new order is
+  announced on the next pass.
+- Move up on the first row, or down on the last, does nothing (and does not
+  dirty the row).
+
+### Web
+
+- A day reordered on the phone renders in that order at
+  `/dashboard/nutrition/days/<date>`, grouped by meal.
+- Editing an entry on web (name, macros, notes) does NOT change its position.
+- Halve/double on web does NOT change its position.
+- Changing an entry's MEAL on web puts it at the end of the meal it joined.
+- Web offers no reorder of its own, and adds no sort — the order it shows is the
+  server's.
+
+### API / auth
+
+- `GET /v1/nutrition/entries` returns `position` on every entry, and entries
+  sorted by it within a meal.
+- `PUT /v1/nutrition/entries/{id}` **without** `position` leaves the stored
+  position unchanged. This is the one that matters: every pre-N553 client sends
+  exactly this shape.
+- `PUT` **with** `position` moves the entry there.
+- A brand-new entry with no `position` is appended to the end of its meal.
+- An entry whose `meal` or `eaten_on` changed, sent with no `position`, is
+  appended to the end of the list it joined.
+- `position` outside ±2^40 is `invalid_input`, not clamped.
+- A fractional `position` is rejected.
+- Another athlete's entry id with a `position`: `404 not_found`, and the entry
+  does not move. Not 403 — that would confirm the row exists.
+
+### Migration
+
+- A database with existing entries, migrated: every meal keeps the order it was
+  already displayed in, per user and per meal, and no meal reshuffles.
+- A phone already stamped SQLite v41, upgraded: same, seeded from `logged_at,
+  id`.
+
+### NEEDS HUMAN EVIDENCE
+
+- Reorder a meal on the phone, force-quit, reopen, confirm the order held; then
+  open the same day on web and confirm it matches. Nothing short of a device can
+  answer this — and the gap indicator under a moving finger is the specific
+  thing a simulator does not settle.

@@ -47,10 +47,33 @@ export type Entry = Macros & {
    *  must never rewrite what a past day says you ate. */
   source_food_id: string | null;
   notes: string;
+  /**
+   * Where this entry sits inside its meal — N553/#1019.
+   *
+   * Read-only here, and that is the design rather than an omission: reordering
+   * is a phone gesture (press and hold a row, drag it up or down), and web's
+   * job is to agree with what the phone was told. Web never sends this field —
+   * see `EntryInput` — so an edit made here cannot disturb an order set there.
+   *
+   * Not a rank. Neighbours are 1024 apart so a move is one write, so "3072"
+   * does not mean "third" and the numbers are not comparable across meals.
+   */
+  position: number;
   created_at: string;
   updated_at: string;
 };
 
+/**
+ * What web sends when it saves an entry.
+ *
+ * **`position` is deliberately absent, and that absence is load-bearing** —
+ * N553. The server reads "no position key" as "leave the order alone", so a
+ * correction typed here, or a halve/double tap, keeps whatever order the
+ * athlete arranged on their phone. Adding `position?: number` to this type
+ * would be the first step toward web sending a stale one; if web ever grows a
+ * reorder of its own, it needs the same midpoint arithmetic the phone has
+ * (`apps/mobile/lib/entryOrder.ts`), not a number lifted off a rendered row.
+ */
 export type EntryInput = Macros & {
   eaten_on: string;
   meal: Meal;
@@ -60,6 +83,24 @@ export type EntryInput = Macros & {
   source_food_id?: string | null;
   notes?: string;
 };
+
+/**
+ * One meal's entries, in the order the athlete arranged them — N553/#1019.
+ *
+ * A filter and NOTHING ELSE, on purpose. `/nutrition/entries` already sorts by
+ * `position` within a meal, so the order this receives is the answer; sorting
+ * again here — by name, by kcal, by time — would silently overrule a phone
+ * gesture with a rule nobody asked for, and would look like the reorder
+ * feature failing rather than like this function being wrong.
+ *
+ * Extracted from `DayEditor` so that rule is testable at all: an inline
+ * `entries.filter(...)` in a Clerk-authenticated client component is reachable
+ * by no test in this repo, which is precisely how a stray `.sort()` would get
+ * in unnoticed.
+ */
+export function entriesInMeal(entries: readonly Entry[], meal: Meal): Entry[] {
+  return entries.filter((e) => e.meal === meal);
+}
 
 export type RecipeItemInput = Macros & {
   name: string;

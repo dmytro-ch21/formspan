@@ -52,6 +52,8 @@ function entry(over: Partial<Entry> = {}): Entry {
     source_food_id: null,
     category: null,
     notes: '',
+    // N553 — a default so a test only states the order when order is the point.
+    position: 1024,
     ...over,
   };
 }
@@ -382,6 +384,8 @@ describe('long-press lifts a row for the drag (N531)', () => {
     return {
       enabled: true,
       activeId: null,
+      onEnterEdit: jest.fn(),
+      onNudge: jest.fn(),
       onStart: jest.fn(),
       onMove: jest.fn(),
       onEnd: jest.fn(),
@@ -395,6 +399,17 @@ describe('long-press lifts a row for the drag (N531)', () => {
     renderCard({ entries: [entry({ id: 'a', meal: 'breakfast' })], drag });
     fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
     expect(drag.onStart).toHaveBeenCalledWith('a', 'breakfast');
+  });
+
+  // N553 — the ONE meaning long-press now has. It picks the row up (above)
+  // AND puts the meal into edit mode, which is what survives the finger
+  // lifting. Both, from one gesture; see `EntryRow`'s doc comment for why
+  // that is one meaning rather than two.
+  it('a long-press also puts the meal into edit mode', () => {
+    const drag = dragHandlers();
+    renderCard({ entries: [entry({ id: 'a', meal: 'dinner' })], drag, meal: 'dinner' });
+    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    expect(drag.onEnterEdit).toHaveBeenCalledWith('dinner');
   });
 
   it('is inert while selecting, even with drag enabled — a checkbox does not lift', () => {

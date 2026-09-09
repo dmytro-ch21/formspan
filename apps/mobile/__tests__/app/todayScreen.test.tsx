@@ -292,6 +292,8 @@ function entry(over: Partial<Entry> & { id: string }): Entry {
     added_sugar_g: null,
     sodium_mg: null,
     cholesterol_mg: null,
+    // N553 — a default so a test only states the order when order is the point.
+    position: 1024,
     ...over,
   };
 }

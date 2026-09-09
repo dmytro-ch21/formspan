@@ -7,19 +7,37 @@
  * typechecker cannot see. Everything the row shows is still passed in
  * computed; this file owns the row's gestures and nothing about the meal.
  *
- * ## Three gestures on one row, and who wins
+ * ## Four gestures on one row, and who wins
  *
  * - **Tap** opens the entry (or toggles it while combine-selecting). The
  *   `Pressable` is the responder from touch-down, as before.
  * - **Horizontal swipe** reveals Delete — `SwipeToDelete`, the row's PARENT,
  *   steals the responder on a decisively horizontal move. Unchanged.
- * - **Long-press, then move** lifts the row and drags it to another meal.
- *   New. `onLongPress` ARMS the drag (`flags.arm()`); the wrapper's
- *   `PanResponder` claims the responder on the NEXT move only while armed,
- *   taking it from the `Pressable` the way `SwipeToDelete` already takes it.
- *   A move before the long-press timer fires is a scroll or a swipe, exactly
- *   as it was — the arm is the whole difference, and it costs the athlete a
- *   deliberate 300ms hold.
+ * - **Long-press, then move** lifts the row and drags it. `onLongPress` ARMS
+ *   the drag (`flags.arm()`); the wrapper's `PanResponder` claims the
+ *   responder on the NEXT move only while armed, taking it from the
+ *   `Pressable` the way `SwipeToDelete` already takes it. A move before the
+ *   long-press timer fires is a scroll or a swipe, exactly as it was.
+ * - **Drag the handle** (N553) does the same thing with no hold at all, and
+ *   the handle only exists once the meal is in edit mode. Its own
+ *   `PanResponder` claims on TOUCH-DOWN — the row's does not and must not,
+ *   because the row is also a button and a scroll surface, whereas 44 points
+ *   of grip at the end of a row is only ever one thing.
+ *
+ * ## What long-press MEANS now, which is one thing (N553/#1019)
+ *
+ * **Long-press puts this row's meal into edit mode, and picks this row up.**
+ * That is a single meaning, not two: lifting the finger without moving leaves
+ * the meal in edit mode with every row showing a handle, and moving the finger
+ * drags — the same continuous gesture N531 shipped, which is why that muscle
+ * memory is not broken by this ticket. The athlete's own words were "on press
+ * hold it should enter a edit mode with movable items up and down"; edit mode
+ * is what makes the second and third moves cost no hold at all.
+ *
+ * The alternative — keep N531's immediate drag and hang edit mode off a
+ * separate button — was rejected in the history entry: two ways to move a row
+ * is a worse story than one, and it would have left the gesture the athlete
+ * actually performed still doing the thing they said was wrong.
  *
  * While a drag is the responder, `SwipeToDelete`'s own claim is asked on
  * every move (it is a non-responder ancestor) and would take a diagonal
@@ -105,6 +123,14 @@ export type EntryDragHandlers = {
   enabled: boolean;
   /** The entry currently lifted anywhere on screen, or null. */
   activeId: string | null;
+  /** N553 — long-press also puts the row's meal into edit mode. */
+  onEnterEdit: (meal: Meal) => void;
+  /**
+   * N553 — move a row one place, without a gesture. `delta` is -1 for up and
+   * +1 for down. The VoiceOver equivalent of the drag, and the reason edit
+   * mode is reachable at all with a screen reader on.
+   */
+  onNudge: (id: string, meal: Meal, delta: number) => void;
   onStart: (id: string, meal: Meal) => void;
   onMove: (pageY: number) => void;
   onEnd: (pageY: number) => void;
@@ -114,6 +140,7 @@ export type EntryDragHandlers = {
 export function EntryRow({
   entry,
   selecting,
+  editing = false,
   isSelected,
   addColor,
   checkColor,
@@ -124,6 +151,12 @@ export function EntryRow({
 }: {
   entry: Entry;
   selecting: boolean;
+  /**
+   * N553 — this row's meal is in edit mode: show the grip instead of the
+   * 3-dot, and let the grip start a drag with no hold. Default false so every
+   * caller and test written before N553 renders exactly as it did.
+   */
+  editing?: boolean;
   isSelected: boolean;
   /** The accent the selected checkbox fills with. */
   addColor: string;
@@ -132,7 +165,7 @@ export function EntryRow({
   foodUnit: FoodUnit;
   /** Tap: open the entry, or toggle it while selecting — the caller decides. */
   onPress: () => void;
-  /** The 3-dot control. Not rendered when absent. */
+  /** The 3-dot control. Not rendered when absent, or while editing. */
   onMenu?: () => void;
   drag?: EntryDragHandlers;
 }) {
@@ -189,6 +222,41 @@ export function EntryRow({
     [dragEnabled, flags, lift, settle, onMove, onEnd, onCancel],
   );
 
+  // The grip's responder, and the one place in this file that claims a touch
+  // on TOUCH-DOWN. That is safe here and nowhere else on the row: the handle
+  // is rendered only in edit mode, it is 44 points of nothing but grip, and it
+  // has no second meaning to swallow. The row itself still must not, because
+  // it is simultaneously a button (tap opens the entry) and part of a scroll
+  // surface.
+  const onStart = drag?.onStart;
+  const handleResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          flags.arm();
+          flags.grant();
+          lift.setValue(0);
+          onStart?.(entry.id, entry.meal);
+        },
+        onPanResponderMove: (_e, g) => {
+          lift.setValue(g.dy);
+          onMove?.(g.moveY);
+        },
+        onPanResponderRelease: (_e, g) => {
+          onEnd?.(g.moveY);
+          settle();
+        },
+        onPanResponderTerminate: () => {
+          onCancel?.();
+          settle();
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [flags, lift, settle, onStart, onMove, onEnd, onCancel, entry.id, entry.meal],
+  );
+
   return (
     <Animated.View
       style={[
@@ -206,7 +274,14 @@ export function EntryRow({
         onLongPress={
           dragEnabled
             ? () => {
+                // ONE meaning, two consequences that are the same intention:
+                // the meal enters edit mode (and stays there when the finger
+                // lifts), and this row is picked up (so a continuous
+                // hold-and-drag works with no second gesture). See the doc
+                // comment above for why this replaced N531's drag-only
+                // long-press rather than sitting beside it.
                 flags.arm();
+                drag?.onEnterEdit(entry.meal);
                 drag?.onStart(entry.id, entry.meal);
               }
             : undefined
@@ -258,9 +333,40 @@ export function EntryRow({
         <Text style={styles.rowKcal}>{Math.round(entry.kcal)}</Text>
       </Pressable>
       {/* OUTSIDE the row's Pressable, as a sibling — nested pressables fight
-          over one touch, and this one must not be reachable while the row is
-          a checkbox. 44pt square via padding, over the icon's own 18. */}
-      {onMenu && !selecting ? (
+          over one touch, and neither of these may be reachable while the row
+          is a checkbox. 44pt tall via padding, over the icon's own 18.
+
+          Edit mode swaps the 3-dot for the grip rather than adding it beside:
+          the row already carries a tap, a swipe, a long-press and a drag, and
+          a fifth control competing for the same 44 points is how a thumb hits
+          the wrong one. The menu's actions are all reachable again the moment
+          edit mode ends, which is one tap on Done. */}
+      {dragEnabled && editing ? (
+        <RNView
+          {...handleResponder.panHandlers}
+          style={styles.more}
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel={`Reorder ${entry.name}`}
+          accessibilityHint="Drag to move this item up or down, or use the actions to move it one place"
+          // A drag has no assistive-tech equivalent, so the same two moves are
+          // offered as ACTIONS — the rotor's answer to a gesture VoiceOver
+          // cannot perform. This is the gap N531's own doc comment named and
+          // could only point elsewhere for; within-meal order had nowhere else
+          // to be set, so here it is closed rather than deferred.
+          accessibilityActions={[
+            { name: 'increment', label: 'Move up' },
+            { name: 'decrement', label: 'Move down' },
+          ]}
+          onAccessibilityAction={(e) => {
+            if (e.nativeEvent.actionName === 'increment') drag?.onNudge(entry.id, entry.meal, -1);
+            if (e.nativeEvent.actionName === 'decrement') drag?.onNudge(entry.id, entry.meal, 1);
+          }}
+          testID={`food-entry-${entry.id}-grip`}
+        >
+          <Icon name="grip" size={18} color={vola.textMuted} />
+        </RNView>
+      ) : onMenu && !selecting ? (
         <Pressable
           onPress={onMenu}
           style={styles.more}

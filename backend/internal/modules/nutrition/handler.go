@@ -137,6 +137,14 @@ type entryBody struct {
 	// comment.
 	Category *string `json:"category"`
 	Notes    string  `json:"notes"`
+	// Position is OPTIONAL and a pointer for a reason that is the whole of
+	// N553's data-safety story: omitting it means "do not change the order",
+	// and only a stated value moves a row. Web's editor and every phone build
+	// older than N553 omit it, so a non-pointer here would have them all
+	// sending 0 and flattening a meal on the first edit. See SaveEntry in
+	// postgres.go for the SQL that acts on nil, and for why that is the exact
+	// shape of the bug exercise.updateWithin shipped three times.
+	Position *int64 `json:"position"`
 }
 
 func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +190,7 @@ func (h *Handler) SaveEntry(w http.ResponseWriter, r *http.Request) {
 		Servings: in.Servings, ServingLabel: strings.TrimSpace(in.ServingLabel),
 		Macros:       Macros{Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG},
 		SourceFoodID: in.SourceFoodID, Category: category, Notes: in.Notes,
+		PositionWanted: in.Position,
 	}
 	if err := e.Validate(); err != nil {
 		writeError(w, r, err)

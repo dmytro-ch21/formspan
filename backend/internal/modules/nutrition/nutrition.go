@@ -351,9 +351,60 @@ type Entry struct {
 
 	Notes string `json:"notes"`
 
+	// Position is where this entry sits INSIDE its meal on its day — N553.
+	//
+	// Gapped, not dense: neighbours are PositionStep apart, so moving a row
+	// between two others is the midpoint of the two and writes ONE row. A
+	// dense 0,1,2,… would renumber every row after the moved one, which is a
+	// write per entry per drag and, offline, a sync conflict per entry on
+	// rows the athlete never touched. See the migration's own comment.
+	//
+	// Never unique and never compared across meals. Two entries in different
+	// meals routinely share a value, and ListEntries' ORDER BY still carries
+	// a total order because created_at and id follow it.
+	Position int64 `json:"position"`
+
+	// PositionWanted is the position a WRITE is asking for, and nil means
+	// "whatever the row already has" — appended to the end of its meal if the
+	// row is new.
+	//
+	// A separate field from Position, and json:"-" so it is never a response
+	// key, because the two are different questions: Position is what the row
+	// IS, PositionWanted is what a caller is asking it to BECOME. Collapsing
+	// them into one int64 is precisely the bug this repo has shipped three
+	// times on exercise.updateWithin — a caller that does not know about the
+	// column (web's entry editor, web's scale-by-a-factor, any client built
+	// before this migration) sends the zero value, the SET clause writes it,
+	// and a whole meal silently collapses onto position 0 in id order. A
+	// pointer makes "did not say" distinguishable from "said zero", and
+	// SaveEntry's COALESCE is what acts on the distinction.
+	PositionWanted *int64 `json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// PositionStep is the gap left between neighbouring entries in a meal.
+//
+// 1024 buys ten successive midpoint insertions at the SAME spot before two
+// neighbours become adjacent and the client has to renumber that one meal.
+// Ten is far more than an athlete does to one breakfast, and a rebalance is
+// correct rather than merely rare — it is not a failure mode, just the only
+// write in this scheme that touches more than one row.
+//
+// Kept in step with the migration's own comment and with `POSITION_STEP` in
+// apps/mobile/lib/entryOrder.ts. All three must agree, because the server and
+// the phone each backfill their own copy of this column independently and the
+// two backfills have to land on the same numbers.
+const PositionStep = 1024
+
+// PositionBound keeps a position inside the range JSON can carry exactly.
+//
+// 2^40 is roughly a trillion — a billion drags-to-top away from the edge —
+// and comfortably inside 2^53, where a JavaScript number stops being an exact
+// integer. Rejected here rather than clamped: a client sending 1e300 has a
+// bug, and silently rewriting its request would hide it.
+const PositionBound = 1 << 40
 
 func (e *Entry) Validate() error {
 	if !isUUID(e.ID) {
@@ -387,6 +438,14 @@ func (e *Entry) Validate() error {
 		c := strings.TrimSpace(*e.Category)
 		if len(c) < 1 || len(c) > 40 {
 			return fmt.Errorf("%w: category must be 1-40 characters", ErrInvalidInput)
+		}
+	}
+	// Only the REQUESTED position is checked. Position itself is read back
+	// from the column and is whatever this server put there.
+	if e.PositionWanted != nil {
+		p := *e.PositionWanted
+		if p < -PositionBound || p > PositionBound {
+			return fmt.Errorf("%w: position must be between %d and %d", ErrInvalidInput, -PositionBound, PositionBound)
 		}
 	}
 	return nil
