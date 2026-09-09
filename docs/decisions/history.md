@@ -65434,6 +65434,44 @@ exactly the confident-and-wrong failure this repo keeps naming.
   third sport contributes rows.
 
 
+## 2026-09-09 — H19: an Expo patch drift was failing `verify` and CI on every branch
+
+`expo@57.0.21` and `expo-router@57.0.20` were published on 2026-09-08.
+`apps/mobile` was pinned a patch behind both, so `scripts/check-expo-compat.py`
+failed — and because it sits in `verify` and in the `Mobile (Expo)` CI job,
+**every** branch went red, including ones touching nothing mobile. Reproduced
+on `origin/main` at 87e95efb with a clean tree, so it belonged to no branch.
+
+`pnpm --dir apps/mobile exec expo install --fix` moved exactly the two lines
+and nothing else — `react-native` did not move, which is the thing CLAUDE.md
+asks be checked rather than assumed, since `--fix` is entitled to move it and
+that would have made this a deliberate upgrade rather than a repair. No
+`minimumReleaseAgeExclude` block was written into `pnpm-workspace.yaml`
+(H17/#952 — a tool writes one there sometimes, and committing it silently
+disables the supply-chain delay for future installs).
+
+**Worth recording because it cost more time than the fix did: a SECOND red,
+which turned out not to be real.** The first full local `verify` on this
+branch failed four component suites, and a later one failed
+`__tests__/app/goalsScreen.test.tsx` on `main` itself — a 15s timeout in
+"catches a mis-keyed calorie figure". Every one of them passes in isolation,
+on both trees. The cause is the oversubscription flake `jest.config.js`'s own
+`maxWorkers` comment already documents in detail: *"the failure is never a
+wrong value, always a missing element — a `waitFor` whose budget expires
+because the render it is waiting on never got scheduled. Which suite loses is
+arbitrary."* `maxWorkers: 2` is applied for CI only, and this machine was
+running several sessions' jest processes at once — including another
+worktree's, visible in `pgrep`. Re-run against a quieter machine: 314 suites,
+4,985 tests, exit 0.
+
+The general shape is this file's own *Verify that a check can fail* rule
+pointed the other way — **a red that is the apparatus, not the subject.** A
+downed Colima is the version of it already recorded here; a contended jest
+pool is the same thing with a slower symptom, and it is more dangerous
+because it names a plausible innocent file each time. Before believing a
+component-suite failure on this repo, re-run it alone, and check what else is
+running.
+
 ## Open items / known gaps as of this entry
 
 
