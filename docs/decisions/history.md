@@ -66031,6 +66031,66 @@ the title describes which patterns matched — never which apps changed. Read
 Config fix tracked separately; it needs a decision (ignore `react`/`react-dom`
 for the whole workspace, or split the entry) rather than an edit in passing.
 
+## 2026-09-09 — H21: Dependabot cannot bump one app's React without the other's, so the shared ones are ignored
+
+Follow-up to the #928/#1004 repair earlier the same day. That fixed one PR;
+this fixes the mechanism that produced it and would have produced another
+every Monday.
+
+**The finding that decided the design, and it eliminated the option the ticket
+favoured.** `#1005` was filed proposing a `directories:` split as the only real
+separation, with a criterion to measure whether it resolves against the single
+root `pnpm-lock.yaml`. Reading GitHub's own reference closed the question a
+different way: **Dependabot groups a DEPENDENCY, not a (dependency, directory)
+pair.** With `apps/web`, `apps/mobile` and `apps/admin` in one pnpm workspace
+behind one lockfile, a `react` update is a SINGLE update that rewrites every
+`package.json` declaring react. Mobile's react and web's react were never two
+updates that could be sorted into two groups — they are one update, and every
+grouping change merely relabels the PR it arrives in.
+
+So no arrangement of `patterns`, `exclude-patterns` or group order could have
+fixed this. Only `ignore` can, and `ignore` has no per-directory scoping
+either (also confirmed from the reference, not assumed).
+
+**Two facts made `directories:` the wrong answer even as a fallback.**
+Dependabot reads its config only from the DEFAULT branch, so a split cannot be
+exercised on a PR — the ticket's "measure it first" criterion was
+unsatisfiable before merge, which is worth recording as a property of the tool
+rather than an oversight. And its failure mode is the bad one: if member
+directories did not resolve against the root lockfile, npm updates would
+simply STOP, silently, with nothing failing anywhere. That is this file's own
+*absence is not evidence* trap aimed squarely at supply-chain hygiene. A
+weekly red PR is a far better failure than an updater that quietly stopped.
+
+**What shipped.** `react`, `react-dom`, `@types/react` and `@types/react-dom`
+are `ignore`d for the npm ecosystem. React is framework-pinned on both
+surfaces — Expo SDK 57 pins the mobile app, Next pins web/admin — so mobile's
+moves via `expo install --fix` and web's moves with its `next` bump.
+`@clerk/clerk-expo` IS separable, because that name belongs to one app only,
+so it moved into `mobile-dependencies` (matched first — a dependency joins the
+first group whose patterns match, making definition order load-bearing) with a
+redundant `exclude-patterns` in the web group so a future reorder cannot drag
+it back.
+
+**And the comment became a check.** `.github/dependabot.yml` asserted the
+separation held — *"named distinctly enough"* — in prose. Nothing read it, so
+it was wrong for months and the first thing that noticed was a PR failing
+`check-expo-compat`. `scripts/check-dependabot-scope.py` (`pnpm run
+check:dependabot-scope`, in `verify` and in the `Scripts (Python)` job) now
+asserts the invariant the comment was gesturing at: every dependency declared
+by BOTH the Expo app and a Next app is either `ignore`d or listed in
+`ALLOWED_SHARED` **with a reason**. It found three the fix had not considered
+— `typescript`, `eslint`, `@types/node` — none pinned by Expo, all classified
+rather than ignored, because `expo install --check` validates react,
+react-dom, react-native and expo-* and nothing else. A newly shared package
+fails until somebody decides which kind it is.
+
+The parser refuses to guess: no npm entry, or no `ignore:` block, is an error
+rather than an empty set — an empty set would pass vacuously, which is the
+failure this check exists to end. Mutation-verified three ways (react dropped
+from `ignore`; the whole block removed; a stale `ALLOWED_SHARED` entry), each
+red, restore confirmed by re-running.
+
 ## Open items / known gaps as of this entry
 
 

@@ -346,6 +346,19 @@ jobs:
       - name: Migration version safety (pairing, duplicates, above merge base)
         run: python3 scripts/check-migration-versions.py --self-test && python3 scripts/check-migration-versions.py
 
+      # H21 (#1005). apps/web, apps/mobile and apps/admin are ONE pnpm
+      # workspace, so Dependabot has one npm entry and groups a DEPENDENCY,
+      # never a (dependency, directory) pair — a `react` bump rewrites every
+      # package.json declaring react, including the Expo app's, whose version
+      # the SDK pins. #928 arrived that way: titled "web-and-admin", moving
+      # apps/mobile off Expo's React pin.
+      #
+      # `.github/dependabot.yml` used to assert the separation held, in a
+      # comment. Nothing read it, so it was wrong for months. This is that
+      # assertion turned into something that fails.
+      - name: Dependabot cannot bump a package both apps share
+        run: python3 scripts/check-dependabot-scope.py --self-test && python3 scripts/check-dependabot-scope.py
+
       # The grip vocabulary is duplicated in Go, mobile and web because there
       # is no shared package to put it in. This is what makes that survivable:
       # drift fails here rather than reaching an athlete as a 400 they cannot
