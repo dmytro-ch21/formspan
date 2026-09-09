@@ -10,7 +10,9 @@
  */
 
 import {
+  DEFAULT_SERVINGS,
   describeMeal,
+  fitServings,
   isQuotaExhausted,
   itemToEntry,
   photographMeal,
@@ -276,5 +278,65 @@ describe('the deadline each estimate path asks for', () => {
   it('gives the photo path the slow budget too', async () => {
     await photographMeal(token, { uri: 'file:///m.jpg', mimeType: 'image/jpeg' });
     expect(deadlineOf()).toBe(SLOW_REQUEST_TIMEOUT_MS);
+  });
+});
+
+/**
+ * N542/#977 — a drafted count of zero is one the server refuses forever.
+ *
+ * `Entry.Validate` requires `servings > 0` and the column CHECKs it again, so
+ * an entry counted zero times is written to the outbox, refused 400,
+ * classified permanent, and lives on this phone until a reinstall. The server
+ * now fits this itself; this is the same fit on the way into the outbox, for
+ * a phone talking to a deploy that predates it — the identical reason
+ * `fitName`/`fitServingLabel` exist here as well as there.
+ */
+describe('fitServings', () => {
+  const item: EstimatedItem = {
+    name: 'Scrambled eggs',
+    serving_label: '1 medium egg',
+    servings: 0,
+    kcal: 180,
+    protein_g: 12,
+    carb_g: 1,
+    fat_g: 14,
+    fibre_g: null,
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
+    portion_confidence: 'medium',
+    assumption: '',
+  };
+
+  it('counts a zero as one', () => {
+    expect(fitServings(0)).toBe(DEFAULT_SERVINGS);
+    expect(DEFAULT_SERVINGS).toBeGreaterThan(0);
+  });
+
+  it('never rewrites a count the model did state, fractional ones included', () => {
+    // Half a burrito is a real portion. Rounding it up would log a meal
+    // nobody ate — which is worse than the ghost row this fit prevents.
+    for (const v of [0.25, 0.5, 1, 2, 3.75, 100]) expect(fitServings(v)).toBe(v);
+  });
+
+  it('leaves a negative alone, so the screen can say so rather than invent a portion', () => {
+    // The asymmetry is the point, and it matches the server's `fitToFood`
+    // exactly: zero means the count was not stated and one is the honest
+    // reading; minus two means the draft is malformed, and a phone quietly
+    // turning it into a portion would put a figure nobody produced into the
+    // log. `describe.tsx` refuses to confirm one instead.
+    expect(fitServings(-2)).toBe(-2);
+  });
+
+  it('is applied by itemToEntry, which is what the outbox actually writes', () => {
+    // The property that matters is not the helper's return value but that
+    // the entry heading for the server carries a count it will accept.
+    expect(itemToEntry(item).servings).toBe(DEFAULT_SERVINGS);
+    expect(itemToEntry({ ...item, servings: 2 }).servings).toBe(2);
+    // And the macros are untouched: they are the total for the quantity, so
+    // restating the count changes nothing the athlete reads.
+    expect(itemToEntry(item).kcal).toBe(180);
   });
 });

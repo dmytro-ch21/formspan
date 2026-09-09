@@ -238,14 +238,45 @@ components:
             longer than that is cut, and an empty one becomes `1 serving`.
             Before this, a draft could carry a label the save would then
             refuse with a 400 — the food lived on one phone only.
-        servings: { type: number, example: 2 }
-        kcal: { type: number }
-        protein_g: { type: number }
-        carb_g: { type: number }
-        fat_g: { type: number }
+        servings:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          exclusiveMaximum: true
+          maximum: 1000
+          example: 2
+          description: >
+            How many of `serving_label`. Always more than zero, and fitted by
+            the server to be (N542): a model that returns `0` has its count
+            restated as `1`, which changes no macro — the figures below are
+            the total for the quantity, not a per-serving rate. Before this, a
+            zero was a valid draft that `NutritionEntryInput` then refused with
+            a 400, stranding the entry on one phone.
+
+
+            The ceiling is DELIBERATELY stricter than `NutritionEntryInput`'s
+            own 10000: refusing a draft the save would have taken costs an
+            absurd estimate, while accepting one it refuses strands a row, so
+            the two errors are not symmetrical and this leans to the cheap
+            one.
+        kcal:
+          type: number
+          minimum: 0
+          exclusiveMaximum: true
+          maximum: 20000
+          description: >
+            For the WHOLE quantity, not per serving. Bounded by exactly what
+            `NutritionEntryInput.kcal` accepts (N542) — an estimate is never
+            allowed to carry a figure the save would refuse.
+        protein_g: { type: number, minimum: 0, maximum: 2000, exclusiveMaximum: true }
+        carb_g: { type: number, minimum: 0, maximum: 2000, exclusiveMaximum: true }
+        fat_g: { type: number, minimum: 0, maximum: 2000, exclusiveMaximum: true }
         fibre_g:
           type: number
           nullable: true
+          minimum: 0
+          maximum: 500
+          exclusiveMaximum: true
           description: Null is "not stated", never zero — the same contract the rest of this module holds.
         portion_confidence:
           type: string

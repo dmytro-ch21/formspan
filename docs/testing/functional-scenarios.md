@@ -21574,3 +21574,79 @@ being honest about what it does not yet know.
 8. **Force-quit VOLA mid-run**, relaunch, reopen the run, then finish it. PASS: the route and distance are continuous and NOT doubled — the segment recorded before the kill appears once. FAIL: a duplicated/zig-zag track or roughly twice the real distance (the pre-fix behaviour).
 9. **Back out of the run screen without finishing.** PASS: Settings → Heart-rate monitor shows the strap disconnected. FAIL: it stays connected with nothing reading it.
 10. Live heart rate appears **only** on a run — Today, strength and BJJ no longer show it at all (#987).
+
+## N542 — an estimate the save refuses: `servings = 0`, and three more numeric bounds that disagreed (`backend/internal/modules/nutrition/estimate.go`'s `sane`/`fitToFood`, `apps/mobile/lib/estimateApi.ts`'s `fitServings`, `apps/mobile/app/food/describe.tsx`, `contracts/public.openapi.yaml`, #977)
+
+The same failure class as N533 above, one field over and then three more.
+`ValidateEstimate` accepted `servings >= 0` while `Entry.Validate` and the
+`nutrition_entries` CHECK both require `> 0`, so an item counted zero times
+was a valid draft the phone wrote locally and could never push. Auditing the
+rest of `sane()` against the validators found the same disagreement in `kcal`
+(inclusive at 20000 against an exclusive ceiling), in the macros (5000 against
+2000) and in fibre (sharing the macro ceiling against its own 500). Full
+account: `docs/decisions/history.md`, 2026-09-09 N542.
+
+### Backend (`POST /v1/nutrition/estimate`)
+
+- **Happy path — a zero count is fitted, not refused.** Stub the provider to
+  return an item with `"servings": 0`. The response is 200 and the item's
+  `servings` is `1`, with **every macro unchanged** — the figures are the
+  total for the quantity, so restating the count must not rescale them. A
+  `PUT /v1/nutrition/entries/{id}` built from that item is 200.
+  (`estimate_fit_test.go`.)
+- **A stated count is never rewritten**, fractional ones included: `0.25`,
+  `0.5`, `2`, `3.75` come back exactly as sent. A fit that rounded up would
+  log a meal nobody ate, which is worse than the row it prevents.
+- **A negative or NaN count is REFUSED, not fitted** — 400 `invalid_input`.
+  The asymmetry is the contract: zero means the count was not stated, minus
+  two means the draft is malformed.
+- **Every numeric field's ceiling is the save's own.** An item at exactly
+  20000 kcal, at 2000 g of any macro, or at 500 g of fibre is refused by the
+  estimate — the same values `Food.Validate`/`Entry.Validate` refuse. Just
+  below each is accepted by both. This is the property, not the numbers:
+  anything the estimate accepts must be saveable.
+- **Negative — the trap is real.** Feed the unfitted `servings: 0` item
+  straight to `PUT /v1/nutrition/entries/{id}`: 400 `invalid_input`. If this
+  ever returns 200 the limits have moved and the fit is doing nothing.
+- **The contract:** `EstimatedItem.servings` declares `minimum: 0` with
+  `exclusiveMinimum`, and `kcal`/`protein_g`/`carb_g`/`fat_g`/`fibre_g`
+  declare exactly the ceilings `NutritionEntryInput` accepts. A client may
+  rely on a draft being loggable without clamping it itself.
+
+### Mobile — the describe screen (`__tests__/app/describeZeroServings.test.tsx`)
+
+- **A zero the MODEL sent arrives as one.** A draft carrying `servings: 0`
+  (an older deploy, before the server fit) shows `1` in the Servings box, no
+  row message, and logs an entry with `servings: 1` and unchanged calories.
+- **A zero the ATHLETE typed is refused, visibly.** Clear the Servings box
+  and type `0`: that row — and only that row — shows "Servings must be more
+  than 0 — say how many, or remove this", the Log button is disabled on both
+  `disabled` and `accessibilityState`, and its `accessibilityHint` says why.
+  Pressing it logs nothing and saves nothing.
+- **The compiled path is blocked too.** With "Combine into one meal" ticked
+  and one row zeroed, Log does nothing. This is the case that would otherwise
+  be silently wrong rather than refused: a compiled entry carries its own
+  `servings: 1`, so the zeroed row's calories would have pushed happily into a
+  meal the athlete said they ate none of.
+- **Both ways out work.** Correcting the count to `1.5` clears the message and
+  logs `servings: 1.5`; removing the row instead logs the remaining ones.
+- **Clearing the box does not resurrect the model's zero.** On a draft that
+  arrived with `servings: 0` (fitted to `1` on the way in), empty the Servings
+  field: no row message, Log still enabled. An empty box means "I have not
+  decided", which is the fitted 1 — not the refused 0 underneath it. Found in
+  review by clearing the field rather than by reading the code.
+- **The Log button's reason is in its LABEL, not only its hint** — iOS leaves
+  "Speak Hints" off by default, so a hint on a disabled control is not
+  reliably announced (`components/ShareToFriend.tsx` records the same lesson).
+- **`itemToEntry` fits on the way into the outbox** (`lib/__tests__/estimateApi.test.ts`)
+  — the same defence as `fitName`/`fitServingLabel`, for a phone talking to a
+  deploy without the server fit.
+
+### Device checks (no test can reach these)
+
+- **NEEDS HUMAN EVIDENCE** — typing `0` into a Servings box on a real phone
+  shows the row's message where the athlete is already looking, and the Log
+  button reads as inert rather than broken.
+- **NEEDS HUMAN EVIDENCE** — VoiceOver announces the Log button as disabled
+  and reads the hint, rather than announcing an enabled button that ignores
+  taps.

@@ -300,9 +300,9 @@ func ValidateEstimate(e Estimate) error {
 			return fmt.Errorf("%w: item %d has confidence %q", ErrInvalidInput, i, it.PortionConfidence)
 		}
 		for _, f := range []struct {
-			name string
-			v    float64
-			max  float64
+			name  string
+			v     float64
+			limit float64
 		}{
 			{"kcal", it.Kcal, maxItemKcal},
 			{"protein_g", it.ProteinG, maxItemGrams},
@@ -310,12 +310,13 @@ func ValidateEstimate(e Estimate) error {
 			{"fat_g", it.FatG, maxItemGrams},
 			{"servings", it.Servings, maxItemServings},
 		} {
-			if err := sane(f.name, i, f.v, f.max); err != nil {
+			if err := sane(f.name, i, f.v, f.limit); err != nil {
 				return err
 			}
 		}
 		if it.FibreG != nil {
-			if err := sane("fibre_g", i, *it.FibreG, maxItemGrams); err != nil {
+			// Fibre's OWN ceiling, not the other macros' — see maxItemFibreG.
+			if err := sane("fibre_g", i, *it.FibreG, maxItemFibreG); err != nil {
 				return err
 			}
 		}
@@ -328,6 +329,18 @@ func ValidateEstimate(e Estimate) error {
 // claims nothing about weight or size, which is exactly what an empty label
 // means.
 const DefaultServingLabel = "1 serving"
+
+// DefaultServings is HOW MANY of that label a drafted item is counted as when
+// the model returned a count of zero (N542/#977).
+//
+// One, for the same reason the label's default is "1 serving": an item's
+// macros are the TOTAL for the quantity — the schema says so in as many words
+// — so the count beside them is a counter, not a multiplier anything on the
+// log path applies to those numbers. A zero therefore means the model
+// described the plate and failed to say how many of it there were, and one is
+// the only honest reading of that. Nothing about what gets logged changes; the
+// count merely becomes a number `Entry.Validate` will accept.
+const DefaultServings = 1
 
 // fitToFood trims what the model returned down to what a SAVED FOOD and a
 // LOGGED ENTRY will accept (N533/#964).
@@ -357,6 +370,13 @@ const DefaultServingLabel = "1 serving"
 // default is honest there — ValidateEstimate refuses it. Pinned by
 // `estimate_fit_test.go`.
 //
+// N542/#977 added the third field with the same disagreement — a `servings`
+// of zero, which `ValidateEstimate` accepted (`v >= 0`) and `Entry.Validate`
+// refuses (`> 0`) — and the fit and the refusal now divide the same way they
+// do for the name and the label: a value that can be restated without
+// changing what the athlete will read is fitted, and a value that cannot is
+// refused. See the guard below and `DefaultServings`.
+//
 // Runes, not bytes, because the validators count runes: a label in Cyrillic
 // or with an accented gram sign is two bytes a character, and a byte cut
 // would both refuse labels the validator accepts and split a character.
@@ -367,6 +387,27 @@ func (e *Estimate) fitToFood() {
 		it.ServingLabel = clampRunes(strings.TrimSpace(it.ServingLabel), maxLabelRunes)
 		if it.ServingLabel == "" {
 			it.ServingLabel = DefaultServingLabel
+		}
+		// `Entry.Validate` requires `servings > 0` and the column CHECKs it
+		// again; `ValidateEstimate` only ever asked for `>= 0`. So a drafted
+		// zero — a model slip, or an athlete clearing the box on a client that
+		// let them — was an accepted draft the save refuses forever (N542).
+		//
+		// FITTED rather than refused, which is the opposite of the call made
+		// for the macro ceilings above and for the same reason stated there:
+		// this fit changes no number the athlete will read. The macros are the
+		// total for the quantity either way, so a zero becoming one restates
+		// the count and rewrites nothing. Refusing would instead spend one of
+		// the athlete's daily estimates to complain about a field the model
+		// filled in.
+		//
+		// EXACTLY zero, never `<= 0`, and that is the whole of the guard. A
+		// NEGATIVE count is not an unstated one — it is evidence the output is
+		// malformed — and `ValidateEstimate` goes on refusing it rather than
+		// inventing a portion from it. `NaN == 0` is false for the same
+		// reason, so a NaN is still refused rather than quietly becoming one.
+		if it.Servings == 0 {
+			it.Servings = DefaultServings
 		}
 	}
 }
@@ -389,12 +430,41 @@ func clampRunes(s string, n int) string {
 // module has already been bitten once by rails tuned too tight. Nothing here
 // should ever fire on something somebody ate. What they catch is garbage —
 // a misplaced decimal, a units confusion, or an infinity.
+//
+// **Each is now the SAVE's OWN ceiling rather than a looser number beside it**
+// (N542/#977), which is the same "two literals that must agree are one
+// literal" that `maxNameRunes`/`maxLabelRunes` became in N533. They used not
+// to be, and the gap was the whole bug: `maxItemGrams` was 5000 while
+// `Macros.validate` refuses anything from 2000 up, so an item claiming 3 kg of
+// protein was a VALID estimate that the phone wrote locally and the server
+// then refused 400 forever — an accepted draft that can never be saved, the
+// phantom-row shape #964 was reported for.
+//
+// A macro is deliberately REFUSED at the ceiling rather than clamped down to
+// it, unlike a name or a label: cutting a phrase to forty runes keeps a
+// readable phrase, whereas cutting 3000 g of protein to 1999 g would put a
+// number nobody measured into the athlete's own history and call it their
+// dinner. Nothing real is refused by this — 2 kg of one macronutrient in one
+// item is not food — so the "never fires on something somebody ate" property
+// above is untouched.
 const (
-	// Eight times a day's intake, in one item.
-	maxItemKcal = 20000
-	// Five kilograms of one macronutrient.
-	maxItemGrams = 5000
+	// Exactly `Macros.validate`'s ceiling. Eight times a day's intake in one
+	// item, and the largest value a nutrition_entries row will hold.
+	maxItemKcal = maxKcal
+	// Exactly `Macros.validate`'s ceiling for protein, carbohydrate and fat:
+	// two kilograms of one macronutrient.
+	maxItemGrams = maxMacroG
+	// Fibre has a ceiling of its own in `Macros.validate`, four times lower
+	// than the other macros'. Sharing `maxItemGrams` with them is what let an
+	// 800 g fibre item through the estimate and into a refused save.
+	maxItemFibreG = maxFibreG
 	// A thousand of anything.
+	//
+	// Deliberately STRICTER than `Entry.Validate`'s own 10000, and that
+	// direction is the safe one: it refuses drafts the save would have
+	// accepted, which costs an absurd estimate, rather than accepting drafts
+	// the save refuses, which is what strands a row on one phone. Left where
+	// it is because a thousand portions of one item is already garbage.
 	maxItemServings = 1000
 )
 
@@ -410,15 +480,21 @@ const (
 // takes part in. **`math.IsInf` is a separate check for the mirror reason:**
 // `+Inf >= 0` is TRUE, so the NaN-safe form alone lets infinity past. That gap
 // was real here until a test caught it.
-func sane(field string, idx int, v, max float64) error {
+//
+// `limit` is EXCLUSIVE — `v >= limit` fails — because every ceiling this is
+// called with is `Macros.validate`'s, and that validator's own form is
+// `v < max` (N542/#977). The bound used to be inclusive, so an item with
+// kcal of exactly 20000 was an estimate the save then refused: a one-value
+// phantom row hiding inside two numbers that looked identical.
+func sane(field string, idx int, v, limit float64) error {
 	if math.IsInf(v, 0) {
 		return fmt.Errorf("%w: item %d has %s = %v", ErrInvalidInput, idx, field, v)
 	}
 	if !(v >= 0) {
 		return fmt.Errorf("%w: item %d has %s = %v", ErrInvalidInput, idx, field, v)
 	}
-	if v > max {
-		return fmt.Errorf("%w: item %d has %s = %v, which is not food", ErrInvalidInput, idx, field, v)
+	if v >= limit {
+		return fmt.Errorf("%w: item %d has %s = %v, which is more than a logged entry can hold", ErrInvalidInput, idx, field, v)
 	}
 	return nil
 }
@@ -453,8 +529,14 @@ func EstimateSchema() map[string]any {
 					"Short — at most 40 characters — and never empty. Put any explanation of the portion in 'assumption', not here.",
 			},
 			"servings": map[string]any{
-				"type":        "number",
-				"description": "How many of serving_label. Two eggs with serving_label '1 medium egg' is 2.",
+				"type": "number",
+				// Asked for here AND enforced by `fitToFood` (N542/#977), the
+				// same pairing the serving_label above documents: the prompt
+				// makes a stated count the common case, the fit makes a
+				// missing one harmless. A schema cannot express `exclusiveMinimum`
+				// under structured outputs.
+				"description": "How many of serving_label. Two eggs with serving_label '1 medium egg' is 2. " +
+					"Always more than zero — if you cannot say how many, say 1 and put the doubt in 'assumption'.",
 			},
 			"kcal":      map[string]any{"type": "number", "description": "Calories for the whole quantity, not per serving."},
 			"protein_g": map[string]any{"type": "number", "description": "Protein in grams for the whole quantity."},
