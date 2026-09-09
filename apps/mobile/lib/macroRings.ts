@@ -267,3 +267,83 @@ export function readRings(
     };
   });
 }
+
+/**
+ * The colour a ring's SECOND lap is drawn in — W24/#1022.
+ *
+ * ## Why this exists instead of a border
+ *
+ * A ring past 100% wraps, and the two laps have to be tellable apart. The
+ * first cut separated them with a hairline of the card's own ground drawn
+ * under the second lap. On a dark card that is a black outline, and the
+ * athlete's verdict was that it "doesnt look too good" — asking instead for
+ * what a highlighter does: *"if we draw one line it is clean and if we draw
+ * another line on top the line becomes darker... no borders just darker."*
+ *
+ * That is exactly **multiply**, which is how two passes of translucent ink
+ * actually compose: each channel scales by itself, so a mid tone darkens and
+ * a near-white barely moves. Deriving the shade from the hue keeps the
+ * palette gate's contract too — no second colour is declared, so nothing new
+ * needs a row in `constants/Colors.ts` or a ΔE justification against it.
+ *
+ * ## The floor, and why it is a rule rather than a tuned constant
+ *
+ * Pure multiply is too dark for one of the four. Measured against
+ * `vola.surface` `#10151F`, with WCAG 1.4.11's 3:1 for non-text graphics that
+ * carry meaning: protein → 3.47:1, fat → 3.76:1, carbs → 14.19:1, and
+ * **fibre → 2.93:1, which fails**. A ring the athlete cannot see is not a
+ * subtler ring, it is a missing one.
+ *
+ * So the darkening is bounded by the measurement rather than by a constant
+ * somebody picked once: multiply fully, then step back toward the base until
+ * the result clears the floor. A hand-tuned 0.6 would work today and go
+ * silently wrong the next time the palette moves — and it has moved before.
+ * `Colors.ts`'s own doc comment still lists the reference values (`fat
+ * #FBC410`, `fibre #B16AF6`) while the export carries the corrected ones,
+ * which is precisely the drift a fixed constant would not survive.
+ */
+export const OVERLAP_CONTRAST_FLOOR = 3;
+
+function channels(hex: string): [number, number, number] {
+  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+function toHex(rgb: [number, number, number]): string {
+  return `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
+function relativeLuminance(hex: string): number {
+  const [r, g, b] = channels(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG 2.x contrast ratio. Exported for the tests that pin the floor. */
+export function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Ink over itself: each channel scaled by itself, mixed `t` of the way. */
+function multiplyToward(hex: string, t: number): string {
+  const rgb = channels(hex);
+  return toHex(rgb.map((v) => v + ((v * v) / 255 - v) * t) as [number, number, number]);
+}
+
+/**
+ * The second lap's colour: the hue multiplied by itself, backed off only as
+ * far as the contrast floor demands.
+ *
+ * Returns the base unchanged when even a full multiply cannot clear the floor
+ * — a hue that dark has nowhere to go, and drawing the wrap in the same
+ * colour is the honest failure. It never returns something invisible.
+ */
+export function overlapColor(hex: string, surface: string): string {
+  for (let t = 10; t > 0; t--) {
+    const candidate = multiplyToward(hex, t / 10);
+    if (contrastRatio(candidate, surface) >= OVERLAP_CONTRAST_FLOOR) return candidate;
+  }
+  return hex;
+}

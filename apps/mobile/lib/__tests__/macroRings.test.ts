@@ -1,6 +1,12 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import {
   DEFAULT_RINGS,
+  OVERLAP_CONTRAST_FLOOR,
   RING_KEYS,
+  contrastRatio,
+  overlapColor,
   parseRings,
   readRings,
   ringCap,
@@ -8,6 +14,7 @@ import {
   sweepFor,
 } from '../macroRings';
 import type { Macros, Target } from '../nutrition';
+import { macroColors, vola } from '@/constants/Colors';
 
 const macros = (over: Partial<Macros> = {}): Macros => ({
   kcal: 1242,
@@ -226,5 +233,70 @@ describe('ringCap', () => {
     expect(ringCap(0, INNER, STROKE)).toBe('butt');
     expect(ringCap(-1, INNER, STROKE)).toBe('butt');
     expect(ringCap(Number.NaN, INNER, STROKE)).toBe('butt');
+  });
+});
+
+
+/**
+ * W24/#1022 — a wrapped ring's second lap is darker ink, not a bordered one.
+ *
+ * The athlete's words: *"if we draw one line it is clean and if we draw
+ * another line on top the line becomes darker... no borders just darker."*
+ */
+describe('overlapColor — the second lap of a wrapped ring', () => {
+  it('darkens the hue rather than tinting it another colour', () => {
+    const base = macroColors.carbs;
+    const over = overlapColor(base, vola.surface);
+    expect(over).not.toBe(base);
+    // Darker means lower contrast against a DARK surface — the shade moved
+    // toward the ground, which is what a second pass of ink does.
+    expect(contrastRatio(over, vola.surface)).toBeLessThan(contrastRatio(base, vola.surface));
+  });
+
+  it('holds every ring above the contrast floor — including fibre, which pure multiply fails', () => {
+    // Measured before this was written: a full multiply puts fibre at 2.93:1
+    // against `vola.surface`, under WCAG 1.4.11's 3:1 for non-text graphics
+    // that carry meaning. A ring nobody can see is not a subtler ring.
+    for (const [name, hex] of Object.entries(macroColors)) {
+      const ratio = contrastRatio(overlapColor(hex, vola.surface), vola.surface);
+      expect({ name, ratio: ratio >= OVERLAP_CONTRAST_FLOOR }).toEqual({ name, ratio: true });
+    }
+  });
+
+  it('backs off only as far as the floor demands — carbs has room, so it darkens fully', () => {
+    // Carbs clears the floor at a full multiply (14.19:1), so nothing should
+    // hold it back. This is what stops the fix from being "darken everything
+    // by the least amount fibre can tolerate".
+    const full = overlapColor(macroColors.carbs, vola.surface);
+    const fibre = overlapColor(macroColors.fibre, vola.surface);
+    expect(contrastRatio(full, vola.surface)).toBeGreaterThan(OVERLAP_CONTRAST_FLOOR);
+    // Fibre is the constrained one: it must sit close to the floor, not far
+    // above it, or the back-off has overshot and the wrap stops reading.
+    expect(contrastRatio(fibre, vola.surface)).toBeLessThan(OVERLAP_CONTRAST_FLOOR + 1.5);
+  });
+
+  it('returns the hue unchanged when nothing can clear the floor', () => {
+    // A colour already at the ground has nowhere to darken to. Drawing the
+    // wrap in the same colour is the honest failure; returning something
+    // invisible is not.
+    expect(overlapColor('#111722', vola.surface)).toBe('#111722');
+  });
+
+  it('barely moves a near-white, the way ink over paper does', () => {
+    const before = contrastRatio('#F3F6FA', vola.surface);
+    const after = contrastRatio(overlapColor('#F3F6FA', vola.surface), vola.surface);
+    expect(before - after).toBeLessThan(2);
+  });
+});
+
+describe('the rings draw no border', () => {
+  it('never strokes with the card ground', () => {
+    // The defect this closes was a separator ring drawn in `vola.surface`
+    // UNDER the second lap, which reads as a black outline on a dark card.
+    // Asserted at the source, because the invariant is "no ground-coloured
+    // stroke exists" and no rendered assertion can see a stroke that was
+    // removed.
+    const src = readFileSync(join(__dirname, '..', '..', 'components/today/MacroRings.tsx'), 'utf8');
+    expect(src).not.toMatch(/stroke=\{vola\.surface\}/);
   });
 });

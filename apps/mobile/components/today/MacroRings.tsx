@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
 import { vola } from '@/constants/Colors';
-import { ringCap, ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
+import { overlapColor, ringCap, ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -239,23 +239,24 @@ function Ring({
       {sweep?.overflow != null ? (
         <>
           {/*
-            A hairline of the card's own ground under the second lap, so the
-            wrap is legible as a separate pass without inventing a second colour
-            that would need its own row in the palette gate. Drawn at the full
-            circumference because the first lap beneath it is complete.
+            W24/#1022 — the second lap is DARKER INK, not a bordered one.
+
+            This used to draw a hairline of the card's own ground beneath the
+            wrap to separate the two laps. On a dark card that reads as a black
+            outline, and the athlete asked for what a highlighter does instead:
+            one pass is clean, a second pass on top goes darker, no borders.
+            `overlapColor` is that — the hue multiplied by itself, held above
+            the contrast floor so no ring darkens into the background.
+
+            The separator is GONE rather than restyled: with the second lap a
+            different shade, the thing it existed to disambiguate disambiguates
+            itself, and a ring drawn at `stroke + 3` was always going to be the
+            widest mark on the card.
           */}
           <AnimatedCircle
             {...common}
             strokeLinecap={overCap}
-            stroke={vola.surface}
-            strokeWidth={stroke + 3}
-            strokeDasharray={circumference}
-            strokeDashoffset={overOffset}
-          />
-          <AnimatedCircle
-            {...common}
-            strokeLinecap={overCap}
-            stroke={colour}
+            stroke={overlapColor(colour, vola.surface)}
             strokeDasharray={circumference}
             strokeDashoffset={overOffset}
           />

@@ -67205,6 +67205,49 @@ phase 1's already-merged tickets and to #753's flag flip, not to a web
 predicate that a unit test can settle completely. The evidence latch will not
 fire on this one, and that is correct rather than an oversight.
 
+## 2026-09-09 — W24: a wrapped macro ring is darker ink, not a bordered one
+
+The athlete, on device: *"the rings on food tracker we have when they overlap
+it has black brders and it doesnt look too good. what i want instead is to
+have something like a highlighter does in real life, if we draw one line it is
+clean and if we draw another line on top the line becomes darker... no borders
+just darker."*
+
+It was literally a border. A ring past 100% wraps, and `MacroRings` separated
+the two laps with a hairline of the card's own ground (`stroke={vola.surface}`,
+`strokeWidth={stroke + 3}`) drawn under the second lap. The stated reason was
+good — make the wrap legible without inventing a second colour that would need
+its own row in the palette gate — but on a dark card a ground-coloured stroke
+three points wider than the ring is an outline, and the widest mark on the
+card.
+
+**The requested behaviour is multiply**, which is how two passes of
+translucent ink actually compose: each channel scales by itself, so a mid tone
+darkens and a near-white barely moves. Deriving the second lap's shade from
+the hue keeps the palette gate's contract intact — nothing new is declared, so
+nothing needs a ΔE justification — and the separator is deleted rather than
+restyled, because a second lap in a different shade disambiguates itself.
+
+**The part worth recording is the floor.** Pure multiply is too dark for one
+of the four. Measured against `vola.surface` `#10151F`, with WCAG 1.4.11's 3:1
+for non-text graphics carrying meaning: protein 3.47:1, fat 3.76:1, carbs
+14.19:1, and **fibre 2.93:1 — failing**. A ring the athlete cannot see is not
+a subtler ring, it is a missing one.
+
+So the darkening is bounded by the measurement rather than by a constant:
+`overlapColor` multiplies fully, then steps back toward the base until the
+result clears the floor, and returns the hue unchanged if nothing can. A
+hand-tuned 0.6 would have worked today and gone silently wrong the next time
+the palette moved — and it has moved: `Colors.ts`'s own doc comment still
+lists the reference values (`fat #FBC410`, `fibre #B16AF6`) while the export
+carries the corrected `#CAA021` and `#D657AA`. That drift is exactly what a
+fixed constant would not survive, and it was found by computing against the
+export rather than reading the comment.
+
+Mutation-checked three ways, each red, restore confirmed by re-running:
+dropping the contrast floor (reproducing the fibre failure), restoring the
+ground-coloured separator, and returning the base with no darkening at all.
+
 ## Open items / known gaps as of this entry
 
 
