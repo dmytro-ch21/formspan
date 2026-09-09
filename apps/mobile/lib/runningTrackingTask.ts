@@ -33,12 +33,43 @@ import { getDb } from './db';
 
 export const RUN_LOCATION_TASK = 'vola-run-location';
 
-/** Who the queued fixes belong to. Set when a run starts, cleared when it
- *  ends; the task itself has no React context to read it from. */
+/**
+ * Who the queued fixes belong to.
+ *
+ * Held in memory AND on disk, because iOS may relaunch a terminated app
+ * purely to deliver queued location updates — and that new process has run
+ * no React at all, so an in-memory-only identity would be `null` and the
+ * task would silently drop exactly the fixes this feature exists to keep.
+ * (Review finding; the first cut had the memory half only.)
+ */
 let taskIdentity: { userID: string; sessionID: string } | null = null;
 
-export function setRunTrackingIdentity(identity: { userID: string; sessionID: string } | null): void {
+export async function setRunTrackingIdentity(
+  identity: { userID: string; sessionID: string } | null,
+): Promise<void> {
   taskIdentity = identity;
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM running_tracking_active`);
+  if (identity) {
+    await db.runAsync(
+      `INSERT INTO running_tracking_active (id, user_id, session_id) VALUES (1, ?, ?)`,
+      identity.userID,
+      identity.sessionID,
+    );
+  }
+}
+
+/** The task's own lookup: memory first, disk when this process has never
+ *  seen the running screen. */
+async function activeRunIdentity(): Promise<{ userID: string; sessionID: string } | null> {
+  if (taskIdentity) return taskIdentity;
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ user_id: string; session_id: string }>(
+    `SELECT user_id, session_id FROM running_tracking_active WHERE id = 1`,
+  );
+  if (!row) return null;
+  taskIdentity = { userID: row.user_id, sessionID: row.session_id };
+  return taskIdentity;
 }
 
 /** Exported for the drain path and tests: the row shape the queue holds. */
@@ -104,6 +135,36 @@ export async function readRunFixQueue(
   );
 }
 
+/**
+ * Drops everything at or before `recordedAt` — called on mount with the last
+ * RESTORED route point's timestamp.
+ *
+ * This is what makes the drain durable across a process kill. The screen's
+ * cursor is in memory, so a relaunched screen starts at zero; without this,
+ * it would re-read every fix already folded into `route_points` and append
+ * them a second time, duplicating the route and inflating distance and
+ * elapsed time. Pruning against the saved points aligns the queue with what
+ * has actually been recorded, using data already persisted rather than a
+ * second bookkeeping column that could disagree with it.
+ *
+ * Fixes the filters rejected (poor accuracy) or auto-pause discarded are
+ * pruned too, correctly: they are at or before the same instant and would be
+ * rejected identically on a second pass.
+ */
+export async function pruneRunFixesThrough(
+  userID: string,
+  sessionID: string,
+  recordedAt: string,
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `DELETE FROM running_fix_queue WHERE user_id = ? AND session_id = ? AND recorded_at <= ?`,
+    userID,
+    sessionID,
+    recordedAt,
+  );
+}
+
 /** Called when a run finishes: the queue has served its purpose and the
  *  points now live in the run's own detail. */
 export async function clearRunFixQueue(userID: string, sessionID: string): Promise<void> {
@@ -116,7 +177,7 @@ export async function clearRunFixQueue(userID: string, sessionID: string): Promi
 // at that moment, not when the screen mounts).
 TaskManager.defineTask(RUN_LOCATION_TASK, async ({ data, error }) => {
   if (error) return;
-  const identity = taskIdentity;
+  const identity = await activeRunIdentity();
   if (!identity) return; // no run in progress — nothing owns these fixes
   const locations = (data as { locations?: Parameters<typeof appendRunFixes>[2] } | undefined)?.locations;
   if (!locations?.length) return;
@@ -154,7 +215,7 @@ let androidSub: Location.LocationSubscription | null = null;
  *   fix aimed at iOS.
  */
 export async function startRunTracking(userID: string, sessionID: string): Promise<void> {
-  setRunTrackingIdentity({ userID, sessionID });
+  await setRunTrackingIdentity({ userID, sessionID });
   const options = {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 3000,
@@ -183,7 +244,7 @@ export async function startRunTracking(userID: string, sessionID: string): Promi
  *  must leave no background work behind, which is half of what this ticket
  *  is about. */
 export async function stopRunTracking(): Promise<void> {
-  setRunTrackingIdentity(null);
+  await setRunTrackingIdentity(null);
   androidSub?.remove();
   androidSub = null;
   try {

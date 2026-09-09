@@ -65520,6 +65520,52 @@ working foreground run into no run at all. So Android still uses
 mechanisms, one interpretation path, no second copy of the logic. Android
 background is a separate ticket, not a silent casualty of an iOS fix.
 
+**Review found four defects in the first cut of this ticket, and three of
+them defeated its own purpose. Recorded in full, because each is a distinct
+way of being confidently wrong.**
+
+1. **`bluetooth-central` was never actually added.** The config set
+   `isBackgroundEnabled: true` and three separate places — a code comment,
+   this entry, the commit message — asserted the background mode had shipped.
+   It had not: per the plugin's own source, that flag reaches only the
+   ANDROID manifest, and the iOS `UIBackgroundModes` entry comes from a
+   separate `modes` prop that was never set. So the heart-rate half did
+   nothing at all. Found by `ac-verifier` running `expo prebuild` and reading
+   the generated `Info.plist` — the output — where the first cut had verified
+   the config by evaluating it, which is the input. **Verifying what you hand
+   a plugin is not verifying what the plugin does**, and this file's own
+   "verify that a check can fail" discipline was applied to expo-location
+   (whose Swift was read directly) and not to this one.
+2. **The link was torn down on lock and never reconnected.** The orchestrator
+   still called `stopLiveHR()` on AppState `'background'` — which is exactly
+   what locking the phone raises — while the same commit removed the
+   `'active'` reconnect. The two halves were correct separately and, together,
+   guaranteed heart rate ended at the lock: the precise bug the ticket exists
+   to fix, reintroduced by its own fix.
+3. **A process kill mid-run duplicated the route.** The drain cursor was a
+   `useRef(0)`, so a relaunched screen re-read every fix already folded into
+   the restored `route_points` and appended them again — duplicate track,
+   inflated distance and elapsed time. The `db.ts` comment asserted
+   exactly-once "even across an app kill" and this entry claimed a test proved
+   it; the test kept its cursor in a local variable and never simulated a
+   kill, so it proved nothing of the sort. Fixed by `pruneRunFixesThrough`,
+   which on mount drops whatever the saved points already cover — deriving the
+   resume point from data already persisted rather than a second bookkeeping
+   column free to disagree with it — and by persisting the task's identity, so
+   an iOS relaunch-to-deliver does not drop fixes for want of an owner.
+4. **The location permission string became a lie.** It still read "VOLA does
+   not track your location in the background or when the app is closed". The
+   ticket flagged this hazard for the Bluetooth string and the location one
+   was missed on the first pass; both are what the athlete reads in the system
+   dialog.
+
+**Live heart rate is now running-only (#987, closed here).** With the link
+run-scoped, Today's card and the strength/BJJ chips could never connect, so
+leaving them would have shipped an indicator that is permanently blank. That
+matches the athlete's own decision — *"keep it only for running sessions for
+monitoring and coaching"* — and BJJ and strength take their heart rate from
+Apple Health, which W19 (#985) is making reliable.
+
 **Two capabilities were added to the binary, and both are reviewed ones.**
 `location` and `bluetooth-central` background modes. The justification is the
 ordinary one — a run tracker recording a run — and the scope is deliberately
@@ -65536,9 +65582,11 @@ would have made the system dialog a lie, so it was rewritten in the same
 commit.
 
 **Tests.** `runningTrackingTask.test.ts` against the real `running_fix_queue`:
-field fidelity, cursor exactly-once across a simulated kill, a 200-fix
-locked-screen backlog preserved whole and in order, per-athlete and per-run
-isolation, and release-on-finish scoped to one run. Five mutations, four
+field fidelity, cursor exactly-once WITHIN a session (not across a kill — see
+defect 3; that is what the prune covers), a 200-fix locked-screen backlog
+preserved whole and in order, per-athlete and per-run isolation,
+release-on-finish scoped to one run, the prune's inclusive boundary and run
+scoping, and the on-disk identity surviving a process with no React. Five mutations, four
 caught; **the fifth survived and is recorded rather than papered over** —
 deleting `ORDER BY id` changes nothing, because both plans SQLite can choose
 here (table scan, or the `(user_id, session_id, id)` index) already yield id

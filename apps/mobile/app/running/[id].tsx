@@ -56,6 +56,7 @@ import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
 import {
   clearRunFixQueue,
+  pruneRunFixesThrough,
   readRunFixQueue,
   startRunTracking,
   stopRunTracking,
@@ -303,6 +304,13 @@ export default function RunningSessionScreen() {
         if (existing) {
           setPoints(existing.route_points);
           pointsRef.current = existing.route_points;
+          // W21/#992: the drain cursor lives in memory, so a relaunched
+          // screen starts at zero. Drop whatever these restored points
+          // already cover, or the queue would be folded in a SECOND time —
+          // duplicate route, inflated distance and elapsed time. Review
+          // caught exactly that.
+          const lastRestored = existing.route_points[existing.route_points.length - 1];
+          if (lastRestored) await pruneRunFixesThrough(userId, id, lastRestored.recorded_at);
           if (existing.duration_seconds != null) setElapsedSeconds(existing.duration_seconds);
           setSource(existing.source);
           setFinishedDetail(existing);
@@ -360,6 +368,10 @@ export default function RunningSessionScreen() {
   useEffect(() => {
     return () => {
       void stopRunTracking();
+      // …and the monitor. Backing out of a run without finishing used to
+      // leave the BLE link open with nothing left to close it (review
+      // finding) — an invisible battery drain on both devices.
+      void stopLiveHR();
     };
   }, []);
 
@@ -378,15 +390,15 @@ export default function RunningSessionScreen() {
    * happened on; wall-clock reads would collapse that backlog into a single
    * instant and the hysteresis would be meaningless.
    */
-  function processFix(fix: QueuedFix, isNewest: boolean) {
-    if (!mountedRef.current) return;
+  function processFix(fix: QueuedFix, isNewest: boolean): boolean {
+    if (!mountedRef.current) return false;
     // A wildly inaccurate fix (a bad multipath reflection indoors, a
     // cold-start estimate) is worse than a gap — it draws a spike in the
     // route and in the distance total that no later good fix removes,
     // because distance is a sum of segments and a bad segment's length does
     // not un-happen. Unfit to judge "are we stopped" from, so it is
     // excluded from auto-pause too.
-    if (fix.accuracy_m != null && fix.accuracy_m > MIN_ACCURACY_M) return;
+    if (fix.accuracy_m != null && fix.accuracy_m > MIN_ACCURACY_M) return false;
 
     const now = new Date(fix.recorded_at).getTime();
     const point: RoutePoint = {
@@ -418,7 +430,7 @@ export default function RunningSessionScreen() {
       setSignalWeak(false);
       persistProgress({ duration_seconds: Math.round(elapsedMsRef.current / 1000) });
       requestSync('run-auto-paused');
-      return;
+      return false;
     }
 
     if (action === 'resume' && autoPausedRef.current) {
@@ -432,7 +444,7 @@ export default function RunningSessionScreen() {
     } else if (autoPausedRef.current) {
       // Still stopped — stationary noise, not a place the athlete ran
       // through.
-      return;
+      return false;
     }
 
     lastPointAtRef.current = now;
@@ -440,7 +452,6 @@ export default function RunningSessionScreen() {
     const next = [...pointsRef.current, point];
     pointsRef.current = next;
     setPoints(next);
-    persistProgress();
     // Only for the newest fix of a drain: following a ten-minute backlog
     // point by point would animate the camera across the whole route.
     if (isNewest) {
@@ -449,6 +460,7 @@ export default function RunningSessionScreen() {
         { duration: 300 },
       );
     }
+    return true;
   }
 
   /** Interpret everything the task has captured since the last drain. */
@@ -461,10 +473,22 @@ export default function RunningSessionScreen() {
     drainingRef.current = true;
     try {
       const fixes = await readRunFixQueue(userId, id, fixCursorRef.current);
+      let appended = false;
       for (let i = 0; i < fixes.length; i++) {
+        try {
+          if (processFix(fixes[i], i === fixes.length - 1)) appended = true;
+        } catch {
+          // This fix could not be interpreted. Skip it rather than abandon
+          // the drain — and still advance past it, since retrying a fix that
+          // throws would wedge every later one behind it forever.
+        }
+        // Advanced only after the attempt, so a throw mid-loop cannot mark
+        // untouched fixes consumed.
         fixCursorRef.current = fixes[i].id;
-        processFix(fixes[i], i === fixes.length - 1);
       }
+      // ONE write per drain rather than one per fix: a ten-minute backlog is
+      // ~200 fixes, and `persistProgress` rewrites the whole route each time.
+      if (appended) persistProgress();
     } catch {
       // The queue is on disk and the cursor has not moved past anything
       // unread — the next drain resumes exactly here.

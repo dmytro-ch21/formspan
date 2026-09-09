@@ -512,10 +512,29 @@ const CREATE_HR_MONITOR_SAMPLES = `
  * behaviour those took several tickets to get right is not reimplemented in
  * a headless task where it could quietly diverge.
  *
- * `id` is an autoincrement so draining is strictly ordered and resumable:
- * the screen records the last id it consumed, and a fix is therefore
- * processed exactly once even across an app kill.
+ * `id` is an autoincrement so draining is strictly ordered. The screen's
+ * cursor is in MEMORY, so exactly-once across an app kill comes from
+ * `pruneRunFixesThrough` on mount — which drops whatever the restored route
+ * points already cover — not from the cursor itself. An earlier version of
+ * this comment claimed the cursor survived a kill; it does not, and review
+ * caught the resulting duplicate-route bug.
  */
+/**
+ * W21/#992: which run the background location task is capturing for.
+ *
+ * On disk rather than in memory alone because iOS can relaunch a terminated
+ * app solely to hand over queued location updates; that process has run no
+ * React, so an in-memory identity would be null and the fixes would be
+ * dropped without a trace. One row, enforced by the CHECK.
+ */
+const CREATE_RUN_TRACKING_ACTIVE = `
+  CREATE TABLE IF NOT EXISTS running_tracking_active (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL
+  );
+`;
+
 const CREATE_RUN_FIX_QUEUE = `
   CREATE TABLE IF NOT EXISTS running_fix_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -891,6 +910,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_DETECTED_ACTIVITIES);
   await db.execAsync(CREATE_HR_MONITOR_SAMPLES);
   await db.execAsync(CREATE_RUN_FIX_QUEUE);
+  await db.execAsync(CREATE_RUN_TRACKING_ACTIVE);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );

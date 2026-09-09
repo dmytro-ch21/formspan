@@ -168,14 +168,23 @@ module.exports = () => ({
         // athlete's words for the feature, not the API's.
         "react-native-ble-plx",
         {
-          // W21/#992: TRUE now, and for the athlete's reason rather than
-          // convenience: most people run with the screen locked, and a
-          // foreground-only link stops delivering the moment it goes off, so
-          // the run's heart rate simply ended mid-run. This adds the
-          // `bluetooth-central` background mode, which App Review reads; the
-          // justification is the ordinary one (a run tracker recording a run),
-          // and the link is held only while a run is active, never app-wide.
+          // W21/#992: background BLE, so a run's heart rate survives the
+          // screen locking. TWO props are needed and only one of them is
+          // obvious — `isBackgroundEnabled` alone does NOT do this. Measured
+          // against the plugin's own source: `withBLE.js` passes
+          // `isBackgroundEnabled` only to `withBLEAndroidManifest` (an
+          // Android <uses-feature> line), while the iOS `UIBackgroundModes`
+          // entry comes exclusively from
+          // `withBLEBackgroundModes(config, _props.modes || [])`. A first cut
+          // of this ticket set the flag, asserted in three places that
+          // `bluetooth-central` had shipped, and generated an Info.plist
+          // without it; `ac-verifier` caught that by running `expo prebuild`
+          // and reading the plist rather than trusting the config.
+          //
+          // `central` only — VOLA reads a monitor and never advertises as
+          // one, so `peripheral` would be a capability we do not use.
           isBackgroundEnabled: true,
+          modes: ['central'],
           neverForLocation: true,
           // The old string promised 'Only while VOLA is open', which this
           // change would have turned into a lie in the system dialog.
@@ -186,8 +195,14 @@ module.exports = () => ({
       [
         "expo-location",
         {
+          // W21/#992 rewrote this. The old text promised "only accessed while
+          // VOLA is open and on screen — VOLA does not track your location in
+          // the background", which the `location` background mode below makes
+          // false. Reviewers caught the Bluetooth string's version of this lie
+          // and this one was missed on the first pass; both are what the
+          // athlete actually reads in the system dialog.
           locationWhenInUsePermission:
-            "VOLA uses your location to track your run's route, distance and pace while you're using the app. Location is only accessed while VOLA is open and on screen — VOLA does not track your location in the background or when the app is closed.",
+            "VOLA uses your location to track your run's route, distance and pace. While a run is in progress it keeps tracking with your screen locked, and iOS shows its location indicator the whole time. Tracking starts when you start a run and stops when you finish it — VOLA never tracks your location at any other time.",
           // W21/#992: the `location` background mode, so a run keeps
           // recording once the screen locks.
           //

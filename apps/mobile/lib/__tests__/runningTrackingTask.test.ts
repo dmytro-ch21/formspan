@@ -2,7 +2,9 @@ import { migratedFixture, type FixtureDb } from './support/sqlite';
 import {
   appendRunFixes,
   clearRunFixQueue,
+  pruneRunFixesThrough,
   readRunFixQueue,
+  setRunTrackingIdentity,
 } from '../runningTrackingTask';
 
 /**
@@ -114,5 +116,59 @@ describe('clearRunFixQueue', () => {
 
     expect(await readRunFixQueue(USER, RUN, 0)).toEqual([]);
     expect(await readRunFixQueue(USER, 'ses-run-2', 0)).toHaveLength(1);
+  });
+});
+
+describe('pruneRunFixesThrough — what makes the drain survive an app kill', () => {
+  it('drops what the saved route already covers and keeps the rest', async () => {
+    // The screen's cursor is in memory, so a relaunched screen starts at
+    // zero. Without this prune it re-reads every fix already folded into
+    // `route_points` and appends them a second time: duplicate route,
+    // inflated distance, corrupted elapsed time. Review found exactly that.
+    await appendRunFixes(USER, RUN, [fix(0), fix(3), fix(6), fix(9)]);
+
+    // The app died after the fix at +6s had been recorded and persisted.
+    await pruneRunFixesThrough(USER, RUN, new Date(t0.getTime() + 6000).toISOString());
+
+    const left = await readRunFixQueue(USER, RUN, 0);
+    expect(left.map((r) => r.recorded_at)).toEqual([new Date(t0.getTime() + 9000).toISOString()]);
+  });
+
+  it('is inclusive of the boundary, so the last saved point is never replayed', async () => {
+    await appendRunFixes(USER, RUN, [fix(0)]);
+    await pruneRunFixesThrough(USER, RUN, t0.toISOString());
+    expect(await readRunFixQueue(USER, RUN, 0)).toEqual([]);
+  });
+
+  it('touches only this run', async () => {
+    await appendRunFixes(USER, RUN, [fix(0)]);
+    await appendRunFixes(USER, 'ses-run-2', [fix(0)]);
+    await pruneRunFixesThrough(USER, RUN, new Date(t0.getTime() + 60_000).toISOString());
+    expect(await readRunFixQueue(USER, RUN, 0)).toEqual([]);
+    expect(await readRunFixQueue(USER, 'ses-run-2', 0)).toHaveLength(1);
+  });
+});
+
+describe('the active-run identity is on disk', () => {
+  it('survives a process that has never run the screen — iOS relaunches to deliver fixes', async () => {
+    await setRunTrackingIdentity({ userID: USER, sessionID: RUN });
+
+    // A relaunched process: nothing in memory, only what the task can read.
+    const row = await mockFixture.getFirstAsync<{ user_id: string; session_id: string }>(
+      `SELECT user_id, session_id FROM running_tracking_active WHERE id = 1`,
+    );
+    expect(row).toEqual({ user_id: USER, session_id: RUN });
+  });
+
+  it('holds exactly one run, and clearing it leaves nothing to capture for', async () => {
+    await setRunTrackingIdentity({ userID: USER, sessionID: RUN });
+    await setRunTrackingIdentity({ userID: USER, sessionID: 'ses-run-2' });
+    const rows = await mockFixture.getAllAsync<{ session_id: string }>(
+      `SELECT session_id FROM running_tracking_active`,
+    );
+    expect(rows).toEqual([{ session_id: 'ses-run-2' }]);
+
+    await setRunTrackingIdentity(null);
+    expect(await mockFixture.getAllAsync(`SELECT * FROM running_tracking_active`)).toEqual([]);
   });
 });

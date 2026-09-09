@@ -21571,3 +21571,6 @@ being honest about what it does not yet know.
 5. Finish the run, then leave the app for a few minutes. PASS: no location indicator, and the monitor disconnects — nothing keeps running once the run is over. FAIL: the indicator stays lit, or the strap stays connected.
 6. Kill the app mid-run and reopen it. PASS: the run resumes with the locked-screen fixes still present (the queue is on disk).
 7. Android: a foreground run behaves exactly as before this change — background is explicitly not claimed there yet.
+8. **Force-quit VOLA mid-run**, relaunch, reopen the run, then finish it. PASS: the route and distance are continuous and NOT doubled — the segment recorded before the kill appears once. FAIL: a duplicated/zig-zag track or roughly twice the real distance (the pre-fix behaviour).
+9. **Back out of the run screen without finishing.** PASS: Settings → Heart-rate monitor shows the strap disconnected. FAIL: it stays connected with nothing reading it.
+10. Live heart rate appears **only** on a run — Today, strength and BJJ no longer show it at all (#987).
