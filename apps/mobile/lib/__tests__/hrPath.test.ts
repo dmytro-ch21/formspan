@@ -131,6 +131,23 @@ describe('what Settings actually says', () => {
     expect(hrPathDetail('live', { monitorName: null, healthSource: 'healthkit' })).toContain('Your monitor');
   });
 
+  it('never points at a switch this device does not have', () => {
+    // N552 review: the 'nothing' copy told the athlete to "switch your health
+    // app sync on above" — against a Toggle rendered `disabled` with "Not
+    // available on this device" whenever there is no store to read. Telling
+    // somebody to do what the same screen has just said they cannot is the
+    // exact failure the block above it exists to end.
+    const noStore = hrPathDetail('nothing', { monitorName: null, healthSource: null }) ?? '';
+    expect(noStore).not.toMatch(/sync on above/i);
+    expect(noStore).toMatch(/no health store/i);
+    // It still has to say what CAN be done, or it is only a complaint.
+    expect(noStore).toMatch(/pairing a bluetooth monitor below/i);
+
+    // With a store, the switch is real and pointing at it is right.
+    const withStore = hrPathDetail('nothing', { monitorName: null, healthSource: 'healthkit' }) ?? '';
+    expect(withStore).toMatch(/switch Apple Health sync on above/);
+  });
+
   it('"quiet" states an observation and an action, never a cause', () => {
     const quiet = hrPathDetail('health_quiet', { monitorName: null, healthSource: 'healthkit' }) ?? '';
     // On iOS a declined grant and an empty store are indistinguishable
@@ -173,6 +190,17 @@ describe('broadcast guidance is generic, which is the second criterion', () => {
       expect(devices).toContain(vendor);
     }
     expect(BROADCAST_STEPS.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('does not assert a vendor menu path as current fact', () => {
+    // N552 review: `BROADCAST_STEPS` names menus inside five third-party apps
+    // this repo does not ship and cannot watch. Vendors move them between
+    // releases; nothing in this suite can notice, so the copy has to hedge or
+    // it is claiming more than the app can know — and an athlete who cannot
+    // find the named item concludes their watch is unsupported, which is the
+    // misreading the whole block exists to prevent.
+    expect(BROADCAST_RULE).toMatch(/when this was written/i);
+    expect(BROADCAST_RULE).toMatch(/if yours does not match/i);
   });
 
   it('every row actually says what to do', () => {

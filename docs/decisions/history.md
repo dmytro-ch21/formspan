@@ -67595,6 +67595,85 @@ the defect is one somebody deletes rather than satisfies.
   sparse, recording writes dense — which is measured for the Apple Watch (the
   W19 incident) and assumed for the rest.
 
+### The review pass, and the one thing it caught that reading the code twice had not
+
+`ac-verifier` returned five code criteria `MET` and the sixth as
+`NEEDS HUMAN EVIDENCE`; `frontend-reviewer` hand-traced all three new
+effects/hooks and found them correct. The one `[blocking]` finding was not
+about behaviour at all, and it is worth recording because the commit contained
+its own refutation.
+
+**The feature's explanatory copy was below this app's stated contrast floor,
+and the comment arguing for the one line that wasn't proved the arithmetic had
+already been done.** `HRMonitorPairing`'s `pathHeadline` was set to
+`vola.textMuted` under a doc comment stating that `textDim` measures 3.96:1
+against `vola.bg` — under the 4.5:1 body-text floor — and `textMuted` 7.38:1.
+Re-measured independently: `#667085` on `#080B12` is **3.957:1**, `#949FB3` is
+**7.376:1**; against `surface` (`#10151F`) they are 3.674:1 and 6.848:1, so the
+verdict does not depend on which ground the row is drawn over. The floor is
+this repo's own, written down in `constants/Colors.ts`, which says in as many
+words that dropping `textMuted` to 3.98:1 *"fails"*.
+
+Everything underneath that one headline stayed at 3.957:1: `hrPathDetail` (the
+actual explanation of what to do), `healthPathTip` (described in its own doc
+comment as *"the one gesture that changes the report"*), `nonBroadcastingNote`
+(*"the reason this ticket was filed"*), `BROADCAST_RULE` and every `step.how`
+row. A Settings block that exists so an Apple Watch owner stops concluding the
+app is broken cannot render its substance at a ratio the codebase calls a
+failure — and it was inconsistent *within the one commit*, which is the part
+no amount of re-reading the diff had surfaced.
+
+Fixed by a `bodyCopy` style — identical metrics to `muted`, only the ink
+differs, because what is being fixed is legibility and not hierarchy — applied
+to those five plus the no-Bluetooth branch's one sentence (the only prose that
+branch has, and leaving it dim would have stranded one unreadable line under
+three readable ones). `pathHeadline` is now set apart by size and weight
+rather than by ink; its doc comment says so. Deliberately left on `muted`: the
+state stub "No monitor paired." and the paragraph describing the Scan button
+sitting directly beneath it — neither is new in this ticket and both are
+chrome around a control the athlete can already see. A general contrast sweep
+of `settings.tsx` is a different ticket.
+
+**The guard is a rendered-colour assertion, not a token assertion**
+(`components/__tests__/hrPairingContrast.test.tsx`). It renders the block,
+flattens each substantive node's style, and asserts `contrastRatio(ink, ground)
+>= 4.5` for both `bg` and `surface` — so a future paragraph that reaches for
+`styles.muted` fails, which a doc comment demonstrably cannot achieve: this
+exact reasoning had already been written out twice in this one file (W20's
+`foundDetail`, N552's `pathHeadline`) and the next paragraph added went dim
+anyway. It carries its own apparatus check — that `textDim` really is below
+the floor on both grounds — because a floor nothing can fall below is not a
+floor. Nine mutations, nine killed, green baseline before and after, restore
+confirmed by re-running rather than by grepping.
+
+**Two `[suggestion]`s, both taken.** First: `hrPathDetail`'s `'nothing'` branch
+told the athlete to *"switch `<store>` sync on above"* — at a `<Toggle>`
+rendered `disabled` with "Not available on this device" whenever there is no
+store at all. That is this ticket's own failure mode, one block down: telling
+somebody to do what the same screen has just said they cannot. Guarded on
+`healthSource === null`, which is safe from a flash-and-correct because
+Settings computes it synchronously from `isHealthKitSupported()`. Second:
+`BROADCAST_STEPS` asserts menu paths inside five third-party apps this repo
+does not ship and cannot watch; `BROADCAST_RULE` now closes by saying the paths
+are where each app kept the setting *when this was written* and to look for
+anything called "broadcast" if they have moved. Nothing in this suite can
+notice a vendor menu change — a test asserting "Toolbox → Heart Rate
+Broadcast" only asserts that we still say it — so the hedge is the honest
+version and is itself guarded.
+
+### One residual the review opened, deliberately not closed here
+
+**On Android the "switch sync on above" sentence can still point at a disabled
+toggle.** `healthSourceFor` returns `'health_connect'` unconditionally for
+Android, so a phone with no Health Connect available still reads as having a
+store. Closing it needs Settings to distinguish *not yet checked* from *not
+available* — `healthConnectSupported` starts `false` and resolves async — and a
+naive guard on it would trade one wrong sentence for a wrong sentence that
+flashes and then corrects itself, which is precisely the monotonic-screen rule
+`healthProbeSettled` exists in this same module to honour. Recorded in
+`hrPath.ts` next to the guard that does land, and worth its own ticket rather
+than a widened guard here.
+
 ## Open items / known gaps as of this entry
 
 

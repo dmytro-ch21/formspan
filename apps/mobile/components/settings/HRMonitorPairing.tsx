@@ -267,17 +267,17 @@ export function HRMonitorPairing({
           <Text style={styles.pathHeadline} testID={`${testID}-path-headline`}>
             {hrPathHeadline(path, pathInput)}
           </Text>
-          <Text style={styles.muted} testID={`${testID}-path-detail`}>
+          <Text style={styles.bodyCopy} testID={`${testID}-path-detail`}>
             {hrPathDetail(path, pathInput)}
           </Text>
         </>
       )}
       {healthPathTip(path) != null && (
-        <Text style={styles.muted} testID={`${testID}-health-tip`}>
+        <Text style={styles.bodyCopy} testID={`${testID}-health-tip`}>
           {healthPathTip(path)}
         </Text>
       )}
-      <Text style={styles.muted} testID={`${testID}-non-broadcasting`}>
+      <Text style={styles.bodyCopy} testID={`${testID}-non-broadcasting`}>
         {nonBroadcastingNote(sourceLabel)}
       </Text>
     </RNView>
@@ -292,7 +292,9 @@ export function HRMonitorPairing({
             build was told, which read as "heart rate is off" rather than as
             "one of the two routes is". The path block above says what they
             actually have. */}
-        <Text style={styles.muted}>Bluetooth isn&apos;t available in this build, so the live path is not an option here.</Text>
+        <Text style={styles.bodyCopy} testID={`${testID}-no-bluetooth`}>
+          Bluetooth isn&apos;t available in this build, so the live path is not an option here.
+        </Text>
       </RNView>
     );
   }
@@ -393,9 +395,9 @@ export function HRMonitorPairing({
       </Pressable>
       {showBroadcastHelp && (
         <RNView style={styles.help} testID={`${testID}-broadcast-help`}>
-          <Text style={styles.muted}>{BROADCAST_RULE}</Text>
+          <Text style={styles.bodyCopy} testID={`${testID}-broadcast-rule`}>{BROADCAST_RULE}</Text>
           {BROADCAST_STEPS.map((step) => (
-            <Text key={step.device} style={styles.muted}>
+            <Text key={step.device} style={styles.bodyCopy} testID={`${testID}-broadcast-step`}>
               <Text style={styles.helpDevice}>{step.device}</Text>
               {` — ${step.how}`}
             </Text>
@@ -412,17 +414,40 @@ const styles = StyleSheet.create({
   subLabel: { fontSize: 13, fontWeight: '600', color: vola.text, marginTop: 4 },
   pathBlock: { gap: 6 },
   /**
-   * `textMuted`, not the `textDim` the surrounding prose uses — same
-   * reasoning as `foundDetail` below. This is the one line that answers the
-   * question the athlete came to this screen with, so it is information
-   * rather than chrome: measured against `vola.bg`, `textDim` is 3.96:1
-   * (under the 4.5:1 body-text floor) and `textMuted` is 7.38:1.
+   * The one line that answers the question the athlete came to this screen
+   * with. It is set apart from the paragraph under it by SIZE and WEIGHT,
+   * not by ink — both are `textMuted`, because both are above the 4.5:1
+   * floor and hierarchy built out of an unreadable second tier is not
+   * hierarchy. See `bodyCopy` below for the measurements.
    */
   pathHeadline: { fontSize: 13, fontWeight: '600', color: vola.textMuted, lineHeight: 18 },
   disclosure: { fontSize: 13, fontWeight: '600', color: vola.text, paddingVertical: 4 },
   help: { gap: 8, paddingBottom: 4 },
   helpDevice: { fontWeight: '600', color: vola.textMuted },
   muted: { fontSize: 12, color: vola.textDim, lineHeight: 17 },
+  /**
+   * The prose an athlete has to READ, as opposed to the chrome around it.
+   * Identical metrics to `muted` — only the ink differs, because the
+   * difference being made here is legibility and not hierarchy.
+   *
+   * Measured against `vola.bg` (`#080B12`): `textDim` is 3.96:1, under the
+   * 4.5:1 floor this file's own palette calls a failure
+   * (`constants/Colors.ts`, the `setDone` note: "drops `textMuted` to 3.98:1,
+   * which fails"); `textMuted` is 7.38:1. Against `surface` (`#10151F`) the
+   * same two are 3.67:1 and 6.85:1, so the verdict does not depend on which
+   * ground the settings row is drawn over.
+   *
+   * **N552/#1021 is the reason this exists as its own style.** That ticket
+   * promoted `pathHeadline` on exactly this reasoning and left the paragraphs
+   * underneath it — the explanation of what to do, the one gesture that
+   * changes the report, the note about wearables that never broadcast, and
+   * the broadcast instructions — at 3.96:1. A Settings block that exists so
+   * an Apple Watch owner stops concluding the app is broken cannot render its
+   * substance below the floor. Anything a reader must actually get through
+   * goes here; a state stub ("No monitor paired.") and the description of a
+   * control they can already see stay on `muted`.
+   */
+  bodyCopy: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
   spinner: { alignSelf: 'flex-start' },
   device: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
   deviceBody: { flex: 1, gap: 2 },

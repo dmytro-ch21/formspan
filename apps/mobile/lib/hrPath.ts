@@ -166,6 +166,33 @@ export function hrPathDetail(state: HRPathState, input: Pick<HRPathInput, 'monit
         `doesn't have permission to read heart rate from it.`
       );
     case 'nothing':
+      // N552 review: "switch ${label} sync on above" pointed at a Toggle that
+      // is rendered `disabled` with "Not available on this device" whenever
+      // this device has no store at all — telling the athlete to do something
+      // the same screen has just said they cannot, which is the exact failure
+      // this ticket exists to end, one block up. `healthSource === null` IS
+      // that case: `healthSourceFor` returns null when HealthKit is not
+      // linked (Simulator, web), and Settings computes it synchronously from
+      // `isHealthKitSupported()`, so this branch cannot flash and correct
+      // itself.
+      //
+      // KNOWN RESIDUAL, deliberately not chased here: on Android
+      // `healthSourceFor` returns 'health_connect' unconditionally, so a
+      // phone with no Health Connect available still reads as having a store
+      // and still gets the "switch it on above" sentence against a disabled
+      // toggle. Closing it needs Settings to distinguish "not yet checked"
+      // from "not available" — `healthConnectSupported` starts `false` and
+      // resolves async — and a naive guard on it would trade one wrong
+      // sentence for a wrong sentence that flashes and then corrects itself,
+      // which is the monotonic-screen rule `healthProbeSettled` above exists
+      // to honour. Worth its own ticket, not a widened guard here.
+      if (input.healthSource === null) {
+        return (
+          `No monitor is paired, and this device has no health store VOLA can read heart rate from, so finished ` +
+          `sessions will have no heart rate, no zones and no training load. Pairing a Bluetooth monitor below is ` +
+          `the only route on this device.`
+        );
+      }
       return (
         `No monitor is paired and VOLA isn't reading from ${label}, so finished sessions will have no heart ` +
         `rate, no zones and no training load. Pair a monitor below, or switch ${label} sync on above.`
@@ -227,11 +254,27 @@ export function nonBroadcastingNote(sourceLabel: string): string {
  * so the athlete's job is to find whatever their watch calls "broadcast",
  * not to find their watch on a list. A device absent from these rows is not
  * unsupported.
+ *
+ * **The menu paths in `BROADCAST_STEPS` below cannot be verified from here,
+ * ever.** Every one of them is a menu inside somebody else's app, changed on
+ * their release schedule, and nothing in this repo's suite can notice when
+ * one moves — a test asserting "Toolbox → Heart Rate Broadcast" only asserts
+ * that we still say it. `BROADCAST_RULE`'s closing sentence is what carries
+ * that honestly to the athlete; keep it if you edit those rows.
  */
 export const BROADCAST_RULE =
   'VOLA reads the standard Bluetooth heart-rate profile, the one every brand speaks — it never checks which ' +
   'watch or strap it is. So the only question is whether yours broadcasts. Most watches call the setting ' +
-  '"broadcast heart rate", and many only broadcast while a workout is running on the watch itself.';
+  '"broadcast heart rate", and many only broadcast while a workout is running on the watch itself. ' +
+  // N552 review: the rows below assert menu paths inside apps this repo does
+  // not ship and cannot watch. Vendors move them between releases without
+  // telling anyone, so stating them as current fact is claiming more than
+  // the app can know — and an athlete who cannot find the named menu item
+  // concludes their watch is unsupported, which is the misreading this whole
+  // block exists to prevent. Hedged once, here, rather than per row: the
+  // rule is what to look for; the rows are where it was last seen.
+  'The paths below are where each app kept that setting when this was written — they move between app ' +
+  'updates, so if yours does not match, look for anything called "broadcast".';
 
 export type BroadcastStep = { device: string; how: string };
 

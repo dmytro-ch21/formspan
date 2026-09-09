@@ -22235,3 +22235,33 @@ nothing about a device that can never appear in one.
   strap, wear a watch, or make Apple Health hold real samples.
 - **Whether the path block is legible on a phone** — it is the longest block of
   prose in Settings, and its whole value is that somebody reads it.
+
+### Review pass — legibility and copy that points at a real control (#1021)
+
+20. **Every substantive line in the heart-rate block clears 4.5:1.** The path
+    headline and detail, the health-path tip, the non-broadcasting note, the
+    broadcast rule and every per-device step, on both the `bg` and `surface`
+    grounds. Covered mechanically by
+    `components/__tests__/hrPairingContrast.test.tsx`, which asserts the
+    RENDERED ink rather than the token name — the regression to guard is a new
+    paragraph reaching for `styles.muted`, not the palette changing.
+21. **A device with no health store is never told to switch one on.** On a
+    build where HealthKit is not linked (Simulator, web) the toggle above the
+    block is `disabled` with "Not available on this device"; the copy must say
+    pairing a monitor is the only route here, and must not contain "sync on
+    above".
+22. **With a store present, the same copy still points at the switch** — the
+    guard above must not have removed the useful half.
+23. **The broadcast steps read as "where it was last seen", not as fact.** The
+    rule closes by saying the paths move between app updates and to look for
+    anything called "broadcast". A vendor renaming a menu must not read to the
+    athlete as their watch being unsupported.
+
+### Still not reachable by any automated check (added by the review pass)
+
+- **Whether 7.38:1 at 12px is actually comfortable on a phone in daylight.**
+  The ratio is arithmetic; legibility is not. The floor being met is a
+  necessary condition, not the answer to the question the device check asks.
+- **The Android case where Health Connect is unavailable.** The copy can still
+  point at a disabled toggle there — see the residual recorded in
+  `lib/hrPath.ts` and in `docs/decisions/history.md`.
