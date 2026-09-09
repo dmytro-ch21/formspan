@@ -65985,6 +65985,52 @@ out of the sync payload — it is local view state, owed to nobody.
   cannot rename a key" is a claim that reads as obviously true and was false
   twice in one ticket. Write the circuit down and run it.
 
+## 2026-09-09 — a "web-and-admin" dependency PR was bumping React inside the Expo app (#928)
+
+Dependabot's #928, titled *"Bump the web-and-admin-dependencies group"*, also
+edited `apps/mobile/package.json`: `react` and `react-dom` `19.2.3 → 19.2.8`,
+`@types/react` `~19.2.2 → ~19.2.18`, `@clerk/clerk-expo` `^2.19.31 → ^2.20.0`.
+
+**Expo SDK 57 pins React at 19.2.3**, so this failed `check-expo-compat` —
+correctly, and that is the check that exists because of the 2026-08-09 `dyld`
+symbol-not-found abort which killed every installed build before any JS ran.
+The PR was doing the one thing that check is there to prevent, under a title
+saying it touched neither app.
+
+**Root cause is in `.github/dependabot.yml`, and it is a reasoning error rather
+than a typo.** `apps/web`, `apps/mobile` and `apps/admin` are one pnpm
+workspace with a single root `pnpm-lock.yaml`, so Dependabot has exactly one
+npm entry for all three and groups can only match **package names**, never
+directories. The config knows this and says so — then bridges the gap with an
+assumption written into its own comment: *"mobile (Expo/React Native)
+dependencies are named distinctly enough from web/admin's (Next.js) that a
+name-pattern group reaches the same separation"*.
+
+That assumption is false for precisely the packages both apps share.
+`web-and-admin-dependencies` patterns `react`, `react-dom`, `@types/react` and
+`@clerk/*`; `mobile-dependencies` patterns only `expo*`, `@expo/*`,
+`react-native*` and `@react-native*`. So mobile's React — the version the Expo
+SDK dictates — falls through the mobile group and lands in the web/admin one,
+every time, by design. `@clerk/clerk-expo` matches `@clerk/*` the same way.
+
+**Resolution here**: `apps/mobile/package.json` restored to `main`, so the PR
+became what its title always claimed — `apps/web` and `apps/admin` only.
+`verify` green, 316 suites. The mobile React bump is not merely deferred, it is
+**wrong**: mobile React follows `expo install --fix` and the SDK's pin, not
+Dependabot.
+
+**Two things worth carrying forward.** The lockfile conflict this started as
+was the least of it — `git rebase` resolved it textually with no conflict at
+all, `pnpm install` produced zero drift, and the branch was still broken. A
+clean merge said nothing about whether the result was coherent; only running
+the check did. And the PR's *title* was the misleading part: a grouped
+dependency PR is named after its group, and the group is a name pattern, so
+the title describes which patterns matched — never which apps changed. Read
+`--name-only` before believing any grouped bump's scope.
+
+Config fix tracked separately; it needs a decision (ignore `react`/`react-dom`
+for the whole workspace, or split the entry) rather than an edit in passing.
+
 ## Open items / known gaps as of this entry
 
 
