@@ -66640,6 +66640,226 @@ collects.
   a three-row list should be the searchable history or the calendar the athlete
   currently uses is a judgement nobody has ruled on.
 
+## 2026-09-09 — W19 (#985): a session reported PRE-CLASS background heart rate as its result, and could never correct itself
+
+`apps/mobile/lib/biometric.ts`, `lib/hrWorkoutWindow.ts` (new), `lib/biometricSync.ts`,
+`lib/healthConnectSync.ts`, `lib/healthkit.ts`, `lib/healthConnect.ts`,
+`lib/sessionStore.ts`, `lib/db.ts` (schema 40 → 41).
+
+### What the athlete saw, and what was actually in the data
+
+A 90-minute BJJ class on 2026-09-08. The Amazfit Helio Strap recorded **1:27:43,
+avg 126 bpm, max 185, 684 kcal**. VOLA reported **avg 104, max 125, training load
+14**, with about 13 minutes attributed to any zone at all. Their words: *"Very off
+with the hr … fix it asap so it is reliable."*
+
+Measured against staging the same evening, not inferred. Session `28d61d67`,
+window **18:41:48 → 20:11:48** — `ended_at = started_at + 90m` to the
+millisecond, which is what a post-hoc log produces. Zepp's own record of the
+class: **19:19 → 20:47**. `biometric_samples` for the logged window: **469 rows,
+all between 18:41 and 19:18**, one per minute of passive background HR with an
+eight-minute burst of workout-grade 1/s sampling in the middle, and then nothing
+at all for the window's last 53 minutes. The class itself — where the 185 lives
+— was not in Apple Health when VOLA asked, and still was not two hours later.
+
+So the report was computed almost entirely from heart rate recorded while the
+athlete stood around before class.
+
+### Three defects, and the first is the one that made it permanent
+
+**1. A thin result was treated as final.** `needsEnrichmentAttempt` opened with
+`if (ledgerEntry.hrSource === 'window') return false` — "real evidence found,
+never retry" — and `sessionsNeedingBiometricSync` enforced the same thing a
+second time in SQL. VOLA found 469 background samples, recorded `'window'`, and
+would never have re-examined that session. W18 (#957) had just made the retry
+cadence fast for `'none'` and left this case untouched: the failure W18 was built
+for arrived as a **false positive** instead of an absence, and walked straight
+past it.
+
+**2. The window was what the athlete typed, not when they trained.** 18:41 is 38
+minutes before the class started; 20:11 is 36 minutes before it ended. Even with
+perfect data that averages in half an hour of standing around and drops the
+hardest final stretch.
+
+**3. Widening symmetrically would have made it worse.** The athlete's own
+suggestion was ±20 minutes, and it is the right instinct about the *fallback* and
+wrong on its own: the missing data was **absent**, not out of range, and padding
+the START pulls in more rest, dragging the average further down. Padding has to
+be paired with fitting, never with averaging.
+
+### The coverage rule — `hrSampleCoverage`, in `lib/biometric.ts`
+
+One question: *do the samples this result was computed from plausibly cover the
+session at all?* Not a quality score, not a confidence. Two independent bars,
+because the incident breaks both and each catches what the other misses:
+
+- **`HR_COVERAGE_MIN_FRACTION` (0.75)** — covered time over window length. The
+  incident measured **0.48**. Deliberately not 0.5, where the incident would have
+  squeaked past on this bar alone: a rule whose two halves have to rescue each
+  other on the case it was built for is not a rule.
+- **`HR_COVERAGE_MAX_TRAILING_GAP_MS` (10 minutes)** — how long after the last
+  reading the window may still run. The incident: **53 minutes**. This is what
+  catches a recording that stops early while the fraction still looks
+  respectable, and the end of a class is where the max lives.
+- **`HR_COVERAGE_MAX_GAP_MS` (6 minutes)** is not a third threshold but a mirror
+  of `backend/internal/modules/biometric/trimp.go`'s `maxSampleGapForZoneAttribution`,
+  so "covered" here means exactly "time the backend will actually attribute to a
+  zone". A rule measuring coverage more generously than the backend measures
+  minutes would call a result plausible that the report renders as almost no zone
+  time — the incident's other visible symptom (13 minutes of 90).
+
+The stretches from the window's start to the first reading and from the last to
+its end are counted the same capped way. Without that, a short session read at a
+perfectly ordinary cadence scores thin purely because coverage was measured only
+*between* readings.
+
+A `'window'` ledger row is now terminal **only when its coverage is
+`'plausible'`**. Anything else falls through to the identical age-based ladder a
+`'none'` result already gets (W18's `retryCooldownMs`) and is bounded by the same
+`RETRY_WINDOW_DAYS` — a thin result is still a result, not a licence to re-query
+on every foreground return, and it stops being asked about after three days like
+everything else. A densely-read session is terminal after one pass and costs one
+workout query and one heart-rate query, exactly as before.
+
+Schema 41 adds `coverage` to both retry ledgers, backfilled to `'unknown'`, which
+`needsEnrichmentAttempt` treats as **retryable** rather than grandfathered-final.
+That is the same deliberate choice v37 made for `hr_source`, for the same reason
+and with the same self-bounding: only a session whose `ended_at` is recent is
+re-offered at all, so a legitimately-covered session from months ago stays
+excluded, and the athlete's own stuck session gets one honest look on upgrade.
+
+### The window itself — `lib/hrWorkoutWindow.ts`, four sources in order
+
+1. **The watch's own workout.** When the store holds one that plausibly IS this
+   session, its start and end are a *measurement* of when training happened,
+   against typed times that are at best an estimate. `HKWorkoutTypeIdentifier`
+   has been in `READ_TYPES` since N465 and Health Connect's `ExerciseSession` in
+   `READ_RECORD_TYPES` since N479, so this asks for **no new permission and shows
+   no new consent screen on either platform**.
+2. **The session's own logged window** — unchanged, and still the answer for
+   every live-tracked session.
+3. **A ±20-minute padded search, FIT** — the athlete's own number, used as a
+   search window handed to N522's `fitHRWindow`, never as a window whose samples
+   are averaged.
+4. **N522's dated-day search, fit the same way**, for the badly-mistyped case
+   ±20 minutes cannot reach. iOS only, as it always was.
+
+Steps 3 and 4 now also run when the session's own window returned samples that do
+not COVER it — not only when it returned nothing, as before. That is the incident
+exactly. A fit is kept only if what it finds actually covers the session:
+replacing thin evidence with different thin evidence is churn, not a fix.
+
+**Admission and ranking, when several workouts overlap.** Two bars, both
+independent: the candidate must be mostly inside the logged window
+(`WORKOUT_MIN_OVERLAP_FRACTION`, 0.5 — the incident's class scored 0.59) and
+comparable in length to it (`WORKOUT_MIN_DURATION_SIMILARITY`, 0.5, measured as
+shorter-over-longer so one number bounds both directions — the class scored 0.98).
+The second closes two opposite failures the first cannot see at all: a five-minute
+walk sitting entirely inside a 90-minute class passes overlap at a perfect 1.0
+(0.06 here), and an all-day "workout" that engulfs the session does too (0.19
+here). Survivors are then ranked by how much of the two windows' **union** their
+overlap accounts for, which prefers a workout matching the session over one merely
+containing it. If a second survivor scores within `WORKOUT_AMBIGUITY_MARGIN` (0.1,
+mirroring `fitHRWindow`'s own) and does **not** overlap the winner, the whole
+selection declines — two comparably-good, genuinely separate candidates is a coin
+flip presented as a measurement. One that *does* overlap the winner is the same
+event described twice (a phone and a strap both logging the class) and never
+triggers it.
+
+`workoutSearchWindow` is widened at the start by the longest workout the rules
+could ever admit — **derived** from `WORKOUT_MIN_DURATION_SIMILARITY` rather than
+declared, so retuning that constant cannot leave a fourth number silently
+disagreeing with the other three. Both stores filter workouts by when they
+STARTED, so without it a workout that began before the padded window and was still
+running inside it would never come back.
+
+The chosen window travels as `computeSessionMetrics`'s existing `windowOverride`
+(N522's wire shape — no backend change, no contract change), which means N522's
+diagnostic line on the session screen fires here for free: *"Heart rate found
+7:19 PM–8:47 PM (session logged 6:41 PM–8:11 PM)"* whenever the two differ by more
+than `HR_WINDOW_MISMATCH_THRESHOLD_MINUTES`. The session's own `started_at`/
+`ended_at` are never rewritten — heart rate corroborates a session, it never
+replaces what the athlete logged.
+
+### Android parity
+
+`queryExerciseSessionWindows` reads `ExerciseSessionRecord` unfiltered by
+`exerciseType`, the way `queryWorkoutWindows` reads HealthKit workouts unfiltered
+by `workoutActivityType`: a BJJ class is recorded as strength training, martial
+arts, kickboxing or "other" depending entirely on which tile the athlete tapped,
+so enumerating the list would be a guess that fails silently for everyone who
+tapped something else — and the activity type does not help answer the question
+being asked, which is decided from times alone. A **refused** `ExerciseSession`
+grant throws rather than reading as "no workout" (W15/#944), so it reaches
+`noteIfRefused` and is reported exactly like a refused HeartRate read. Android
+gets steps 1–3; step 4 (the dated-day search) never shipped there and is left
+alone rather than folded in silently — Health Connect's own 30-day history wall
+already bounds Android more tightly, and widening it further is a separate
+decision with its own cost.
+
+### Verification
+
+**21 mutations, 21 killed, with a green 168/168 baseline immediately before and
+after, and each mutation confirmed present on disk before its run was believed.**
+
+**The first version of the coverage tests killed only 15 of 21, and the six
+survivors are the interesting part.** Those tests derived the fixture from the
+constant under test — a 100-minute window whose hole size was computed as
+`D * (1 - HR_COVERAGE_MIN_FRACTION) + HR_COVERAGE_MAX_GAP_MS`. It reads
+beautifully and it cannot fail: mutate the constant and the fixture moves with
+it, so the assertion holds against the mutated rule. All three coverage
+constants survived in **both** directions, at 166/166 green. This is CLAUDE.md's
+"Verify that a check can fail" landing on a test suite written by somebody who
+had just read that section. Every boundary fixture is now a literal with the
+arithmetic spelled out in its comment, and the six became six kills.
+
+The killed set, by name: `HR_COVERAGE_MIN_FRACTION` 0.75→0.76 and →0.74;
+`HR_COVERAGE_MAX_TRAILING_GAP_MS` 10→9 and →11 minutes; `HR_COVERAGE_MAX_GAP_MS`
+6→5 and →7 minutes; the fraction comparison `>=`→`>`; the trailing-gap comparison
+`>`→`>=`; the terminal rule reverted to its pre-W19 form (5 tests red, including
+the end-to-end incident reproduction); `'unknown'` grandfathered as final; a
+zero-length window answering `'thin'`; the head and the tail each stopped
+contributing; `WORKOUT_MIN_OVERLAP_FRACTION` 0.5→0.51 and →0.4;
+`WORKOUT_MIN_DURATION_SIMILARITY` 0.5→0.51 and →0.05; each of the two admission
+bars removed outright; the ambiguity check removed; and ranking by start time
+instead of by score.
+
+Beyond the pure rules, `biometricSync.test.ts` and `healthConnectSync.test.ts`
+run the whole thing against the **real** SQLite ledgers: the incident recorded as
+thin and still listed by `sessionsNeedingBiometricSync`; the class picked up on a
+later pass once the strap has written it, with the watch's own window sent as the
+override and only THEN going terminal; a workout the store knows about but holds
+no heart rate for, falling through after being asked; the ±20-minute padded fit
+landing on the training rather than on the logged start; and the ordinary
+densely-covered session terminal after one pass with exactly one heart-rate query.
+
+Four existing tests changed rather than being added to, and each one is worth
+naming because the change is the behaviour change: three used one or two readings
+as a stand-in for "real evidence exists", which is no longer the same thing, and
+now build dense evidence instead; and `needsEnrichmentAttempt`'s own terminal test
+used a session nine days old, so `RETRY_WINDOW_DAYS` was making it false
+regardless — it could not have failed if the terminal rule had been deleted
+outright. It now uses a two-hour-old session.
+
+One test-harness bug found on the way: a `describe`-level `mockImplementation`
+leaks into every test declared after it, because `mockClear` resets calls and not
+implementations. Two unrelated Health Connect tests failed on it. The default
+implementation is now re-applied in the file-level `beforeEach`.
+
+### Open
+
+- **Coverage measures presence, not correctness.** A watch worn continuously
+  across a logged window that is simply the wrong 90 minutes answers
+  `'plausible'`, and steps 3 and 4 never run for it. The workout window (step 1)
+  is what catches that case, and there is no fallback when the store holds no
+  workout AND the readings are continuous. Nothing observed yet; noted because
+  the rule's shape makes it reachable.
+- **The thresholds are reasoned from one incident.** 0.75 and 10 minutes are
+  argued in their own doc comments and pinned by literal-fixture tests, but the
+  only real-world measurement behind them is this one class.
+- **NEEDS HUMAN EVIDENCE, latched on #985**: the numbers landing within a few bpm
+  of Zepp's, on the 16 Pro Max with the Amazfit, after a real class.
+
 ## Open items / known gaps as of this entry
 
 

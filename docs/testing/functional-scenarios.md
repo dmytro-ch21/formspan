@@ -21950,3 +21950,65 @@ Today already counted the day's sessions and offered no way to open one.
   day rather than as a second list stapled under the first.
 - A heavy day with three logged sessions: `LATER` and `DAILY PROGRESS` are still
   reachable without the screen feeling like a report.
+
+## W19 (#985) — the heart-rate window a session is actually read from
+
+The incident: a 90-minute class logged 18:41:48 → 20:11:48 whose heart rate
+Apple Health only held for the first 37 minutes, because the strap's companion
+app had not written the class (19:19 → 20:47) yet. VOLA reported avg 104 / max
+125 against the strap's own avg 126 / max 185, recorded `hr_source: 'window'`,
+and — because that was terminal — could never have corrected itself.
+
+### Happy path
+
+- A session whose logged window is read densely by the watch reports the same
+  avg/max it always did, is enriched on the first pass, and is never re-queried
+  afterwards. Exactly one heart-rate query and one workout query for it.
+- A session the watch ALSO recorded as its own workout reports the workout's
+  numbers, and the session screen carries N522's diagnostic line naming both
+  windows ("Heart rate found 7:19 PM–8:47 PM (session logged 6:41 PM–8:11 PM)")
+  whenever they differ by more than ten minutes.
+- A post-hoc-logged session whose typed start is up to 20 minutes off still
+  reports the training's own numbers, via the padded search and the fit — not
+  an average that includes the rest either side of it.
+- Android: the same three, driven by Health Connect's `ExerciseSessionRecord`
+  rather than HealthKit's workouts.
+
+### Edge cases and errors
+
+- **The incident itself.** Health holds only pre-class background HR for the
+  logged window. The session is still enriched (a thin result is recorded, not
+  refused), and it stays retryable: a later pass, after the strap syncs, picks
+  the class up and the report changes to the class's own numbers.
+- A session whose evidence stays thin for three days stops being retried
+  (`RETRY_WINDOW_DAYS`) rather than re-querying forever.
+- The store knows a workout but holds no heart rate inside it — the workout
+  window is asked about and then abandoned; the session's own window is used.
+- Two comparably-good, non-overlapping workouts overlap the session (a run
+  before, a class after): neither is chosen, and the fallback path runs.
+- One class recorded twice, by a phone and by a strap, a couple of minutes
+  apart: one of them is chosen, and the same one on every later pass.
+- A five-minute walk sitting entirely inside a logged class, and an all-day
+  "workout" engulfing it: neither is mistaken for the session.
+- Upgrading a device that already enriched the incident's session under the old
+  rule: that session is offered one more look rather than staying wrong.
+- **Android, refused grant**: `ExerciseSession` read refused in Health Connect
+  settings — reported as not-permitted, never reported as "the watch knows no
+  workout", and the ledger is left untouched so a later grant picks it up.
+- **Sync heart rate** (the session screen's button, W18) still bypasses the
+  cadence and the terminal rule both, and now recomputes the window as well —
+  it is the manual path for a session that is already wrong.
+
+### Needs a device — NEEDS HUMAN EVIDENCE (latched on #985)
+
+- Take a BJJ class with the Amazfit on. Log it in VOLA with deliberately sloppy
+  start/end times. Once Zepp has synced, the session's avg and max land within
+  a few bpm of what Zepp shows for the same class — not the numbers for the
+  half-hour of standing around before it.
+- The same session's report shows the "Heart rate found …" line naming the
+  window it actually used, and the session's own logged times are unchanged in
+  the header.
+- A session logged with accurate times, read densely by the watch, shows the
+  same numbers it did before this change and does not gain the diagnostic line.
+- On Android with Health Connect: a class recorded as an exercise session
+  reports that session's window rather than the typed one.

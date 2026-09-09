@@ -465,6 +465,170 @@ export function hrMaxFromDateOfBirth(dateOfBirth: string | null | undefined, on:
 
 // --- retry ledger (pure decisions, N478 + N511) -----------------------
 
+/**
+ * ---------------------------------------------------------------------
+ * W19/#985 — how well a computed result's own evidence covered the window
+ * ---------------------------------------------------------------------
+ *
+ * ## The incident, measured
+ *
+ * A 90-minute BJJ class logged 18:41:48 → 20:11:48. The strap's own record
+ * of that class was 19:19 → 20:47 (avg 126, max 185). Apple Health held
+ * **469 heart-rate samples for the logged window, every one of them between
+ * 18:41 and 19:18** — one per minute of passive background HR, with an
+ * eight-minute burst of workout-grade 1/s sampling in the middle, and then
+ * NOTHING for the window's last 53 minutes. The class itself had not been
+ * written to Apple Health yet, and still had not been two hours later.
+ *
+ * VOLA computed avg 104 / max 125 from that, recorded `hr_source: 'window'`,
+ * and — because `needsEnrichmentAttempt` treated `'window'` as terminal —
+ * would never have looked again. When the strap finally wrote the class,
+ * nothing was left to pick it up. **The result was not merely wrong; it was
+ * permanently wrong**, which is the part the athlete actually pays for.
+ *
+ * ## What this rule decides, and what it deliberately does not
+ *
+ * This asks ONE question: *do the samples this result was computed from
+ * plausibly cover the session at all?* It is not a quality score, not a
+ * confidence, and emphatically not a judgement about the athlete — a real
+ * 90-minute class read from a worn strap answers `'plausible'` on the first
+ * pass and is terminal immediately, exactly as before. It exists so that
+ * "we found SOMETHING" stops being a synonym for "there is nothing left to
+ * find".
+ *
+ * Two independent bars, because the incident's shape breaks both and each
+ * catches a case the other misses:
+ *
+ * 1. **Covered fraction** (`HR_COVERAGE_MIN_FRACTION`) — the incident's
+ *    samples covered ~48% of the logged window. Catches evidence that
+ *    occupies only part of the session, wherever in it that part sits.
+ * 2. **Trailing gap** (`HR_COVERAGE_MAX_TRAILING_GAP_MS`) — the incident's
+ *    last reading was 53 minutes before the window ended. Catches a
+ *    recording that stops early even when the fraction still looks
+ *    respectable, which matters because the end of a class is where the
+ *    hardest rolls (and the max) live.
+ */
+
+/**
+ * The longest gap between two readings that still counts as covered time —
+ * 6 minutes. **Not a threshold this file gets to tune**: it mirrors
+ * `backend/internal/modules/biometric/trimp.go`'s own
+ * `maxSampleGapForZoneAttribution` exactly, so "covered" here means
+ * precisely "time the backend will actually attribute to a zone". A rule
+ * that measured coverage more generously than the backend measures minutes
+ * would call a result plausible that the report itself renders as almost no
+ * zone time at all — which is the incident's other visible symptom (13
+ * minutes attributed out of 90).
+ *
+ * `lib/hrWindowFit.ts`'s `HR_FIT_MAX_GAP_MS` is the same number for the same
+ * reason, declared separately because that module imports only a TYPE from
+ * this one and adding a value import would close an import cycle.
+ */
+export const HR_COVERAGE_MAX_GAP_MS = 6 * 60_000;
+
+/**
+ * The minimum share of a session's window that must be covered for its
+ * result to be treated as final — 0.75.
+ *
+ * A worn strap answers essentially 1.0: it writes continuously, and every
+ * inter-reading gap is far under `HR_COVERAGE_MAX_GAP_MS`. Three quarters
+ * leaves real room for an honest dropout — a strap re-seated mid-class, a
+ * companion app that batched one stretch late — without accepting a number
+ * computed mostly from outside the training. The incident measured 0.48
+ * against this bar.
+ *
+ * Deliberately not higher: a session is terminal once it passes, and an
+ * over-strict bar spends real battery re-reading Health for sessions whose
+ * data is simply never going to improve. Deliberately not lower: at 0.5 the
+ * incident itself would have squeaked past on this bar alone (its trailing
+ * gap would still have caught it, but a rule whose two bars have to rescue
+ * each other on the very case it was built for is not a rule).
+ */
+export const HR_COVERAGE_MIN_FRACTION = 0.75;
+
+/**
+ * How long after the last reading a window may still run and be treated as
+ * covered — 10 minutes.
+ *
+ * Above `HR_COVERAGE_MAX_GAP_MS` on purpose: a gap the backend already
+ * declines to attribute is not by itself evidence the recording STOPPED,
+ * and one skipped attribution interval at the end of a session is ordinary.
+ * Ten minutes is not — it is long enough that the athlete was still training
+ * with nothing recording it, which is exactly the incident (53 minutes), and
+ * it matches `lib/hrSessionReport.ts`'s own
+ * `HR_WINDOW_MISMATCH_THRESHOLD_MINUTES` reasoning about what is comfortably
+ * above ordinary clock noise.
+ */
+export const HR_COVERAGE_MAX_TRAILING_GAP_MS = 10 * 60_000;
+
+/** `'plausible'` — the evidence covered the window, nothing left to wait
+ *  for. `'thin'` — it did not, so the session stays retryable. `'unknown'`
+ *  — a ledger row from before W19/#985, which is treated as `'thin'` for
+ *  retry purposes (see `needsEnrichmentAttempt`) rather than grandfathered
+ *  in as final, because a row written under the old rule is exactly the row
+ *  that may be holding the incident. */
+export type HRCoverage = 'plausible' | 'thin' | 'unknown';
+
+/**
+ * Whether `sampleTimesISO` plausibly covers `[windowStart, windowEnd]` —
+ * pure, so the whole "is this result final" decision is testable without a
+ * device, a network or a health store. See this section's own doc comment
+ * for the incident and both bars.
+ *
+ * Covered time is summed the way the backend attributes zone minutes: each
+ * interval between consecutive readings counts for at most
+ * `HR_COVERAGE_MAX_GAP_MS`. The stretches from the window's start to the
+ * first reading and from the last reading to its end are counted the same
+ * capped way — a reading 30 seconds into a window covers that 30 seconds,
+ * and without this a short session read at a perfectly ordinary cadence
+ * would score as thin purely because coverage was measured only BETWEEN
+ * readings.
+ *
+ * A window of zero (or negative) length is `'plausible'`: there is no
+ * session there to under-cover, and answering `'thin'` would make such a
+ * row retry for `RETRY_WINDOW_DAYS` while never being able to improve.
+ * Zero readings is `'thin'` — but note the caller reaching that case has an
+ * `hr_source: 'none'` result anyway, which was always retryable.
+ */
+export function hrSampleCoverage(
+  windowStart: string | Date,
+  windowEnd: string | Date,
+  sampleTimesISO: readonly string[],
+): Exclude<HRCoverage, 'unknown'> {
+  const startMs = new Date(windowStart).getTime();
+  const endMs = new Date(windowEnd).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 'thin';
+  const durationMs = endMs - startMs;
+  if (durationMs <= 0) return 'plausible';
+
+  const times = sampleTimesISO
+    .map((t) => new Date(t).getTime())
+    .filter((t) => Number.isFinite(t) && t >= startMs && t <= endMs)
+    .sort((a, b) => a - b);
+  if (times.length === 0) return 'thin';
+
+  const last = times[times.length - 1];
+  if (endMs - last > HR_COVERAGE_MAX_TRAILING_GAP_MS) return 'thin';
+
+  let covered = Math.min(times[0] - startMs, HR_COVERAGE_MAX_GAP_MS);
+  for (let i = 0; i + 1 < times.length; i++) {
+    covered += Math.min(times[i + 1] - times[i], HR_COVERAGE_MAX_GAP_MS);
+  }
+  covered += Math.min(endMs - last, HR_COVERAGE_MAX_GAP_MS);
+
+  return covered / durationMs >= HR_COVERAGE_MIN_FRACTION ? 'plausible' : 'thin';
+}
+
+/** Reads whatever a ledger column holds into the closed `HRCoverage`
+ *  vocabulary — anything unrecognised, including the `'unknown'` default a
+ *  pre-W19 row backfills to, reads as `'unknown'` and therefore retries. */
+export function coverageFromLedger(raw: string | null | undefined): HRCoverage {
+  if (raw === 'plausible') return 'plausible';
+  if (raw === 'thin') return 'thin';
+  return 'unknown';
+}
+
+
 /** What this device already knows about one session's enrichment attempt —
  *  the local ledger row (`lib/db.ts`'s `health_connect_enrichment` table on
  *  Android, `biometric_hr_synced` on iOS as of N511/#893 — both the same
@@ -472,11 +636,18 @@ export function hrMaxFromDateOfBirth(dateOfBirth: string | null | undefined, on:
  *  `needsEnrichmentAttempt` below, are the shared decision both platforms
  *  make from it; only the SQL reading/writing the row differs. */
 export type EnrichmentLedgerEntry = {
-  /** `'window'` once real evidence has been found and stored — a session
-   *  never needs retrying past that point. `'none'` means the last attempt
-   *  found zero samples; see `needsEnrichmentAttempt` for the retry
-   *  window. */
+  /** `'window'` once the server computed a result from real samples.
+   *  `'none'` means the last attempt found zero samples; see
+   *  `needsEnrichmentAttempt` for the retry window.
+   *
+   *  **No longer terminal on its own, as of W19/#985** — see `coverage`. */
   hrSource: 'window' | 'none';
+  /** How well the samples behind that result actually covered the window
+   *  they were read from — `hrSampleCoverage`, recorded by each platform's
+   *  orchestrator at the moment it read them. `undefined` for a row written
+   *  before W19/#985 existed, which reads as `'unknown'` and is deliberately
+   *  RETRYABLE: see `needsEnrichmentAttempt`. */
+  coverage?: HRCoverage;
   /** RFC3339, when the last attempt ran. */
   attemptedAt: string;
 };
@@ -558,7 +729,13 @@ export function needsEnrichmentAttempt(
 ): boolean {
   if (!session.endedAt) return false;
   if (!ledgerEntry) return true;
-  if (ledgerEntry.hrSource === 'window') return false;
+  // W19/#985: a `'window'` result is terminal only when the samples behind
+  // it plausibly covered the session. `'thin'` — and `'unknown'`, the shape
+  // every row written before W19 has — falls through to exactly the same
+  // age-based ladder a `'none'` result gets, and is bounded by the same
+  // `RETRY_WINDOW_DAYS`. See `hrSampleCoverage` for the rule and for the
+  // incident that produced it.
+  if (ledgerEntry.hrSource === 'window' && ledgerEntry.coverage === 'plausible') return false;
 
   const endedMs = new Date(session.endedAt).getTime();
   if (!Number.isFinite(endedMs)) return false;

@@ -1,3 +1,4 @@
+import type { WorkoutWindow } from './hrWorkoutWindow';
 import {
   averagePaceSecPerKm,
   elevationGainMeters,
@@ -521,6 +522,44 @@ export async function queryVO2MaxSamples(sinceDate: Date): Promise<HealthKitQuan
   } catch {
     return [];
   }
+}
+
+/**
+ * Every workout HealthKit holds that STARTED inside `[start, end]`, reduced
+ * to its own start and end — W19/#985.
+ *
+ * Deliberately unfiltered by `workoutActivityType`, unlike both queries
+ * above: this is not "did the athlete do a run/walk/hike", it is "does the
+ * watch know when this session actually happened", and a BJJ class is
+ * recorded as `traditionalStrengthTraining`, `martialArts`, `kickboxing`,
+ * `functionalStrengthTraining` or `other` depending entirely on which tile
+ * the athlete tapped on which device. Enumerating that list would be a
+ * guess that fails silently for everyone who tapped something else, and the
+ * caller (`lib/hrWorkoutWindow.ts`'s `selectWorkoutWindow`) already decides
+ * whether a candidate plausibly IS this session, from times alone — which
+ * is a question the activity type does not help answer.
+ *
+ * Needs no new authorization: `HKWorkoutTypeIdentifier` has been in
+ * `READ_TYPES` since N465, so this reads what the athlete has already
+ * granted and shows no new consent screen.
+ *
+ * Returns `[]`, never throws, on any native failure — the same posture as
+ * every other query in this file. A caller that gets `[]` falls back to the
+ * session's own window, which is exactly what it did before this existed.
+ */
+export async function queryWorkoutWindows(start: Date, end: Date): Promise<WorkoutWindow[]> {
+  if (!hk) return [];
+  let workouts: readonly NativeWorkout[];
+  try {
+    workouts = await hk.queryWorkoutSamples({
+      filter: { date: { startDate: start, endDate: end } },
+      limit: QUERY_LIMIT,
+      ascending: false,
+    });
+  } catch {
+    return [];
+  }
+  return workouts.map((w) => ({ start: w.startDate.toISOString(), end: w.endDate.toISOString() }));
 }
 
 /**

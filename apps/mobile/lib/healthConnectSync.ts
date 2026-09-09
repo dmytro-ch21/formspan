@@ -2,12 +2,15 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import {
   computeSessionMetrics,
+  coverageFromLedger,
   hrMaxFromDateOfBirth,
+  hrSampleCoverage,
   putBiometricSamples,
   selectEnrichmentCandidates,
   type BiometricSample,
   type EnrichmentCandidate,
   type EnrichmentLedgerEntry,
+  type HRCoverage,
 } from './biometric';
 import { getDb } from './db';
 import { upsertDetectedActivities, DETECTED_ACTIVITY_WINDOW_DAYS } from './detectedActivity';
@@ -15,13 +18,17 @@ import {
   isHealthConnectSupported,
   HealthConnectPermissionError,
   type HealthConnectRecordType,
+  queryExerciseSessionWindows,
   queryHeartRateSamples,
   queryOtherExerciseSessions,
   queryVo2MaxReadings,
   requestHealthConnectReadAuthorization,
   sourceFromDataOrigin,
+  type HeartRateReading,
 } from './healthConnect';
 import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
+import { fitHRWindow } from './hrWindowFit';
+import { paddedHRSearchWindow, selectWorkoutWindow, workoutSearchWindow } from './hrWorkoutWindow';
 import { PREF_HEALTH_CONNECT_IMPORT, readPref, writePref } from './prefs';
 import { getProfile } from './profile';
 import type { TokenGetter } from './useAuthToken';
@@ -103,12 +110,12 @@ async function candidateSessions(userID: string, now: Date): Promise<EnrichmentC
   return rows.map((r) => ({ id: r.id, startedAt: r.started_at, endedAt: r.ended_at }));
 }
 
-type LedgerRow = { session_id: string; hr_source: string; attempted_at: string };
+type LedgerRow = { session_id: string; hr_source: string; attempted_at: string; coverage: string | null };
 
 async function readLedger(userID: string): Promise<Map<string, EnrichmentLedgerEntry>> {
   const db = await getDb();
   const rows = await db.getAllAsync<LedgerRow>(
-    `SELECT session_id, hr_source, attempted_at FROM health_connect_enrichment WHERE user_id = ?`,
+    `SELECT session_id, hr_source, attempted_at, coverage FROM health_connect_enrichment WHERE user_id = ?`,
     userID,
   );
   const out = new Map<string, EnrichmentLedgerEntry>();
@@ -118,6 +125,9 @@ async function readLedger(userID: string): Promise<Map<string, EnrichmentLedgerE
     // column that could in principle hold anything.
     out.set(r.session_id, {
       hrSource: r.hr_source === 'window' ? 'window' : 'none',
+      // W19/#985 — 'unknown' for a pre-W19 row, which retries rather than
+      // reading as final. See `lib/biometric.ts`'s `hrSampleCoverage`.
+      coverage: coverageFromLedger(r.coverage),
       attemptedAt: r.attempted_at,
     });
   }
@@ -129,21 +139,24 @@ async function recordAttempt(
   sessionID: string,
   hrSource: 'window' | 'none',
   sampleCount: number,
+  coverage: Exclude<HRCoverage, 'unknown'>,
   now: Date,
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `INSERT INTO health_connect_enrichment (user_id, session_id, hr_source, sample_count, attempted_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO health_connect_enrichment (user_id, session_id, hr_source, sample_count, attempted_at, coverage)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, session_id) DO UPDATE SET
        hr_source = excluded.hr_source,
        sample_count = excluded.sample_count,
-       attempted_at = excluded.attempted_at`,
+       attempted_at = excluded.attempted_at,
+       coverage = excluded.coverage`,
     userID,
     sessionID,
     hrSource,
     sampleCount,
     now.toISOString(),
+    coverage,
   );
 }
 
@@ -391,7 +404,10 @@ async function enrichHealthConnectSession(
   // `endedAt` is guaranteed non-null here — `selectEnrichmentCandidates`
   // only keeps sessions `needsEnrichmentAttempt` already confirmed are
   // finished, and `enrichHealthConnectSessionNow` guards for it itself.
-  const readings = await queryHeartRateSamples(session.startedAt, session.endedAt as string);
+  const { readings, windowOverride, coverage } = await readSessionHR(
+    session.startedAt,
+    session.endedAt as string,
+  );
   if (readings.length > 0) {
     await putBiometricSamples(getToken, readings.map(toHeartRateSample));
   }
@@ -400,7 +416,7 @@ async function enrichHealthConnectSession(
     // No HRmax to compute with (no date of birth on file yet) — samples
     // are still uploaded above for whenever that changes, but there is
     // no server-confirmed 'window' result to record.
-    await recordAttempt(userID, session.id, 'none', readings.length, now);
+    await recordAttempt(userID, session.id, 'none', readings.length, coverage, now);
     return { hrSource: 'none', sampleCount: readings.length };
   }
 
@@ -415,10 +431,109 @@ async function enrichHealthConnectSession(
   // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
   // HRMaxSource doc comment for why nothing in this app produces
   // 'observed' yet.
-  const metrics = await computeSessionMetrics(getToken, session.id, hrMaxBPM, 'estimated', 'window');
+  const metrics = await computeSessionMetrics(
+    getToken,
+    session.id,
+    hrMaxBPM,
+    'estimated',
+    'window',
+    windowOverride,
+  );
   const hrSource = metrics.hr_source === 'window' ? 'window' : 'none';
-  await recordAttempt(userID, session.id, hrSource, metrics.sample_count, now);
+  await recordAttempt(userID, session.id, hrSource, metrics.sample_count, coverage, now);
   return { hrSource, sampleCount: metrics.sample_count };
+}
+
+/**
+ * W19/#985 — the Android twin of `lib/biometricSync.ts`'s `readSessionHR`,
+ * and deliberately the same three steps in the same order: the athlete's
+ * data should not be read from a different window depending on which phone
+ * they own. Read that function's doc comment for the reasoning; this one
+ * records only what differs.
+ *
+ * **What differs is one step, and it is a pre-existing asymmetry rather
+ * than a new one**: N522/#934's dated-day search never shipped on Android,
+ * so this has the workout window (step 1), the session's own window
+ * (step 2) and the ±20-minute padded fit (step 3), but not the fourth
+ * dated-day fallback. Health Connect's own 30-day history wall
+ * (`isWithinHealthConnectHistoryWall`) already bounds what Android can look
+ * at more tightly than iOS, and widening the fallback further is a separate
+ * decision with its own cost, not something to fold into this one silently.
+ *
+ * The workout read is `ExerciseSession`, already granted since N479/#824.
+ * A REFUSED grant throws out of `queryExerciseSessionWindows` rather than
+ * reading as "no workout" (W15/#944) — deliberately not caught here, so it
+ * reaches `syncHealthConnectBiometrics`'s `noteIfRefused` and is reported,
+ * exactly like a refused HeartRate read.
+ */
+async function readSessionHR(
+  startedAt: string,
+  endedAt: string,
+): Promise<{
+  readings: HeartRateReading[];
+  windowOverride: { start: string; end: string } | null;
+  coverage: Exclude<HRCoverage, 'unknown'>;
+}> {
+  const startMs = new Date(startedAt).getTime();
+  const endMs = new Date(endedAt).getTime();
+  const durationMs = endMs - startMs;
+  const coverageOf = (w: { start: string; end: string }, samples: readonly HeartRateReading[]) =>
+    hrSampleCoverage(w.start, w.end, samples.map((r) => r.time));
+
+  // 1. the watch's own exercise session
+  const search = workoutSearchWindow(startedAt, endedAt);
+  const workout = selectWorkoutWindow(
+    startedAt,
+    endedAt,
+    await queryExerciseSessionWindows(search.start.toISOString(), search.end.toISOString()),
+  );
+  if (workout) {
+    const workoutReadings = await queryHeartRateSamples(workout.start, workout.end);
+    if (workoutReadings.length > 0) {
+      return {
+        readings: workoutReadings,
+        windowOverride: workout,
+        coverage: coverageOf(workout, workoutReadings),
+      };
+    }
+  }
+
+  // 2. the session's own logged window
+  const anchor = { start: startedAt, end: endedAt };
+  const exact = await queryHeartRateSamples(startedAt, endedAt);
+  const exactCoverage = coverageOf(anchor, exact);
+  if (exact.length > 0 && exactCoverage === 'plausible') {
+    return { readings: exact, windowOverride: null, coverage: exactCoverage };
+  }
+
+  // 3. a ±20-minute padded search, FIT — never averaged
+  if (durationMs > 0) {
+    const padded = paddedHRSearchWindow(startedAt, endedAt);
+    const searched = await queryHeartRateSamples(padded.start.toISOString(), padded.end.toISOString());
+    const fit = fitHRWindow(
+      searched.map((r) => ({ measuredAt: r.time, bpm: r.beatsPerMinute })),
+      durationMs,
+      anchor,
+    );
+    if (fit) {
+      const fitStartMs = new Date(fit.start).getTime();
+      const fitEndMs = new Date(fit.end).getTime();
+      const fitted = searched.filter((r) => {
+        const t = new Date(r.time).getTime();
+        return t >= fitStartMs && t <= fitEndMs;
+      });
+      const fitCoverage = fitted.length > 0 ? coverageOf(fit, fitted) : 'thin';
+      if (fitted.length > 0 && fitCoverage === 'plausible') {
+        return {
+          readings: fitted,
+          windowOverride: { start: fit.start, end: fit.end },
+          coverage: fitCoverage,
+        };
+      }
+    }
+  }
+
+  return { readings: exact, windowOverride: null, coverage: exactCoverage };
 }
 
 /**

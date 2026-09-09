@@ -37,9 +37,23 @@ let mockSupported = true;
 let mockHeartRateReadings: HeartRateReading[] = [];
 let mockVo2MaxReadings: Vo2MaxReading[] = [];
 const mockRequestAuth = jest.fn().mockResolvedValue(true);
-const mockQueryHeartRate = jest.fn((_startedAt: string, _endedAt: string) =>
-  Promise.resolve(mockHeartRateReadings),
-);
+/** W19/#985 — the same opt-in store the iOS suite uses: when set, every
+ *  heart-rate read is filtered by ITS OWN window, so a test can distinguish
+ *  the workout window from the session's own. Null keeps the pre-W19
+ *  behaviour (every read returns the same list) for every test that predates
+ *  this ticket. */
+let mockHRStore: HeartRateReading[] | null = null;
+const mockQueryHeartRate = jest.fn((startedAt: string, endedAt: string) => {
+  if (!mockHRStore) return Promise.resolve(mockHeartRateReadings);
+  const from = new Date(startedAt).getTime();
+  const to = new Date(endedAt).getTime();
+  return Promise.resolve(
+    mockHRStore.filter((r) => {
+      const t = new Date(r.time).getTime();
+      return t >= from && t <= to;
+    }),
+  );
+});
 const mockQueryVo2Max = jest.fn((_since: string, _until: string) =>
   Promise.resolve(mockVo2MaxReadings),
 );
@@ -53,6 +67,15 @@ const mockQueryExercise = jest.fn((_since: string, _until: string) =>
 /** Same shape for the heart-rate read, so a refused HeartRate grant can be
  *  simulated without disturbing `mockHeartRateReadings`'s happy path. */
 let mockHeartRateRejectsWith: unknown = null;
+/** W19/#985 — what Health Connect's `ExerciseSession` store holds for THIS
+ *  pass's workout-window lookup (a different read from the walk/hike
+ *  detection one above, which stays `mockQueryExercise`). `[]` is "the watch
+ *  knows no workout", the shape every pre-W19 test assumes. */
+let mockExerciseWindows: { start: string; end: string }[] = [];
+let mockExerciseWindowsRejectsWith: unknown = null;
+const mockQueryExerciseWindows = jest.fn((_since: string, _until: string) =>
+  Promise.resolve(mockExerciseWindows),
+);
 jest.mock('../healthConnect', () => {
   const real = jest.requireActual('../healthConnect');
   return {
@@ -65,6 +88,10 @@ jest.mock('../healthConnect', () => {
         : mockQueryHeartRate(startedAt, endedAt),
     queryVo2MaxReadings: (since: string, until: string) => mockQueryVo2Max(since, until),
     queryOtherExerciseSessions: (since: string, until: string) => mockQueryExercise(since, until),
+    queryExerciseSessionWindows: (since: string, until: string) =>
+      mockExerciseWindowsRejectsWith
+        ? Promise.reject(mockExerciseWindowsRejectsWith)
+        : mockQueryExerciseWindows(since, until),
   };
 });
 
@@ -79,7 +106,7 @@ const mockPutSamples = jest.fn((...args: unknown[]) => {
   const samples = args[1] as unknown[];
   return Promise.resolve(samples);
 });
-const mockComputeSessionMetrics = jest.fn((...args: unknown[]) => {
+const defaultComputeSessionMetrics = (...args: unknown[]) => {
   const sessionID = args[1] as string;
   if (mockComputeThrows === sessionID) return Promise.reject(new Error('simulated compute failure'));
   return Promise.resolve({
@@ -99,7 +126,13 @@ const mockComputeSessionMetrics = jest.fn((...args: unknown[]) => {
     rule_version: 1,
     ...mockComputedMetrics,
   } satisfies SessionMetrics);
-});
+};
+/** Re-applied in the file-level `beforeEach` below, because a `describe` that
+ *  installs its own `mockImplementation` would otherwise leak it into every
+ *  test declared after it — `mockClear` resets calls, not implementations.
+ *  W19/#985's own block does exactly that, and two unrelated tests failed on
+ *  it before this was hoisted. */
+const mockComputeSessionMetrics = jest.fn(defaultComputeSessionMetrics);
 jest.mock('../biometric', () => {
   const real = jest.requireActual('../biometric');
   return {
@@ -169,12 +202,139 @@ beforeEach(async () => {
   mockProfileThrows = false;
   mockExerciseRejectsWith = null;
   mockHeartRateRejectsWith = null;
+  mockExerciseWindows = [];
+  mockExerciseWindowsRejectsWith = null;
+  mockHRStore = null;
+  mockQueryExerciseWindows.mockClear();
   mockQueryExercise.mockClear();
   mockRequestAuth.mockClear();
   mockQueryHeartRate.mockClear();
   mockQueryVo2Max.mockClear();
   mockPutSamples.mockClear();
   mockComputeSessionMetrics.mockClear();
+  mockComputeSessionMetrics.mockImplementation(defaultComputeSessionMetrics);
+});
+
+/**
+ * W19/#985 on Android — `ExerciseSessionRecord` is what Health Connect calls
+ * the watch's own workout, and it has been readable since N479/#824, so this
+ * is parity with the iOS side rather than a new permission. Same three
+ * behaviours, same pure decisions (`lib/hrWorkoutWindow.ts`,
+ * `hrSampleCoverage`); only the native boundary differs.
+ */
+describe('syncHealthConnectBiometrics — the watch\'s own window (W19/#985)', () => {
+  const sessionEnd = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const sessionStart = new Date(sessionEnd.getTime() - 90 * 60_000);
+  const offset = (minutes: number) => new Date(sessionStart.getTime() + minutes * 60_000);
+
+  function reading(minute: number, bpm: number): HeartRateReading {
+    return heartRateReading({
+      id: `hc:hr:w19:${minute}`,
+      time: offset(minute).toISOString(),
+      beatsPerMinute: bpm,
+    });
+  }
+
+  async function theSession(id = 'w19') {
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession(id, sessionStart.toISOString(), sessionEnd.toISOString());
+    return id;
+  }
+
+  beforeEach(() => {
+    // The server is authoritative on the result; derive it from what was
+    // actually uploaded so a test does not have to restate it.
+    mockComputeSessionMetrics.mockImplementation((...args: unknown[]) => {
+      const uploaded = (mockPutSamples.mock.calls.at(-1)?.[1] as unknown[] | undefined) ?? [];
+      return Promise.resolve({
+        session_id: args[1] as string,
+        hr_source: uploaded.length > 0 ? 'window' : 'none',
+        sample_count: uploaded.length,
+      } as unknown as SessionMetrics);
+    });
+  });
+
+  it("reads the exercise session's own window when Health Connect knows one, and sends it as the override", async () => {
+    const id = await theSession();
+    // The class really ran 37 minutes after the logged start and 36 past its
+    // end — the incident's own offsets, on the other platform.
+    mockExerciseWindows = [{ start: offset(37).toISOString(), end: offset(125).toISOString() }];
+    mockHRStore = [
+      ...Array.from({ length: 37 }, (_, m) => reading(m, 104)), // pre-class background
+      ...Array.from({ length: 89 }, (_, i) => reading(37 + i, 150)), // the class itself
+    ];
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, id, expect.any(Number), 'estimated', 'window', {
+      start: offset(37).toISOString(),
+      end: offset(125).toISOString(),
+    });
+    const uploaded = mockPutSamples.mock.calls[0][1] as { value: number }[];
+    expect(uploaded.every((x) => x.value === 150)).toBe(true);
+  });
+
+  it('leaves a thin result retryable, and records the coverage that says so', async () => {
+    const id = await theSession();
+    mockExerciseWindows = [];
+    mockHRStore = Array.from({ length: 37 }, (_, m) => reading(m, 104)); // stops 53 minutes early
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    const [row] = await mockFixture.getAllAsync<{ hr_source: string; coverage: string }>(
+      `SELECT hr_source, coverage FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
+      USER,
+      id,
+    );
+    expect(row.hr_source).toBe('window');
+    expect(row.coverage).toBe('thin');
+
+    // A second pass, past the cooldown, asks again — the property the iOS
+    // side proves through `sessionsNeedingBiometricSync`; on Android the
+    // same decision is made in memory by `selectEnrichmentCandidates`.
+    await mockFixture.runAsync(
+      `UPDATE health_connect_enrichment SET attempted_at = ? WHERE user_id = ? AND session_id = ?`,
+      new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      USER,
+      id,
+    );
+    mockComputeSessionMetrics.mockClear();
+    await syncHealthConnectBiometrics(USER, getToken);
+    expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('a densely-covered session is terminal after one pass', async () => {
+    const id = await theSession();
+    mockHRStore = Array.from({ length: 91 }, (_, m) => reading(m, 150));
+
+    await syncHealthConnectBiometrics(USER, getToken);
+    const [row] = await mockFixture.getAllAsync<{ coverage: string }>(
+      `SELECT coverage FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
+      USER,
+      id,
+    );
+    expect(row.coverage).toBe('plausible');
+
+    mockComputeSessionMetrics.mockClear();
+    await syncHealthConnectBiometrics(USER, getToken);
+    expect(mockComputeSessionMetrics).not.toHaveBeenCalled();
+  });
+
+  it('reports a REFUSED ExerciseSession grant rather than reading it as "no workout" (W15/#944)', async () => {
+    await theSession();
+    mockExerciseWindowsRejectsWith = new HealthConnectPermissionError('ExerciseSession');
+    mockHRStore = [];
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toContain('ExerciseSession');
+    // ...and the ledger is left alone, so a later grant picks the session up.
+    const rows = await mockFixture.getAllAsync(
+      `SELECT session_id FROM health_connect_enrichment WHERE user_id = ?`,
+      USER,
+    );
+    expect(rows).toEqual([]);
+  });
 });
 
 describe('the settings toggle', () => {
@@ -240,7 +400,7 @@ describe('syncHealthConnectBiometrics', () => {
       }),
     ]);
 
-    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'estimated', 'window');
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'estimated', 'window', null);
 
     const ledger = await mockFixture.getAllAsync<{ hr_source: string; sample_count: number }>(
       `SELECT hr_source, sample_count FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
@@ -262,7 +422,7 @@ describe('syncHealthConnectBiometrics', () => {
     // Still asked the backend to compute — it is the authority on the
     // result, and doing so is what gives the athlete a real "none" row
     // rather than one that silently never exists.
-    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'estimated', 'window');
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 's1', 190, 'estimated', 'window', null);
 
     const ledger = await mockFixture.getAllAsync<{ hr_source: string }>(
       `SELECT hr_source FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
@@ -375,7 +535,7 @@ describe('syncHealthConnectBiometrics', () => {
 
     expect(result.attempted).toBe(1); // 'older' and VO2max never ran
     expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
-    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 'newer', 190, 'estimated', 'window');
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(getToken, 'newer', 190, 'estimated', 'window', null);
     // VO2max is the LAST network call this pass makes — confirms the guard
     // covers it too, not only the per-session loop.
     expect(mockPutSamples).not.toHaveBeenCalledWith(

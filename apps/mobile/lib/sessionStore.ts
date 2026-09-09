@@ -541,6 +541,17 @@ export async function trainingSince(
  * the queue has to starve, it should be the end whose watch data is already
  * gone — but the real repair is making a failed attempt always leave a
  * ledger row, which is #937's own open follow-up, not this ordering.
+ *
+ * **W19/#985 widened the exclusion, and the widening is load-bearing.** The
+ * clause used to read `hr_source != 'window'` alone, which made a `'window'`
+ * row terminal HERE, in SQL, regardless of what `needsEnrichmentAttempt`
+ * decided — so the pure retry rule could never see a session this query had
+ * already dropped. It now also keeps a row whose `coverage` is anything but
+ * `'plausible'`, which is the SQL-expressible half of that rule; the
+ * time-sensitive half (cadence, retry window) still belongs to
+ * `needsEnrichmentAttempt` and still runs over what this returns. The two
+ * must agree on what "terminal" means or one of them is dead code — see
+ * `lib/biometric.ts`'s `hrSampleCoverage` for what makes a result final.
  */
 export async function sessionsNeedingBiometricSync(
   userID: string,
@@ -555,7 +566,7 @@ export async function sessionsNeedingBiometricSync(
       WHERE s.user_id = ?
         AND s.deleted_at IS NULL
         AND s.ended_at IS NOT NULL
-        AND (b.session_id IS NULL OR b.hr_source != 'window')
+        AND (b.session_id IS NULL OR b.hr_source != 'window' OR b.coverage != 'plausible')
         AND (? IS NULL OR s.ended_at >= ?)
       ORDER BY s.ended_at DESC
       LIMIT ?`,
