@@ -65472,6 +65472,185 @@ because it names a plausible innocent file each time. Before believing a
 component-suite failure on this repo, re-run it alone, and check what else is
 running.
 
+## 2026-09-08 — W21 (#992): a run stopped recording the moment the screen locked, and `watchPositionAsync` could never have fixed it
+
+**What the athlete lost.** Lock the phone during a run — which is how most
+people run — and VOLA quietly stopped recording it. Not just heart rate:
+**GPS too**, so distance, pace and route all ended at the moment the screen
+went off. No error, no gap marker; the saved run was simply the part before
+the lock. Reported by the athlete: *"here it should work with locked screen
+too, most people run with locked screen so fix it."*
+
+**Why, and why the obvious fix would have done nothing.** `app/running/[id]`
+tracked with `Location.watchPositionAsync`, and `app.config.js` declared **no
+`UIBackgroundModes` at all**, so iOS suspended the app and the watch stopped
+delivering. The obvious remedy — add the `location` background mode — **would
+not have worked**, and this is the part worth recording: expo-location
+hard-codes `manager.allowsBackgroundLocationUpdates = false` in
+`BaseLocationProvider.swift`, the provider behind `watchPositionAsync`, and
+sets it `YES` in exactly one place, `EXLocationTaskConsumer.m` — the
+TaskManager path. Read from the vendored source rather than inferred: with
+this library, `watchPositionAsync` can never deliver in the background on iOS
+no matter what the Info.plist says. Background tracking requires
+`startLocationUpdatesAsync` plus a registered task, so that is what this does.
+
+**Shape: the task captures, the screen interprets.** A headless task cannot
+be allowed to re-implement the accuracy floor, the auto-pause hysteresis and
+the distance accumulation — that logic took several tickets (N465, L13,
+auto-pause) to get right, and a second copy in a background context would be
+free to diverge with nothing noticing. So `lib/runningTrackingTask.ts` makes
+**no decisions**: it appends fixes to `running_fix_queue` and stops there.
+The running screen drains that queue through the same `processFix` the live
+callback used to be, with one change that is the crux — **`now` is the fix's
+own timestamp, never `Date.now()`**. A backlog drained after ten locked-screen
+minutes has to make its pause/resume decisions on the timeline the fixes
+actually happened on; wall-clock reads would collapse the backlog into one
+instant and the hysteresis would mean nothing.
+
+The queue is on disk, and the drain is cursor-based, so a fix is delivered
+exactly once even across an app kill mid-run — and `finish()` drains once
+more **before** stopping, or the run would be saved missing its own ending.
+
+**Android keeps its existing path, deliberately.** Background location there
+additionally needs `ACCESS_BACKGROUND_LOCATION` and a foreground service —
+its own permission story and its own Play review. Adopting the task path
+without them risked `startLocationUpdatesAsync` failing outright and turning a
+working foreground run into no run at all. So Android still uses
+`watchPositionAsync` and appends to the **same queue**: two capture
+mechanisms, one interpretation path, no second copy of the logic. Android
+background is a separate ticket, not a silent casualty of an iOS fix.
+
+**Review found four defects in the first cut of this ticket, and three of
+them defeated its own purpose. Recorded in full, because each is a distinct
+way of being confidently wrong.**
+
+1. **`bluetooth-central` was never actually added.** The config set
+   `isBackgroundEnabled: true` and three separate places — a code comment,
+   this entry, the commit message — asserted the background mode had shipped.
+   It had not: per the plugin's own source, that flag reaches only the
+   ANDROID manifest, and the iOS `UIBackgroundModes` entry comes from a
+   separate `modes` prop that was never set. So the heart-rate half did
+   nothing at all. Found by `ac-verifier` running `expo prebuild` and reading
+   the generated `Info.plist` — the output — where the first cut had verified
+   the config by evaluating it, which is the input. **Verifying what you hand
+   a plugin is not verifying what the plugin does**, and this file's own
+   "verify that a check can fail" discipline was applied to expo-location
+   (whose Swift was read directly) and not to this one.
+2. **The link was torn down on lock and never reconnected.** The orchestrator
+   still called `stopLiveHR()` on AppState `'background'` — which is exactly
+   what locking the phone raises — while the same commit removed the
+   `'active'` reconnect. The two halves were correct separately and, together,
+   guaranteed heart rate ended at the lock: the precise bug the ticket exists
+   to fix, reintroduced by its own fix.
+3. **A process kill mid-run duplicated the route.** The drain cursor was a
+   `useRef(0)`, so a relaunched screen re-read every fix already folded into
+   the restored `route_points` and appended them again — duplicate track,
+   inflated distance and elapsed time. The `db.ts` comment asserted
+   exactly-once "even across an app kill" and this entry claimed a test proved
+   it; the test kept its cursor in a local variable and never simulated a
+   kill, so it proved nothing of the sort. Fixed by pruning the queue on
+   mount against whatever the saved points already cover — deriving the resume
+   point from data already persisted rather than a second bookkeeping column
+   free to disagree with it — and by persisting the task's identity, so an
+   iOS relaunch-to-deliver does not drop fixes for want of an owner.
+
+   **And the FIRST fix for this was itself wrong, in a way worth recording,
+   because both reviewers found it independently on the second pass and
+   nothing else could have.** The screen restores `route_points` on two mount
+   branches — reopening a finished run, and resuming one the app was killed
+   in the middle of — and the prune landed on the finished branch only. That
+   is the branch where `finish()` has already run `clearRunFixQueue`, so the
+   call had nothing to do; the branch a kill actually takes did not have it.
+   The mechanism existed, was correct, was unit-tested, and was **never
+   reached on the path it was built for**. Every instrument agreed: typecheck
+   clean, the helper's own tests green, `verify` green — because a missing
+   call is not a wrong one, and this repo's mobile suite is deliberately not
+   component tests, so no test could see a call site the screen never wrote.
+   Meanwhile the `db.ts` comment, this entry and `functional-scenarios.md`'s
+   own step 8 all asserted the scenario was covered. That is the
+   "asserted, not verified" shape this file's own *Verify that a check can
+   fail* section names, landing on the correction to a previous instance of
+   itself.
+
+   The structural fix is one helper — `pruneRunFixesToRestoredTrack`, taking
+   the restored points rather than a timestamp, so no call site has to work
+   out which instant aligns the queue — used by both branches. The guard is a
+   **count**, in `hrReportWiring.test.ts`: prunes must equal restores, so a
+   third branch cannot arrive without one. Counting is the point. Asserting
+   the prune merely *appears* in the file is the check that cannot fail — it
+   appeared, on the wrong branch, for the entire life of the bug.
+4. **The location permission string became a lie.** It still read "VOLA does
+   not track your location in the background or when the app is closed". The
+   ticket flagged this hazard for the Bluetooth string and the location one
+   was missed on the first pass; both are what the athlete reads in the system
+   dialog.
+5. **Removing the background teardown left the PAIRING screen holding a link
+   with nothing to close it.** Settings calls `connectIfRemembered()` when you
+   pick a monitor, so the athlete can see the strap actually reporting rather
+   than discovering mid-run that broadcasting was never switched on. Until
+   this ticket, the orchestrator's `'background'` teardown released that link
+   incidentally. Defect 2 removed that teardown — correctly, it was killing
+   runs at the lock — and nothing replaced it for the non-run case: pairing a
+   strap and pocketing the phone held the connection open indefinitely. A fix
+   for one battery bug creating another, in the same commit, found by review.
+   The pairing screen now releases only what it opened (`openedHere`), so a
+   run started while Settings is still mounted underneath keeps the link it
+   owns. Settings copy says so.
+
+**Live heart rate is now running-only (#987, closed here).** With the link
+run-scoped, Today's card and the strength/BJJ chips could never connect, so
+leaving them would have shipped an indicator that is permanently blank. That
+matches the athlete's own decision — *"keep it only for running sessions for
+monitoring and coaching"* — and BJJ and strength take their heart rate from
+Apple Health, which W19 (#985) is making reliable.
+
+**One of #987's own acceptance criteria was superseded rather than met, and
+saying so is the point.** It asked that recording stay unchanged for every
+sport — *"`useHRRecording` still runs"* — because it was written before W21
+scoped the link to a run. Those two premises cannot both hold: with nothing
+opening a connection outside a run, a recorder on the strength and BJJ
+screens would be armed for a stream that never arrives. The branch resolved
+it in favour of the athlete's later and more specific instruction — *"lets
+make the bluetooth active specifically when we want to activate a run"* — and
+removed the recording path with the display. `ac-verifier` graded the
+criterion NOT MET, correctly, on its literal text; it is recorded here as
+superseded, and the criterion is struck on the issue rather than quietly
+ticked.
+
+**Two capabilities were added to the binary, and both are reviewed ones.**
+`location` and `bluetooth-central` background modes. The justification is the
+ordinary one — a run tracker recording a run — and the scope is deliberately
+narrow: **when-in-use authorization is retained** (`locationAlways*` stay
+`false`; when-in-use plus the background mode is the standard arrangement and
+iOS shows its blue indicator throughout), and the Bluetooth link is now held
+**only for the duration of a run** rather than whenever the app is foreground
+(the athlete's decision: *"lets make the bluetooth active specifically when we
+want to activate a run"*). `lib/hrMonitor/orchestrator.ts` no longer connects
+on AppState at all; `startWatch` connects and `finish` releases.
+
+The Bluetooth permission string said *"Only while VOLA is open"* — this change
+would have made the system dialog a lie, so it was rewritten in the same
+commit.
+
+**Tests.** `runningTrackingTask.test.ts` against the real `running_fix_queue`:
+field fidelity, cursor exactly-once WITHIN a session (not across a kill — see
+defect 3; that is what the prune covers), a 200-fix locked-screen backlog
+preserved whole and in order, per-athlete and per-run isolation,
+release-on-finish scoped to one run, the prune's inclusive boundary and run
+scoping, and the on-disk identity surviving a process with no React. Five mutations, four
+caught; **the fifth survived and is recorded rather than papered over** —
+deleting `ORDER BY id` changes nothing, because both plans SQLite can choose
+here (table scan, or the `(user_id, session_id, id)` index) already yield id
+order. The clause states a contract the drain depends on rather than
+defending against an observable failure, and the code now says so, so the
+next reader does not delete it as dead.
+
+**What no test here can reach, and it is most of the point:** whether iOS
+actually keeps delivering with the screen off. That is the ticket's
+`NEEDS HUMAN EVIDENCE` criterion — a real outdoor run, locked, checked
+afterwards for distance, route AND heart rate covering the whole run, and
+checked again that nothing keeps running once it is finished.
+
 ## Open items / known gaps as of this entry
 
 

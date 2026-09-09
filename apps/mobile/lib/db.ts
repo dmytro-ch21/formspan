@@ -502,6 +502,65 @@ const CREATE_HR_MONITOR_SAMPLES = `
 `;
 
 /**
+ * W21/#992: GPS fixes captured while a run is in progress, including while
+ * the app is backgrounded and the screen is locked.
+ *
+ * The background task (`lib/runningTrackingTask.ts`) runs outside React and
+ * only APPENDS here — it makes no decisions. The running screen drains the
+ * queue and feeds each fix through exactly the same accuracy filter,
+ * auto-pause hysteresis and distance accumulation it has always used, so the
+ * behaviour those took several tickets to get right is not reimplemented in
+ * a headless task where it could quietly diverge.
+ *
+ * `id` is an autoincrement so draining is strictly ordered. The screen's
+ * cursor is in MEMORY, so exactly-once across an app kill comes from
+ * `pruneRunFixesToRestoredTrack` on mount — which drops whatever the restored
+ * route points already cover — not from the cursor itself.
+ *
+ * This comment has now been wrong twice, in two different ways, and both are
+ * worth keeping. It first claimed the cursor survived a kill; it does not.
+ * It was then corrected to describe the prune — while the prune was wired
+ * into only one of the screen's two restore branches, and not the one a kill
+ * actually takes. So the second version described a mechanism that existed
+ * and was not reached. The guarantee is real only because
+ * `pruneRunFixesToRestoredTrack` is now the single helper both branches call,
+ * and `hrReportWiring.test.ts` counts prunes against restores so a third
+ * branch cannot arrive without one.
+ */
+/**
+ * W21/#992: which run the background location task is capturing for.
+ *
+ * On disk rather than in memory alone because iOS can relaunch a terminated
+ * app solely to hand over queued location updates; that process has run no
+ * React, so an in-memory identity would be null and the fixes would be
+ * dropped without a trace. One row, enforced by the CHECK.
+ */
+const CREATE_RUN_TRACKING_ACTIVE = `
+  CREATE TABLE IF NOT EXISTS running_tracking_active (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL
+  );
+`;
+
+const CREATE_RUN_FIX_QUEUE = `
+  CREATE TABLE IF NOT EXISTS running_fix_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    elevation_m REAL,
+    accuracy_m REAL,
+    speed_mps REAL,
+    recorded_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS running_fix_queue_session_idx
+    ON running_fix_queue (user_id, session_id, id);
+`;
+
+
+/**
  * Daily trackers: the DEFINITIONS, pulled from the server and pushed back.
  *
  * `dirty 0 / remote 1` by default, the `workout_cache`/`foods` direction, and
@@ -858,6 +917,8 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
   await db.execAsync(CREATE_DETECTED_ACTIVITIES);
   await db.execAsync(CREATE_HR_MONITOR_SAMPLES);
+  await db.execAsync(CREATE_RUN_FIX_QUEUE);
+  await db.execAsync(CREATE_RUN_TRACKING_ACTIVE);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );

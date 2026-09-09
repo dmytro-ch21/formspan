@@ -26,7 +26,6 @@ import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { SectionHeader } from '@/components/ui/Section';
 import { WeekStrip } from '@/components/today/WeekStrip';
 import { MomentumCard } from '@/components/today/MomentumCard';
-import { LiveHRCard } from '@/components/today/LiveHRCard';
 import { UpNextCard } from '@/components/today/UpNextCard';
 import { DetectedActivityCard } from '@/components/today/DetectedActivityCard';
 import { ProgressCard } from '@/components/today/ProgressCard';
@@ -1166,9 +1165,6 @@ export default function TodayScreen() {
               N430/#692: this used to always push a bare `/food/add`, which
               `app/food/add.tsx` defaults to real today, so `Log food` on a
               browsed day silently filed the entry under the wrong one. */}
-          {/* N528/#958: live heart rate when a paired monitor is connected;
-              renders nothing otherwise, so Today without one is unchanged. */}
-          <LiveHRCard />
           <View style={styles.section}>
             <SectionHeader label="Daily progress" />
             {foodEnabled ? (

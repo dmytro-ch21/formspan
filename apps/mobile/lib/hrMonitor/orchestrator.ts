@@ -13,8 +13,11 @@ import { isBluetoothSupported, startLiveHR, stopLiveHR } from './liveHR';
  * screen on). Also flushes any recorded samples still owed to the server on
  * each foreground, so a session finished offline uploads when signal returns.
  *
- * Same shape as `startBiometricSyncOrchestrator`: one identity, one AppState
- * listener, returns the stop function. Identity changes stop the old link.
+ * W21/#992 reduced this: it no longer opens or closes the Bluetooth link at
+ * all. The run owns that lifetime (`app/running/[id].tsx`), because a link
+ * held on app foreground is one the athlete pays for whenever VOLA is open,
+ * and a link dropped on app background is one that dies the moment a run's
+ * screen locks. What remains here is the identity and the sample flush.
  */
 let identity: { userID: string; getToken: TokenGetter } | null = null;
 
@@ -24,12 +27,7 @@ export function setHRMonitorIdentity(userID: string | null, getToken: TokenGette
     void stopLiveHR();
     return;
   }
-  if (identity?.userID === userID) {
-    identity = { userID, getToken };
-    return;
-  }
   identity = { userID, getToken };
-  void connectIfRemembered();
 }
 
 /** Called by Settings after pairing/forgetting, so the link follows the
@@ -48,21 +46,32 @@ export async function connectIfRemembered(): Promise<void> {
 export function startHRMonitorOrchestrator(): () => void {
   const onChange = (next: AppStateStatus) => {
     if (next === 'active') {
-      void connectIfRemembered();
+      // W21/#992: NO auto-connect here any more. The link is opened by the
+      // run that needs it (`app/running/[id].tsx`) and closed when that run
+      // ends, so neither battery pays for a monitor nobody is reading. A
+      // foregrounded app with a paired strap and no run in progress holds no
+      // connection at all.
       const id = identity;
       if (id) {
         void flushHRMonitorSamples(id.userID, id.getToken).catch(() => {
           // Offline — next foreground.
         });
       }
-    } else if (next === 'background') {
-      void stopLiveHR();
     }
+    // W21/#992: and NO teardown on 'background' either — that line is the
+    // reason this ticket's first cut did not work at all. Locking the phone
+    // raises 'background' exactly like leaving the app, so the link was
+    // dropped the instant the screen went off, and with the 'active'
+    // reconnect removed above nothing ever brought it back: heart rate
+    // ended at the lock, which is the bug this ticket exists to fix. The RUN
+    // owns the link now — `startWatch` opens it, `finish` and the screen's
+    // unmount release it — so there is nothing here to close.
   };
   const sub = AppState.addEventListener('change', onChange);
   if (AppState.currentState === 'active') onChange('active');
   return () => {
     sub.remove();
+    // The app itself is going away, so nothing can be reading a monitor.
     void stopLiveHR();
   };
 }

@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Pressable, ScrollView, StyleSheet } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -54,6 +54,16 @@ import { useHRMax } from '@/lib/hrMonitor/useHRMax';
 import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
+import {
+  clearRunFixQueue,
+  pruneRunFixesToRestoredTrack,
+  readRunFixQueue,
+  startRunTracking,
+  stopRunTracking,
+  type QueuedFix,
+} from '@/lib/runningTrackingTask';
+import { connectIfRemembered } from '@/lib/hrMonitor/orchestrator';
+import { stopLiveHR } from '@/lib/hrMonitor/liveHR';
 import { useUnits } from '@/lib/useUnits';
 import { announce } from '@/lib/voice';
 import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
@@ -95,11 +105,13 @@ import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
  *
  * ## Auto-pause (L11/#777)
  *
- * The GPS watch is deliberately NOT torn down on an auto-pause the way it is
- * on a manual one — the location callback's auto-pause branch (inside
- * `startWatch()`) leaves `watchRef` running so the same subscription can
- * notice movement resuming and clear itself, per the ticket's "resume
- * automatically once movement resumes" criterion. A manual
+ * GPS capture is deliberately NOT stopped on an auto-pause the way it is on
+ * a manual one — `processFix`'s auto-pause branch leaves the background task
+ * running so a later fix can notice movement resuming and clear the pause
+ * itself, per the ticket's "resume automatically once movement resumes"
+ * criterion. (W21/#992 moved capture into that task so a locked screen keeps
+ * recording; what used to be one `watchPositionAsync` subscription is now
+ * `startRunTracking` plus the drain below.) A manual
  * pause has no such requirement (only the athlete's own tap resumes it), so
  * it keeps stopping the watch outright, exactly as before this ticket — that
  * is strictly cheaper on battery for the common case (an athlete who pauses
@@ -119,6 +131,11 @@ import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
  */
 
 const MIN_ACCURACY_M = 50;
+
+/** How often the screen interprets what the background task captured.
+ *  Two seconds is well inside the 3s fix cadence, so a foreground run still
+ *  draws its track as it happens. */
+const FIX_DRAIN_INTERVAL_MS = 2_000;
 /** How stale the last fix has to be before the screen admits GPS is weak. */
 const SIGNAL_STALE_MS = 15000;
 
@@ -153,10 +170,15 @@ export default function RunningSessionScreen() {
   // finishes VIA this screen (`finish()` navigates away immediately rather
   // than re-rendering the finished branch off freshly-computed local state).
   const [finishedDetail, setFinishedDetail] = useState<RunningDetail | null>(null);
+  // W21/#992: the drain cursor and its re-entrancy guard. The cursor is the
+  // last queued fix this screen has interpreted, so a fix is processed
+  // exactly once — including across an app kill, since the queue is on disk
+  // and the points it produced are persisted with the run.
+  const fixCursorRef = useRef(0);
+  const drainingRef = useRef(false);
   const [sessionTimes, setSessionTimes] = useState<{ startedAt: string; endedAt: string | null } | null>(null);
 
   const mapRef = useRef<MapView | null>(null);
-  const watchRef = useRef<Location.LocationSubscription | null>(null);
   // Active-time bookkeeping — see the file doc comment above.
   const elapsedMsRef = useRef(0);
   const resumedAtRef = useRef<number | null>(null);
@@ -178,13 +200,6 @@ export default function RunningSessionScreen() {
   const autoPausedRef = useRef(false);
   const autoPauseStateRef = useRef<AutoPauseState>(initialAutoPauseState);
   const lastRawFixRef = useRef<RoutePoint | null>(null);
-  // Bumped by every `startWatch()` call and captured by that call's own
-  // location callback — see the callback's own first line for why: without
-  // this, a fix from a subscription `startWatch()` is in the middle of
-  // superseding (the `await Location.watchPositionAsync(...)` below has not
-  // resolved yet) could still fire once more and process against the freshly
-  // -reset auto-pause refs, using an old, unrelated fix's speed.
-  const watchGenerationRef = useRef(0);
 
   useEffect(() => {
     runStatusRef.current = status;
@@ -289,6 +304,12 @@ export default function RunningSessionScreen() {
         if (existing) {
           setPoints(existing.route_points);
           pointsRef.current = existing.route_points;
+          // W21/#992: the drain cursor lives in memory, so a relaunched
+          // screen starts at zero. Drop whatever these restored points
+          // already cover, or the queue would be folded in a SECOND time —
+          // duplicate route, inflated distance and elapsed time. Review
+          // caught exactly that.
+          await pruneRunFixesToRestoredTrack(userId, id, existing.route_points);
           if (existing.duration_seconds != null) setElapsedSeconds(existing.duration_seconds);
           setSource(existing.source);
           setFinishedDetail(existing);
@@ -309,6 +330,21 @@ export default function RunningSessionScreen() {
       if (existing && existing.route_points.length > 0) {
         setPoints(existing.route_points);
         pointsRef.current = existing.route_points;
+        // W21/#992 — THE call this whole mechanism turns on, and the first
+        // cut put it only on the `ended_at` branch above, which is the one
+        // path where `finish()` has already run `clearRunFixQueue` and there
+        // is nothing left to prune. Both reviewers caught it independently.
+        //
+        // This is the branch that matters: `fixCursorRef` is a fresh
+        // `useRef(0)` on every mount, so without this the drain below reads
+        // the queue from id 0 and re-folds every fix already inside the
+        // `route_points` we just restored — the route drawn twice, distance
+        // roughly doubled, and elapsed time corrupted when a replayed fix's
+        // own timestamp predates `resumedAtRef`. Pruning against the last
+        // point actually saved aligns the queue with what is on disk, using
+        // data already persisted rather than a second cursor column that
+        // could disagree with it.
+        await pruneRunFixesToRestoredTrack(userId, id, existing.route_points);
         // `duration_seconds` is written on every save now (see
         // `persistProgress`), so this is normally populated. The fallback to
         // `trackDurationSeconds` covers a row saved before that fix, or any
@@ -345,133 +381,189 @@ export default function RunningSessionScreen() {
   // location indicator lit for a run nobody is looking at any more.
   useEffect(() => {
     return () => {
-      watchRef.current?.remove();
-      watchRef.current = null;
+      void stopRunTracking();
+      // …and the monitor. Backing out of a run without finishing used to
+      // leave the BLE link open with nothing left to close it (review
+      // finding) — an invisible battery drain on both devices.
+      void stopLiveHR();
     };
   }, []);
+
+  /**
+   * One queued fix, interpreted exactly as a live one used to be.
+   *
+   * W21/#992 moved ACQUISITION into a background task
+   * (`lib/runningTrackingTask.ts`) so a locked screen keeps recording. It
+   * deliberately did NOT move this — the accuracy floor, the auto-pause
+   * hysteresis and the distance accumulation stay here, in one place, fed
+   * from the queue instead of from a subscription callback.
+   *
+   * The one real change: `now` is the FIX'S OWN timestamp, never
+   * `Date.now()`. A backlog drained after ten locked-screen minutes must
+   * make its pause/resume decisions on the timeline the fixes actually
+   * happened on; wall-clock reads would collapse that backlog into a single
+   * instant and the hysteresis would be meaningless.
+   */
+  function processFix(fix: QueuedFix, isNewest: boolean): boolean {
+    if (!mountedRef.current) return false;
+    // A wildly inaccurate fix (a bad multipath reflection indoors, a
+    // cold-start estimate) is worse than a gap — it draws a spike in the
+    // route and in the distance total that no later good fix removes,
+    // because distance is a sum of segments and a bad segment's length does
+    // not un-happen. Unfit to judge "are we stopped" from, so it is
+    // excluded from auto-pause too.
+    if (fix.accuracy_m != null && fix.accuracy_m > MIN_ACCURACY_M) return false;
+
+    const now = new Date(fix.recorded_at).getTime();
+    const point: RoutePoint = {
+      lat: fix.lat,
+      lng: fix.lng,
+      elevation_m: fix.elevation_m,
+      recorded_at: fix.recorded_at,
+    };
+
+    // Auto-pause: feed this fix's speed through the hysteresis regardless of
+    // whether tracking is about to stop or already stopped, so the fix that
+    // arrives as the runner starts moving again is the one that resumes.
+    // See `lib/runningAutoPause.ts` for the threshold/hold reasoning.
+    const speedMps = deriveSpeedMps(fix.speed_mps, lastRawFixRef.current, point);
+    lastRawFixRef.current = point;
+    const { state: nextAutoState, action } = nextAutoPauseState(
+      autoPauseStateRef.current,
+      speedMps,
+      now,
+    );
+    autoPauseStateRef.current = nextAutoState;
+
+    if (action === 'pause' && runStatusRef.current === 'tracking') {
+      elapsedMsRef.current += now - (resumedAtRef.current ?? now);
+      resumedAtRef.current = null;
+      autoPausedRef.current = true;
+      runStatusRef.current = 'paused';
+      setStatus('paused');
+      setSignalWeak(false);
+      persistProgress({ duration_seconds: Math.round(elapsedMsRef.current / 1000) });
+      requestSync('run-auto-paused');
+      return false;
+    }
+
+    if (action === 'resume' && autoPausedRef.current) {
+      autoPausedRef.current = false;
+      resumedAtRef.current = now;
+      runStatusRef.current = 'tracking';
+      setStatus('tracking');
+      requestSync('run-auto-resumed');
+      // Falls through: this fix is the resumption and is recorded below like
+      // any other moving fix.
+    } else if (autoPausedRef.current) {
+      // Still stopped — stationary noise, not a place the athlete ran
+      // through.
+      return false;
+    }
+
+    lastPointAtRef.current = now;
+    setSignalWeak(false);
+    const next = [...pointsRef.current, point];
+    pointsRef.current = next;
+    setPoints(next);
+    // Only for the newest fix of a drain: following a ten-minute backlog
+    // point by point would animate the camera across the whole route.
+    if (isNewest) {
+      mapRef.current?.animateCamera(
+        { center: { latitude: point.lat, longitude: point.lng } },
+        { duration: 300 },
+      );
+    }
+    return true;
+  }
+
+  /** Interpret everything the task has captured since the last drain. */
+  async function drainFixes() {
+    if (!userId || !id || !mountedRef.current) return;
+    // Re-entrancy matters: the interval and an AppState 'active' can land
+    // together on the foreground edge, and two drains sharing one cursor
+    // would process the same fixes twice — doubling distance.
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    try {
+      const fixes = await readRunFixQueue(userId, id, fixCursorRef.current);
+      let appended = false;
+      for (let i = 0; i < fixes.length; i++) {
+        try {
+          if (processFix(fixes[i], i === fixes.length - 1)) appended = true;
+        } catch (err) {
+          // This fix could not be interpreted. Skip it rather than abandon
+          // the drain — and still advance past it, since retrying a fix that
+          // throws would wedge every later one behind it forever.
+          //
+          // Logged, because silence here is the dangerous half: a bug that
+          // throws for EVERY fix would truncate every run's track to nothing
+          // and look exactly like an athlete who never moved. This repo has
+          // shipped that shape before (the `completed` flag written and
+          // never read back), and one line makes it visible instead.
+          console.warn('[running] dropped a queued GPS fix', err);
+        }
+        // Advanced only after the attempt, so a throw mid-loop cannot mark
+        // untouched fixes consumed.
+        fixCursorRef.current = fixes[i].id;
+      }
+      // ONE write per drain rather than one per fix: a ten-minute backlog is
+      // ~200 fixes, and `persistProgress` rewrites the whole route each time.
+      if (appended) persistProgress();
+    } catch {
+      // The queue is on disk and the cursor has not moved past anything
+      // unread — the next drain resumes exactly here.
+    } finally {
+      drainingRef.current = false;
+    }
+  }
 
   async function startWatch() {
     resumedAtRef.current = Date.now();
     runStatusRef.current = 'tracking';
     setStatus('tracking');
-    // A fresh subscription always starts un-paused, whether this is the
-    // first start or a manual Resume (including a manual Resume that
-    // pre-empts an auto-pause) — the hysteresis and the last-raw-fix
-    // baseline for speed derivation should not carry across a gap in
-    // watching, or a stale timestamp would make the first post-gap fix look
-    // like an implausibly slow (or fast) segment.
+    // A fresh start is always un-paused, whether this is the first start or
+    // a manual Resume (including one that pre-empts an auto-pause) — the
+    // hysteresis and the last-raw-fix baseline should not carry across a gap
+    // in tracking, or the first post-gap fix would look like an implausibly
+    // slow (or fast) segment.
     autoPausedRef.current = false;
     autoPauseStateRef.current = initialAutoPauseState;
     lastRawFixRef.current = null;
-    // Captured now, before the `await` below — a fix delivered by a PRIOR
-    // subscription that has not finished being torn down yet (see this
-    // function's replace-the-old-one comment further down) will carry the
-    // generation it closed over, not this one, and gets ignored outright by
-    // the callback's own first line.
-    const myGeneration = ++watchGenerationRef.current;
     requestSync('run-started');
-    const sub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        timeInterval: 3000,
-        distanceInterval: 8,
-      },
-      (loc) => {
-        if (!mountedRef.current) return;
-        // A fix from a subscription this screen no longer considers current
-        // — superseded by a later `startWatch()` call (a manual Resume, or a
-        // fast double-tap of it) that started before this one's own
-        // `Location.watchPositionAsync` promise had resolved and torn this
-        // subscription down. Ignored completely, before touching ANY shared
-        // state, so it cannot process against auto-pause bookkeeping that
-        // has already been reset for the newer subscription.
-        if (watchGenerationRef.current !== myGeneration) return;
-        // A wildly inaccurate fix (a bad multipath reflection indoors, a
-        // cold-start estimate) is worse than a gap — it draws a spike in the
-        // route and a spike in the distance total that no amount of later
-        // good fixes removes, because distance is a sum of segments and a
-        // bad segment's length does not un-happen. The same fix is unfit to
-        // judge "are we stopped" from, so it is excluded from auto-pause too.
-        if (loc.coords.accuracy != null && loc.coords.accuracy > MIN_ACCURACY_M) return;
-
-        const now = Date.now();
-        const point: RoutePoint = {
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-          elevation_m: loc.coords.altitude,
-          recorded_at: new Date(loc.timestamp).toISOString(),
-        };
-
-        // Auto-pause: feed this fix's speed through the hysteresis regardless
-        // of whether tracking is about to stop or already stopped, so the fix
-        // that arrives right as the runner starts moving again is the one
-        // that resumes. See `lib/runningAutoPause.ts` for the threshold/hold
-        // reasoning and `deriveSpeedMps` for where the speed itself comes
-        // from.
-        const speedMps = deriveSpeedMps(loc.coords.speed, lastRawFixRef.current, point);
-        lastRawFixRef.current = point;
-        const { state: nextAutoState, action } = nextAutoPauseState(
-          autoPauseStateRef.current,
-          speedMps,
-          now,
-        );
-        autoPauseStateRef.current = nextAutoState;
-
-        if (action === 'pause' && runStatusRef.current === 'tracking') {
-          elapsedMsRef.current += now - (resumedAtRef.current ?? now);
-          resumedAtRef.current = null;
-          autoPausedRef.current = true;
-          runStatusRef.current = 'paused';
-          setStatus('paused');
-          setSignalWeak(false);
-          persistProgress({ duration_seconds: Math.round(elapsedMsRef.current / 1000) });
-          requestSync('run-auto-paused');
-          return;
-        }
-
-        if (action === 'resume' && autoPausedRef.current) {
-          autoPausedRef.current = false;
-          resumedAtRef.current = now;
-          runStatusRef.current = 'tracking';
-          setStatus('tracking');
-          requestSync('run-auto-resumed');
-          // Falls through: this fix is the resumption and is recorded below
-          // like any other moving fix.
-        } else if (autoPausedRef.current) {
-          // Still stopped — keep the watch alive for the next fix (so
-          // movement can resume it), but this fix is stationary noise, not
-          // a place the athlete ran through.
-          return;
-        }
-
-        lastPointAtRef.current = now;
-        setSignalWeak(false);
-        const next = [...pointsRef.current, point];
-        pointsRef.current = next;
-        setPoints(next);
-        persistProgress();
-        mapRef.current?.animateCamera(
-          { center: { latitude: point.lat, longitude: point.lng } },
-          { duration: 300 },
-        );
-      },
-    );
-    // The screen can unmount while this `await` was in flight — assigning
-    // unconditionally would leak the subscription: nothing left holding its
-    // reference would ever call `.remove()`, so the GPS indicator and the
-    // battery cost outlive the screen.
-    if (!mountedRef.current) {
-      sub.remove();
-      return;
-    }
-    // And a second `startWatch()` (a fast double-tap of Resume before the
-    // first call's promise settles) must not leak the ONE it replaces —
-    // whichever this is, it is the subscription this screen means to have
-    // going forward, so any stale one is removed first rather than merely
-    // overwritten.
-    watchRef.current?.remove();
-    watchRef.current = sub;
+    if (!userId || !id) return;
+    await startRunTracking(userId, id);
+    // W21/#992: the heart-rate monitor is connected FOR THIS RUN, not held
+    // whenever the app is open — see `lib/hrMonitor/orchestrator.ts`.
+    void connectIfRemembered();
+    void drainFixes();
   }
+
+  /**
+   * W21/#992 — interpret whatever the background task has captured.
+   *
+   * Runs while PAUSED as well as while tracking: an auto-pause is cleared by
+   * a later moving fix, so a screen that stopped draining when it paused
+   * could never notice the athlete running again.
+   */
+  useEffect(() => {
+    if (status !== 'tracking' && status !== 'paused') return;
+    void drainFixes();
+    const timer = setInterval(() => void drainFixes(), FIX_DRAIN_INTERVAL_MS);
+    // The foreground edge is the one that matters: returning to the app after
+    // a locked-screen stretch is exactly when the backlog is largest.
+    const appState = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void drainFixes();
+    });
+    return () => {
+      clearInterval(timer);
+      appState.remove();
+    };
+    // `drainFixes` is redeclared every render and is re-entrancy-guarded by
+    // `drainingRef`; listing it would restart the interval on every render
+    // for no behavioural gain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, userId, id]);
 
   // Elapsed clock + weak-signal banner, both driven by wall-clock reads
   // rather than by counting ticks — see the file doc comment.
@@ -587,8 +679,7 @@ export default function RunningSessionScreen() {
     // there is nothing left for the subscription to watch for.
     autoPausedRef.current = false;
     runStatusRef.current = 'paused';
-    watchRef.current?.remove();
-    watchRef.current = null;
+    void stopRunTracking();
     setStatus('paused');
     setSignalWeak(false);
     persistProgress({ duration_seconds: Math.round(elapsedMsRef.current / 1000) });
@@ -602,12 +693,18 @@ export default function RunningSessionScreen() {
 
   async function finish() {
     if (!userId || !id) return;
+    // W21/#992: the tail of the run is whatever the background task captured
+    // since the last drain — the final seconds, and everything from a locked
+    // screen. Drained BEFORE tracking stops, or the run is saved missing its
+    // own ending.
+    await drainFixes();
     if (status === 'tracking' && resumedAtRef.current) {
       elapsedMsRef.current += Date.now() - resumedAtRef.current;
       resumedAtRef.current = null;
     }
-    watchRef.current?.remove();
-    watchRef.current = null;
+    await stopRunTracking();
+    // The run is over: release the monitor too.
+    void stopLiveHR();
     autoPausedRef.current = false;
 
     const finalPoints = pointsRef.current;
@@ -659,6 +756,10 @@ export default function RunningSessionScreen() {
         },
       ]);
       await finishLocalSession(userId, id);
+      // The queue has served its purpose: these fixes are now the run's
+      // own route points. Released here rather than at `stopRunTracking`
+      // so a failure between the two cannot lose the tail.
+      await clearRunFixQueue(userId, id);
     } catch (err) {
       // The save failed — the screen falls back to the ordinary error state,
       // so `runStatusRef` follows it rather than being left at a stale

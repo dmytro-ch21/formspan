@@ -168,17 +168,57 @@ module.exports = () => ({
         // athlete's words for the feature, not the API's.
         "react-native-ble-plx",
         {
-          isBackgroundEnabled: false,
+          // W21/#992: background BLE, so a run's heart rate survives the
+          // screen locking. TWO props are needed and only one of them is
+          // obvious — `isBackgroundEnabled` alone does NOT do this. Measured
+          // against the plugin's own source: `withBLE.js` passes
+          // `isBackgroundEnabled` only to `withBLEAndroidManifest` (an
+          // Android <uses-feature> line), while the iOS `UIBackgroundModes`
+          // entry comes exclusively from
+          // `withBLEBackgroundModes(config, _props.modes || [])`. A first cut
+          // of this ticket set the flag, asserted in three places that
+          // `bluetooth-central` had shipped, and generated an Info.plist
+          // without it; `ac-verifier` caught that by running `expo prebuild`
+          // and reading the plist rather than trusting the config.
+          //
+          // `central` only — VOLA reads a monitor and never advertises as
+          // one, so `peripheral` would be a capability we do not use.
+          isBackgroundEnabled: true,
+          modes: ['central'],
           neverForLocation: true,
+          // The old string promised 'Only while VOLA is open', which this
+          // change would have turned into a lie in the system dialog.
           bluetoothAlwaysPermission:
-            "VOLA connects to your heart-rate monitor over Bluetooth to show your live heart rate during a session and record it for the session's report. Only while VOLA is open.",
+            'VOLA connects to your heart-rate monitor over Bluetooth to record your heart rate during a run, including while your screen is locked. It connects when a run starts and disconnects when the run ends.',
         },
       ],
       [
         "expo-location",
         {
+          // W21/#992 rewrote this. The old text promised "only accessed while
+          // VOLA is open and on screen — VOLA does not track your location in
+          // the background", which the `location` background mode below makes
+          // false. Reviewers caught the Bluetooth string's version of this lie
+          // and this one was missed on the first pass; both are what the
+          // athlete actually reads in the system dialog.
           locationWhenInUsePermission:
-            "VOLA uses your location to track your run's route, distance and pace while you're using the app. Location is only accessed while VOLA is open and on screen — VOLA does not track your location in the background or when the app is closed.",
+            "VOLA uses your location to track your run's route, distance and pace. While a run is in progress it keeps tracking with your screen locked, and iOS shows its location indicator the whole time. Tracking starts when you start a run and stops when you finish it — VOLA never tracks your location at any other time.",
+          // W21/#992: the `location` background mode, so a run keeps
+          // recording once the screen locks.
+          //
+          // This does NOT need 'Always' authorization and deliberately does
+          // not ask for it: when-in-use plus this background mode is the
+          // standard run-tracker arrangement, and iOS shows its own blue
+          // indicator throughout. The two `false`s below are unchanged.
+          //
+          // The mode alone is NOT sufficient, which is the easy thing to get
+          // wrong: expo-location hard-codes `allowsBackgroundLocationUpdates
+          // = false` in BaseLocationProvider.swift (the provider behind
+          // `watchPositionAsync`) and sets it true only in
+          // EXLocationTaskConsumer.m — the TaskManager path. So the running
+          // screen tracks via `startLocationUpdatesAsync`; read
+          // lib/runningTrackingTask.ts before changing either.
+          isIosBackgroundLocationEnabled: true,
           locationAlwaysAndWhenInUsePermission: false,
           locationAlwaysPermission: false,
           motionUsagePermission: false,
