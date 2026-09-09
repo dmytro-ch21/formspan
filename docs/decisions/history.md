@@ -67248,6 +67248,56 @@ Mutation-checked three ways, each red, restore confirmed by re-running:
 dropping the contrast floor (reproducing the fibre failure), restoring the
 ground-coloured separator, and returning the base with no darkening at all.
 
+## 2026-09-09 — W24, second pass: the overlap was measurably invisible, and a test said it was fine
+
+The first W24 fix replaced a black separator with a multiplied hue and shipped
+the same afternoon. The athlete's verdict on device: *"the overlap color shold
+be more destinguishable rn is barely visible."* The measurement agrees, and the
+numbers are worth keeping because they say exactly how the reasoning failed.
+
+CIEDE2000 between the two laps, as shipped: protein 19.86, fat 21.01, fibre
+14.50, **carbs 5.42, kcal 2.68** — against this repo's own ΔE 15 floor for two
+colours being tellable apart. Self-multiply is physically what a second pass of
+ink does and it **cannot move a bright colour**: `255 × 255 / 255` is still
+255, so the lime and the near-white barely shifted.
+
+**The enforced constraint was the wrong pair, and that is the whole lesson.**
+The code held the second lap above a contrast floor against the CARD, and
+nothing anywhere asserted it differed from the FIRST LAP — the only comparison
+the athlete actually makes. Both constraints sound like "is it visible"; only
+one of them is the question on screen.
+
+**And the suite defended the bug.** One of the tests read *"barely moves a
+near-white, the way ink over paper does"* — an assertion that the defect was
+intended behaviour, written because it described what the code did rather than
+what the screen needed. That is this file's "check that cannot fail" in its
+most embarrassing form: not a check that could not fail, but one that would
+have failed if the code were CORRECTED.
+
+**Now**: darken by scaling the channels (less light, which is what darker
+means on a screen) and choose the amount by measuring both things — ΔE2000 ≥
+22 from the first lap, WCAG contrast ≥ 3:1 against the card. Result: protein
+22.14, fat 22.39, carbs 22.77, kcal 22.01, fibre 14.64 (contrast-capped, and
+stated as such).
+
+**It takes the LEAST darkening that reaches the target, not the most the floor
+allows** — measured both ways. Maximising drives every ring to contrast ~3.03
+and turns the carbs lime into an olive `#4F6E13` and the kcal near-white into
+a mid grey. The ring's colour IS the macro's identity on that card, keyed to
+the row's dot, so a second lap that has lost its hue is a different defect
+rather than a fix.
+
+ΔE2000 is now implemented in `lib/macroRings.ts` — the same metric
+`validate_palette.mjs` uses, so "distinguishable" means one thing here. It was
+cross-checked against an independent Python implementation written for the
+measurement above: same five inputs, same answers to two decimals. An
+implementation that only agrees with itself is the trap this file already
+names for stubbed providers, applied to arithmetic.
+
+Mutation-checked three ways, restores re-run: reverting to self-multiply
+(reproducing carbs 5.42 and kcal 2.68 by name), dropping the separation
+target, and dropping the contrast floor.
+
 ## Open items / known gaps as of this entry
 
 
