@@ -27,7 +27,13 @@ import {
  * source label, and clamping the unresolved case each turn this file red.
  */
 
-const ON = new Date('2026-09-09T12:00:00Z');
+// Mid-afternoon UTC on purpose. `jest` runs this suite under
+// `TZ=America/Los_Angeles` (see `apps/mobile/package.json`), and "recorded
+// today" is a LOCAL-day question — an instant at 06:00Z on the 9th is the
+// evening of the 8th in Los Angeles. An earlier draft of this file used
+// 12:00Z and the fixture, not the code, was what went red. Both instants
+// below sit inside the same local day in UTC and in the test timezone.
+const ON = new Date('2026-09-09T20:00:00Z');
 const DOB_36 = '1990-03-01'; // 36 on ON, so 220 - 36 = 184
 
 describe('resolveHRMax — precedence', () => {
@@ -185,7 +191,7 @@ describe('the derivation an athlete can audit', () => {
 
   it('an observed maximum shows when it was recorded and how many readings stand behind it', () => {
     const r = resolveHRMax({
-      observed: { bpm: 191, measured_at: '2026-09-09T06:00:00Z', sample_count: 12_400 },
+      observed: { bpm: 191, measured_at: '2026-09-09T17:00:00Z', sample_count: 12_400 },
       dateOfBirth: DOB_36,
       on: ON,
     });
@@ -195,6 +201,34 @@ describe('the derivation an athlete can audit', () => {
       label: 'Readings behind it',
       value: '12,400 heart-rate samples',
     });
+  });
+
+  it('"today" and "yesterday" are the DEVICE\'s days, not UTC\'s', () => {
+    // An athlete who peaked at 22:00 last night, reading this at 11:00 this
+    // morning, is told "yesterday" — even where those two instants land on
+    // the SAME UTC day, which they do for every timezone west of Greenwich.
+    // Formatting in UTC instead tells a whole timezone that last night's
+    // session happened today, or the reverse, depending which side of the
+    // line they are on.
+    //
+    // Both instants are built from LOCAL components on purpose. Writing them
+    // as UTC literals makes the test itself timezone-dependent — the first
+    // draft of this case passed under the suite's pinned
+    // `TZ=America/Los_Angeles` and failed under `TZ=UTC`, which is a test
+    // asserting the timezone rather than the behaviour.
+    const lastNight = new Date(2026, 8, 8, 22, 0, 0);
+    const thisMorning = new Date(2026, 8, 9, 11, 0, 0);
+    const lines = hrMaxDerivationLines(
+      {
+        kind: 'observed',
+        source: 'observed',
+        bpm: 191,
+        measuredAt: lastNight.toISOString(),
+        sampleCount: 3,
+      },
+      thisMorning,
+    );
+    expect(lines).toContainEqual({ label: 'Recorded', value: 'yesterday' });
   });
 
   it('a recorded date it cannot parse is said out loud, not rendered as Invalid Date', () => {
