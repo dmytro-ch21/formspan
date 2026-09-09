@@ -66091,6 +66091,122 @@ failure this check exists to end. Mutation-verified three ways (react dropped
 from `ignore`; the whole block removed; a stale `ALLOWED_SHARED` entry), each
 red, restore confirmed by re-running.
 
+## 2026-09-09 — N203 (#645): an attestation now covers the criteria list as it stood when it was POSTED, not as it reads when the workflow runs
+
+`scripts/evidence-latch.py` resolved an attestation with
+`client.set_body(number, tick_evidence(issue.get("body") or ""))` — the body as
+it reads at RUN time. Nothing compared that against the body the observation was
+actually written against. Those are the same list only while nothing edits the
+ticket in between, and on a board that runs several sessions at once and amends
+open tickets constantly, "in between" is not a rare interleaving.
+
+**Measured live on #584, twice in one afternoon, and neither instance was
+anybody's mistake.** A genuine device walk was posted at `17:09:45Z`; the run
+landed at `17:17:53Z`, GitHub Actions having just returned from that day's
+outage. In those eight minutes a concurrent session, correctly following its own
+instructions, appended **four new `NEEDS HUMAN EVIDENCE` criteria** to the same
+body for work it had not finished. All four were ticked and the ticket closed.
+It was caught only because that session was still looking at the issue seconds
+later.
+
+**The second instance is the sharper one and is why the fix refuses rather than
+ticking a subset.** The recovery reverted the four new criteria and missed that
+the same sweep had also ticked **three older** ones nobody had walked. Diffing
+the ticked boxes against the comment's own text showed it covered none of them:
+it named NOW/NEXT, one week strip, a rest day and a focus line, while one ticked
+box read *"the rehomed training calendar... try it in airplane mode"*, a phrase
+appearing nowhere in it. Those three predate the comment and would sit in any
+snapshot, so **snapshot-and-tick-the-subset — the obvious design — does not
+catch instance 2 at all.** Refusing does something no parser can: it puts a
+human back in front of the current list at the moment of release.
+
+### What landed
+
+An `issue_comment` webhook payload carries `issue.body`; `from_event` already
+re-reads the live issue for unrelated reasons. Comparing the two answers exactly
+"did the ask change underneath this observation", with no history API — and none
+exists that would answer it, since GitHub exposes when an issue body was edited
+but never the body as of a timestamp.
+
+- `criteria_drift(before, after)` — a **multiset** difference over evidence
+  criteria TEXT. Text only, so a box being ticked in between is not drift
+  (`tick_evidence` rewrites `[ ]` to `[x]` and leaves the text alone), and a
+  non-evidence checkbox appearing is not drift either. The question is "is the
+  ASK still the one that was attested against", not "has anything happened here".
+- A new `stale` verdict: **nothing ticked, nothing closed, the label kept**, and
+  a comment naming what moved, what is outstanding now, and the gesture to
+  repeat. Leaving a ticket open costs one comment; ticking a criterion nobody
+  walked is the failure the latch exists to prevent.
+- A missing snapshot (`"body" not in payload.issue`) refuses too — and the
+  distinction is real rather than defensive: an issue with a genuinely empty body
+  is a legitimate `None`, which resolves normally.
+
+**It cannot deadlock, which is the rule this file's own rule-2 was written
+under** — the design before this one released on ticking a checkbox, and
+0 of 415 acceptance-criteria boxes in this repo's history had ever been ticked.
+The refusal is per-comment, not sticky: post again once the list is right and it
+releases. The hand-tick (`edited`) path is untouched and remains a second exit.
+
+### The paraphrase residue, addressed rather than filed
+
+The root cause under instance 2 was one layer up from the race: the comment's
+author had not walked the device, they were relaying a summary given in chat,
+and *"NOW/NEXT leads the screen"* is looser than the criterion it ticked
+(*"the resume card leads while an active session runs"*). No parser closes that.
+So `render_resolve_comment` now prints **which criteria it ticked and on whose
+observation**, next to the observation itself. It does not detect the mismatch —
+it puts both halves on one screen, so the next reader of the thread can see one,
+instead of it being findable only by diffing checkbox states against prose.
+
+### Verification, both directions, and one thing that is NOT verified
+
+- `--self-test` gained 49 vectors (60 → 109), including the #584 race as data,
+  and drives `from_event` **end to end** against a fake client rather than only
+  exercising `decide` — a correct state machine handed the wrong body is still
+  the bug.
+- **16 mutations, 16 killed, each by a named red check rather than a crash.**
+  Four survived a first pass and the tests were the weaker half every time:
+  a hardcoded `have_body_snapshot=True` survived because a missing snapshot
+  reads as an empty body and drifts anyway (now isolated by a vector where the
+  live body has no criteria at all); dropping the ticked-criteria list from the
+  closing comment survived because the paraphrase checks called the renderer
+  directly and never went through `apply`; and dropping the "what changed"
+  section survived because the criterion also appears further down the same
+  comment. Two checks were also rewritten because they *crashed* rather than
+  failed, which stops the harness and leaves every later vector unrun. The
+  fourth survivor came out of review: `apply` deciding whether a resolve was an
+  attestation or a hand-tick could be hardcoded either way and nothing noticed,
+  because every end-to-end vector drove an `issue_comment` event and none drove
+  an `issues`/`edited` one. The driver is now general and the second exit path
+  is exercised too.
+- **Reviewers:** `ac-verifier` (4 MET, 1 correctly left as `NEEDS HUMAN
+  EVIDENCE`) and `backend-reviewer` (no `[blocking]`) — the latter caught that
+  the hand-tick exit passed an empty criteria tuple into the new resolve
+  comment, so a ticket whose boxes a human had just ticked one by one closed
+  saying "No evidence criterion was outstanding": literally true at that point
+  in `decide`, and the opposite of what a reader would take from it. The
+  `edited` path now posts its own comment naming the criteria and who ticked
+  them, and says plainly that no observation was recorded.
+- **Live, against a real ticket (#994), dry-run, nothing written**: with the
+  live body as the snapshot it RESOLVES — ticks, unlabels, comments, closes;
+  with one criterion removed from the snapshot, so it reads as having arrived
+  after the comment, it goes `STALE` and writes one comment and nothing else.
+- **Not verified: that `payload.issue.body` is genuinely the body as of comment
+  time.** GitHub's webhook documentation does not say so (checked). The evidence
+  for it is this file's own older observation that an `edited` payload is a
+  snapshot, and `issues.edited` carrying `changes.body.from`, which is only
+  coherent if `issue.body` is the state at event time. Both ways of being wrong
+  are survivable — a payload that is really the live body yields no drift ever
+  (today's behaviour, no protection, no breakage), and one that is older yields
+  a recoverable false refusal — but rather than leave it as an argument,
+  `from_event` now prints the comparison on **every** comment event
+  (`snapshot check: N criteria at comment time, M now; +a -b`), so the first
+  real occurrence settles it from an Actions log. #645 carries the post-merge
+  device-equivalent check as its outstanding evidence criterion.
+
+No workflow change: `.github/workflows/evidence-latch.yml` already passes the
+whole payload, and the snapshot was in it all along.
+
 ## Open items / known gaps as of this entry
 
 
