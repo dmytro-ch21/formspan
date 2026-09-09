@@ -48,6 +48,9 @@ import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-
 import { Text, View } from '@/components/Themed';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
 import { ScreenHeader, TAB_BAR_CLEARANCE } from '@/components/ScreenHeader';
+import { ShareSheet } from '@/components/ShareToFriend';
+import { EntryMenuSheet } from '@/components/food/EntryMenuSheet';
+import type { EntryDragHandlers } from '@/components/food/EntryRow';
 import { MealCard } from '@/components/food/MealCard';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { TargetRow } from '@/components/food/TargetRow';
@@ -65,17 +68,29 @@ import {
   startOfMonth,
   weekDays,
 } from '@/lib/calendar';
-import { cacheTargets, localEntries, localLoggedDays, localTargetView, removeEntry } from '@/lib/foodLog';
+import {
+  cacheTargets,
+  duplicateEntry,
+  entrySyncState,
+  localEntries,
+  localLoggedDays,
+  localTargetView,
+  moveEntry,
+  removeEntry,
+} from '@/lib/foodLog';
 import {
   bySlot,
   eatenFrom,
   mealAvailableForDay,
+  MEALS,
   viewTarget,
   type EatenView,
   type Entry,
   type Meal,
   type TargetView,
 } from '@/lib/nutrition';
+import { shareBlockedReason } from '@/lib/shares';
+import { useEntryDrag, type SectionFrame } from '@/lib/useEntryDrag';
 import { FoodSummaryCard } from '@/components/food/FoodSummaryCard';
 import { useModules } from '@/lib/ModulesProvider';
 import { foodLogGate } from '@/lib/modules';
@@ -145,6 +160,30 @@ export default function FoodScreen() {
   });
   const { userId } = useAuth();
 
+  /**
+   * N531/#962 — drag an entry between meal sections. The cards register
+   * themselves in `cardRefs`; `measure` reads their window frames at the
+   * moment a drag starts (see `useEntryDrag`'s doc comment for why at start
+   * and not via `onLayout`); `onDrop` is a plain `meal` edit through the
+   * outbox, like any edit. Inert while combining: a row that is a checkbox
+   * is not a row that lifts.
+   */
+  const cardRefs = useRef<Partial<Record<Meal, RNView | null>>>({});
+  const measure = useCallback(
+    () =>
+      Promise.all(
+        MEALS.map(
+          (meal) =>
+            new Promise<SectionFrame | null>((resolve) => {
+              const v = cardRefs.current[meal];
+              if (!v) return resolve(null);
+              v.measureInWindow((_x, y, _w, h) => resolve({ meal, top: y, bottom: y + h }));
+            }),
+        ),
+      ).then((frames) => frames.filter((f): f is SectionFrame => f !== null)),
+    [],
+  );
+
   // N81/#415 — the month grid the day switcher's label opens, so a day months
   // back is a couple of taps rather than up to ninety on the ±1-day arrows.
   // Same shape as `WeekPlanner`'s `monthOpen` sheet, one grid convention
@@ -164,6 +203,45 @@ export default function FoodScreen() {
    * "nobody is selecting", the ordinary state on every other screen visit.
    */
   const [combining, setCombining] = useState<{ meal: Meal; selected: Set<string> } | null>(null);
+
+  /**
+   * N531/#962 — the 3-dot menu and the share picker it can open.
+   *
+   * Each keeps its LAST subject after closing (`open: false` rather than
+   * `null`), the same reason `library.tsx`'s sheets keep `shownFacet` past
+   * `openFacet`: the Modal animates out with its content still drawn, and a
+   * sheet whose title blanks the instant Done is tapped reads as a flicker.
+   * `share` is additionally the KEY of the `ShareSheet` below, so a picker
+   * opened for a different entry is a fresh instance with no "Sent ✓" ledger
+   * borrowed from the last one.
+   */
+  const [menu, setMenu] = useState<{ entry: Entry; open: boolean } | null>(null);
+  const [share, setShare] = useState<{ id: string; open: boolean } | null>(null);
+  /**
+   * Whether the entry under the menu is safe to share — `entrySyncState`,
+   * the same two flags the entry screen read for the same button before
+   * this ticket moved it. `undefined` is "not read yet" and the sheet treats
+   * it as blocked ("Loading…"); `null` is the read that found nothing to
+   * refuse. Re-read on `lastSyncAt` because a push finishing in the
+   * background is exactly what turns "Not synced yet" into shareable, and
+   * nothing about the entry's own fields changes when it does.
+   */
+  const [menuSync, setMenuSync] = useState<{ id: string; blocked: string | null } | null>(null);
+  const menuEntryId = menu?.open ? menu.entry.id : null;
+  useEffect(() => {
+    if (!userId || !menuEntryId) return;
+    let live = true;
+    entrySyncState(userId, menuEntryId).then((s) => {
+      if (!live) return;
+      // No local row at all reads as blocked, not as permitted — there is
+      // nothing here to send. Same posture as the entry screen's `null`.
+      const blocked = s ? shareBlockedReason({ ...s, unsavedOnScreen: false }) : 'Not on this device.';
+      setMenuSync({ id: menuEntryId, blocked });
+    });
+    return () => {
+      live = false;
+    };
+  }, [userId, menuEntryId, lastSyncAt]);
 
   // N61: this tab is REACHABLE with nutrition off now — see `(tabs)/_layout.tsx`
   // for why hiding it was the worse failure — so the screen has to say what
@@ -392,23 +470,110 @@ export default function FoodScreen() {
     loadMonth(next);
   }
 
+  /**
+   * Re-read one day after a local write to it.
+   *
+   * `wroteOn` is the day the write belonged to, captured by the caller
+   * BEFORE any await. Without it, writing and then stepping days races: the
+   * write's re-read resolves last and writes `loaded` back to the old day,
+   * so the new day falls to `loading` until the next focus or sync. It fails
+   * honest — never a number from the wrong day — but it strands the screen.
+   * Found in review (of `onDelete`, which every other write here now shares).
+   */
+  const reloadDay = useCallback(
+    async (wroteOn: string) => {
+      if (!userId) return;
+      const rows = await localEntries(userId, wroteOn);
+      setLoaded((prev) =>
+        prev.on === wroteOn || prev.on === '' ? { on: wroteOn, eaten: eatenFrom(rows) } : prev,
+      );
+    },
+    [userId],
+  );
+
   async function onDelete(id: string) {
     if (!userId) return;
-    // The day this delete belongs to, captured BEFORE any await. Without it,
-    // deleting and then stepping days races: the delete's re-read resolves last
-    // and writes `loaded` back to the old day, so the new day falls to
-    // `loading` until the next focus or sync. It fails honest — never a number
-    // from the wrong day — but it strands the screen. Found in review.
     const deletingOn = on;
     await removeEntry(userId, id);
     // Every other write in this feature asks for a push; without it the
     // tombstone sits until the next foreground or timer tick, and a row deleted
     // on the phone stays on web for minutes.
     requestSync('food deleted');
-    const rows = await localEntries(userId, deletingOn);
-    setLoaded((prev) =>
-      prev.on === deletingOn || prev.on === '' ? { on: deletingOn, eaten: eatenFrom(rows) } : prev,
-    );
+    await reloadDay(deletingOn);
+  }
+
+  // N531 — the menu's Duplicate. A new local row through the outbox; it is
+  // on screen the moment the re-read lands, network or not.
+  async function onDuplicate(id: string) {
+    if (!userId) return;
+    const wroteOn = on;
+    await duplicateEntry(userId, id);
+    requestSync('food duplicated');
+    await reloadDay(wroteOn);
+  }
+
+  // N531 — the drop half of a drag. `useEntryDrag` only calls this for a
+  // section DIFFERENT from the one the row started in; `moveEntry` guards
+  // the same thing again at the row, so a no-op never dirties anything.
+  const onDropMove = useCallback(
+    (id: string, _from: Meal, to: Meal) => {
+      if (!userId) return;
+      const wroteOn = on;
+      moveEntry(userId, id, to)
+        .then(() => {
+          requestSync('food moved');
+          return reloadDay(wroteOn);
+        })
+        .catch(() => {
+          // The row is gone from this device (deleted from under the drag).
+          // The re-read below shows the day as it is; nothing to say.
+          return reloadDay(wroteOn);
+        });
+    },
+    [userId, on, reloadDay],
+  );
+
+  const drag = useEntryDrag({
+    enabled: !!userId && combining === null,
+    measure,
+    onDrop: onDropMove,
+  });
+  // One object, memoised on the coordinator's STABLE callbacks plus the two
+  // facts rows read — never rebuilt on every render, because `EntryRow`
+  // memoises its `PanResponder` on these and a responder rebuilt mid-drag
+  // loses its gesture state. See that file's own comment.
+  const dragHandlers = useMemo<EntryDragHandlers>(
+    () => ({
+      enabled: !!userId && combining === null,
+      activeId: drag.active?.id ?? null,
+      onStart: drag.start,
+      onMove: drag.move,
+      onEnd: drag.end,
+      onCancel: drag.cancel,
+    }),
+    [userId, combining, drag.active?.id, drag.start, drag.move, drag.end, drag.cancel],
+  );
+
+  // N531 — what the 3-dot menu does. Each closes the sheet first: the
+  // action's own re-read is what the athlete should see next, not a sheet
+  // still naming a row that has just changed.
+  function closeMenu() {
+    setMenu((m) => (m ? { ...m, open: false } : m));
+  }
+  function menuDuplicate() {
+    const e = menu?.entry;
+    closeMenu();
+    if (e) void onDuplicate(e.id);
+  }
+  function menuRemove() {
+    const e = menu?.entry;
+    closeMenu();
+    if (e) void onDelete(e.id);
+  }
+  function menuShare() {
+    const e = menu?.entry;
+    closeMenu();
+    if (e) setShare({ id: e.id, open: true });
   }
 
   // N115 — combine-select. `toggleSelect` is shared across every `MealCard`
@@ -454,6 +619,13 @@ export default function FoodScreen() {
       <ScrollView
         contentContainerStyle={[styles.container, { paddingBottom: TAB_BAR_CLEARANCE + 40 }]}
         contentInsetAdjustmentBehavior="automatic"
+        // N531 — locked for the length of a drag. On iOS a JS responder
+        // cannot refuse the native scroll view (`SwipeToDelete`'s doc comment
+        // measures this), so a lifted row dragged upward would scroll the
+        // page under itself; disabling the scroll while a row is lifted is
+        // the only thing that actually stops that. The long-press that lifts
+        // it happens with the finger still, before any scroll has begun.
+        scrollEnabled={drag.active === null}
       >
         {/* Inside the ScrollView, so it scrolls away with the content and
             nothing passes under it — no bottom rule. See `ScreenHeader`. */}
@@ -614,6 +786,16 @@ export default function FoodScreen() {
                   }
                   onCancelCombine={() => setCombining(null)}
                   onConfirmCombine={confirmCombine}
+                  // N531 — the row menu and the drag.
+                  onEntryMenu={(id) => {
+                    const e = slot.entries.find((x) => x.id === id);
+                    if (e) setMenu({ entry: e, open: true });
+                  }}
+                  drag={dragHandlers}
+                  containerRef={(v) => {
+                    cardRefs.current[slot.meal] = v;
+                  }}
+                  isDropTarget={drag.active !== null && drag.target === slot.meal}
                   testID={`food-meal-${slot.meal}`}
                 />
               ))}
@@ -621,6 +803,31 @@ export default function FoodScreen() {
           )}
         </RNView>
       </ScrollView>
+
+      {/* N531 — the 3-dot menu. One sheet for the whole day, fed the row it
+          was opened from; see `EntryMenuSheet` for why it is this shape. */}
+      <EntryMenuSheet
+        open={menu?.open ?? false}
+        entryName={menu?.entry.name ?? ''}
+        shareBlocked={menu && menuSync?.id === menu.entry.id ? menuSync.blocked : undefined}
+        onDuplicate={menuDuplicate}
+        onRemove={menuRemove}
+        onShare={menuShare}
+        onClose={closeMenu}
+        testID="entry-menu"
+      />
+      {/* Keyed on the entry so each share starts with its own clean "Sent"
+          ledger — the key is what makes `share.id` changing a remount rather
+          than an edit. Mounted only once something has been shared at all. */}
+      {share ? (
+        <ShareSheet
+          key={share.id}
+          resourceType="nutrition_entry"
+          resourceId={share.id}
+          open={share.open}
+          onClose={() => setShare((s) => (s ? { ...s, open: false } : s))}
+        />
+      ) : null}
 
       {/*
         The month grid, opened from the day switcher's label — N81/#415. The

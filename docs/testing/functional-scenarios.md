@@ -12277,6 +12277,100 @@ that decision had picked up along the way.
   different, undiagnosed issue and needs re-filing once confirmed on a
   device, not assumed closed by this fix.
 
+## Food entry row menu and drag between meals (N531 — `components/food/EntryRow.tsx`, `EntryMenuSheet.tsx`, `lib/useEntryDrag.ts`, `app/(tabs)/food.tsx`)
+
+Follows N115 (combine-select) and N468 (collapsible sections). Every logged
+entry row on the Food day view carries a 3-dot control opening a sheet with
+exactly Duplicate / Remove / Share; a long-press lifts the row so it can be
+dropped on another meal section. The large Share button is gone from the
+entry screen (`app/food/entry/[id].tsx`).
+
+### Happy path
+
+- Open Food on a day with entries: every row in every section shows the
+  3-dot control at its right edge, labelled "More for <name>" to VoiceOver.
+- Tap it: a bottom sheet slides up naming the entry, with three rows —
+  Duplicate, Remove, Share — a grabber, and Done. Tapping outside, Done, or
+  the two-finger escape closes it.
+- **Duplicate**: the sheet closes and a second row with the same name,
+  amount and calories appears in the SAME meal immediately; the section's
+  header count and kcal total both grow by that entry; the day's summary
+  and remaining figures move accordingly. Kill the app and reopen: both rows
+  are still there. With signal, the copy reaches the server on the next
+  push and appears on web's day view.
+- **Remove**: the sheet closes and the row is gone, exactly as swiping it
+  and tapping Delete would do; totals drop; the removal syncs.
+- **Share** on an entry that has synced: the sheet closes and the friend
+  picker ("Send a copy to") opens for THAT entry; pick a friend → "Sent ✓"
+  and the success chime; the friend receives a saved food, not a dated row
+  in their own log (N116).
+- **Drag**: press and hold a row (~300ms) — it lifts (slightly scaled, a
+  hairline border) and its own section's border takes the accent colour.
+  Drag up or down: the section under the finger takes the accent border
+  instead; the page does NOT scroll while a row is lifted. Release over a
+  different section: the row lands in that meal, the source section's
+  count/total drop and the target's rise, the day-pill and every section's
+  collapsed/expanded state are exactly as they were. Kill and reopen: the
+  entry is still in the new meal. Open the same day on web after a sync:
+  same meal.
+- Where a moved row sits inside its new section is by its ORIGINAL log
+  time, not at the bottom — within-meal order is not a thing this app
+  stores (see the N531 history entry).
+
+### Edge cases and errors
+
+- Long-press and release without moving: the row settles back, nothing
+  changes, and the page scrolls normally again straight afterwards (the
+  scroll lock lifted).
+- Drag and release over the day pill, the summary card, the trackers, or
+  between two cards: nothing moves — a drop outside every section is a
+  cancel, not a snap to the nearest meal.
+- Drag and release over the section the row started in: nothing changes,
+  and the entry remains shareable (the no-op does not mark it as edited).
+- Drag while a section is COLLAPSED (N468): the collapsed card is still a
+  valid drop target (its header is its area); dropping there moves the entry
+  into it and the card stays collapsed with its count incremented.
+- Start "Combine" in a section (N115): the 3-dot controls disappear from
+  that section's rows and a long-press on any row lifts nothing; tapping
+  rows still toggles selection; Cancel restores the controls.
+- Share on an entry logged moments ago with no signal: the Share row is
+  dimmed with "Not synced yet — this becomes shareable once it reaches the
+  server." under it; tapping it does nothing; VoiceOver reads the reason as
+  part of the button. Regain signal, wait for the push (or trigger sync):
+  reopen the menu and Share is enabled without leaving the screen.
+- Share on an entry edited on this phone but not yet pushed: dimmed with
+  "Save your changes first — sharing sends the saved version."
+- Duplicate with no signal (airplane mode): works exactly as online; the
+  copy shows immediately and the sync chip shows one pending; it pushes
+  when signal returns.
+- Duplicate on a PAST day (stepped back with the arrows): allowed — it is
+  a correction to that day, like any edit; the copy lands on that day.
+- The entry that was open in the menu is deleted from another surface
+  (web) and a pull lands before you tap: Duplicate/Remove report nothing
+  and the day simply re-reads without the row.
+- Rotate / different text sizes: the sheet's rows stay ≥44pt; the 3-dot
+  control keeps a 44pt square target.
+
+### Auth and security
+
+- With nobody signed in nothing on this screen writes (the handlers all
+  guard on `userId`), and the menu's Share cannot open a picker for an
+  entry that is not this account's — the sync-state read is scoped to the
+  user, and an id this device has no row for reads as "Not on this device."
+- The share itself is the existing `POST /v1/shares` path with the
+  existing friend-only 404 semantics (N116); nothing here widens who can be
+  sent what.
+
+### Not covered by the suite (device checks)
+
+- Whether the long-press lifts cleanly before the native scroll view has
+  begun a pan on a real iPhone, and whether a lifted row ever scrolls the
+  page under itself. Jest has no gesture system; the responder ordering is
+  argued from RN's responder plugin, not measured.
+- Whether the lifted row is visibly above the NEXT card as it crosses into
+  it (zIndex/elevation), on both platforms.
+- Android has not been run.
+
 ## Food search result cards (N58 — `app/food/add.tsx`, `lib/foodGlyph.ts`)
 
 Follows N51, which wired the search. This is what a result looks like.

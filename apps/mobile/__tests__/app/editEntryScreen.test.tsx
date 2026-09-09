@@ -272,3 +272,16 @@ describe('"Made of" and splitting a combined meal back into its parts (N115)', (
     expect(input.removeId).toBe('combined-1');
   });
 });
+
+/**
+ * N531/#962 — the large Share button left this screen; sharing lives on the
+ * day view's per-row menu now (`foodEntryMenu.test.tsx`), one tap closer.
+ * Save and Delete stay.
+ */
+it('has no Share button any more — sharing moved to the row menu (N531)', async () => {
+  await open();
+  expect(screen.queryByTestId('entry-share-open')).toBeNull();
+  expect(screen.queryByTestId('share-disabled-reason', { includeHiddenElements: true })).toBeNull();
+  expect(screen.getByTestId('edit-save')).toBeTruthy();
+  expect(screen.getByTestId('edit-delete')).toBeTruthy();
+});

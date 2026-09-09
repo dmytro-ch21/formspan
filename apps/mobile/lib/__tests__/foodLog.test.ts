@@ -15,6 +15,7 @@
 import { ApiError, OfflineError } from '../apiError';
 import {
   cacheEntries,
+  duplicateEntry,
   editEntry,
   cacheTargets,
   entrySyncState,
@@ -26,6 +27,7 @@ import {
   localFoods,
   localTargetView,
   logFood,
+  moveEntry,
   pendingFoodCount,
   recentsFor,
   removeEntry,
@@ -1036,5 +1038,155 @@ describe('N468/#792: a caffeinated food automatically posts to the caffeine trac
     const entries = await localTrackerEntries(USER, TODAY);
     expect(entries).toHaveLength(1);
     expect(entries[0].amount).toBe(95); // NOT round(95 * 2.4) = 228
+  });
+});
+
+/**
+ * N531/#962 — the row menu's Duplicate and the drag's drop, at the outbox.
+ *
+ * Both are local-first writes and both have to survive a pull. The drag has
+ * one more property the ticket calls out by name — "do not ship a drag that
+ * silently forgets" — so the pull-racing-a-move case is pinned here rather
+ * than argued from `cacheEntries`' `WHERE dirty = 0`.
+ */
+describe('duplicate (N531)', () => {
+  it('writes a NEW row in the same meal on the same day, with the same nutrition and provenance', async () => {
+    const src = await logFood(USER, meal({
+      meal: 'breakfast', source_food_id: 'food-7', category: 'poultry', notes: 'with sauce',
+    }));
+    const dup = await duplicateEntry(USER, src);
+
+    expect(dup).not.toBe(src);
+    const day = await localEntries(USER, TODAY);
+    expect(day).toHaveLength(2);
+    const copy = day.find((e) => e.id === dup);
+    const orig = day.find((e) => e.id === src);
+    expect(copy).toMatchObject({
+      meal: 'breakfast', eaten_on: TODAY, name: 'Chicken thigh', kcal: 180, protein_g: 25,
+      source_food_id: 'food-7', category: 'poultry', notes: 'with sauce',
+    });
+    // The original is untouched — a duplicate is an addition, not an edit.
+    expect(orig).toMatchObject({ meal: 'breakfast', kcal: 180 });
+  });
+
+  it('owes a push for the copy, and makes no network call to create it (airplane mode)', async () => {
+    const src = await logFood(USER, meal());
+    // The original has already been sent, so the outbox is empty before this.
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, src);
+    expect(await pendingFoodCount(USER)).toBe(0);
+
+    const dup = await duplicateEntry(USER, src);
+    expect(mockApi).not.toHaveBeenCalled();
+    expect(await row(dup)).toMatchObject({ dirty: 1, remote: 0, deleted_at: null });
+    expect(await pendingFoodCount(USER)).toBe(1);
+  });
+
+  it('sends the copy under its own id on the next push, with the same meal and source food', async () => {
+    const src = await logFood(USER, meal({ source_food_id: 'food-7' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, src);
+    const dup = await duplicateEntry(USER, src);
+
+    await syncFood(USER, token);
+    const entryCalls = mockApi.mock.calls.filter(([, path]) => String(path).includes(dup));
+    expect(entryCalls).toHaveLength(1);
+    const [, , init] = entryCalls[0] as [unknown, string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ meal: 'lunch', source_food_id: 'food-7' });
+    expect(await row(dup)).toMatchObject({ dirty: 0, remote: 1 });
+  });
+
+  it('refuses an entry that is gone, rather than duplicating nothing', async () => {
+    const id = await logFood(USER, meal());
+    await removeEntry(USER, id);
+    await expect(duplicateEntry(USER, id)).rejects.toThrow(/no longer exists/);
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+
+  it("cannot duplicate another athlete's entry", async () => {
+    const theirs = await logFood('u2', meal());
+    await expect(duplicateEntry(USER, theirs)).rejects.toThrow(/no longer exists/);
+    expect(await localEntries(USER, TODAY)).toHaveLength(0);
+  });
+});
+
+describe('move between meals (N531)', () => {
+  it('changes ONLY the meal, and owes a push for it', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    const before = await db.getFirstAsync<{ logged_at: string }>(
+      `SELECT logged_at FROM food_entries WHERE id = ?`, id,
+    );
+
+    await moveEntry(USER, id, 'lunch');
+
+    const [e] = await localEntries(USER, TODAY);
+    expect(e).toMatchObject({ id, meal: 'lunch', kcal: 180, name: 'Chicken thigh' });
+    expect(await row(id)).toMatchObject({ dirty: 1, remote: 1, deleted_at: null });
+    // `logged_at` is when it was eaten; a move does not re-eat it.
+    const after = await db.getFirstAsync<{ logged_at: string }>(
+      `SELECT logged_at FROM food_entries WHERE id = ?`, id,
+    );
+    expect(after?.logged_at).toBe(before?.logged_at);
+    expect(mockApi).not.toHaveBeenCalled();
+  });
+
+  it('a drop on the section the entry is already in is a no-op — it does not dirty the row', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    const before = await row(id);
+
+    await moveEntry(USER, id, 'breakfast');
+
+    // Same `updated_at`, still clean — so `entrySyncState` still says
+    // shareable, which is the reason this guard exists.
+    expect(await row(id)).toEqual(before);
+    expect(await entrySyncState(USER, id)).toEqual({ unsynced: false, owed: false });
+  });
+
+  it('sends the new meal on the next push', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await moveEntry(USER, id, 'dinner');
+
+    await syncFood(USER, token);
+    const [, , init] = mockApi.mock.calls[0] as [unknown, string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ meal: 'dinner' });
+    expect(await row(id)).toMatchObject({ dirty: 0, remote: 1 });
+  });
+
+  it('persists across a pull: once pushed, the server echoing the new meal keeps it there', async () => {
+    const id = await logFood(USER, meal({ meal: 'breakfast' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await moveEntry(USER, id, 'dinner');
+    await syncFood(USER, token);
+
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ meal: 'dinner' }), id, source_food_id: null, category: null, notes: '' },
+    ]);
+    const [e] = await localEntries(USER, TODAY);
+    expect(e.meal).toBe('dinner');
+  });
+
+  it('a pull that arrives BEFORE the push does not snap the entry back to its old meal', async () => {
+    // The trap the ticket names: the athlete drags lunch to dinner, then a
+    // background pull answers with the server\'s still-stale copy. The
+    // local move is `dirty`, and `cacheEntries` refuses to overwrite a row
+    // this device still owes — pinned here rather than assumed.
+    const id = await logFood(USER, meal({ meal: 'lunch' }));
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await moveEntry(USER, id, 'dinner');
+
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal({ meal: 'lunch' }), id, source_food_id: null, category: null, notes: '' },
+    ]);
+
+    const [e] = await localEntries(USER, TODAY);
+    expect(e.meal).toBe('dinner');
+    expect(await row(id)).toMatchObject({ dirty: 1 });
+  });
+
+  it('refuses an entry that is gone', async () => {
+    const id = await logFood(USER, meal());
+    await removeEntry(USER, id);
+    await expect(moveEntry(USER, id, 'dinner')).rejects.toThrow(/no longer exists/);
   });
 });

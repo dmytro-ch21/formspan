@@ -329,3 +329,125 @@ describe('combine-select mode (N115)', () => {
     expect(screen.getByTestId('meal-breakfast-combine-bar')).toBeTruthy();
   });
 });
+
+/**
+ * N531/#962 — the 3-dot control on every row, and the long-press that lifts
+ * one. `MealCard` is a thin renderer here too: it hands each row the
+ * caller's `onEntryMenu` and `drag`, and these tests ask only what a caller
+ * sees — the drop decision itself is `useEntryDrag.test.ts`.
+ */
+describe('the per-row 3-dot menu (N531)', () => {
+  it('every row gets a labelled control that calls back with its id', () => {
+    const onEntryMenu = jest.fn();
+    renderCard({
+      entries: [entry({ id: 'a', name: 'Oats' }), entry({ id: 'b', name: 'Greek yoghurt' })],
+      onEntryMenu,
+    });
+    const more = screen.getByTestId('food-entry-b-more');
+    expect(more.props.accessibilityLabel).toBe('More for Greek yoghurt');
+    expect(more.props.accessibilityRole).toBe('button');
+    fireEvent.press(more);
+    expect(onEntryMenu).toHaveBeenCalledWith('b');
+    expect(screen.getByTestId('food-entry-a-more').props.accessibilityLabel).toBe('More for Oats');
+  });
+
+  it('renders no control at all without a handler', () => {
+    renderCard({ entries: [entry({ id: 'a' })] });
+    expect(screen.queryByTestId('food-entry-a-more')).toBeNull();
+  });
+
+  it('is hidden while selecting — the row is a checkbox then', () => {
+    renderCard({
+      entries: [entry({ id: 'a' }), entry({ id: 'b' })],
+      onEntryMenu: () => {},
+      selecting: true,
+      selectedIds: new Set(),
+    });
+    expect(screen.queryByTestId('food-entry-a-more')).toBeNull();
+    expect(screen.getByTestId('food-entry-a-select')).toBeTruthy();
+  });
+
+  it('tapping the row still opens the entry — the control is a sibling, not a nested press', () => {
+    const onEntryPress = jest.fn();
+    const onEntryMenu = jest.fn();
+    renderCard({ entries: [entry({ id: 'a' })], onEntryPress, onEntryMenu });
+    fireEvent.press(screen.getByTestId('food-entry-a-open'));
+    expect(onEntryPress).toHaveBeenCalledWith('a');
+    expect(onEntryMenu).not.toHaveBeenCalled();
+  });
+});
+
+describe('long-press lifts a row for the drag (N531)', () => {
+  function dragHandlers(over: Partial<React.ComponentProps<typeof MealCard>['drag']> = {}) {
+    return {
+      enabled: true,
+      activeId: null,
+      onStart: jest.fn(),
+      onMove: jest.fn(),
+      onEnd: jest.fn(),
+      onCancel: jest.fn(),
+      ...over,
+    };
+  }
+
+  it('a long-press tells the coordinator which entry lifted, and from which meal', () => {
+    const drag = dragHandlers();
+    renderCard({ entries: [entry({ id: 'a', meal: 'breakfast' })], drag });
+    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    expect(drag.onStart).toHaveBeenCalledWith('a', 'breakfast');
+  });
+
+  it('is inert while selecting, even with drag enabled — a checkbox does not lift', () => {
+    const drag = dragHandlers();
+    renderCard({
+      entries: [entry({ id: 'a' }), entry({ id: 'b' })],
+      drag,
+      selecting: true,
+      selectedIds: new Set(),
+    });
+    fireEvent(screen.getByTestId('food-entry-a-select'), 'longPress');
+    expect(drag.onStart).not.toHaveBeenCalled();
+  });
+
+  it('is inert when the coordinator says disabled', () => {
+    const drag = dragHandlers({ enabled: false });
+    renderCard({ entries: [entry({ id: 'a' })], drag });
+    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    expect(drag.onStart).not.toHaveBeenCalled();
+  });
+
+  it('does nothing without a coordinator at all', () => {
+    const onEntryPress = jest.fn();
+    renderCard({ entries: [entry({ id: 'a' })], onEntryPress });
+    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    expect(onEntryPress).not.toHaveBeenCalled();
+  });
+
+  it('a lift released without moving is cancelled, so the day view can unlock its scroll', () => {
+    const drag = dragHandlers();
+    renderCard({ entries: [entry({ id: 'a' })], drag });
+    const row = screen.getByTestId('food-entry-a-open');
+    fireEvent(row, 'pressIn');
+    fireEvent(row, 'longPress');
+    fireEvent(row, 'pressOut');
+    expect(drag.onStart).toHaveBeenCalledTimes(1);
+    expect(drag.onCancel).toHaveBeenCalledTimes(1);
+    expect(drag.onEnd).not.toHaveBeenCalled();
+  });
+
+  it('a plain tap released never cancels — nothing was lifted', () => {
+    const drag = dragHandlers();
+    renderCard({ entries: [entry({ id: 'a' })], drag });
+    const row = screen.getByTestId('food-entry-a-open');
+    fireEvent(row, 'pressIn');
+    fireEvent(row, 'pressOut');
+    expect(drag.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('the section under the finger says so to assistive tech', () => {
+    renderCard({ entries: [entry({ id: 'a' })], isDropTarget: true });
+    expect(screen.getByTestId('meal-breakfast').props.accessibilityState).toEqual({ selected: true });
+    renderCard({ entries: [entry({ id: 'b' })], isDropTarget: false, testID: 'meal-lunch' });
+    expect(screen.getByTestId('meal-lunch').props.accessibilityState).toBeUndefined();
+  });
+});
