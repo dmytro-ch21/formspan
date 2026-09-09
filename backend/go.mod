@@ -3,13 +3,13 @@ module github.com/dmytro-ch21/vola/backend
 go 1.26.8
 
 require (
-	github.com/MicahParks/jwkset v0.11.1
-	github.com/MicahParks/keyfunc/v3 v3.8.1
-	github.com/anthropics/anthropic-sdk-go v1.63.1
+	github.com/MicahParks/jwkset v0.11.3
+	github.com/MicahParks/keyfunc/v3 v3.8.2
+	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/openai/openai-go/v3 v3.52.0
+	github.com/openai/openai-go/v3 v3.56.0
 	golang.org/x/image v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
