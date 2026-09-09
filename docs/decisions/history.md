@@ -66495,6 +66495,151 @@ useful* thing to print is also an on-device question — if the athlete finds
 themselves reading signal strength and ignoring the tag, the order in that line
 is the thing to change.
 
+## 2026-09-09 — N548 (#991): a session logged today opens from Today, and the rows belong to the day being shown
+
+**The athlete's own words, from daily use:** *"we need to redesign how I access
+the logged sessions from today. I need to go progress → find week → then open
+and see it there. We need in today things that got logged be clickable and able
+to review."*
+
+That is three navigations to reach something logged an hour ago, on the screen
+it was logged from. Today already **counted** the day's sessions — the `rest`
+lead says *"You logged 2 sessions today anyway"* — and then offered no way to
+open either of them. A number without its rows is the shape that sends you to
+another tab.
+
+### What shipped
+
+A **`LOGGED` block on Today**, between the lead and `LATER`, one row per session
+the day being shown already has, each opening that session's own screen.
+
+- `lib/todayBoard.ts` gains **`loggedOn(sessions, dayKey)`** — the pure *what
+  did this day log* selection — and `TodayBoard` gains `logged:
+  Source<Session[]>`.
+- `components/today/LoggedCard.tsx` is the row: the `UpNextCard` shape mirrored
+  (sport rule, tinted disc, glyph, chevron) with **no filled button**, because
+  Today allows one filled control and it belongs to what has not been done yet.
+- `app/(tabs)/index.tsx`'s `LoggedBlock` renders it, routing through
+  **`sessionHref`** — so strength, BJJ and running each land on the screen that
+  already exists for them. **No new report screen was built**, and that was
+  deliberate: a fourth session view is how three surfaces end up disagreeing
+  about what a session is.
+
+### The three decisions worth recording
+
+**1. It is the SAME selection the `rest` lead's count is derived from.**
+`loggedToday` used to re-derive the day filter inline. Now it is
+`logged.value.length`. That is not tidying: the moment the rows exist, a
+separately-derived count is *two answers to one question a few hundred points
+apart on one screen* — the W2/W4 shape this repo has shipped twice. Reachable
+only when there is no resume, which is exactly when the two day keys agree, so
+no number it used to produce changed.
+
+**2. The rows follow the browsed day, via `momentumDayKey`, not via `viewDay`
+directly.** Today can display a past day (N430/#692), and the criterion says the
+rows must belong to the day being *shown*. But the day switcher is **hidden**
+while a session is running, so a `dayOffset` left over from browsing before that
+session started is neither visible nor correctable — and this screen never
+unmounts, so that leftover genuinely persists. Momentum, `quickLog` and the
+trackers all resolve to real today in that state through `momentumDayKey`; the
+LOGGED list does too, rather than keying off `viewDay` and describing last
+Tuesday underneath a card describing a session running right now.
+
+**3. The resumed session is excluded from the list — by ID, not by state.** The
+resume card immediately above already *is* that session, with a much bigger
+target on it. Filtering on `ended_at` instead would have hidden a **second** open
+session, which is reachable (Plan and web both start one with no active-session
+guard) and which `findResume` deliberately leaves in the list for that reason. So
+it is `s.id !== resumeOffer?.session.id`, and a second open session still renders,
+marked `In progress`.
+
+### A fourth copy of the session summary was avoided by deleting the third
+
+`sessionMeta` (duration · sets · tonnage, or duration · distance · pace for a
+run) existed **three times** — `app/session/history.tsx`'s `SessionRow`,
+`components/TrainingCalendar.tsx`'s day detail, and the strength half of Today's
+resume card — and they had **already diverged**: history's row has no running
+branch at all, so a run there still reads a strength-shaped line even after N462
+fixed exactly that on the calendar. Rather than write it a fourth time, it is
+`lib/sessionSummary.ts` now, and `TrainingCalendar` reads it. `history.tsx` is
+deliberately left alone: its line leads with the session's **date**, which a list
+spanning months has to, so folding it in means deciding what that screen's
+sentence should be — a change to a screen this ticket is not about, and one
+`sessionMeta` now makes cheap whenever somebody wants it.
+
+The `#425` asymmetry recorded in `TrainingCalendar` (a month aggregate
+under-counts by an unresolved set's tonnage, while the session screen's Volume
+tile withholds the whole figure) is preserved in a comment at the site the
+functions left, not silently dropped with them.
+
+### The section says nothing rather than saying the day was empty
+
+`LoggedBlock` renders **nothing at all** for `unread`, `unavailable` or an empty
+day. The other blocks on this screen announce a failed read; this one must not,
+for a reason specific to it: `useTodayBoard` reads the **30 most recent
+sessions**, so a day browsed far enough back that its sessions fall outside those
+30 selects nothing — and a "nothing logged" line there would be a false claim
+about the athlete rather than an honest one about the disk. Silence is the only
+rendering that is true in both cases. That cap is pre-existing and shared with
+`loggedToday`, `owedOn` and the resume search over the same list; it is written
+down on `loggedOn` itself rather than left to be rediscovered.
+
+### Mutation-tested, nine ways, green baseline in the same session
+
+`lib/__tests__/todayLogged.test.ts` seeds a **migrated SQLite fixture** through
+`upsert` and reads it back through `listLocalSessions` — the exact read the hook
+makes — before the selection is applied, because the interesting risk is at the
+seam and not in the filter. `started_at` is an ISO instant; the day it belongs to
+is the **local** calendar day; the suite runs under `TZ=America/Los_Angeles`, so
+8pm on the 26th is stored as the 27th. An array of hand-written literals cannot
+show that, and a `slice(0, 10)` implementation passes every other case.
+
+All nine mutations were confirmed present on disk before the run and were caught:
+
+| mutation | caught by |
+|---|---|
+| `loggedOn` ignores its `dayKey` | 8 tests |
+| `loggedOn` reads `started_at.slice(0, 10)` | the evening-session case, alone |
+| `loggedOn` does not sort | 2 tests — **after a fix; see below** |
+| `logged` keyed on `viewDay`, not `momentumDayKey` | the resume case |
+| the resume-ID filter dropped | 3 tests |
+| `sessionMeta` loses its running branch | 4 tests |
+| `sessionMeta` fabricates zeros | 3 tests |
+| `LoggedBlock` renders on an empty day | 2 tests |
+| rows opened by something other than `sessionHref` | 4 tests |
+
+**The sort mutation initially SURVIVED**, and that is the entry worth keeping.
+`listLocalSessions` is already `ORDER BY started_at DESC`, so every test that got
+its rows from the store was ordered correctly *by SQLite* — the selection's own
+sort was doing nothing any assertion could see, while being genuinely
+load-bearing at the boundary where rows come from a mock instead. Two tests were
+added: one hands `loggedOn` a deliberately reversed array, and the screen test's
+mock now returns oldest-first. Exactly the "a test emptied by where its data
+happens to come from" case CLAUDE.md's *Verify that a check can fail* section
+collects.
+
+### Open
+
+- **The `NEEDS HUMAN EVIDENCE` criterion is outstanding**: log a session, return
+  to Today, reach its report in one tap. Nothing in a render tree answers that —
+  the row's target size, whether the block reads as part of the day or as a
+  second list, and whether three sessions on a heavy day pushes `LATER` too far
+  down are all things you look at.
+- **The 30-session cap is unchanged and now has one more consumer.** Browsing
+  back past it shows no LOGGED block on a day that really did log something.
+  Fixing it means a day-scoped `WHERE date(started_at, 'localtime') = ?` read
+  that neither Today nor Train has, and adding one *only* for this list would
+  reintroduce the two-answers problem decision 1 above exists to remove — so it
+  is a change to what the hook reads, not to this block.
+- **`app/session/history.tsx` still carries its own summary line**, and still
+  shows a run without distance or pace. `sessionMeta` is what it would adopt; the
+  open question is what a months-long list's row should lead with, not whether
+  the numbers are shared.
+- The section header's `All` goes to `/session/history` rather than to Progress.
+  Progress is untouched and keeps every route it had — but whether the way out of
+  a three-row list should be the searchable history or the calendar the athlete
+  currently uses is a judgement nobody has ruled on.
+
 ## Open items / known gaps as of this entry
 
 

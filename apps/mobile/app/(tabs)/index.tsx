@@ -28,6 +28,7 @@ import { WeekStrip } from '@/components/today/WeekStrip';
 import { MomentumCard } from '@/components/today/MomentumCard';
 import { UpNextCard } from '@/components/today/UpNextCard';
 import { DetectedActivityCard } from '@/components/today/DetectedActivityCard';
+import { LoggedCard } from '@/components/today/LoggedCard';
 import { ProgressCard } from '@/components/today/ProgressCard';
 import {
   LoggingCard,
@@ -64,7 +65,9 @@ import {
   readPref,
   writePref,
 } from '@/lib/prefs';
+import { sessionMeta } from '@/lib/sessionSummary';
 import { restLine } from '@/lib/trend';
+import type { UnitSystem } from '@/lib/units';
 import { enabledSports, labelFor, logsAfterwards, type Module } from '@/lib/modules';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
 import { formatPlanTime } from '@/lib/planTime';
@@ -1128,6 +1131,35 @@ export default function TodayScreen() {
             </Pressable>
           )}
 
+          {/* ── 1b. LOGGED ────────────────────────────────────────────────
+              N548 — what the day being shown already has, each row opening
+              the session it names.
+
+              Directly under the lead because it is the other half of the
+              same sentence: block 1 says what is coming, this says what is
+              done. The athlete's complaint was that the second half was only
+              reachable through Progress — "I need to go progress → find week
+              → then open and see it there".
+
+              **It adds a path and removes none.** Progress still carries the
+              training calendar, the week review and every route into a past
+              session; `All` here goes to the full searchable history rather
+              than replacing any of that.
+
+              Absent entirely when the read has not answered, has failed, or
+              the day genuinely logged nothing — the same discipline as every
+              other block on this screen. A "nothing logged today" line would
+              be a claim about the athlete, and on a day browsed far enough
+              back to fall outside the 30 sessions this screen reads it would
+              be a false one (see `loggedOn`'s own note on that cap). */}
+          <LoggedBlock
+            logged={board.logged}
+            modules={modules}
+            units={units}
+            onOpenSession={(s) => router.push(sessionHref(s, modules))}
+            onAll={() => router.push('/session/history')}
+          />
+
           {/* N479/#824 — sits between blocks 1 and 2; see this screen's own
               doc comment above for why it is not a seventh numbered block.
               Absent entirely when there is nothing detected, dismissed or
@@ -1928,6 +1960,71 @@ function LeadBlock({
       </View>
       <Icon name="chevron" size={16} color={vola.textDim} />
     </Pressable>
+  );
+}
+
+/**
+ * Block 1b — LOGGED. **N548.**
+ *
+ * What the day being shown already has, newest first, each row opening the
+ * session it names. The selection is not made here — {@link buildTodayBoard}
+ * owns it, so the rows and the `rest` lead's own "you logged N sessions"
+ * sentence are the same answer rather than two.
+ *
+ * **Renders nothing at all for `unread`, `unavailable` or an empty day**, and
+ * the third is the interesting one. The other blocks on this screen say so
+ * when a read fails, because they are answering a question the athlete asked
+ * by opening the screen. This one is not: an athlete who has logged nothing
+ * yet needs a way to start, which block 1 already is, not a row telling them
+ * the day is empty. And silence is the only honest rendering on a day browsed
+ * far enough back to fall outside the 30 sessions the screen reads — see
+ * `loggedOn`.
+ *
+ * **`All` goes to the full searchable history, not to Progress.** The ticket's
+ * fourth criterion is that nothing hides; Progress is untouched and still
+ * carries the calendar and the week review. `session/history` is the superset
+ * — every session on the account, searchable and filterable — so the way out
+ * of a three-row list leads somewhere that can answer more than the list did.
+ *
+ * Each session's route comes from `sessionHref`, which is where the
+ * strength/BJJ/running branch is already decided (`lib/startSession.ts`). This
+ * screen deliberately does not learn that branch a second time: a BJJ class
+ * pushed into the strength set logger fails nothing and is silent.
+ */
+function LoggedBlock({
+  logged,
+  modules,
+  units,
+  onOpenSession,
+  onAll,
+}: {
+  logged: Source<Session[]>;
+  modules: Module[];
+  units: UnitSystem;
+  onOpenSession: (s: Session) => void;
+  onAll: () => void;
+}) {
+  if (logged.state !== 'ready' || logged.value.length === 0) return null;
+
+  return (
+    <View style={styles.section} testID="today-logged">
+      <SectionHeader label="Logged" action="All" onAction={onAll} testID="today-logged-all" />
+      {logged.value.map((s) => {
+        const sportLabel = labelFor(modules, s.sport);
+        return (
+          <LoggedCard
+            key={s.id}
+            sport={s.sport}
+            sportLabel={sportLabel}
+            title={s.name || `${sportLabel} session`}
+            meta={sessionMeta(s, units)}
+            inProgress={!s.ended_at}
+            onOpen={() => onOpenSession(s)}
+            testID={`today-logged-${s.id}`}
+          />
+        );
+      })}
+    </View>
   );
 }
 

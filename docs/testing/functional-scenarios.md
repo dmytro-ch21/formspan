@@ -21877,3 +21877,76 @@ disc, drop-lines, a glow, and the latest reading ringed.
 - With **both Helio Straps present and broadcasting**: the two rows are
   tellable apart, the one held against the phone is the one that pairs, and
   the paired row reads as a status rather than a repeated name.
+
+## N548 — what was logged today opens from Today (`apps/mobile/lib/todayBoard.ts`'s `loggedOn`/`TodayBoard.logged`, `apps/mobile/lib/sessionSummary.ts`, `apps/mobile/components/today/LoggedCard.tsx`, `apps/mobile/app/(tabs)/index.tsx`'s `LoggedBlock`, #991)
+
+The athlete's own complaint, from daily use: reviewing a session logged an hour
+ago meant leaving Today for Progress, finding the week, and opening it there.
+Today already counted the day's sessions and offered no way to open one.
+
+### Happy path
+
+- Log a strength session, return to Today: a `LOGGED` block sits under the lead,
+  the row names the sport (`STRENGTH`) and the session (`Leg day`), and tapping
+  it opens `/session/[id]`.
+- A BJJ class logged the same day opens `/bjj/session/[id]` — **not** the set
+  logger, which would render "Sets 0 · Reps 0 · Volume —" over an empty list and
+  throw nothing.
+- A run opens `/running/[id]`.
+- Three sports on one day list all three, **newest first** — the evening class
+  above the morning lift.
+- A session that was never named reads `Strength session`, not a blank row.
+- The row's meta line states only what exists: a lift reads duration · sets ·
+  tonnage; a mat class with no sets reads the duration alone (never `0 sets`); a
+  run reads duration · distance · pace, and the pace is the one the tracking
+  screen showed (active seconds), not a wall-clock figure a pause has slowed.
+- `All` in the section header opens the full searchable history
+  (`/session/history`).
+
+### The browsed day (N430/#692) — the case most able to be silently wrong
+
+- Step the day pill back one day: the rows become **yesterday's**, and today's
+  are gone. A list keyed on real today looks perfect on today and fails only
+  here.
+- Two sessions with the same name, one on each day: tapping the browsed day's
+  row opens the browsed day's session id.
+- Step back to a day that logged nothing: the whole block disappears — no
+  "nothing logged" line — and reappears on stepping forward, so the absence is
+  the day and not a section that unmounted.
+- Browse far enough back that the day's sessions fall outside the 30 most recent
+  the screen reads: **no block, no claim.** Known limitation, shared with the
+  rest-day count and the resume search over the same list.
+
+### While a session is running
+
+- The resume card leads, and the running session is **not** repeated as a row
+  beneath it.
+- Sessions logged EARLIER on real today still appear beneath the resume card,
+  even if the day pill was left on another day before the session started (the
+  pill is hidden during a resume, so that state is not correctable from the
+  screen).
+- A **second** open session — reachable, since Plan and web start one with no
+  active-session guard — does appear, marked `In progress` rather than showing
+  a fabricated `0 min`.
+
+### Nothing hides
+
+- Progress keeps every route it had: the training calendar still opens a past
+  session by date, and the week strip on Today still goes to Progress.
+
+### Edge cases and errors
+
+- The session read failing (`unavailable`) draws no block — the lead already
+  says the read failed, and a second failure notice for the same read is noise.
+- Before the read answers (`unread`) the block is absent, not a spinner: this
+  is a tab screen that re-reads on every focus.
+- The number in the rest day's "You logged N sessions today anyway" and the
+  number of rows below it are the same selection; they cannot disagree.
+
+### Needs a device — NEEDS HUMAN EVIDENCE (latched on #991)
+
+- Log a session, return to Today, reach its report in **one tap**.
+- The row's target is comfortable one-handed, and the block reads as part of the
+  day rather than as a second list stapled under the first.
+- A heavy day with three logged sessions: `LATER` and `DAILY PROGRESS` are still
+  reachable without the screen feeling like a report.
