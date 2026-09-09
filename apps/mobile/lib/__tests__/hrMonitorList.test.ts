@@ -1,4 +1,12 @@
-import { liveHRStatusLabel, pairedMonitorStatusLabel, type LiveHRState } from '../hrMonitor/heartRateProfile';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+import {
+  isPairedMonitorConnected,
+  liveHRStatusLabel,
+  pairedMonitorStatusLabel,
+  type LiveHRState,
+} from '../hrMonitor/heartRateProfile';
 import { monitorRowA11yLabel, monitorRows, shortDeviceTag, signalWord } from '../hrMonitor/monitorList';
 
 /**
@@ -167,9 +175,61 @@ describe('pairedMonitorStatusLabel — a state, never the device name', () => {
     expect(pairedMonitorStatusLabel({ ...base, status: 'connected', device: other })).toBe('Connected');
   });
 
+  it('the mismatch guard fires in EVERY connectable state, not just connected', () => {
+    const other = { id: IOS_B, name: 'Polar H10' };
+    for (const status of ['connecting', 'connected', 'reconnecting', 'disconnected'] as const) {
+      expect(pairedMonitorStatusLabel({ ...base, status, device: other }, dev.id)).toBe('Not connected');
+    }
+    // `unsupported` is about the binary, not about any one device, so it wins.
+    expect(pairedMonitorStatusLabel({ ...base, status: 'unsupported', device: other }, dev.id)).toBe(
+      'Bluetooth not available',
+    );
+  });
+
+  it('the row icon and the row words cannot disagree', () => {
+    const other = { id: IOS_B, name: 'Polar H10' };
+    for (const status of ['off', 'unsupported', 'connecting', 'connected', 'reconnecting', 'disconnected'] as const) {
+      for (const device of [null, dev, other]) {
+        for (const id of [undefined, dev.id, null]) {
+          const state: LiveHRState = { ...base, status, device };
+          expect(isPairedMonitorConnected(state, id)).toBe(pairedMonitorStatusLabel(state, id) === 'Connected');
+        }
+      }
+    }
+  });
+
   it('the in-session chip still says the device name — the two labels are different on purpose', () => {
     const connected: LiveHRState = { status: 'connected', device: dev, bpm: 140, at: null, attempt: 0 };
     expect(liveHRStatusLabel(connected)).toBe(dev.name);
     expect(pairedMonitorStatusLabel(connected, dev.id)).toBe('Connected');
+  });
+});
+
+/**
+ * W20/#986 — a WIRING invariant, checked at the source level for the same
+ * reason `hrReportWiring.test.ts` does it: no unit test can see across files,
+ * and the defect this ticket is about was exactly a call site reaching for the
+ * wrong label. The pure functions can be perfect and the screen can still call
+ * `liveHRStatusLabel` in the paired row, which is the bug as filed.
+ */
+describe('the pairing screen is wired to the row label, not the chip label', () => {
+  const source = readFileSync(
+    join(__dirname, '..', '..', 'components', 'settings', 'HRMonitorPairing.tsx'),
+    'utf8',
+  );
+
+  it('the paired row uses `pairedMonitorStatusLabel` and never the chip label', () => {
+    expect(source).toContain('pairedMonitorStatusLabel(live, remembered.id)');
+    expect(source).not.toContain('liveHRStatusLabel');
+  });
+
+  it('the row icon asks the shared predicate rather than reading the status itself', () => {
+    expect(source).toContain('isPairedMonitorConnected(live, remembered.id)');
+    expect(source).not.toContain("live.status === 'connected'");
+  });
+
+  it('the scan list renders `monitorRows`, so a same-name collision is separated', () => {
+    expect(source).toContain('monitorRows(found)');
+    expect(source).toContain('monitorRowA11yLabel(row)');
   });
 });

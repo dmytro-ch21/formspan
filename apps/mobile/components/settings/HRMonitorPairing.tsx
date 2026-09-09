@@ -5,7 +5,7 @@ import { Text } from '@/components/Themed';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
-import { pairedMonitorStatusLabel } from '@/lib/hrMonitor/heartRateProfile';
+import { isPairedMonitorConnected, pairedMonitorStatusLabel } from '@/lib/hrMonitor/heartRateProfile';
 import { forgetMonitor, readRememberedMonitor, rememberMonitor, type RememberedMonitor } from '@/lib/hrMonitor/hrMonitorStore';
 import { ensureBluetoothPermissions, isBluetoothSupported, scanForMonitors, stopLiveHR, type FoundMonitor } from '@/lib/hrMonitor/liveHR';
 import { monitorRowA11yLabel, monitorRows } from '@/lib/hrMonitor/monitorList';
@@ -148,10 +148,10 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
         <ActivityIndicator accessibilityLabel="Loading" style={styles.spinner} />
       ) : remembered ? (
         <RNView style={styles.device} testID={`${testID}-remembered`}>
-          <Icon name="heart" size={16} color={live.status === 'connected' ? vola.green : vola.textDim} />
+          <Icon name="heart" size={16} color={isPairedMonitorConnected(live, remembered.id) ? vola.green : vola.textMuted} />
           <RNView style={styles.deviceBody}>
             <Text style={styles.deviceName}>{remembered.name}</Text>
-            <Text style={styles.muted} testID={`${testID}-status`}>
+            <Text style={styles.deviceStatus} testID={`${testID}-status`}>
               {pairedMonitorStatusLabel(live, remembered.id)}
             </Text>
           </RNView>
@@ -229,7 +229,17 @@ const styles = StyleSheet.create({
   foundRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 12 },
   foundBody: { flex: 1, gap: 2 },
   foundName: { fontSize: 14, color: vola.text },
-  foundDetail: { fontSize: 12, color: vola.textDim },
+  /**
+   * `textMuted`, NOT the `textDim` that `styles.muted` uses for this block's
+   * prose. Measured against `vola.bg`: `textDim` is 3.96:1, under the 4.5:1
+   * floor for body text; `textMuted` is 7.38:1. These two lines are the ones
+   * W20 exists to make readable — the tag that separates two identical straps
+   * and the state of the paired one — so they are information, not chrome, and
+   * a disambiguator the athlete cannot read defeats the whole fix. The
+   * surrounding explanatory paragraphs stay `muted`.
+   */
+  foundDetail: { fontSize: 12, color: vola.textMuted },
+  deviceStatus: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
   use: { fontSize: 13, fontWeight: '700', color: vola.text },
   note: { fontSize: 12, color: vola.text, lineHeight: 17 },
 });

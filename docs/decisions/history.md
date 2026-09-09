@@ -66449,6 +66449,42 @@ stripping separators from the id → 8 red. Moving the signal boundary one dBm �
 Disabling the other-device check → 1 red. Restore confirmed by re-running the
 suite, not by grepping the files.
 
+### What review changed, and the one that was more than a nit
+
+Both reviewers returned **no blocking findings**. Three suggestions; all three
+were taken, and one of them mattered more than it was filed as.
+
+- **The row's icon and the row's words could disagree.** The paired row's heart
+  was still `live.status === 'connected' ? green : dim`, which does not know
+  about the device-mismatch check the new label does — so a link held for some
+  other monitor would render a green heart over the words "Not connected".
+  That is W20's own defect, one element of a row overstating what the other
+  says, surviving inside the fix for it. `isPairedMonitorConnected` now shares
+  the private `isSomeOtherDevice` guard with `pairedMonitorStatusLabel`, and a
+  test walks every status × device × id combination asserting the two can never
+  disagree.
+- **`textDim` cannot carry this line.** Both reviewers flagged the new detail
+  line's colour and both hedged, because this component's own prose already
+  uses `textDim` and `constants/Colors.ts` only measures that token against
+  `setDone`. Measured here against `vola.bg`: **`textDim` is 3.96:1**, under
+  the 4.5:1 floor for body text, and **`textMuted` is 7.38:1**. The hedge
+  understates it — the disambiguating tag is the single string this entire
+  ticket exists to make readable, and *a disambiguator the athlete cannot read
+  defeats the fix*. Both W20 lines (the scan row's detail and the paired row's
+  status) moved to `textMuted`; the surrounding explanatory paragraphs stayed
+  `muted`, because those are prose.
+- **The mismatch guard was only tested for `connected`.** It fires in every
+  connectable state; now asserted in all of them, with `unsupported` pinned as
+  the one that outranks it (that is about the binary, not about a device).
+
+A fourth thing came out of taking the first: the pure functions can be perfect
+and the *screen* can still call the wrong one — which is the bug exactly as
+filed. So a source-level wiring test, the same instrument and the same reason
+as `hrReportWiring.test.ts`: the pairing screen must reference
+`pairedMonitorStatusLabel`, `isPairedMonitorConnected` and `monitorRows`, and
+must contain neither `liveHRStatusLabel` nor a bare `live.status === 'connected'`.
+Four more mutations, each confirmed on disk, each caught — eleven in total.
+
 ### Left open
 
 The last criterion is `NEEDS HUMAN EVIDENCE` and cannot be anything else: with

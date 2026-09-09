@@ -217,9 +217,7 @@ export function liveHRStatusLabel(state: LiveHRState): string {
  */
 export function pairedMonitorStatusLabel(state: LiveHRState, pairedDeviceId?: string | null): string {
   if (state.status === 'unsupported') return 'Bluetooth not available';
-  if (pairedDeviceId != null && state.device != null && state.device.id !== pairedDeviceId) {
-    return 'Not connected';
-  }
+  if (isSomeOtherDevice(state, pairedDeviceId)) return 'Not connected';
   switch (state.status) {
     case 'off':
       return 'Not connected';
@@ -232,4 +230,20 @@ export function pairedMonitorStatusLabel(state: LiveHRState, pairedDeviceId?: st
     case 'disconnected':
       return 'Disconnected';
   }
+}
+
+/**
+ * Whether the live link is this row's monitor, connected right now. Shares
+ * `isSomeOtherDevice` with `pairedMonitorStatusLabel` so the row's icon and
+ * its words cannot disagree — a green heart over "Not connected" is the same
+ * class of defect W20 was filed for, one element of the row overstating what
+ * the other one says.
+ */
+export function isPairedMonitorConnected(state: LiveHRState, pairedDeviceId?: string | null): boolean {
+  return state.status === 'connected' && !isSomeOtherDevice(state, pairedDeviceId);
+}
+
+/** The live link is held for a device that is not the one this row is about. */
+function isSomeOtherDevice(state: LiveHRState, pairedDeviceId?: string | null): boolean {
+  return pairedDeviceId != null && state.device != null && state.device.id !== pairedDeviceId;
 }
