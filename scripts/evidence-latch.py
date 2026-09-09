@@ -84,6 +84,51 @@ was seen. Do not add it later as a convenience.
 Ticking the boxes by hand also works, because it is the natural gesture even if
 it is currently unused; it is the second path, not the primary one.
 
+### 3. An attestation covers the criteria list AS IT STOOD WHEN IT WAS POSTED.
+
+Measured live on #584, twice in one afternoon, and neither instance was a bug in
+anything above.
+
+A genuine device walk was posted at 17:09:45Z. The workflow ran at 17:17:53Z —
+eight minutes later, GitHub Actions having just come back from an outage. In that
+window a concurrent session, working the same ticket and following its own
+instructions correctly, appended **four new evidence criteria** for work it had
+not finished. `apply` ticks `tick_evidence(issue.body)` — the body as it reads at
+RUN time — so all four were marked verified by an observation posted before they
+existed, and the ticket closed. It was caught because that session happened to
+still be looking at the issue seconds later. On a ticket nobody is watching, the
+same interleaving closes silently with real work recorded as walked.
+
+So an attestation is now checked against the body it was written against. For an
+`issue_comment` event the webhook payload carries `issue.body` as of the moment
+the comment was created; `from_event` already re-reads the live issue for its own
+reasons, and comparing the two answers exactly "did the ask change underneath
+this observation". If the evidence-criteria list moved — anything added, removed
+or reworded — the latch REFUSES: nothing ticked, nothing closed, the label kept,
+and a comment naming what moved. Ticking a box nobody walked is the failure this
+whole file exists to prevent; leaving a ticket open costs one more comment.
+
+**This refuses rather than ticking the subset that WAS in the snapshot**, which
+is the more obvious design and is not enough. The second instance on #584 is why:
+the same sweep also ticked **three OLDER criteria** — present long before the
+comment, and therefore in any snapshot — that the comment's prose covered
+nowhere. It named NOW/NEXT, one week strip, a rest day and a focus line, while
+one ticked box read "the rehomed training calendar... try it in airplane mode",
+a phrase appearing nowhere in it. No parser can close that gap; a human
+re-reading the current list can, and refusing is what makes them do it.
+
+That residue — **paraphrase loss between what a person reports and what a
+checkbox asks for** — is also why `render_resolve_comment` now prints the
+criteria it ticked, and whose observation it ticked them on, next to the
+observation itself. It does not detect the mismatch. It puts both halves on the
+same screen so the next reader of the thread can see one.
+
+**And this cannot deadlock.** The refusal is per-comment, not sticky: post again
+once the list is right and it releases. The hand-tick path (`edited`) is
+untouched and remains a second exit. Both directions are in `--self-test`,
+end-to-end through `from_event` against a fake client rather than only through
+`decide`, because a perfect state machine wired up wrong is still the bug.
+
 ## The silent majority path stays silent
 
 Most closes are legitimate. An issue with no unticked evidence criterion is not
@@ -257,6 +302,42 @@ def tick_evidence(body: str) -> str:
 
 
 @dataclass(frozen=True)
+class Drift:
+    """What changed in the evidence-criteria list between two versions of a body."""
+
+    added: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.added or self.removed)
+
+
+def criteria_texts(body: str | None) -> tuple[str, ...]:
+    return tuple(c.text for c in evidence_criteria(body))
+
+
+def criteria_drift(before: str | None, after: str | None) -> Drift:
+    """Evidence criteria present in one body and not the other.
+
+    A multiset difference, not a set one: two criteria may legitimately read the
+    same, and a duplicate appearing is still an addition.
+
+    Compares the criterion TEXT only, so a box being ticked in between is not
+    drift — `tick_evidence` rewrites `[ ]` to `[x]` and leaves the text alone,
+    and a human hand-ticking does the same. That is deliberate: the question
+    this asks is "is the ASK still the one that was attested against", not "has
+    anything at all happened to this issue".
+    """
+    added = list(criteria_texts(after))
+    removed = list(criteria_texts(before))
+    for text in list(added):
+        if text in removed:
+            removed.remove(text)
+            added.remove(text)
+    return Drift(tuple(added), tuple(removed))
+
+
+@dataclass(frozen=True)
 class Attestation:
     kind: str  # "evidence" | "empty" | "rejected"
     observation: str = ""
@@ -287,10 +368,11 @@ def parse_attestation(comment: str | None) -> Attestation | None:
 
 @dataclass(frozen=True)
 class Action:
-    kind: str  # "latch" | "relatch" | "resolve" | "guidance" | "noop"
+    kind: str  # "latch" | "relatch" | "resolve" | "stale" | "guidance" | "noop"
     reason: str = ""
     criteria: tuple[Criterion, ...] = field(default=())
     observation: str = ""
+    drift: Drift = field(default_factory=Drift)
 
 
 def decide(
@@ -301,6 +383,8 @@ def decide(
     body: str | None,
     labelled: bool,
     comment: str | None = None,
+    body_at_comment: str | None = None,
+    have_body_snapshot: bool = False,
     actor_is_bot: bool = False,
     actor_authorized: bool = False,
     is_pull_request: bool = False,
@@ -344,6 +428,31 @@ def decide(
             # internet make the repo's bot post a comment on demand.
             return Action("noop", "commenter cannot write to this repository")
         if att.kind == "evidence":
+            # THE DRIFT GUARD (N203). An attestation is an observation of a
+            # SPECIFIC list of criteria, and `apply` ticks the list as it reads
+            # when the workflow RUNS — which is not the same list if anything
+            # edited the body in between. Measured live on #584: a genuine walk
+            # was posted at 17:09:45Z, the run landed at 17:17:53Z, and in that
+            # window a concurrent session added four brand-new criteria for work
+            # it had not finished. All four were ticked and the ticket closed.
+            #
+            # Refuse rather than tick a subset, because the subset is not safe
+            # either: the SAME sweep also ticked three OLDER criteria the
+            # comment's prose did not cover, and only a human re-reading the
+            # current list catches that. Refusing is what forces that re-read.
+            if not have_body_snapshot:
+                return Action(
+                    "stale",
+                    "the body as it stood when this comment was posted is unknown",
+                    unmet, att.observation,
+                )
+            drift = criteria_drift(body_at_comment, body)
+            if drift:
+                return Action(
+                    "stale",
+                    "the evidence criteria changed after this comment was posted",
+                    unmet, att.observation, drift,
+                )
             return Action("resolve", "attested", unmet, att.observation)
         if att.kind == "empty":
             return Action("guidance", "attestation carried no observation", unmet)
@@ -403,12 +512,95 @@ def render_latch_comment(criteria: tuple[Criterion, ...], *, again: bool) -> str
     )
 
 
-def render_resolve_comment(observation: str) -> str:
+def render_resolve_comment(
+    observation: str,
+    criteria: tuple[Criterion, ...] = (),
+    actor: str = "",
+) -> str:
+    """Say WHICH criteria were ticked and on WHOSE observation.
+
+    The list is not decoration. The second half of the #584 incident was not the
+    race at all — the same sweep ticked three OLDER criteria that the comment's
+    prose covered nowhere, and that was only discovered by diffing the ticked
+    boxes against the comment's text by hand. **Paraphrase loss between what a
+    human reports and what a checkbox asks for** is invisible when the comment
+    and the boxes sit in different places on the page; printing them together,
+    in the ticket, is the cheapest possible way to make a mismatch legible to
+    whoever reads the thread next.
+    """
+    who = f"@{actor}'s" if actor else "the reported"
+    if criteria:
+        checklist = "\n".join(f"{i}. {c.text}" for i, c in enumerate(criteria, 1))
+        ticked = (
+            f"Ticked {len(criteria)} "
+            f"{'criterion' if len(criteria) == 1 else 'criteria'} on {who} observation:\n\n"
+            f"{checklist}\n\n"
+            f"Each is now marked verified **by the observation quoted above**. If one of "
+            f"them is not something that observation actually covered, untick it and say "
+            f"so — this list is here so that mismatch is visible in the ticket rather than "
+            f"only findable by diffing.\n\n"
+        )
+    else:
+        ticked = "No evidence criterion was outstanding.\n\n"
     return (
         f"{LATCH_SENTINEL}\n"
         f"**Evidence recorded — closing.**\n\n> {observation}\n\n"
-        f"Evidence criteria ticked, `{LABEL}` removed.\n"
+        f"{ticked}"
+        f"`{LABEL}` removed.\n"
     )
+
+
+def render_stale_comment(action: Action) -> str:
+    """Refuse an attestation whose criteria list moved underneath it."""
+    parts = [
+        f"{LATCH_SENTINEL}",
+        "**Not closing — the evidence criteria changed after this comment was posted.**",
+        "",
+        f"> {action.observation}",
+        "",
+    ]
+    if action.drift.added:
+        added = "\n".join(f"- {t}" for t in action.drift.added)
+        parts += [
+            f"{len(action.drift.added)} criteri"
+            f"{'on was' if len(action.drift.added) == 1 else 'a were'} ADDED to this "
+            f"ticket after that comment went up, so the observation cannot have covered "
+            f"{'it' if len(action.drift.added) == 1 else 'them'}:",
+            "",
+            added,
+            "",
+        ]
+    if action.drift.removed:
+        removed = "\n".join(f"- {t}" for t in action.drift.removed)
+        parts += [
+            f"{len(action.drift.removed)} criteri"
+            f"{'on was' if len(action.drift.removed) == 1 else 'a were'} REMOVED or "
+            f"reworded in the same window:",
+            "",
+            removed,
+            "",
+        ]
+    if not action.drift:
+        parts += [
+            "The body as it stood when the comment was posted could not be read, so "
+            "there is nothing to attest against.",
+            "",
+        ]
+    outstanding_now = "\n".join(f"{i}. {c.text}" for i, c in enumerate(action.criteria, 1))
+    parts += [
+        "Nothing was ticked and nothing was closed. **Read the list as it stands now** "
+        "— that re-read is the point of this refusal, and on the live instance this "
+        "guard was built from it is what would have caught three OLDER criteria the "
+        "attestation did not cover either — then post again:",
+        "",
+        "    /evidence <what you observed>",
+        "",
+        "Still outstanding:",
+        "",
+        outstanding_now,
+        "",
+    ]
+    return "\n".join(parts)
 
 
 def render_guidance_comment(action: Action) -> str:
@@ -570,7 +762,7 @@ class Client:
         )
 
 
-def apply(client: Client, number: int, issue: dict, action: Action) -> int:
+def apply(client: Client, number: int, issue: dict, action: Action, actor: str = "") -> int:
     print(f"  #{number}: {action.kind.upper()} — {action.reason}")
     if action.kind == "noop":
         return 0
@@ -590,8 +782,16 @@ def apply(client: Client, number: int, issue: dict, action: Action) -> int:
             client.set_body(number, tick_evidence(issue.get("body") or ""))
         client.remove_label(number)
         client.comment(number, render_resolve_comment(
-            action.observation or "all evidence criteria ticked on the ticket"))
+            action.observation or "all evidence criteria ticked on the ticket",
+            action.criteria, actor))
         client.close(number)
+        return 0
+    if action.kind == "stale":
+        # No tick, no label removal, no close. The ticket stays exactly as it
+        # was and the human is told what moved. This is the fail-safe direction
+        # on purpose: leaving a ticket open costs one more comment, ticking a
+        # criterion nobody walked is the failure the latch exists to prevent.
+        client.comment(number, render_stale_comment(action))
         return 0
     if action.kind == "guidance":
         if action.reason.startswith("evidence criteria were removed"):
@@ -651,6 +851,18 @@ def from_event(client: Client, path: str) -> int:
     # a snapshot, and two edits in quick succession would otherwise be decided
     # against the older one.
     issue = client.issue(number)
+
+    # ...and that very property — the payload IS a snapshot, built when the
+    # event fired — is what makes the drift guard possible at all. For an
+    # `issue_comment` event, `payload.issue.body` is the issue body as GitHub
+    # saw it at the moment the comment was created; `issue["body"]` above is the
+    # body now. The two differ exactly when something edited the ticket in the
+    # window this guard is about. No history API is involved, and none exists
+    # that would answer it: GitHub does not expose an issue body as-of a
+    # timestamp, only the times at which it was edited.
+    #
+    # `"body" in raw_issue` rather than a truthiness test, because an issue with
+    # no body at all is a legitimate `None` and not a missing snapshot.
     act = decide(
         event=event,
         state=issue.get("state", ""),
@@ -658,13 +870,33 @@ def from_event(client: Client, path: str) -> int:
         body=issue.get("body"),
         labelled=any(l["name"] == LABEL for l in issue.get("labels", [])),
         comment=comment,
+        body_at_comment=raw_issue.get("body"),
+        have_body_snapshot="body" in raw_issue,
         actor_is_bot=actor.get("type", "") == "Bot",
         actor_authorized=actor_authorized,
         is_pull_request="pull_request" in raw_issue,
     )
     if act.kind == "noop" and not actor_authorized and event in ("comment", "edited"):
         print(f"  (actor {login or '<unknown>'} has no write access to {client.repo})")
-    return apply(client, number, issue, act)
+
+    # Report the drift comparison on every comment event, whatever the verdict.
+    #
+    # This is a MEASUREMENT, not decoration, and it is here because the property
+    # the guard rests on — that `payload.issue.body` is the body as of when the
+    # comment was created, not as of when this runs — is NOT stated in GitHub's
+    # webhook documentation (checked). It is asserted by this file's own older
+    # comment above ("an `edited` payload is a snapshot"), and by `issues.edited`
+    # carrying `changes.body.from`, which is only coherent if `issue.body` is the
+    # state at event time. Printing the comparison every time means the first
+    # real occurrence settles it from an Actions log rather than from an
+    # argument, in whichever direction it goes.
+    if event == "comment" and comment:
+        snap = criteria_drift(raw_issue.get("body"), issue.get("body"))
+        print(f"  snapshot check: {len(criteria_texts(raw_issue.get('body')))} criteri"
+              f"a at comment time, {len(criteria_texts(issue.get('body')))} now; "
+              f"+{len(snap.added)} -{len(snap.removed)}")
+
+    return apply(client, number, issue, act, login)
 
 
 def simulate(client: Client, number: int, event: str, comment: str | None) -> int:
@@ -684,10 +916,17 @@ def simulate(client: Client, number: int, event: str, comment: str | None) -> in
         body=issue.get("body"),
         labelled=any(l["name"] == LABEL for l in issue.get("labels", [])),
         comment=comment,
+        # A hand-driven simulation posts its comment NOW, against the body it
+        # just read — so the body at comment time is the body it just read. That
+        # is truthful rather than a bypass: `--simulate` cannot reproduce a
+        # delayed run, and claiming no snapshot exists would make the maintainer's
+        # own driver permanently refuse.
+        body_at_comment=issue.get("body"),
+        have_body_snapshot=True,
         actor_authorized=client.can_write(me),
         is_pull_request="pull_request" in issue,
     )
-    return apply(client, number, issue, act)
+    return apply(client, number, issue, act, me)
 
 
 def backfill(client: Client, only: set[int] | None = None) -> int:
@@ -785,6 +1024,99 @@ REAL_MENTIONS = [
     "**It is wrong for every ticket carrying a `NEEDS HUMAN EVIDENCE` criterion** — where the code has landed and the evidence has not.",
     "- [ ] A PR can land its code without closing a ticket whose `NEEDS HUMAN EVIDENCE` criteria are outstanding — without relying on anyone remembering to omit `closes`.",
 ]
+
+
+# The #584 race, as data. Three criteria a device walk genuinely covered, and one
+# a concurrent session appended to the same body while that walk's comment was
+# already posted and its workflow run had not yet started.
+WALKED_CRITERIA = "\n".join([
+    "- [ ] **NEEDS HUMAN EVIDENCE** — NOW/NEXT leads the screen while a session runs.",
+    "- [ ] **NEEDS HUMAN EVIDENCE** — one week strip, not a second calendar.",
+    "- [ ] **NEEDS HUMAN EVIDENCE** — a genuine rest day reads as a real state.",
+])
+MID_FLIGHT_TEXT = (
+    "**NEEDS HUMAN EVIDENCE** — a resumed session overrides a leftover browsed day."
+)
+MID_FLIGHT_CRITERION = f"- [ ] {MID_FLIGHT_TEXT}"
+REAL_WALK = ("/evidence walked on a device against the current build: NOW/NEXT leads, "
+             "one week strip, a rest day reads as a real state")
+
+
+class _FakeClient(Client):
+    """A Client wired to a dict instead of to GitHub.
+
+    Exists so the end-to-end vectors below can drive `from_event` — the wiring,
+    not just `decide`. A perfect state machine that is handed the wrong body is
+    still the bug, and the pure vectors cannot see that.
+    """
+
+    def __init__(self, issue_now: dict):
+        super().__init__("owner/repo", dry_run=False)
+        self._issue_now = issue_now
+        # The BODIES, not just "a comment happened". A mutation that stops the
+        # closing comment naming what it ticked survives a test that only counts
+        # comments — measured, it did.
+        self.comments: list[str] = []
+
+    def comment(self, n: int, body: str) -> None:
+        self.comments.append(body)
+        super().comment(n, body)
+
+    def issue(self, number: int) -> dict:  # no network
+        return self._issue_now
+
+    def can_write(self, login: str, association: str = "") -> bool:  # no network
+        return True
+
+    def ensure_label(self) -> None:  # no network
+        self.performed.append("ensure label")
+
+    def _do(self, description: str, fn) -> None:  # record, never call
+        self.performed.append(description)
+
+
+def _drive_comment_event(
+    *, body_at_comment: str | None, body_now: str | None, comment: str,
+    labelled: bool = True, omit_snapshot: bool = False,
+) -> "_FakeClient":
+    """Run one `issue_comment` event end-to-end and hand back what was written."""
+    import contextlib
+    import io
+    import tempfile
+
+    payload_issue: dict = {"number": 584}
+    if not omit_snapshot:
+        payload_issue["body"] = body_at_comment
+    payload = {
+        "action": "created",
+        "issue": payload_issue,
+        "comment": {
+            "body": comment,
+            "user": {"login": "dmytro-ch21", "type": "User"},
+            "author_association": "OWNER",
+        },
+    }
+    client = _FakeClient({
+        "number": 584, "state": "open", "state_reason": None, "body": body_now,
+        "labels": [{"name": LABEL}] if labelled else [],
+    })
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+        json.dump(payload, fh)
+        path = fh.name
+    before = os.environ.get("GITHUB_EVENT_NAME")
+    os.environ["GITHUB_EVENT_NAME"] = "issue_comment"
+    try:
+        # The decision is printed; the vectors assert on `performed`, so the
+        # narration would only bury the self-test's own output.
+        with contextlib.redirect_stdout(io.StringIO()):
+            from_event(client, path)
+    finally:
+        if before is None:
+            os.environ.pop("GITHUB_EVENT_NAME", None)
+        else:
+            os.environ["GITHUB_EVENT_NAME"] = before
+        os.unlink(path)
+    return client
 
 
 def self_test() -> int:
@@ -893,15 +1225,25 @@ def self_test() -> int:
     met = "- [x] **NEEDS HUMAN EVIDENCE** — seen on a device."
     plain = "- [ ] The audit row is updated."
 
-    def d(**kw):
+    def act(**kw) -> Action:
         # `actor_authorized=True` is the DEFAULT here so the vectors below read
         # as "what happens for a maintainer". Every unauthorized case is spelled
         # out explicitly instead, because that is the security boundary and it
         # should be impossible to weaken by editing a default.
+        #
+        # `body_at_comment` defaults to `body` — i.e. "nothing edited the ticket
+        # between the comment and the run", which is what every vector written
+        # before the drift guard existed silently assumed. The cases where it
+        # DIFFERS are spelled out explicitly, below, for the same reason.
         base = dict(event="closed", state="closed", state_reason="completed",
-                    body=unmet, labelled=False, actor_authorized=True)
+                    body=unmet, labelled=False, actor_authorized=True,
+                    have_body_snapshot=True)
         base.update(kw)
-        return decide(**base).kind
+        base.setdefault("body_at_comment", base["body"])
+        return decide(**base)
+
+    def d(**kw):
+        return act(**kw).kind
 
     check("closed with evidence outstanding latches", d(), "latch")
     check("closed again while latched re-latches", d(labelled=True), "relatch")
@@ -944,6 +1286,152 @@ def self_test() -> int:
           d(event="edited", labelled=True, body=plain), "guidance")
     check("edit on an unlabelled issue does nothing",
           d(event="edited", labelled=False, body=unmet), "noop")
+
+    # --- N203: THE DRIFT GUARD --------------------------------------------
+    #
+    # An attestation is an observation of the criteria list AS IT STOOD WHEN IT
+    # WAS POSTED. `apply` ticks the list as it reads when the workflow RUNS.
+    # Those are the same list only while nothing edits the body in between —
+    # and on #584 something did, in an eight-minute window, and four criteria
+    # for unfinished work were marked verified.
+    #
+    # Both directions are asserted, because a guard that never releases is the
+    # same death as one that never fires (see rule 2 in the module docstring).
+
+    walked, added = WALKED_CRITERIA, WALKED_CRITERIA + "\n" + MID_FLIGHT_CRITERION
+
+    check("DRIFT: no drift when nothing moved", bool(criteria_drift(walked, walked)), False)
+    check("DRIFT: a criterion appended is detected",
+          criteria_drift(walked, added).added, (MID_FLIGHT_TEXT,))
+    check("DRIFT: a criterion deleted is detected",
+          len(criteria_drift(added, walked).removed), 1)
+    check("DRIFT: ticking a box in between is NOT drift — the text is unchanged",
+          bool(criteria_drift(walked, tick_evidence(walked))), False)
+    check("DRIFT: rewording a criterion is drift in both directions",
+          (len(criteria_drift(walked, walked.replace("one week strip", "a week strip")).added),
+           len(criteria_drift(walked, walked.replace("one week strip", "a week strip")).removed)),
+          (1, 1))
+    check("DRIFT: a non-evidence checkbox appearing is not drift",
+          bool(criteria_drift(walked, walked + "\n- [ ] The audit row is updated.")), False)
+    check("DRIFT: duplicates are a multiset, not a set",
+          len(criteria_drift(walked, walked + "\n" + walked.splitlines()[0]).added), 1)
+
+    check("DRIFT: an attestation against a list that grew is REFUSED",
+          d(event="comment", labelled=True, comment=REAL_WALK,
+            body=added, body_at_comment=walked), "stale")
+    check("DRIFT: the same attestation against an unchanged list RESOLVES",
+          d(event="comment", labelled=True, comment=REAL_WALK,
+            body=walked, body_at_comment=walked), "resolve")
+    check("DRIFT: an unreadable snapshot refuses rather than sweeping",
+          d(event="comment", labelled=True, comment=REAL_WALK,
+            body=walked, have_body_snapshot=False), "stale")
+    check("DRIFT: the refusal names the criterion that appeared",
+          act(event="comment", labelled=True, comment=REAL_WALK,
+              body=added, body_at_comment=walked).drift.added, (MID_FLIGHT_TEXT,))
+    check("DRIFT: a refusal is not a rejection of the observation — it is kept",
+          act(event="comment", labelled=True, comment=REAL_WALK,
+              body=added, body_at_comment=walked).observation.startswith("walked on a device"), True)
+    check("DRIFT: the guard runs AFTER authorisation, so a stranger still gets silence",
+          d(event="comment", labelled=True, actor_authorized=False, comment=REAL_WALK,
+            body=added, body_at_comment=walked), "noop")
+    check("DRIFT: a bare /evidence is still guidance, not a drift refusal",
+          d(event="comment", labelled=True, comment="/evidence",
+            body=added, body_at_comment=walked), "guidance")
+    check("DRIFT: the hand-tick exit is untouched by any of this",
+          d(event="edited", labelled=True, body=tick_evidence(added)), "resolve")
+
+    # --- N203, END TO END through `from_event`, which is where the wiring is.
+    # `decide` being right proves nothing if the payload snapshot never reaches
+    # it. These drive a real event file against a fake client and assert on the
+    # WRITES, which is what the ticket is actually about.
+
+    refused = _drive_comment_event(
+        body_at_comment=walked, body_now=added, comment=REAL_WALK)
+    check("E2E REPRODUCTION: nothing is ticked when a criterion arrived late",
+          any("tick the evidence" in x for x in refused.performed), False)
+    check("E2E REPRODUCTION: the ticket is not closed",
+          any("close" in x for x in refused.performed), False)
+    check("E2E REPRODUCTION: the label is kept, so the board stays honest",
+          any("remove" in x for x in refused.performed), False)
+    check("E2E REPRODUCTION: the human is told, exactly once",
+          [x for x in refused.performed if x.startswith("comment on")], ["comment on #584"])
+    check("E2E REPRODUCTION: and told WHICH criterion arrived late",
+          MID_FLIGHT_TEXT in "\n".join(refused.comments).split("Nothing was ticked")[0], True)
+
+    released = _drive_comment_event(
+        body_at_comment=walked, body_now=walked, comment=REAL_WALK)
+    check("E2E ORDINARY: an unchanged list still ticks",
+          any("tick the evidence" in x for x in released.performed), True)
+    check("E2E ORDINARY: ...drops the label",
+          any("remove" in x for x in released.performed), True)
+    check("E2E ORDINARY: ...and closes, which is the gesture that must keep working",
+          any("close #584 as completed" == x for x in released.performed), True)
+    _released_said = "\n".join(released.comments)
+    check("E2E ORDINARY: ...and the closing comment names every criterion it ticked",
+          all(c.text in _released_said for c in outstanding(walked)), True)
+    check("E2E ORDINARY: ...on a named observer",
+          "@dmytro-ch21's observation" in _released_said, True)
+
+    unreadable = _drive_comment_event(
+        body_at_comment=None, body_now=walked, comment=REAL_WALK, omit_snapshot=True)
+    check("E2E: a payload with no body snapshot refuses rather than sweeping",
+          any("close" in x for x in unreadable.performed), False)
+
+    # ISOLATES `have_body_snapshot` from the drift comparison. Above, a missing
+    # snapshot reads as an empty body and therefore drifts against any criteria
+    # at all — so the flag can be deleted and that vector still passes. Here the
+    # live body carries NO evidence criterion, the drift comparison comes up
+    # empty either way, and only the flag is left to refuse on. Mutation-tested:
+    # without this vector, `have_body_snapshot=True` hardcoded in `from_event`
+    # survives the whole suite.
+    blind = _drive_comment_event(
+        body_at_comment=None, body_now="- [ ] The audit row is updated.",
+        comment=REAL_WALK, omit_snapshot=True)
+    check("E2E: a missing snapshot refuses even where drift alone would say nothing moved",
+          any("close" in x for x in blind.performed), False)
+
+    # An issue whose body is genuinely empty is a real `None`, not a missing
+    # snapshot — the distinction `"body" in raw_issue` exists to draw.
+    empty = _drive_comment_event(body_at_comment=None, body_now=None, comment=REAL_WALK)
+    check("E2E: an empty body is a snapshot, and resolves rather than refusing",
+          any("close #584 as completed" == x for x in empty.performed), True)
+
+    # --- N203: the paraphrase residue, made visible rather than detected ----
+    _walked_crit = tuple(outstanding(walked))
+    _resolve = render_resolve_comment("saw it on the 15 Pro, twice", _walked_crit, "dmytro-ch21")
+    check("PARAPHRASE: the resolve comment names whose observation it ticked on",
+          "@dmytro-ch21" in _resolve, True)
+    check("PARAPHRASE: ...and lists every criterion it ticked",
+          all(c.text in _resolve for c in _walked_crit), True)
+    check("PARAPHRASE: ...next to the observation itself",
+          "> saw it on the 15 Pro, twice" in _resolve, True)
+    check("PARAPHRASE: a hand-tick resolve with no criteria still reads sensibly",
+          "No evidence criterion was outstanding" in render_resolve_comment("ticked by hand"), True)
+
+    _stale = render_stale_comment(act(event="comment", labelled=True, comment=REAL_WALK,
+                                      body=added, body_at_comment=walked))
+    # `MID_FLIGHT_TEXT in _stale` is NOT enough and was measured surviving a
+    # mutation: the criterion also appears in the "Still outstanding" list at the
+    # bottom, so the check passed with the "what changed" section deleted.
+    _stale_head = _stale.split("Nothing was ticked")[0]
+    check("the refusal comment names what changed, in its own right",
+          MID_FLIGHT_TEXT in _stale_head, True)
+    check("the refusal comment says the criterion was ADDED",
+          "ADDED to this ticket" in _stale_head, True)
+    _removed_stale = render_stale_comment(
+        act(event="comment", labelled=True, comment=REAL_WALK,
+            body=walked, body_at_comment=added))
+    check("a criterion vanishing is reported too, not silently accepted",
+          "REMOVED or reworded" in _removed_stale.split("Nothing was ticked")[0], True)
+    check("a criterion vanishing still refuses",
+          d(event="comment", labelled=True, comment=REAL_WALK,
+            body=walked, body_at_comment=added), "stale")
+    check("the refusal comment gives the exit gesture back", "/evidence" in _stale, True)
+    check("the refusal comment lists what is still outstanding",
+          "one week strip" in _stale, True)
+    check("LOOP: the refusal comment must never attest", parse_attestation(_stale), None)
+    check("LOOP: the resolve comment, with its new list, must never attest",
+          parse_attestation(_resolve), None)
 
     # --- the comment a human actually reads -------------------------------
     crit = tuple(outstanding(unmet))
