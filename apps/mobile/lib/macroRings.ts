@@ -187,6 +187,44 @@ export function sweepFor(percent: number | null): RingSweep | null {
 }
 
 /**
+ * Whether an arc has enough body to carry a round cap.
+ *
+ * ## What this fixes, and why it is not a styling preference
+ *
+ * `MacroRings` draws every ring with `strokeLinecap: 'round'` — that is most
+ * of what makes four concentric arcs read as one set, and it is recorded there
+ * as a deliberate choice. But a round cap adds half a stroke width beyond each
+ * END of the arc, so the mark it draws is never shorter than one stroke width
+ * whatever the value behind it. At this app's proportions (13pt stroke, an
+ * inner radius near 46pt) that floor is about **4.5% of the ring**, so 1% and
+ * 4% draw the identical capsule, and a 2% fill renders as a rounded pill
+ * detached from the track it belongs to.
+ *
+ * The user reported exactly that (#637): *"the nice rings but the overlapping
+ * numbers dont make sense"* — four short arcs at four radii, reading as a
+ * stack of floating colour pills above the centre rather than as four rings,
+ * and therefore as a SECOND colour legend competing with the coloured dot each
+ * macro row already carries. The pills were never a legend; they were the data,
+ * drawn by a cap.
+ *
+ * So below the floor the cap comes off: a 2% fill draws a 2% sliver, flush on
+ * the track, and the row's dot is left as the only colour key on the card.
+ * Above it nothing changes, because there the cap is decoration on an arc that
+ * already has a length of its own.
+ *
+ * `fraction` is 0–1 of one lap (`RingSweep.base` or `overflow`), and the
+ * comparison is in the same units as `stroke` — points of arc length.
+ */
+export function ringCap(
+  fraction: number,
+  circumference: number,
+  stroke: number,
+): 'round' | 'butt' {
+  if (!Number.isFinite(fraction) || fraction <= 0) return 'butt';
+  return fraction * circumference < stroke ? 'butt' : 'round';
+}
+
+/**
  * Read the four rings off the day's totals and target.
  *
  * Both arguments are nullable and mean different things when they are null —

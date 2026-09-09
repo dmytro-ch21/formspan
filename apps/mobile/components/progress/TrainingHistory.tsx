@@ -29,11 +29,14 @@ import { useUnits } from '@/lib/useUnits';
  * - **`WeekReview`** is already on Progress. N178 renders the very same
  *   component inside `components/progress/ThisWeek.tsx`, so putting it here as
  *   well would be one card drawn twice on one screen.
- * - **`TrendStrip`** asks *have I been showing up*, which `TrainingSummary` —
+ * - **`TrendStrip`** asked *have I been showing up*, which `TrainingSummary` —
  *   also on Progress, also above this — already answers with a bar per week
  *   over a selectable span. Two weekly-bar charts a few hundred points apart is
  *   the W2/W4 shape this repo has shipped twice, so this block does not draw a
- *   third.
+ *   third. Past tense on purpose: N179 left the component in place with a
+ *   no-caller note, and N201/#637 deleted it. `weeklyDays` in `lib/trend.ts`
+ *   still has its thirteen tests and is what a future offline weekly-bar view
+ *   would be rebuilt from.
  * - **`TrainingCalendar`** has no equivalent on this tab. `TrainingSummary`'s
  *   day grid says *which days*; this says which days were **planned**, which
  *   were met, and opens the session behind one. That is a different question,

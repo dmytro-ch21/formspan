@@ -66207,6 +66207,161 @@ instead of it being findable only by diffing checkbox states against prose.
 No workflow change: `.github/workflows/evidence-latch.yml` already passes the
 whole payload, and the snapshot was in it all along.
 
+## 2026-09-09 — N201: Today's 7-day trend matches the reference, and the x-position stops lying
+
+**PR #1003, closing #637.** The user walked four Today screenshots on 2026-08-26
+and filed three findings. Two of them had moved by the time this was picked up;
+the third is the one they came back to in one sentence: *"The trend should
+nicely be shown as I gave you the reference, period."* The reference is
+`~/Desktop/trend-face.jpeg` and it is the spec in full, not a menu — an earlier
+reading of this ticket treated the day labels as the checkable minimum and the
+rest as deferrable polish, and that reading was withdrawn by the user.
+
+### The chart was not a styling job, and this is why
+
+`Spark` in `components/today/ProgressCard.tsx` placed point `i` at
+`(i / (n - 1)) * (SPARK_W - 10) + 5` — **by its index in the array of
+readings.** For a bare sparkline that is correct and unremarkable. The moment
+`M T W T F S S` is written underneath it, it is a component whose entire job is
+reporting measurements putting Thursday's weigh-in under Tuesday's letter: four
+readings in a week spread themselves across the full width, and every reading
+after a missed day is reported a day early.
+
+So the geometry moved out to **`lib/sparkWeek.ts`**, which places each reading
+on a fixed seven-slot grid ending today, keyed on its date, and leaves a missed
+day as a gap. No interpolation across the gap either — joining Tuesday to
+Thursday with a segment is what a line chart means; inventing a Wednesday point
+on it is not, and neither is shuffling Thursday left so the series looks
+unbroken.
+
+What the card draws on top of it, each element from the reference:
+
+- **`M T W T F S S` beneath the line**, absolutely positioned on the same x each
+  point was placed at — not seven flexed boxes, whose even spacing would only
+  accidentally be the grid the dots were drawn on.
+- **Today's letter in a filled lime disc.** Always the last slot, because the
+  grid ends today. The reference marks its fourth letter and rings its last
+  point; under a grid that genuinely ends today those coincide, which reads
+  better than the mock.
+- **Drop-lines** from each point to the foot of the plot — the thing that
+  carries the eye from a dot down to its letter across empty space. They end at
+  `box.height`, not at the lowest point's y, so the week's lightest reading does
+  not get a zero-length one.
+- **A glow**: the same polyline twice more, wider and dimmer, under the real
+  one. Two passes rather than a blur or a shadow.
+- **The latest reading ringed** rather than filled, and it follows the last
+  READING rather than the current date — an athlete who last weighed in on
+  Thursday sees the ring on Thursday, not floating on today's empty slot.
+
+**On the glow, because this repo has a recorded refusal of one.**
+`components/today/MacroRings.tsx` says, twice, that the user rejected a bloom
+around the RINGS. That refusal stands and nothing here touches it. The trend
+line is the one place they asked for the treatment, in their own reference, in
+the sentence quoted at the top. Both are honoured by keeping the glow here and
+out of there. It is `vola.lime` at low opacity throughout, and `lime` has a mono
+twin (`#E7EBF1`), so a monochrome build gets a grey halo rather than the one
+green thing in a black-and-white app.
+
+Kept unchanged, because the old code was deliberately right about both: **raw
+readings, not the smoothed trend** (at a week's width `trendWeight` has nothing
+to work with, and the dots are the evidence behind the figure on the left rather
+than a second claim), and **nothing drawn below two readings** — not the line,
+and now not the letters either, because an axis under an absent chart is
+scaffolding for something that is not there.
+
+### The test that had to fail against the old code
+
+Two halves, the split `trendChartLayout`/`trendChart` already uses: the
+arithmetic as numbers (`lib/__tests__/sparkWeek.test.ts`, 21 cases) and the
+drawing (`components/__tests__/progressSpark.test.tsx`, 13). The assertion that
+matters in the second is a **cross-check between two independently rendered
+things** — the `cx` of a dot inside the `Svg`, against the horizontal centre of
+the letter box laid out beneath it in ordinary React Native. Those agree only
+if both came from the same date-keyed grid.
+
+Mutation-tested, with each mutation confirmed present on disk before the run and
+the restore confirmed byte-identical, baseline green in the same session:
+restoring index positioning kills **3** of the geometry tests (Thursday lands at
+53.8 where the grid puts it at 66); moving the today marker to the first slot
+kills 2; replacing the derived letters with a fixed `M…S` string kills 1;
+putting the baseline back at the lowest point kills 2; drawing below two
+readings kills 2; flattening the glow kills 1.
+
+**`typecheck:mobile` caught what jest could not.** Both new test files were green
+under jest while carrying real type errors — `RingReading` missing `label`, and
+`Measured[]` handed to a prop typed `Checkin[]`. jest never typechecks; that gap
+is exactly what the separate link in `verify` is for.
+
+### Momentum's "two colour legends" were one legend and a linecap
+
+The ticket reports *a stack of four small colour pills floats above the ring*,
+competing with the coloured dot each macro row already carries. **There is no
+such legend, and there never was.** The four marks in the screenshot
+(`IMG_5745.jpg`, 2026-08-26 10:12) are the four ring FILLS, at 4.6% / 2% / 14% /
+2% — their colours are the ring order, their lengths track the four
+percentages, and they sit at the four ring radii.
+
+What makes them read as detached pills is `strokeLinecap: 'round'`. A round cap
+adds half a stroke width beyond each end, so an arc's drawn length has a floor
+of one stroke width whatever the value behind it — at 13pt of stroke on the
+inner ring's ~148pt lap, that floor is about 9% of the ring. A 2% fill therefore
+draws a capsule roughly four times its own length, floating clear of the track
+it belongs to.
+
+So `ringCap` (in `lib/macroRings.ts`) takes the cap off any arc shorter than one
+stroke width, and `MacroRings` asks it per arc. Above the floor nothing changes,
+because there the cap is decoration on an arc that already has a length of its
+own — the "round caps are most of what makes four arcs read as a set" note in
+that file stands. The cap is read from the target rather than the animated
+value, because a linecap is not animatable; mid-sweep an arc briefly wears the
+cap of the value it is heading for.
+
+**The one legend on the card is the macro row's dot**, which is what the ticket
+asked for and where the colour sits next to the number it belongs to.
+
+**The "stray isolated dot near the protein row's 2%" is an artefact of the
+report, not of the app.** Reproduced by sampling the screenshot: the blob is
+`#FFFEFC`, pixel-identical to the user's white annotation strokes and brighter
+than `vola.text` (`#F3F6FA`), the brightest token this app owns; it is irregular
+rather than circular, and it sits directly below the tail of the hand-drawn
+arrow above it. It is the end of that pen stroke. Nothing to fix.
+
+### `TrendStrip` is deleted
+
+N179 (#627) cut it from Today and left the component in place with a note giving
+two reasons: N179's own criterion was *moved, not deleted*, and it was the only
+purely-local weekly-bar renderer. The first reason expired when N179 merged. The
+second is speculative, and it is satisfied by the half that matters:
+**`weeklyDays` in `lib/trend.ts` stays**, untouched, with its thirteen tests —
+it is the derivation, it is local, and it is what an offline weekly-bar block
+would be rebuilt from. What is gone is a ~130-line VIEW that nothing called,
+whose own docstring described a screen it was no longer on.
+
+Not re-homed, per the ticket. The three comments that explain its absence
+(`app/(tabs)/index.tsx`, `app/(tabs)/progress.tsx`,
+`components/progress/TrainingHistory.tsx`) now say it was deleted, so nobody
+goes looking for the file.
+
+### Open
+
+- **Both `NEEDS HUMAN EVIDENCE` criteria are outstanding.** The day letters at
+  10pt in an 18pt slot are legible in the simulator's render tree and that is
+  not the same as legible on a phone; and a week with a genuinely missed day
+  reading as a gap is a thing you look at.
+- The chart is marked `accessibilityElementsHidden` /
+  `importantForAccessibility="no-hide-descendants"`: the card is one button with
+  one spoken label, and seven single letters concatenated onto it is noise. That
+  also removes it from RNTL's default queries, which the component test opts out
+  of explicitly and asserts directly rather than by side effect. Whether a
+  screen-reader user should get a spoken summary of the week — the way
+  `TrendStrip` did, and `TrainingSummary` does — is a real question this does not
+  answer.
+- `ringCap`'s floor is one stroke width, which bounds a small arc's
+  overstatement at 2×. A tighter floor (two stroke widths) would be more honest
+  and would cost the "reads as a set" quality on moderately-filled rings. Left
+  at one; the number is in one function if it ever needs re-measuring on a
+  device.
+
 ## Open items / known gaps as of this entry
 
 

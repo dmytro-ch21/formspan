@@ -21747,3 +21747,87 @@ permutation instead of the shared one · M14 `reorderedIndices` stops swapping
 - Fold a group, leave the session for Settings and come straight back — the
   group is still folded (the fold state is no longer re-read on focus).
 - Logging a normal set is still two taps, and Done still ticks nothing.
+
+## N201 — Today's 7-day trend line, the macro-ring cap, and `TrendStrip`'s removal (`apps/mobile/lib/sparkWeek.ts`, `apps/mobile/components/today/ProgressCard.tsx`, `apps/mobile/lib/macroRings.ts`, `apps/mobile/components/today/MacroRings.tsx`)
+
+The trend the user asked for by reference (`~/Desktop/trend-face.jpeg`): a line
+over seven points with `M T W T F S S` beneath it, today's letter in a filled
+disc, drop-lines, a glow, and the latest reading ringed.
+
+### The x-position (the ticket's actual defect)
+
+- **Weigh in every day for a week.** Seven dots, one over each letter, evenly
+  spaced; the seventh letter is today's and it is the marked one.
+- **Miss Wednesday.** Six dots. Wednesday's slot is empty, and Thursday's dot is
+  still over the fourth letter — not the third. *This is the regression: index
+  positioning puts Thursday over Wednesday, and every day after it one letter
+  early.*
+- **Weigh in only Monday, Tuesday and Wednesday.** The line occupies the left
+  three sevenths and the right four are empty; it does not stretch to fill the
+  card.
+- **Weigh in twice on one day.** One dot on that day, carrying the later
+  reading — not two dots at the same x joined by a vertical segment.
+- **A reading dated eight days ago, and one dated tomorrow.** Neither is drawn.
+- **Weigh in on Monday and Thursday only, nothing since.** The ring is on
+  Thursday, not floating on today's empty slot.
+
+### Drawing nothing
+
+- **One reading in the window.** No line, no dots, no letters — `No trend yet`.
+  A flat line through one point asserts a stability nobody measured.
+- **No readings.** Same.
+- **Two readings.** Enough: the line and the full axis appear.
+- **Check-ins still loading.** Blank, not `No trend yet` — an absence being
+  read is not an absence confirmed.
+
+### The reference's treatment
+
+- Today's letter is in a filled lime disc with dark text; the other six are
+  plain muted letters.
+- Each dot has a faint vertical line down to the axis, all ending level with
+  each other.
+- The line is drawn three times on the same points — two wider dimmed passes
+  under one full-strength stroke.
+- The latest reading is a ring (card-coloured centre, lime stroke) with a halo;
+  every other reading is a small filled disc.
+- **Monochrome mode on:** the glow, the disc and the ring are all grey. Nothing
+  on this card stays green.
+
+### Units and locale
+
+- Switch the profile to imperial: the big figure and the delta change; the
+  chart does not need to, but nothing on it should show a number in the wrong
+  unit (it shows none).
+- The letters rotate with the day the week ends on — on a Wednesday the axis
+  reads `T F S S M T W`, not a fixed `M…S`.
+
+### Momentum's rings
+
+- **A day with 87 of 1,880 kcal logged** (protein 2%, carbs 14%, fat 2%): the
+  two smallest fills draw as thin slivers flush on their tracks, not as rounded
+  capsules floating clear of them. The only colour key on the card is the dot
+  beside each macro row.
+- **A macro over 50%:** the arc keeps its round cap and the four rings still
+  read as one set.
+- **A ring with no target set:** an empty track, no arc, and no dot at 12
+  o'clock (a round cap on a zero-length arc would draw one, and a dot there is
+  a reading).
+- **A macro over 100%:** the second lap still draws, still separated by the
+  hairline of card ground, and the row still prints the real percentage.
+
+### `TrendStrip` is gone
+
+- Today has no eight-week bar strip; Progress has not grown one either. The
+  question it asked — *have I been showing up* — is answered by
+  `TrainingSummary` on Progress, over a selectable span.
+
+### Needs a device — NEEDS HUMAN EVIDENCE (latched on #637)
+
+- On a real phone, beside `~/Desktop/trend-face.jpeg`: the day letters are
+  legible at the card's size, today reads as today, and the line's treatment
+  (glow, drop-lines, ringed latest point) matches the reference closely enough
+  to call it done.
+- A week with a genuinely missed day: the gap reads as a gap, and no point sits
+  under the wrong letter.
+- The Momentum card on a lightly-logged morning: the four ring fills read as
+  four rings, not as a stack of coloured pills above the centre.

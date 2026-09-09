@@ -3,6 +3,7 @@ import {
   RING_KEYS,
   parseRings,
   readRings,
+  ringCap,
   serialiseRings,
   sweepFor,
 } from '../macroRings';
@@ -177,5 +178,53 @@ describe('parseRings — the stored preference', () => {
 
   it('round-trips through serialise', () => {
     expect(parseRings(serialiseRings(['fat', 'protein']))).toEqual(['protein', 'fat']);
+  });
+});
+
+/**
+ * The cap, and the "floating pills" it drew (N201/#637).
+ *
+ * `MacroRings` ships a 13pt stroke; the inner ring's circumference is about
+ * 290pt, so one stroke width is ~4.5% of that lap. Below the floor the round
+ * cap is longer than the arc it caps, which is how a 2% protein fill rendered
+ * as a capsule sitting off the track — read by the user as a second colour
+ * legend competing with the macro rows' own dots.
+ */
+describe('ringCap', () => {
+  // Inner ring: radius (168 - 13) / 2 - 3 * (13 + 5) = 23.5 → C ≈ 147.7.
+  const INNER = 2 * Math.PI * 23.5;
+  // Outer ring: radius (168 - 13) / 2 = 77.5 → C ≈ 487.
+  const OUTER = 2 * Math.PI * 77.5;
+  const STROKE = 13;
+
+  it('drops the cap when the arc is shorter than the cap itself', () => {
+    expect(ringCap(0.02, INNER, STROKE)).toBe('butt');
+    expect(ringCap(0.02, OUTER, STROKE)).toBe('butt');
+  });
+
+  it('keeps it once the arc has a body of its own', () => {
+    expect(ringCap(0.5, INNER, STROKE)).toBe('round');
+    expect(ringCap(0.14, OUTER, STROKE)).toBe('round');
+  });
+
+  // The threshold is arc LENGTH, not percentage: the same 5% is a longer mark
+  // on the outer ring than on the inner one, and only one of them clears it.
+  it('is a length, so the same percentage differs by radius', () => {
+    expect(ringCap(0.05, INNER, STROKE)).toBe('butt');
+    expect(ringCap(0.05, OUTER, STROKE)).toBe('round');
+  });
+
+  it('exactly one stroke width of arc is enough', () => {
+    const fraction = STROKE / INNER;
+    expect(ringCap(fraction, INNER, STROKE)).toBe('round');
+    expect(ringCap(fraction * 0.999, INNER, STROKE)).toBe('butt');
+  });
+
+  // A ring at zero draws no arc; a cap on it would draw a dot, which is a
+  // reading. `sweepFor` already refuses to invent one for a null percent.
+  it('never caps a zero or absent sweep', () => {
+    expect(ringCap(0, INNER, STROKE)).toBe('butt');
+    expect(ringCap(-1, INNER, STROKE)).toBe('butt');
+    expect(ringCap(Number.NaN, INNER, STROKE)).toBe('butt');
   });
 });

@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { ProgressCard } from '../today/ProgressCard';
-import type { Measured } from '@/lib/anthropometry';
+import type { Checkin } from '@/lib/body';
 
 /**
  * What Today's seven-day line actually DRAWS (N201/#637).
@@ -32,11 +32,32 @@ const SUN = '2026-08-30';
 /** Matches `SPARK_SLOT` in `ProgressCard.tsx`. */
 const SLOT = 18;
 
-function w(measured_on: string, weight_kg: number): Measured {
-  return { measured_on, weight_kg };
+/**
+ * A check-in with only the field this chart reads. The card takes `Checkin[]`
+ * (the wire shape) even though the chart itself needs no more than `Measured`,
+ * so the girths are spelled out rather than cast away — a cast here would hide
+ * the next field the card starts reading.
+ */
+function w(measured_on: string, weight_kg: number): Checkin {
+  return {
+    user_id: 'u1',
+    measured_on,
+    weight_kg,
+    neck_cm: null,
+    shoulders_cm: null,
+    chest_cm: null,
+    waist_cm: null,
+    hips_cm: null,
+    thigh_cm: null,
+    calf_cm: null,
+    upper_arm_cm: null,
+    forearm_cm: null,
+    measured_side: 'right',
+    notes: '',
+  };
 }
 
-function draw(checkins: Measured[]) {
+function draw(checkins: Checkin[]) {
   render(
     <ProgressCard
       checkins={checkins}

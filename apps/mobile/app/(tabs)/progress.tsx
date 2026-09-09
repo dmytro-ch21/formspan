@@ -385,8 +385,9 @@ export default function ProgressScreen() {
 
               Deliberately the ONLY one of Today's three analytical blocks that
               landed here: `WeekReview` is already drawn by `ThisWeek`, and
-              `TrendStrip`'s weekly bars are already drawn by `TrainingSummary`.
-              See the component's own note.
+              `TrendStrip`'s weekly bars are already drawn by `TrainingSummary`,
+              and that component was deleted outright by N201/#637 once it had
+              gone a fortnight with no caller.
             */}
             <TrainingHistory />
 
