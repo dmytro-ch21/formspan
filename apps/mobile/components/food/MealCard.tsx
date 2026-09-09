@@ -236,9 +236,41 @@ export function MealCard({
   // per-parent, so `EntryRow`'s own `lifted` style alone would still leave
   // the row under the NEXT card once it crossed into it.
   const carriesLifted = !!drag?.activeId && entries.some((e) => e.id === drag.activeId);
-  // N553 — the rows this card actually draws while a drag is in flight. See
-  // the comment at the map below for why the lifted row leaves the list.
-  const visible = drag?.activeId ? entries.filter((e) => e.id !== drag.activeId) : entries;
+  // N553 — EVERY row stays MOUNTED for the whole drag, the dragged one
+  // included, and that is load-bearing rather than a preference.
+  //
+  // A draft of this ticket filtered the dragged row out of the list this card
+  // renders, to express "a row being dragged should not also sit in the list
+  // it is being dragged through". **frontend-reviewer caught it as blocking,
+  // and it was a regression against N531's cross-meal drag as well as a break
+  // in this ticket's own reorder.** `drag.activeId` is set SYNCHRONOUSLY by
+  // `EntryRow`'s `onLongPress`, before the finger has moved a pixel — so the
+  // very next render removed the row under the finger, React unmounted its
+  // `SwipeToDelete`/`EntryRow` subtree, and that `EntryRow` instance is the
+  // one holding the live `PanResponder` (and, in edit mode, the grip's) that
+  // has to track the rest of the gesture. Unmounting a native view that holds
+  // an active touch responder terminates or corrupts the gesture: the drag
+  // died at the moment it began.
+  //
+  // The hole in the list that filter was reaching for is already there for
+  // free, and always was: `EntryRow` translates the lifted row by the finger's
+  // `dy`, and a transform does not occupy layout — so the row's own slot
+  // empties visually while the row itself follows the finger, over its
+  // siblings (`lifted`) and over the next card (`cardLifted`). That is exactly
+  // how N531's drag has read since it shipped, and the accent `dropGap` below
+  // is what says where the row will LAND.
+  const activeId = drag?.activeId ?? null;
+  const draggedAt = activeId === null ? -1 : entries.findIndex((e) => e.id === activeId);
+  // `dropSlot` counts against this meal WITHOUT the dragged row — that is what
+  // an insertion index means, and what `slotFor` returns and `plan` takes. So
+  // rendering every row needs the translation: each row carries the index it
+  // holds in THAT list, and the dragged row holds none of them, which is what
+  // null says here.
+  const rows = entries.map((e, i) => ({
+    entry: e,
+    slot: i === draggedAt ? null : draggedAt >= 0 && i > draggedAt ? i - 1 : i,
+  }));
+  const slotCount = draggedAt >= 0 ? entries.length - 1 : entries.length;
 
   return (
     <RNView
@@ -355,13 +387,13 @@ export function MealCard({
           )}
 
           {/* N553 — the rows, with a gap opened at the slot a lifted row would
-              land in. `visible` is this meal WITHOUT the lifted row, because
-              that is what an insertion index counts against (`slotFor` and
-              `plan` both exclude it) and because a row being dragged should
-              not also sit in the list it is being dragged through. */}
-          {visible.map((e, i) => (
+              land in. Every row is drawn, the lifted one included (see the
+              `rows` comment above — unmounting it kills the gesture it is
+              holding); `slot` is that row's index in the list WITHOUT the
+              lifted row, which is the coordinate `dropSlot` speaks in. */}
+          {rows.map(({ entry: e, slot }) => (
             <RNView key={e.id}>
-              {isDropTarget && dropSlot === i ? (
+              {isDropTarget && slot !== null && dropSlot === slot ? (
                 <RNView
                   style={[styles.dropGap, { backgroundColor: addColor }]}
                   testID={testID ? `${testID}-drop-gap` : undefined}
@@ -403,7 +435,7 @@ export function MealCard({
               where a finger over the card's padding or its Add Food button
               resolves to. Separate from the map, which has no index for
               "after the last one". */}
-          {isDropTarget && dropSlot !== null && dropSlot >= visible.length ? (
+          {isDropTarget && dropSlot !== null && dropSlot >= slotCount ? (
             <RNView
               style={[styles.dropGap, { backgroundColor: addColor }]}
               testID={testID ? `${testID}-drop-gap` : undefined}

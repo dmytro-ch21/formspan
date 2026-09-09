@@ -21,8 +21,9 @@
  * - **Drag the handle** (N553) does the same thing with no hold at all, and
  *   the handle only exists once the meal is in edit mode. Its own
  *   `PanResponder` claims on TOUCH-DOWN — the row's does not and must not,
- *   because the row is also a button and a scroll surface, whereas 44 points
- *   of grip at the end of a row is only ever one thing.
+ *   because the row is also a button and a scroll surface, whereas the grip
+ *   at the end of a row (44 × 44 — see `styles.grip`, which is measured
+ *   rather than asserted) is only ever one thing.
  *
  * ## What long-press MEANS now, which is one thing (N553/#1019)
  *
@@ -334,7 +335,14 @@ export function EntryRow({
       </Pressable>
       {/* OUTSIDE the row's Pressable, as a sibling — nested pressables fight
           over one touch, and neither of these may be reachable while the row
-          is a checkbox. 44pt tall via padding, over the icon's own 18.
+          is a checkbox. Both reach 44 × 44 over the icon's own 18, and by
+          DIFFERENT means, stated here because the comment that used to sit
+          in this slot claimed 44 for a target that measured 30 across (see
+          `styles.grip`): the grip gets its 44 from padding, because a
+          `PanResponder` on a bare `View` is not a `Pressable` and `hitSlop`
+          outside a clipping ancestor is not something to bet a gesture on;
+          the 3-dot keeps its narrow padding and takes the rest from
+          `hitSlop`, because it is a tap and a tap can afford that.
 
           Edit mode swaps the 3-dot for the grip rather than adding it beside:
           the row already carries a tap, a swipe, a long-press and a drag, and
@@ -344,7 +352,7 @@ export function EntryRow({
       {dragEnabled && editing ? (
         <RNView
           {...handleResponder.panHandlers}
-          style={styles.more}
+          style={styles.grip}
           accessible
           accessibilityRole="adjustable"
           accessibilityLabel={`Reorder ${entry.name}`}
@@ -370,7 +378,11 @@ export function EntryRow({
         <Pressable
           onPress={onMenu}
           style={styles.more}
-          hitSlop={6}
+          // 30 across + 7 either side = 44. It was 6 (giving 42), which is
+          // the same near-miss the grip had in a form that at least reached
+          // most of the way; one point makes the number the one Apple's own
+          // minimum states.
+          hitSlop={7}
           accessibilityRole="button"
           accessibilityLabel={`More for ${entry.name}`}
           accessibilityHint="Duplicate, remove or share this entry"
@@ -407,7 +419,25 @@ const styles = StyleSheet.create({
   rowName: { fontSize: 14, fontWeight: '600' },
   rowServing: { fontSize: 12, color: vola.textDim },
   rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  // The 3-dot: 13 + 18 + 13 = 44 tall, 10 + 18 + 2 = 30 across, and the
+  // missing 14 comes from its `hitSlop={7}` above. A `Pressable` may do that;
+  // the grip may not (below).
   more: { paddingVertical: 13, paddingLeft: 10, paddingRight: 2 },
+  // N553 — the grip, and the arithmetic is the point: 13 + 18 + 13 = 44 tall,
+  // 24 + 18 + 2 = 44 across, over an 18pt icon. It is 44 of REAL PADDING, not
+  // 30 of padding and a promise, which is what shipped in the first draft of
+  // this ticket and what frontend-reviewer caught: the file's own comments
+  // said "44 points of grip" while the style said 10 + 18 + 2 = 30, and a
+  // thumb landing in the missing 14 hit the row's `Pressable` and OPENED the
+  // entry instead of picking it up — the exact failure #1019's fifth
+  // criterion ("draggable without a second hand") is about.
+  //
+  // The 24 is all on the LEFT so the icon does not move when edit mode swaps
+  // the 3-dot for the grip (both keep `paddingRight: 2`); the row's own
+  // `Pressable` is a sibling, not an ancestor, so a wider grip SHRINKS it
+  // rather than overlapping it — the 14 points are taken from the far end of
+  // a full-width row, and nothing else lives there.
+  grip: { paddingVertical: 13, paddingLeft: 24, paddingRight: 2 },
 
   checkbox: {
     width: 20,

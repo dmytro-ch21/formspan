@@ -22288,6 +22288,13 @@ its convergence rule.
 - Switching day ends edit mode; yesterday's card is not still editing.
 - Combine-select mode disables the lift entirely, as it always has: a row that
   is a checkbox does not drag.
+- The row under the finger STAYS ON SCREEN for the whole drag. It must not
+  vanish at the instant of the long-press, and after travelling a card's height
+  it must still drop where it is released — the first draft of N553 unmounted
+  it the moment `activeId` was set, which killed the gesture holding it.
+- The grip is hittable with a thumb, not a stylus: press it near its LEFT edge
+  rather than dead centre and a drag starts, rather than the entry opening. It
+  is 44 x 44, and the missing 14 points used to belong to the row's own tap.
 
 ### Mobile — where a drop lands
 

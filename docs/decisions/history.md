@@ -67859,6 +67859,59 @@ It is the same silent-blanking mechanism this ticket spent its care avoiding,
 already live. Left alone deliberately (it is a different fix with a different
 restore-path test) and filed as its own ticket.
 
+### Two things review caught, both about the gesture rather than the data
+
+`frontend-reviewer` returned two `[blocking]` findings on the first draft of
+this branch, and they are worth recording because both were **invisible to the
+whole suite** and one of them was a regression against N531's already-shipped
+drag.
+
+**The dragged row was being UNMOUNTED mid-gesture.** `MealCard` filtered the
+active row out of the list it renders — `entries.filter((e) => e.id !== drag.activeId)`
+— to express "a row being dragged should not also sit in the list it is being
+dragged through". But `drag.activeId` is set **synchronously** by `EntryRow`'s
+`onLongPress`, before the finger has moved a pixel. So the very next render
+destroyed the `EntryRow` instance holding the live `PanResponder` (and, in edit
+mode, the grip's second one) that was supposed to track the rest of the
+gesture, and removing a native view that holds an active touch responder
+terminates or corrupts the touch. The within-meal reorder this ticket exists
+for and N531's cross-meal drag were both plausibly dead on a device.
+
+`origin/main` had it right and this branch broke it: `main` maps over the
+unfiltered list and expresses the lift with `EntryRow`'s own `translateY`. That
+is also why the "hole" the filter was reaching for never needed the filter — a
+transform does not occupy layout, so the row's slot empties visually while the
+row follows the finger. Every row now stays mounted; the accent `dropGap` says
+where it will land, and `dropSlot` (which counts against the meal WITHOUT the
+lifted row, because that is what an insertion index means) is translated per
+row rather than compared against a rendered index.
+
+**The grip was 30 points across, under comments claiming 44.** `styles.more`
+was `paddingLeft: 10, paddingRight: 2` over an 18pt icon: 44 tall, 30 wide,
+with no `hitSlop` on the grip's bare `View`. Acceptance criterion 5 is
+"reachable one-handed — the reorder target must be draggable without a second
+hand", and the missing 14 points belonged to the row's own `Pressable`, so a
+thumb landing slightly left of the icon **opened the entry instead of picking
+it up** — the failure the criterion names, delivered by the control that was
+supposed to fix it. The grip now has its own style at
+`paddingLeft: 24, paddingRight: 2` — 24 + 18 + 2 = 44 across, 13 + 18 + 13 = 44
+down, all of it real padding, with the 24 on the LEFT so the icon does not move
+when edit mode swaps the 3-dot for the grip, and taken from a sibling
+`Pressable` that shrinks rather than from an overlap. The 3-dot went from
+`hitSlop={6}` (42) to 7 (44) in passing.
+
+**What let both through was the same absence, so both are now tested.** No test
+in this repo had ever rendered a `MealCard` with one of its own entries lifted,
+so nothing could see the unmount; and a comment asserting 44 is a comment,
+which cannot fail. `MealCard.test.tsx` now renders a card with `drag.activeId`
+set to one of its rows and asserts the row is still there **with its pan
+handlers still on it** (mutation: restore the filter → three tests red), that
+the seam opens above the right row and below the last one (mutation: drop the
+slot translation → both red), and that the grip's padding plus the icon's own
+18 sums to 44 in both axes (mutation: put the padding back to 10/2 → red). Each
+mutation was applied, run, reverted, and the green re-established by
+**re-running** rather than by reading the file back.
+
 ### Open
 
 - The last acceptance criterion is `NEEDS HUMAN EVIDENCE` and cannot be met by
