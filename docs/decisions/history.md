@@ -65813,6 +65813,178 @@ its own ticket.
   the row's message and an inert Log button, and VoiceOver reads the hint
   rather than announcing an enabled button that ignores taps.
 
+## 2026-09-09 — N543 (#981): a removal renamed the collapsed-group keys, so one exercise's "Done" jumped to another
+
+N530 (#961) gave the strength session screen a per-exercise **Done** that folds
+an exercise's rows to a summary line. It keyed the fold state by *occurrence in
+render order* — `squat#0`, `bench#0`, `squat#1` for a circuit — recomputed from
+scratch on every render by `groupKeys`, and persisted per session in
+`local_sessions.collapsed_json`. `frontend-reviewer` found the hole on that PR
+and it was filed rather than fixed: **`removeGroup` never touched the
+`collapsed` set**, and an occurrence-numbered key is not stable across a
+removal. Drop the first squat of a circuit and the surviving block is
+recomputed as `squat#0` — a *different* name for the same rows, and the same
+name a *different* block used to have. The fold either jumps to a block the
+athlete never tapped Done on, or the block they did tap loses it.
+
+No data was ever at risk: `sets` is untouched, `completed` is untouched, and a
+stray fold is one tap to undo. What it violated was the guarantee `groupKeys`'s
+own doc comment made — "keeps the two squat blocks of a circuit independently
+collapsible" — which reasoned about reordering and said nothing about removal.
+
+### The decision: remap, not re-key — and the reason is that a set has no id
+
+The ticket asked for one of two answers: clear/remap stale keys on removal, or
+stop keying on occurrence order and say what the key is instead. **We remap**,
+because the alternative is not available at any honest price:
+
+`LoggedSet` carries `exercise_id`, `position`, the measures, and no identity.
+It cannot have one, either — the server replaces a session's sets *wholesale*
+on every write (`replaceSets` PUTs the list and the API responds from a fresh
+read), so a client-minted id would not survive the first sync, and a group is
+in any case not a row but a *maximal run of adjacent rows with the same
+exercise* (`groupSets`), which is a shape rather than a thing. There is no
+stable identifier to key on, so the key stays positional and the *caller* takes
+responsibility for the rename.
+
+`rekeyCollapsed(collapsed, before, survivingOldIndices)` in
+`apps/mobile/lib/sessionCollapse.ts` is that responsibility, made explicit. The
+caller passes the set list as it was and the old indices that remain, in their
+new order; the function groups both, maps each surviving block back to the
+blocks that fed it, and rebuilds the fold state under the new names. The
+correspondence is a parameter rather than something diffed out of the two
+lists, deliberately: with no ids, nothing could recover it, and a guess would
+be the same silent rename this exists to prevent.
+
+Three properties fall out of stating it that way, and each has a test:
+
+- **A merged block reads as folded only if EVERY block feeding it was.**
+  Deleting the bench out of squat/bench/squat welds the two squats into one,
+  and half of it may have been folded. Folding rows the athlete never folded
+  hides work they still owe; leaving them open costs one tap.
+- **Keys naming blocks that no longer exist are dropped**, so `collapsed_json`
+  cannot accumulate the debris of a long session's edits.
+- **`removeSet` needed it too**, and the ticket did not name it: a one-set
+  block *is* an exercise, so removing that set removes the block and triggers
+  the identical rename — reachable from the row menu instead of the header.
+
+**`moveGroup` was going to be left alone, on an argument that was wrong, and
+review caught it.** The draft reasoned: a reorder moves a block by one place,
+and two ADJACENT same-exercise blocks have already merged into one, so a
+reorder cannot change their relative order. Both halves are true and they
+answer the wrong question — *the reorder is what makes them adjacent*.
+`frontend-reviewer` reproduced it against these very functions and it needs no
+removal and no new gesture: `squat / bench / squat / deadlift / squat`, one tap
+of the bench block's existing down-arrow, and the two leading squats become
+neighbours, `groupSets` welds them into one, and `squat#2` is renamed
+`squat#1`. Reproduced again here independently before fixing it. That is the
+same mechanism as *deleting* the row between two same-exercise blocks — which
+the branch already rekeyed, in `removeSet` — with the row moved out of the way
+instead of destroyed, so missing it was a failure to see one shape in two
+gestures.
+
+`moveGroup` now rekeys as well, and from the *same permutation the move itself
+is built on*: `reorderedIndices` is split out of `reorderGroups`
+(`apps/mobile/lib/sessions.ts`), so the screen builds the reordered set list
+and the rekey from one array rather than two copies of a swap that could
+disagree. `lib/__tests__/sessions.test.ts` pins the two against each other
+across every legal move.
+
+`groupKeys`'s doc comment now lists all three faces of the one mechanism —
+removing a block, removing a block's last set, and anything that makes two
+same-exercise blocks adjacent (deleting the row between them *or* moving it
+out from between them) — and says outright that the reorder case is the one a
+plausible argument talked us out of.
+
+### The other two findings from the same review
+
+**`toggleCollapsed` now uses the functional updater.** It read `collapsed` off
+the render closure, so two taps landing in one commit window — two Done
+buttons, or a Done and an expand — both saw the same stale set and the second
+discarded the first. Unlikely on one thumb, fully recoverable, free to rule
+out. The SQLite write moved out of it into a single `useEffect` on `collapsed`,
+so the updater stays pure and every path that changes the fold state (toggle,
+and both removals) persists by the same route rather than each needing its own
+`saveCollapsedGroups` call.
+
+**The focus race was closed rather than documented, and it is worth saying why
+that is not a claim to have reproduced it.** `load()` re-runs on every screen
+focus and unconditionally re-read `collapsed_json`, while the toggle's write
+was fire-and-forget — so a focus landing inside that window could clobber a
+just-made toggle. The reviewer could not make it fire, and neither did we: a
+local `UPDATE` finishes well before a navigation transition, and any test that
+"proved" it would be a test of our own sleep timings. But the argument that it
+is safe is an argument about *timing*, and the read it defends has no value at
+all: `collapsed_json` has exactly one writer in the entire app — this screen —
+so a re-read on focus can only ever return what this screen last wrote. The
+fix is therefore to delete the read, not to win the race. The fold state is now
+hydrated **once per session** (`collapsedHydratedFor`), and the state on screen
+is the truth while the screen is up, exactly as `sets` already is.
+
+### What the tests prove, and one correction to the ticket
+
+The acceptance criterion named the test: construct `squat, bench, squat`, fold
+the second squat, remove the first, assert the survivor is expanded, and
+confirm it fails against today's code. **Measured: as literally worded it
+PASSES against today's code**, and would have shipped as a vacuous green. Fold
+the second squat and remove the first and the survivor *is* the block the
+athlete tapped Done on — so "expanded" asserts the bug rather than the fix.
+The construction is right and the expectation was inverted; the property the
+ticket actually wants is *the survivor keeps the state the athlete gave it*,
+which is red in both directions:
+
+- fold the second squat, remove the first → the survivor must stay **folded**
+  (today: the fold is lost, because the stale `squat#1` names nothing);
+- fold the first squat, remove it → the survivor must be **open** (today: it
+  inherits `squat#0` and folds itself — the issue's own prose, and the title).
+
+Both were run red against a deliberate no-op `rekeyCollapsed` — which is
+exactly what the screen did before — then green against the real one. Every
+guard in the function was mutation-tested with the mutation confirmed present
+in the file content rather than inferred from a diff, and the screen's own
+wiring was mutated seven ways (each removal ceasing to rekey, the rekey handed
+the post-removal list, the closure read restored, a second persistence caller,
+the hydration guard removed, and a `setSets` smuggled into the fold path) —
+all seven caught.
+
+That last set matters more than it looks, because a helper that is right and
+uncalled is *precisely* the shape of the bug being fixed: every pure function
+around `removeGroup` behaved perfectly for a whole release while the screen
+simply never asked. The screen assertions live in
+`apps/mobile/__tests__/app/strengthSessionCollapse.test.ts`, extending N530's
+own source-level wiring test rather than starting a second file beside it —
+two files asserting the same screen drift apart.
+
+N530's load-bearing property is unchanged and re-pinned in the same file: Done
+writes nothing to any set, the fold path cannot reach `completed`, `commit` or
+`setSets`, and logging a normal set is still two taps. `collapsed_json` remains
+out of the sync payload — it is local view state, owed to nobody.
+
+### Gaps this leaves
+
+- `pnpm run verify` fails on this branch at `check:expo-compat` **and does so
+  identically on `origin/main` with this branch's changes stashed** — the
+  expo/expo-router patch drift already filed as H19 (#994), failing verify and
+  CI on every branch. Every other link in the chain passes here, including the
+  full mobile suite (314 suites, 5001 tests), both Go modules and all three
+  apps.
+- No device evidence. The fold jumping between blocks of a circuit is a thing
+  you see rather than assert, and the ticket carries no device criterion; a
+  human check on a real circuit is still the only proof the screen behaves.
+- **The exercise-swap path is the same class of gap and is NOT fixed here**
+  (found by `frontend-reviewer`, filed as a follow-up). `swapExercise`
+  rewrites `exercise_id` on every row of the swapped exercise and writes
+  straight to SQLite from `app/session/[id]/add.tsx`, bypassing this screen's
+  `commit`/`setCollapsed` entirely; the screen then re-reads `sets` on focus
+  with the in-memory `collapsed` untouched. A fold on the swapped exercise is
+  orphaned (its key's exercise-id half changed), and if the new exercise
+  matches a neighbouring block the two merge and a fold can be misapplied.
+  Pre-existing, outside this ticket's `removeGroup`/`removeSet` scope, and a
+  stray fold is still one tap — but it is now written down.
+- The lesson worth keeping is not about `moveGroup`. It is that "this mutator
+  cannot rename a key" is a claim that reads as obviously true and was false
+  twice in one ticket. Write the circuit down and run it.
+
 ## Open items / known gaps as of this entry
 
 

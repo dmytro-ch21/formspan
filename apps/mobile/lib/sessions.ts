@@ -1427,7 +1427,7 @@ export function fillForward(
  * ordinary case or the orphaned-drop one the ordinal fix above depends on.
  */
 export function groupSets(
-  sets: Pick<LoggedSet, 'exercise_id'>[],
+  sets: readonly Pick<LoggedSet, 'exercise_id'>[],
 ): { exerciseID: string; indices: number[] }[] {
   const groups: { exerciseID: string; indices: number[] }[] = [];
   sets.forEach((s, i) => {
@@ -1455,11 +1455,40 @@ export function reorderGroups(
   groupIndex: number,
   delta: -1 | 1,
 ): LoggedSet[] | null {
+  const moved = reorderedIndices(order, groupIndex, delta);
+  if (!moved) return null;
+  return moved.map((i, position) => ({ ...sets[i], position }));
+}
+
+/**
+ * The PERMUTATION behind `reorderGroups`: every set index, in the order the
+ * move puts them, or `null` when the move would go off either end.
+ *
+ * Split out for N543/#981, and it is not a tidy-up. A caller that has to
+ * carry per-group state across the move — the session screen's collapsed-set
+ * (`sessionCollapse.ts`'s `rekeyCollapsed`) is the one that does — needs the
+ * old-index-to-new-index correspondence, and reconstructing it beside
+ * `reorderGroups` means two copies of the swap that can disagree. This is the
+ * one copy; `reorderGroups` is a `.map` over it.
+ *
+ * Worth knowing what a reorder can do to the shape of the list, because a
+ * reasonable-sounding argument that it cannot was wrong and shipped in this
+ * function's first N543 draft: moving a block OUT from between two blocks of
+ * the SAME exercise makes those two adjacent, so `groupSets` welds them into
+ * one on the next render — squat/bench/squat/deadlift/squat, move the bench
+ * down one, and the last squat block is renamed. Deleting the block between
+ * them does the same thing, which is why both paths rekey.
+ */
+export function reorderedIndices(
+  order: readonly (readonly number[])[],
+  groupIndex: number,
+  delta: -1 | 1,
+): number[] | null {
   const target = groupIndex + delta;
   if (target < 0 || target >= order.length) return null;
   const moved = order.map((g) => g.slice());
   [moved[groupIndex], moved[target]] = [moved[target], moved[groupIndex]];
-  return moved.flat().map((i, position) => ({ ...sets[i], position }));
+  return moved.flat();
 }
 
 /**

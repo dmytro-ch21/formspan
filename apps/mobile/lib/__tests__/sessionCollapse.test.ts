@@ -1,5 +1,11 @@
-import { groupKeys, parseCollapsed, summariseGroup, toggleGroup } from '../sessionCollapse';
-import { groupSets, type LoggedSet } from '../sessions';
+import {
+  groupKeys,
+  parseCollapsed,
+  rekeyCollapsed,
+  summariseGroup,
+  toggleGroup,
+} from '../sessionCollapse';
+import { groupSets, reorderedIndices, type LoggedSet } from '../sessions';
 
 /**
  * Per-exercise "Done" (N530/#961, the user's item 7): the pure half.
@@ -160,5 +166,181 @@ describe('summariseGroup — the one line a collapsed group shows', () => {
     const snapshot = JSON.stringify(rows);
     summariseGroup(rows, kg);
     expect(JSON.stringify(rows)).toBe(snapshot);
+  });
+});
+
+/**
+ * N543/#981 — a removal must not hand one block's fold state to another.
+ *
+ * `groupKeys` numbers by occurrence, so removing `squat#0` renames the
+ * surviving `squat#1` to `squat#0`. Nothing in the screen touched the
+ * `collapsed` set on removal, so the survivor inherited whatever the removed
+ * block's key had been — folded a block nobody folded, or lost a fold nobody
+ * undid, depending on which one went.
+ *
+ * These tests run the screen's OWN removal path (`removeOnScreen` below is
+ * the two lines `removeGroup` runs), not the helper in isolation: a helper
+ * that is right and uncalled is the failure this ticket is about.
+ */
+describe('rekeyCollapsed — removing a block leaves every survivor as the athlete left it', () => {
+  const circuit = () => [
+    set({ exercise_id: 'squat' }),
+    set({ exercise_id: 'bench' }),
+    set({ exercise_id: 'squat' }),
+  ];
+
+  /** What `removeGroup` does: drop the group's set indices, rekey the folds. */
+  function removeOnScreen(sets: LoggedSet[], collapsed: ReadonlySet<string>, groupIndex: number) {
+    const drop = new Set(groupSets(sets)[groupIndex].indices);
+    const surviving = sets.map((_, i) => i).filter((i) => !drop.has(i));
+    return {
+      sets: surviving.map((i, position) => ({ ...sets[i], position })),
+      collapsed: rekeyCollapsed(collapsed, sets, surviving),
+    };
+  }
+
+  /** Which exercise blocks read as folded, in render order. */
+  function foldedBlocks(sets: LoggedSet[], collapsed: ReadonlySet<string>): boolean[] {
+    return groupKeys(groupSets(sets)).map((k) => collapsed.has(k));
+  }
+
+  it('the keys are the ones the bug renames', () => {
+    // Not decoration: every case below turns on `squat#1` becoming `squat#0`.
+    expect(groupKeys(groupSets(circuit()))).toEqual(['squat#0', 'bench#0', 'squat#1']);
+  });
+
+  it('folds the SECOND squat, removes the first — the survivor stays folded', () => {
+    // #981's acceptance criterion, with the expectation corrected: the block
+    // that survives here IS the one the athlete tapped Done on, so "expanded"
+    // would assert the bug. Today's code drops the fold, because the stale
+    // `squat#1` names nothing after the rename.
+    const sets = circuit();
+    const out = removeOnScreen(sets, toggleGroup(new Set(), 'squat#1'), 0);
+    expect(groupKeys(groupSets(out.sets))).toEqual(['bench#0', 'squat#0']);
+    expect(foldedBlocks(out.sets, out.collapsed)).toEqual([false, true]);
+  });
+
+  it('folds the FIRST squat, removes it — the survivor is NOT folded', () => {
+    // The issue's own prose: the stale `squat#0` is inherited by a block the
+    // athlete never tapped, which renders it shut mid-workout.
+    const sets = circuit();
+    const out = removeOnScreen(sets, toggleGroup(new Set(), 'squat#0'), 0);
+    expect(foldedBlocks(out.sets, out.collapsed)).toEqual([false, false]);
+    expect([...out.collapsed]).toEqual([]);
+  });
+
+  it('folds the FIRST squat, removes the SECOND — the fold stays where it was', () => {
+    const sets = circuit();
+    const out = removeOnScreen(sets, toggleGroup(new Set(), 'squat#0'), 2);
+    expect(groupKeys(groupSets(out.sets))).toEqual(['squat#0', 'bench#0']);
+    expect(foldedBlocks(out.sets, out.collapsed)).toEqual([true, false]);
+  });
+
+  it('folds the SECOND squat, removes the bench between them — the two squats merge, unfolded', () => {
+    // Adjacency IS the grouping, so deleting the bench welds the squats into
+    // ONE block. Half of it was folded and half was not; the honest answer is
+    // open, because folding rows the athlete never folded hides work.
+    const sets = circuit();
+    const out = removeOnScreen(sets, toggleGroup(new Set(), 'squat#1'), 1);
+    expect(groupKeys(groupSets(out.sets))).toEqual(['squat#0']);
+    expect(foldedBlocks(out.sets, out.collapsed)).toEqual([false]);
+  });
+
+  it('folds BOTH squats, removes the bench — the merged block stays folded', () => {
+    const sets = circuit();
+    const both = toggleGroup(toggleGroup(new Set(), 'squat#0'), 'squat#1');
+    const out = removeOnScreen(sets, both, 1);
+    expect(foldedBlocks(out.sets, out.collapsed)).toEqual([true]);
+  });
+
+  it('drops keys for blocks that no longer exist, so collapsed_json cannot accumulate', () => {
+    const sets = circuit();
+    const out = removeOnScreen(sets, new Set(['squat#0', 'bench#0', 'squat#1', 'deadlift#0']), 1);
+    // One merged squat block survives; bench's key and the never-real
+    // deadlift key both go, rather than sitting in the row forever.
+    expect([...out.collapsed]).toEqual(['squat#0']);
+  });
+
+  it('removing the LAST set of a block removes the block, same rename, same guarantee', () => {
+    // `removeSet` runs the identical path — a one-set block is an exercise.
+    const sets = circuit();
+    const surviving = [1, 2]; // drop set 0, which is all of squat#0
+    const collapsed = rekeyCollapsed(toggleGroup(new Set(), 'squat#0'), sets, surviving);
+    expect([...collapsed]).toEqual([]);
+  });
+
+  it('a reorder that welds two same-exercise blocks together keeps the fold on its own block', () => {
+    // The case N543's first draft argued away, reproduced by
+    // `frontend-reviewer` against the real functions: squat / bench / squat /
+    // deadlift / squat, move the BENCH down one place, and the two leading
+    // squats become adjacent and merge — renaming `squat#2` to `squat#1`.
+    // One tap of an existing arrow, no removal anywhere.
+    const sets = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'deadlift' }),
+      set({ exercise_id: 'squat' }),
+    ];
+    expect(groupKeys(groupSets(sets))).toEqual([
+      'squat#0',
+      'bench#0',
+      'squat#1',
+      'deadlift#0',
+      'squat#2',
+    ]);
+    const order = groupSets(sets).map((g) => g.indices);
+    const moved = reorderedIndices(order, 1, 1);
+    expect(moved).not.toBeNull();
+    const after = moved!.map((i, position) => ({ ...sets[i], position }));
+    expect(groupKeys(groupSets(after))).toEqual([
+      'squat#0',
+      'bench#0',
+      'deadlift#0',
+      'squat#1',
+    ]);
+
+    // The athlete folded the LAST squat. It must still be the folded one.
+    const out = rekeyCollapsed(new Set(['squat#2']), sets, moved!);
+    expect(foldedBlocks(after, out)).toEqual([false, false, false, true]);
+  });
+
+  it('a plain reorder of two different exercises renames nothing', () => {
+    const sets = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'deadlift' }),
+    ];
+    const order = groupSets(sets).map((g) => g.indices);
+    const moved = reorderedIndices(order, 1, 1)!; // bench and deadlift swap
+    const after = moved.map((i, position) => ({ ...sets[i], position }));
+    const out = rekeyCollapsed(new Set(['squat#0', 'bench#0']), sets, moved);
+    expect(groupKeys(groupSets(after))).toEqual(['squat#0', 'deadlift#0', 'bench#0']);
+    expect(foldedBlocks(after, out)).toEqual([true, false, true]);
+  });
+
+  it('ignores an index that names no set, rather than sliding the rest by one', () => {
+    // The out-of-range filter has to run BEFORE the rows are mapped: filter
+    // afterwards and `after`'s indices fall out of step with `surviving`'s,
+    // which reads as a confident wrong answer. 99 names nothing; the two real
+    // survivors must still land on their own blocks.
+    const sets = circuit();
+    expect([...rekeyCollapsed(new Set(['squat#1']), sets, [99, 1, 2])]).toEqual(['squat#0']);
+    expect([...rekeyCollapsed(new Set(['squat#1']), sets, [-1, 1, 2])]).toEqual(['squat#0']);
+  });
+
+  it('is a pure read — neither the sets nor the input set are touched', () => {
+    const sets = circuit();
+    const snapshot = JSON.stringify(sets);
+    const input = new Set(['squat#1']);
+    rekeyCollapsed(input, sets, [1, 2]);
+    expect(JSON.stringify(sets)).toBe(snapshot);
+    expect([...input]).toEqual(['squat#1']);
+  });
+
+  it('an unchanged set list is left exactly as it was', () => {
+    const sets = circuit();
+    const all = sets.map((_, i) => i);
+    expect([...rekeyCollapsed(new Set(['squat#1']), sets, all)]).toEqual(['squat#1']);
   });
 });

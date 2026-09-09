@@ -106,8 +106,13 @@ describe('a folded group shows the summary and none of the set controls', () => 
 describe('Done writes nothing to any set', () => {
   it('toggleCollapsed never reaches sets, completed, commit or persist', () => {
     const toggle = body('toggleCollapsed');
-    expect(toggle).toContain('toggleGroup(collapsed, key)');
-    expect(toggle).toContain('saveCollapsedGroups(');
+    // N543/#981 moved two things and neither weakens this: the updater is
+    // now functional (`prev`, not the render closure's `collapsed`), and the
+    // SQLite write moved to a single effect on `collapsed` so the updater
+    // stays pure. What this test is FOR is unchanged — the fold path must
+    // not be able to reach a row.
+    expect(toggle).toContain('toggleGroup(prev, key)');
+    expect(toggle).not.toContain('saveCollapsedGroups(');
     expect(toggle).not.toMatch(/\bsetSets\b/);
     expect(toggle).not.toMatch(/\bcompleted\b/);
     expect(toggle).not.toMatch(/\bcommit\(/);
@@ -119,6 +124,67 @@ describe('Done writes nothing to any set', () => {
   it('the Done chip and the collapsed header both call toggleCollapsed, and nothing else calls it', () => {
     const calls = source.match(/toggleCollapsed\(key\)/g) ?? [];
     expect(calls).toHaveLength(2);
+  });
+});
+
+/**
+ * N543/#981 — the fold state must be REBUILT whenever a block can disappear.
+ *
+ * `groupKeys` numbers blocks by occurrence, so a removal renames every later
+ * block of the same exercise: drop the first squat of a circuit and `squat#1`
+ * becomes `squat#0`. `lib/__tests__/sessionCollapse.test.ts` proves
+ * `rekeyCollapsed` answers that correctly. Only a read of THIS file can prove
+ * the screen asks it — and "a helper that is right and uncalled" is precisely
+ * the shape of the bug being fixed, which lived a whole release as
+ * `removeGroup` never touching the `collapsed` set while every pure function
+ * around it behaved perfectly.
+ */
+describe('every removal rebuilds the fold state', () => {
+  it.each(['removeSet', 'removeGroup'])('%s rekeys the collapsed set', (fn) => {
+    const fnBody = body(fn);
+    // `sets` is the list BEFORE the removal, and `surviving` the old indices
+    // that remain — handing it the post-removal list would compare a list
+    // against itself and change nothing, silently.
+    expect(fnBody).toMatch(/setCollapsed\(\(prev\) => rekeyCollapsed\(prev, sets, surviving\)\)/);
+  });
+
+  it('moveGroup rekeys too, from the same permutation the move is built on', () => {
+    // The case N543's first draft argued away and `frontend-reviewer`
+    // reproduced: moving a block out from between two same-exercise blocks
+    // makes them adjacent, `groupSets` welds them into one, and every later
+    // block of that exercise is renamed — no removal anywhere.
+    const fnBody = body('moveGroup');
+    expect(fnBody).toMatch(/setCollapsed\(\(prev\) => rekeyCollapsed\(prev, sets, moved\)\)/);
+    // One copy of the swap, not two: the screen builds the new set list from
+    // the SAME permutation it hands the rekey, so the two cannot disagree.
+    expect(fnBody).toContain('reorderedIndices(');
+    expect(fnBody).toContain('commit(moved.map((i, position) => ({ ...sets[i], position })))');
+    expect(fnBody).not.toContain('reorderGroups(');
+  });
+
+  it('the screen imports rekeyCollapsed', () => {
+    // Guards the guard: a rename that broke the two assertions above should
+    // fail loudly here rather than leaving them matching nothing.
+    expect(source).toContain('rekeyCollapsed');
+  });
+
+  it('the fold state is written from exactly one place', () => {
+    // The effect on `collapsed`. Two writers means a rekey somewhere saves a
+    // different set than the one it just installed.
+    expect(source.match(/saveCollapsedGroups\(/g) ?? []).toHaveLength(1);
+  });
+
+  it('the stored fold state is read once per session, not once per focus', () => {
+    // `load` re-runs on every focus, and `collapsed_json` has exactly one
+    // writer — this screen. So a re-read there can only return what this
+    // screen last wrote, and its one possible surprise is a stale answer
+    // clobbering a toggle whose write is still in flight. Hydrating once
+    // removes the read rather than racing it.
+    const read = source.indexOf('readCollapsedGroups(userId, id)');
+    expect(read).toBeGreaterThan(-1);
+    expect(source.slice(Math.max(0, read - 400), read)).toContain(
+      'collapsedHydratedFor.current !==',
+    );
   });
 });
 

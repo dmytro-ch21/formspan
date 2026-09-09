@@ -4,6 +4,7 @@ import {
   pendingSuggestableIndices,
   repairSet,
   reorderGroups,
+  reorderedIndices,
   roundDistanceM,
   sessionActiveSeconds,
   sessionDistanceMeters,
@@ -275,6 +276,40 @@ describe('fillForward', () => {
   it('returns the same array when nothing changed, so callers can skip a write', () => {
     const sets = [set('squat', { reps: 5 }), set('squat', { reps: 3 })];
     expect(fillForward(sets, 0, ['reps'])).toBe(sets);
+  });
+});
+
+describe('reorderedIndices — the permutation reorderGroups is built on', () => {
+  const sets = [set('a', { reps: 1 }), set('b', { reps: 2 }), set('c', { reps: 3 })];
+  const order = [[0], [1], [2]];
+
+  it('agrees with reorderGroups, so the two cannot drift apart (N543/#981)', () => {
+    // The session screen uses this to carry its collapsed-group state across
+    // a move, and builds the moved set list from the same array. If these
+    // two ever disagreed, the fold state would describe a list nobody has.
+    for (const [gi, delta] of [
+      [0, 1],
+      [1, -1],
+      [1, 1],
+      [2, -1],
+    ] as [number, -1 | 1][]) {
+      const moved = reorderedIndices(order, gi, delta);
+      const viaGroups = reorderGroups(sets, order, gi, delta);
+      expect(moved).not.toBeNull();
+      expect(viaGroups).not.toBeNull();
+      expect(moved!.map((i, position) => ({ ...sets[i], position }))).toEqual(viaGroups);
+    }
+  });
+
+  it('returns null off either end, same as reorderGroups', () => {
+    expect(reorderedIndices(order, 0, -1)).toBeNull();
+    expect(reorderedIndices(order, 2, 1)).toBeNull();
+  });
+
+  it('never mutates the order it is given', () => {
+    const input = [[0], [1], [2]];
+    reorderedIndices(input, 0, 1);
+    expect(input).toEqual([[0], [1], [2]]);
   });
 });
 
