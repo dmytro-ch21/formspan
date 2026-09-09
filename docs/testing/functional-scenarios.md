@@ -22052,8 +22052,14 @@ written down.
   preset, and the copy says how many readings are held further back — it does
   not claim there are none, and it does not send them to a range that does not
   exist.
-- A reading exactly 365 days old is inside `1Y` (the window is inclusive at both
-  ends); one at 366 is not, and the `none-in-range` sentence is what appears.
+- `1Y` reaches back **364** days, not 365 — `windowStart` is
+  `shiftDate(today, -(RANGE_DAYS[range] - 1))` and the filter is `day >= 0`, so
+  a reading 364 days old is the oldest one inside the window and a reading
+  exactly 365 days old falls out with `day === -1`. Both 365 and 366 produce the
+  `none-in-range` sentence. This off-by-one is `trendSeries.ts`'s pre-existing
+  behaviour (it predates F34 and is shared by every trend screen), stated here
+  so a scenario translated into a real assertion is written against what the
+  code does rather than against the inclusive reading of "1Y".
 - Weight (`/v1/body/checkins`, no range cap) and training load
   (`/v1/biometric/sessions/load`, capped at 1200 days against a ~1103-day
   request) still offer their own ranges unchanged — different endpoints,
