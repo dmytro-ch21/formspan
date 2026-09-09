@@ -174,7 +174,10 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     color: vola.textMuted,
     textDecorationLine: 'underline',
-    paddingTop: 2,
+    // Vertical padding rather than `paddingTop: 2` — this is a tappable link
+    // in a hero block, and at 13pt the text's own box is a tap target barely
+    // taller than a fingertip is precise. Matches `hr-zones.tsx`'s own link.
+    paddingVertical: 8,
   },
   heroBand: { fontSize: 13, fontWeight: '700' },
 

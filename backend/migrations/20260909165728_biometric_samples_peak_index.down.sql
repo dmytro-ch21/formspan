@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS biometric_samples_user_metric_value_idx;

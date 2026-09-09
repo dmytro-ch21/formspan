@@ -245,12 +245,35 @@ type pgxQuerier interface {
 // That is the shape of bug that reads as plausible forever.
 func (r *PostgresRepository) ObservedHRMax(ctx context.Context, userID string) (*ObservedHRMax, error) {
 	var out ObservedHRMax
+	// The peak stays ONE ordered row — `ORDER BY value DESC, measured_at DESC
+	// LIMIT 1`, never independent `MAX(value)`/`MAX(measured_at)` aggregates,
+	// which are free to come from two different rows and would report a March
+	// peak as having been recorded yesterday.
+	// `TestObservedHRMax_MeasuredAtComesFromThePeakRow` is built so that swap
+	// passes every other assertion in the file and fails only that one.
+	//
+	// The COUNT is a separate scalar subquery rather than `COUNT(*) OVER ()`
+	// beside those columns, and that is a performance fix rather than a
+	// stylistic one (backend review, measured on 2.5M real rows). A window
+	// aggregate with no partition and no frame must materialise and count the
+	// entire matching set before it can emit the LIMIT 1 row — so the LIMIT
+	// bought nothing, and even a perfect covering index could not help while
+	// the two were fused. Split, the peak is an Index Only Scan against
+	// `biometric_samples_user_metric_value_idx` (0.08ms) and only the count
+	// walks the athlete's rows.
 	err := r.pool.QueryRow(ctx, `
-		SELECT value, measured_at, COUNT(*) OVER ()
-		FROM biometric_samples
-		WHERE user_id = $1 AND metric_type = $2
-		ORDER BY value DESC, measured_at DESC
-		LIMIT 1`,
+		WITH peak AS (
+			SELECT value, measured_at
+			FROM biometric_samples
+			WHERE user_id = $1 AND metric_type = $2
+			ORDER BY value DESC, measured_at DESC
+			LIMIT 1
+		)
+		SELECT peak.value,
+		       peak.measured_at,
+		       (SELECT COUNT(*) FROM biometric_samples
+		         WHERE user_id = $1 AND metric_type = $2)
+		FROM peak`,
 		userID, string(MetricHeartRate)).Scan(&out.BPM, &out.MeasuredAt, &out.SampleCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No samples at all. Not an error: an athlete who has never worn a

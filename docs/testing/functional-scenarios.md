@@ -22427,6 +22427,12 @@ and from the bpm line on any run-type detail screen. Also
 - `GET /v1/biometric/hr-max` returns 401 unauthenticated, and never another
   athlete's peak: two accounts with heart-rate history on the same device (sign
   out, sign in) must see their own maximum each time.
+- **An athlete with a large history does not pay for everyone else's.** The
+  peak lookup is served by `biometric_samples_user_metric_value_idx`; if that
+  index is ever dropped or its column order changed, this endpoint silently
+  reverts to scanning the whole table and gets slower as OTHER users' data
+  grows. There is no functional symptom — the answer stays correct — so this
+  is a scenario for a load check, not a correctness one.
 
 ### Needs a device
 

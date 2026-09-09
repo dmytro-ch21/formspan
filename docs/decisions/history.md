@@ -68206,7 +68206,82 @@ to the floor. Backend integration tests run against a per-branch
 `vola_test_n535` rather than the shared `vola_test`, which was sitting dirty at
 version 92 from another worktree.
 
+### Review found a blocking one the tests could never have: the query read the whole table
+
+`backend-reviewer` measured, rather than argued, what the shipped query cost —
+2.5M rows in `biometric_samples`, 500K belonging to the asking athlete, the
+rest spread over ~5,000 others. `EXPLAIN (ANALYZE, BUFFERS)`: a **Parallel Seq
+Scan over the entire table**, 2M rows discarded by filter, a 500K-row sort
+spilling to disk, **596ms**. Reproduced independently before fixing it, on a
+throwaway database, because a performance claim is exactly the kind that reads
+as authoritative and is occasionally about somebody else's schema.
+
+**The cost grew with the PLATFORM's data, not the asking athlete's** — every
+new user made every other user's zones screen slower. That is the property
+that made it blocking rather than merely slow.
+
+Two independent causes, and fixing one without the other would have achieved
+nothing:
+
+1. **No index could serve it.** Migration 000089's
+   `(user_id, metric_type, measured_at)` does not contain `value`, so
+   `ORDER BY value DESC` could not use it. New index, `value DESC,
+   measured_at DESC` matching the ORDER BY exactly. Deliberately a second
+   index rather than a reordering of the first: putting `value` ahead of
+   `measured_at` there would break the window read ("every sample between
+   started_at and ended_at"), which is far hotter and is the reason 000089
+   chose its order.
+2. **`COUNT(*) OVER ()` defeated the `LIMIT 1` regardless.** A window
+   aggregate with no partition and no frame must materialise and count the
+   whole matching set before it can emit one row — verified with the ideal
+   covering index in place, where it still did `Heap Fetches: 500000`. So the
+   `LIMIT` bought nothing while the two were fused, and no index would ever
+   have rescued it.
+
+Split into a CTE for the peak and a scalar subquery for the count: **596ms →
+131ms**, and the peak is now an `Index Only Scan ... LIMIT 1` at **0.08ms**.
+
+**The peak stayed one ordered row through the rewrite, and that was the thing
+to protect.** The reviewer's suggested shape used two separate scalar
+subqueries for `value` and `measured_at`; a CTE keeps them provably from the
+same row instead of from two queries that must be kept in lockstep by hand.
+Both mutations were re-run against the NEW shape afterwards — a query rewrite
+can silently defang the test guarding it, which is the same apparatus trap
+this repo files under "verify that a check can fail", pointed at a refactor.
+Independent-aggregates still fails only the `measured_at` test; a dropped
+user filter on the count still fails cross-user isolation.
+
+### Three doc comments this ticket falsified and did not touch
+
+`lib/biometric.ts` said, in three places, that `'observed'` had no producer
+anywhere in the app and that §3's steps two and three were future work. All
+three were true when written and false the moment this branch landed — and
+none of them is in this branch's diff, so nothing would have flagged them.
+A future session grepping "does anything produce `'observed'`" would have been
+told **no**, three times, in the file that owns the type. Found by
+`frontend-reviewer`; worth recording because the class is general: **the
+comments a change falsifies are rarely the ones it edits.**
+
 ## Open items / known gaps as of this entry
+
+- **N535: the observed-HRmax endpoint still counts every sample the athlete
+  owns, and that count is inherently linear.** The blocking half — a scan of
+  the WHOLE table — is fixed (see the entry above). What remains is the exact
+  `COUNT(*)`, which is bounded by the asking athlete's own history rather than
+  the platform's, but still measured **154ms at 500K samples** and would be
+  ~1.5s at 5M. Not fixable with an index: measured with a perfect covering
+  index and `Heap Fetches: 0` after a `VACUUM`, counting 500K index entries
+  still costs ~110-180ms, because an exact count is O(n) by definition.
+  **The cheap answer exists and was deliberately not taken here.** Capping the
+  count (`SELECT COUNT(*) FROM (SELECT 1 FROM ... LIMIT 1001) t`) measured
+  **0.3ms** — 500x — and loses nothing the number is FOR: it exists so an
+  athlete can judge thin evidence from thick, "1,000+ readings" answers that
+  as well as "12,400", and the thin cases that actually matter (1, 3, 12
+  samples) stay exact. It was left undone because it changes the wire format,
+  the domain type, the screen's copy and four tests, and redesigning a
+  contract at the end of a ticket under review pressure is how the careless
+  version of this gets shipped. Measurements are recorded here so whoever
+  picks it up does not have to take them again.
 
 - **N535: one spurious heart-rate sample defines an athlete's zones, permanently.**
   The observed maximum is an unwindowed `MAX` over every stored `heart_rate`
