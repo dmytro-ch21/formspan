@@ -42,6 +42,7 @@ import { parseOr } from '@/lib/draftNumber';
 import {
   describeMeal,
   estimateErrorMessage,
+  fitServings,
   isQuotaExhausted,
   itemToEntry,
   photographMeal,
@@ -398,6 +399,18 @@ export default function DescribeMealScreen() {
     // removing something load-bearing — this is the backstop for any future
     // caller that is not that button, and the two must not drift apart.
     if (!userId || rows.length === 0 || locked) return;
+    // A row counted zero times cannot be logged — see `hasNoServings`.
+    //
+    // **This guard SURVIVES mutation, deliberately, and that is recorded here
+    // rather than left for someone to rediscover as dead code.** Deleting it
+    // leaves every test green: `blocked` below is computed from the same
+    // `rows` this callback closes over, in the same render, so the button is
+    // already inert in exactly the states this line refuses and no press can
+    // reach it. It is kept for the caller that does not exist yet — a
+    // keyboard "done", a submit from the meal-name field — which would reach
+    // `logAll` without passing the button at all. Same reasoning, and the
+    // same disclosure, as N533's sixth mutation.
+    if (rows.some(hasNoServings)) return;
     setSaving(true);
     setError(null);
     try {
@@ -541,6 +554,14 @@ export default function DescribeMealScreen() {
   const compiling = compileMeal && rows.length > 1;
 
   /**
+   * Whether anything on screen is counted zero times, and so cannot be logged
+   * (N542/#977) — see `hasNoServings`. Both Log paths refuse it and the
+   * button says so by going inert, rather than the athlete tapping Log and
+   * reading an error about a row they can see.
+   */
+  const blocked = rows.some(hasNoServings);
+
+  /**
    * Log every drafted row as ONE combined entry (N472) — summed macros,
    * logged as `1 meal` rather than carrying any one row's own serving count,
    * since a compiled meal is one whole thing eaten, not N components any
@@ -561,6 +582,14 @@ export default function DescribeMealScreen() {
    */
   const logCompiled = useCallback(async () => {
     if (!userId || rows.length <= 1 || locked) return;
+    // Same guard as `logAll`'s, unreachable for the same reason and kept for
+    // the same one — see the note there. What differs is what it would cost
+    // if a future caller did reach it: compiling sums every row's macros into
+    // ONE entry carrying its own `servings: 1`, so a zeroed row would not be
+    // refused by the server at all. It would quietly donate its calories to a
+    // meal the athlete had said they ate none of, which is worse than the
+    // ghost row this ticket is about.
+    if (rows.some(hasNoServings)) return;
     const name = mealName.trim() || defaultMealName(rows);
     setSaving(true);
     setError(null);
@@ -877,6 +906,15 @@ export default function DescribeMealScreen() {
                 />
               </View>
 
+              {/* What is wrong and what to do about it, on the row it is
+                  about — a screen-level error would name a count without
+                  saying which of five rows carries it. */}
+              {hasNoServings(row) ? (
+                <Text style={styles.blocked} testID={`describe-no-servings-${i}`}>
+                  Servings must be more than 0 — say how many, or remove this
+                </Text>
+              ) : null}
+
               {/* Disabled while saving, because the loop drops rows as they
                   land: removing one from under it would let a row the athlete
                   deleted reach the log anyway, since the loop iterates a copy
@@ -955,13 +993,17 @@ export default function DescribeMealScreen() {
 
           <Pressable
             onPress={() => void (compiling ? logCompiled() : logAll())}
-            style={[styles.primary, { backgroundColor: accent.accent }, locked && styles.off]}
+            style={[styles.primary, { backgroundColor: accent.accent }, (locked || blocked) && styles.off]}
             accessibilityRole="button"
             accessibilityLabel={compiling ? `Log ${mealName.trim() || defaultMealName(rows)}` : `Log ${rows.length} items`}
             // `locked`, matching `logAll`'s own guard — and on BOTH props, so
             // VoiceOver never announces an enabled button that ignores taps.
-            disabled={locked}
-            accessibilityState={{ disabled: locked }}
+            // `blocked` is the same contract for a row counted zero times
+            // (N542): the hint is what carries the reason to a screen reader,
+            // which cannot see the red line on the row that caused it.
+            disabled={locked || blocked}
+            accessibilityState={{ disabled: locked || blocked }}
+            accessibilityHint={blocked ? 'Some rows are counted zero times. Say how many, or remove them.' : undefined}
             testID="describe-log"
           >
             <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -1126,12 +1168,40 @@ function NORMALIZE(s: string): string {
 
 let draftKeySeq = 0;
 
+/**
+ * A row that cannot be logged, because it is counted zero times (N542/#977).
+ *
+ * `Entry.Validate` requires `servings > 0`, and the `nutrition_entries` CHECK
+ * requires it again — so an entry counted zero times is written to this
+ * phone's outbox, refused 400, classified permanent, and lives on this device
+ * until a reinstall. The estimator no longer produces one; the athlete still
+ * can, by clearing the Servings box and typing a `0`, and `parseOr` reads
+ * that as the number zero rather than as an empty field.
+ *
+ * TOLD, not silently corrected, and that is the line this file draws: a
+ * missing count from a MODEL is fitted to 1 (`fitServings`) because nobody
+ * chose it, while a zero the ATHLETE typed is a thing they can see on screen
+ * and quietly rewriting it would log a portion they did not ask for. So the
+ * Log button goes inert and the row says what to do about it.
+ *
+ * Reads the TEXT, not `row.servings` — the text is what is on screen and what
+ * `fromDraft` will parse at log time, so this and the log path can never
+ * disagree about what a half-typed field means.
+ */
+function hasNoServings(row: DraftRow): boolean {
+  return !(parseOr(row.servingsText, row.servings) > 0);
+}
+
 function toDraft(it: EstimatedItem): DraftRow {
   draftKeySeq += 1;
   return {
     ...it,
     key: `draft-${draftKeySeq}`,
-    servingsText: String(it.servings),
+    // Fitted on arrival (N542/#977), so the box shows the count the entry
+    // will actually carry. The server fits this itself now; a phone talking
+    // to a deploy that predates that would otherwise render a `0` the athlete
+    // has to notice and correct before anything can be logged at all.
+    servingsText: String(fitServings(it.servings)),
     kcalText: String(Math.round(it.kcal)),
     proteinText: String(Math.round(it.protein_g)),
   };
@@ -1295,6 +1365,7 @@ const styles = StyleSheet.create({
   // attention indistinguishable from the line that does not. Not `danger`
   // either — an uncertain portion is not a failure, it is a request to look.
   uncertain: { fontSize: 12, color: vola.warn, fontWeight: '600' },
+  blocked: { fontSize: 12, color: vola.danger, fontWeight: '600', marginTop: 6 },
   fields: { flexDirection: 'row', gap: 10, marginTop: 6 },
   field: { flex: 1, gap: 4 },
   fieldLabel: { fontSize: 11, color: vola.textDim, fontWeight: '600' },

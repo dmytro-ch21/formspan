@@ -65651,6 +65651,140 @@ actually keeps delivering with the screen off. That is the ticket's
 afterwards for distance, route AND heart rate covering the whole run, and
 checked again that nothing keeps running once it is finished.
 
+## 2026-09-09 — N542: the estimator's numbers are the save's numbers now, and a drafted zero counts as one
+
+Two of this class in one week. N533 (#964) closed an AI-drafted `serving_label`
+the save refuses; `backend-reviewer` found the same shape one field over while
+reviewing that fix, and filing it as #977 is what produced this entry.
+
+### The bug, and then three more of it
+
+`sane()` in `backend/internal/modules/nutrition/estimate.go` accepted
+`servings >= 0`. `Entry.Validate` requires `> 0` and the `nutrition_entries`
+CHECK requires it a third time. So an item counted **zero** times was a
+perfectly valid estimate: the phone confirms it, writes a saved food and an
+entry into the local outbox, pushes, and is refused 400 — which `classify`
+reads as permanent. The row then exists on exactly one device until a
+reinstall removes it. That is the whole phantom-row shape N533 was reported
+for, with a number instead of a string.
+
+**The audit the ticket asked for is what makes this entry worth reading**,
+because it found the same disagreement in three more places, all silent:
+
+| field | estimator accepted | the save accepts | agreed? |
+|---|---|---|---|
+| `servings` | `>= 0`, `<= 1000` | `> 0`, `< 10000` | **no** — a zero |
+| `kcal` | `>= 0`, `<= 20000` | `>= 0`, `< 20000` | **no** — exactly 20000 |
+| `protein_g` / `carb_g` / `fat_g` | `<= 5000` | `< 2000` | **no** — everything from 2000 up |
+| `fibre_g` | `<= 5000` (the macro ceiling) | `< 500` | **no** — everything from 500 up |
+| `name` | trimmed, clamped to 120, empty refused | 1–120 runes | yes (N533) |
+| `serving_label` | trimmed, clamped to 40, empty defaulted | 1–40 runes | yes (N533) |
+
+Three of the four had nothing to do with the reported bug. An item claiming
+three kilograms of protein was an accepted draft the save refuses; so was one
+claiming 800 g of fibre; so was one at exactly twenty thousand calories, where
+two identical-looking numbers differed only by an inclusive comparison against
+an exclusive one. None of them was reachable by an ordinary meal, and all of
+them would have produced the same undiagnosable ghost as the reported one.
+
+The ceilings are now the validators' **own constants** — `maxKcal`,
+`maxMacroG`, `maxFibreG` — rather than looser numbers standing beside them,
+which is the same "two literals that must agree are one literal" that
+`maxNameRunes`/`maxLabelRunes` became in N533. `sane`'s bound is exclusive to
+match `Macros.validate`'s own form.
+
+### Fitted or refused: the line, and why it falls where it does
+
+N533 recorded the choice per field at the call site and this ticket had to
+make it again. The rule the two together now state:
+
+- **A value that can be restated without changing what the athlete reads is
+  FITTED.** `servings = 0` becomes 1. A drafted item's macros are the TOTAL
+  for the quantity — the schema says so in as many words — so the count beside
+  them is a counter, not a multiplier anything on the log path applies. A zero
+  means the model described the plate and failed to say how many of it there
+  were, and one is the only honest reading of that; the calories logged are
+  identical either way. Refusing would instead spend one of the athlete's
+  daily estimates complaining about a field the model filled in.
+- **A value that cannot be is REFUSED.** The macro ceilings clamp nothing:
+  cutting 3 kg of protein down to 1999 g would put a figure nobody measured
+  into the athlete's own history and call it their dinner. Refusing costs an
+  absurd estimate and nothing else, since 2 kg of one macronutrient is not
+  food.
+
+And **exactly** zero is fitted, never `<= 0`. A negative count is not an
+unstated one — it is evidence the output is malformed — and inventing a
+portion from it would be the clamp this ticket just declined. `NaN == 0` is
+false, so a NaN stays refused too; a `<= 0` guard would have swallowed it,
+which is one of the mutations below.
+
+### The phone: fitted for a model, refused for a person
+
+`estimateApi.ts` gains `fitServings`, mirroring the server exactly (zero only)
+for the reason `fitName`/`fitServingLabel` are already mirrored there: the
+phone writes the row before the server ever sees it, so a phone talking to a
+deploy that predates the server fit is the case that still strands a row.
+
+`describe.tsx` draws the line the other way for a value the athlete can see:
+
+- a zero the **model** sent is fitted on arrival, so the Servings box shows
+  `1` rather than a `0` the athlete has to notice and correct;
+- a zero the **athlete** typed is refused, visibly — the row says *"Servings
+  must be more than 0 — say how many, or remove this"* and the Log button goes
+  inert with a hint that carries the reason to a screen reader, which cannot
+  see the red line.
+
+Quietly rewriting a number that is on somebody's screen would log a portion
+they did not ask for. That is the same distinction as the fit/refuse line
+above, applied to who authored the value rather than to whether it can be
+restated.
+
+The compiled path (N472) is blocked by the same guard, and it is the case that
+would have been worst: compiling sums every row into ONE entry carrying its
+own `servings: 1`, so a zeroed row would not be refused by the server at all
+— it would silently donate its calories to a meal the athlete had said they
+ate none of.
+
+### Evidence
+
+`TestAnAcceptedDraftIsAlwaysASaveableOne` is the audit table above written as
+a test: for every numeric field, at its ceiling and just below, an item the
+estimate accepts must be one both `Food.Validate` and `Entry.Validate` accept.
+It goes red four ways without this change. It carries its own apparatus check
+— if fewer than half its probes are ACCEPTED it fails outright, because a
+loop that only ever measures refusals passes while proving nothing.
+
+Seven backend mutations, all caught (dropping the fit; `<= 0` instead of
+`== 0`; `!(> 0)`, which swallows NaN; the inclusive ceiling restored; the
+macro ceiling back to 5000; fibre sharing it again; the kcal ceiling one above
+the save's). Five mobile mutations caught the same way, each verified applied
+by reading the file rather than trusting a diff.
+
+**Two mobile guards SURVIVE mutation, and that is recorded in the code rather
+than left to be rediscovered as dead code.** `logAll` and `logCompiled` each
+refuse a zeroed row, and deleting either leaves every test green: both close
+over the same `rows` the button's `blocked` flag is computed from, in the same
+render, so no press can reach them. They are kept for the caller that does not
+exist yet — a keyboard "done", a submit from the meal-name field — which would
+reach the callback without passing the button. Same disclosure as N533's sixth
+mutation.
+
+**Open**:
+
+- **A fractional `servings` can still draft a food the save refuses** — filed
+  as N549/#995, and measured rather than suspected. `savedFoodFrom` stores a
+  food's macros PER SERVING by dividing the draft's totals by its count, so a
+  count below 1 amplifies: `servings 0.5, kcal 15000` is an accepted estimate
+  whose projection is a 30000-kcal food `Food.Validate` refuses. It survived
+  this pass because it is not a bound comparison at all — the two limits
+  agree, and the arithmetic between them is what breaks — and every fix for it
+  needs a product decision (refuse the draft, clamp the food, or fold the
+  count in and change what "one serving" means for every later reuse) that the
+  bounds fix did not.
+- NEEDS HUMAN EVIDENCE — typing `0` into a Servings box on a real phone shows
+  the row's message and an inert Log button, and VoiceOver reads the hint
+  rather than announcing an enabled button that ignores taps.
+
 ## Open items / known gaps as of this entry
 
 

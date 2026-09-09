@@ -368,6 +368,8 @@ export const NAME_MAX_RUNES = 120;
 export const SERVING_LABEL_MAX_RUNES = 40;
 /** What an item is counted in when the model gave no label. See the server's `DefaultServingLabel`. */
 export const DEFAULT_SERVING_LABEL = '1 serving';
+/** How many of that label, when the model gave a count of zero. See the server's `DefaultServings`. */
+export const DEFAULT_SERVINGS = 1;
 
 /** Cut to at most `n` code points — `Array.from`, not `slice`, so a surrogate pair is never split. */
 function clampRunes(s: string, n: number): string {
@@ -400,6 +402,28 @@ export function fitServingLabel(label: string): string {
   return clampRunes(label.trim(), SERVING_LABEL_MAX_RUNES) || DEFAULT_SERVING_LABEL;
 }
 
+/**
+ * A count the server will accept (N542/#977).
+ *
+ * `Entry.Validate` requires `servings > 0` and the column CHECKs it again,
+ * while the estimate used to accept a zero — so a drafted item counted zero
+ * times was written to this phone's outbox and then refused 400 forever, the
+ * same ghost the two fits above exist to prevent, one field over.
+ *
+ * **EXACTLY zero is fitted, and nothing else** — the server's `fitToFood`
+ * makes the identical distinction, and one rule stated twice is safer than
+ * two rules that must be remembered apart. A drafted item's macros are the
+ * TOTAL for the quantity, so restating a missing count as one changes no
+ * number the athlete reads. A NEGATIVE count is not a missing one: it is
+ * evidence the draft is malformed, and inventing a portion from it would put
+ * a figure nobody produced into the log. The server refuses those outright,
+ * and `describe.tsx` refuses to confirm one rather than silently correcting
+ * it — a value the ATHLETE can see is one the athlete is told about.
+ */
+export function fitServings(servings: number): number {
+  return servings === 0 ? DEFAULT_SERVINGS : servings;
+}
+
 export function itemToEntry(it: EstimatedItem): Macros & {
   name: string;
   servings: number;
@@ -407,10 +431,10 @@ export function itemToEntry(it: EstimatedItem): Macros & {
 } {
   return {
     // Fitted exactly as `savedFoodFrom` fits them: `Entry.Validate` carries
-    // the same two limits, so an entry with an over-long label is a second
-    // ghost beside the food's, not a survivor of it.
+    // the same limits, so an entry with an over-long label — or a count of
+    // zero — is a second ghost beside the food's, not a survivor of it.
     name: fitName(it.name),
-    servings: it.servings,
+    servings: fitServings(it.servings),
     serving_label: fitServingLabel(it.serving_label),
     kcal: it.kcal,
     protein_g: it.protein_g,
