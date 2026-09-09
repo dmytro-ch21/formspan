@@ -297,10 +297,14 @@ export function buildTodayBoard(input: {
 
   const counts = both(owed, planned, (owedPlans, count) => ({ owedPlans, count }));
 
-  const lead = both(counts, loggedToday, ({ owedPlans, count }, logged): TodayLead => {
+  // `loggedCount`, not `logged` — that name is taken a few lines above by the
+  // `Source<Session[]>` this number is the length of, and two bindings called
+  // the same thing with very different types is a double-take every reader has
+  // to do. Raised in review.
+  const lead = both(counts, loggedToday, ({ owedPlans, count }, loggedCount): TodayLead => {
     if (owedPlans.length > 0) return { kind: 'owed', plans: owedPlans };
     if (count > 0) return { kind: 'done', planned: count };
-    return { kind: 'rest', loggedToday: logged };
+    return { kind: 'rest', loggedToday: loggedCount };
   });
 
   return { lead, later: board.later, logged };

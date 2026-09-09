@@ -1232,6 +1232,47 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
     expect(screen.getByTestId('today-logged-earlier')).toBeTruthy();
   });
 
+  it('a second open session says it is running, and says only that', async () => {
+    // Two open sessions is reachable (Plan and web both start one with no
+    // active-session guard). The newest is the resume card; the older is a
+    // row — and it has SETS, so this pins that the row and its spoken label
+    // agree. Raised in review: the label used to append set and tonnage
+    // figures the row deliberately does not show.
+    const noon = new Date(`${todayKey()}T12:00:00`).getTime();
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'newest-open', ended_at: null }),
+      session({
+        id: 'older-open',
+        name: 'Legs',
+        ended_at: null,
+        started_at: new Date(noon - 5 * 3_600_000).toISOString(),
+        sets: [
+          {
+            exercise_id: 'ex1',
+            position: 0,
+            set_type: 'working',
+            completed: true,
+            reps: 5,
+            weight_kg: 100,
+            rir: null,
+            rpe: null,
+            seconds: null,
+            distance_m: null,
+            notes: '',
+          },
+        ] as Session['sets'],
+      }),
+    ]);
+    render(<TodayScreen />);
+
+    const row = await screen.findByTestId('today-logged-older-open');
+    expect(within(row).getByText('In progress')).toBeTruthy();
+    // The measures the session really has, absent from BOTH the row and the
+    // label — a "1 set" a sighted athlete cannot see must not be spoken.
+    expect(within(row).queryByText(/set/)).toBeNull();
+    expect(row.props.accessibilityLabel).toBe('Legs, Strength, in progress. Open the session.');
+  });
+
   it('the way out goes to the full history, and Progress keeps its own route', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
     render(<TodayScreen />);

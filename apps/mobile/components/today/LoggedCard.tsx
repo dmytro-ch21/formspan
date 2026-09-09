@@ -92,10 +92,18 @@ export function LoggedCard({
       // Leads with the card's OWN visible title — WCAG 2.5.3, the same rule
       // the plan card, the suggestion and the Tier 0 offer on this screen were
       // each corrected to follow. "Tap Legs" has to match.
+      //
+      // And it says exactly what the row says, `inProgress` included: the
+      // meta line is SUPPRESSED for a running session (see the render below,
+      // which shows the state instead), so appending it here would read out
+      // set and tonnage figures no sighted athlete can see on that row —
+      // permitted by 2.5.3, and still two descriptions of one card. Raised in
+      // review as unverified behaviour rather than as a defect; it now has one
+      // answer and a test.
       accessibilityLabel={
         accessibilityLabel ??
-        `${title}, ${sportLabel}${inProgress ? ', in progress' : ''}${
-          line ? `, ${meta.join(', ')}` : ''
+        `${title}, ${sportLabel}${
+          inProgress ? ', in progress' : line ? `, ${meta.join(', ')}` : ''
         }. Open the session.`
       }
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
