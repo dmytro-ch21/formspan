@@ -3,12 +3,14 @@ import { join } from 'path';
 
 import {
   DEFAULT_RINGS,
-  OVERLAP_CONTRAST_FLOOR,
-  OVERLAP_SEPARATION_TARGET,
+  OVERTAKE_CONTRAST_FLOOR,
+  OVERTAKE_RED,
+  OVERTAKE_RAMP_STEPS,
   RING_KEYS,
   contrastRatio,
   deltaE2000,
-  overlapColor,
+  overtakeEnd,
+  overtakeRamp,
   parseRings,
   readRings,
   ringCap,
@@ -240,79 +242,86 @@ describe('ringCap', () => {
 
 
 /**
- * W24/#1022 — a wrapped ring's second lap is darker ink, and it has to be
- * DISTINGUISHABLE ink.
+ * N554/#1025 — a ring past target fades into darker, redder ink as the
+ * overtake grows.
  *
- * The first shipped fix held the second lap above a contrast floor against
- * the card and asserted nothing about how far it sat from the first lap. The
- * athlete's verdict was "barely visible", and the measurement agreed: carbs
- * separated by ΔE 5.42 and kcal by 2.68, against this repo's own ΔE 15 floor
- * for two colours being tellable apart. Self-multiply cannot move a bright
- * colour — 255 × 255 / 255 is still 255.
+ * The athlete: *"lets do an effect where the ring starts to overlap we do a
+ * gradient getting darker and darker and in that color add a little of red so
+ * its like a sign of overtake."*
  *
- * Worse, a test asserted that as correct ("barely moves a near-white, the way
- * ink over paper does"), so the suite defended the defect. These tests pin the
- * property the screen needs instead of the behaviour the code had.
+ * The property under test is not "it looks nice" — it is that the ramp is
+ * MONOTONIC, ends red-shifted and darker, and never darkens any ring below
+ * the floor at which it stops being visible on the card.
  */
 const SURFACE = vola.surface;
+const ALL_RINGS = [...Object.values(macroColors), kcalRingColor];
 
-describe('overlapColor — the second lap has to READ as a second pass', () => {
-  it('separates every ring far past the shading-artefact range', () => {
-    // ΔE 15 is the palette gate's "two different colours" floor. Fibre is
-    // contrast-capped below it (14.64) and is the documented exception; every
-    // other ring clears the full target.
-    const measured = Object.fromEntries(
-      Object.entries(macroColors).map(([name, hex]) => [
-        name,
-        deltaE2000(hex, overlapColor(hex, SURFACE)) >= 14,
-      ]),
-    );
-    expect(measured).toEqual({ protein: true, fat: true, carbs: true, fibre: true });
-  });
-
-  it('fixes the two the athlete could not see — carbs and the calorie ring', () => {
-    // The regression guard on the actual complaint. Under self-multiply these
-    // were 5.42 and 2.68; anything near those is the old bug returning.
-    for (const hex of [macroColors.carbs, kcalRingColor]) {
-      expect(deltaE2000(hex, overlapColor(hex, SURFACE))).toBeGreaterThanOrEqual(
-        OVERLAP_SEPARATION_TARGET - 1,
-      );
+describe('overtakeRamp — the colour carries how far past target', () => {
+  it('darkens monotonically from start to end', () => {
+    for (const hex of ALL_RINGS) {
+      const ramp = overtakeRamp(hex, SURFACE);
+      const contrasts = ramp.map((c) => contrastRatio(c, SURFACE));
+      // Against a DARK card, less light means less contrast — so a ramp that
+      // genuinely darkens has strictly falling contrast along its length.
+      const falling = contrasts.every((c, i) => i === 0 || c <= contrasts[i - 1] + 1e-9);
+      expect({ hex, falling }).toEqual({ hex, falling: true });
     }
   });
 
-  it('never darkens below the visibility floor, even chasing separation', () => {
-    for (const hex of [...Object.values(macroColors), kcalRingColor]) {
-      expect(contrastRatio(overlapColor(hex, SURFACE), SURFACE)).toBeGreaterThanOrEqual(
-        OVERLAP_CONTRAST_FLOOR,
-      );
+  it('never starts identical to the ink underneath it', () => {
+    // At 12 o'clock the second lap sits directly on the first. A ramp that
+    // began at the base hue would be invisible exactly where the overtake
+    // begins, which is the moment it most needs to register.
+    for (const hex of ALL_RINGS) {
+      expect(overtakeRamp(hex, SURFACE)[0]).not.toBe(hex);
     }
   });
 
-  it('takes the LEAST darkening that reaches the target, so the hue survives', () => {
-    // Maximising separation instead was measured: it drives every ring to
-    // contrast ~3.03 and turns the carbs lime into an olive. The ring's colour
-    // is the macro's identity on this card, so overshooting is its own defect.
-    // Carbs has contrast to spare — proof the search stopped at the target
-    // rather than darkening as far as it was allowed to.
-    expect(contrastRatio(overlapColor(macroColors.carbs, SURFACE), SURFACE)).toBeGreaterThan(5);
+  it('ends red-shifted — the far end is perceptually nearer red than the base', () => {
+    // A red/blue channel RATIO was tried first and is wrong for a hue that is
+    // already warm: fat `#CAA021` has r/b 6.12, higher than the deep red
+    // anchor's own 5.92, so mixing toward red LOWERS its ratio while plainly
+    // moving it toward red. Perceptual distance to the anchor is the claim
+    // actually being made, and it holds for warm and cool hues alike.
+    for (const hex of ALL_RINGS) {
+      const end = overtakeEnd(hex, SURFACE);
+      expect(deltaE2000(end, OVERTAKE_RED)).toBeLessThan(deltaE2000(hex, OVERTAKE_RED));
+    }
   });
 
-  it('returns the hue unchanged when nothing clears the floor', () => {
-    expect(overlapColor('#111722', SURFACE)).toBe('#111722');
+  it('keeps even the darkest step above the visibility floor', () => {
+    for (const hex of ALL_RINGS) {
+      const ramp = overtakeRamp(hex, SURFACE);
+      const darkest = Math.min(...ramp.map((c) => contrastRatio(c, SURFACE)));
+      expect({ hex, ok: darkest >= OVERTAKE_CONTRAST_FLOOR }).toEqual({ hex, ok: true });
+    }
+  });
+
+  it('separates end from base by more than the palette gate asks of two colours', () => {
+    // ΔE 15 is validate_palette.mjs's floor for "these are different
+    // colours". Fibre is the tightest at 15.90; every other ring clears it by
+    // a wide margin.
+    for (const hex of ALL_RINGS) {
+      expect(deltaE2000(hex, overtakeEnd(hex, SURFACE))).toBeGreaterThanOrEqual(15);
+    }
+  });
+
+  it('has the step count the ring is drawn with', () => {
+    expect(overtakeRamp(macroColors.carbs, SURFACE)).toHaveLength(OVERTAKE_RAMP_STEPS);
   });
 });
 
 describe('deltaE2000', () => {
-  it('is zero for a colour against itself and grows with difference', () => {
+  it('is zero against itself and grows with difference', () => {
     expect(deltaE2000('#B8FF2C', '#B8FF2C')).toBeCloseTo(0, 5);
     expect(deltaE2000('#B8FF2C', '#76A31C')).toBeGreaterThan(deltaE2000('#B8FF2C', '#A8E828'));
   });
 
   it('matches an independent reference implementation', () => {
     // Cross-checked against a separate Python CIEDE2000 written for the
-    // measurement that produced this fix — same inputs, same answers to two
-    // decimals. An implementation that only agrees with itself is the trap
-    // this repo's own testing rules name; this is the second opinion.
+    // measurements these designs were chosen from. An implementation that
+    // only agrees with itself is the trap this repo names for stubbed
+    // providers, pointed at arithmetic.
     expect(deltaE2000('#5C9BFA', '#3B63A0')).toBeCloseTo(22.14, 1);
     expect(deltaE2000('#D657AA', '#9E407E')).toBeCloseTo(14.64, 1);
     expect(deltaE2000('#F3F6FA', '#9C9DA0')).toBeCloseTo(22.01, 1);

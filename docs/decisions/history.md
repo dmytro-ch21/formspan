@@ -67298,6 +67298,61 @@ Mutation-checked three ways, restores re-run: reverting to self-multiply
 (reproducing carbs 5.42 and kcal 2.68 by name), dropping the separation
 target, and dropping the contrast floor.
 
+## 2026-09-09 — N554: a ring past target fades into darker, redder ink as the overtake grows
+
+Third pass on the same ring, and the last one is a feature rather than a
+repair. W24 made a wrapped lap one flat darker shade, which says *that* the
+athlete went past target. They asked for the colour to say *how far*: *"lets
+do an effect where the ring starts to overlap we do a gradient getting darker
+and darker and in that color add a little of red so its like a sign of
+overtake."*
+
+**The red is what does the darkening, and the first guess had it backwards.**
+Mixing toward a BRIGHT red (`#FF4530`) *lightens* every ring — measured, and
+the opposite of what was asked. Mixing toward a DEEP red (`#8E2318`) darkens
+and tints in one operation. End colours, all clearing 3.2:1 against
+`vola.surface` and the palette gate's ΔE 15: protein `#6C608D` (28.25), fat
+`#955819` (27.14), carbs `#6F6917` (42.45), fibre `#B13E65` (15.90), kcal
+`#7F615F` (43.16).
+
+**SVG has no angular gradient**, and a `LinearGradient` runs across a bounding
+box rather than along an arc. Rather than reach for a mask or a per-frame
+listener, the lap is drawn as N **cumulative arcs painted longest-and-darkest
+first**, each shorter and lighter over it. What survives at any point is the
+lightest arc that reaches it — a gradient by painter's algorithm, where every
+arc animates with the same `strokeDashoffset` interpolation the rest of the
+card already uses. Each arc clamps at its own share of the sweep, so the ramp
+grows with the ring instead of appearing whole.
+
+The ramp starts a little way in rather than exactly at the base hue: at 12
+o'clock the second lap sits directly on the first, so a ramp starting at the
+base would be invisible precisely where the overtake begins.
+
+**A test metric was wrong before the code was.** "Ends red-shifted" was first
+written as a red/blue channel RATIO, which fails for a hue that is already
+warm: fat `#CAA021` has r/b 6.12, *higher* than the deep red anchor's own
+5.92, so mixing it toward red lowers the ratio while plainly moving it toward
+red. The assertion is now perceptual distance to the anchor, which is the
+claim actually being made and holds for warm and cool hues alike. Worth
+recording because the test failed for a real reason and the temptation was to
+special-case fat rather than admit the metric did not mean what it said.
+
+`overlapColor` is deleted rather than left beside its replacement — W24's flat
+shade has no callers now, and the reasoning it carried is consolidated into
+the module doc so the lineage survives the code.
+
+**Raised and deliberately not settled**: the `vola-athlete-ux` no-shame rule
+forbids guilt framing in mechanics as well as copy, and red-as-warning is a
+judgement that over is bad — not uniformly true, since over on protein or
+fibre is usually good and over on calories may be exactly the plan on a
+training day. Shipped as asked, for every ring, because the athlete asked
+directly and it is reversible. Whether the red belongs on all four is a
+product question left open on #1025.
+
+Mutation-checked four ways, restores re-run: dropping the contrast floor,
+removing the red entirely, starting the ramp at the base, and a ramp that
+never darkens.
+
 ## Open items / known gaps as of this entry
 
 

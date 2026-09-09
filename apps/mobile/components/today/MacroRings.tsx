@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
 import { vola } from '@/constants/Colors';
-import { overlapColor, ringCap, ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
+import { overtakeRamp, ringCap, ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -182,15 +182,6 @@ function Ring({
     [base, circumference],
   );
 
-  const overOffset = useMemo(
-    () =>
-      over.interpolate({
-        inputRange: [0, 1],
-        outputRange: [circumference, 0],
-      }),
-    [over, circumference],
-  );
-
   const common = {
     cx: size / 2,
     cy: size / 2,
@@ -212,6 +203,16 @@ function Ring({
   */
   const baseCap = ringCap(targetBase, circumference, stroke);
   const overCap = ringCap(targetOver, circumference, stroke);
+
+  /*
+    Reversed on purpose: index 0 must be the darkest, because it is painted
+    FIRST and reaches furthest. `overtakeRamp` returns lightest-first, which is
+    the order the gradient reads in; this is the order it has to be drawn in.
+  */
+  const ramp = useMemo(
+    () => (colour ? [...overtakeRamp(colour, vola.surface)].reverse() : []),
+    [colour],
+  );
 
   return (
     <>
@@ -239,27 +240,46 @@ function Ring({
       {sweep?.overflow != null ? (
         <>
           {/*
-            W24/#1022 — the second lap is DARKER INK, not a bordered one.
-
-            This used to draw a hairline of the card's own ground beneath the
-            wrap to separate the two laps. On a dark card that reads as a black
-            outline, and the athlete asked for what a highlighter does instead:
-            one pass is clean, a second pass on top goes darker, no borders.
-            `overlapColor` is that — the hue multiplied by itself, held above
-            the contrast floor so no ring darkens into the background.
-
-            The separator is GONE rather than restyled: with the second lap a
-            different shade, the thing it existed to disambiguate disambiguates
-            itself, and a ring drawn at `stroke + 3` was always going to be the
-            widest mark on the card.
+            W24/#1022 — no border. This used to draw a hairline of the card's
+            own ground beneath the wrap to separate the two laps, which on a
+            dark card reads as a black outline. Nothing here strokes with the
+            ground any more; the second lap is distinguished by its own colour,
+            which N554 below turns into a gradient.
           */}
-          <AnimatedCircle
-            {...common}
-            strokeLinecap={overCap}
-            stroke={overlapColor(colour, vola.surface)}
-            strokeDasharray={circumference}
-            strokeDashoffset={overOffset}
-          />
+          {/*
+            N554/#1025 — the overtake RAMP, drawn longest-and-darkest first.
+
+            SVG has no angular gradient, and a `LinearGradient` runs across a
+            bounding box rather than along an arc. So the lap is N cumulative
+            arcs painted in reverse: the longest (darkest, reddest) goes down
+            first and each shorter, lighter arc paints over its start. What
+            survives at any point on the ring is the lightest arc that reaches
+            it, which is a gradient — and every arc animates with the same
+            `strokeDashoffset` interpolation the rest of this card already
+            uses, rather than needing a mask or a per-frame listener.
+
+            Each arc clamps at its own share of the sweep, so they reveal in
+            order and the ramp grows with the ring instead of appearing whole.
+          */}
+          {ramp.map((shade, i) => {
+            const reach = ((ramp.length - i) / ramp.length) * targetOver;
+            return (
+              <AnimatedCircle
+                key={shade + i}
+                {...common}
+                strokeLinecap={overCap}
+                stroke={shade}
+                strokeDasharray={circumference}
+                strokeDashoffset={over.interpolate({
+                  inputRange: reach >= 1 ? [0, 1] : [0, reach, 1],
+                  outputRange:
+                    reach >= 1
+                      ? [circumference, 0]
+                      : [circumference, circumference * (1 - reach), circumference * (1 - reach)],
+                })}
+              />
+            );
+          })}
         </>
       ) : null}
     </>
