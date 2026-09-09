@@ -5,7 +5,7 @@
   "dependencies": {
     "@clerk/clerk-expo": "^2.19.31",
     "@kingstinct/react-native-healthkit": "^14.1.0",
-    "expo": "~57.0.20",
+    "expo": "~57.0.21",
     "expo-audio": "~57.0.4",
     "expo-auth-session": "~57.0.11",
     "expo-camera": "~57.0.4",
@@ -20,7 +20,7 @@
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.9",
     "expo-location": "~57.0.16",
-    "expo-router": "~57.0.19",
+    "expo-router": "~57.0.20",
     "expo-secure-store": "~57.0.3",
     "expo-sharing": "~57.0.18",
     "expo-speech": "~57.0.2",
