@@ -22065,3 +22065,89 @@ written down.
   request) still offer their own ranges unchanged — different endpoints,
   different constants, no shared code path with this change beyond `RANGES`,
   which is untouched.
+
+## N551/#1013 — a suggestion applies only to matching pending WORKING sets, on web too (`apps/web/src/lib/api.ts`, `apps/web/src/app/dashboard/sessions/[id]/page.tsx`)
+
+Phase 1 of #753's safety release had already shipped for the backend and for
+mobile (#812/#813). The web session screen was the surface nobody re-checked:
+it filtered `set_type !== "warmup"`, so tapping "Use" on a progression card
+wrote the recommendation into backoffs, drops, AMRAPs and failure sets as well
+as working sets — the exact defect #753 reported, on the exact rule that had
+already been fixed once elsewhere.
+
+The rule now lives in one testable place per app, `pendingSuggestableIndices`,
+with byte-identical semantics on both.
+
+### Happy path
+
+- A strength session on `/dashboard/sessions/<id>` with three pending working
+  sets of an exercise, all empty. The card's "Use" writes the suggested weight
+  and reps into all three, and the button then reads as applied.
+- Repeat with the first working set already completed at a different weight:
+  only the two still-pending sets are written, the completed one is untouched,
+  and "applied" is judged against the first set that would actually receive it
+  — not the first row in the group.
+
+### Edge cases
+
+- **A pending backoff set in the group** (three working sets + one `backoff`):
+  "Use" writes the three working sets and leaves the backoff exactly as it was.
+  This is the whole ticket — a top-set weight silently landing on a set
+  prescribed at 60% is the loudest failure of the old filter.
+- Same again for a pending `drop`, `amrap` and `failure` set — none is written.
+- **A pending warm-up** is still excluded, as it always was.
+- **Every set of the exercise is completed, or is a warm-up/backoff/drop**:
+  the card renders with no action offered at all, rather than an action that
+  would do nothing or would write somewhere it should not.
+- A set row that somehow arrives with no `set_type` is treated as a working
+  set (matching the server's `NOT NULL DEFAULT 'working'` column), so the card
+  still offers an action rather than silently going inert.
+- **Mobile and web agree**: the same session, the same exercise, the same
+  mixed group of set roles, opened on both — the set of rows "Use" would write
+  to is identical.
+
+### Auth / security
+
+- Unchanged: the suggestion itself still comes from
+  `GET /v1/sessions/suggestions`, already scoped to the caller's own sets. This
+  change is purely about which local rows the returned numbers are written
+  into, and the subsequent `PUT` of the set list is the same ownership-checked
+  route it already was.
+
+### The session-start prefill (`applySuggestions`, both apps)
+
+Guards the same invariant one level up. Not currently reachable with a
+non-working set — every caller builds rows through `setsFromWorkout`, which
+hardcodes `set_type: "working"` — so these are regression scenarios for the day
+templates can author a set role (#753's phase 2), not defects today.
+
+- Starting a session from a template prefills blank working sets with the
+  suggestion's weight and reps.
+- A template's own prescribed weight or reps is never overwritten by a
+  suggestion — the template is an instruction, the suggestion is a guess.
+- Once a template can prescribe a backoff/drop/AMRAP/failure set, that set is
+  left blank by the prefill rather than filled with the top-set numbers.
+
+### NEEDS HUMAN EVIDENCE
+
+- With `new_recommendation_engine` **on**, the reported squat session holds
+  335 rather than proposing 335 x 8, and no suggestion anywhere in that
+  session shows a weight the athlete's plates cannot actually make.
+
+  **Whose evidence this is:** #753's flag flip and phase 1's already-merged
+  tickets, **not** #1013. #1013 was re-scoped to four criteria while its branch
+  was open and carries no device or athlete-recognition criterion — everything
+  it asserts is settled by unit tests. This scenario is recorded here because
+  it is worth running, not because this ticket owes it.
+
+### Not covered by any automated check, and deliberately recorded as such
+
+- Reverting the page's **call site** (`const pending = pendingSuggestableIndices(
+  indices, sets)`) back to the old inline filter, while leaving the extracted
+  function and its tests intact, passes `tsc --noEmit` and `pnpm --filter web
+  lint` (exit 0, one `no-unused-vars` warning). Measured, and reproduced
+  independently by two review agents. A functional test that drives the "Use"
+  button end-to-end against a mixed group of set roles is the only thing in
+  this document that would catch it — which is the strongest reason to write
+  the backoff scenario above as a real test rather than leave it a
+  recommendation.

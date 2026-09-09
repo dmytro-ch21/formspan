@@ -67008,6 +67008,203 @@ if the offered set widens *or* the fetch narrows.
   one chart, and this diff is the cheap half of it: raise the cap, mirror the
   constant, and the chips follow.
 
+## 2026-09-09 — N551 (#1013): phase 1 was already shipped, except on the web, where a suggestion still wrote itself into backoffs and drops
+
+**The headline is that this ticket was largely a re-verification, and the one
+thing it found was the part nobody had checked.** #1013 was filed on
+2026-09-09 as "phase 1 of #753, split out per that ticket's own scope note."
+Phase 1 had in fact already shipped — twice — as **#812 (N473)** and **#813
+(N474)**, and a comment on #753 dated 2026-09-05 says so explicitly. #1013 was
+filed anyway, four days later, by a session reading the parent's scope note
+rather than the parent's comment thread.
+
+**#1013 was therefore RE-SCOPED, mid-flight, rather than closed as a
+duplicate.** Its ten original criteria were replaced by four, covering only the
+thing the re-verification actually found: the web set-role filter, the
+`applySuggestions` trap, the extraction that makes the rule testable, and the
+mutation evidence for all three. The nine already-met criteria are recorded
+below as findings rather than as work, and the tenth — the suggestion
+preference — is named in *Left open* as its own ticket rather than carried as an
+unmet criterion on a ticket that cannot close it. Phases 2-5 of #753 live on
+#865, #866 and #867.
+
+So the first job was not to build anything. It was to answer, criterion by
+criterion, *is this already true on `main`* — and to answer it by pointing at
+code rather than by trusting the 2026-09-05 comment, which is itself a claim
+this project's own "verify that a check can fail" rule says to re-measure
+rather than inherit.
+
+### What was already true, and where
+
+Nine of the ten code criteria were met on `origin/main` before this branch
+existed:
+
+| Criterion | Where it lives |
+|---|---|
+| Coherent cohort (same exercise, role and anchor weight) | `straightWorkingSetsWithWeight` + `sameWeightCohort`, `backend/internal/modules/session/progression_v2.go` |
+| Straight working sets only | `straightWorkingSetsWithWeight` filters to `SetTypeWorking` |
+| Finished sessions only | `finishedSessions`, plus `RecentEffortsV2`'s own SQL |
+| Effort required on every set relied on | `effortCoverage`; partial coverage returns `SuggestAbstain` |
+| `effort_conflict` on material RIR/RPE disagreement | `hasEffortConflict`, `conflictThreshold = 2.0` |
+| Explicit `abstain` | `SuggestAbstain`, in the OpenAPI enum and both clients' unions |
+| Real equipment-increment rounding | `roundForProtocolV2` / `incrementWithinV2` / `roundToPlateV2` |
+| The golden squat test | `TestProgressV2_GoldenSquat_NeverInventsASetThatWasNeverPerformed` |
+| Property tests (three) | `progression_property_test.go` |
+
+The golden test is built from the reported session's own numbers — 335lb and
+228lb converted through the *same* constant the clients use — and its twin,
+`TestProgressV1_GoldenSquat_StillReproducesTheOriginalBug`, pins v1 as
+deliberately unfixed behind the flag, so "v1 is untouched" is a test rather
+than a promise.
+
+**All four of the parent ticket's code claims still hold exactly as written**,
+which is worth recording because they were made on 2026-08-29 and `main` has
+moved a great deal since: `repSpread` still computes a rep range across every
+non-warm-up set while `topSet` picks the heaviest weight; `roundToPlate` still
+snaps to a fixed 1.25kg grid; `reserveOf` still lets RIR win silently over RPE;
+and the `new_recommendation_engine` flag still gates the whole thing from
+`Handler.Suggestions`. Every one of those is *v1*, and v1 staying wrong behind
+the flag is the design, not a regression.
+
+### The one that was not true: the web session screen
+
+`apps/web/src/app/dashboard/sessions/[id]/page.tsx` filtered the sets a
+recommendation may be written into as:
+
+```ts
+    const pending = indices.filter(
+      (i) => !sets[i]?.completed && sets[i]?.set_type !== "warmup",
+    );
+```
+
+That is the defect #753 reported, verbatim — *"Suggestions are applied to every
+non-warm-up set, including backoffs and drops, rather than to the sets they were
+derived from"* — still standing, seven months after the fix for it shipped. #812
+fixed **mobile**, by extracting `pendingSuggestableIndices` into
+`apps/mobile/lib/sessions.ts` where a test could reach it. The web copy of the
+same rule was an inline expression inside a 1,500-line page component, so
+nothing in `apps/web/src/lib/__tests__` could see it, and the criterion read as
+met because the ticket text and the review both said "`apps/mobile/app/session/
+[id].tsx`" — which is where the reporter had found it, not where it exclusively
+lived.
+
+**This is the `sessionVolume` shape again, and that function's own doc comment
+predicted it**: a hand-rolled copy of a server rule, living in a component file,
+wrong silently. It has now happened four times for volume and once here.
+
+The fix mirrors mobile exactly — `pendingSuggestableIndices` in
+`apps/web/src/lib/api.ts`, `set_type === "working"` rather than `!== "warmup"`,
+a missing `set_type` reading as `"working"` to match the server's own
+`NOT NULL DEFAULT 'working'` column — plus the test file that could not have
+existed while the rule was inline.
+
+**What it changes for the athlete**, concretely: a squat group with three
+pending working sets and a pending backoff no longer has the backoff silently
+overwritten with the top-set weight when "Use" is tapped at a desk. A backoff
+prescribed at 60% becoming the top set is the loudest version of it; an AMRAP
+being handed a fixed rep count is the quietest.
+
+One deliberate non-change: the two copies keep **byte-identical** semantics for
+an out-of-range index (it survives the filter, because `!undefined` is true and
+`undefined ?? "working"` is `"working"`). Neither call site can produce one, and
+a bounds check on one copy only is how two copies of one rule start drifting.
+The parity is pinned by a test that says so in as many words, so a future
+divergence is visible rather than silent.
+
+### And one that was true only by accident
+
+`applySuggestions` — the silent prefill that runs when a session is started
+from a template or a workout, in **both** apps — writes the recommendation into
+every set of the exercise whose weight or reps are blank, with no set-role
+filter of any kind. It is not currently the reported bug, and the reason is
+worth stating precisely: every caller builds its rows through `setsFromWorkout`,
+which hardcodes `set_type: "working"`, and `WorkoutItem` carries no set role at
+all. So the invariant holds **by construction** — nobody decided it, and nothing
+would notice the day templates learn to author a backoff, which is #753's own
+phase 2.
+
+That is the exact shape of this repo's `T` traps: compiles, passes its tests,
+and is wrong the moment something adjacent changes. Both copies now assert it
+(`(s.set_type ?? "working") !== "working"` → return the set untouched), which is
+a no-op today and a guard tomorrow. Deliberately *not* also guarding
+`completed`: every caller is a session-creation path where nothing is complete,
+and a condition that cannot fire is how a guard stops being read.
+
+### Mutation results
+
+Eight mutations, each confirmed present on disk before the run, each with a
+green baseline in the same session and a re-run — never a grep — to confirm the
+restore. The last three were run a second time after the branch was rebased
+onto `main`, because a mutation result describes the tree it was measured on
+and the tree had moved:
+
+- **`sameWeightCohort` ignores its anchor** (v1's pre-fix behaviour). The golden
+  test failed with its own literal message: `GOLDEN TEST VIOLATION — got 335 x 8,
+  a set that was never performed`. The first attempt at this mutation produced a
+  *compile* error instead — `declared and not used: anchor` — which is a
+  non-zero exit that proves nothing about the test, exactly the case
+  CLAUDE.md's "verify that a check can fail" section names; it was rewritten to
+  compile before it counted.
+- **`roundToPlateV2` rounds on the kg grid and converts back**, plus
+  `roundToIncrement` snapping to `smallestPlateKg` — the reported 68.9lb
+  round-trip. `TestProgressV2_Property_NeverOutputsUnloadableWeight` failed on
+  iteration 1.
+- **The new web helper reverted to `!== "warmup"`** — the literal reported bug.
+  Five of the eight new tests went red, including all four set roles.
+- **Each of the two new `applySuggestions` guards deleted**, one per app. Five
+  tests red on web, five on mobile — the four excluded set roles plus the
+  warm-up, in each.
+- **The web predicate's `!completed` half dropped** — two red. **Its
+  `?? "working"` default dropped** — two red, including the parity test for an
+  out-of-range index. Both exist so that the predicate's *three* separate
+  decisions each have a test, not just the one the ticket is named after.
+- **The web page's CALL SITE reverted to the inline filter**, leaving the
+  extracted function and all 19 of its tests intact. **NOT CAUGHT** — and this
+  is the honest result of the set, recorded rather than tidied. See below.
+
+### Left open
+
+Two things this branch deliberately did not do.
+
+**The strength-suggestion preference is respected on every path that *has* one,
+and the web has none.** `PREF_SUGGESTIONS` / `PREF_SUGGESTIONS_OFF` live in
+mobile's own SQLite `prefs` table (`apps/mobile/lib/prefs.ts`) and are never
+synced to the server — there is no preference for `apps/web` to read, so the web
+session screen showing a `ProgressionCard` is not ignoring a setting, it is
+unaware one exists. Making it respect the preference means first making the
+preference an account property rather than a device one, which is a backend
+module and an endpoint, and neither is in phase 1's scope. Recorded as a gap
+below rather than absorbed.
+
+**#940 (N525) is untouched.** That ticket makes RIR and RPE mutually exclusive
+*at entry*, in `apps/mobile/app/session/[id].tsx`; this branch touches the
+*consumption* of effort data and only on web. They do not overlap, and #940
+stays the blocker it already is for flipping `new_recommendation_engine` — the
+shadow replay on #753 measured 63% of stored sets carrying both fields and 26%
+of exercise-pairs abstaining as a result.
+
+**And the gap this branch measured in its own fix, which is the one worth
+carrying forward.** The rule is now testable; the *wiring* is not. Reverting
+only the call site in `page.tsx` back to the inline filter — leaving
+`pendingSuggestableIndices` and every one of its tests untouched — passes
+`tsc --noEmit` with exit 0 and `pnpm --filter web lint` with exit 0 and a
+single `no-unused-vars` **warning**. `scripts/check-lint-ratchet.mjs` is
+mobile-only, so no ratchet sees it either. Both review agents reproduced this
+independently and both declined to make it blocking, for the same reason:
+closing it needs page-level render coverage that **no web page in this repo
+has** (`docs/testing/device-checks.md`: 0 of 40). So the extraction moved the
+defect from *unreachable by any test* to *reachable, but reintroducible in one
+line without anything going red* — a real improvement and not a closed door.
+That is precisely the shape of the trap this entry opened with, one level up,
+and it wants its own ticket rather than a claim that it is handled.
+
+Note that the re-scoped #1013 carries **no** `NEEDS HUMAN EVIDENCE` criterion,
+which is a change from its original ten: the device-and-athlete question — does
+the reported session's squat hold 335 rather than propose 335 x 8 — belongs to
+phase 1's already-merged tickets and to #753's flag flip, not to a web
+predicate that a unit test can settle completely. The evidence latch will not
+fire on this one, and that is correct rather than an oversight.
+
 ## Open items / known gaps as of this entry
 
 
@@ -67045,3 +67242,6 @@ if the offered set widens *or* the fetch narrows.
 - **`WeekStepper` (N510) has one caller.** It replaced `WeekPlanner`'s own inline strip, which is real reuse (the old ad hoc rendering is gone, not duplicated), but the ticket also asked whether Today or Progress would use it and the answer here was no for both: Today's own week strip (`components/today/WeekStrip.tsx`) answers a different question (food-logging days, explicitly not conflated with training per that file's own comment) and Progress's week section (`components/progress/ThisWeek.tsx`) is a verdict card (`WeekReview`), not a day-marker row — neither is the W2/W4 "two cards, one question" shape this component would create if forced in. A genuine second use is more likely once a screen exists that needs a day-by-day glance at a *training* week specifically (a coach-assigned program, say) — nothing about the component assumes there will ever be a second caller, and nothing prevents one.
 - **`WeekStepper`'s `done` state is honest, not complete.** It means "this day's slot has passed," never "you trained" — see the N510 entry above for why a real completion join (`lib/adherence.ts`'s `matchPlans`) was deliberately left out. A future ticket that wants the stepper to show real completion has that function ready to reach for; it just isn't reached for yet.
 - **BJJ's HR report shows the raw shape of a session, never a drill/roll boundary** (N491, entry above). Automatic detection is filed as N512/#895 and explicitly blocked — this dev environment has no real recorded HR data from an actual BJJ rolling session to validate a step-change heuristic against, only ephemeral worktree-scoped test Postgres instances. Also unverified on a real device: whether the timeline's shape is legible at a glance on a real phone screen, and whether a genuine drilling-to-rolling transition is visually obvious in practice.
+- **The strength-suggestion preference is device-local, so `apps/web` cannot honour it** (N551/#1013). `PREF_SUGGESTIONS` and `PREF_SUGGESTIONS_OFF` live in mobile's own SQLite `prefs` table and are never pushed to the account, so an athlete who silences strength suggestions on their phone still sees a `ProgressionCard` on every web session page. Not a bug in the web screen — there is nothing there for it to read. Closing it means promoting the preference to an account property (a backend module plus an endpoint), which is why it was left out of phase 1 rather than patched around.
+- **Two copies of `pendingSuggestableIndices` now exist**, one in `apps/mobile/lib/sessions.ts` and one in `apps/web/src/lib/api.ts`, deliberately byte-identical including their shared indifference to an out-of-range index. A parity test on the web side pins that, but nothing mechanical compares the two files — the same standing risk `check:grip-parity` and `check:units` exist to close for other shared vocabularies, and a candidate for the same treatment if a third surface ever needs the rule.
+- **A rule can be lifted out of a page component and still be re-inlined in one line with nothing going red.** N551 extracted `pendingSuggestableIndices` into `apps/web/src/lib/api.ts` and gave it 19 tests; reverting only the *call site* in `apps/web/src/app/dashboard/sessions/[id]/page.tsx` back to the old inline `set_type !== "warmup"` filter passes `tsc --noEmit` (exit 0) and `pnpm --filter web lint` (exit 0, one `no-unused-vars` **warning**), and `scripts/check-lint-ratchet.mjs` is mobile-only so no ratchet sees it. Measured, not assumed, and reproduced independently by both review agents. The candidate fixes are a `no-restricted-syntax` rule banning inline set-role filters outside that function's own definition, or extending the ratchet to `apps/web`; page-level render coverage is NOT the answer, because 0 of 40 web/admin pages have any (`docs/testing/device-checks.md`). The same shape applies to every other rule this repo has extracted from a component for testability.

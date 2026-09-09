@@ -1103,6 +1103,23 @@ export function applySuggestions(
   return sets.map((s) => {
     const hit = suggestions.get(s.exercise_id);
     if (!hit) return s;
+    // N551/#1013 item 7, and a guard rather than a fix: a straight-set
+    // recommendation is derived from the straight WORKING-set cohort only
+    // (`straightWorkingSetsWithWeight`, progression_v2.go), so it must not
+    // prefill a backoff, a drop, an AMRAP or a failure set with the top-set
+    // numbers. Today no caller can reach this with one — every caller builds
+    // its rows through `setsFromWorkout`, which hardcodes `set_type:
+    // 'working'`, and `WorkoutItem` carries no set role at all. That makes the
+    // invariant true BY CONSTRUCTION, which is exactly the kind of accident
+    // this repo's T-traps are made of: the day templates can author a backoff,
+    // this silently becomes the bug #753 reported. Asserting it here costs
+    // nothing and makes it true by enforcement instead.
+    //
+    // Deliberately NOT also guarding `completed`: every caller is a
+    // session-CREATION path where nothing is complete yet, and
+    // `pendingSuggestableIndices` is the function for the in-flight case.
+    // Adding a condition that cannot fire is how a guard stops being read.
+    if ((s.set_type ?? 'working') !== 'working') return s;
     let next = s;
     if (next.weight_kg == null && hit.target_weight_kg != null) {
       next = { ...next, weight_kg: hit.target_weight_kg };
