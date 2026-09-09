@@ -3,7 +3,6 @@ import { AppState, type AppStateStatus } from 'react-native';
 import {
   computeSessionMetrics,
   coverageFromLedger,
-  hrMaxFromDateOfBirth,
   hrSampleCoverage,
   putBiometricSamples,
   selectEnrichmentCandidates,
@@ -27,10 +26,10 @@ import {
   type HeartRateReading,
 } from './healthConnect';
 import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
+import { fetchHRMax, type HRMaxResolution } from './hrMax';
 import { fitHRWindow } from './hrWindowFit';
 import { paddedHRSearchWindow, selectWorkoutWindow, workoutSearchWindow } from './hrWorkoutWindow';
 import { PREF_HEALTH_CONNECT_IMPORT, readPref, writePref } from './prefs';
-import { getProfile } from './profile';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -331,15 +330,17 @@ export async function syncHealthConnectBiometrics(
   const [candidates, ledger] = await Promise.all([candidateSessions(userID, now), readLedger(userID)]);
   const toEnrich = selectEnrichmentCandidates(candidates, ledger, now);
 
-  let dateOfBirth: string | null = null;
+  // N535: observed maximum first, the 220 − age seed second, and whichever
+  // wins carries its own `hr_max_source` — see `lib/hrMax.ts`. Resolved once
+  // per pass, because it is a fact about the athlete rather than the session.
+  let hrMax: HRMaxResolution = { kind: 'unresolved', reason: 'nothing-to-go-on' };
   try {
-    dateOfBirth = (await getProfile(getToken)).date_of_birth;
+    hrMax = await fetchHRMax(getToken, now);
   } catch {
     // Offline, or any other transient failure reading the profile — HRmax
     // stays unavailable for THIS pass only; nothing here remembers a
     // negative result, so the next foreground return tries again.
   }
-  const hrMaxBPM = hrMaxFromDateOfBirth(dateOfBirth, now);
 
   let attempted = 0;
   for (const session of toEnrich) {
@@ -349,7 +350,7 @@ export async function syncHealthConnectBiometrics(
     // moved on, nothing later in `toEnrich` should run under it either.
     if (!stillCurrent()) break;
     try {
-      await enrichHealthConnectSession(userID, getToken, session, hrMaxBPM, now);
+      await enrichHealthConnectSession(userID, getToken, session, hrMax, now);
       attempted++;
     } catch (err) {
       // Leave this session's ledger row exactly as it was (absent, or its
@@ -389,16 +390,18 @@ export async function syncHealthConnectBiometrics(
  * (W18/#957) so the session screen's "Sync heart rate"
  * (`enrichHealthConnectSessionNow` below) runs exactly the same attempt for
  * exactly one session, cooldown or not. Throws when the read, upload or
- * compute fails — nothing is recorded then. `hrMaxBPM` may be null (no date
- * of birth yet): samples are still uploaded and the attempt recorded as
- * `'none'`, exactly as the pass always did, so the retry window keeps
- * trying rather than treating a missing profile field as permanent.
+ * compute fails — nothing is recorded then. `hrMax` may be `unresolved` (no
+ * observed maximum and no usable date of birth): samples are still uploaded
+ * and the attempt recorded as `'none'`, exactly as the pass always did, so
+ * the retry window keeps trying rather than treating a missing profile field
+ * as permanent — and uploading those samples is what eventually produces an
+ * observed maximum in the first place.
  */
 async function enrichHealthConnectSession(
   userID: string,
   getToken: TokenGetter,
   session: EnrichmentCandidate,
-  hrMaxBPM: number | null,
+  hrMax: HRMaxResolution,
   now: Date,
 ): Promise<{ hrSource: 'window' | 'none'; sampleCount: number }> {
   // `endedAt` is guaranteed non-null here — `selectEnrichmentCandidates`
@@ -412,10 +415,11 @@ async function enrichHealthConnectSession(
     await putBiometricSamples(getToken, readings.map(toHeartRateSample));
   }
 
-  if (hrMaxBPM == null) {
-    // No HRmax to compute with (no date of birth on file yet) — samples
-    // are still uploaded above for whenever that changes, but there is
-    // no server-confirmed 'window' result to record.
+  if (hrMax.kind === 'unresolved') {
+    // No HRmax to compute with (no observed maximum and no usable date of
+    // birth) — samples are still uploaded above for whenever that changes,
+    // and uploading them is precisely what eventually PRODUCES an observed
+    // maximum, but there is no server-confirmed 'window' result to record.
     await recordAttempt(userID, session.id, 'none', readings.length, coverage, now);
     return { hrSource: 'none', sampleCount: readings.length };
   }
@@ -427,15 +431,15 @@ async function enrichHealthConnectSession(
   // heart_rate samples in the window, regardless of this claim (see
   // `ComputeSessionMetrics`'s own doc comment) — so the ledger below
   // records what the server actually decided, not what was claimed.
-  // 'estimated' — hrMaxBPM above only ever comes from
-  // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
-  // HRMaxSource doc comment for why nothing in this app produces
-  // 'observed' yet.
+  // `hrMax.source` travels with `hrMax.bpm` out of a single `resolveHRMax`
+  // (N535), so a session is labelled with the maximum it was actually scored
+  // against. This used to be the literal 'estimated', which was true only
+  // because nothing in the app could produce anything else.
   const metrics = await computeSessionMetrics(
     getToken,
     session.id,
-    hrMaxBPM,
-    'estimated',
+    hrMax.bpm,
+    hrMax.source,
     'window',
     windowOverride,
   );
@@ -562,25 +566,24 @@ export async function enrichHealthConnectSessionNow(
   if (!session.ended_at) return { status: 'error' };
 
   const now = new Date();
-  let dateOfBirth: string | null = null;
+  let hrMax: HRMaxResolution;
   try {
-    dateOfBirth = (await getProfile(getToken)).date_of_birth;
+    hrMax = await fetchHRMax(getToken, now);
   } catch {
     return { status: 'error' };
   }
-  const hrMaxBPM = hrMaxFromDateOfBirth(dateOfBirth, now);
 
   try {
     const result = await enrichHealthConnectSession(
       userID,
       getToken,
       { id: session.id, startedAt: session.started_at, endedAt: session.ended_at },
-      hrMaxBPM,
+      hrMax,
       now,
     );
     // Samples (if any) are uploaded either way; the honest sentence when
     // there is no HRmax is about the profile, not about the watch.
-    if (hrMaxBPM == null) return { status: 'no_hrmax' };
+    if (hrMax.kind === 'unresolved') return { status: 'no_hrmax' };
     return result.hrSource === 'window'
       ? { status: 'found', sampleCount: result.sampleCount }
       : { status: 'none' };

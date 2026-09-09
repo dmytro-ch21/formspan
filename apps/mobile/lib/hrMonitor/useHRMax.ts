@@ -1,23 +1,32 @@
 import { useEffect, useState } from 'react';
 
-import { hrMaxFromDateOfBirth } from '../biometric';
-import { getProfile } from '../profile';
+import { fetchHRMax, type HRMaxResolution } from '../hrMax';
 import type { TokenGetter } from '../useAuthToken';
 
 /**
- * N528/#958 — the same HRmax seed the enrichment passes use (220 − age from
- * the profile's date of birth), for colouring a live number by zone. `null`
- * until the profile answers, or when there is no date of birth — the number
- * then renders without a zone rather than against a guessed ceiling.
+ * The athlete's HRmax and where it came from, for colouring a live number by
+ * zone.
+ *
+ * **N528/#958 read only the `220 − age` seed; N535/#966 made it the full
+ * resolution** — the observed maximum from the athlete's own sessions when
+ * there is one, the age estimate otherwise, and `unresolved` when there is
+ * neither. `null` while the answer is still in flight, or when the request
+ * failed: the bpm then renders with no zone colour rather than against a
+ * guessed ceiling, which is the same "we have the beats but not the scale"
+ * honesty the number itself already had.
+ *
+ * Returning the resolution rather than a bare number is what lets a caller
+ * that wants to say WHICH maximum it is colouring against do so; callers that
+ * only need the beats read `.bpm` off it (see `hrMaxBpmOf`).
  */
-export function useHRMax(getToken: TokenGetter, enabled: boolean): number | null {
-  const [hrMax, setHRMax] = useState<number | null>(null);
+export function useHRMax(getToken: TokenGetter, enabled: boolean): HRMaxResolution | null {
+  const [hrMax, setHRMax] = useState<HRMaxResolution | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    getProfile(getToken)
-      .then((p) => {
-        if (live) setHRMax(hrMaxFromDateOfBirth(p.date_of_birth, new Date()));
+    fetchHRMax(getToken, new Date())
+      .then((r) => {
+        if (live) setHRMax(r);
       })
       .catch(() => {
         // Offline — no zone colour this time; the number itself is unaffected.
@@ -27,4 +36,10 @@ export function useHRMax(getToken: TokenGetter, enabled: boolean): number | null
     };
   }, [getToken, enabled]);
   return hrMax;
+}
+
+/** The beats, or null when there is no usable maximum — what the zone
+ *  classifier and the live indicator take. */
+export function hrMaxBpmOf(r: HRMaxResolution | null): number | null {
+  return r == null || r.kind === 'unresolved' ? null : r.bpm;
 }

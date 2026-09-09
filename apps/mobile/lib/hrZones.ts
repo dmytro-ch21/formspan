@@ -123,3 +123,88 @@ export function zoneColor(zone: number): string {
 export function zoneBandLabel(from: number, to: number): string {
   return from === to ? `Zone ${from}` : `Zones ${from}-${to}`;
 }
+
+/**
+ * Which zone a heart rate falls in, against a given HRmax. `0` means below
+ * zone 1 — `trimp.go`'s `ZoneNone`, which is not a zone.
+ *
+ * **Moved here from `lib/hrMonitor/heartRateProfile.ts` by N535**, where it
+ * was written as a hardcoded ladder of `if (pct >= 0.9) return 5` — a second
+ * copy of the floors above it, in a file whose own doc comment said "kept
+ * identical on purpose". Two copies kept identical on purpose is the same
+ * thing as one copy, right up until somebody edits one of them; N535's ticket
+ * counted three copies of these floors in the repo and asked for one. This is
+ * that one, and it now derives from `ZONE_FLOORS` rather than restating it, so
+ * there is no longer a version of the ladder that a change to the array can
+ * leave behind.
+ *
+ * `null`/non-positive HRmax returns 0 rather than throwing: the live indicator
+ * renders a bpm with no zone colour when the athlete's HRmax cannot be worked
+ * out, which is the honest rendering of "we have the beats but not the scale".
+ */
+export function zoneForBPM(bpm: number, hrMaxBPM: number | null | undefined): number {
+  if (hrMaxBPM == null || hrMaxBPM <= 0 || bpm <= 0) return 0;
+  const pct = bpm / hrMaxBPM;
+  for (let i = ZONE_FLOORS.length - 1; i >= 0; i -= 1) {
+    if (pct >= ZONE_FLOORS[i]) return i + 1;
+  }
+  return 0;
+}
+
+/**
+ * One zone expressed in actual beats, for a given HRmax. `to` is `null` for
+ * zone 5 — there is no ceiling above the hardest zone there is, and printing
+ * one (the HRmax itself, say) would claim a limit the classifier does not
+ * enforce: `zoneForBPM(210, 200)` is zone 5, not out of range.
+ */
+export type ZoneBpmRange = {
+  zone: ZoneNumber;
+  /** Lowest whole bpm that classifies into this zone. */
+  from: number;
+  /** Highest whole bpm still in this zone, or null for zone 5. */
+  to: number | null;
+};
+
+/**
+ * The five zones in beats per minute — N535's whole point. A run library that
+ * says "Zones 3-4" is telling an athlete nothing they can act on until it can
+ * also say "152-176 bpm".
+ *
+ * **Rounded so that the printed range and `zoneForBPM` cannot disagree.** The
+ * floor is `ceil(fraction × HRmax)`, which is by construction the smallest
+ * whole bpm satisfying `bpm / HRmax >= fraction` — the exact test
+ * `zoneForBPM` applies — and each ceiling is the next zone's floor minus one.
+ * Rounding to nearest instead would put a bpm on screen inside zone 3 that the
+ * classifier calls zone 2 whenever the fraction lands just above a half beat,
+ * which is the app disagreeing with itself in the one place this ticket exists
+ * to stop it. `zoneBpmRanges` is therefore not merely tested against
+ * `zoneForBPM`; it is derived from the same inequality.
+ */
+export function zoneBpmRanges(hrMaxBPM: number): ZoneBpmRange[] {
+  return ZONES.map((zone, i) => {
+    const from = Math.ceil(ZONE_FLOORS[i] * hrMaxBPM);
+    const nextFloor = ZONE_FLOORS[i + 1];
+    return {
+      zone,
+      from,
+      to: nextFloor === undefined ? null : Math.ceil(nextFloor * hrMaxBPM) - 1,
+    };
+  });
+}
+
+/** One zone's beats as a line — "152-175 bpm", or "180+ bpm" for zone 5. */
+export function zoneBpmLabel(range: ZoneBpmRange): string {
+  return range.to === null ? `${range.from}+ bpm` : `${range.from}-${range.to} bpm`;
+}
+
+/**
+ * A zone BAND in beats — what a run type's `zones: [3, 4]` is worth against a
+ * real HRmax. Spans from the low zone's floor to the high zone's ceiling, and
+ * is open-ended whenever the band reaches zone 5.
+ */
+export function zoneBandBpmLabel(from: ZoneNumber, to: ZoneNumber, hrMaxBPM: number): string {
+  const ranges = zoneBpmRanges(hrMaxBPM);
+  const lo = ranges[from - 1];
+  const hi = ranges[to - 1];
+  return hi.to === null ? `${lo.from}+ bpm` : `${lo.from}-${hi.to} bpm`;
+}

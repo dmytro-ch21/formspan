@@ -68065,7 +68065,164 @@ rings' overtake floor and this one mean the same thing.
 Mutation-checked three ways: restoring `textMuted`, sweeping the grip dim too,
 and shrinking the touch target back to its old near-miss.
 
+## 2026-09-09 — N535 (#966): the athlete's own maximum heart rate, and zones in beats
+
+**Design doc §3 decided this on 2026-08-07 and marked it Resolved. Only the
+first of its three steps had ever been built.** The steps: seed HRmax from
+`220 − age` and mark the zones estimated; replace it with the observed maximum
+across the athlete's own history as soon as there is one; never silently
+switch between the two.
+
+Step 1 existed (`hrMaxFromDateOfBirth`, N477). Steps 2 and 3 did not, and the
+shape of the gap is worth recording because it is a shape this repo produces
+repeatedly: **the plumbing for step 2 was complete and had no tap on the end
+of it.** `hr_max_source` was a validated `'estimated' | 'observed'` enum on the
+client, in the server's request validator, in migration `000090`'s CHECK
+constraint and in `public.openapi.yaml`. Four layers agreeing on a vocabulary
+in which one word could never be spoken: **nothing in the repository could
+produce `'observed'`.** Everything typechecked, every test passed, and the
+feature was absent.
+
+### The ticket was wrong three times before a line was written, and that is the more useful part
+
+#966 was filed from plausible sports-science knowledge rather than from what
+this codebase and its design doc had already decided. All three errors would
+have shipped an app that contradicts itself, and each was caught only by
+reading the code the brief was about:
+
+1. **"Use heart-rate reserve (Karvonen) when a resting HR is known."**
+   `trimp.go` scores in Edwards' percent-of-HRmax bands, so Karvonen zones
+   would coach "zone 2" live and report the same run back as "zone 3". Also
+   impossible: resting HR is collected nowhere — not in the HealthKit read
+   set, not in Health Connect's, not on `profiles`. §3 chose Edwards over
+   Banister precisely *because* Banister needs it.
+2. **"Use Tanaka (208 − 0.7 × age), not 220 − age."** The same structural
+   error one level down. Tanaka is the better-supported formula — which is
+   exactly why it slipped past twice — but "better formula" and "the formula
+   this app scores against" are different questions, and `hrMaxFromDateOfBirth`
+   is the sole producer of the `hr_max_bpm` the server's TRIMP is computed
+   from. Changing it is a coordinated client + `trimp.go` + `RuleVersion`
+   change or it is nothing.
+3. **"A measured value the athlete entered."** §3 step 2 says *observed
+   maximum across the athlete's own history*, and the doc's nearest stance on
+   manual fields is blunt: "`profile` currently has no weight field at all,
+   and this is the argument for never adding a manual one."
+
+The pattern is one sentence: **a ticket brief is not a design document, and
+domain knowledge that is correct in general can be wrong for a system that has
+already chosen.** The corrections were written into #966's body rather than
+quietly fixed, so the ticket carries its own errata.
+
+### What was built
+
+**Server (the derivation lives here, deliberately).** §3's opening line —
+"Derive on the backend, not the client — so both platforms report identical
+numbers". `GET /v1/biometric/hr-max` returns the athlete's peak `heart_rate`
+sample, the `measured_at` of **that same row**, and how many heart-rate
+samples stand behind it. `null` (a 200 with a null body, not a 404) when there
+are none: an athlete who has never worn a monitor has no observed maximum, and
+that is an answer rather than a missing resource.
+
+**The query shape is the load-bearing decision, and it is invisible in the
+result.** The obvious implementation is `SELECT MAX(value), MAX(measured_at),
+COUNT(*)`. It returns the right bpm with the **wrong date attached**, because
+two independent aggregates are free to come from two different rows — a peak
+recorded in March, reported as having been recorded yesterday, presented as a
+single reading. It is `ORDER BY value DESC, measured_at DESC LIMIT 1` instead.
+Mutation-tested: replacing the shape with independent aggregates passes every
+bpm assertion in the file and is caught by exactly one test, the one that
+exists for it.
+
+Deliberately **unwindowed** — no "last 12 months". A maximum that ages out is
+the silent switch step 3 forbids, arriving as a slow drift rather than an
+event.
+
+**Zero server-side computation changed.** `hr_max_bpm` is a float validated
+into `[100, 250]`, so a better maximum flows through TRIMP and `time_in_zones`
+untouched. The whole of step 2 on the server is one read.
+
+**Client.** `lib/hrMax.ts` decides which maximum is in force and returns a
+union rather than a number: `observed` (with its `measuredAt` and
+`sampleCount`), `estimated` (with the age it was computed from), or
+`unresolved` (naming what is missing). A bare `number | null` is exactly what
+made step 3 impossible before — every caller got a beat count with no way to
+say where it came from, so all four `computeSessionMetrics` call sites
+hardcoded `'estimated'` and `HRSessionReport` hardcoded the word into a
+sentence. Both were true, and both would have gone on being asserted the
+moment they stopped being true. **Returning the provenance alongside the
+number makes a silent switch unrepresentable rather than merely discouraged.**
+
+`'observed'` now has its first producer, in both orchestrators
+(`biometricSync.ts` on iOS, `healthConnectSync.ts` on Android).
+
+**`app/hr-zones.tsx`** shows the five zones in beats, and the derivation under
+them — `app/goals.tsx`'s pattern, whose principle this repo states as
+auditable recommendations: an argument you cannot inspect is a verdict. For an
+observed maximum that means which maximum, where it came from, when it was
+recorded, **and how many readings stand behind it**. That last one matters more
+than it looks; see the open gap below.
+
+**Consolidation.** The zone floors existed in three places: `trimp.go`'s
+`zoneFloors` (the authority), `hrMonitor/heartRateProfile.ts`'s hardcoded
+`if (pct >= 0.9) return 5` ladder, and `lib/hrZones.ts`'s `ZONE_FLOORS`. The
+ladder's own comment said "kept identical on purpose" — which is the same
+thing as one copy right up until somebody edits one of them. `zoneForBPM` moved
+into `hrZones.ts` and now *derives* from the array instead of restating it, so
+an edit to the floors cannot leave a classifier behind.
+
+**Rounding is derived from the classifier's own inequality, not chosen.**
+`zoneBpmRanges` uses `ceil(fraction × HRmax)`, which is by construction the
+smallest whole bpm satisfying `bpm / HRmax >= fraction` — the exact test
+`zoneForBPM` applies. Rounding to nearest instead puts a bpm on screen inside
+zone 3 that the classifier calls zone 2 whenever a fraction lands just above a
+half beat: the app disagreeing with itself, by one beat, in the one place this
+ticket existed to stop it. The test walks every printed boundary back through
+the classifier rather than asserting numbers somebody typed, and the
+`ceil → round` mutation turns it red.
+
+### Absence stayed absent
+
+No observed maximum and no usable date of birth yields `unresolved`, which
+names what is missing and shows **no number at all** — not a population
+average, not `MIN_HR_MAX_BPM`. N485 settled that argument once already against
+a clamping implementation, and `lib/biometric.ts` records why: clamping is a
+fabricated number that happens to sit exactly on a boundary. The screen test
+asserts nothing bpm-shaped renders, rather than merely that a message does,
+because the clamp would have rendered "100 bpm" and looked entirely
+reasonable.
+
+An implausible *observed* value (a dropped signal at 14 bpm, an artefact at
+300) is discarded and the age estimate tried — the one fallback here, and it
+is not silent, because what comes back says `estimated` and every surface
+shows that.
+
+### Verification
+
+Five mutations, each caught, restore confirmed by re-running the suite rather
+than by grepping the files: the backend's aggregate-shape swap; `ceil → round`
+in the bpm boundaries; a zone floor moved 0.70 → 0.71; the observed/estimated
+precedence swapped; the source label dropped; and the unresolved case clamped
+to the floor. Backend integration tests run against a per-branch
+`vola_test_n535` rather than the shared `vola_test`, which was sitting dirty at
+version 92 from another worktree.
+
 ## Open items / known gaps as of this entry
+
+- **N535: one spurious heart-rate sample defines an athlete's zones, permanently.**
+  The observed maximum is an unwindowed `MAX` over every stored `heart_rate`
+  sample, so a single electrical artefact at 205 bpm outranks a year of honest
+  training and never ages out — and unlike the range check (which discards
+  anything outside `[100, 250]`) an artefact at 205 is perfectly plausible in
+  isolation. **No threshold was invented for this**, because picking one — five
+  samples? a percentile instead of a max? a strap-only source filter? — is
+  policy nobody here has the evidence to set, and a wrong threshold silently
+  discards the real maximum of an athlete who genuinely hit it once. What was
+  built instead is disclosure: the zones screen states the sample count and the
+  date behind the reading, so an athlete looking at "191 bpm, recorded 4 March,
+  3 readings behind it" can see the problem the app cannot. If this bites in
+  practice, the fix is probably a percentile over a windowed set, and it is a
+  ticket rather than a tweak — it changes what the number MEANS, which is a
+  `RuleVersion` question.
 
 
 - **N108 shipped a COUNT where the reference asked for a STREAK, and the user has not ruled on it.** The reference's week strip reads `🔥 3 day streak`. `docs/decisions/nutrition-design.md` §5 rejects day streaks by name — *"a missed day becomes a loss, and a streak rewards logging a fake day to save it. Against the no-shame rule"* — and N53 already shipped the substitute this now uses, `3 of 7 days logged`. The one streak this app keeps (N19's) counts **weeks**, precisely so a rest day cannot break it, and has no running total on any screen to protect. So the reference and a written decision genuinely conflict, and only the user can overrule the decision. Swapping the count back for a chain is one line in `WeekStrip`'s summary.

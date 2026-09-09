@@ -929,6 +929,38 @@ export async function getSessionMetrics(
 }
 
 /**
+ * Mirrors `biometric.ObservedHRMax` (N535/#966) — the athlete's highest
+ * recorded heart-rate sample, the timestamp of THAT sample's own row, and how
+ * many heart-rate samples stand behind it. Wire shape, hence snake_case; see
+ * `lib/hrMax.ts` for what is done with it.
+ */
+export type ObservedHRMax = {
+  bpm: number;
+  measured_at: string;
+  sample_count: number;
+};
+
+/**
+ * The athlete's observed maximum heart rate — `GET /v1/biometric/hr-max`,
+ * N535/#966. `null` when they have no heart-rate samples at all, which the
+ * server returns as a 200 with a null body rather than a 404: "this athlete
+ * has never worn a monitor" is an answer, not a missing resource.
+ *
+ * Derived server-side deliberately (design doc §3: "Derive on the backend,
+ * not the client — so both platforms report identical numbers"). Feed it to
+ * `lib/hrMax.ts`'s `resolveHRMax` rather than using it directly; that is
+ * where the precedence against the age estimate lives, and where the
+ * provenance that must travel with the number is attached.
+ */
+export async function getObservedHRMax(getToken: TokenGetter): Promise<ObservedHRMax | null> {
+  const res = await apiRequest<{ observed_hr_max: ObservedHRMax | null }>(
+    getToken,
+    '/biometric/hr-max',
+  );
+  return res.observed_hr_max ?? null;
+}
+
+/**
  * One session's contribution to the cross-session training-load trend —
  * N489/#850. Mirrors `biometric.SessionLoad` on the backend. `trimp` is
  * never absent here: a session with no computed metrics, or with

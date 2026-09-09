@@ -14,6 +14,7 @@ import {
   type HRQueriedWindow,
   type HRZoneRow,
 } from '@/lib/hrSessionReport';
+import { zoneBpmLabel, zoneBpmRanges } from '@/lib/hrZones';
 import type { HRTimelinePoint } from '@/lib/hrTimeline';
 import type { ExerciseHR, SessionMetrics } from '@/lib/biometric';
 import { useEffect, useRef, useState } from 'react';
@@ -215,7 +216,7 @@ export function HRSessionReport({
           <Text style={styles.limitedText}>
             {report.reason === 'sparse_samples'
               ? `Only ${report.sampleCount} reading${report.sampleCount === 1 ? '' : 's'} — not enough to show training load or heart-rate zones.`
-              : 'Add your date of birth in your profile to unlock training load and zone breakdown.'}
+              : 'Add your date of birth in your profile, or wear a heart-rate monitor for a session or two, to unlock training load and zone breakdown.'}
           </Text>
         </RNView>
         <HRWindowMismatchNote
@@ -238,7 +239,7 @@ export function HRSessionReport({
             title="Training load and heart-rate zones"
             body={[
               'TRIMP (training impulse) weighs every minute of this session by how hard your heart rate says it was — more minutes, or a higher zone, both push it up. It is a load number, not a grade: there is no target to hit.',
-              'The five zones are bands of your estimated max heart rate — zone 1 (very light) through zone 5 (max effort). The breakdown below is minutes spent in each, only counting stretches with a real reading close enough together to trust.',
+              zoneBandsSentence(metrics),
               ...(report.perExercise.length > 0
                 ? [
                     "By exercise, further down, is a rougher read on the same evidence — each exercise's window is a few minutes at most, so its reading count is often low. Read it as a direction (this movement ran hotter than that one), not a precise figure.",
@@ -349,6 +350,48 @@ function HRWindowMismatchNote({
       Heart rate found {formatClockTime(hrWindow.start)}–{formatClockTime(hrWindow.end)} (session logged{' '}
       {formatClockTime(sessionStartedAt)}–{formatClockTime(sessionEndedAt)})
     </Text>
+  );
+}
+
+/**
+ * Which maximum heart rate THIS session's zones were scored against, in beats,
+ * and where that maximum came from.
+ *
+ * **This sentence used to hardcode the word "estimated"** (N535/#966 found it
+ * at what was then line 241), which was true only because
+ * `hrMaxFromDateOfBirth` was the app's sole HRmax producer. Design doc §3's
+ * third step is "never silently switch between them" — and a hardcoded label
+ * does not switch at all, so the first session scored against an athlete's own
+ * measured maximum would still have called itself estimated. It now reads
+ * `hr_max_source`, which is the field that exists to answer exactly this and
+ * which nothing on the client read before.
+ *
+ * The bpm boundaries come with it, because "zone 4" is not actionable and
+ * "160-179 bpm" is — and quoting them here rather than only on the zones
+ * screen means the number is beside the breakdown it explains.
+ */
+function zoneBandsSentence(metrics: SessionMetrics | null): string {
+  const tail =
+    ' The breakdown below is minutes spent in each, only counting stretches with a real reading close enough together to trust.';
+
+  if (metrics?.hr_max_bpm == null) {
+    return (
+      'The five zones are bands of your maximum heart rate — zone 1 (very light) through zone 5 (max effort).' +
+      tail
+    );
+  }
+
+  const provenance =
+    metrics.hr_max_source === 'observed'
+      ? `your measured maximum of ${metrics.hr_max_bpm} bpm — the highest your own sessions have recorded`
+      : `an estimated maximum of ${metrics.hr_max_bpm} bpm (220 − your age, so it is a starting point rather than a measurement)`;
+
+  const ranges = zoneBpmRanges(metrics.hr_max_bpm);
+  const bands = ranges.map((r) => `Z${r.zone} ${zoneBpmLabel(r)}`).join(', ');
+
+  return (
+    `The five zones are bands of ${provenance}: ${bands}.` +
+    tail
   );
 }
 

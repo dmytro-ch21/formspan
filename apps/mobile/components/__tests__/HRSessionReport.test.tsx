@@ -306,3 +306,51 @@ describe('N528/#958 — the report says where its numbers came from', () => {
     expect(screen.queryByTestId('r2-source')).toBeNull();
   });
 });
+
+/**
+ * N535/#966 — the zones sentence reads `hr_max_source` instead of asserting
+ * "estimated".
+ *
+ * This was hardcoded copy: `'The five zones are bands of your estimated max
+ * heart rate'`, true only because nothing in the app could produce anything
+ * else. Design doc §3's third step is "never silently switch between them" —
+ * and a string literal does not switch at all, so the very first session
+ * scored against an athlete's own measured maximum would still have described
+ * itself as an estimate. That is the promise breaking in the one place it was
+ * supposed to be kept.
+ *
+ * The sentence lives inside the InfoMark's sheet, so these open it.
+ */
+describe('which maximum the zones were scored against (N535)', () => {
+  function openInfo(m: SessionMetrics) {
+    render(<HRSessionReport metrics={m} />);
+    fireEvent.press(screen.getByTestId('hr-session-report-info'));
+  }
+
+  test('an observed maximum is not described as an estimate', () => {
+    openInfo(metrics({ hr_max_bpm: 191, hr_max_source: 'observed' }));
+    expect(screen.getByText(/measured maximum of 191 bpm/)).toBeTruthy();
+    expect(screen.queryByText(/estimated max/)).toBeNull();
+    expect(screen.queryByText(/220 − your age/)).toBeNull();
+  });
+
+  test('an estimated maximum still says so, and says what makes it an estimate', () => {
+    openInfo(metrics({ hr_max_bpm: 190, hr_max_source: 'estimated' }));
+    expect(screen.getByText(/estimated maximum of 190 bpm/)).toBeTruthy();
+    expect(screen.getByText(/220 − your age/)).toBeTruthy();
+    expect(screen.queryByText(/measured maximum/)).toBeNull();
+  });
+
+  test('the zones are quoted in beats, not only as numbers 1-5', () => {
+    // 190 bpm: ceil(0.5..0.9 x 190) = 95 / 114 / 133 / 152 / 171.
+    openInfo(metrics({ hr_max_bpm: 190, hr_max_source: 'estimated' }));
+    expect(screen.getByText(/Z1 95-113 bpm/)).toBeTruthy();
+    expect(screen.getByText(/Z5 171\+ bpm/)).toBeTruthy();
+  });
+
+  test('no HRmax on the metrics quotes no beats and claims no provenance', () => {
+    openInfo(metrics({ hr_max_bpm: null, hr_max_source: null }));
+    expect(screen.getByText(/bands of your maximum heart rate/)).toBeTruthy();
+    expect(screen.queryByText(/bpm:/)).toBeNull();
+  });
+});

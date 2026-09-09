@@ -413,6 +413,9 @@ function RootStack() {
         {/* N534. Titled here like every other pushed route, so the back button
             from it reads "Run type" rather than the filename "[id]". */}
         <Stack.Screen name="run-type/[id]" options={{ title: 'Run type' }} />
+        {/* N535. Reached from any surface that quotes a zone — the run-type
+            detail today, and the session report's zone breakdown next. */}
+        <Stack.Screen name="hr-zones" options={{ title: 'Your zones' }} />
         <Stack.Screen name="position/[id]" options={{ title: 'Position' }} />
         <Stack.Screen name="session/start" options={{ title: 'Start' }} />
         <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />
