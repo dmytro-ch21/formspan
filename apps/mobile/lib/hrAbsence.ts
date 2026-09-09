@@ -12,7 +12,7 @@
  * already has: whether sync is on, when the session ended, and the clock.
  */
 
-import { RETRY_WINDOW_DAYS } from './biometric';
+import { RETRY_WINDOW_DAYS, type SessionMetrics } from './biometric';
 
 /** Which absence this is — each gets its own honest sentence below. */
 export type HRAbsenceState =
@@ -77,6 +77,69 @@ export function hrAbsenceCopy(state: HRAbsenceState, sourceLabel: string): strin
         `You can still check once more.`
       );
   }
+}
+
+/**
+ * N552/#1021 — whether this session already HAS heart rate, from the row the
+ * screen already holds. One definition, because three screens ask it and the
+ * automatic attempt below turns on the answer.
+ *
+ * The same three facts `hrSourceSentence` refuses to speak about: a missing
+ * row, an `hr_source` of `'none'`, or a row with no samples behind it are all
+ * "no heart rate", and the last two exist because the server records an
+ * honest empty result rather than no result at all.
+ */
+export function sessionHasHeartRate(
+  metrics: Pick<SessionMetrics, 'hr_source' | 'sample_count'> | null | undefined,
+): boolean {
+  return !!metrics && metrics.hr_source !== 'none' && metrics.sample_count > 0;
+}
+
+/**
+ * N552/#1021 — whether to run ONE enrichment attempt automatically, without
+ * the athlete tapping anything.
+ *
+ * ## Why this exists
+ *
+ * "Sync heart rate" (W18/#957) made the non-broadcasting path *recoverable*.
+ * It did not make it *automatic*: an athlete whose wearable only ever reaches
+ * VOLA through Apple Health / Health Connect finished a session, opened it,
+ * and had to press a button to get their own numbers. The enrichment pass
+ * otherwise runs on foreground return, sign-in and the Settings toggle — none
+ * of which happens when you finish training and go straight to the report.
+ * So the supported way to run without a broadcasting device involved a poke,
+ * every time, which is the thing #1021 says it must not.
+ *
+ * ## The three guards, and why each is load-bearing
+ *
+ * - **`alreadyAttempted`** — once per screen instance. The attempt is a
+ *   profile fetch plus a health read plus possibly an upload; a re-render
+ *   must not re-run it.
+ * - **`metricsLoaded` / `hasHeartRate`** — a session that already has a
+ *   result gets nothing. Without this the hook would fire on EVERY open of
+ *   every session under `RETRY_WINDOW_DAYS`, including ones whose report is
+ *   sitting right there on screen.
+ * - **`absence === 'checking'`** — and pointedly not `'gave_up'`. Past
+ *   `RETRY_WINDOW_DAYS` the orchestrator has deliberately stopped, and an
+ *   automatic attempt there would re-ask the health store on every open, for
+ *   every old session, forever — exactly the unbounded ongoing cost
+ *   `RETRY_WINDOW_DAYS` exists to prevent (see `needsEnrichmentAttempt`).
+ *   The BUTTON still works there, because a tap is explicit intent; that
+ *   distinction is W18's and this does not weaken it.
+ */
+export function autoSyncNowDue(input: {
+  absence: HRAbsenceState;
+  /** Has the screen's own metrics read answered at all? */
+  metricsLoaded: boolean;
+  /** `sessionHasHeartRate` of that read. */
+  hasHeartRate: boolean;
+  /** Has this screen instance already made its one attempt? */
+  alreadyAttempted: boolean;
+}): boolean {
+  if (input.alreadyAttempted) return false;
+  if (!input.metricsLoaded) return false;
+  if (input.hasHeartRate) return false;
+  return input.absence === 'checking';
 }
 
 /** The session fields one on-demand enrichment attempt needs — the shape a

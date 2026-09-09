@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 
 import { triggerBiometricSyncNow } from '../biometricSync';
+import { triggerHealthConnectSyncNow } from '../healthConnectSync';
+import { isHealthKitSupported } from '../healthkit';
 import type { TokenGetter } from '../useAuthToken';
+import { healthSourceFor } from '../vo2MaxSource';
 import { MIN_SAMPLE_SPACING_MS, flushHRMonitorSamples, recordHRMonitorSample } from './hrRecorder';
 import { subscribeLiveHRReadings } from './liveHR';
 
@@ -45,12 +49,39 @@ export function useHRRecording(input: {
   useEffect(() => {
     if (active || !wasActive.current || !userId) return;
     wasActive.current = false;
+    /**
+     * N552/#1021 — the enrichment pass is kicked on EVERY finish, not only
+     * when direct samples were flushed.
+     *
+     * The `n > 0` guard was right for the ticket that wrote it (N528: the
+     * server should compute the report with the monitor's own samples in
+     * place) and wrong for this one. A run finished with a non-broadcasting
+     * wearable flushes zero rows, so the pass was not kicked, so the health
+     * store was not asked until the next foreground return — and an athlete
+     * who finishes a run and stays in the app has no foreground return. That
+     * is the "supported path needs a poke" this ticket forbids.
+     *
+     * Kicking it unconditionally also picks up VO₂max (the same pass runs
+     * both chains), which is the other half of #1021's third criterion and
+     * is exactly what an Apple Watch writes shortly after an outdoor run.
+     *
+     * Platform-switched the same way `useSessionHRSync` switches: the
+     * HealthKit pass returns immediately on Android and vice versa, so
+     * calling the wrong one would silently do nothing.
+     */
+    const kickEnrichment = () => {
+      const source = healthSourceFor(Platform.OS, isHealthKitSupported());
+      if (source === 'healthkit') triggerBiometricSyncNow(userId, getToken);
+      else if (source === 'health_connect') triggerHealthConnectSyncNow(userId, getToken);
+    };
     void flushHRMonitorSamples(userId, getToken)
-      .then((n) => {
-        if (n > 0) triggerBiometricSyncNow(userId, getToken);
-      })
+      .then(kickEnrichment)
       .catch(() => {
         // Offline — the rows stay pending; the orchestrator flushes later.
+        // The pass is still kicked: a failed flush is about the MONITOR's
+        // rows, and says nothing about whether the health store has
+        // something to give this session.
+        kickEnrichment();
       });
     // Deliberately not keyed on `sessionID`: this fires on the active-to-
     // finished EDGE, and `flushHRMonitorSamples` is user-scoped rather than

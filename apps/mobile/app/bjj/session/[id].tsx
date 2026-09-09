@@ -362,6 +362,10 @@ export default function BjjSessionScreen() {
     sessionID: id,
     startedAt: session?.started_at,
     endedAt: session?.ended_at,
+    // N552/#1021: so the hook's one automatic enrichment attempt skips a
+    // session that already has heart rate.
+    metrics: hrMetrics,
+    metricsLoaded: hrLoaded,
     onFound: () => {
       if (!id) return;
       getSessionMetrics(getToken, id)
