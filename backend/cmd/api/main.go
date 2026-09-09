@@ -682,6 +682,9 @@ func main() {
 	// {sessionID}/metrics pattern above at all, since ServeMux matches on the
 	// full segment shape, so registration order here is not load-bearing.
 	mux.Handle("GET /v1/biometric/sessions/load", verifier.RequireAuth(http.HandlerFunc(biometricHandler.ListSessionLoad)))
+	// N535: the observed maximum heart rate, so zones stop being quoted
+	// from `220 − age` once the athlete has actually recorded a peak.
+	mux.Handle("GET /v1/biometric/hr-max", verifier.RequireAuth(http.HandlerFunc(biometricHandler.GetObservedHRMax)))
 
 	// Say what happened and have it fill the chips (N33). A DRAFT comes back;
 	// nothing is logged until the athlete confirms it and PUTs it through

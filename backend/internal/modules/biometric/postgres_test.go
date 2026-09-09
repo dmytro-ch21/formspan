@@ -1399,3 +1399,172 @@ func TestListExerciseHR_CannotBeListedForAnotherUsersSession(t *testing.T) {
 		t.Fatalf("listing against another user's session gave %v, want ErrNotFound", err)
 	}
 }
+
+// --- ObservedHRMax (N535/#966) ----------------------------------------------
+//
+// The point of these is the SHAPE of the query, not just its answer. An
+// obvious implementation — `SELECT MAX(value), MAX(measured_at), COUNT(*)` —
+// returns the right number with the wrong date attached, because the two
+// aggregates are free to come from two different rows. That reads as a
+// single reading and is not one, and it is invisible in any test that only
+// asserts the bpm. Hence TestObservedHRMax_MeasuredAtComesFromThePeakRow.
+
+func TestObservedHRMax_NoSamplesReturnsNil(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_bio_hrmax_empty"
+	cleanupSamples(t, pool, user)
+
+	got, err := repo.ObservedHRMax(ctx, user)
+	if err != nil {
+		t.Fatalf("observed hr max: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("observed hr max = %+v, want nil for an athlete with no samples", got)
+	}
+}
+
+// The peak wins regardless of insertion order — i.e. this is a maximum over
+// the whole history, not "the latest reading" wearing a different name.
+func TestObservedHRMax_HighestValueWinsRegardlessOfOrder(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_bio_hrmax_peak"
+	cleanupSamples(t, pool, user)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+
+	in := []Sample{
+		hrSample("bio-hrmax-a", base, 140),
+		hrSample("bio-hrmax-peak", base.Add(time.Minute), 191),
+		hrSample("bio-hrmax-c", base.Add(2*time.Minute), 152), // newest, but not the peak
+	}
+	if _, err := repo.PutSamples(ctx, user, in); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	got, err := repo.ObservedHRMax(ctx, user)
+	if err != nil {
+		t.Fatalf("observed hr max: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("observed hr max = nil, want the 191 bpm peak")
+	}
+	if got.BPM != 191 {
+		t.Fatalf("observed hr max bpm = %v, want 191 (the peak, not the newest)", got.BPM)
+	}
+}
+
+// The reading has to be internally consistent: the timestamp must belong to
+// the row the bpm came from. Constructed so an independent-aggregates query
+// passes on the bpm and fails here — the peak is deliberately the OLDEST row.
+func TestObservedHRMax_MeasuredAtComesFromThePeakRow(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_bio_hrmax_measured_at"
+	cleanupSamples(t, pool, user)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	peakAt := base
+
+	in := []Sample{
+		hrSample("bio-hrmax-ma-peak", peakAt, 188),
+		hrSample("bio-hrmax-ma-later", base.Add(time.Hour), 130),
+		hrSample("bio-hrmax-ma-latest", base.Add(2*time.Hour), 125),
+	}
+	if _, err := repo.PutSamples(ctx, user, in); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	got, err := repo.ObservedHRMax(ctx, user)
+	if err != nil {
+		t.Fatalf("observed hr max: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("observed hr max = nil, want the 188 bpm peak")
+	}
+	if got.BPM != 188 {
+		t.Fatalf("observed hr max bpm = %v, want 188", got.BPM)
+	}
+	if !got.MeasuredAt.Equal(peakAt) {
+		t.Fatalf("observed hr max measured_at = %s, want %s (the peak row's own timestamp, "+
+			"not the latest sample's)", got.MeasuredAt.UTC(), peakAt)
+	}
+}
+
+// SampleCount describes the evidence behind the reading — how many heart-rate
+// samples this athlete has at all — so it counts the history, not the peak.
+// Other metric types are not heart rate and must not inflate it.
+func TestObservedHRMax_SampleCountCountsAllHeartRateSamplesOnly(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const user = "user_bio_hrmax_count"
+	cleanupSamples(t, pool, user)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+
+	in := []Sample{
+		hrSample("bio-hrmax-count-1", base, 120),
+		hrSample("bio-hrmax-count-2", base.Add(time.Minute), 175),
+		hrSample("bio-hrmax-count-3", base.Add(2*time.Minute), 130),
+		{
+			ID: "bio-hrmax-count-resting", MetricType: MetricRestingHeartRate, Source: SourceAppleWatch,
+			SourcePlatform: PlatformHealthKit, Value: 55, Unit: "bpm", MeasuredAt: base,
+		},
+		{
+			ID: "bio-hrmax-count-vo2", MetricType: MetricVO2Max, Source: SourceAppleWatch,
+			SourcePlatform: PlatformHealthKit, Value: 48, Unit: "ml/kg/min", MeasuredAt: base,
+		},
+	}
+	if _, err := repo.PutSamples(ctx, user, in); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	got, err := repo.ObservedHRMax(ctx, user)
+	if err != nil {
+		t.Fatalf("observed hr max: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("observed hr max = nil, want a reading")
+	}
+	if got.BPM != 175 {
+		t.Fatalf("observed hr max bpm = %v, want 175 (resting HR is not a heart-rate sample here)", got.BPM)
+	}
+	if got.SampleCount != 3 {
+		t.Fatalf("observed hr max sample_count = %d, want 3 (all heart_rate samples, "+
+			"excluding the other metric types)", got.SampleCount)
+	}
+}
+
+// One athlete's peak must never be reported as another's — the same
+// cross-user isolation every other read on this repository asserts.
+func TestObservedHRMax_CrossUserIsolation(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	const owner = "user_bio_hrmax_owner"
+	const other = "user_bio_hrmax_other"
+	cleanupSamples(t, pool, owner, other)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+
+	if _, err := repo.PutSamples(ctx, owner, []Sample{
+		hrSample("bio-hrmax-iso-own", base, 150),
+	}); err != nil {
+		t.Fatalf("put owner: %v", err)
+	}
+	if _, err := repo.PutSamples(ctx, other, []Sample{
+		hrSample("bio-hrmax-iso-other", base, 199),
+	}); err != nil {
+		t.Fatalf("put other: %v", err)
+	}
+
+	got, err := repo.ObservedHRMax(ctx, owner)
+	if err != nil {
+		t.Fatalf("observed hr max: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("observed hr max = nil, want the owner's own 150 bpm")
+	}
+	if got.BPM != 150 {
+		t.Fatalf("observed hr max bpm = %v, want 150 — the other athlete's 199 leaked", got.BPM)
+	}
+	if got.SampleCount != 1 {
+		t.Fatalf("observed hr max sample_count = %d, want 1 (the owner's own samples only)", got.SampleCount)
+	}
+}
