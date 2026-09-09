@@ -715,6 +715,7 @@ const CREATE_BIOMETRIC_HR_SYNCED = `
     synced_at TEXT NOT NULL,
     hr_source TEXT NOT NULL DEFAULT 'none',
     attempted_at TEXT NOT NULL DEFAULT '',
+    coverage TEXT NOT NULL DEFAULT 'unknown',
     PRIMARY KEY (user_id, session_id)
   );
 `;
@@ -746,6 +747,7 @@ const CREATE_HEALTH_CONNECT_ENRICHMENT = `
     hr_source TEXT NOT NULL,
     sample_count INTEGER NOT NULL,
     attempted_at TEXT NOT NULL,
+    coverage TEXT NOT NULL DEFAULT 'unknown',
     PRIMARY KEY (user_id, session_id)
   );
 `;
@@ -811,7 +813,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 40;
+const SCHEMA_VERSION = 41;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1560,6 +1562,33 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // server holds, and the pull runs on every sync.
     await addColumnIfMissing(db, 'foods', 'shared_by', 'TEXT');
     await addColumnIfMissing(db, 'foods', 'shared_at', 'TEXT');
+  }
+
+  if (current < 41) {
+    // W19/#985: both retry ledgers gain `coverage` — whether the samples a
+    // `'window'` result was computed from plausibly covered the session at
+    // all. See `lib/biometric.ts`'s `hrSampleCoverage` for the rule and the
+    // incident: an `hr_source: 'window'` row was terminal on its own, so a
+    // session computed almost entirely from PRE-CLASS background heart rate
+    // was permanently wrong and could never correct itself.
+    //
+    // Real ALTERs, same reason as every branch above: `CREATE TABLE IF NOT
+    // EXISTS` is a no-op against an existing table, so a device already
+    // stamped 40 would keep both tables without the column and the first
+    // read of either would throw.
+    //
+    // Backfills to `'unknown'`, and `needsEnrichmentAttempt` treats that as
+    // RETRYABLE rather than as grandfathered-final. That is the same
+    // deliberate choice v37 made for `hr_source` above, for the same reason:
+    // a row written under the old rule is exactly the row that may be
+    // holding a wrong result, so every such session gets one more honest
+    // look. Self-bounding for the identical reason too — `RETRY_WINDOW_DAYS`
+    // (3) only re-offers a session whose `ended_at` is recent, so a
+    // legitimately-covered session from months ago stays excluded regardless
+    // of what this backfill says, and a recent one pays one idempotent
+    // re-check that either confirms its numbers or fixes them.
+    await addColumnIfMissing(db, 'biometric_hr_synced', 'coverage', "TEXT NOT NULL DEFAULT 'unknown'");
+    await addColumnIfMissing(db, 'health_connect_enrichment', 'coverage', "TEXT NOT NULL DEFAULT 'unknown'");
   }
 
   // The day query the card runs on every render of Today.

@@ -86,8 +86,22 @@ describe('needsEnrichmentAttempt — cadence by session age', () => {
     );
   });
 
-  it("'window' stays terminal at every age — real evidence is never re-asked, even a minute old", () => {
-    const found: EnrichmentLedgerEntry = { hrSource: 'window', attemptedAt: ended(0) };
+  it("a COVERED 'window' stays terminal at every age — real evidence is never re-asked, even a minute old", () => {
+    const found: EnrichmentLedgerEntry = { hrSource: 'window', coverage: 'plausible', attemptedAt: ended(0) };
     expect(needsEnrichmentAttempt({ endedAt: ended(0.5) }, found, now)).toBe(false);
+  });
+
+  it("W19/#985: a THIN 'window' rides this same cadence rather than being terminal", () => {
+    // The whole point of W19 is that "we found something" stopped meaning
+    // "there is nothing left to find". A thin result is not exempt from the
+    // ladder either — it gets exactly the ladder, which is what the two
+    // assertions here are: the 5-hour tier's short cooldown, both sides.
+    const thin = (minutesAgo: number): EnrichmentLedgerEntry => ({
+      hrSource: 'window',
+      coverage: 'thin',
+      attemptedAt: ended(minutesAgo / 60),
+    });
+    expect(needsEnrichmentAttempt({ endedAt: ended(5) }, thin(30), now)).toBe(false);
+    expect(needsEnrichmentAttempt({ endedAt: ended(5) }, thin(RETRY_SHORT_COOLDOWN_HOURS * 60), now)).toBe(true);
   });
 });

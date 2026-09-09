@@ -469,6 +469,45 @@ export async function queryOtherExerciseSessions(
 }
 
 /**
+ * Every exercise session Health Connect holds in `[since, until]`, reduced
+ * to its own start and end — W19/#985, and the Android half of the
+ * "prefer the watch's own workout" rule. The counterpart to
+ * `lib/healthkit.ts`'s `queryWorkoutWindows`, returning the identical
+ * platform-neutral shape so `lib/hrWorkoutWindow.ts` decides once for both
+ * platforms rather than twice.
+ *
+ * Deliberately unfiltered by `exerciseType`, unlike `queryOtherExerciseSessions`
+ * above — see `queryWorkoutWindows`'s own doc comment for why the activity
+ * type cannot answer the question being asked here. It also means this
+ * needs none of that function's per-record type narrowing, and no record
+ * `metadata.id`: nothing downstream keys a ledger on these, so a record
+ * without an id is still perfectly good evidence of when training happened.
+ *
+ * Same permission posture as every read in this file (W15/#944): a REFUSED
+ * `ExerciseSession` grant throws `HealthConnectPermissionError` rather than
+ * coming back as an empty list, so a missing manifest entry can never
+ * masquerade as "the watch knows no workout". `ExerciseSession` has been in
+ * `READ_RECORD_TYPES` since N479/#824, so this asks for nothing new.
+ */
+export async function queryExerciseSessionWindows(
+  since: string,
+  until: string,
+): Promise<{ start: string; end: string }[]> {
+  if (!(await ensureInitialized())) return [];
+  let records: NativeExerciseSessionRecord[];
+  try {
+    const result = await hc!.readRecords('ExerciseSession', {
+      timeRangeFilter: { operator: 'between', startTime: since, endTime: until },
+    });
+    records = result.records as NativeExerciseSessionRecord[];
+  } catch (err) {
+    rethrowIfNotPermitted(err, 'ExerciseSession');
+    return [];
+  }
+  return records.map((r) => ({ start: r.startTime, end: r.endTime }));
+}
+
+/**
  * Known Health Connect writer package names, matched to `biometric.Source`.
  *
  * Not exhaustive by design — Health Connect exposes no stable vendor

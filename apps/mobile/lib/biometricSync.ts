@@ -2,18 +2,27 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import {
   computeSessionMetrics,
+  coverageFromLedger,
   hrMaxFromDateOfBirth,
+  hrSampleCoverage,
   needsEnrichmentAttempt,
   planHRSync,
   putBiometricSamples,
   sessionHRWindow,
   toBiometricSample,
   type EnrichmentLedgerEntry,
+  type HRCoverage,
 } from './biometric';
 import { getDb } from './db';
 import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
 import { fitHRWindow, wideHRQueryWindow } from './hrWindowFit';
-import { isHealthKitSupported, queryHeartRateSamples, queryVO2MaxSamples } from './healthkit';
+import { paddedHRSearchWindow, selectWorkoutWindow, workoutSearchWindow } from './hrWorkoutWindow';
+import {
+  isHealthKitSupported,
+  queryHeartRateSamples,
+  queryVO2MaxSamples,
+  queryWorkoutWindows,
+} from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
 import { getProfile } from './profile';
 import {
@@ -297,7 +306,7 @@ export async function readBiometricSyncFailureCount(userID: string): Promise<num
 
 // --- session heart-rate windows (design doc §2) ---------------------------
 
-type LedgerRow = { session_id: string; hr_source: string; attempted_at: string };
+type LedgerRow = { session_id: string; hr_source: string; attempted_at: string; coverage: string | null };
 
 /**
  * The local retry ledger, keyed by session — N511/#893. Same shape and same
@@ -307,15 +316,19 @@ type LedgerRow = { session_id: string; hr_source: string; attempted_at: string }
 async function readBiometricHRLedger(userID: string): Promise<Map<string, EnrichmentLedgerEntry>> {
   const db = await getDb();
   const rows = await db.getAllAsync<LedgerRow>(
-    `SELECT session_id, hr_source, attempted_at FROM biometric_hr_synced WHERE user_id = ?`,
+    `SELECT session_id, hr_source, attempted_at, coverage FROM biometric_hr_synced WHERE user_id = ?`,
     userID,
   );
   const out = new Map<string, EnrichmentLedgerEntry>();
   for (const r of rows) {
     // Defensive fallback rather than trusting a column that could in
     // principle hold anything — same posture as the Android reader.
+    // `coverage` (W19/#985) goes through `coverageFromLedger` for the same
+    // reason, and its 'unknown' fallback is what makes a pre-W19 row
+    // retryable rather than silently final.
     out.set(r.session_id, {
       hrSource: r.hr_source === 'window' ? 'window' : 'none',
+      coverage: coverageFromLedger(r.coverage),
       attemptedAt: r.attempted_at,
     });
   }
@@ -410,43 +423,7 @@ async function enrichSessionWindow(
   // reach this, and it guards for it too.
   if (!window) return { hrSource: 'none', sampleCount: 0 };
 
-  let raw = await queryHeartRateSamples(window.start, window.end);
-  // N522/#934: the exact session window found NOTHING — before giving up
-  // and letting this land as `hr_source: 'none'`, try a wide-window fit.
-  // This is exactly the post-hoc-logged-session shape (design doc in
-  // `lib/hrWindowFit.ts`): the exact window can be wrong even though the
-  // watch has real evidence nearby the same day. A session whose exact
-  // window DID find samples never reaches this — the fit only ever
-  // FALLS BACK, it never overrides a plain read that already worked.
-  let windowOverride: { start: string; end: string } | null = null;
-  if (raw.length === 0) {
-    const wide = wideHRQueryWindow(session.started_at);
-    const wideRaw = await queryHeartRateSamples(wide.start, wide.end);
-    const durationMs = window.end.getTime() - window.start.getTime();
-    const fit = fitHRWindow(
-      wideRaw.map((s) => ({ measuredAt: s.measuredAt, bpm: s.value })),
-      durationMs,
-      // `window.start`/`window.end` rather than `session.started_at`/
-      // `session.ended_at` directly — identical values (sessionHRWindow
-      // just parses them to Date), but already known non-null here (the
-      // `if (!window) return` above), where the session's own field is
-      // still typed `string | null`.
-      { start: window.start.toISOString(), end: window.end.toISOString() },
-    );
-    if (fit) {
-      const fitStartMs = new Date(fit.start).getTime();
-      const fitEndMs = new Date(fit.end).getTime();
-      raw = wideRaw.filter((s) => {
-        const t = new Date(s.measuredAt).getTime();
-        return t >= fitStartMs && t <= fitEndMs;
-      });
-      // Only claim the fit as the query window once it actually produced
-      // real samples to upload — an empty intersection here would mean
-      // the fit and the filter disagree, which should not happen but
-      // must not silently claim an override with nothing behind it.
-      if (raw.length > 0) windowOverride = { start: fit.start, end: fit.end };
-    }
-  }
+  const { raw, windowOverride, coverage } = await readSessionHR(window, session.started_at);
 
   const samples = raw.map((s) => toBiometricSample(s, 'heart_rate', 'healthkit'));
   const plan = planHRSync(samples);
@@ -463,8 +440,8 @@ async function enrichSessionWindow(
   // it sees zero heart_rate samples for the window. N511/#893's fix is
   // reading THAT back (`metrics.hr_source` below) rather than — as the
   // pre-N511 code did — ignoring the response and marking the ledger
-  // "done" unconditionally. `windowOverride` (N522/#934) is null on
-  // every path except a trusted wide-window fit — see above.
+  // "done" unconditionally. `windowOverride` is null whenever the
+  // session's own window was the one read — see `readSessionHR`.
   const metrics = await computeSessionMetrics(
     getToken,
     session.id,
@@ -474,8 +451,130 @@ async function enrichSessionWindow(
     windowOverride,
   );
   const hrSource = metrics.hr_source === 'window' ? 'window' : 'none';
-  await recordBiometricHRAttempt(userID, session.id, hrSource, now);
+  await recordBiometricHRAttempt(userID, session.id, hrSource, coverage, now);
   return { hrSource, sampleCount: metrics.sample_count };
+}
+
+/**
+ * Which window this session's heart rate is actually read from, and what
+ * came back — W19/#985. Four sources, tried in this order, each falling
+ * through only when the one before it produced nothing worth keeping:
+ *
+ * 1. **The watch's own workout**, when the store holds one that plausibly
+ *    IS this session (`lib/hrWorkoutWindow.ts`) **and the heart rate inside
+ *    it actually covers it**. A measurement of when training happened beats
+ *    a pair of typed times with nothing to score — but only when there is
+ *    something behind it. A workout with THIN heart rate is held as a
+ *    fallback rather than winning outright, because the same workout would
+ *    win again on every later pass and the session would go permanently
+ *    wrong on it, which is the failure this whole ticket exists to close.
+ * 2. **The session's own logged window** — unchanged, and still the answer
+ *    for every live-tracked session, which is most of them.
+ * 3. **A ±20-minute padded search, FIT** (`paddedHRSearchWindow` +
+ *    `fitHRWindow`). Padding alone would make the incident worse rather
+ *    than better — see `lib/hrWorkoutWindow.ts`'s doc comment — so the
+ *    padded window is only ever searched, never averaged.
+ * 4. **N522/#934's dated-day search, fit the same way**, for the badly
+ *    mistyped case the ±20 minutes cannot reach.
+ *
+ * **Steps 3 and 4 now also run when the session's own window returned
+ * samples that do not COVER it** — not only when it returned nothing, as
+ * before N522. That is the incident exactly: 469 real samples, all of them
+ * from before the class started. A fit is kept only if what it finds
+ * actually covers the session; otherwise the session's own window's result
+ * stands, because replacing thin evidence with different thin evidence is
+ * churn, not a fix.
+ *
+ * Every read here is a local Health query on a background pass with no
+ * latency budget (see this module's own doc comment). The added cost is
+ * paid only by sessions that are already going wrong: a session whose own
+ * window is densely covered — the ordinary case — costs one workout query
+ * and one heart-rate query, and never reaches steps 3 or 4.
+ */
+type SessionHR = {
+  raw: Awaited<ReturnType<typeof queryHeartRateSamples>>;
+  windowOverride: { start: string; end: string } | null;
+  coverage: Exclude<HRCoverage, 'unknown'>;
+};
+
+async function readSessionHR(
+  window: { start: Date; end: Date },
+  sessionStartedAt: string,
+): Promise<SessionHR> {
+  const durationMs = window.end.getTime() - window.start.getTime();
+  const anchor = { start: window.start.toISOString(), end: window.end.toISOString() };
+  const coverageOf = (w: { start: string; end: string }, samples: readonly { measuredAt: string }[]) =>
+    hrSampleCoverage(w.start, w.end, samples.map((x) => x.measuredAt));
+
+  // 1. the watch's own workout
+  const search = workoutSearchWindow(window.start, window.end);
+  const workout = selectWorkoutWindow(window.start, window.end, await queryWorkoutWindows(search.start, search.end));
+  // A workout the store knows about but holds no heart rate for tells us
+  // WHEN, not WHAT — fall through rather than record an empty override.
+  //
+  // And one whose heart rate does not COVER it is **this ticket's own bug
+  // wearing a better window**: real evidence, too thin to be the answer,
+  // and — because `selectWorkoutWindow` picks the same workout on every
+  // later pass — permanent once `RETRY_WINDOW_DAYS` runs out. Short-
+  // circuiting on `length > 0` alone would therefore throw away an
+  // already-dense reading of the session's own window that step 2 was
+  // about to find, in the same pass, for free. So a thin workout read is
+  // HELD as a fallback and the cheaper sources are still tried; only a
+  // plausible one wins outright.
+  let workoutFallback: SessionHR | null = null;
+  if (workout) {
+    const workoutRaw = await queryHeartRateSamples(new Date(workout.start), new Date(workout.end));
+    if (workoutRaw.length > 0) {
+      const workoutCoverage = coverageOf(workout, workoutRaw);
+      if (workoutCoverage === 'plausible') {
+        return { raw: workoutRaw, windowOverride: workout, coverage: workoutCoverage };
+      }
+      workoutFallback = { raw: workoutRaw, windowOverride: workout, coverage: workoutCoverage };
+    }
+  }
+
+  // 2. the session's own logged window
+  const exact = await queryHeartRateSamples(window.start, window.end);
+  const exactCoverage = coverageOf(anchor, exact);
+  if (exact.length > 0 && exactCoverage === 'plausible') {
+    return { raw: exact, windowOverride: null, coverage: exactCoverage };
+  }
+
+  // 3 and 4. search wider, and FIT — never average
+  const padded = paddedHRSearchWindow(window.start, window.end);
+  const wide = wideHRQueryWindow(sessionStartedAt);
+  for (const searchWindow of [padded, wide]) {
+    const searched = await queryHeartRateSamples(searchWindow.start, searchWindow.end);
+    const fit = fitHRWindow(
+      searched.map((x) => ({ measuredAt: x.measuredAt, bpm: x.value })),
+      durationMs,
+      anchor,
+    );
+    if (!fit) continue;
+    const fitStartMs = new Date(fit.start).getTime();
+    const fitEndMs = new Date(fit.end).getTime();
+    const fitted = searched.filter((x) => {
+      const t = new Date(x.measuredAt).getTime();
+      return t >= fitStartMs && t <= fitEndMs;
+    });
+    // Only claim the fit as the query window once it actually produced real
+    // samples that cover the session. An empty intersection would mean the
+    // fit and the filter disagree; a thin one would be a different wrong
+    // answer replacing this one, which is not an improvement worth an
+    // override.
+    if (fitted.length === 0) continue;
+    const fitCoverage = coverageOf(fit, fitted);
+    if (fitCoverage !== 'plausible') continue;
+    return { raw: fitted, windowOverride: { start: fit.start, end: fit.end }, coverage: fitCoverage };
+  }
+
+  // Nothing covered the session. Between two thin answers the watch's own
+  // workout still wins: it is a MEASUREMENT of when training happened where
+  // the logged window is a pair of typed times. Both are `'thin'` either
+  // way, so this decides which numbers the athlete sees meanwhile, never
+  // whether the session gets looked at again.
+  if (workoutFallback) return workoutFallback;
+  return { raw: exact, windowOverride: null, coverage: exactCoverage };
 }
 
 /**
@@ -527,27 +626,34 @@ export async function enrichSessionNow(
  * retried session (its previous attempt was `'none'`) must overwrite that
  * row with the new attempt's outcome and timestamp, not silently no-op the
  * way `OR IGNORE` would have.
+ *
+ * `coverage` (W19/#985) is written on EVERY attempt, including one that
+ * found nothing — a row whose coverage is stale is a row whose terminality
+ * is stale, and `needsEnrichmentAttempt` reads this column to decide it.
  */
 async function recordBiometricHRAttempt(
   userID: string,
   sessionID: string,
   hrSource: 'window' | 'none',
+  coverage: Exclude<HRCoverage, 'unknown'>,
   now: Date,
 ): Promise<void> {
   const db = await getDb();
   const nowISO = now.toISOString();
   await db.runAsync(
-    `INSERT INTO biometric_hr_synced (user_id, session_id, synced_at, hr_source, attempted_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO biometric_hr_synced (user_id, session_id, synced_at, hr_source, attempted_at, coverage)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, session_id) DO UPDATE SET
        synced_at = excluded.synced_at,
        hr_source = excluded.hr_source,
-       attempted_at = excluded.attempted_at`,
+       attempted_at = excluded.attempted_at,
+       coverage = excluded.coverage`,
     userID,
     sessionID,
     nowISO,
     hrSource,
     nowISO,
+    coverage,
   );
 }
 

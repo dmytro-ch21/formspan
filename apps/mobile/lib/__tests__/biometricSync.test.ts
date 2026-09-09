@@ -41,9 +41,34 @@ let mockVO2MaxSamples: HealthKitQuantitySample[] = [];
 // is a real but different bug (an unnecessary HealthKit query, not an
 // incorrect override). This spy lets the test assert the CALL itself never
 // happened.
-const mockQueryHeartRateSamples = jest.fn((start: Date, end: Date) =>
-  Promise.resolve(end.getTime() - start.getTime() > WIDE_SPAN_THRESHOLD_MS ? mockWideHRSamples : mockHRSamples),
-);
+/**
+ * W19/#985 — an opt-in, more literal fake: a STORE of readings that every
+ * query filters by its own window, instead of the span-length switch above.
+ *
+ * The span switch models two windows (exact vs. dated-day) and cannot model
+ * four (the watch's own workout, the exact window, the ±20-minute padded
+ * search, the dated day) — several of which have similar spans. Tests that
+ * care WHICH window was asked about set this; every test written before this
+ * ticket leaves it null and keeps the original behaviour exactly.
+ */
+let mockHRStore: HealthKitQuantitySample[] | null = null;
+const mockQueryHeartRateSamples = jest.fn((start: Date, end: Date) => {
+  if (mockHRStore) {
+    return Promise.resolve(
+      mockHRStore.filter((s) => {
+        const t = new Date(s.measuredAt).getTime();
+        return t >= start.getTime() && t <= end.getTime();
+      }),
+    );
+  }
+  return Promise.resolve(end.getTime() - start.getTime() > WIDE_SPAN_THRESHOLD_MS ? mockWideHRSamples : mockHRSamples);
+});
+/** W19/#985 — what HealthKit's workout store holds for this pass. `[]` (the
+ *  default) is "the watch knows no workout", which is the pre-W19 shape and
+ *  keeps every test written before this ticket asking about the session's
+ *  own window. */
+let mockWorkoutWindows: { start: string; end: string }[] = [];
+const mockQueryWorkoutWindows = jest.fn((_start: Date, _end: Date) => Promise.resolve(mockWorkoutWindows));
 jest.mock('../healthkit', () => {
   const real = jest.requireActual('../healthkit');
   return {
@@ -51,6 +76,7 @@ jest.mock('../healthkit', () => {
     isHealthKitSupported: () => mockSupported,
     queryHeartRateSamples: (start: Date, end: Date) => mockQueryHeartRateSamples(start, end),
     queryVO2MaxSamples: () => Promise.resolve(mockVO2MaxSamples),
+    queryWorkoutWindows: (start: Date, end: Date) => mockQueryWorkoutWindows(start, end),
   };
 });
 
@@ -96,12 +122,37 @@ function hrSample(overrides: Partial<HealthKitQuantitySample> = {}): HealthKitQu
   };
 }
 
+/**
+ * A minute-by-minute reading across `[startISO, endISO]` — what a worn strap
+ * actually produces, and therefore what `hrSampleCoverage` (W19/#985) calls
+ * `'plausible'`.
+ *
+ * Several tests below predate that rule and used one or two samples as a
+ * stand-in for "real evidence exists". That is no longer the same thing: two
+ * readings in the middle of a 30-minute window are exactly the shape W19
+ * exists to keep RETRYABLE, so those tests now build their evidence with
+ * this instead. The behaviour each of them asserts is unchanged; only the
+ * fixture is now dense enough to still mean what its name says.
+ */
+function denseHRSamples(startISO: string, endISO: string, bpm = 150): HealthKitQuantitySample[] {
+  const start = new Date(startISO).getTime();
+  const end = new Date(endISO).getTime();
+  const out: HealthKitQuantitySample[] = [];
+  for (let t = start; t <= end; t += 60_000) {
+    out.push(hrSample({ uuid: `dense-${t}`, measuredAt: new Date(t).toISOString(), value: bpm }));
+  }
+  return out;
+}
+
 beforeEach(async () => {
   mockFixture = await migratedFixture();
   mockUuidSeq = 0;
   mockSupported = true;
   mockHRSamples = [];
   mockWideHRSamples = [];
+  mockWorkoutWindows = [];
+  mockHRStore = null;
+  mockQueryWorkoutWindows.mockClear();
   mockVO2MaxSamples = [];
   mockDateOfBirth = '1990-01-01';
   mockPutSamples.mockClear();
@@ -150,14 +201,17 @@ describe('syncBiometricEnrichment — gating', () => {
 
 describe('syncBiometricEnrichment — session heart-rate windows', () => {
   it('a session with real HR samples: uploads them, computes with hr_source window, and marks the ledger', async () => {
-    mockHRSamples = [hrSample({ uuid: 'hr-1' }), hrSample({ uuid: 'hr-2', value: 165 })];
+    // Dense across the whole session window (W19/#985) — see
+    // `denseHRSamples`: two readings would now be `'thin'` coverage, which
+    // is deliberately NOT terminal, and this test is about the terminal case.
+    mockHRSamples = denseHRSamples('2026-09-01T07:00:00.000Z', '2026-09-01T07:30:00.000Z');
     const session = await finishedSession();
 
     await syncBiometricEnrichment(USER, getToken);
 
     expect(mockPutSamples).toHaveBeenCalledTimes(1);
     const [, uploaded] = mockPutSamples.mock.calls[0];
-    expect(uploaded).toHaveLength(2);
+    expect(uploaded).toHaveLength(mockHRSamples.length);
     expect(uploaded[0].metric_type).toBe('heart_rate');
 
     expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
@@ -265,7 +319,9 @@ describe('syncBiometricEnrichment — session heart-rate windows', () => {
     );
     mockComputeMetrics.mockClear();
     mockPutSamples.mockClear();
-    mockHRSamples = [hrSample()]; // the Watch has now synced its data
+    // The Watch has now synced its data — densely, across the whole window,
+    // so this attempt's result is genuinely terminal (W19/#985).
+    mockHRSamples = denseHRSamples(recentStart.toISOString(), recentEnd.toISOString());
 
     await syncBiometricEnrichment(USER, getToken);
 
@@ -438,7 +494,11 @@ describe('syncBiometricEnrichment — wide-window HR fit fallback (N522/#934)', 
   });
 
   it('never runs the wide-window fallback when the exact window already found real samples', async () => {
-    mockHRSamples = [hrSample()];
+    // W19/#985: "real samples" now has to mean samples that COVER the
+    // window. A single reading no longer stops the fallback, and should not
+    // — see `hrSampleCoverage`. The property this test guards (the common,
+    // healthy path costs exactly one heart-rate query) is unchanged.
+    mockHRSamples = denseHRSamples('2026-09-01T07:00:00.000Z', '2026-09-01T07:30:00.000Z');
     mockWideHRSamples = samplesWithElevatedBlock('2026-09-01T18:00:00.000Z', '2026-09-01T19:00:00.000Z');
     await finishedSession();
 
@@ -455,6 +515,250 @@ describe('syncBiometricEnrichment — wide-window HR fit fallback (N522/#934)', 
       ([start, end]: [Date, Date]) => end.getTime() - start.getTime() > WIDE_SPAN_THRESHOLD_MS,
     );
     expect(ranAWideQuery).toBe(false);
+  });
+});
+
+/**
+ * W19/#985 — the incident, end to end, against the real SQLite ledger.
+ *
+ * A 90-minute class logged 18:41:48 → 20:11:48 whose heart rate Apple Health
+ * only holds for its first 37 minutes, because the strap's companion app had
+ * not written the class itself yet. Everything here is built from that
+ * measurement; see `lib/biometric.ts`'s `hrSampleCoverage` doc comment.
+ */
+describe('syncBiometricEnrichment — a thin result never becomes final (W19/#985)', () => {
+  // Recent, so RETRY_WINDOW_DAYS is never what decides anything below.
+  const sessionEnd = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const sessionStart = new Date(sessionEnd.getTime() - 90 * 60_000);
+  const startISO = sessionStart.toISOString();
+  const endISO = sessionEnd.toISOString();
+  const offset = (minutes: number) => new Date(sessionStart.getTime() + minutes * 60_000);
+
+  /** Once-a-minute background heart rate over `[fromMin, toMin]`, in the low
+   *  hundreds — the incident's real shape (85–125 bpm, not resting, not
+   *  training either). */
+  function backgroundHR(fromMin: number, toMin: number): HealthKitQuantitySample[] {
+    const out: HealthKitQuantitySample[] = [];
+    for (let m = fromMin; m <= toMin; m++) {
+      out.push(hrSample({ uuid: `bg-${m}`, measuredAt: offset(m).toISOString(), value: 104 }));
+    }
+    return out;
+  }
+
+  async function theSession() {
+    return finishedSession({ started_at: startISO, ended_at: endISO });
+  }
+
+  beforeEach(() => {
+    // The file-level default derives the server's answer from `mockHRSamples`,
+    // which these tests deliberately do not use (they drive `mockHRStore`, so
+    // that WHICH window was queried is what decides what comes back). Derive
+    // it from what was actually uploaded instead — same intent, right input.
+    mockComputeMetrics.mockImplementation((...args: unknown[]) => {
+      const uploaded = (mockPutSamples.mock.calls.at(-1)?.[1] as unknown[] | undefined) ?? [];
+      void args;
+      return Promise.resolve({
+        hr_source: uploaded.length > 0 ? 'window' : 'none',
+        sample_count: uploaded.length,
+      });
+    });
+  });
+
+  it('records the thin result but leaves the session retryable — the pre-class average is not the last word', async () => {
+    mockHRStore = backgroundHR(0, 37); // nothing at all for the last 53 minutes
+    const session = await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    // The result IS computed and stored — this is not "refuse to answer".
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    const [row] = await mockFixture.getAllAsync<{ hr_source: string; coverage: string }>(
+      `SELECT hr_source, coverage FROM biometric_hr_synced WHERE user_id = ? AND session_id = ?`,
+      USER,
+      session.id,
+    );
+    expect(row.hr_source).toBe('window');
+    expect(row.coverage).toBe('thin');
+
+    // ...and the session is still a candidate, which is the whole fix. Under
+    // the old rule this list was empty and stayed empty forever.
+    expect((await sessionsNeedingBiometricSync(USER, 10)).map((c) => c.id)).toEqual([session.id]);
+  });
+
+  it("picks the class up on a later pass once the strap has written it, and only THEN goes terminal", async () => {
+    mockHRStore = backgroundHR(0, 37);
+    const session = await theSession();
+    await syncBiometricEnrichment(USER, getToken);
+    mockComputeMetrics.mockClear();
+    mockPutSamples.mockClear();
+
+    // The companion app syncs: Apple Health now holds the class itself, as a
+    // workout AND as dense readings running 37 minutes late and 36 minutes
+    // past the logged end — the incident's real offsets.
+    const classStart = offset(37);
+    const classEnd = offset(125);
+    mockWorkoutWindows = [{ start: classStart.toISOString(), end: classEnd.toISOString() }];
+    mockHRStore = [
+      ...backgroundHR(0, 36),
+      ...Array.from({ length: 89 }, (_, i) =>
+        hrSample({ uuid: `class-${i}`, measuredAt: offset(37 + i).toISOString(), value: 126 + (i % 20) }),
+      ),
+    ];
+    // Past the hourly cooldown for a three-hour-old session.
+    await mockFixture.runAsync(
+      `UPDATE biometric_hr_synced SET attempted_at = ? WHERE user_id = ? AND session_id = ?`,
+      new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      USER,
+      session.id,
+    );
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockComputeMetrics).toHaveBeenCalledTimes(1);
+    const [, , , , hrSource, windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(hrSource).toBe('window');
+    // The WATCH's window, not the typed one — this is the whole second half
+    // of the ticket, and it is what makes the reported max the class's 185
+    // rather than the pre-class 125.
+    expect(windowOverride).toEqual({
+      start: classStart.toISOString(),
+      end: classEnd.toISOString(),
+    });
+    const uploaded = mockPutSamples.mock.calls[0][1];
+    expect(uploaded.every((x: { value: number }) => x.value >= 126)).toBe(true);
+
+    // Densely covered now, so it is finally terminal — no re-querying forever.
+    const [row] = await mockFixture.getAllAsync<{ coverage: string }>(
+      `SELECT coverage FROM biometric_hr_synced WHERE user_id = ? AND session_id = ?`,
+      USER,
+      session.id,
+    );
+    expect(row.coverage).toBe('plausible');
+    expect(await sessionsNeedingBiometricSync(USER, 10)).toEqual([]);
+  });
+
+  it("falls back to the session's own window when the store knows a workout but holds no heart rate for it", async () => {
+    // A workout record with nothing behind it tells us WHEN, not WHAT — a
+    // real shape on Android especially, where an app can write an exercise
+    // session without ever writing heart rate. The workout window is still
+    // ASKED about (it is the only way to find out), and then abandoned.
+    mockWorkoutWindows = [{ start: offset(37).toISOString(), end: offset(125).toISOString() }];
+    mockHRStore = [];
+    await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toBeFalsy();
+    const [firstStart, firstEnd] = mockQueryHeartRateSamples.mock.calls[0];
+    expect(firstStart.toISOString()).toBe(offset(37).toISOString());
+    expect(firstEnd.toISOString()).toBe(offset(125).toISOString());
+    const [secondStart] = mockQueryHeartRateSamples.mock.calls[1];
+    expect(secondStart.toISOString()).toBe(startISO);
+  });
+
+  it('a workout whose own heart rate is THIN never beats an already-dense read of the logged window', async () => {
+    // Found in review. A workout can pass both admission bars and still hold
+    // barely any heart rate — an app that wrote the exercise session while
+    // the strap was off for most of it. Preferring it on `length > 0` alone
+    // would throw away the dense answer step 2 finds in the SAME pass, and
+    // because `selectWorkoutWindow` picks that same workout again on every
+    // later pass, the session would never escape it: this ticket's own bug,
+    // reached through the fix for it.
+    //
+    // The workout starts 40 minutes before the session and ends 40 minutes
+    // before it does: 90 minutes long (similarity 1.0), 50 of them inside
+    // the logged window (overlap 0.56), so it is admitted. Health holds
+    // nothing before the logged start, so the workout's own window scores
+    // 6 + 50 + 0 = 56 of 90 minutes = 0.62 — thin. The logged window scores
+    // a flat 1.0.
+    mockWorkoutWindows = [{ start: offset(-40).toISOString(), end: offset(50).toISOString() }];
+    mockHRStore = Array.from({ length: 91 }, (_, m) =>
+      hrSample({ uuid: `dense-${m}`, measuredAt: offset(m).toISOString(), value: 150 }),
+    );
+    await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toBeFalsy();
+    const uploaded = mockPutSamples.mock.calls[0][1];
+    expect(uploaded).toHaveLength(91);
+    // ...and because the dense answer won, the session is properly terminal.
+    expect(await sessionsNeedingBiometricSync(USER, 10)).toEqual([]);
+  });
+
+  it('when the workout and the logged window are BOTH thin, the watch still wins — and the session stays retryable', async () => {
+    // The other half of the same rule. Neither answer covers the session, so
+    // neither is final either way; what this decides is which numbers the
+    // athlete sees meanwhile, and the workout is a measurement of when
+    // training happened where the logged window is a pair of typed times.
+    const workout = { start: offset(-40).toISOString(), end: offset(50).toISOString() };
+    mockWorkoutWindows = [workout];
+    mockHRStore = backgroundHR(0, 37);
+    const session = await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toEqual(workout);
+    const [row] = await mockFixture.getAllAsync<{ coverage: string }>(
+      `SELECT coverage FROM biometric_hr_synced WHERE user_id = ? AND session_id = ?`,
+      USER,
+      session.id,
+    );
+    expect(row.coverage).toBe('thin');
+    expect((await sessionsNeedingBiometricSync(USER, 10)).map((c) => c.id)).toEqual([session.id]);
+  });
+
+  it('a densely-covered session is terminal after ONE pass, and never queries anything wider', async () => {
+    // The ordinary case, and the regression this fix must not cause: no
+    // padded search, no dated-day search, one heart-rate query.
+    mockHRStore = Array.from({ length: 91 }, (_, m) =>
+      hrSample({ uuid: `dense-${m}`, measuredAt: offset(m).toISOString(), value: 150 }),
+    );
+    await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    expect(mockQueryHeartRateSamples).toHaveBeenCalledTimes(1);
+    expect(await sessionsNeedingBiometricSync(USER, 10)).toEqual([]);
+  });
+
+  it('W19: the ±20-minute padded search FITS rather than averages, when the logged start is 20 minutes late', async () => {
+    // No workout record at all — the fallback the ticket names, and the
+    // athlete's own suggested ±20 minutes is exactly what it takes to reach
+    // this class. The watch was worn from 20 minutes BEFORE the logged start
+    // and taken off 20 minutes before the logged end, so the logged window's
+    // own readings stop early: `hrSampleCoverage` calls that thin, which is
+    // what lets the fallback run at all.
+    mockWorkoutWindows = [];
+    const store: HealthKitQuantitySample[] = [];
+    for (let m = -20; m <= 0; m++) {
+      store.push(hrSample({ uuid: `warm-${m}`, measuredAt: offset(m).toISOString(), value: 62 }));
+    }
+    for (let m = 1; m <= 70; m++) {
+      // Real surges, not a flat block — the fit has its own high-intensity
+      // bar and a synthetic plateau would clear it for the wrong reason.
+      store.push(hrSample({ uuid: `roll-${m}`, measuredAt: offset(m).toISOString(), value: m % 7 === 0 ? 175 : 145 }));
+    }
+    mockHRStore = store;
+    await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).not.toBeFalsy();
+    expect(windowOverride.start).toBe(offset(-20).toISOString());
+    expect(windowOverride.end).toBe(offset(70).toISOString());
+
+    // The PADDED search is what found it — three heart-rate queries (the
+    // workout window is never asked about, there is no workout), and the
+    // dated-day search N522 added is never reached.
+    expect(mockQueryHeartRateSamples).toHaveBeenCalledTimes(2);
+    const [paddedStart, paddedEnd] = mockQueryHeartRateSamples.mock.calls[1];
+    expect(paddedStart.getTime()).toBe(sessionStart.getTime() - 20 * 60_000);
+    expect(paddedEnd.getTime()).toBe(sessionEnd.getTime() + 20 * 60_000);
   });
 });
 
@@ -479,12 +783,13 @@ describe('sessionsNeedingBiometricSync — SQL-level ledger exclusion (N511/#893
     // rather than 1. The assertion below still catches the mutation either
     // way (it pins the exact list, not merely membership); only the
     // mechanism the prose describes has changed.
-    mockHRSamples = [hrSample()];
+    mockHRSamples = denseHRSamples('2026-08-01T07:00:00.000Z', '2026-08-01T07:30:00.000Z');
     await finishedSession({ started_at: '2026-08-01T07:00:00.000Z', ended_at: '2026-08-01T07:30:00.000Z' });
     await syncBiometricEnrichment(USER, getToken);
     mockComputeMetrics.mockClear();
     mockPutSamples.mockClear();
 
+    mockHRSamples = denseHRSamples('2026-08-02T07:00:00.000Z', '2026-08-02T07:30:00.000Z');
     await finishedSession({ started_at: '2026-08-02T07:00:00.000Z', ended_at: '2026-08-02T07:30:00.000Z' });
     await syncBiometricEnrichment(USER, getToken);
     mockComputeMetrics.mockClear();

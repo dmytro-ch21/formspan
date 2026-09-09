@@ -22,8 +22,10 @@ import {
   ageInYears,
   chunkSamples,
   classifyHealthKitSource,
+  coverageFromLedger,
   heartRateSamplesInWindow,
   hrMaxFromDateOfBirth,
+  hrSampleCoverage,
   isWithinHealthConnectHistoryWall,
   needsEnrichmentAttempt,
   planHRSync,
@@ -258,6 +260,144 @@ describe('isWithinHealthConnectHistoryWall', () => {
   });
 });
 
+/**
+ * W19/#985 — the coverage rule. Every boundary below is pinned to the
+ * constants rather than to a literal, so a retune moves the fixture with the
+ * rule and a MUTATION of the constant moves only one of the two and fails.
+ * That is the point: see CLAUDE.md's "Verify that a check can fail" — the
+ * mutation results for each of these three constants are recorded in this
+ * ticket's `docs/decisions/history.md` entry.
+ */
+describe('hrSampleCoverage (W19/#985)', () => {
+  const MINUTE = 60_000;
+  const T0 = new Date('2026-09-08T22:41:48.000Z').getTime();
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  /** Readings once a minute across `[from, to]`, inclusive of both ends. */
+  function everyMinute(from: number, to: number): string[] {
+    const out: string[] = [];
+    for (let t = from; t <= to; t += MINUTE) out.push(iso(t));
+    return out;
+  }
+
+  /**
+   * **Every fixture below is a LITERAL, and that is the whole point.**
+   *
+   * A first version of these tests derived the hole size and the last
+   * reading's offset FROM the constants — which reads beautifully and cannot
+   * fail: mutate `HR_COVERAGE_MIN_FRACTION` and the fixture moves with it, so
+   * the assertion holds against the mutated rule. Measured, not argued: six
+   * mutations (all three constants, both directions) survived that version
+   * with 166/166 green. See CLAUDE.md's "Verify that a check can fail".
+   *
+   * So the arithmetic is spelled out in each comment instead, and the numbers
+   * are fixed. Retuning a constant deliberately therefore breaks these — which
+   * is exactly the alarm that was missing.
+   */
+
+  const D = 100 * MINUTE;
+
+  it('is plausible exactly AT the covered-fraction bar — the bar is inclusive', () => {
+    // 100-minute window, read once a minute except for a 31-minute hole.
+    // Covered = 34 (first block) + 6 (the hole, capped at HR_COVERAGE_MAX_GAP_MS)
+    //         + 35 (second block) = 75 of 100 minutes = 0.75 exactly.
+    const times = [...everyMinute(T0, T0 + 34 * MINUTE), ...everyMinute(T0 + 65 * MINUTE, T0 + D)];
+    expect(hrSampleCoverage(iso(T0), iso(T0 + D), times)).toBe('plausible');
+  });
+
+  it('is thin one minute of coverage BELOW the bar — nothing else about the window differs', () => {
+    // The same window with a 32-minute hole: 34 + 6 + 34 = 74 of 100 = 0.74.
+    const times = [...everyMinute(T0, T0 + 34 * MINUTE), ...everyMinute(T0 + 66 * MINUTE, T0 + D)];
+    expect(hrSampleCoverage(iso(T0), iso(T0 + D), times)).toBe('thin');
+  });
+
+  it('is plausible when the last reading sits exactly ON the trailing-gap bar', () => {
+    // Last reading 10 minutes before the window ends. Covered is 96 of 100
+    // here, far clear of the fraction bar, so the trailing-gap rule is the
+    // only thing this pair can be measuring.
+    const times = everyMinute(T0, T0 + 90 * MINUTE);
+    expect(hrSampleCoverage(iso(T0), iso(T0 + D), times)).toBe('plausible');
+  });
+
+  it('is thin one minute past the trailing-gap bar', () => {
+    // Last reading 11 minutes before the end. Still 95 of 100 covered, so the
+    // fraction rule would pass this — the gap rule is what refuses it.
+    const times = everyMinute(T0, T0 + 89 * MINUTE);
+    expect(hrSampleCoverage(iso(T0), iso(T0 + D), times)).toBe('thin');
+  });
+
+  it('counts one gap for at most six minutes — the backend attributes zone time the same way', () => {
+    // Two readings, one on each window edge, so covered time IS the cap.
+    // An 8-minute window: 6 of 8 = 0.75, exactly the bar.
+    expect(hrSampleCoverage(iso(T0), iso(T0 + 8 * MINUTE), [iso(T0), iso(T0 + 8 * MINUTE)])).toBe(
+      'plausible',
+    );
+    // A 9-minute window: still 6 covered, now 0.67 — which it would NOT be if
+    // one gap could count for more than six minutes.
+    expect(hrSampleCoverage(iso(T0), iso(T0 + 9 * MINUTE), [iso(T0), iso(T0 + 9 * MINUTE)])).toBe('thin');
+  });
+
+  it('credits the stretch before the FIRST reading, up to the same cap', () => {
+    // A 10-minute window first read at minute 6: 6 (head, capped) + 4 = 10 of
+    // 10. Without this, a short session read at a perfectly ordinary cadence
+    // scores thin purely because coverage was measured only BETWEEN readings.
+    expect(hrSampleCoverage(iso(T0), iso(T0 + 10 * MINUTE), everyMinute(T0 + 6 * MINUTE, T0 + 10 * MINUTE))).toBe(
+      'plausible',
+    );
+  });
+
+  it('credits the stretch after the LAST reading, up to the same cap', () => {
+    // The mirror: last read at minute 4, so 4 + 6 (tail, capped) = 10 of 10.
+    expect(hrSampleCoverage(iso(T0), iso(T0 + 10 * MINUTE), everyMinute(T0, T0 + 4 * MINUTE))).toBe(
+      'plausible',
+    );
+  });
+
+  it("reproduces the incident: 469 readings that stop 53 minutes before the window ends", () => {
+    // Session 18:41:48 -> 20:11:48 local (90 minutes, `started_at + 90m` to
+    // the millisecond). Apple Health held readings only between 18:41 and
+    // 19:18 — one a minute, with an eight-minute burst of 1/s in the middle
+    // — and nothing at all afterwards. See `hrSampleCoverage`'s own doc
+    // comment for the full measurement.
+    const windowEnd = T0 + 90 * MINUTE;
+    const times = everyMinute(T0, T0 + 37 * MINUTE);
+    for (let t = T0 + 20 * MINUTE; t < T0 + 28 * MINUTE; t += 1000) times.push(iso(t));
+    expect(times.length).toBeGreaterThan(400); // the real incident's 469
+    expect(hrSampleCoverage(iso(T0), iso(windowEnd), times)).toBe('thin');
+  });
+
+  it('a densely-read session is plausible on the first pass — the ordinary case is still terminal at once', () => {
+    const times = everyMinute(T0, T0 + 90 * MINUTE);
+    expect(hrSampleCoverage(iso(T0), iso(T0 + 90 * MINUTE), times)).toBe('plausible');
+  });
+
+  it('ignores readings outside the window rather than crediting them as coverage', () => {
+    const windowEnd = T0 + 90 * MINUTE;
+    const times = [...everyMinute(T0, T0 + 20 * MINUTE), ...everyMinute(windowEnd + MINUTE, windowEnd + 90 * MINUTE)];
+    expect(hrSampleCoverage(iso(T0), iso(windowEnd), times)).toBe('thin');
+  });
+
+  it('is thin with no readings at all, and plausible for a zero-length window', () => {
+    expect(hrSampleCoverage(iso(T0), iso(T0 + 90 * MINUTE), [])).toBe('thin');
+    // Nothing there to under-cover; answering 'thin' would make such a row
+    // retry for RETRY_WINDOW_DAYS while never being able to improve.
+    expect(hrSampleCoverage(iso(T0), iso(T0), [iso(T0)])).toBe('plausible');
+  });
+});
+
+describe('coverageFromLedger (W19/#985)', () => {
+  it('reads the two real values through, and everything else as unknown', () => {
+    expect(coverageFromLedger('plausible')).toBe('plausible');
+    expect(coverageFromLedger('thin')).toBe('thin');
+    // The migration's own backfill value, a NULL column on a device that
+    // somehow skipped it, and anything a future writer might put there.
+    expect(coverageFromLedger('unknown')).toBe('unknown');
+    expect(coverageFromLedger(null)).toBe('unknown');
+    expect(coverageFromLedger(undefined)).toBe('unknown');
+    expect(coverageFromLedger('window')).toBe('unknown');
+  });
+});
+
 describe('needsEnrichmentAttempt', () => {
   const now = new Date('2026-09-10T12:00:00.000Z');
 
@@ -269,9 +409,58 @@ describe('needsEnrichmentAttempt', () => {
     expect(needsEnrichmentAttempt({ endedAt: '2026-09-10T08:00:00.000Z' }, undefined, now)).toBe(true);
   });
 
-  it("is false once real evidence ('window') has been recorded — terminal, never retried", () => {
-    const ledger: EnrichmentLedgerEntry = { hrSource: 'window', attemptedAt: '2026-09-01T00:00:00.000Z' };
-    expect(needsEnrichmentAttempt({ endedAt: '2026-09-01T08:00:00.000Z' }, ledger, now)).toBe(false);
+  it("is false once a COVERED 'window' result has been recorded — terminal, never retried", () => {
+    // Deliberately a RECENT session, unlike the version of this test that
+    // predated W19/#985: the old one used a session nine days old, so
+    // `RETRY_WINDOW_DAYS` was making it false regardless of what the
+    // `'window'` check did — the assertion could not have failed if the
+    // terminal rule were deleted outright. Two hours old isolates the rule
+    // actually under test.
+    const endedAt = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const ledger: EnrichmentLedgerEntry = {
+      hrSource: 'window',
+      coverage: 'plausible',
+      attemptedAt: new Date(now.getTime() - 60 * 60 * 1000).toISOString(),
+    };
+    expect(needsEnrichmentAttempt({ endedAt }, ledger, now)).toBe(false);
+  });
+
+  it("W19/#985: a 'window' result whose evidence was THIN stays retryable, on the ordinary cadence", () => {
+    // The incident: 469 real samples, every one of them from before the
+    // class began, recorded as `hr_source: 'window'` and therefore
+    // permanently final. It is now retryable — and via the SAME ladder a
+    // `'none'` result uses, not a special one.
+    const endedAt = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString();
+    const past = { hrSource: 'window' as const, coverage: 'thin' as const };
+    const stale = new Date(now.getTime() - (RETRY_COOLDOWN_HOURS + 1) * 60 * 60 * 1000).toISOString();
+    const fresh = new Date(now.getTime() - 60_000).toISOString();
+
+    expect(needsEnrichmentAttempt({ endedAt }, { ...past, attemptedAt: stale }, now)).toBe(true);
+    // ...and it is not exempt from the cooldown either: a thin result is
+    // still a result, not a licence to re-query on every foreground return.
+    expect(needsEnrichmentAttempt({ endedAt }, { ...past, attemptedAt: fresh }, now)).toBe(false);
+  });
+
+  it(`W19/#985: a THIN 'window' result stops being retried past RETRY_WINDOW_DAYS, exactly like 'none'`, () => {
+    const endedAt = new Date(
+      now.getTime() - (RETRY_WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const attemptedAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const ledger: EnrichmentLedgerEntry = { hrSource: 'window', coverage: 'thin', attemptedAt };
+    expect(needsEnrichmentAttempt({ endedAt }, ledger, now)).toBe(false);
+  });
+
+  it("W19/#985: a pre-W19 row (no coverage recorded) is retryable, not grandfathered as final", () => {
+    // The upgrade path. A device that enriched the incident's session under
+    // the old rule holds exactly this row, and the whole point of the
+    // migration's `'unknown'` default is that it gets one more honest look
+    // rather than staying wrong forever.
+    const endedAt = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString();
+    const attemptedAt = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    expect(needsEnrichmentAttempt({ endedAt }, { hrSource: 'window', attemptedAt }, now)).toBe(true);
+    expect(
+      needsEnrichmentAttempt({ endedAt }, { hrSource: 'window', coverage: 'unknown', attemptedAt }, now),
+    ).toBe(true);
   });
 
   it(`is true for a fresh 'none' result within the retry window and past the cooldown`, () => {
