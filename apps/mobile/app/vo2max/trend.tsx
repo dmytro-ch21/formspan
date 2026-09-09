@@ -11,15 +11,15 @@ import { isHealthConnectSupported } from '@/lib/healthConnect';
 import { readHealthConnectImportEnabled } from '@/lib/healthConnectSync';
 import { isHealthKitSupported } from '@/lib/healthkit';
 import {
-  type HealthSource,
   VO2MAX_FETCH_DAYS,
   healthSourceFor,
-  healthSourceLabel,
+  vo2MaxEmptyCopy,
+  vo2MaxRanges,
   vo2MaxScreenState,
   vo2MaxStateCopy,
 } from '@/lib/vo2MaxSource';
 import { readHealthKitImportEnabled } from '@/lib/healthkitSync';
-import { RANGES, type TrendEmpty, type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
+import { type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useVo2MaxTrend } from '@/lib/useVo2MaxTrend';
 
@@ -34,9 +34,11 @@ import { useVo2MaxTrend } from '@/lib/useVo2MaxTrend';
  * The carve-out (CLAUDE.md "Which platform gets a feature") allows a small
  * read-only chart on the phone when it answers ONE question with no metric
  * picker and preset windows that all end today. This screen shows exactly
- * one series (VO₂max), no picker, and `RANGES` minus `Plan` — `Plan`
- * presupposes a nutrition/weight phase this metric has nothing to do with,
- * so it is filtered out rather than shown and left meaningless.
+ * one series (VO₂max), no picker, and the fixed windows that fit inside
+ * what this screen actually fetches (`vo2MaxRanges`) — `Plan` presupposes a
+ * nutrition/weight phase this metric has nothing to do with, and `All`
+ * promised more than the samples endpoint's cap can deliver (F34), so
+ * neither is shown and left meaningless.
  *
  * ## Why there is no goal line and no projection
  *
@@ -62,7 +64,21 @@ const FETCH_DAYS = VO2MAX_FETCH_DAYS;
  *  otherwise divide by zero — see `TrendChart`'s own `minSpan` doc. */
 const MIN_SPAN = 2;
 
-const VO2MAX_RANGES = RANGES.filter((r) => r.key !== 'Plan');
+/**
+ * F34/#955 — was `RANGES.filter((r) => r.key !== 'Plan')`, which left `All`
+ * on a screen that fetches at most `VO2MAX_FETCH_DAYS` + slack: `All` showed
+ * roughly the last thirteen months under a label promising everything. The
+ * offered set is now DERIVED from the fetch window in `lib/vo2MaxSource.ts`,
+ * so a preset the hook does not fetch cannot appear here — see that
+ * function's doc comment for why relabelling was chosen over paging or a
+ * per-metric cap raise.
+ */
+const VO2MAX_RANGES = vo2MaxRanges();
+
+/** The widest preset on offer — read off the derived list rather than written
+ *  down, so the "try a wider one" invitation in `vo2MaxEmptyCopy` cannot
+ *  outlive the range that used to satisfy it. */
+const WIDEST_RANGE = VO2MAX_RANGES[VO2MAX_RANGES.length - 1]?.key;
 
 export default function Vo2MaxTrendScreen() {
   const getToken = useAuthToken();
@@ -192,7 +208,7 @@ export default function Vo2MaxTrendScreen() {
 
             {series.empty ? (
               <Text style={styles.empty} testID="vo2max-empty">
-                {vo2MaxEmptyCopy(series.empty, source)}
+                {vo2MaxEmptyCopy(series.empty, source, range !== WIDEST_RANGE)}
               </Text>
             ) : (
               <TrendChart
@@ -217,32 +233,6 @@ export default function Vo2MaxTrendScreen() {
       </ScrollView>
     </>
   );
-}
-
-/**
- * The read-only sibling of `emptyCopy` in `components/TrendCard.tsx`.
- *
- * Not reused directly: that function's `none` case reads "Record your X and
- * the trend appears here", which presumes the athlete logs the metric by
- * hand. Nobody records a VO2max — it is read from a device — so the honest
- * sentence names WHAT to do about it (a capable device, HealthKit sync)
- * rather than an action this screen has no control to offer.
- */
-function vo2MaxEmptyCopy(empty: TrendEmpty, source: HealthSource | null): string {
-  switch (empty.kind) {
-    case 'unavailable':
-      return "Couldn't load your VO2max trend. It'll be here when the connection is back.";
-    case 'none':
-      // W16/#945 — names the source THIS device reads from; "Apple Watch …
-      // Health" on an Android phone was a sentence about somebody else's device.
-      return `No VO2max reading yet. A watch or another device that estimates it needs to have written one to ${source ? healthSourceLabel(source) : 'your health app'}.`;
-    case 'none-in-range':
-      return `Nothing in this range — you have ${empty.totalReadings} ${
-        empty.totalReadings === 1 ? 'reading' : 'readings'
-      } further back. Try a wider one.`;
-    case 'too-few':
-      return `${empty.have} of ${empty.need} readings needed for a trend line.`;
-  }
 }
 
 /** The readings behind the chart, newest first — the identical pattern

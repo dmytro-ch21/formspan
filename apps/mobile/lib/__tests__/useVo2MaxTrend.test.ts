@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react-native';
 import { useVo2MaxTrend } from '../useVo2MaxTrend';
-import { SERVER_MAX_LIST_RANGE_DAYS, VO2MAX_FETCH_DAYS } from '../vo2MaxSource';
+import { RANGE_DAYS } from '../trendSeries';
+import { SERVER_MAX_LIST_RANGE_DAYS, VO2MAX_FETCH_DAYS, vo2MaxRanges } from '../vo2MaxSource';
 
 /**
  * W16/#945 — what `useVo2MaxTrend` actually SENDS.
@@ -41,11 +42,31 @@ describe('useVo2MaxTrend — the request the server will accept', () => {
 
   it('stays under the cap even when a caller asks for the old three years', async () => {
     // The screen used to pass `365 * 3`. The helper clamps; the hook must not
-    // route around it.
-    renderHook(() => useVo2MaxTrend(getToken, 'All', 365 * 3));
+    // route around it. (`1Y`, not `All`: F34/#955 took `All` off this screen
+    // because a capped fetch cannot honour an unbounded label.)
+    renderHook(() => useVo2MaxTrend(getToken, '1Y', 365 * 3));
     await waitFor(() => expect(mockList).toHaveBeenCalled());
     const [, , from, to] = mockList.mock.calls[0] as [unknown, string, string, string];
     expect((Date.parse(to) - Date.parse(from)) / 86_400_000).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
+  });
+
+  it('fetches back far enough to fill the WIDEST range the screen offers', async () => {
+    // F34/#955 — the other direction of the same drift, and the one the old
+    // test could not see: staying under the cap says nothing about whether the
+    // window covers the chips. `All` was offered on a fetch that could not
+    // reach the athlete's first reading, so it showed ~13 months under a label
+    // meaning everything. This asserts the invariant that replaced it — every
+    // preset on screen is entirely inside what was actually requested — and it
+    // goes red if either the offered set widens or the fetch narrows.
+    const widest = vo2MaxRanges().at(-1)!.key as keyof typeof RANGE_DAYS;
+    renderHook(() => useVo2MaxTrend(getToken, widest, VO2MAX_FETCH_DAYS));
+    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    const [, , from, to] = mockList.mock.calls[0] as [unknown, string, string, string];
+    const fetchedDays = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+    expect(fetchedDays).toBeGreaterThanOrEqual(RANGE_DAYS[widest]);
+    // ...and still under the cap, so the two constraints hold at once rather
+    // than one being satisfied by breaking the other.
+    expect(fetchedDays).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
   });
 
   it('exposes the fetched samples and settles loading', async () => {
