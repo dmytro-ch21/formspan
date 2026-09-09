@@ -57,33 +57,61 @@ updates:
   # package.json files through the shared workspace.
   #
   # Groups substitute for the "one PR series per app" shape the ticket asked
-  # for, since a single ecosystem entry has no per-directory grouping: mobile
-  # (Expo/React Native) dependencies are named distinctly enough from
+  # for, since a single ecosystem entry has no per-directory grouping.
+  #
+  # H21 (#1005) — THIS COMMENT USED TO CLAIM the separation was complete:
+  # "mobile (Expo/React Native) dependencies are named distinctly enough from
   # web/admin's (Next.js) that a name-pattern group reaches the same
-  # separation the three-directory design was going for.
+  # separation the three-directory design was going for." That is false for
+  # every package BOTH apps declare, and it shipped a real hazard: #928
+  # arrived titled "web-and-admin-dependencies" while bumping `react` inside
+  # `apps/mobile` from 19.2.3 to 19.2.8. Expo SDK 57 pins React at 19.2.3, so
+  # it failed `check-expo-compat` — the check that exists because of the
+  # 2026-08-09 dyld symbol-not-found abort that killed every installed build
+  # before any JS ran.
+  #
+  # The deeper point, and the reason NO grouping change can fix it:
+  # **Dependabot groups a DEPENDENCY, not a (dependency, directory) pair.**
+  # One npm entry over one pnpm workspace means a `react` update is a SINGLE
+  # update that rewrites every package.json declaring react. Mobile's react
+  # and web's react are not two updates that could be sorted into two groups;
+  # they are one update. Reordering patterns, adding `exclude-patterns`, or
+  # moving `react` into `mobile-dependencies` all just relabel that one PR.
+  #
+  # So the shared, framework-pinned packages are `ignore`d outright below.
+  # Package names that belong to exactly ONE app are still separable, and
+  # grouping is the right tool for those — hence `@clerk/clerk-expo` moving
+  # to the mobile group (matched first; a dependency joins the FIRST group
+  # whose patterns match, so definition order is load-bearing here).
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
     groups:
+      # FIRST, deliberately: a dependency joins the first group it matches, so
+      # `@clerk/clerk-expo` must be claimed here before `@clerk/*` below sees
+      # it. It is a mobile-only package name, so grouping genuinely separates
+      # it — unlike react/react-dom, which both apps declare.
       mobile-dependencies:
         patterns:
           - "expo*"
           - "@expo/*"
           - "react-native*"
           - "@react-native*"
+          - "@clerk/clerk-expo"
         update-types: ["minor", "patch"]
       web-and-admin-dependencies:
         patterns:
           - "next"
-          - "react"
-          - "react-dom"
-          - "@types/react"
-          - "@types/react-dom"
           - "@clerk/*"
           - "tailwindcss"
           - "@tailwindcss/*"
+        # Redundant with `mobile-dependencies` being matched first, and kept
+        # anyway: it states the intent locally, so reordering the groups
+        # cannot silently drag the Expo Clerk package back in here.
+        exclude-patterns:
+          - "@clerk/clerk-expo"
         update-types: ["minor", "patch"]
       dev-tooling:
         patterns:
@@ -94,6 +122,30 @@ updates:
           - "@testing-library/*"
           - "@redocly/*"
         update-types: ["minor", "patch"]
+    # H21 (#1005). React is pinned by a FRAMEWORK on both surfaces — Expo SDK
+    # 57 pins `apps/mobile` at 19.2.3, Next pins web/admin — and Dependabot
+    # cannot bump one without the other (see the long note above). Between
+    # "mobile silently drifts off the Expo pin" and "web React is bumped by
+    # hand alongside `next`", only the second is safe: the first is the
+    # launch-abort class `check-expo-compat` exists to catch.
+    #
+    # `apps/mobile`'s React moves via `pnpm --dir apps/mobile exec expo
+    # install --fix`, never here. `apps/web`/`apps/admin` React moves with
+    # their `next` bump, which still arrives in `web-and-admin-dependencies`.
+    #
+    # Deliberately NOT solved with a `directories:` split, which is the
+    # obvious alternative and is unverifiable before it ships: Dependabot
+    # reads this file only from the DEFAULT branch, so a split cannot be
+    # tested on a PR. If member directories did not resolve against the one
+    # root `pnpm-lock.yaml`, npm updates would simply STOP — silently, with
+    # no failing check anywhere, which is this repo's own "absence is not
+    # evidence" trap aimed at supply-chain hygiene. A weekly red PR is a much
+    # better failure than an updater that quietly stopped.
+    ignore:
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "@types/react"
+      - dependency-name: "@types/react-dom"
     labels: ["dependencies"]
 
   # --- .github/workflows/ (Actions used by CI, including the ones this
