@@ -1,10 +1,17 @@
 import { Pressable, StyleSheet, View as RNView } from 'react-native';
-import Svg, { Circle, Polyline } from 'react-native-svg';
+import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { daysBetween, shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
+import { shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
 import { PHASE_LABELS, type Checkin, type Phase } from '@/lib/body';
+import {
+  MIN_SPARK_POINTS,
+  SPARK_DAYS,
+  sparkPolyline,
+  sparkWeek,
+  type SparkPoint,
+} from '@/lib/sparkWeek';
 import { formatWeight, weightUnitName, toDisplayWeight, type UnitSystem } from '@/lib/units';
 
 /**
@@ -43,9 +50,15 @@ export type ProgressCardProps = {
   testID?: string;
 };
 
-const SPARK_DAYS = 7;
 const SPARK_W = 132;
-const SPARK_H = 58;
+/** Height of the PLOT. The letter row below it is `SPARK_AXIS_H` on top. */
+const SPARK_H = 52;
+const SPARK_INSET = 7;
+const SPARK_PAD = 9;
+/** The `M T W T F S S` row. Tall enough for the filled disc that marks today. */
+const SPARK_AXIS_H = 17;
+/** Width of one letter's box — `SPARK_W / SPARK_DAYS` is 18.9, so this fits. */
+const SPARK_SLOT = 18;
 
 export function ProgressCard({
   checkins,
@@ -181,13 +194,42 @@ export function phaseProgress(
 }
 
 /**
- * The 7-day line.
+ * The 7-day line — the reference (`~/Desktop/trend-face.jpeg`, N201/#637) in
+ * the space this card has for it.
  *
- * Raw readings, not the smoothed trend — at a week's width the smoothing has
+ * Five things make it that chart rather than a sparkline, and each is here for
+ * a reason the reference states by showing it:
+ *
+ * - **`M T W T F S S` beneath the line**, so a dot is a day rather than a
+ *   position in a list;
+ * - **today marked**, in a filled disc, because "is the last dot today or
+ *   Thursday" is the first question anybody asks of a week;
+ * - **drop-lines** from each point to the foot of the plot, which is what ties
+ *   a dot to its letter across a gap of empty space;
+ * - **a glow under the line** — two wider, low-opacity passes of the same
+ *   stroke, not a shadow. `MacroRings` records that the user rejected a bloom
+ *   around the RINGS, twice; this is the one place they asked for it, in their
+ *   own reference, in the words *"The trend should nicely be shown as I gave
+ *   you the reference, period."* Both are honoured by keeping the glow here
+ *   and out of there.
+ * - **the latest reading ringed** rather than filled, so the newest fact is
+ *   the one the eye lands on.
+ *
+ * ## The x-positions are dates, and that is the whole point
+ *
+ * See {@link sparkWeek}. This used to place point `i` at `i / (n - 1)` of the
+ * width — its INDEX — which draws the same picture for "weighed in every day"
+ * and "weighed in four times", and would put those four readings under four
+ * letters that are not their days the moment an axis appeared. A missing day
+ * is a gap here, and a gap is the honest drawing.
+ *
+ * ## What has not changed
+ *
+ * Raw readings, not the smoothed trend: at a week's width the smoothing has
  * nothing to work with, and the dots are the evidence behind the figure on the
- * left rather than a second claim. Fewer than two readings draws nothing at
- * all: a single dot is not a line, and a flat line through one point asserts a
- * stability nobody measured.
+ * left rather than a second claim. And **fewer than two readings draws nothing
+ * at all** — not the line, and not the letters either, because an axis under
+ * an absent chart is scaffolding for something that is not there.
  */
 function Spark({
   checkins,
@@ -198,15 +240,14 @@ function Spark({
   today: string;
   ready: boolean;
 }) {
-  const pts = checkins
-    .filter((c) => {
-      if (c.weight_kg == null || c.weight_kg <= 0) return false;
-      const age = daysBetween(c.measured_on, today);
-      return age >= 0 && age < SPARK_DAYS;
-    })
-    .sort((a, b) => a.measured_on.localeCompare(b.measured_on));
+  const { days, points, baseline } = sparkWeek(checkins, today, {
+    width: SPARK_W,
+    height: SPARK_H,
+    inset: SPARK_INSET,
+    pad: SPARK_PAD,
+  });
 
-  if (!ready || pts.length < 2) {
+  if (!ready || points.length < MIN_SPARK_POINTS) {
     return (
       <RNView style={styles.spark}>
         <Text style={styles.sparkAbsent}>{ready ? 'No trend yet' : ''}</Text>
@@ -214,44 +255,147 @@ function Spark({
     );
   }
 
-  const values = pts.map((p) => p.weight_kg as number);
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  // A perfectly flat week would divide by zero; give it a hair of range so the
-  // line sits in the middle rather than at the top.
-  const span = hi - lo < 0.01 ? 1 : hi - lo;
-
-  const x = (i: number) => (pts.length === 1 ? SPARK_W / 2 : (i / (pts.length - 1)) * (SPARK_W - 10) + 5);
-  const y = (v: number) => SPARK_H - 10 - ((v - lo) / span) * (SPARK_H - 20);
-
-  const points = pts.map((p, i) => `${x(i)},${y(p.weight_kg as number)}`).join(' ');
-  const lastIdx = pts.length - 1;
+  const line = sparkPolyline(points);
 
   return (
-    <RNView style={styles.spark}>
-      <Text style={styles.sparkLabel}>7-day trend</Text>
-      <Svg width={SPARK_W} height={SPARK_H}>
+    <RNView
+      style={styles.spark}
+      testID="today-spark-wrap"
+      /*
+        One card, one announcement. The Pressable above already says the
+        weight, the direction and the phase; seven single letters and eight
+        dots read out individually is noise on top of an answer already given.
+      */
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Text style={styles.sparkLabel}>{SPARK_DAYS}-day trend</Text>
+      <Svg width={SPARK_W} height={SPARK_H} testID="today-spark">
+        {/*
+          Drop-lines first, so the line and its dots sit on top of them. Faint
+          on purpose: they exist to carry the eye down to a letter, and a
+          full-strength rule per point would draw a grid nobody asked for.
+        */}
+        {points.map((p) => (
+          <Line
+            key={`drop-${p.on}`}
+            x1={p.x}
+            y1={p.y}
+            x2={p.x}
+            y2={baseline}
+            stroke={vola.lime}
+            strokeOpacity={0.22}
+            strokeWidth={1}
+          />
+        ))}
+
+        {/*
+          The glow: the same polyline twice more, wider and dimmer, under the
+          real one. Two passes rather than a blur — `react-native-svg` filters
+          are not uniformly supported on this app's runtime, and a shadow
+          would be a `shadow*`/`elevation` prop, which is the treatment
+          `MacroRings` records as refused. Both passes are `vola.lime`, which
+          has a mono twin, so a monochrome build gets a grey halo rather than
+          the one green thing in a black-and-white app.
+        */}
         <Polyline
-          points={points}
+          points={line}
+          fill="none"
+          stroke={vola.lime}
+          strokeOpacity={0.1}
+          strokeWidth={9}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Polyline
+          points={line}
+          fill="none"
+          stroke={vola.lime}
+          strokeOpacity={0.2}
+          strokeWidth={5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Polyline
+          points={line}
           fill="none"
           stroke={vola.lime}
           strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        {pts.map((p, i) => (
-          <Circle
-            key={p.measured_on}
-            cx={x(i)}
-            cy={y(p.weight_kg as number)}
-            r={i === lastIdx ? 4 : 2.5}
-            fill={i === lastIdx ? vola.lime : vola.surface}
-            stroke={vola.lime}
-            strokeWidth={i === lastIdx ? 2 : 1.5}
-          />
+
+        {points.map((p) => (
+          <SparkDot key={p.on} point={p} />
         ))}
       </Svg>
+
+      {/*
+        The axis. Absolutely positioned on the SAME x each point was placed at,
+        rather than seven flexed boxes: a flex row would space the letters
+        evenly by its own arithmetic, which is only accidentally the grid the
+        points were drawn on, and would drift the moment either changes.
+      */}
+      <RNView style={styles.axis} testID="today-spark-axis">
+        {days.map((d, i) => (
+          <RNView
+            key={d.on}
+            testID={`today-spark-day-${i}`}
+            style={[styles.axisSlot, { left: d.x - SPARK_SLOT / 2 }]}
+          >
+            {d.isToday ? (
+              <RNView style={styles.axisToday} testID="today-spark-today">
+                <Text style={styles.axisTodayLetter} testID={`today-spark-letter-${i}`}>
+                  {d.letter}
+                </Text>
+              </RNView>
+            ) : (
+              <Text style={styles.axisLetter} testID={`today-spark-letter-${i}`}>
+                {d.letter}
+              </Text>
+            )}
+          </RNView>
+        ))}
+      </RNView>
     </RNView>
+  );
+}
+
+/**
+ * One reading.
+ *
+ * The latest is a RING with a halo, every other one a filled disc — the
+ * reference's own emphasis, and the right way round: the newest fact is the
+ * one being reported, and an outline reads as "here" where a bigger blob just
+ * reads as heavier.
+ */
+function SparkDot({ point }: { point: SparkPoint }) {
+  if (!point.latest) {
+    return (
+      <Circle
+        cx={point.x}
+        cy={point.y}
+        r={2.5}
+        fill={vola.lime}
+        testID={`today-spark-point-${point.on}`}
+      />
+    );
+  }
+  return (
+    <>
+      <Circle cx={point.x} cy={point.y} r={7} fill={vola.lime} fillOpacity={0.18} />
+      <Circle
+        cx={point.x}
+        cy={point.y}
+        r={4.5}
+        // The card's own ground, not `transparent`: the glow pass underneath
+        // would otherwise show through the middle of the ring and fill it in.
+        fill={vola.surface}
+        stroke={vola.lime}
+        strokeWidth={2.5}
+        testID={`today-spark-point-${point.on}`}
+      />
+    </>
   );
 }
 
@@ -317,4 +461,28 @@ const styles = StyleSheet.create({
   spark: { width: SPARK_W, alignItems: 'flex-end', gap: 4, justifyContent: 'center' },
   sparkLabel: { fontSize: 10, color: vola.textDim },
   sparkAbsent: { fontSize: 11, color: vola.textDim },
+
+  axis: { width: SPARK_W, height: SPARK_AXIS_H },
+  axisSlot: {
+    position: 'absolute',
+    top: 0,
+    width: SPARK_SLOT,
+    height: SPARK_AXIS_H,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // `textMuted`, not `textDim`: this is the label a value is read against, and
+  // the axis on `/goals/trend` is the same weight. Dim is for absences.
+  axisLetter: { fontSize: 10, color: vola.textMuted, fontWeight: '600' },
+  axisToday: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: vola.lime,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // The app's ground on the accent, which is the pairing `accents.green.on`
+  // states — the accent is never dark enough for white text.
+  axisTodayLetter: { fontSize: 10, color: vola.bg, fontWeight: '800' },
 });
