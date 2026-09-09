@@ -461,8 +461,13 @@ async function enrichSessionWindow(
  * through only when the one before it produced nothing worth keeping:
  *
  * 1. **The watch's own workout**, when the store holds one that plausibly
- *    IS this session (`lib/hrWorkoutWindow.ts`). A measurement of when
- *    training happened beats a pair of typed times with nothing to score.
+ *    IS this session (`lib/hrWorkoutWindow.ts`) **and the heart rate inside
+ *    it actually covers it**. A measurement of when training happened beats
+ *    a pair of typed times with nothing to score — but only when there is
+ *    something behind it. A workout with THIN heart rate is held as a
+ *    fallback rather than winning outright, because the same workout would
+ *    win again on every later pass and the session would go permanently
+ *    wrong on it, which is the failure this whole ticket exists to close.
  * 2. **The session's own logged window** — unchanged, and still the answer
  *    for every live-tracked session, which is most of them.
  * 3. **A ±20-minute padded search, FIT** (`paddedHRSearchWindow` +
@@ -486,14 +491,16 @@ async function enrichSessionWindow(
  * window is densely covered — the ordinary case — costs one workout query
  * and one heart-rate query, and never reaches steps 3 or 4.
  */
-async function readSessionHR(
-  window: { start: Date; end: Date },
-  sessionStartedAt: string,
-): Promise<{
+type SessionHR = {
   raw: Awaited<ReturnType<typeof queryHeartRateSamples>>;
   windowOverride: { start: string; end: string } | null;
   coverage: Exclude<HRCoverage, 'unknown'>;
-}> {
+};
+
+async function readSessionHR(
+  window: { start: Date; end: Date },
+  sessionStartedAt: string,
+): Promise<SessionHR> {
   const durationMs = window.end.getTime() - window.start.getTime();
   const anchor = { start: window.start.toISOString(), end: window.end.toISOString() };
   const coverageOf = (w: { start: string; end: string }, samples: readonly { measuredAt: string }[]) =>
@@ -502,12 +509,27 @@ async function readSessionHR(
   // 1. the watch's own workout
   const search = workoutSearchWindow(window.start, window.end);
   const workout = selectWorkoutWindow(window.start, window.end, await queryWorkoutWindows(search.start, search.end));
+  // A workout the store knows about but holds no heart rate for tells us
+  // WHEN, not WHAT — fall through rather than record an empty override.
+  //
+  // And one whose heart rate does not COVER it is **this ticket's own bug
+  // wearing a better window**: real evidence, too thin to be the answer,
+  // and — because `selectWorkoutWindow` picks the same workout on every
+  // later pass — permanent once `RETRY_WINDOW_DAYS` runs out. Short-
+  // circuiting on `length > 0` alone would therefore throw away an
+  // already-dense reading of the session's own window that step 2 was
+  // about to find, in the same pass, for free. So a thin workout read is
+  // HELD as a fallback and the cheaper sources are still tried; only a
+  // plausible one wins outright.
+  let workoutFallback: SessionHR | null = null;
   if (workout) {
     const workoutRaw = await queryHeartRateSamples(new Date(workout.start), new Date(workout.end));
-    // A workout the store knows about but holds no heart rate for tells us
-    // WHEN, not WHAT — fall through rather than record an empty override.
     if (workoutRaw.length > 0) {
-      return { raw: workoutRaw, windowOverride: workout, coverage: coverageOf(workout, workoutRaw) };
+      const workoutCoverage = coverageOf(workout, workoutRaw);
+      if (workoutCoverage === 'plausible') {
+        return { raw: workoutRaw, windowOverride: workout, coverage: workoutCoverage };
+      }
+      workoutFallback = { raw: workoutRaw, windowOverride: workout, coverage: workoutCoverage };
     }
   }
 
@@ -546,6 +568,12 @@ async function readSessionHR(
     return { raw: fitted, windowOverride: { start: fit.start, end: fit.end }, coverage: fitCoverage };
   }
 
+  // Nothing covered the session. Between two thin answers the watch's own
+  // workout still wins: it is a MEASUREMENT of when training happened where
+  // the logged window is a pair of typed times. Both are `'thin'` either
+  // way, so this decides which numbers the athlete sees meanwhile, never
+  // whether the session gets looked at again.
+  if (workoutFallback) return workoutFallback;
   return { raw: exact, windowOverride: null, coverage: exactCoverage };
 }
 

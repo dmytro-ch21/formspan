@@ -21992,6 +21992,12 @@ and — because that was terminal — could never have corrected itself.
   "workout" engulfing it: neither is mistaken for the session.
 - Upgrading a device that already enriched the incident's session under the old
   rule: that session is offered one more look rather than staying wrong.
+- **The watch's workout is known but ITS heart rate is thin, while the logged
+  window's is dense** (the strap was off for most of the workout the app
+  recorded). The dense answer wins; the session goes terminal on it rather than
+  getting stuck on the sparse workout for good. Both platforms.
+- The workout AND the logged window are both thin: the workout's window is what
+  the report names, and the session is still retryable.
 - **Android, refused grant**: `ExerciseSession` read refused in Health Connect
   settings — reported as not-permitted, never reported as "the watch knows no
   workout", and the ledger is left untouched so a later grant picks it up.

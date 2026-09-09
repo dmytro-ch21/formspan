@@ -466,14 +466,13 @@ async function enrichHealthConnectSession(
  * reaches `syncHealthConnectBiometrics`'s `noteIfRefused` and is reported,
  * exactly like a refused HeartRate read.
  */
-async function readSessionHR(
-  startedAt: string,
-  endedAt: string,
-): Promise<{
+type SessionHR = {
   readings: HeartRateReading[];
   windowOverride: { start: string; end: string } | null;
   coverage: Exclude<HRCoverage, 'unknown'>;
-}> {
+};
+
+async function readSessionHR(startedAt: string, endedAt: string): Promise<SessionHR> {
   const startMs = new Date(startedAt).getTime();
   const endMs = new Date(endedAt).getTime();
   const durationMs = endMs - startMs;
@@ -487,14 +486,21 @@ async function readSessionHR(
     endedAt,
     await queryExerciseSessionWindows(search.start.toISOString(), search.end.toISOString()),
   );
+  // Only a workout whose heart rate actually COVERS it wins outright; a
+  // thin one is held as a fallback and the cheaper sources are still
+  // tried. See `lib/biometricSync.ts`'s twin of this block for why —
+  // short-circuiting on `length > 0` alone is this ticket's own bug
+  // wearing a better window, and it would discard an already-dense
+  // reading of the session's own times that step 2 finds in the same pass.
+  let workoutFallback: SessionHR | null = null;
   if (workout) {
     const workoutReadings = await queryHeartRateSamples(workout.start, workout.end);
     if (workoutReadings.length > 0) {
-      return {
-        readings: workoutReadings,
-        windowOverride: workout,
-        coverage: coverageOf(workout, workoutReadings),
-      };
+      const workoutCoverage = coverageOf(workout, workoutReadings);
+      if (workoutCoverage === 'plausible') {
+        return { readings: workoutReadings, windowOverride: workout, coverage: workoutCoverage };
+      }
+      workoutFallback = { readings: workoutReadings, windowOverride: workout, coverage: workoutCoverage };
     }
   }
 
@@ -533,6 +539,10 @@ async function readSessionHR(
     }
   }
 
+  // Nothing covered the session — the watch's own workout still beats a
+  // pair of typed times between two thin answers. See the twin comment in
+  // `lib/biometricSync.ts`.
+  if (workoutFallback) return workoutFallback;
   return { readings: exact, windowOverride: null, coverage: exactCoverage };
 }
 

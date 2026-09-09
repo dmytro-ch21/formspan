@@ -303,6 +303,34 @@ describe('syncHealthConnectBiometrics — the watch\'s own window (W19/#985)', (
     expect(mockComputeSessionMetrics).toHaveBeenCalledTimes(1);
   });
 
+  it('an exercise session whose own heart rate is THIN never beats a dense read of the logged window', async () => {
+    // The Android twin of `lib/__tests__/biometricSync.test.ts`'s test of the
+    // same name — found in review, and the same trap on both platforms: a
+    // workout that passes both admission bars but holds barely any heart
+    // rate must not short-circuit past the dense answer the very next step
+    // finds, or the session is stuck on it for good.
+    const id = await theSession();
+    mockExerciseWindows = [{ start: offset(-40).toISOString(), end: offset(50).toISOString() }];
+    mockHRStore = Array.from({ length: 91 }, (_, m) => reading(m, 150));
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockComputeSessionMetrics).toHaveBeenCalledWith(
+      getToken,
+      id,
+      expect.any(Number),
+      'estimated',
+      'window',
+      null,
+    );
+    const [row] = await mockFixture.getAllAsync<{ coverage: string }>(
+      `SELECT coverage FROM health_connect_enrichment WHERE user_id = ? AND session_id = ?`,
+      USER,
+      id,
+    );
+    expect(row.coverage).toBe('plausible');
+  });
+
   it('a densely-covered session is terminal after one pass', async () => {
     const id = await theSession();
     mockHRStore = Array.from({ length: 91 }, (_, m) => reading(m, 150));

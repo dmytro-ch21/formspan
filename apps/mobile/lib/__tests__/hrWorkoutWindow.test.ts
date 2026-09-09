@@ -182,6 +182,35 @@ describe('selectWorkoutWindow — several candidates', () => {
     expect(selectWorkoutWindow(SESSION_START, SESSION_END, [worse, best])).toEqual(best);
   });
 
+  it('declines just UNDER the ambiguity margin, and decides just OVER it', () => {
+    // Found by review: every other constant in this file was mutation-checked
+    // at its boundary, but WORKOUT_AMBIGUITY_MARGIN's own VALUE was not — only
+    // the existence of the check that reads it. Moving 0.1 to 0.05 or to 0.15
+    // left all 17 tests green, which is a constant nothing measures.
+    //
+    // Both pairs below are well-separated and non-overlapping (the rival ends
+    // exactly where the winner starts), so the overlap exemption never
+    // applies, and every number is a LITERAL with its arithmetic written out
+    // — retuning the margin deliberately must break this test, which is the
+    // whole point of it existing.
+    //
+    // The shared rival, w(-45, 45): 90 minutes long (similarity 1.0), 45 of
+    // them inside the logged window (overlap 45/90 = 0.5, exactly at the bar).
+    //   score = 45 / (90 − −45) = 45/135 = 0.3333…
+    const rival = w(-45, 45);
+
+    // Under: w(45, 105) is 60 long, 45 inside (0.75), similarity 60/90.
+    //   score = 45 / (105 − 0) = 45/105 = 0.42857…
+    //   gap = 0.42857 − 0.33333 = 0.0952 — inside 0.1, so this is a coin flip.
+    expect(selectWorkoutWindow(SESSION_START, SESSION_END, [rival, w(45, 105)])).toBeNull();
+
+    // Over: w(45, 100) is 55 long, 45 inside (0.818), similarity 55/90.
+    //   score = 45 / (100 − 0) = 0.45
+    //   gap = 0.45 − 0.33333 = 0.1167 — past 0.1, so the better one wins.
+    const decisive = w(45, 100);
+    expect(selectWorkoutWindow(SESSION_START, SESSION_END, [rival, decisive])).toEqual(decisive);
+  });
+
   it('resolves two identically-scored, identically-placed records the same way every time', () => {
     // Same times from two writers: they overlap, so this is not ambiguity —
     // but the answer still has to be stable across passes, or a session

@@ -66846,6 +66846,44 @@ leaks into every test declared after it, because `mockClear` resets calls and no
 implementations. Two unrelated Health Connect tests failed on it. The default
 implementation is now re-applied in the file-level `beforeEach`.
 
+### What review found, and it was the same bug one layer in
+
+`frontend-reviewer` caught a **blocking** one, and it is worth recording because
+it is this ticket's own failure reached through the fix for it. Step 1 committed
+to the workout's heart rate as soon as `workoutRaw.length > 0`, with no coverage
+check — unlike step 2, which was gated on `'plausible'` from the start. So a
+workout that passes both admission bars while holding barely any heart rate (an
+app that wrote the exercise session with the strap off for most of it) beat an
+**already-dense** read of the session's own window that step 2 would have found
+in the same pass. And because `selectWorkoutWindow` picks that same workout on
+every later pass, the session never fell through again: found something, stopped
+looking, permanently — the exact sentence this ticket exists to delete.
+
+The reviewer reproduced it live rather than asserting it. Step 1 now short-
+circuits only on `'plausible'`; a thin workout is HELD as a fallback, the cheaper
+sources are still tried, and the workout wins the tie only when nothing covered
+the session — where it is still the better answer, because it is a measurement of
+when training happened and the logged window is a pair of typed times. Both
+orchestrators changed identically. Two new tests, one per platform, and both go
+red on the old short-circuit.
+
+`ac-verifier` confirmed all five code-verifiable criteria and found **two more
+places nothing was measuring anything**, both of which were fixed here:
+
+- **`WORKOUT_AMBIGUITY_MARGIN`'s VALUE was untested** — only the existence of the
+  check reading it. Moving 0.1 to 0.05 or to 0.15 left all 17 tests green. It now
+  has a boundary pair (gaps of 0.0952 and 0.1167, every number a literal with its
+  arithmetic written out) and both directions are killed.
+- **The v40→v41 migration had no test**, against this file's own
+  one-test-per-migration convention. Deleting BOTH `addColumnIfMissing` calls
+  left the whole suite green — and that ALTER is what an already-syncing device
+  depends on, since `CREATE TABLE IF NOT EXISTS` is a no-op against its existing
+  tables. A device stamped 40 is now migrated for real in the test, both columns
+  asserted, both pre-existing rows asserted to backfill `'unknown'`; dropping
+  either ALTER now fails.
+
+Four mutations, four killed, against a green baseline in the same session.
+
 ### Open
 
 - **Coverage measures presence, not correctness.** A watch worn continuously

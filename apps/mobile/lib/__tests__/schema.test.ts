@@ -1329,6 +1329,47 @@ it('a device already stamped 36 gains hr_source/attempted_at, and existing rows 
   expect(row.attempted_at).toBe('2026-08-01T00:00:00.000Z');
 });
 
+it('a device already stamped 40 gains coverage on BOTH ledgers, and existing rows backfill retryable (W19/#985)', async () => {
+  // Found by review: the v40→v41 block had no test of its own, and deleting
+  // both `addColumnIfMissing` calls left the whole suite green — the file's
+  // every-migration-gets-a-test convention, quietly skipped. It matters most
+  // for exactly the athlete this ticket is about, who was already syncing
+  // biometric HR before it: `CREATE TABLE IF NOT EXISTS` is a no-op against
+  // their existing tables, so without the ALTERs the first ledger read of
+  // the next foreground pass throws "no such column: coverage".
+  const db = await migratedFixture();
+  db.raw.exec(
+    `INSERT INTO biometric_hr_synced (user_id, session_id, synced_at, hr_source, attempted_at)
+       VALUES ('u1', 's1', '2026-09-01T00:00:00.000Z', 'window', '2026-09-01T00:00:00.000Z');
+     INSERT INTO health_connect_enrichment (user_id, session_id, hr_source, sample_count, attempted_at)
+       VALUES ('u1', 's2', 'window', 469, '2026-09-01T00:00:00.000Z');
+     ALTER TABLE biometric_hr_synced DROP COLUMN coverage;
+     ALTER TABLE health_connect_enrichment DROP COLUMN coverage;
+     PRAGMA user_version = 40;`,
+  );
+
+  await migrate(db as never);
+
+  for (const table of ['biometric_hr_synced', 'health_connect_enrichment']) {
+    const cols = (db.raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(cols).toContain('coverage');
+  }
+  expect(db.raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 41 });
+
+  // Both pre-existing rows backfill to 'unknown', NOT 'plausible' — a row
+  // written under the old rule is exactly the row that may be holding the
+  // incident's permanently-wrong result, so it gets one more honest look.
+  // `RETRY_WINDOW_DAYS` is what stops that being unbounded.
+  expect(
+    db.raw.prepare('SELECT coverage FROM biometric_hr_synced WHERE session_id = ?').get('s1'),
+  ).toEqual({ coverage: 'unknown' });
+  expect(
+    db.raw.prepare('SELECT coverage FROM health_connect_enrichment WHERE session_id = ?').get('s2'),
+  ).toEqual({ coverage: 'unknown' });
+});
+
 it('a device already stamped 37 gains time_of_day_minutes (N126/#520)', async () => {
   // Every dev machine and every installed build predating this ticket is
   // stamped 37, and `migrate()` returns early at `current >= SCHEMA_VERSION`

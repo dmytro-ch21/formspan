@@ -657,6 +657,60 @@ describe('syncBiometricEnrichment — a thin result never becomes final (W19/#98
     expect(secondStart.toISOString()).toBe(startISO);
   });
 
+  it('a workout whose own heart rate is THIN never beats an already-dense read of the logged window', async () => {
+    // Found in review. A workout can pass both admission bars and still hold
+    // barely any heart rate — an app that wrote the exercise session while
+    // the strap was off for most of it. Preferring it on `length > 0` alone
+    // would throw away the dense answer step 2 finds in the SAME pass, and
+    // because `selectWorkoutWindow` picks that same workout again on every
+    // later pass, the session would never escape it: this ticket's own bug,
+    // reached through the fix for it.
+    //
+    // The workout starts 40 minutes before the session and ends 40 minutes
+    // before it does: 90 minutes long (similarity 1.0), 50 of them inside
+    // the logged window (overlap 0.56), so it is admitted. Health holds
+    // nothing before the logged start, so the workout's own window scores
+    // 6 + 50 + 0 = 56 of 90 minutes = 0.62 — thin. The logged window scores
+    // a flat 1.0.
+    mockWorkoutWindows = [{ start: offset(-40).toISOString(), end: offset(50).toISOString() }];
+    mockHRStore = Array.from({ length: 91 }, (_, m) =>
+      hrSample({ uuid: `dense-${m}`, measuredAt: offset(m).toISOString(), value: 150 }),
+    );
+    await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toBeFalsy();
+    const uploaded = mockPutSamples.mock.calls[0][1];
+    expect(uploaded).toHaveLength(91);
+    // ...and because the dense answer won, the session is properly terminal.
+    expect(await sessionsNeedingBiometricSync(USER, 10)).toEqual([]);
+  });
+
+  it('when the workout and the logged window are BOTH thin, the watch still wins — and the session stays retryable', async () => {
+    // The other half of the same rule. Neither answer covers the session, so
+    // neither is final either way; what this decides is which numbers the
+    // athlete sees meanwhile, and the workout is a measurement of when
+    // training happened where the logged window is a pair of typed times.
+    const workout = { start: offset(-40).toISOString(), end: offset(50).toISOString() };
+    mockWorkoutWindows = [workout];
+    mockHRStore = backgroundHR(0, 37);
+    const session = await theSession();
+
+    await syncBiometricEnrichment(USER, getToken);
+
+    const [, , , , , windowOverride] = mockComputeMetrics.mock.calls[0];
+    expect(windowOverride).toEqual(workout);
+    const [row] = await mockFixture.getAllAsync<{ coverage: string }>(
+      `SELECT coverage FROM biometric_hr_synced WHERE user_id = ? AND session_id = ?`,
+      USER,
+      session.id,
+    );
+    expect(row.coverage).toBe('thin');
+    expect((await sessionsNeedingBiometricSync(USER, 10)).map((c) => c.id)).toEqual([session.id]);
+  });
+
   it('a densely-covered session is terminal after ONE pass, and never queries anything wider', async () => {
     // The ordinary case, and the regression this fix must not cause: no
     // padded search, no dated-day search, one heart-rate query.
