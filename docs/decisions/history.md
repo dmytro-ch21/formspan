@@ -65548,16 +65548,54 @@ way of being confidently wrong.**
    inflated distance and elapsed time. The `db.ts` comment asserted
    exactly-once "even across an app kill" and this entry claimed a test proved
    it; the test kept its cursor in a local variable and never simulated a
-   kill, so it proved nothing of the sort. Fixed by `pruneRunFixesThrough`,
-   which on mount drops whatever the saved points already cover — deriving the
-   resume point from data already persisted rather than a second bookkeeping
-   column free to disagree with it — and by persisting the task's identity, so
-   an iOS relaunch-to-deliver does not drop fixes for want of an owner.
+   kill, so it proved nothing of the sort. Fixed by pruning the queue on
+   mount against whatever the saved points already cover — deriving the resume
+   point from data already persisted rather than a second bookkeeping column
+   free to disagree with it — and by persisting the task's identity, so an
+   iOS relaunch-to-deliver does not drop fixes for want of an owner.
+
+   **And the FIRST fix for this was itself wrong, in a way worth recording,
+   because both reviewers found it independently on the second pass and
+   nothing else could have.** The screen restores `route_points` on two mount
+   branches — reopening a finished run, and resuming one the app was killed
+   in the middle of — and the prune landed on the finished branch only. That
+   is the branch where `finish()` has already run `clearRunFixQueue`, so the
+   call had nothing to do; the branch a kill actually takes did not have it.
+   The mechanism existed, was correct, was unit-tested, and was **never
+   reached on the path it was built for**. Every instrument agreed: typecheck
+   clean, the helper's own tests green, `verify` green — because a missing
+   call is not a wrong one, and this repo's mobile suite is deliberately not
+   component tests, so no test could see a call site the screen never wrote.
+   Meanwhile the `db.ts` comment, this entry and `functional-scenarios.md`'s
+   own step 8 all asserted the scenario was covered. That is the
+   "asserted, not verified" shape this file's own *Verify that a check can
+   fail* section names, landing on the correction to a previous instance of
+   itself.
+
+   The structural fix is one helper — `pruneRunFixesToRestoredTrack`, taking
+   the restored points rather than a timestamp, so no call site has to work
+   out which instant aligns the queue — used by both branches. The guard is a
+   **count**, in `hrReportWiring.test.ts`: prunes must equal restores, so a
+   third branch cannot arrive without one. Counting is the point. Asserting
+   the prune merely *appears* in the file is the check that cannot fail — it
+   appeared, on the wrong branch, for the entire life of the bug.
 4. **The location permission string became a lie.** It still read "VOLA does
    not track your location in the background or when the app is closed". The
    ticket flagged this hazard for the Bluetooth string and the location one
    was missed on the first pass; both are what the athlete reads in the system
    dialog.
+5. **Removing the background teardown left the PAIRING screen holding a link
+   with nothing to close it.** Settings calls `connectIfRemembered()` when you
+   pick a monitor, so the athlete can see the strap actually reporting rather
+   than discovering mid-run that broadcasting was never switched on. Until
+   this ticket, the orchestrator's `'background'` teardown released that link
+   incidentally. Defect 2 removed that teardown — correctly, it was killing
+   runs at the lock — and nothing replaced it for the non-run case: pairing a
+   strap and pocketing the phone held the connection open indefinitely. A fix
+   for one battery bug creating another, in the same commit, found by review.
+   The pairing screen now releases only what it opened (`openedHere`), so a
+   run started while Settings is still mounted underneath keeps the link it
+   owns. Settings copy says so.
 
 **Live heart rate is now running-only (#987, closed here).** With the link
 run-scoped, Today's card and the strength/BJJ chips could never connect, so
@@ -65565,6 +65603,19 @@ leaving them would have shipped an indicator that is permanently blank. That
 matches the athlete's own decision — *"keep it only for running sessions for
 monitoring and coaching"* — and BJJ and strength take their heart rate from
 Apple Health, which W19 (#985) is making reliable.
+
+**One of #987's own acceptance criteria was superseded rather than met, and
+saying so is the point.** It asked that recording stay unchanged for every
+sport — *"`useHRRecording` still runs"* — because it was written before W21
+scoped the link to a run. Those two premises cannot both hold: with nothing
+opening a connection outside a run, a recorder on the strength and BJJ
+screens would be armed for a stream that never arrives. The branch resolved
+it in favour of the athlete's later and more specific instruction — *"lets
+make the bluetooth active specifically when we want to activate a run"* — and
+removed the recording path with the display. `ac-verifier` graded the
+criterion NOT MET, correctly, on its literal text; it is recorded here as
+superseded, and the criterion is struck on the issue rather than quietly
+ticked.
 
 **Two capabilities were added to the binary, and both are reviewed ones.**
 `location` and `bluetooth-central` background modes. The justification is the

@@ -56,7 +56,7 @@ import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
 import {
   clearRunFixQueue,
-  pruneRunFixesThrough,
+  pruneRunFixesToRestoredTrack,
   readRunFixQueue,
   startRunTracking,
   stopRunTracking,
@@ -309,8 +309,7 @@ export default function RunningSessionScreen() {
           // already cover, or the queue would be folded in a SECOND time —
           // duplicate route, inflated distance and elapsed time. Review
           // caught exactly that.
-          const lastRestored = existing.route_points[existing.route_points.length - 1];
-          if (lastRestored) await pruneRunFixesThrough(userId, id, lastRestored.recorded_at);
+          await pruneRunFixesToRestoredTrack(userId, id, existing.route_points);
           if (existing.duration_seconds != null) setElapsedSeconds(existing.duration_seconds);
           setSource(existing.source);
           setFinishedDetail(existing);
@@ -331,6 +330,21 @@ export default function RunningSessionScreen() {
       if (existing && existing.route_points.length > 0) {
         setPoints(existing.route_points);
         pointsRef.current = existing.route_points;
+        // W21/#992 — THE call this whole mechanism turns on, and the first
+        // cut put it only on the `ended_at` branch above, which is the one
+        // path where `finish()` has already run `clearRunFixQueue` and there
+        // is nothing left to prune. Both reviewers caught it independently.
+        //
+        // This is the branch that matters: `fixCursorRef` is a fresh
+        // `useRef(0)` on every mount, so without this the drain below reads
+        // the queue from id 0 and re-folds every fix already inside the
+        // `route_points` we just restored — the route drawn twice, distance
+        // roughly doubled, and elapsed time corrupted when a replayed fix's
+        // own timestamp predates `resumedAtRef`. Pruning against the last
+        // point actually saved aligns the queue with what is on disk, using
+        // data already persisted rather than a second cursor column that
+        // could disagree with it.
+        await pruneRunFixesToRestoredTrack(userId, id, existing.route_points);
         // `duration_seconds` is written on every save now (see
         // `persistProgress`), so this is normally populated. The fallback to
         // `trackDurationSeconds` covers a row saved before that fix, or any
@@ -477,10 +491,17 @@ export default function RunningSessionScreen() {
       for (let i = 0; i < fixes.length; i++) {
         try {
           if (processFix(fixes[i], i === fixes.length - 1)) appended = true;
-        } catch {
+        } catch (err) {
           // This fix could not be interpreted. Skip it rather than abandon
           // the drain — and still advance past it, since retrying a fix that
           // throws would wedge every later one behind it forever.
+          //
+          // Logged, because silence here is the dangerous half: a bug that
+          // throws for EVERY fix would truncate every run's track to nothing
+          // and look exactly like an athlete who never moved. This repo has
+          // shipped that shape before (the `completed` flag written and
+          // never read back), and one line makes it visible instead.
+          console.warn('[running] dropped a queued GPS fix', err);
         }
         // Advanced only after the attempt, so a throw mid-loop cannot mark
         // untouched fixes consumed.

@@ -514,10 +514,18 @@ const CREATE_HR_MONITOR_SAMPLES = `
  *
  * `id` is an autoincrement so draining is strictly ordered. The screen's
  * cursor is in MEMORY, so exactly-once across an app kill comes from
- * `pruneRunFixesThrough` on mount — which drops whatever the restored route
- * points already cover — not from the cursor itself. An earlier version of
- * this comment claimed the cursor survived a kill; it does not, and review
- * caught the resulting duplicate-route bug.
+ * `pruneRunFixesToRestoredTrack` on mount — which drops whatever the restored
+ * route points already cover — not from the cursor itself.
+ *
+ * This comment has now been wrong twice, in two different ways, and both are
+ * worth keeping. It first claimed the cursor survived a kill; it does not.
+ * It was then corrected to describe the prune — while the prune was wired
+ * into only one of the screen's two restore branches, and not the one a kill
+ * actually takes. So the second version described a mechanism that existed
+ * and was not reached. The guarantee is real only because
+ * `pruneRunFixesToRestoredTrack` is now the single helper both branches call,
+ * and `hrReportWiring.test.ts` counts prunes against restores so a third
+ * branch cannot arrive without one.
  */
 /**
  * W21/#992: which run the background location task is capturing for.

@@ -165,6 +165,33 @@ export async function pruneRunFixesThrough(
   );
 }
 
+/**
+ * The prune a resuming screen owes, expressed once so a call site cannot get
+ * it half-right.
+ *
+ * `app/running/[id].tsx` restores `route_points` from disk on two different
+ * mount branches — reopening a FINISHED run, and resuming one the app was
+ * killed in the middle of. The first cut of W21 pruned on the first branch
+ * only, which is the one where `finish()` has already run
+ * `clearRunFixQueue` and there is nothing to prune; the branch that needed
+ * it did not have it. Both reviewers found it independently and neither the
+ * suite nor typecheck could, because a missing call is not a wrong one.
+ *
+ * Taking the restored points rather than a timestamp is the point: the thing
+ * a caller must not have to work out is WHICH instant aligns the queue with
+ * what is on disk. Empty points mean nothing has been folded in yet, so
+ * nothing is pruned and the drain legitimately starts from the beginning.
+ */
+export async function pruneRunFixesToRestoredTrack(
+  userID: string,
+  sessionID: string,
+  routePoints: { recorded_at: string }[],
+): Promise<void> {
+  const last = routePoints[routePoints.length - 1];
+  if (!last) return;
+  await pruneRunFixesThrough(userID, sessionID, last.recorded_at);
+}
+
 /** Called when a run finishes: the queue has served its purpose and the
  *  points now live in the run's own detail. */
 export async function clearRunFixQueue(userID: string, sessionID: string): Promise<void> {

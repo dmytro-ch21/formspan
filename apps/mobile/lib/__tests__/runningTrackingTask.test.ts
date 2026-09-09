@@ -3,6 +3,7 @@ import {
   appendRunFixes,
   clearRunFixQueue,
   pruneRunFixesThrough,
+  pruneRunFixesToRestoredTrack,
   readRunFixQueue,
   setRunTrackingIdentity,
 } from '../runningTrackingTask';
@@ -170,5 +171,51 @@ describe('the active-run identity is on disk', () => {
 
     await setRunTrackingIdentity(null);
     expect(await mockFixture.getAllAsync(`SELECT * FROM running_tracking_active`)).toEqual([]);
+  });
+});
+
+describe('pruneRunFixesToRestoredTrack — the shape a resuming screen actually calls', () => {
+  /**
+   * The defect this covers was a MISSING CALL, not wrong arithmetic: W21's
+   * first cut pruned only on the reopen-a-finished-run branch, and the
+   * resume-after-a-kill branch — the one the whole feature exists for — went
+   * to the drain with a zero cursor and re-folded the entire saved route.
+   *
+   * A test cannot see a call site the screen forgot to write, so the fix is
+   * structural: one helper, taking the restored points, used by both
+   * branches. What is testable — and is tested here — is that the helper
+   * derives the right boundary from the points, so that neither call site
+   * has to.
+   */
+  it('drops exactly what the restored points already cover', async () => {
+    await appendRunFixes(USER, RUN, [fix(0), fix(3), fix(6), fix(9)]);
+    // The screen restored a track ending at +6s; +9s arrived after the last
+    // save and is still owed to the drain.
+    await pruneRunFixesToRestoredTrack(USER, RUN, [
+      { recorded_at: t0.toISOString() },
+      { recorded_at: new Date(t0.getTime() + 6000).toISOString() },
+    ]);
+
+    const left = await readRunFixQueue(USER, RUN, 0);
+    expect(left.map((r) => r.recorded_at)).toEqual([new Date(t0.getTime() + 9000).toISOString()]);
+  });
+
+  it('keeps the whole queue when no points were restored', async () => {
+    // A run killed before its first save has nothing folded in, so the drain
+    // must legitimately start from the beginning. Pruning here would delete
+    // the only record of the run's opening minutes.
+    await appendRunFixes(USER, RUN, [fix(0), fix(3)]);
+    await pruneRunFixesToRestoredTrack(USER, RUN, []);
+    expect(await readRunFixQueue(USER, RUN, 0)).toHaveLength(2);
+  });
+
+  it('takes the LAST point, not the first — an ordered track prunes to its end', async () => {
+    await appendRunFixes(USER, RUN, [fix(0), fix(3), fix(6)]);
+    await pruneRunFixesToRestoredTrack(USER, RUN, [
+      { recorded_at: t0.toISOString() },
+      { recorded_at: new Date(t0.getTime() + 3000).toISOString() },
+    ]);
+    // Anchoring on the first point would leave +3s queued and draw it twice.
+    expect(await readRunFixQueue(USER, RUN, 0)).toHaveLength(1);
   });
 });

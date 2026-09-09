@@ -7,7 +7,7 @@ import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { liveHRStatusLabel } from '@/lib/hrMonitor/heartRateProfile';
 import { forgetMonitor, readRememberedMonitor, rememberMonitor, type RememberedMonitor } from '@/lib/hrMonitor/hrMonitorStore';
-import { ensureBluetoothPermissions, isBluetoothSupported, scanForMonitors, type FoundMonitor } from '@/lib/hrMonitor/liveHR';
+import { ensureBluetoothPermissions, isBluetoothSupported, scanForMonitors, stopLiveHR, type FoundMonitor } from '@/lib/hrMonitor/liveHR';
 import { connectIfRemembered } from '@/lib/hrMonitor/orchestrator';
 import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 
@@ -25,6 +25,23 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
   const [found, setFound] = useState<FoundMonitor[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const stopScan = useRef<(() => void) | null>(null);
+  /**
+   * W21/#992 — did THIS screen open the link?
+   *
+   * Pairing connects once so the athlete sees the strap actually reporting
+   * rather than discovering mid-run that broadcasting was never switched on.
+   * That verification link has to be released again, and until review caught
+   * it nothing did: the orchestrator used to drop the link on app background,
+   * W21 removed that (a locked screen mid-run raises 'background' too), and
+   * this screen never had a counterpart teardown of its own. Pairing a strap
+   * and pocketing the phone therefore held the connection open indefinitely
+   * — both batteries paying for a monitor nobody was reading, which is the
+   * exact thing the athlete asked for the opposite of.
+   *
+   * Only what this screen opened is released, so a run started from another
+   * tab while Settings is still mounted underneath keeps the link it owns.
+   */
+  const openedHere = useRef(false);
   const supported = isBluetoothSupported();
 
   useEffect(() => {
@@ -40,6 +57,10 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
     return () => {
       alive = false;
       stopScan.current?.();
+      if (openedHere.current) {
+        openedHere.current = false;
+        void stopLiveHR();
+      }
     };
   }, [userId]);
 
@@ -79,6 +100,7 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
       setRemembered(m);
       setFound([]);
       setNote(null);
+      openedHere.current = true;
       void connectIfRemembered();
     },
     [userId],
@@ -89,6 +111,9 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
     await forgetMonitor(userId);
     setRemembered(null);
     setNote(null);
+    // With nothing remembered, `connectIfRemembered` drops the link — so it
+    // is already released and unmount has nothing left to do.
+    openedHere.current = false;
     void connectIfRemembered();
   }, [userId]);
 
@@ -107,7 +132,8 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
       <Text style={styles.muted}>
         Heart rate straight from your watch or chest strap over Bluetooth during a run — including while your screen
         is locked, and with no waiting for Apple Health or Health Connect to sync. VOLA connects when a run starts and
-        disconnects when it ends. Apple Health / Health Connect still fill in any gaps.
+        disconnects when it ends — and once here when you pair one, to check it is broadcasting. Apple Health / Health
+        Connect still fill in any gaps.
       </Text>
 
       {remembered === undefined ? (
