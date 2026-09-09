@@ -4,8 +4,10 @@ import { join } from 'path';
 import {
   DEFAULT_RINGS,
   OVERLAP_CONTRAST_FLOOR,
+  OVERLAP_SEPARATION_TARGET,
   RING_KEYS,
   contrastRatio,
+  deltaE2000,
   overlapColor,
   parseRings,
   readRings,
@@ -14,7 +16,7 @@ import {
   sweepFor,
 } from '../macroRings';
 import type { Macros, Target } from '../nutrition';
-import { macroColors, vola } from '@/constants/Colors';
+import { kcalRingColor, macroColors, vola } from '@/constants/Colors';
 
 const macros = (over: Partial<Macros> = {}): Macros => ({
   kcal: 1242,
@@ -238,64 +240,87 @@ describe('ringCap', () => {
 
 
 /**
- * W24/#1022 — a wrapped ring's second lap is darker ink, not a bordered one.
+ * W24/#1022 — a wrapped ring's second lap is darker ink, and it has to be
+ * DISTINGUISHABLE ink.
  *
- * The athlete's words: *"if we draw one line it is clean and if we draw
- * another line on top the line becomes darker... no borders just darker."*
+ * The first shipped fix held the second lap above a contrast floor against
+ * the card and asserted nothing about how far it sat from the first lap. The
+ * athlete's verdict was "barely visible", and the measurement agreed: carbs
+ * separated by ΔE 5.42 and kcal by 2.68, against this repo's own ΔE 15 floor
+ * for two colours being tellable apart. Self-multiply cannot move a bright
+ * colour — 255 × 255 / 255 is still 255.
+ *
+ * Worse, a test asserted that as correct ("barely moves a near-white, the way
+ * ink over paper does"), so the suite defended the defect. These tests pin the
+ * property the screen needs instead of the behaviour the code had.
  */
-describe('overlapColor — the second lap of a wrapped ring', () => {
-  it('darkens the hue rather than tinting it another colour', () => {
-    const base = macroColors.carbs;
-    const over = overlapColor(base, vola.surface);
-    expect(over).not.toBe(base);
-    // Darker means lower contrast against a DARK surface — the shade moved
-    // toward the ground, which is what a second pass of ink does.
-    expect(contrastRatio(over, vola.surface)).toBeLessThan(contrastRatio(base, vola.surface));
+const SURFACE = vola.surface;
+
+describe('overlapColor — the second lap has to READ as a second pass', () => {
+  it('separates every ring far past the shading-artefact range', () => {
+    // ΔE 15 is the palette gate's "two different colours" floor. Fibre is
+    // contrast-capped below it (14.64) and is the documented exception; every
+    // other ring clears the full target.
+    const measured = Object.fromEntries(
+      Object.entries(macroColors).map(([name, hex]) => [
+        name,
+        deltaE2000(hex, overlapColor(hex, SURFACE)) >= 14,
+      ]),
+    );
+    expect(measured).toEqual({ protein: true, fat: true, carbs: true, fibre: true });
   });
 
-  it('holds every ring above the contrast floor — including fibre, which pure multiply fails', () => {
-    // Measured before this was written: a full multiply puts fibre at 2.93:1
-    // against `vola.surface`, under WCAG 1.4.11's 3:1 for non-text graphics
-    // that carry meaning. A ring nobody can see is not a subtler ring.
-    for (const [name, hex] of Object.entries(macroColors)) {
-      const ratio = contrastRatio(overlapColor(hex, vola.surface), vola.surface);
-      expect({ name, ratio: ratio >= OVERLAP_CONTRAST_FLOOR }).toEqual({ name, ratio: true });
+  it('fixes the two the athlete could not see — carbs and the calorie ring', () => {
+    // The regression guard on the actual complaint. Under self-multiply these
+    // were 5.42 and 2.68; anything near those is the old bug returning.
+    for (const hex of [macroColors.carbs, kcalRingColor]) {
+      expect(deltaE2000(hex, overlapColor(hex, SURFACE))).toBeGreaterThanOrEqual(
+        OVERLAP_SEPARATION_TARGET - 1,
+      );
     }
   });
 
-  it('backs off only as far as the floor demands — carbs has room, so it darkens fully', () => {
-    // Carbs clears the floor at a full multiply (14.19:1), so nothing should
-    // hold it back. This is what stops the fix from being "darken everything
-    // by the least amount fibre can tolerate".
-    const full = overlapColor(macroColors.carbs, vola.surface);
-    const fibre = overlapColor(macroColors.fibre, vola.surface);
-    expect(contrastRatio(full, vola.surface)).toBeGreaterThan(OVERLAP_CONTRAST_FLOOR);
-    // Fibre is the constrained one: it must sit close to the floor, not far
-    // above it, or the back-off has overshot and the wrap stops reading.
-    expect(contrastRatio(fibre, vola.surface)).toBeLessThan(OVERLAP_CONTRAST_FLOOR + 1.5);
+  it('never darkens below the visibility floor, even chasing separation', () => {
+    for (const hex of [...Object.values(macroColors), kcalRingColor]) {
+      expect(contrastRatio(overlapColor(hex, SURFACE), SURFACE)).toBeGreaterThanOrEqual(
+        OVERLAP_CONTRAST_FLOOR,
+      );
+    }
   });
 
-  it('returns the hue unchanged when nothing can clear the floor', () => {
-    // A colour already at the ground has nowhere to darken to. Drawing the
-    // wrap in the same colour is the honest failure; returning something
-    // invisible is not.
-    expect(overlapColor('#111722', vola.surface)).toBe('#111722');
+  it('takes the LEAST darkening that reaches the target, so the hue survives', () => {
+    // Maximising separation instead was measured: it drives every ring to
+    // contrast ~3.03 and turns the carbs lime into an olive. The ring's colour
+    // is the macro's identity on this card, so overshooting is its own defect.
+    // Carbs has contrast to spare — proof the search stopped at the target
+    // rather than darkening as far as it was allowed to.
+    expect(contrastRatio(overlapColor(macroColors.carbs, SURFACE), SURFACE)).toBeGreaterThan(5);
   });
 
-  it('barely moves a near-white, the way ink over paper does', () => {
-    const before = contrastRatio('#F3F6FA', vola.surface);
-    const after = contrastRatio(overlapColor('#F3F6FA', vola.surface), vola.surface);
-    expect(before - after).toBeLessThan(2);
+  it('returns the hue unchanged when nothing clears the floor', () => {
+    expect(overlapColor('#111722', SURFACE)).toBe('#111722');
+  });
+});
+
+describe('deltaE2000', () => {
+  it('is zero for a colour against itself and grows with difference', () => {
+    expect(deltaE2000('#B8FF2C', '#B8FF2C')).toBeCloseTo(0, 5);
+    expect(deltaE2000('#B8FF2C', '#76A31C')).toBeGreaterThan(deltaE2000('#B8FF2C', '#A8E828'));
+  });
+
+  it('matches an independent reference implementation', () => {
+    // Cross-checked against a separate Python CIEDE2000 written for the
+    // measurement that produced this fix — same inputs, same answers to two
+    // decimals. An implementation that only agrees with itself is the trap
+    // this repo's own testing rules name; this is the second opinion.
+    expect(deltaE2000('#5C9BFA', '#3B63A0')).toBeCloseTo(22.14, 1);
+    expect(deltaE2000('#D657AA', '#9E407E')).toBeCloseTo(14.64, 1);
+    expect(deltaE2000('#F3F6FA', '#9C9DA0')).toBeCloseTo(22.01, 1);
   });
 });
 
 describe('the rings draw no border', () => {
   it('never strokes with the card ground', () => {
-    // The defect this closes was a separator ring drawn in `vola.surface`
-    // UNDER the second lap, which reads as a black outline on a dark card.
-    // Asserted at the source, because the invariant is "no ground-coloured
-    // stroke exists" and no rendered assertion can see a stroke that was
-    // removed.
     const src = readFileSync(join(__dirname, '..', '..', 'components/today/MacroRings.tsx'), 'utf8');
     expect(src).not.toMatch(/stroke=\{vola\.surface\}/);
   });

@@ -276,74 +276,173 @@ export function readRings(
  * A ring past 100% wraps, and the two laps have to be tellable apart. The
  * first cut separated them with a hairline of the card's own ground drawn
  * under the second lap. On a dark card that is a black outline, and the
- * athlete's verdict was that it "doesnt look too good" — asking instead for
- * what a highlighter does: *"if we draw one line it is clean and if we draw
- * another line on top the line becomes darker... no borders just darker."*
+ * athlete asked instead for what a highlighter does: *"if we draw one line it
+ * is clean and if we draw another line on top the line becomes darker... no
+ * borders just darker."*
  *
- * That is exactly **multiply**, which is how two passes of translucent ink
- * actually compose: each channel scales by itself, so a mid tone darkens and
- * a near-white barely moves. Deriving the shade from the hue keeps the
- * palette gate's contract too — no second colour is declared, so nothing new
- * needs a row in `constants/Colors.ts` or a ΔE justification against it.
+ * ## The first attempt was measurably wrong, and the tests said it was fine
  *
- * ## The floor, and why it is a rule rather than a tuned constant
+ * It darkened by MULTIPLYING the hue with itself — physically what a second
+ * pass of ink does — and held the result above a contrast floor against the
+ * card. Shipped, the athlete's verdict was *"barely visible"*, and the
+ * measurement agrees. CIEDE2000 between the two laps, as shipped:
  *
- * Pure multiply is too dark for one of the four. Measured against
- * `vola.surface` `#10151F`, with WCAG 1.4.11's 3:1 for non-text graphics that
- * carry meaning: protein → 3.47:1, fat → 3.76:1, carbs → 14.19:1, and
- * **fibre → 2.93:1, which fails**. A ring the athlete cannot see is not a
- * subtler ring, it is a missing one.
+ * | ring    | ΔE2000 |
+ * |---------|--------|
+ * | protein | 19.86  |
+ * | fat     | 21.01  |
+ * | fibre   | 14.50  |
+ * | carbs   |  5.42  |
+ * | kcal    |  2.68  |
  *
- * So the darkening is bounded by the measurement rather than by a constant
- * somebody picked once: multiply fully, then step back toward the base until
- * the result clears the floor. A hand-tuned 0.6 would work today and go
- * silently wrong the next time the palette moves — and it has moved before.
- * `Colors.ts`'s own doc comment still lists the reference values (`fat
- * #FBC410`, `fibre #B16AF6`) while the export carries the corrected ones,
- * which is precisely the drift a fixed constant would not survive.
+ * Self-multiply cannot move a bright colour: `255 * 255 / 255` is still 255,
+ * so the lime and the near-white barely shifted at all. This repo's own
+ * palette gate uses ΔE 15 as the floor for two colours being tellable apart;
+ * carbs and kcal were nowhere near it.
+ *
+ * **The enforced constraint was the wrong pair.** The floor asserted the
+ * second lap stayed visible against the BACKGROUND — and nothing anywhere
+ * asserted it differed from the FIRST LAP, which is the only thing the
+ * athlete is actually trying to see. Worse, a test asserted the defect as
+ * intended behaviour ("barely moves a near-white, the way ink over paper
+ * does"), so the suite defended it. That is this repo's "check that cannot
+ * fail" in its most embarrassing form: a test written to describe what the
+ * code did rather than what the screen needed.
+ *
+ * ## What it does now
+ *
+ * Darken by SCALING the channels — less light, which is what "darker" means
+ * on a screen — and choose the amount by measuring both things that matter:
+ *
+ *  - **separation** from the first lap, ΔE2000 ≥ {@link OVERLAP_SEPARATION_TARGET};
+ *  - **visibility** against the card, WCAG contrast ≥ {@link OVERLAP_CONTRAST_FLOOR}
+ *    (1.4.11's 3:1 for non-text graphics that carry meaning).
+ *
+ * It takes the LEAST darkening that reaches the separation target, rather than
+ * the most the contrast floor allows. Maximising was tried and measured: it
+ * drives every ring to contrast ~3.03 and turns the carbs lime into an olive
+ * (`#4F6E13`) and the kcal near-white into a mid grey. The ring's colour IS
+ * the macro's identity on this card — the row's dot is keyed to it — so a
+ * second lap that has lost the hue is a different failure, not a fix.
+ *
+ * Where the two constraints cannot both be met the contrast floor wins and
+ * the separation is whatever remains: fibre `#D657AA` tops out at ΔE 14.64,
+ * because darkening it further puts it under 3:1. Capped, stated, and still
+ * an order of magnitude better than the 2.68 it replaces for kcal.
  */
 export const OVERLAP_CONTRAST_FLOOR = 3;
+
+/**
+ * ΔE2000 the second lap aims to differ from the first by.
+ *
+ * Above the palette gate's own ΔE 15 "these are two different colours" floor,
+ * deliberately: 15 is the bar for two colours being *distinguishable when
+ * compared*, and these two are adjacent arcs of the SAME hue on a small
+ * ring, read at a glance rather than compared side by side. Measured at 15
+ * the step reads as a shading artefact; at 22 it reads as two passes.
+ */
+export const OVERLAP_SEPARATION_TARGET = 22;
 
 function channels(hex: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 }
 
 function toHex(rgb: [number, number, number]): string {
-  return `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+  return `#${rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
 
-function relativeLuminance(hex: string): number {
-  const [r, g, b] = channels(hex).map((v) => {
-    const c = v / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+function linear(v: number): number {
+  const c = v / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
 /** WCAG 2.x contrast ratio. Exported for the tests that pin the floor. */
 export function contrastRatio(a: string, b: string): number {
-  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  const lum = (hex: string) => {
+    const [r, g, b2] = channels(hex).map(linear);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b2;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/** Ink over itself: each channel scaled by itself, mixed `t` of the way. */
-function multiplyToward(hex: string, t: number): string {
-  const rgb = channels(hex);
-  return toHex(rgb.map((v) => v + ((v * v) / 255 - v) * t) as [number, number, number]);
+function toLab(hex: string): [number, number, number] {
+  const [r, g, b] = channels(hex).map(linear);
+  const x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+  const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+  const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  const [fx, fy, fz] = [f(x), f(y), f(z)];
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
 
 /**
- * The second lap's colour: the hue multiplied by itself, backed off only as
- * far as the contrast floor demands.
+ * CIEDE2000. The same metric `scripts/validate_palette.mjs` uses to judge
+ * whether two palette entries are tellable apart, so "distinguishable" means
+ * one thing in this repo rather than two.
+ */
+export function deltaE2000(hexA: string, hexB: string): number {
+  const [L1, a1, b1] = toLab(hexA);
+  const [L2, a2, b2] = toLab(hexB);
+  const rad = Math.PI / 180;
+  const C1 = Math.hypot(a1, b1);
+  const C2 = Math.hypot(a2, b2);
+  const Cb = (C1 + C2) / 2;
+  const G = Cb > 0 ? 0.5 * (1 - Math.sqrt(Cb ** 7 / (Cb ** 7 + 25 ** 7))) : 0;
+  const a1p = (1 + G) * a1;
+  const a2p = (1 + G) * a2;
+  const C1p = Math.hypot(a1p, b1);
+  const C2p = Math.hypot(a2p, b2);
+  const h1p = (((Math.atan2(b1, a1p) / rad) % 360) + 360) % 360;
+  const h2p = (((Math.atan2(b2, a2p) / rad) % 360) + 360) % 360;
+  const dLp = L2 - L1;
+  const dCp = C2p - C1p;
+  const dhp = C1p * C2p === 0 ? 0 : ((((h2p - h1p + 180) % 360) + 360) % 360) - 180;
+  const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin((dhp * rad) / 2);
+  const Lbp = (L1 + L2) / 2;
+  const Cbp = (C1p + C2p) / 2;
+  let hbp: number;
+  if (C1p * C2p === 0) hbp = h1p + h2p;
+  else if (Math.abs(h1p - h2p) <= 180) hbp = (h1p + h2p) / 2;
+  else hbp = h1p + h2p < 360 ? (h1p + h2p + 360) / 2 : (h1p + h2p - 360) / 2;
+  const T =
+    1 -
+    0.17 * Math.cos((hbp - 30) * rad) +
+    0.24 * Math.cos(2 * hbp * rad) +
+    0.32 * Math.cos((3 * hbp + 6) * rad) -
+    0.2 * Math.cos((4 * hbp - 63) * rad);
+  const dTh = 30 * Math.exp(-(((hbp - 275) / 25) ** 2));
+  const Rc = 2 * Math.sqrt(Cbp ** 7 / (Cbp ** 7 + 25 ** 7));
+  const Sl = 1 + (0.015 * (Lbp - 50) ** 2) / Math.sqrt(20 + (Lbp - 50) ** 2);
+  const Sc = 1 + 0.045 * Cbp;
+  const Sh = 1 + 0.015 * Cbp * T;
+  const Rt = -Math.sin(2 * dTh * rad) * Rc;
+  return Math.sqrt(
+    (dLp / Sl) ** 2 + (dCp / Sc) ** 2 + (dHp / Sh) ** 2 + Rt * (dCp / Sc) * (dHp / Sh),
+  );
+}
+
+/** Less light, which is what "darker" means on a screen. */
+function darken(hex: string, k: number): string {
+  return toHex(channels(hex).map((v) => v * k) as [number, number, number]);
+}
+
+/**
+ * The second lap's colour: the least darkening that reads as a second pass,
+ * never so much that it drops under the contrast floor.
  *
- * Returns the base unchanged when even a full multiply cannot clear the floor
- * — a hue that dark has nowhere to go, and drawing the wrap in the same
- * colour is the honest failure. It never returns something invisible.
+ * Returns the base unchanged only when nothing clears the floor — a hue that
+ * dark has nowhere to go, and drawing the wrap in the same colour is the
+ * honest failure. It never returns something invisible.
  */
 export function overlapColor(hex: string, surface: string): string {
-  for (let t = 10; t > 0; t--) {
-    const candidate = multiplyToward(hex, t / 10);
-    if (contrastRatio(candidate, surface) >= OVERLAP_CONTRAST_FLOOR) return candidate;
+  let best: { hex: string; separation: number } | null = null;
+  for (let step = 100; step >= 20; step--) {
+    const candidate = darken(hex, step / 100);
+    if (contrastRatio(candidate, surface) < OVERLAP_CONTRAST_FLOOR) continue;
+    const separation = deltaE2000(hex, candidate);
+    if (separation >= OVERLAP_SEPARATION_TARGET) return candidate;
+    if (!best || separation > best.separation) best = { hex: candidate, separation };
   }
-  return hex;
+  return best?.hex ?? hex;
 }
