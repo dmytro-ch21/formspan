@@ -109,7 +109,7 @@ import {
   saveCollapsedGroups,
   saveLocalSets,
 } from '@/lib/sessionStore';
-import { groupKeys, summariseGroup, toggleGroup } from '@/lib/sessionCollapse';
+import { groupKeys, rekeyCollapsed, summariseGroup, toggleGroup } from '@/lib/sessionCollapse';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
 import * as Haptics from 'expo-haptics';
 import { report } from '@/lib/report';
@@ -228,6 +228,13 @@ export default function SessionScreen() {
    * notices.
    */
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  /**
+   * `<userId>:<sessionId>` once the fold state has been read from SQLite for
+   * that session — see `load` and the persistence effect below (N543/#981).
+   * A ref, not state: it gates a read and a write, and re-rendering on it
+   * would say nothing new on screen.
+   */
+  const collapsedHydratedFor = useRef<string | null>(null);
   const [volume, setVolume] = useState<Volume | null>(null);
   const [catalog, setCatalog] = useState<Map<string, Exercise>>(new Map());
   const [suggestions, setSuggestions] = useState<Map<string, Suggestion>>(new Map());
@@ -722,10 +729,24 @@ export default function SessionScreen() {
       // has the folded groups folded rather than flashing them open. Local
       // only, so there is no offline case to worry about — and a read that
       // fails reads as "nothing collapsed", which costs one tap on Done.
-      const folded = await readCollapsedGroups(userId, id).catch(() => []);
+      //
+      // **ONCE PER SESSION, not once per focus (N543/#981).** `load` re-runs
+      // on every return to this screen; re-reading the fold state there was a
+      // read whose answer could only ever be what this screen itself last
+      // wrote — `collapsed_json` has exactly one writer, the effect below —
+      // and whose one possible surprise was a stale answer clobbering a
+      // just-made toggle whose write had not landed. Review could not make
+      // that race fire (a local UPDATE beats a navigation transition), which
+      // is an argument about timing; hydrating once removes the read that
+      // would have to win it. The state on screen is the truth while the
+      // screen is up, exactly as `sets` already is.
+      if (collapsedHydratedFor.current !== `${userId}:${id}`) {
+        const folded = await readCollapsedGroups(userId, id).catch(() => []);
+        collapsedHydratedFor.current = `${userId}:${id}`;
+        setCollapsed(new Set(folded));
+      }
       setSession(s);
       setSets(s.sets);
-      setCollapsed(new Set(folded));
       setVolume(localVolume(s.sets));
       setError(null);
       setEverLoaded(true);
@@ -764,6 +785,31 @@ export default function SessionScreen() {
       load();
     }, [load]),
   );
+
+  /**
+   * The one place the fold state is written (N543/#981).
+   *
+   * Fire-and-forget, as it was: the screen state is the source of truth while
+   * the screen is up and the write exists for the next cold start, so a
+   * failed write costs one tap on Done after an app kill — not worth an alert
+   * mid-set. It moved out of `toggleCollapsed` so that the state update there
+   * can be a pure functional updater, and so that a removal's rekey (see
+   * `removeGroup`/`removeSet`) persists by the same route rather than needing
+   * its own `saveCollapsedGroups` call at each site.
+   *
+   * Gated on hydration for the obvious reason: before `load` has read the
+   * row, `collapsed` is the empty initial state, and writing THAT would erase
+   * the folds of a session being reopened. `collapsedHydratedFor` is set in
+   * the same tick as the state it describes, so the first run after hydration
+   * re-writes what was just read — one no-op UPDATE of identical content per
+   * mount, which is cheaper than the ref-of-last-written it would take to
+   * skip it.
+   */
+  useEffect(() => {
+    if (!userId || !id) return;
+    if (collapsedHydratedFor.current !== `${userId}:${id}`) return;
+    saveCollapsedGroups(userId, id, [...collapsed]).catch(() => {});
+  }, [collapsed, userId, id]);
 
   // See suggestionPrefs's own doc comment above for why this is read on
   // focus rather than once per mount.
@@ -1020,21 +1066,21 @@ export default function SessionScreen() {
   /**
    * Fold an exercise shut, or open it back up (N530/#961).
    *
-   * **Writes nothing to any set.** This is the one place the collapsed state
-   * changes, and it touches `collapsed` and its own column only — never
-   * `sets`, never `completed`, never `dirty`. An unticked set under a folded
-   * header stays unticked, and the summary line says so. Not a structural
-   * change either: no index moves, so a running countdown is left alone.
+   * **Writes nothing to any set.** It touches `collapsed` and its own column
+   * only — never `sets`, never `completed`, never `dirty`. An unticked set
+   * under a folded header stays unticked, and the summary line says so. Not a
+   * structural change either: no index moves, so a running countdown is left
+   * alone.
    *
-   * Persisted fire-and-forget: the screen state is the source of truth while
-   * the screen is up, and the write exists for the next cold start. A failed
-   * write costs one tap on Done after an app kill, which is not worth an
-   * alert mid-set.
+   * **Functional updater, not the closure's `collapsed` (N543/#981).** Two
+   * taps landing in one commit window — two Done buttons, or a Done and an
+   * expand — both read the same stale set and the second silently discards
+   * the first. Unlikely on one thumb and fully recoverable; free to rule out.
+   * The write itself is in an effect on `collapsed` rather than here, so the
+   * updater stays pure and there is exactly one place that persists.
    */
   function toggleCollapsed(key: string) {
-    const next = toggleGroup(collapsed, key);
-    setCollapsed(next);
-    if (userId && id) saveCollapsedGroups(userId, id, [...next]).catch(() => {});
+    setCollapsed((prev) => toggleGroup(prev, key));
     Haptics.selectionAsync().catch(() => {});
   }
 
@@ -1408,7 +1454,14 @@ export default function SessionScreen() {
 
   function removeSet(index: number) {
     stopTimerForStructureChange();
-    commit(sets.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i })));
+    // A one-set block IS an exercise, so removing that set removes the block
+    // and renames every later block of the same exercise — the identical
+    // hazard `removeGroup` handles, reachable from the row menu instead of
+    // the header. Deleting the row BETWEEN two same-exercise blocks merges
+    // them, which `rekeyCollapsed` also has to answer for. See N543/#981.
+    const surviving = sets.map((_, i) => i).filter((i) => i !== index);
+    setCollapsed((prev) => rekeyCollapsed(prev, sets, surviving));
+    commit(surviving.map((i, position) => ({ ...sets[i], position })));
   }
 
   if (loading && !everLoaded) {
@@ -1488,9 +1541,14 @@ export default function SessionScreen() {
           onPress: () => {
             stopTimerForStructureChange();
             const drop = new Set(g.indices);
-            commit(
-              sets.filter((_, i) => !drop.has(i)).map((x, position) => ({ ...x, position })),
-            );
+            const surviving = sets.map((_, i) => i).filter((i) => !drop.has(i));
+            // N543/#981 — the fold state is keyed by occurrence, so this
+            // removal RENAMES every later block of the same exercise.
+            // Rebuilding it here is what keeps the survivor's header exactly
+            // as the athlete left it; leaving it alone handed one block's
+            // fold to another. `rekeyCollapsed`'s own doc has the mechanism.
+            setCollapsed((prev) => rekeyCollapsed(prev, sets, surviving));
+            commit(surviving.map((i, position) => ({ ...sets[i], position })));
           },
         },
       ],

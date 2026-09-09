@@ -21650,3 +21650,77 @@ account: `docs/decisions/history.md`, 2026-09-09 N542.
 - **NEEDS HUMAN EVIDENCE** — VoiceOver announces the Log button as disabled
   and reads the hint, rather than announcing an enabled button that ignores
   taps.
+
+
+## N543/#981 — removing an exercise must not move another one's "Done" (`apps/mobile/lib/sessionCollapse.ts`'s `rekeyCollapsed`/`groupKeys`, `apps/mobile/app/session/[id].tsx`'s `removeGroup`/`removeSet`/`toggleCollapsed`/`load`)
+
+Follow-up to N530 above. The fold state is keyed by occurrence in render order
+(`squat#0`, `bench#0`, `squat#1`), recomputed every render, so **any removal
+renames later blocks of the same exercise**. Nothing rebuilt the state across
+that rename, so one block's fold landed on another. No data is at risk — `sets`
+and `completed` are untouched and a stray fold is one tap — but the screen
+asserts something the athlete did not do.
+
+### Automated (`lib/__tests__/sessionCollapse.test.ts`, `__tests__/app/strengthSessionCollapse.test.ts`)
+
+**The rename, pure (`rekeyCollapsed`) — circuit `squat, bench, squat`**
+
+- Baseline: the keys really are `squat#0 / bench#0 / squat#1`, so every case
+  below turns on `squat#1` being renamed.
+- Fold the SECOND squat, remove the first → the survivor stays **folded**. (The
+  ticket's own criterion said "expanded"; measured, that is what today's code
+  already does, and the survivor here *is* the block the athlete tapped — see
+  the history entry.)
+- Fold the FIRST squat, remove it → the survivor is **open**, and the set is
+  empty. This is the issue's title case: a block nobody tapped rendering shut.
+- Fold the FIRST squat, remove the SECOND → the fold stays where it was.
+- Remove the bench BETWEEN the two squats (they merge into one block): folded
+  only if **both** halves were folded; open if only one was.
+- Keys naming blocks that no longer exist are dropped, so `collapsed_json`
+  cannot accumulate debris.
+- Removing a one-set block's only set is the same rename (the `removeSet` path).
+- An index that names no set (`99`, `-1`) is ignored without sliding the
+  survivors by one — the range filter has to run before the rows are mapped.
+- Pure: neither the set list nor the input set is mutated; an unchanged set
+  list comes back unchanged.
+
+**Screen (structural)**
+
+- `removeSet` and `removeGroup` each contain
+  `setCollapsed((prev) => rekeyCollapsed(prev, sets, surviving))` — the set
+  list as it was BEFORE the removal, plus the surviving old indices.
+- `toggleCollapsed` uses `toggleGroup(prev, key)`, never the render closure's
+  `collapsed`, and contains no `saveCollapsedGroups` call.
+- Exactly one `saveCollapsedGroups(` call site in the screen (the effect on
+  `collapsed`), so every path persists by one route.
+- `readCollapsedGroups` is guarded by `collapsedHydratedFor.current !== …` —
+  read once per session, not once per focus.
+- N530's properties re-pinned unchanged: the fold path reaches no `setSets`,
+  `completed`, `commit(` or `persist`; the 2-tap logging wirings are verbatim.
+
+### Mutation checks (all confirmed present in the file content, red on the named test, restored, baseline green)
+
+Library — M1 `every` → `some` in the merge rule · M2 range filter dropped · M3
+sources indexed by the new position instead of the old · M4 `afterKeys` →
+`beforeKeys` (rename never applied).
+Screen — M5 `removeGroup` stops rekeying (the original bug, restored) · M6
+`removeSet` stops rekeying · M7 the rekey handed the POST-removal list · M8
+`toggleCollapsed` back to the stale closure read · M9 a second
+`saveCollapsedGroups` caller · M10 hydration guard removed (re-read every
+focus) · M11 a `setSets` smuggled into the fold path.
+
+### Needs a device — NEEDS HUMAN EVIDENCE (latched on #981)
+
+- Build a circuit with the same exercise twice (squat, bench, squat). Tap Done
+  on the FIRST squat, then remove that same squat from its header menu — the
+  remaining squat stays OPEN with its rows visible, and does not fold itself.
+- Same circuit: tap Done on the SECOND squat, then remove the first — the
+  remaining squat is still folded, showing the summary line it had.
+- Same circuit with the bench holding one set: fold one squat, delete that
+  bench set — the two squats merge into one block, and it is OPEN.
+- After each of the above, kill the app and reopen the session — the folded
+  state on first paint matches what was on screen when it was killed (i.e. the
+  rekey was persisted, not just applied in memory).
+- Fold a group, leave the session for Settings and come straight back — the
+  group is still folded (the fold state is no longer re-read on focus).
+- Logging a normal set is still two taps, and Done still ticks nothing.

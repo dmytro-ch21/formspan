@@ -1427,7 +1427,7 @@ export function fillForward(
  * ordinary case or the orphaned-drop one the ordinal fix above depends on.
  */
 export function groupSets(
-  sets: Pick<LoggedSet, 'exercise_id'>[],
+  sets: readonly Pick<LoggedSet, 'exercise_id'>[],
 ): { exerciseID: string; indices: number[] }[] {
   const groups: { exerciseID: string; indices: number[] }[] = [];
   sets.forEach((s, i) => {
