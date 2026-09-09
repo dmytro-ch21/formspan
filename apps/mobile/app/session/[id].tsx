@@ -128,7 +128,7 @@ import {
   pendingSuggestableIndices,
   fillForward,
   measuresFor,
-  reorderGroups,
+  reorderedIndices,
   timedSetStillAt,
   elapsedBelongsInSeconds,
   offersTimerTarget,
@@ -1518,10 +1518,19 @@ export default function SessionScreen() {
    * doing this at all".
    */
   function moveGroup(groupIndex: number, delta: -1 | 1) {
-    const next = reorderGroups(sets, groups.map((g) => g.indices), groupIndex, delta);
-    if (!next) return;
+    // N543/#981 — a reorder CAN rename a fold key, and the first draft of this
+    // ticket argued it could not. Moving a block out from between two blocks
+    // of the same exercise makes those two adjacent, so `groupSets` welds them
+    // into one and every later block of that exercise moves down a number:
+    // squat/bench/squat/deadlift/squat, one tap of the bench's down-arrow, and
+    // `squat#2` becomes `squat#1`. That is the same shape as deleting the row
+    // between them, which `removeSet` already rekeys — so this rekeys too,
+    // from the same permutation the move itself is built on.
+    const moved = reorderedIndices(groups.map((g) => g.indices), groupIndex, delta);
+    if (!moved) return;
     stopTimerForStructureChange();
-    commit(next);
+    setCollapsed((prev) => rekeyCollapsed(prev, sets, moved));
+    commit(moved.map((i, position) => ({ ...sets[i], position })));
   }
 
   function removeGroup(groupIndex: number) {

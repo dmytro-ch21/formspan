@@ -40,22 +40,33 @@ export type GroupKey = string;
  * happened.** So, explicitly:
  *
  * STABLE against — a set added or removed WITHIN a block, a set added to any
- * other block, any edit to a row's numbers, ticks, type or notes, and a
- * reorder that does not change the relative order of two same-exercise
- * blocks (which is every reorder the screen can perform: `moveGroup` moves by
- * one place, and two adjacent same-exercise blocks have already merged into
- * one).
+ * other block, and any edit to a row's numbers, ticks, type or notes. None of
+ * those changes how many blocks of an exercise exist or in what order.
  *
  * NOT STABLE against — anything that changes HOW MANY blocks of an exercise
- * precede this one. Removing a block, removing a block's last set, and
- * deleting the row between two same-exercise blocks (which merges them) all
- * RENAME later blocks of that exercise: drop the first squat and `squat#1`
- * becomes `squat#0`. A `collapsed` set carried unchanged across one of those
- * therefore lands on a different block — the fold jumps to a block nobody
- * tapped, or the tapped block loses it. Nothing here can prevent that,
- * because a set carries no id to key on instead; the caller must rebuild the
- * fold state with {@link rekeyCollapsed}, and the session screen does at
- * every site that removes a row or a block.
+ * PRECEDE this one. Three separate gestures do, and they are one mechanism
+ * wearing three faces: **removing a block**, **removing a block's last set**,
+ * and **anything that makes two same-exercise blocks adjacent, so `groupSets`
+ * welds them into one** — which is both deleting the row between them AND
+ * moving that row's block out from between them with the reorder arrows.
+ * Drop the first squat and `squat#1` becomes `squat#0`; move the bench down
+ * one in squat/bench/squat/deadlift/squat and `squat#2` becomes `squat#1`.
+ * A `collapsed` set carried unchanged across any of those lands on a
+ * different block — the fold jumps to a block nobody tapped, or the tapped
+ * block loses it.
+ *
+ * **The third face is the one that was missed.** N543's first draft argued a
+ * reorder was safe because two ADJACENT same-exercise blocks have already
+ * merged, which is true and answers the wrong question: the reorder makes
+ * them adjacent. `frontend-reviewer` reproduced it against these functions.
+ * If you find yourself reasoning that some new mutator cannot rename a key,
+ * write the circuit down and run it — the argument is easy to get right about
+ * a case that is not the one that bites.
+ *
+ * Nothing here can prevent any of it, because a set carries no id to key on
+ * instead. The caller must rebuild the fold state with
+ * {@link rekeyCollapsed}, and the session screen does at every site that
+ * removes or reorders — `removeSet`, `removeGroup`, `moveGroup`.
  */
 export function groupKeys(groups: readonly { exerciseID: string }[]): GroupKey[] {
   const seen = new Map<string, number>();

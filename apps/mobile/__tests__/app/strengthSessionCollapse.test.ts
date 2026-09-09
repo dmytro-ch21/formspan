@@ -148,6 +148,20 @@ describe('every removal rebuilds the fold state', () => {
     expect(fnBody).toMatch(/setCollapsed\(\(prev\) => rekeyCollapsed\(prev, sets, surviving\)\)/);
   });
 
+  it('moveGroup rekeys too, from the same permutation the move is built on', () => {
+    // The case N543's first draft argued away and `frontend-reviewer`
+    // reproduced: moving a block out from between two same-exercise blocks
+    // makes them adjacent, `groupSets` welds them into one, and every later
+    // block of that exercise is renamed — no removal anywhere.
+    const fnBody = body('moveGroup');
+    expect(fnBody).toMatch(/setCollapsed\(\(prev\) => rekeyCollapsed\(prev, sets, moved\)\)/);
+    // One copy of the swap, not two: the screen builds the new set list from
+    // the SAME permutation it hands the rekey, so the two cannot disagree.
+    expect(fnBody).toContain('reorderedIndices(');
+    expect(fnBody).toContain('commit(moved.map((i, position) => ({ ...sets[i], position })))');
+    expect(fnBody).not.toContain('reorderGroups(');
+  });
+
   it('the screen imports rekeyCollapsed', () => {
     // Guards the guard: a rename that broke the two assertions above should
     // fail loudly here rather than leaving them matching nothing.

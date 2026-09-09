@@ -21681,6 +21681,19 @@ asserts something the athlete did not do.
 - Removing a one-set block's only set is the same rename (the `removeSet` path).
 - An index that names no set (`99`, `-1`) is ignored without sliding the
   survivors by one — the range filter has to run before the rows are mapped.
+
+**The reorder, pure (`reorderedIndices` + `rekeyCollapsed`)**
+
+- `squat, bench, squat, deadlift, squat`: move the BENCH down one place. The
+  two leading squats become adjacent and merge, renaming `squat#2` to
+  `squat#1` — no removal anywhere, one tap of an existing arrow. A fold on the
+  LAST squat must still be on that same block afterwards. (This case was
+  argued away in the first draft and caught by `frontend-reviewer`.)
+- A reorder of two DIFFERENT exercises that welds nothing renames nothing, and
+  both existing folds stay on their own blocks.
+- `reorderedIndices` agrees with `reorderGroups` for every legal move, returns
+  `null` off either end, and never mutates the order it is given — the screen
+  builds the moved set list and the rekey from the one array.
 - Pure: neither the set list nor the input set is mutated; an unchanged set
   list comes back unchanged.
 
@@ -21689,6 +21702,9 @@ asserts something the athlete did not do.
 - `removeSet` and `removeGroup` each contain
   `setCollapsed((prev) => rekeyCollapsed(prev, sets, surviving))` — the set
   list as it was BEFORE the removal, plus the surviving old indices.
+- `moveGroup` contains `setCollapsed((prev) => rekeyCollapsed(prev, sets, moved))`,
+  calls `reorderedIndices` and no longer calls `reorderGroups` — one copy of
+  the swap feeds both the new set list and the rekey.
 - `toggleCollapsed` uses `toggleGroup(prev, key)`, never the render closure's
   `collapsed`, and contains no `saveCollapsedGroups` call.
 - Exactly one `saveCollapsedGroups(` call site in the screen (the effect on
@@ -21707,7 +21723,10 @@ Screen — M5 `removeGroup` stops rekeying (the original bug, restored) · M6
 `removeSet` stops rekeying · M7 the rekey handed the POST-removal list · M8
 `toggleCollapsed` back to the stale closure read · M9 a second
 `saveCollapsedGroups` caller · M10 hydration guard removed (re-read every
-focus) · M11 a `setSets` smuggled into the fold path.
+focus) · M11 a `setSets` smuggled into the fold path · M12 `moveGroup` stops
+rekeying (the reviewer's blocking case) · M13 `moveGroup` builds its own
+permutation instead of the shared one · M14 `reorderedIndices` stops swapping
+· M15 `reorderGroups` re-implements the swap and gets it wrong.
 
 ### Needs a device — NEEDS HUMAN EVIDENCE (latched on #981)
 
@@ -21721,6 +21740,10 @@ focus) · M11 a `setSets` smuggled into the fold path.
 - After each of the above, kill the app and reopen the session — the folded
   state on first paint matches what was on screen when it was killed (i.e. the
   rekey was persisted, not just applied in memory).
+- Build `squat, bench, squat, deadlift, squat`. Fold the LAST squat, then tap
+  the bench block's down-arrow — the first two squats merge into one open
+  block and the folded squat is still the folded one, still showing its
+  summary line.
 - Fold a group, leave the session for Settings and come straight back — the
   group is still folded (the fold state is no longer re-read on focus).
 - Logging a normal set is still two taps, and Done still ticks nothing.

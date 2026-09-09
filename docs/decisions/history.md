@@ -65868,12 +65868,33 @@ Three properties fall out of stating it that way, and each has a test:
   block *is* an exercise, so removing that set removes the block and triggers
   the identical rename — reachable from the row menu instead of the header.
 
-`moveGroup` is deliberately left alone. Reordering moves a block by one place,
-and two adjacent same-exercise blocks have already merged into one, so the
-relative order of two same-exercise blocks cannot change through the screen's
-own controls — the only shape change a reorder can produce is a merge.
-`groupKeys`'s doc comment now says all of this in the form that was missing:
-not only what the key survives, but the list of what **renames** it.
+**`moveGroup` was going to be left alone, on an argument that was wrong, and
+review caught it.** The draft reasoned: a reorder moves a block by one place,
+and two ADJACENT same-exercise blocks have already merged into one, so a
+reorder cannot change their relative order. Both halves are true and they
+answer the wrong question — *the reorder is what makes them adjacent*.
+`frontend-reviewer` reproduced it against these very functions and it needs no
+removal and no new gesture: `squat / bench / squat / deadlift / squat`, one tap
+of the bench block's existing down-arrow, and the two leading squats become
+neighbours, `groupSets` welds them into one, and `squat#2` is renamed
+`squat#1`. Reproduced again here independently before fixing it. That is the
+same mechanism as *deleting* the row between two same-exercise blocks — which
+the branch already rekeyed, in `removeSet` — with the row moved out of the way
+instead of destroyed, so missing it was a failure to see one shape in two
+gestures.
+
+`moveGroup` now rekeys as well, and from the *same permutation the move itself
+is built on*: `reorderedIndices` is split out of `reorderGroups`
+(`apps/mobile/lib/sessions.ts`), so the screen builds the reordered set list
+and the rekey from one array rather than two copies of a swap that could
+disagree. `lib/__tests__/sessions.test.ts` pins the two against each other
+across every legal move.
+
+`groupKeys`'s doc comment now lists all three faces of the one mechanism —
+removing a block, removing a block's last set, and anything that makes two
+same-exercise blocks adjacent (deleting the row between them *or* moving it
+out from between them) — and says outright that the reorder case is the one a
+plausible argument talked us out of.
 
 ### The other two findings from the same review
 
@@ -65950,11 +65971,19 @@ out of the sync payload — it is local view state, owed to nobody.
 - No device evidence. The fold jumping between blocks of a circuit is a thing
   you see rather than assert, and the ticket carries no device criterion; a
   human check on a real circuit is still the only proof the screen behaves.
-- `moveGroup`'s merge case is reasoned about above and not rekeyed. It is
-  correct today by the argument given (a reorder cannot change the relative
-  order of two same-exercise blocks), which is an argument, not a test — if
-  reordering ever gains a drag-to-anywhere gesture, that argument dies and
-  `rekeyCollapsed` needs a third call site with the permutation.
+- **The exercise-swap path is the same class of gap and is NOT fixed here**
+  (found by `frontend-reviewer`, filed as a follow-up). `swapExercise`
+  rewrites `exercise_id` on every row of the swapped exercise and writes
+  straight to SQLite from `app/session/[id]/add.tsx`, bypassing this screen's
+  `commit`/`setCollapsed` entirely; the screen then re-reads `sets` on focus
+  with the in-memory `collapsed` untouched. A fold on the swapped exercise is
+  orphaned (its key's exercise-id half changed), and if the new exercise
+  matches a neighbouring block the two merge and a fold can be misapplied.
+  Pre-existing, outside this ticket's `removeGroup`/`removeSet` scope, and a
+  stray fold is still one tap — but it is now written down.
+- The lesson worth keeping is not about `moveGroup`. It is that "this mutator
+  cannot rename a key" is a claim that reads as obviously true and was false
+  twice in one ticket. Write the circuit down and run it.
 
 ## Open items / known gaps as of this entry
 

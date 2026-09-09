@@ -5,7 +5,7 @@ import {
   summariseGroup,
   toggleGroup,
 } from '../sessionCollapse';
-import { groupSets, type LoggedSet } from '../sessions';
+import { groupSets, reorderedIndices, type LoggedSet } from '../sessions';
 
 /**
  * Per-exercise "Done" (N530/#961, the user's item 7): the pure half.
@@ -267,6 +267,56 @@ describe('rekeyCollapsed — removing a block leaves every survivor as the athle
     const surviving = [1, 2]; // drop set 0, which is all of squat#0
     const collapsed = rekeyCollapsed(toggleGroup(new Set(), 'squat#0'), sets, surviving);
     expect([...collapsed]).toEqual([]);
+  });
+
+  it('a reorder that welds two same-exercise blocks together keeps the fold on its own block', () => {
+    // The case N543's first draft argued away, reproduced by
+    // `frontend-reviewer` against the real functions: squat / bench / squat /
+    // deadlift / squat, move the BENCH down one place, and the two leading
+    // squats become adjacent and merge — renaming `squat#2` to `squat#1`.
+    // One tap of an existing arrow, no removal anywhere.
+    const sets = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'deadlift' }),
+      set({ exercise_id: 'squat' }),
+    ];
+    expect(groupKeys(groupSets(sets))).toEqual([
+      'squat#0',
+      'bench#0',
+      'squat#1',
+      'deadlift#0',
+      'squat#2',
+    ]);
+    const order = groupSets(sets).map((g) => g.indices);
+    const moved = reorderedIndices(order, 1, 1);
+    expect(moved).not.toBeNull();
+    const after = moved!.map((i, position) => ({ ...sets[i], position }));
+    expect(groupKeys(groupSets(after))).toEqual([
+      'squat#0',
+      'bench#0',
+      'deadlift#0',
+      'squat#1',
+    ]);
+
+    // The athlete folded the LAST squat. It must still be the folded one.
+    const out = rekeyCollapsed(new Set(['squat#2']), sets, moved!);
+    expect(foldedBlocks(after, out)).toEqual([false, false, false, true]);
+  });
+
+  it('a plain reorder of two different exercises renames nothing', () => {
+    const sets = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'deadlift' }),
+    ];
+    const order = groupSets(sets).map((g) => g.indices);
+    const moved = reorderedIndices(order, 1, 1)!; // bench and deadlift swap
+    const after = moved.map((i, position) => ({ ...sets[i], position }));
+    const out = rekeyCollapsed(new Set(['squat#0', 'bench#0']), sets, moved);
+    expect(groupKeys(groupSets(after))).toEqual(['squat#0', 'deadlift#0', 'bench#0']);
+    expect(foldedBlocks(after, out)).toEqual([true, false, true]);
   });
 
   it('ignores an index that names no set, rather than sliding the rest by one', () => {
