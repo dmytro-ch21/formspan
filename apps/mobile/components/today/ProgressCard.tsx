@@ -57,7 +57,20 @@ const SPARK_INSET = 7;
 const SPARK_PAD = 9;
 /** The `M T W T F S S` row. Tall enough for the filled disc that marks today. */
 const SPARK_AXIS_H = 17;
-/** Width of one letter's box — `SPARK_W / SPARK_DAYS` is 18.9, so this fits. */
+/**
+ * Width of one letter's box.
+ *
+ * The slots are spaced by `sparkWeek`'s own step — `(SPARK_W - 2 * SPARK_INSET)
+ * / (SPARK_DAYS - 1)`, i.e. 19.67 — NOT by `SPARK_W / SPARK_DAYS`, which is a
+ * different number (18.9) and was what this comment used to cite. 18 is under
+ * the real step, so adjacent boxes never touch.
+ *
+ * Each box is centred on its slot (`left: x - SPARK_SLOT / 2`), so the outer
+ * two reach 2pt past the nominal 132pt width at each end. Nothing clips — no
+ * ancestor sets `overflow: 'hidden'`, and the card has 14pt of padding and a
+ * 12pt column gap for it to sit in — but a future change to `SPARK_INSET` or
+ * `SPARK_W` has to be made against the step above, not against this constant.
+ */
 const SPARK_SLOT = 18;
 
 export function ProgressCard({

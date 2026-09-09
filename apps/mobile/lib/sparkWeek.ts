@@ -151,8 +151,12 @@ export function sparkWeek(
   const values = [...byDay.values()];
   const lo = values.length > 0 ? Math.min(...values) : 0;
   const hi = values.length > 0 ? Math.max(...values) : 0;
-  // A perfectly flat week would divide by zero; a hair of range puts the line
-  // in the middle of the box rather than along its top edge.
+  // A perfectly flat week would divide by zero. The hair of range is only that
+  // — a divide-by-zero guard. Every reading equals `lo` in that week, so the
+  // line comes out FLAT ALONG THE BOTTOM INSET (`height - pad`), which is the
+  // ordinary lowest-reading rule applied uniformly, not a special middle
+  // placement. Said plainly because this comment used to claim the middle, and
+  // `sparkWeek.test.ts`'s own flat-week case asserts the bottom.
   const span = hi - lo < 0.01 ? 1 : hi - lo;
   const y = (v: number) => box.height - box.pad - ((v - lo) / span) * (box.height - 2 * box.pad);
 
