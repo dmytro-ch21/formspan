@@ -189,11 +189,13 @@ const FALLBACK: Module[] = [
     default_on: false,
     enabled: false,
     capabilities: {
-      catalog: 'exercises',
-      // No facets: the registry gives running none. Kept explicitly empty
-      // rather than copied from strength — they share a catalog kind, which
-      // is exactly why a careless edit lands here too.
-      facets: [],
+      // N534: running has its own catalog now (`lib/runTypes.ts`) instead of
+      // borrowing the strength one. Mirrored from the registry in
+      // `backend/internal/platform/discipline/discipline.go`, which is the
+      // source of truth — see that entry for why moving it off "exercises"
+      // is safe.
+      catalog: 'runs',
+      facets: ['focus'],
       has_goals: false,
       has_progression: false,
       has_food_log: false,

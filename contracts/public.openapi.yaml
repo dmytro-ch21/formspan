@@ -2937,7 +2937,7 @@ components:
       properties:
         catalog:
           type: string
-          description: Content kind the Library shows — `exercises`, `techniques`, or empty.
+          description: Content kind the Library shows — `exercises`, `techniques`, `runs`, or empty.
           example: techniques
         facets:
           type: array

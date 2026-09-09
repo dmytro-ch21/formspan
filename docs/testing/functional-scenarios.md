@@ -21490,3 +21490,65 @@ saying so. Full account: `docs/decisions/history.md`, 2026-09-08 N533.
    with a 41-character serving label): the saved list shows the red reason
    line; tap the row, fix the label, save; the line is gone and the food
    reaches web after the next sync.
+
+## N534 — the run library: run types in the Library (`apps/mobile/lib/runTypes.ts`, `apps/mobile/lib/hrZones.ts`, `apps/mobile/app/library.tsx`, `apps/mobile/app/run-type/[id].tsx`, `backend/internal/platform/discipline/discipline.go`)
+
+Running had no catalog before this — it borrowed one row from the strength
+catalog. These scenarios are about the catalog existing, being reachable, and
+being honest about what it does not yet know.
+
+### Happy path
+
+- With Running enabled, open the Library: run types appear in the same merged,
+  alphabetical list as exercises and techniques — not in a separate section and
+  not grouped at the top or bottom.
+- Each run row says what it trains and its zone band (e.g. "Threshold · Zones
+  3-4") and a typical duration. The tile's colour tracks the HARDEST zone in
+  the band, using the same ramp as the BJJ RPE selector and the post-session HR
+  report — a zone-5 run and a zone-5 bar elsewhere in the app are the same
+  colour.
+- Tap a run type: the detail screen opens with what it trains, how it should
+  feel, how the session goes, a typical duration, the coaching note, and the
+  goals it serves.
+- Open the "Focus" filter and pick one (e.g. Speed): the list narrows to runs
+  with that focus. The filter only offers focuses that have runs behind them —
+  there is no option that yields an empty list.
+- Set the sport chip to Running: run types remain; set it to Strength or BJJ:
+  they disappear. Set it back to All: they return.
+
+### Edge cases and errors
+
+- **Airplane mode, cold start.** Force-quit, turn the network off, open the
+  Library, select Running. The run types are all there and every detail screen
+  opens fully — this is the point of the catalog being a local constant rather
+  than a fetch, and it is the one behaviour that distinguishes it from the
+  technique and exercise catalogs. A spinner or an empty list here is a
+  regression.
+- **Running turned off in "What you train".** No run types anywhere in the
+  Library, and no empty "Runs" heading left behind.
+- **A stale link to a removed run type** (`/run-type/does-not-exist`): an
+  honest "That run type no longer exists" rather than a blank screen of empty
+  fields or a crash.
+- **Strides and sprints** carry an explicit section saying heart rate will not
+  tell you much for these, because the effort ends before the heart responds.
+  That section must NOT appear on longer runs.
+- **No bpm anywhere.** The screens say "Zones 3-4", never "152-171 bpm" — the
+  athlete's own maximum heart rate is not derived yet (N535). A bpm range
+  appearing here before N535 lands means something invented one.
+
+### Needs a device
+
+- **Whether the run types read as useful and distinguishable to an actual
+  runner** — the core question this ticket cannot answer from a test. Twelve
+  rows that a runner cannot tell apart is a worse library than none.
+- **Whether the Library's chip row is now crowded.** A third sport contributes
+  rows and a fifth filter axis ("Focus") exists. The row was already carrying
+  every enabled sport plus per-sport facets.
+- **Whether the seeded `Run` exercise sitting beside the run types reads as
+  confusing.** Under the Running chip the list shows "Run" — the loggable
+  exercise row that distance and duration PRs attach to — next to "Easy run",
+  "Long run" and ten more. Deliberately left in place (removing it would touch
+  the row PRs are recorded against), and explicitly the first thing to judge on
+  a screen.
+- **Zone colours at a glance.** Whether scanning the list actually communicates
+  intensity, or whether the tile colours read as decoration.

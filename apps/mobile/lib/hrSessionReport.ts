@@ -1,4 +1,4 @@
-import { vola } from '@/constants/Colors';
+import { ZONE_LABELS, zoneColor } from './hrZones';
 import { HR_LIMITED_SAMPLE_THRESHOLD } from './bjjSession';
 import { sessionEffectivenessSummary, type SessionEffectivenessSummary } from './sessionEffectiveness';
 import type { ExerciseHR, SessionMetrics } from './biometric';
@@ -172,68 +172,12 @@ export type HRSessionReportView =
     };
 
 /**
- * Zone 1-5 labels, Edwards' standard bands (`trimp.go`'s `zoneFloors`: 50 / 60
- * / 70 / 80 / 90% of HRmax). Kept short — this renders beside a number, not in
- * place of one.
+ * Zone labels and the zone colour ramp moved to `lib/hrZones.ts` in N534, so
+ * the run library, the zone derivation and the live trainer can import the
+ * same vocabulary instead of each spelling "zone 4" their own way. The
+ * reasoning for both — including why the RPE ramp was reused rather than a new
+ * palette invented — moved with them.
  */
-const ZONE_LABELS: Record<number, string> = {
-  1: 'Very light',
-  2: 'Light',
-  3: 'Moderate',
-  4: 'Hard',
-  5: 'Max effort',
-};
-
-/**
- * Zone colour — the design decision N488's ticket asked for explicitly:
- * "check whether zone colours need a design decision... don't invent one
- * without checking existing chart/zone color precedent first."
- *
- * **What was found**: no existing HR-zone palette anywhere in the repo (`grep
- * -ri "zone" assets/brand apps/mobile` before this file existed turns up
- * nothing but this ticket's own data types). What DOES already exist is a
- * four-step "how hard" ramp for exactly this kind of ordinal effort scale —
- * `rpeColour()` in `apps/mobile/app/bjj/log.tsx`, which colours the BJJ RPE
- * selector `vola.green` (1-4) → `vola.rpeModerate` (5-6) → `vola.warn` (7-8)
- * → `vola.danger` (9-10). An HR zone IS the same question — "how hard was
- * this" — answered from a sensor instead of a self-report, so reusing that
- * exact ramp rather than inventing a fifth categorical hue keeps "how hard"
- * reading as one idea across the app instead of two unrelated colour systems
- * that happen to sit near each other on a session screen.
- *
- * **The fifth step**: zone 1 (below 60% of HRmax) is resting/warm-up
- * territory, not the bottom of an effort scale — colouring it `vola.green`
- * would claim "light but real work" for heart rate that is often just
- * standing around between rounds. `vola.textDim` (the same neutral this file
- * already uses for "didn't register as an answer" elsewhere in the app) reads
- * as "not really trained" rather than as the first rung of a ladder.
- *
- * **Why this needed no new palette validation**: every value here is already
- * an established semantic token — `green`/`rpeModerate`/`warn`/`danger` are
- * already contrast-checked individually in `scripts/validate_palette.mjs`,
- * and reused together is exactly what `rpeColour()` already does with three of
- * the four. `textDim` is a base text token, not a status colour. Nothing here
- * is a new hex value, so there is nothing for `check:palette` to gain by
- * asserting — the four hot steps are already covered by the guard `rpeColour`
- * depends on, and adding a redundant assertion of "these are the same four
- * values" would test that a constant equals itself.
- */
-export function zoneColor(zone: number): string {
-  switch (zone) {
-    case 1:
-      return vola.textDim;
-    case 2:
-      return vola.green;
-    case 3:
-      return vola.rpeModerate;
-    case 4:
-      return vola.warn;
-    case 5:
-      return vola.danger;
-    default:
-      return vola.textDim;
-  }
-}
 
 function buildZoneRows(timeInZones: Record<string, number>): HRZoneRow[] {
   const minutesByZone = [1, 2, 3, 4, 5].map((zone) => ({

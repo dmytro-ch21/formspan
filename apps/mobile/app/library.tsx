@@ -46,6 +46,8 @@ import {
   type TechniqueSummary,
 } from '@/lib/techniques';
 import { fetchPositions, type Position } from '@/lib/positions';
+import { zoneBandLabel, zoneColor } from '@/lib/hrZones';
+import { focusCode, RUN_TYPES, runFocusOptions, type RunType } from '@/lib/runTypes';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { beltLabel, beltSyllabuses } from '@/lib/syllabuses';
 import { useModules } from '@/lib/ModulesProvider';
@@ -159,7 +161,13 @@ function usesFacet(sport: string, mods: Module[], facet: string): boolean {
   return (m?.enabled && m.capabilities.facets.includes(facet)) ?? false;
 }
 
-type FacetKey = 'position' | 'belt' | 'muscle' | 'movement';
+type FacetKey = 'position' | 'belt' | 'muscle' | 'movement' | 'focus';
+
+/** "a", "a and b", "a, b and c" — for the search placeholder's list of kinds. */
+function listAnd(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
 
 /**
  * One collator, built once.
@@ -257,7 +265,11 @@ const LOAD_LABEL: Record<Exercise['load_type'], string> = {
 /** One list, two kinds of row. */
 type Row =
   | { kind: 'exercise'; key: string; name: string; ex: Exercise }
-  | { kind: 'technique'; key: string; name: string; t: TechniqueSummary };
+  | { kind: 'technique'; key: string; name: string; t: TechniqueSummary }
+  // N534. Runs come from a local constant rather than a fetch, so unlike the
+  // other two this row kind can never be missing because the network was —
+  // see `lib/runTypes.ts` for why that was the call.
+  | { kind: 'run'; key: string; name: string; r: RunType };
 
 export default function LibraryScreen() {
   const accent = useAccent();
@@ -279,6 +291,10 @@ export default function LibraryScreen() {
    * every Library visit regardless of whether the user does BJJ.
    */
   const techniqueSport = moduleWithCatalog(modules, 'techniques');
+  // N534. Keyed on the catalog kind, never on `key === 'running'` — the
+  // clients ban comparing keys so that a discipline gaining or losing a
+  // surface stays one row in the registry rather than an edit in three apps.
+  const runSport = moduleWithCatalog(modules, 'runs');
   /**
    * A technique discipline this server HAS, which this athlete has turned off.
    *
@@ -333,6 +349,9 @@ export default function LibraryScreen() {
   // The strength axes. Client-side, over the catalog already loaded — see
   // `lib/exerciseFacets.ts` for why they are groupings and not the raw fields.
   const [muscle, setMuscle] = useState('');
+  // N534. Not persisted to prefs the way `belt` is: belt is a standing fact
+  // about the athlete, focus is a mood for one visit to this screen.
+  const [focus, setFocus] = useState('');
   const [movement, setMovement] = useState('');
   // Which facet's picker is open, or null. One piece of state for all four
   // sheets, the same way the Plan screen's day sheet serves seven rows.
@@ -515,14 +534,32 @@ export default function LibraryScreen() {
     { key: 'belt', label: 'Belt', options: [...BELT_CAPS] },
     { key: 'muscle', label: 'Muscle', options: [{ key: '', label: 'All' }, ...MUSCLE_GROUPS] },
     { key: 'movement', label: 'Movement', options: [{ key: '', label: 'All' }, ...MOVEMENT_GROUPS] },
+    // Derived from the run catalog, so this control can never offer a focus
+    // with nothing behind it — see `runFocusOptions`.
+    { key: 'focus', label: 'Focus', options: [{ key: '', label: 'All' }, ...runFocusOptions()] },
   ];
-  const facetValue = (k: FacetKey) =>
-    k === 'position' ? position : k === 'belt' ? belt : k === 'muscle' ? muscle : movement;
+  /**
+   * Both of these were written with a trailing `else` covering the last axis,
+   * which is correct for exactly as long as nobody adds one. N534 added the
+   * fifth, and under the old shape `focus` would have silently read and
+   * written `movement` — a filter that appears to work while narrowing a
+   * different catalog. Exhaustive now: an unhandled key returns nothing and
+   * sets nothing rather than falling through to whichever branch happens to
+   * be last.
+   */
+  const facetValue = (k: FacetKey) => {
+    if (k === 'position') return position;
+    if (k === 'belt') return belt;
+    if (k === 'muscle') return muscle;
+    if (k === 'movement') return movement;
+    return focus;
+  };
   const setFacetValue = (k: FacetKey, v: string) => {
     if (k === 'position') setPosition(v);
     else if (k === 'belt') setBelt(v);
     else if (k === 'muscle') setMuscle(v);
-    else setMovement(v);
+    else if (k === 'movement') setMovement(v);
+    else if (k === 'focus') setFocus(v);
   };
 
   /**
@@ -751,6 +788,10 @@ export default function LibraryScreen() {
   // sport shows them when that sport is the one carrying them.
   const showTechniques =
     techniqueSport !== undefined && (sport === '' || sport === techniqueSport.key);
+  // Same rule, one catalog over. Note the asymmetry with techniques: this is
+  // gated for DISPLAY only, not for a fetch, because there is no fetch — the
+  // catalog is a local constant.
+  const showRuns = runSport !== undefined && (sport === '' || sport === runSport.key);
 
   /**
    * Whether the "More from your library" affordance has anything behind it.
@@ -819,6 +860,24 @@ export default function LibraryScreen() {
       tq = searchTechniques(scoped, query);
     }
 
+    // N534. Runs are a local constant, so unlike the two above they need no
+    // fetch, no cache and no failure state — filtering is the whole job.
+    let rt: readonly RunType[] = [];
+    if (showRuns) {
+      rt = RUN_TYPES;
+      // Gated on the registry like every other axis here: a focus left in
+      // state with its control hidden must not silently filter a catalog it
+      // has nothing to do with, which is the bug the belt row's comment
+      // records.
+      if (usesFacet(sport, modules, 'focus') && focus) {
+        rt = rt.filter((r) => r.trains === focus);
+      }
+      if (q) rt = rt.filter((r) => r.name.toLowerCase().includes(q));
+      // The catalog is authored easy-to-hard; the merge below needs it by
+      // name, like the other two sources.
+      rt = [...rt].sort((a, b) => collator.compare(a.name, b.name));
+    }
+
     // Linear merge of two sorted runs.
     const out: Row[] = [];
     let i = 0;
@@ -834,10 +893,30 @@ export default function LibraryScreen() {
         out.push({ kind: 'technique', key: `t:${t.id}`, name: t.name, t });
       }
     }
-    return out;
+    if (rt.length === 0) return out;
+
+    // A SECOND linear pass rather than a three-way merge, deliberately: the
+    // two-way merge above is load-bearing for ~1046 exercise rows and is left
+    // exactly as it was, while this one walks a dozen runs against the
+    // already-merged list. Generalising the first loop to three sources would
+    // have meant rewriting the hot path to add the smallest input to it.
+    const merged: Row[] = [];
+    let a = 0;
+    let b = 0;
+    while (a < out.length || b < rt.length) {
+      const takeMerged =
+        b >= rt.length || (a < out.length && collator.compare(out[a].name, rt[b].name) <= 0);
+      if (takeMerged) {
+        merged.push(out[a++]);
+      } else {
+        const r = rt[b++];
+        merged.push({ kind: 'run', key: `r:${r.id}`, name: r.name, r });
+      }
+    }
+    return merged;
   }, [
-    sortedExercises, sortedTechniques, showTechniques, sport, position, belt, query,
-    muscle, movement, modules,
+    sortedExercises, sortedTechniques, showTechniques, showRuns, sport, position, belt, query,
+    muscle, movement, focus, modules,
   ]);
 
   // Each clause has to match the condition the `rows` memo actually filters
@@ -851,7 +930,8 @@ export default function LibraryScreen() {
     position !== '' ||
     (usesBelt(sport, modules) && belt !== '') ||
     (usesFacet(sport, modules, 'muscle') && muscle !== '') ||
-    (usesFacet(sport, modules, 'movement') && movement !== '');
+    (usesFacet(sport, modules, 'movement') && movement !== '') ||
+    (usesFacet(sport, modules, 'focus') && focus !== '');
 
   return (
     <View style={styles.container} testID="library-screen">
@@ -898,7 +978,15 @@ export default function LibraryScreen() {
       <View style={styles.controls} testID="library-controls">
         <TextInput
           style={styles.search}
-          placeholder={showTechniques ? 'Search exercises and techniques' : 'Search exercises'}
+          // Built from what is actually in the list rather than a nested
+          // ternary: with three kinds the ternary has four cases, and the one
+          // it would get wrong is the one nobody tests (runs on, techniques
+          // off — a runner who does not train BJJ).
+          placeholder={`Search ${listAnd([
+            'exercises',
+            ...(showTechniques ? ['techniques'] : []),
+            ...(showRuns ? ['runs'] : []),
+          ])}`}
           placeholderTextColor={vola.textDim}
           accessibilityLabel="Search exercises and techniques by name"
           value={query}
@@ -1126,13 +1214,21 @@ export default function LibraryScreen() {
                   router.push(`/exercise/${item.ex.id}`);
                 }}
               />
-            ) : (
+            ) : item.kind === 'technique' ? (
               <TechniqueRow
                 t={item.t}
                 restricted={rulesets.get(item.t.ibjjf_ruleset_id)?.is_restricted ?? false}
                 onPress={() => {
                   keepQueryRef.current = true;
                   router.push(`/technique/${item.t.id}`);
+                }}
+              />
+            ) : (
+              <RunRow
+                r={item.r}
+                onPress={() => {
+                  keepQueryRef.current = true;
+                  router.push(`/run-type/${item.r.id}`);
                 }}
               />
             )
@@ -1652,6 +1748,45 @@ function TechniqueRow({
           <Text style={styles.badgeText}>IBJJF</Text>
         </View>
       )}
+    </Pressable>
+  );
+}
+
+/**
+ * A run type in the merged list — N534.
+ *
+ * Same three-part shape as `TechniqueRow`: tile, name, one meta line. What
+ * differs is what the tile's COLOUR means. For a technique it encodes category
+ * (taxonomy); for a run it encodes the top of its zone band, through
+ * `lib/hrZones.ts`'s existing ramp, so scanning the list answers "how hard is
+ * this" without reading a word. That ramp is the same one the BJJ RPE selector
+ * and the post-session HR report already use, which is why a run tile and a
+ * zone-4 bar elsewhere in the app are the same colour on purpose.
+ */
+function RunRow({ r, onPress }: { r: RunType; onPress: () => void }) {
+  const band = zoneBandLabel(r.zones[0], r.zones[1]);
+  return (
+    <Pressable
+      style={styles.row}
+      onPress={onPress}
+      accessibilityRole="button"
+      // The tile is decorative to a screen reader, so everything it encodes —
+      // the focus code and the zone colour — has to be said here or it is not
+      // conveyed at all. The effort line is included because for an athlete
+      // with no heart-rate strap it is the ONLY usable intensity cue.
+      accessibilityLabel={`${r.name}, ${r.trains} run, ${band}. ${r.effort} Running.`}
+      testID={`run-type-${r.id}`}
+    >
+      <LibraryTile code={focusCode(r.trains)} accent={zoneColor(r.zones[1])} />
+      <View style={styles.rowBody}>
+        <Text style={styles.name}>{r.name}</Text>
+        <Text style={styles.meta} numberOfLines={1}>
+          {r.trains} · {band}
+        </Text>
+        <Text style={styles.muted} numberOfLines={1}>
+          {r.minutes[0]}-{r.minutes[1]} min
+        </Text>
+      </View>
     </Pressable>
   );
 }

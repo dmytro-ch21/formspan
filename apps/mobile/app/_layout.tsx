@@ -410,6 +410,9 @@ function RootStack() {
         <Stack.Screen name="curriculum/edit/[id]" options={{ title: 'Edit curriculum' }} />
         <Stack.Screen name="exercise/[id]" options={{ title: 'Exercise' }} />
         <Stack.Screen name="technique/[id]" options={{ title: 'Technique' }} />
+        {/* N534. Titled here like every other pushed route, so the back button
+            from it reads "Run type" rather than the filename "[id]". */}
+        <Stack.Screen name="run-type/[id]" options={{ title: 'Run type' }} />
         <Stack.Screen name="position/[id]" options={{ title: 'Position' }} />
         <Stack.Screen name="session/start" options={{ title: 'Start' }} />
         <Stack.Screen name="session/[id]" options={{ title: 'Session' }} />

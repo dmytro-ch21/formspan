@@ -65297,6 +65297,143 @@ plugin (grant-before-terminate, bubble-from-lowest-common-ancestor) rather
 than measured — the same standing `SwipeToDelete` has had since it shipped.
 Android is unrun, as it was for `SwipeToDelete`.
 
+## 2026-09-08 — N534 (#965): running gets a catalog of its own — what each kind of run trains, and how hard
+
+Running was the one sport in VOLA with nothing behind it. The registry gave it
+`catalog: "exercises"` and `facets: []`, so it borrowed a single row — the
+seeded `run` exercise — out of the STRENGTH catalog purely so distance and
+duration PRs had somewhere to live. Open the Library as a runner and there was
+nothing about running in it. An athlete who wanted to *train* rather than
+record a jog had no way to learn that a tempo run and an interval session are
+different tools for different jobs.
+
+`apps/mobile/lib/runTypes.ts` is now twelve run types — recovery, easy, long,
+tempo, VO2max intervals, hill repeats, fartlek, progression, strides, sprints,
+walk-run and time trial — each carrying what it trains, the zone band it lives
+in, how it should FEEL, its shape, a typical duration, which goals it serves,
+and the thing a coach would actually say about it. They render in the existing
+merged Library list and open a detail screen at `run-type/[id]`.
+
+**This is the first of five tickets** (N534–N538) covering the running
+enrichment the user asked for on 2026-09-08: this catalog, a zone derivation
+(N535), goals (N536), a chosen coaching voice (N537), and a live trainer that
+says "ease off / pick it up" from streamed heart rate (N538, blocked on N528's
+BLE work). The order is deliberate — this one has no dependencies and is
+useful alone.
+
+### A zone model already existed, and the tickets nearly contradicted it
+
+The most important thing found while scoping this, and it was nearly missed.
+`backend/internal/modules/biometric/trimp.go` already defines Edwards' five
+zones — `zoneFloors = [0.50, 0.60, 0.70, 0.80, 0.90]` as fractions of HRmax,
+with `ZoneForHR` classifying against them and a `RuleVersion` whose own doc
+says to bump it whenever those floors change. `lib/hrSessionReport.ts` already
+rendered them with decided labels and a documented colour ramp reusing
+`rpeColour()`'s existing effort scale.
+
+N535's brief, as originally written, told the implementer to use heart-rate
+RESERVE (Karvonen) whenever a resting HR was known. That would have shipped an
+app that coached an athlete in "zone 2" live and then reported the very same
+run back to them as "zone 3" — two surfaces answering one question and free to
+disagree, which is the defect class this repo files as a `W`. **The ticket was
+corrected before anyone picked it up**, and the constraint is now stated there:
+the bands are `trimp.go`'s, and changing them is a change to the server, its
+`RuleVersion` and the client together or to neither.
+
+So this ticket did not invent a zone vocabulary. It EXTRACTED the existing one
+into `lib/hrZones.ts` — labels, the colour ramp, and a `ZONE_FLOORS` mirror of
+the server's array — and pointed `hrSessionReport.ts` at it. Four surfaces
+(this catalog, N535, N536, N538) now import one answer instead of copying it a
+second, third and fourth time.
+
+### The catalog is a local constant, deliberately
+
+Every other catalog here is server-owned and console-editable, so the default
+expectation would have been a `runtype` module, a migration, a seed file and a
+`/v1` route. This is twelve rows of stable domain knowledge — what a fartlek
+is has not changed since Gösta Holmér — with no per-user state and nothing an
+admin needs to edit per deployment.
+
+Against that, a local constant buys the thing the server-owned catalogs
+measurably do NOT have: it is present on a cold start in a basement gym with no
+signal. This file's own open-items list still carries "the technique library is
+not cached in SQLite, so the reflection wizard's drilled step is empty on a
+cold launch with no signal" as a live gap; the run catalog simply cannot have
+that failure mode. It shows in the detail screen too — `run-type/[id]` is the
+only detail screen in the app with no loading state, because there is nothing
+to load.
+
+Promoting it to the server later is mechanical: the shape is already
+row-shaped, so it becomes a seed file and a fetch and the screens do not
+change. Worth doing when somebody needs to author a run type without shipping a
+build — not before.
+
+### Moving running off the "exercises" catalog was safe, and that was checked
+
+`discipline.go`'s running entry now declares `Catalog: "runs"` and
+`Facets: ["focus"]`. The obvious worry is what else keyed off `"exercises"`.
+Measured rather than assumed: **nothing does.** Every `moduleWithCatalog` /
+`moduleOffWithCatalog` call site across all three clients asks for
+`"techniques"`. And `RUN_EXERCISE_ID` — the thing that genuinely does still tie
+a run to a strength exercise row — is a SET's `exercise_id` on the sessions
+table, which this capability string has never had anything to do with. The
+whole backend suite passes unchanged, and no test anywhere pinned the old
+value.
+
+One facet, not two. "Focus" (what a run trains) is what an athlete picks by;
+intensity is derivable from it and would be a near-duplicate second control on
+a chip row that already carries every enabled sport. The options are DERIVED
+from the catalog rather than listed separately, so the control can never offer
+a focus with no runs behind it — the same "state that cannot be constructed"
+rule `library.tsx`'s `showExtras` gate already applies.
+
+### `hrUnreliable` exists for N538's benefit, not this screen's
+
+Two entries — strides and sprints — carry `hrUnreliable: true`, and the detail
+screen turns it into a section saying heart rate will not tell you much here.
+
+This is a warning aimed at the live trainer that does not exist yet. Heart rate
+lags effort by roughly 30 seconds at the start of a hard bout, so a 15-second
+stride is over before the heart has responded: a trainer watching bpm would
+read zone 2 during an all-out sprint and tell the athlete to speed up. N538
+needs to refuse to zone-coach these runs, and the flag is how it will know
+without re-deriving the physiology. A test pins which entries carry it, and a
+second states it as a property (nothing long enough for HR to catch up may
+carry it) so a copy-pasted flag fails rather than passing quietly.
+
+### Effort before zone, everywhere
+
+Every surface here puts how a run should FEEL above which zone it is. The order
+is the argument: N535 does not exist yet, and even once it does, an athlete
+with no strap has no bpm to compare against. Running coaching described
+intensity by breath and conversation for a century before heart-rate monitors,
+and it is still the more robust signal on a hot day or a bad night's sleep.
+Leading with the zone would put the half that does not work yet above the half
+that always does.
+
+For the same reason the detail screen says "Zones 3-4" and NOT "152-171 bpm":
+turning a zone into a number needs the athlete's own HRmax, and deriving that
+honestly is N535's whole job. Printing a range from a guessed maximum would be
+exactly the confident-and-wrong failure this repo keeps naming.
+
+**Open**:
+
+- **The seeded `Run` exercise now sits in the list beside the run types**, and
+  nobody has looked at that on a screen. Under the Running chip the Library
+  shows "Run" (the loggable exercise row that distance/duration PRs attach to)
+  next to "Easy run", "Long run" and ten others. It is arguably correct — one
+  is the thing you log, the others are what you might train — but it is equally
+  arguably confusing, and it was left in place rather than hidden because
+  removing it would touch the row PRs are recorded against. This is the first
+  thing to look at on a device.
+- **No "start this run" button**, deliberately. The catalog is a reference
+  today; N536 is what connects a goal to a week, and until it exists a button
+  here could only start a generic run, which Today already does better.
+- NEEDS HUMAN EVIDENCE — the run types read as useful and distinguishable to an
+  actual runner, and the Library's chip row has not become crowded now that a
+  third sport contributes rows.
+
+
 ## Open items / known gaps as of this entry
 
 
