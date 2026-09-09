@@ -269,79 +269,35 @@ export function readRings(
 }
 
 /**
- * The colour a ring's SECOND lap is drawn in — W24/#1022.
+ * Colour maths for the rings — the lineage matters, so it is recorded once
+ * here rather than lost with the code it justified.
  *
- * ## Why this exists instead of a border
+ * **W24/#1022** replaced a black separator under a wrapped ring's second lap
+ * with a darker shade of the same hue, asked for as what a highlighter does:
+ * *"if we draw one line it is clean and if we draw another line on top the
+ * line becomes darker... no borders just darker."*
  *
- * A ring past 100% wraps, and the two laps have to be tellable apart. The
- * first cut separated them with a hairline of the card's own ground drawn
- * under the second lap. On a dark card that is a black outline, and the
- * athlete asked instead for what a highlighter does: *"if we draw one line it
- * is clean and if we draw another line on top the line becomes darker... no
- * borders just darker."*
+ * **That first attempt was measurably wrong, and a test asserted it was
+ * fine.** It darkened by multiplying the hue with itself, which is physically
+ * what a second pass of ink does and **cannot move a bright colour** —
+ * `255 * 255 / 255` is still 255. Shipped, ΔE2000 between the two laps was
+ * protein 19.86, fat 21.01, fibre 14.50, **carbs 5.42, kcal 2.68**, against
+ * this repo's own ΔE 15 floor for two colours being tellable apart. The
+ * athlete's verdict was "barely visible".
  *
- * ## The first attempt was measurably wrong, and the tests said it was fine
+ * The enforced constraint was the wrong PAIR: the code held the second lap
+ * above a contrast floor against the CARD and asserted nothing about its
+ * distance from the FIRST LAP, which is the only comparison anyone makes. A
+ * test then locked it in by asserting a near-white "barely moves, the way ink
+ * over paper does" — a test that would have failed if the code were
+ * corrected.
  *
- * It darkened by MULTIPLYING the hue with itself — physically what a second
- * pass of ink does — and held the result above a contrast floor against the
- * card. Shipped, the athlete's verdict was *"barely visible"*, and the
- * measurement agrees. CIEDE2000 between the two laps, as shipped:
- *
- * | ring    | ΔE2000 |
- * |---------|--------|
- * | protein | 19.86  |
- * | fat     | 21.01  |
- * | fibre   | 14.50  |
- * | carbs   |  5.42  |
- * | kcal    |  2.68  |
- *
- * Self-multiply cannot move a bright colour: `255 * 255 / 255` is still 255,
- * so the lime and the near-white barely shifted at all. This repo's own
- * palette gate uses ΔE 15 as the floor for two colours being tellable apart;
- * carbs and kcal were nowhere near it.
- *
- * **The enforced constraint was the wrong pair.** The floor asserted the
- * second lap stayed visible against the BACKGROUND — and nothing anywhere
- * asserted it differed from the FIRST LAP, which is the only thing the
- * athlete is actually trying to see. Worse, a test asserted the defect as
- * intended behaviour ("barely moves a near-white, the way ink over paper
- * does"), so the suite defended it. That is this repo's "check that cannot
- * fail" in its most embarrassing form: a test written to describe what the
- * code did rather than what the screen needed.
- *
- * ## What it does now
- *
- * Darken by SCALING the channels — less light, which is what "darker" means
- * on a screen — and choose the amount by measuring both things that matter:
- *
- *  - **separation** from the first lap, ΔE2000 ≥ {@link OVERLAP_SEPARATION_TARGET};
- *  - **visibility** against the card, WCAG contrast ≥ {@link OVERLAP_CONTRAST_FLOOR}
- *    (1.4.11's 3:1 for non-text graphics that carry meaning).
- *
- * It takes the LEAST darkening that reaches the separation target, rather than
- * the most the contrast floor allows. Maximising was tried and measured: it
- * drives every ring to contrast ~3.03 and turns the carbs lime into an olive
- * (`#4F6E13`) and the kcal near-white into a mid grey. The ring's colour IS
- * the macro's identity on this card — the row's dot is keyed to it — so a
- * second lap that has lost the hue is a different failure, not a fix.
- *
- * Where the two constraints cannot both be met the contrast floor wins and
- * the separation is whatever remains: fibre `#D657AA` tops out at ΔE 14.64,
- * because darkening it further puts it under 3:1. Capped, stated, and still
- * an order of magnitude better than the 2.68 it replaces for kcal.
+ * **N554/#1025** supersedes the flat second lap entirely with
+ * {@link overtakeRamp}, so the shade now carries how far past target the ring
+ * has gone. The measurement helpers below are what keep that honest, and they
+ * are the same metrics `scripts/validate_palette.mjs` uses so
+ * "distinguishable" means one thing in this repo.
  */
-export const OVERLAP_CONTRAST_FLOOR = 3;
-
-/**
- * ΔE2000 the second lap aims to differ from the first by.
- *
- * Above the palette gate's own ΔE 15 "these are two different colours" floor,
- * deliberately: 15 is the bar for two colours being *distinguishable when
- * compared*, and these two are adjacent arcs of the SAME hue on a small
- * ring, read at a glance rather than compared side by side. Measured at 15
- * the step reads as a shading artefact; at 22 it reads as two passes.
- */
-export const OVERLAP_SEPARATION_TARGET = 22;
 
 function channels(hex: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
@@ -428,21 +384,81 @@ function darken(hex: string, k: number): string {
 }
 
 /**
- * The second lap's colour: the least darkening that reads as a second pass,
- * never so much that it drops under the contrast floor.
+ * The overtake ramp — N554/#1025.
  *
- * Returns the base unchanged only when nothing clears the floor — a hue that
- * dark has nowhere to go, and drawing the wrap in the same colour is the
- * honest failure. It never returns something invisible.
+ * W24 made a wrapped ring's second lap one flat darker shade, which says
+ * *that* the athlete went past target. The athlete asked for the colour to
+ * say *how far*: **"a gradient getting darker and darker and in that color
+ * add a little of red so its like a sign of overtake."**
+ *
+ * So the second lap runs from the base hue, where the overtake begins, to a
+ * darker red-shifted end. The magnitude is in the colour rather than in a
+ * number beside it.
+ *
+ * ## The red is what does the darkening
+ *
+ * The end is the base mixed toward {@link OVERTAKE_RED}, a DEEP red, then
+ * darkened only as far as the contrast floor allows. Mixing toward a deep red
+ * darkens and tints in one operation — mixing toward a bright red
+ * (`#FF4530`, tried first) *lightens*, which is the opposite of what was
+ * asked, and the measurement caught it.
+ *
+ * Measured against `vola.surface`, every ring clears the floor and every step
+ * clears the palette gate's ΔE 15:
+ *
+ * | ring    | end       | contrast | ΔE2000 |
+ * |---------|-----------|----------|--------|
+ * | protein | `#6C608D` | 3.22     | 28.25  |
+ * | fat     | `#955819` | 3.21     | 27.14  |
+ * | carbs   | `#6F6917` | 3.23     | 42.45  |
+ * | fibre   | `#B13E65` | 3.26     | 15.90  |
+ * | kcal    | `#7F615F` | 3.29     | 43.16  |
+ *
+ * ## Why the ramp does not start exactly at the base
+ *
+ * At 12 o'clock the second lap sits directly on the first, so a ramp starting
+ * at the base hue would be invisible precisely where the overtake begins.
+ * It starts a short way in ({@link OVERTAKE_RAMP_ONSET}) — subtle, as asked,
+ * but never identical to the ink underneath it.
  */
-export function overlapColor(hex: string, surface: string): string {
-  let best: { hex: string; separation: number } | null = null;
+export const OVERTAKE_RED = '#8E2318';
+export const OVERTAKE_CONTRAST_FLOOR = 3.2;
+export const OVERTAKE_RAMP_ONSET = 0.12;
+export const OVERTAKE_RAMP_STEPS = 14;
+
+function mixHex(a: string, b: string, t: number): string {
+  const [A, B] = [channels(a), channels(b)];
+  return toHex(A.map((v, i) => v + (B[i] - v) * t) as [number, number, number]);
+}
+
+/** The darkest, reddest the ring is allowed to get. */
+export function overtakeEnd(hex: string, surface: string): string {
+  const tinted = mixHex(hex, OVERTAKE_RED, 0.45);
+  let end = tinted;
   for (let step = 100; step >= 20; step--) {
-    const candidate = darken(hex, step / 100);
-    if (contrastRatio(candidate, surface) < OVERLAP_CONTRAST_FLOOR) continue;
-    const separation = deltaE2000(hex, candidate);
-    if (separation >= OVERLAP_SEPARATION_TARGET) return candidate;
-    if (!best || separation > best.separation) best = { hex: candidate, separation };
+    const candidate = darken(tinted, step / 100);
+    if (contrastRatio(candidate, surface) < OVERTAKE_CONTRAST_FLOOR) break;
+    end = candidate;
   }
-  return best?.hex ?? hex;
+  return end;
+}
+
+/**
+ * The ramp, start of the overtake to its current end.
+ *
+ * Returned lightest-first. `MacroRings` paints it in REVERSE — longest and
+ * darkest arc first, each shorter and lighter over it — because SVG has no
+ * angular gradient and painter's algorithm gives one for free, using the same
+ * `strokeDashoffset` animation every other arc on this card already uses.
+ */
+export function overtakeRamp(
+  hex: string,
+  surface: string,
+  steps: number = OVERTAKE_RAMP_STEPS,
+): string[] {
+  const end = overtakeEnd(hex, surface);
+  return Array.from({ length: steps }, (_, i) => {
+    const t = OVERTAKE_RAMP_ONSET + (1 - OVERTAKE_RAMP_ONSET) * (i / Math.max(1, steps - 1));
+    return mixHex(hex, end, t);
+  });
 }
