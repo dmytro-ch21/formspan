@@ -65769,6 +65769,34 @@ exist yet — a keyboard "done", a submit from the meal-name field — which wou
 reach the callback without passing the button. Same disclosure as N533's sixth
 mutation.
 
+### What review found, and it was on the phone
+
+`frontend-reviewer` cleared the Servings box rather than reading the code, and
+that found a real bug in the fit itself. `toDraft` fitted only the DISPLAYED
+string, leaving the model's `0` on the row underneath — and `parseOr` falls
+back to that number when the box is empty, with the fields set
+`selectTextOnFocus`. So tapping the pre-filled `1` and backspacing, the
+ordinary way to correct a portion, re-exposed a zero the athlete never typed
+and blocked the row for it. An empty box means "I have not decided", which is
+the fitted 1, not the refused 0. Both halves are now fitted together and a
+test clears the field to prove it.
+
+It also raised an accessibility precedent this branch had walked straight
+past: `components/ShareToFriend.tsx` already learned, and says so in place,
+that iOS leaves "Speak Hints" OFF by default, so a hint on a disabled control
+is not reliably announced and a disabled control with no explanation is
+indistinguishable from a broken one. The reason is now in the Log button's
+LABEL as well as its hint.
+
+From `backend-reviewer`: the contract now states the `servings` CEILING too,
+and says why it is deliberately stricter than the save's. Its observation that
+the audit test's "at least half the probes were accepted" self-check sat right
+on its own boundary was taken further than suggested — the ratio is gone, and
+each probe now states the verdict it expects, so a bound is pinned by name
+rather than by a count. Declined: adding numeric bounds to `NutritionMacros`
+in the contract, which is a real gap that predates this branch and belongs to
+its own ticket.
+
 **Open**:
 
 - **A fractional `servings` can still draft a food the save refuses** — filed

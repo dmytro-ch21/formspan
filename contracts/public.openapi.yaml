@@ -242,6 +242,8 @@ components:
           type: number
           exclusiveMinimum: true
           minimum: 0
+          exclusiveMaximum: true
+          maximum: 1000
           example: 2
           description: >
             How many of `serving_label`. Always more than zero, and fitted by
@@ -250,6 +252,13 @@ components:
             the total for the quantity, not a per-serving rate. Before this, a
             zero was a valid draft that `NutritionEntryInput` then refused with
             a 400, stranding the entry on one phone.
+
+
+            The ceiling is DELIBERATELY stricter than `NutritionEntryInput`'s
+            own 10000: refusing a draft the save would have taken costs an
+            absurd estimate, while accepting one it refuses strands a row, so
+            the two errors are not symmetrical and this leans to the cheap
+            one.
         kcal:
           type: number
           minimum: 0

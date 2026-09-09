@@ -321,37 +321,58 @@ func TestAnAcceptedDraftIsAlwaysASaveableOne(t *testing.T) {
 		PortionConfidence: ConfidenceMedium,
 	}
 	fibre := func(v float64) *float64 { return &v }
-	probes := map[string]func(*EstimatedItem){
-		"servings zero":            func(i *EstimatedItem) { i.Servings = 0 },
-		"servings at the ceiling":  func(i *EstimatedItem) { i.Servings = maxItemServings },
-		"servings just under":      func(i *EstimatedItem) { i.Servings = maxItemServings - 0.5 },
-		"servings fractional":      func(i *EstimatedItem) { i.Servings = 0.5 },
-		"kcal at the ceiling":      func(i *EstimatedItem) { i.Kcal = maxItemKcal },
-		"kcal just under":          func(i *EstimatedItem) { i.Kcal = maxItemKcal - 0.5 },
-		"kcal over":                func(i *EstimatedItem) { i.Kcal = maxItemKcal + 1 },
-		"protein at the ceiling":   func(i *EstimatedItem) { i.ProteinG = maxItemGrams },
-		"protein just under":       func(i *EstimatedItem) { i.ProteinG = maxItemGrams - 0.5 },
-		"protein at the old bound": func(i *EstimatedItem) { i.ProteinG = 5000 },
-		"carb at the ceiling":      func(i *EstimatedItem) { i.CarbG = maxItemGrams },
-		"carb just under":          func(i *EstimatedItem) { i.CarbG = maxItemGrams - 0.5 },
-		"fat at the ceiling":       func(i *EstimatedItem) { i.FatG = maxItemGrams },
-		"fat just under":           func(i *EstimatedItem) { i.FatG = maxItemGrams - 0.5 },
-		"fibre at the ceiling":     func(i *EstimatedItem) { i.FibreG = fibre(maxItemFibreG) },
-		"fibre just under":         func(i *EstimatedItem) { i.FibreG = fibre(maxItemFibreG - 0.5) },
-		"fibre at the old bound":   func(i *EstimatedItem) { i.FibreG = fibre(4999) },
-		"nothing changed":          func(i *EstimatedItem) {},
+	probes := map[string]struct {
+		mutate func(*EstimatedItem)
+		wantOK bool
+	}{
+		"nothing changed":          {func(i *EstimatedItem) {}, true},
+		"servings zero":            {func(i *EstimatedItem) { i.Servings = 0 }, true},
+		"servings fractional":      {func(i *EstimatedItem) { i.Servings = 0.5 }, true},
+		"servings just under":      {func(i *EstimatedItem) { i.Servings = maxItemServings - 0.5 }, true},
+		"servings at the ceiling":  {func(i *EstimatedItem) { i.Servings = maxItemServings }, false},
+		"servings negative":        {func(i *EstimatedItem) { i.Servings = -1 }, false},
+		"kcal just under":          {func(i *EstimatedItem) { i.Kcal = maxItemKcal - 0.5 }, true},
+		"kcal at the ceiling":      {func(i *EstimatedItem) { i.Kcal = maxItemKcal }, false},
+		"kcal over":                {func(i *EstimatedItem) { i.Kcal = maxItemKcal + 1 }, false},
+		"protein just under":       {func(i *EstimatedItem) { i.ProteinG = maxItemGrams - 0.5 }, true},
+		"protein at the ceiling":   {func(i *EstimatedItem) { i.ProteinG = maxItemGrams }, false},
+		"protein at the old bound": {func(i *EstimatedItem) { i.ProteinG = 5000 }, false},
+		"carb just under":          {func(i *EstimatedItem) { i.CarbG = maxItemGrams - 0.5 }, true},
+		"carb at the ceiling":      {func(i *EstimatedItem) { i.CarbG = maxItemGrams }, false},
+		"carb at the old bound":    {func(i *EstimatedItem) { i.CarbG = 5000 }, false},
+		"fat just under":           {func(i *EstimatedItem) { i.FatG = maxItemGrams - 0.5 }, true},
+		"fat at the ceiling":       {func(i *EstimatedItem) { i.FatG = maxItemGrams }, false},
+		"fat at the old bound":     {func(i *EstimatedItem) { i.FatG = 5000 }, false},
+		"fibre just under":         {func(i *EstimatedItem) { i.FibreG = fibre(maxItemFibreG - 0.5) }, true},
+		"fibre at the ceiling":     {func(i *EstimatedItem) { i.FibreG = fibre(maxItemFibreG) }, false},
+		"fibre at the old bound":   {func(i *EstimatedItem) { i.FibreG = fibre(4999) }, false},
 	}
-	accepted := 0
-	for name, mutate := range probes {
+	for name, tc := range probes {
 		t.Run(name, func(t *testing.T) {
 			it := base
-			mutate(&it)
+			tc.mutate(&it)
 			e := Estimate{Items: []EstimatedItem{it}}
 			e.fitToFood()
-			if err := ValidateEstimate(e); err != nil {
-				return // refused: nothing is ever written, which is the safe half
+			err := ValidateEstimate(e)
+
+			// The estimate's OWN verdict is asserted, not merely observed.
+			// An earlier draft of this test only checked saveability for
+			// whatever happened to be accepted, and guarded that with a
+			// "at least half the probes were accepted" ratio — which a
+			// refusing probe added later would have broken for the wrong
+			// reason, and which said nothing about WHICH probes ran. Stating
+			// the expected verdict per probe pins each bound directly and
+			// cannot pass while measuring nothing.
+			if tc.wantOK && err != nil {
+				t.Fatalf("the estimate refused a value the save accepts: %v", err)
 			}
-			accepted++
+			if !tc.wantOK {
+				if err == nil {
+					t.Fatal("the estimate accepted a value at or beyond the save's own ceiling")
+				}
+				return
+			}
+
 			f, en := foodFromItem(e.Items[0]), entryFromItem(e.Items[0])
 			if err := f.Validate(); err != nil {
 				t.Errorf("the estimate accepted an item the FOOD save refuses: %v", err)
@@ -360,10 +381,5 @@ func TestAnAcceptedDraftIsAlwaysASaveableOne(t *testing.T) {
 				t.Errorf("the estimate accepted an item the ENTRY save refuses: %v", err)
 			}
 		})
-	}
-	// The apparatus check this whole test depends on: if the probes were all
-	// refused the loop above would pass while measuring nothing at all.
-	if accepted < len(probes)/2 {
-		t.Fatalf("only %d of %d probes were accepted — the estimator has been tightened until this test proves nothing", accepted, len(probes))
 	}
 }

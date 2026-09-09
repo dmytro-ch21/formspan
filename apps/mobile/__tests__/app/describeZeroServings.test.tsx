@@ -197,4 +197,27 @@ describe('a zero the model sent', () => {
     // rewrites nothing about what was eaten.
     expect(logged.kcal).toBe(180);
   });
+
+  it('stays fitted when the athlete CLEARS the box, rather than re-exposing the zero underneath', () => {
+    // Found in review. `parseOr` falls back to the row's own `servings` when
+    // the box is empty, and the fields are `selectTextOnFocus` — so tapping
+    // the pre-filled "1" and backspacing, the ordinary way to correct a
+    // portion, used to resurrect the model's `0` and block the row for a
+    // zero the athlete never typed. An empty box means "I have not decided",
+    // which is the fitted 1, not the refused 0.
+    return describeOnce(response([item({ servings: 0 })])).then(() => {
+      fireEvent.changeText(screen.getByTestId('describe-servings-0'), '');
+      expect(screen.queryByTestId('describe-no-servings-0')).toBeNull();
+      expect(screen.getByTestId('describe-log').props.accessibilityState?.disabled).toBe(false);
+    });
+  });
+
+  it('says why the button is inert in the LABEL, not only the hint', async () => {
+    // iOS leaves "Speak Hints" off by default, so a hint on a disabled
+    // control is not reliably announced — `components/ShareToFriend.tsx`
+    // already walked this back once and says so in place.
+    await describeOnce(response([item(), item({ name: 'Toast' })]));
+    fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
+    expect(screen.getByTestId('describe-log').props.accessibilityLabel).toMatch(/counted zero times/i);
+  });
 });

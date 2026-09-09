@@ -21630,6 +21630,14 @@ account: `docs/decisions/history.md`, 2026-09-09 N542.
   meal the athlete said they ate none of.
 - **Both ways out work.** Correcting the count to `1.5` clears the message and
   logs `servings: 1.5`; removing the row instead logs the remaining ones.
+- **Clearing the box does not resurrect the model's zero.** On a draft that
+  arrived with `servings: 0` (fitted to `1` on the way in), empty the Servings
+  field: no row message, Log still enabled. An empty box means "I have not
+  decided", which is the fitted 1 — not the refused 0 underneath it. Found in
+  review by clearing the field rather than by reading the code.
+- **The Log button's reason is in its LABEL, not only its hint** — iOS leaves
+  "Speak Hints" off by default, so a hint on a disabled control is not
+  reliably announced (`components/ShareToFriend.tsx` records the same lesson).
 - **`itemToEntry` fits on the way into the outbox** (`lib/__tests__/estimateApi.test.ts`)
   — the same defence as `fitName`/`fitServingLabel`, for a phone talking to a
   deploy without the server fit.

@@ -995,7 +995,13 @@ export default function DescribeMealScreen() {
             onPress={() => void (compiling ? logCompiled() : logAll())}
             style={[styles.primary, { backgroundColor: accent.accent }, (locked || blocked) && styles.off]}
             accessibilityRole="button"
-            accessibilityLabel={compiling ? `Log ${mealName.trim() || defaultMealName(rows)}` : `Log ${rows.length} items`}
+            // The reason is IN THE LABEL, not only in the hint below —
+            // `components/ShareToFriend.tsx` already learned this and says so
+            // in place: iOS leaves "Speak Hints" OFF by default, so a hint on
+            // a disabled control is not reliably announced, and a disabled
+            // control with no explanation is indistinguishable from a broken
+            // one. The hint is kept as well, for a reader that does speak it.
+            accessibilityLabel={`${compiling ? `Log ${mealName.trim() || defaultMealName(rows)}` : `Log ${rows.length} items`}${blocked ? '. Some rows are counted zero times.' : ''}`}
             // `locked`, matching `logAll`'s own guard — and on BOTH props, so
             // VoiceOver never announces an enabled button that ignores taps.
             // `blocked` is the same contract for a row counted zero times
@@ -1201,6 +1207,15 @@ function toDraft(it: EstimatedItem): DraftRow {
     // will actually carry. The server fits this itself now; a phone talking
     // to a deploy that predates that would otherwise render a `0` the athlete
     // has to notice and correct before anything can be logged at all.
+    //
+    // **Both the text AND the number, and the pair is the fix rather than
+    // the string alone.** `parseOr` falls back to the row's own `servings`
+    // when the box is EMPTY, and this file's inputs are `selectTextOnFocus` —
+    // so tapping the pre-filled "1" and backspacing, which is the ordinary
+    // way to correct a portion, would re-expose the model's `0` underneath
+    // and block the row for a zero the athlete never typed. Found in review
+    // by clearing the field, not by reading the code.
+    servings: fitServings(it.servings),
     servingsText: String(fitServings(it.servings)),
     kcalText: String(Math.round(it.kcal)),
     proteinText: String(Math.round(it.protein_g)),
