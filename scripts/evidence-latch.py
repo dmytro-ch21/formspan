@@ -473,7 +473,13 @@ def decide(
             # treat that as evidence: drop the label so the board is honest, but
             # do not close on the strength of a body edit that removed the ask.
             return Action("guidance", "evidence criteria were removed, not ticked")
-        return Action("resolve", "all evidence criteria ticked by hand", ())
+        # The criteria go along even though `unmet` is empty here BY DEFINITION.
+        # Without them the closing comment read "No evidence criterion was
+        # outstanding" on a ticket whose boxes a human had just ticked one by
+        # one — literally true and the opposite of what happened. Found by
+        # `backend-reviewer`.
+        return Action("resolve", "all evidence criteria ticked by hand",
+                      tuple(evidence_criteria(body)))
 
     return Action("noop", f"unhandled event {event!r}")
 
@@ -516,6 +522,7 @@ def render_resolve_comment(
     observation: str,
     criteria: tuple[Criterion, ...] = (),
     actor: str = "",
+    by_hand: bool = False,
 ) -> str:
     """Say WHICH criteria were ticked and on WHOSE observation.
 
@@ -529,6 +536,20 @@ def render_resolve_comment(
     whoever reads the thread next.
     """
     who = f"@{actor}'s" if actor else "the reported"
+    if by_hand:
+        # The `edited` exit: a human ticked the boxes themselves, so there is no
+        # observation to quote and nothing was ticked BY this script. Saying
+        # otherwise would be the one thing this comment exists to prevent.
+        checklist = "\n".join(f"{i}. {c.text}" for i, c in enumerate(criteria, 1))
+        by = f" by @{actor}" if actor else ""
+        return (
+            f"{LATCH_SENTINEL}\n"
+            f"**Every evidence criterion on this ticket is ticked — closing.**\n\n"
+            f"Ticked by hand{by}, not by an attestation comment, so there is no "
+            f"observation recorded here. The criteria now marked verified:\n\n"
+            f"{checklist}\n\n"
+            f"`{LABEL}` removed.\n"
+        )
     if criteria:
         checklist = "\n".join(f"{i}. {c.text}" for i, c in enumerate(criteria, 1))
         ticked = (
@@ -783,7 +804,7 @@ def apply(client: Client, number: int, issue: dict, action: Action, actor: str =
         client.remove_label(number)
         client.comment(number, render_resolve_comment(
             action.observation or "all evidence criteria ticked on the ticket",
-            action.criteria, actor))
+            action.criteria, actor, by_hand=not action.observation))
         client.close(number)
         return 0
     if action.kind == "stale":
@@ -1075,27 +1096,50 @@ class _FakeClient(Client):
         self.performed.append(description)
 
 
+def _drive_edit_event(*, body_now: str | None, labelled: bool = True) -> "_FakeClient":
+    """Run one `issues`/`edited` event end-to-end — the HAND-TICK exit path.
+
+    Separate from the comment driver because `from_event` reads the actor from
+    `sender` here and from `comment.user` there, and because `apply` decides
+    whether a resolve was an attestation or a hand-tick. A mutation that stopped
+    it telling those apart survived the whole suite until this existed.
+    """
+    return _drive_event(
+        name="issues",
+        payload={"action": "edited", "issue": {"number": 584, "body": body_now},
+                 "sender": {"login": "dmytro-ch21", "type": "User"}},
+        body_now=body_now, labelled=labelled)
+
+
 def _drive_comment_event(
     *, body_at_comment: str | None, body_now: str | None, comment: str,
     labelled: bool = True, omit_snapshot: bool = False,
 ) -> "_FakeClient":
     """Run one `issue_comment` event end-to-end and hand back what was written."""
+    payload_issue: dict = {"number": 584}
+    if not omit_snapshot:
+        payload_issue["body"] = body_at_comment
+    return _drive_event(
+        name="issue_comment",
+        payload={
+            "action": "created",
+            "issue": payload_issue,
+            "comment": {
+                "body": comment,
+                "user": {"login": "dmytro-ch21", "type": "User"},
+                "author_association": "OWNER",
+            },
+        },
+        body_now=body_now, labelled=labelled)
+
+
+def _drive_event(
+    *, name: str, payload: dict, body_now: str | None, labelled: bool,
+) -> "_FakeClient":
     import contextlib
     import io
     import tempfile
 
-    payload_issue: dict = {"number": 584}
-    if not omit_snapshot:
-        payload_issue["body"] = body_at_comment
-    payload = {
-        "action": "created",
-        "issue": payload_issue,
-        "comment": {
-            "body": comment,
-            "user": {"login": "dmytro-ch21", "type": "User"},
-            "author_association": "OWNER",
-        },
-    }
     client = _FakeClient({
         "number": 584, "state": "open", "state_reason": None, "body": body_now,
         "labels": [{"name": LABEL}] if labelled else [],
@@ -1104,7 +1148,7 @@ def _drive_comment_event(
         json.dump(payload, fh)
         path = fh.name
     before = os.environ.get("GITHUB_EVENT_NAME")
-    os.environ["GITHUB_EVENT_NAME"] = "issue_comment"
+    os.environ["GITHUB_EVENT_NAME"] = name
     try:
         # The decision is printed; the vectors assert on `performed`, so the
         # narration would only bury the self-test's own output.
@@ -1405,8 +1449,38 @@ def self_test() -> int:
           all(c.text in _resolve for c in _walked_crit), True)
     check("PARAPHRASE: ...next to the observation itself",
           "> saw it on the 15 Pro, twice" in _resolve, True)
-    check("PARAPHRASE: a hand-tick resolve with no criteria still reads sensibly",
+    check("PARAPHRASE: a resolve with genuinely no criteria still reads sensibly",
           "No evidence criterion was outstanding" in render_resolve_comment("ticked by hand"), True)
+
+    # The `edited` exit posts a DIFFERENT comment: a human ticked the boxes, so
+    # there is no observation and this script ticked nothing. The first version
+    # of the paraphrase list said "No evidence criterion was outstanding" here —
+    # true by the time `decide` reaches that branch, and the opposite of what a
+    # reader would take from it. Found by `backend-reviewer`.
+    _hand = act(event="edited", labelled=True, body=tick_evidence(walked))
+    check("HAND-TICK: the resolve carries the criteria, not an empty tuple",
+          len(_hand.criteria), 3)
+    _hand_text = render_resolve_comment("", _hand.criteria, "dmytro-ch21", by_hand=True)
+    check("HAND-TICK: the comment says they were ticked by hand, by whom",
+          "Ticked by hand by @dmytro-ch21" in _hand_text, True)
+    check("HAND-TICK: ...lists them",
+          all(c.text in _hand_text for c in _hand.criteria), True)
+    check("HAND-TICK: ...and does not claim an observation exists",
+          "No evidence criterion was outstanding" in _hand_text
+          or "observation:" in _hand_text, False)
+    check("LOOP: the hand-tick resolve comment must never attest",
+          parse_attestation(_hand_text), None)
+
+    handed = _drive_edit_event(body_now=tick_evidence(walked))
+    _handed_said = "\n".join(handed.comments)
+    check("E2E HAND-TICK: the second exit path still closes",
+          any("close #584 as completed" == x for x in handed.performed), True)
+    check("E2E HAND-TICK: ...says the boxes were ticked by hand",
+          "Ticked by hand by @dmytro-ch21" in _handed_said, True)
+    check("E2E HAND-TICK: ...and never re-ticks a body it did not read an observation for",
+          any("tick the evidence" in x for x in handed.performed), False)
+    check("E2E HAND-TICK: an edit that leaves criteria outstanding changes nothing",
+          _drive_edit_event(body_now=walked).performed, [])
 
     _stale = render_stale_comment(act(event="comment", labelled=True, comment=REAL_WALK,
                                       body=added, body_at_comment=walked))

@@ -66160,11 +66160,12 @@ instead of it being findable only by diffing checkbox states against prose.
 
 ### Verification, both directions, and one thing that is NOT verified
 
-- `--self-test` gained 40 vectors, including the #584 race as data, and drives
-  `from_event` **end to end** against a fake client rather than only exercising
-  `decide` — a correct state machine handed the wrong body is still the bug.
-- **13 mutations, 13 killed, each by a named red check rather than a crash.**
-  Three survived the first pass and the tests were the weaker half every time:
+- `--self-test` gained 49 vectors (60 → 109), including the #584 race as data,
+  and drives `from_event` **end to end** against a fake client rather than only
+  exercising `decide` — a correct state machine handed the wrong body is still
+  the bug.
+- **16 mutations, 16 killed, each by a named red check rather than a crash.**
+  Four survived a first pass and the tests were the weaker half every time:
   a hardcoded `have_body_snapshot=True` survived because a missing snapshot
   reads as an empty body and drifts anyway (now isolated by a vector where the
   live body has no criteria at all); dropping the ticked-criteria list from the
@@ -66172,7 +66173,20 @@ instead of it being findable only by diffing checkbox states against prose.
   directly and never went through `apply`; and dropping the "what changed"
   section survived because the criterion also appears further down the same
   comment. Two checks were also rewritten because they *crashed* rather than
-  failed, which stops the harness and leaves every later vector unrun.
+  failed, which stops the harness and leaves every later vector unrun. The
+  fourth survivor came out of review: `apply` deciding whether a resolve was an
+  attestation or a hand-tick could be hardcoded either way and nothing noticed,
+  because every end-to-end vector drove an `issue_comment` event and none drove
+  an `issues`/`edited` one. The driver is now general and the second exit path
+  is exercised too.
+- **Reviewers:** `ac-verifier` (4 MET, 1 correctly left as `NEEDS HUMAN
+  EVIDENCE`) and `backend-reviewer` (no `[blocking]`) — the latter caught that
+  the hand-tick exit passed an empty criteria tuple into the new resolve
+  comment, so a ticket whose boxes a human had just ticked one by one closed
+  saying "No evidence criterion was outstanding": literally true at that point
+  in `decide`, and the opposite of what a reader would take from it. The
+  `edited` path now posts its own comment naming the criteria and who ticked
+  them, and says plainly that no observation was recorded.
 - **Live, against a real ticket (#994), dry-run, nothing written**: with the
   live body as the snapshot it RESOLVES — ticks, unlabels, comments, closes;
   with one criterion removed from the snapshot, so it reads as having arrived
