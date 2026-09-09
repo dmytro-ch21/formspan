@@ -105,8 +105,9 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
     <RNView style={styles.block} testID={testID}>
       <Text style={styles.label}>Heart-rate monitor</Text>
       <Text style={styles.muted}>
-        Live heart rate during every session, straight from your watch or chest strap over Bluetooth — no waiting for
-        Apple Health or Health Connect to sync. Apple Health / Health Connect still fill in any gaps.
+        Heart rate straight from your watch or chest strap over Bluetooth during a run — including while your screen
+        is locked, and with no waiting for Apple Health or Health Connect to sync. VOLA connects when a run starts and
+        disconnects when it ends. Apple Health / Health Connect still fill in any gaps.
       </Text>
 
       {remembered === undefined ? (

@@ -21552,3 +21552,22 @@ being honest about what it does not yet know.
   a screen.
 - **Zone colours at a glance.** Whether scanning the list actually communicates
   intensity, or whether the tile colours read as decoration.
+
+## W21 — a run keeps recording with the screen locked (`apps/mobile/lib/runningTrackingTask.ts`, `app/running/[id].tsx`, `lib/hrMonitor/orchestrator.ts`, `app.config.js`, #992)
+
+### Automated (`lib/__tests__/runningTrackingTask.test.ts`)
+
+- The queue keeps every field the screen needs (accuracy, speed, elevation, RFC3339 timestamp) in arrival order.
+- A cursor delivers each fix exactly once: a second drain with the same cursor returns nothing; fixes appended while the screen slept come back on the next drain and never re-deliver what was consumed.
+- A 200-fix locked-screen backlog (ten minutes at the 3 s cadence) is preserved whole and strictly time-ordered — distance is a sum of consecutive segments, so an out-of-order drain would inflate it.
+- Fixes never cross athletes or runs; releasing the queue on finish releases that run only.
+
+### Manual / device — the ticket's evidence (16 Pro Max, outdoors)
+
+1. Start a run, lock the phone, and run for several minutes. PASS: iOS shows its blue location indicator throughout. FAIL: no indicator, or the app is plainly suspended.
+2. Unlock mid-run. PASS: distance, pace and the drawn route have all continued through the locked stretch, with no gap and no straight line across it. FAIL: the track stops at the moment of the lock (the pre-W21 behaviour).
+3. With a paired monitor, check the finished report's heart rate covers the whole run, not just the unlocked start.
+4. Auto-pause still behaves: stop for a minute mid-run with the screen locked, then move again. PASS: the saved run shows the pause and resumes on its own, with elapsed time excluding the stop.
+5. Finish the run, then leave the app for a few minutes. PASS: no location indicator, and the monitor disconnects — nothing keeps running once the run is over. FAIL: the indicator stays lit, or the strap stays connected.
+6. Kill the app mid-run and reopen it. PASS: the run resumes with the locked-screen fixes still present (the queue is on disk).
+7. Android: a foreground run behaves exactly as before this change — background is explicitly not claimed there yet.

@@ -168,10 +168,19 @@ module.exports = () => ({
         // athlete's words for the feature, not the API's.
         "react-native-ble-plx",
         {
-          isBackgroundEnabled: false,
+          // W21/#992: TRUE now, and for the athlete's reason rather than
+          // convenience: most people run with the screen locked, and a
+          // foreground-only link stops delivering the moment it goes off, so
+          // the run's heart rate simply ended mid-run. This adds the
+          // `bluetooth-central` background mode, which App Review reads; the
+          // justification is the ordinary one (a run tracker recording a run),
+          // and the link is held only while a run is active, never app-wide.
+          isBackgroundEnabled: true,
           neverForLocation: true,
+          // The old string promised 'Only while VOLA is open', which this
+          // change would have turned into a lie in the system dialog.
           bluetoothAlwaysPermission:
-            "VOLA connects to your heart-rate monitor over Bluetooth to show your live heart rate during a session and record it for the session's report. Only while VOLA is open.",
+            'VOLA connects to your heart-rate monitor over Bluetooth to record your heart rate during a run, including while your screen is locked. It connects when a run starts and disconnects when the run ends.',
         },
       ],
       [
@@ -179,6 +188,22 @@ module.exports = () => ({
         {
           locationWhenInUsePermission:
             "VOLA uses your location to track your run's route, distance and pace while you're using the app. Location is only accessed while VOLA is open and on screen — VOLA does not track your location in the background or when the app is closed.",
+          // W21/#992: the `location` background mode, so a run keeps
+          // recording once the screen locks.
+          //
+          // This does NOT need 'Always' authorization and deliberately does
+          // not ask for it: when-in-use plus this background mode is the
+          // standard run-tracker arrangement, and iOS shows its own blue
+          // indicator throughout. The two `false`s below are unchanged.
+          //
+          // The mode alone is NOT sufficient, which is the easy thing to get
+          // wrong: expo-location hard-codes `allowsBackgroundLocationUpdates
+          // = false` in BaseLocationProvider.swift (the provider behind
+          // `watchPositionAsync`) and sets it true only in
+          // EXLocationTaskConsumer.m — the TaskManager path. So the running
+          // screen tracks via `startLocationUpdatesAsync`; read
+          // lib/runningTrackingTask.ts before changing either.
+          isIosBackgroundLocationEnabled: true,
           locationAlwaysAndWhenInUsePermission: false,
           locationAlwaysPermission: false,
           motionUsagePermission: false,

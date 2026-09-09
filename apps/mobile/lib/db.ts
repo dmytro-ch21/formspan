@@ -502,6 +502,38 @@ const CREATE_HR_MONITOR_SAMPLES = `
 `;
 
 /**
+ * W21/#992: GPS fixes captured while a run is in progress, including while
+ * the app is backgrounded and the screen is locked.
+ *
+ * The background task (`lib/runningTrackingTask.ts`) runs outside React and
+ * only APPENDS here — it makes no decisions. The running screen drains the
+ * queue and feeds each fix through exactly the same accuracy filter,
+ * auto-pause hysteresis and distance accumulation it has always used, so the
+ * behaviour those took several tickets to get right is not reimplemented in
+ * a headless task where it could quietly diverge.
+ *
+ * `id` is an autoincrement so draining is strictly ordered and resumable:
+ * the screen records the last id it consumed, and a fix is therefore
+ * processed exactly once even across an app kill.
+ */
+const CREATE_RUN_FIX_QUEUE = `
+  CREATE TABLE IF NOT EXISTS running_fix_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    elevation_m REAL,
+    accuracy_m REAL,
+    speed_mps REAL,
+    recorded_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS running_fix_queue_session_idx
+    ON running_fix_queue (user_id, session_id, id);
+`;
+
+
+/**
  * Daily trackers: the DEFINITIONS, pulled from the server and pushed back.
  *
  * `dirty 0 / remote 1` by default, the `workout_cache`/`foods` direction, and
@@ -858,6 +890,7 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
   await db.execAsync(CREATE_DETECTED_ACTIVITIES);
   await db.execAsync(CREATE_HR_MONITOR_SAMPLES);
+  await db.execAsync(CREATE_RUN_FIX_QUEUE);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );

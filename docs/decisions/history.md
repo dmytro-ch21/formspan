@@ -65472,6 +65472,86 @@ because it names a plausible innocent file each time. Before believing a
 component-suite failure on this repo, re-run it alone, and check what else is
 running.
 
+## 2026-09-08 — W21 (#992): a run stopped recording the moment the screen locked, and `watchPositionAsync` could never have fixed it
+
+**What the athlete lost.** Lock the phone during a run — which is how most
+people run — and VOLA quietly stopped recording it. Not just heart rate:
+**GPS too**, so distance, pace and route all ended at the moment the screen
+went off. No error, no gap marker; the saved run was simply the part before
+the lock. Reported by the athlete: *"here it should work with locked screen
+too, most people run with locked screen so fix it."*
+
+**Why, and why the obvious fix would have done nothing.** `app/running/[id]`
+tracked with `Location.watchPositionAsync`, and `app.config.js` declared **no
+`UIBackgroundModes` at all**, so iOS suspended the app and the watch stopped
+delivering. The obvious remedy — add the `location` background mode — **would
+not have worked**, and this is the part worth recording: expo-location
+hard-codes `manager.allowsBackgroundLocationUpdates = false` in
+`BaseLocationProvider.swift`, the provider behind `watchPositionAsync`, and
+sets it `YES` in exactly one place, `EXLocationTaskConsumer.m` — the
+TaskManager path. Read from the vendored source rather than inferred: with
+this library, `watchPositionAsync` can never deliver in the background on iOS
+no matter what the Info.plist says. Background tracking requires
+`startLocationUpdatesAsync` plus a registered task, so that is what this does.
+
+**Shape: the task captures, the screen interprets.** A headless task cannot
+be allowed to re-implement the accuracy floor, the auto-pause hysteresis and
+the distance accumulation — that logic took several tickets (N465, L13,
+auto-pause) to get right, and a second copy in a background context would be
+free to diverge with nothing noticing. So `lib/runningTrackingTask.ts` makes
+**no decisions**: it appends fixes to `running_fix_queue` and stops there.
+The running screen drains that queue through the same `processFix` the live
+callback used to be, with one change that is the crux — **`now` is the fix's
+own timestamp, never `Date.now()`**. A backlog drained after ten locked-screen
+minutes has to make its pause/resume decisions on the timeline the fixes
+actually happened on; wall-clock reads would collapse the backlog into one
+instant and the hysteresis would mean nothing.
+
+The queue is on disk, and the drain is cursor-based, so a fix is delivered
+exactly once even across an app kill mid-run — and `finish()` drains once
+more **before** stopping, or the run would be saved missing its own ending.
+
+**Android keeps its existing path, deliberately.** Background location there
+additionally needs `ACCESS_BACKGROUND_LOCATION` and a foreground service —
+its own permission story and its own Play review. Adopting the task path
+without them risked `startLocationUpdatesAsync` failing outright and turning a
+working foreground run into no run at all. So Android still uses
+`watchPositionAsync` and appends to the **same queue**: two capture
+mechanisms, one interpretation path, no second copy of the logic. Android
+background is a separate ticket, not a silent casualty of an iOS fix.
+
+**Two capabilities were added to the binary, and both are reviewed ones.**
+`location` and `bluetooth-central` background modes. The justification is the
+ordinary one — a run tracker recording a run — and the scope is deliberately
+narrow: **when-in-use authorization is retained** (`locationAlways*` stay
+`false`; when-in-use plus the background mode is the standard arrangement and
+iOS shows its blue indicator throughout), and the Bluetooth link is now held
+**only for the duration of a run** rather than whenever the app is foreground
+(the athlete's decision: *"lets make the bluetooth active specifically when we
+want to activate a run"*). `lib/hrMonitor/orchestrator.ts` no longer connects
+on AppState at all; `startWatch` connects and `finish` releases.
+
+The Bluetooth permission string said *"Only while VOLA is open"* — this change
+would have made the system dialog a lie, so it was rewritten in the same
+commit.
+
+**Tests.** `runningTrackingTask.test.ts` against the real `running_fix_queue`:
+field fidelity, cursor exactly-once across a simulated kill, a 200-fix
+locked-screen backlog preserved whole and in order, per-athlete and per-run
+isolation, and release-on-finish scoped to one run. Five mutations, four
+caught; **the fifth survived and is recorded rather than papered over** —
+deleting `ORDER BY id` changes nothing, because both plans SQLite can choose
+here (table scan, or the `(user_id, session_id, id)` index) already yield id
+order. The clause states a contract the drain depends on rather than
+defending against an observable failure, and the code now says so, so the
+next reader does not delete it as dead.
+
+**What no test here can reach, and it is most of the point:** whether iOS
+actually keeps delivering with the screen off. That is the ticket's
+`NEEDS HUMAN EVIDENCE` criterion — a real outdoor run, locked, checked
+afterwards for distance, route AND heart rate covering the whole run, and
+checked again that nothing keeps running once it is finished.
+
 ## Open items / known gaps as of this entry
 
 

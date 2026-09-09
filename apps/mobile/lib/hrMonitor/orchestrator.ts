@@ -24,12 +24,7 @@ export function setHRMonitorIdentity(userID: string | null, getToken: TokenGette
     void stopLiveHR();
     return;
   }
-  if (identity?.userID === userID) {
-    identity = { userID, getToken };
-    return;
-  }
   identity = { userID, getToken };
-  void connectIfRemembered();
 }
 
 /** Called by Settings after pairing/forgetting, so the link follows the
@@ -48,7 +43,11 @@ export async function connectIfRemembered(): Promise<void> {
 export function startHRMonitorOrchestrator(): () => void {
   const onChange = (next: AppStateStatus) => {
     if (next === 'active') {
-      void connectIfRemembered();
+      // W21/#992: NO auto-connect here any more. The link is opened by the
+      // run that needs it (`app/running/[id].tsx`) and closed when that run
+      // ends, so neither battery pays for a monitor nobody is reading. A
+      // foregrounded app with a paired strap and no run in progress holds no
+      // connection at all.
       const id = identity;
       if (id) {
         void flushHRMonitorSamples(id.userID, id.getToken).catch(() => {
