@@ -111,7 +111,64 @@ export type TodayBoard = {
   lead: Source<TodayLead>;
   /** Block 2 — LATER. The soonest planned day strictly after real `now`. */
   later: Source<PlannedOffer | null>;
+  /**
+   * **N548 — what the day being shown actually logged, newest first.**
+   *
+   * The rows Today draws under `LOGGED`, each of which opens the session it
+   * names. Before this, a session logged an hour ago could only be reviewed by
+   * leaving Today for Progress and finding the week — the athlete's own
+   * complaint, from daily use.
+   *
+   * Three things about it are load-bearing:
+   *
+   * - **It is the SAME selection `rest`'s `loggedToday` count is derived
+   *   from** ({@link loggedOn}, called once below), so the number in "You
+   *   logged 2 sessions today anyway" and the number of rows underneath can
+   *   never disagree. Two answers to *what did this day log* a few hundred
+   *   points apart is the W2/W4 shape this repo has shipped twice.
+   * - **It follows the browsed day**, not real today — with the one exception
+   *   every other day-following read on this screen already makes, see
+   *   {@link momentumDayKey}.
+   * - **The resumed session is excluded** while it is the lead, because the
+   *   resume card immediately above already IS that session with a bigger
+   *   target on it. An in-progress session that is not the lead — a second
+   *   open session, which is reachable — still appears, marked as running.
+   */
+  logged: Source<Session[]>;
 };
+
+/**
+ * The day's sessions, newest first — the pure *what did this day log*
+ * selection, and the whole of N548's data question.
+ *
+ * `dayString(new Date(started_at))`, i.e. the LOCAL calendar day the session
+ * began on, matching how `loggedToday` has always counted and how
+ * `trainingSince` buckets in SQL (`date(started_at, 'localtime')`). A session
+ * begun at 8pm Pacific belongs to that day, not to the UTC tomorrow it is
+ * stored as.
+ *
+ * **An unfinished session is included.** It happened on this day whether or
+ * not it has been closed; a list that silently dropped it would be missing the
+ * one session most likely to need opening. Callers that already draw it
+ * elsewhere exclude it by id rather than by state — see {@link TodayBoard.logged}.
+ *
+ * Sorted on the parsed instant rather than on the raw string: `started_at`
+ * reaches here in more than one textual shape (a `Z`-suffixed instant from the
+ * server, a local wall-clock string from a backdated log), and comparing those
+ * as text orders them by their spelling.
+ *
+ * **The list it is given is capped**, and this function cannot widen it:
+ * `useTodayBoard` reads the 30 most recent sessions. A browsed day far enough
+ * back that its sessions fall outside those 30 selects nothing here — which is
+ * why the screen renders no LOGGED section at all in that case rather than a
+ * "nothing logged" line it has not earned. Same cap, same parity, as
+ * `loggedToday` and the resume search have always had over the same list.
+ */
+export function loggedOn(sessions: Session[], dayKey: string): Session[] {
+  return sessions
+    .filter((s) => dayString(new Date(s.started_at)) === dayKey)
+    .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
+}
 
 export function buildTodayBoard(input: {
   sessions: Source<Session[]>;
@@ -134,6 +191,40 @@ export function buildTodayBoard(input: {
 }): TodayBoard {
   const board = buildTrainBoard(input);
 
+  const resumeOffer = board.resume.state === 'ready' ? board.resume.value : null;
+
+  /*
+   * N548 — the day's logged sessions, computed BEFORE the resume early return
+   * below so both exits carry it.
+   *
+   * `momentumDayKey` rather than `viewDay` directly: the day switcher is
+   * hidden while a session is running, so a `dayOffset` left over from
+   * browsing before it started is neither visible nor correctable, and every
+   * other day-following read on this screen already resolves to real today in
+   * that state. A LOGGED list describing last Tuesday while the resume card
+   * above it describes a session running right now is exactly the disagreement
+   * that function exists to prevent.
+   */
+  const loggedDayKey = momentumDayKey(
+    resumeOffer !== null,
+    input.viewDay ?? input.now,
+    dayString(input.now),
+  );
+  const logged: Source<Session[]> =
+    input.sessions.state === 'ready'
+      ? {
+          state: 'ready',
+          // The resumed session is drawn by the resume card above; listing it
+          // again below would be one session with two targets on one screen.
+          // Filtered by ID rather than by `ended_at`, so a SECOND open session
+          // — reachable, since Plan and web both start one with no
+          // active-session guard — still appears here instead of vanishing.
+          value: loggedOn(input.sessions.value, loggedDayKey).filter(
+            (s) => s.id !== resumeOffer?.session.id,
+          ),
+        }
+      : input.sessions;
+
   /*
    * Resume wins BEFORE the plan reads are consulted, and the early return is
    * the mechanism rather than a comment about intent.
@@ -146,10 +237,11 @@ export function buildTodayBoard(input: {
    * read — or a browsed day — turns a live session into "we could not look" or
    * hides it, either of which loses a running clock in a gym.
    */
-  if (board.resume.state === 'ready' && board.resume.value !== null) {
+  if (resumeOffer !== null) {
     return {
-      lead: { state: 'ready', value: { kind: 'resume', offer: board.resume.value } },
+      lead: { state: 'ready', value: { kind: 'resume', offer: resumeOffer } },
       later: board.later,
+      logged,
     };
   }
 
@@ -175,16 +267,18 @@ export function buildTodayBoard(input: {
    * of {@link TodayLead} has a vector that can construct it. An unreachable
    * fallback branch is how #583 shipped an `empty` state no test could ever
    * build and a green assertion about copy that could never appear.
+   *
+   * **The COUNT of `logged` above, not a second filter (N548).** It used to
+   * re-derive the same predicate inline, which is fine until Today also draws
+   * the rows — at which point the sentence "you logged 2 sessions today
+   * anyway" and the two rows under it are two answers to one question, free to
+   * drift apart. Reachable only when there is no resume (the early return
+   * above), which is exactly when `loggedDayKey` and `viewDayKey` are the same
+   * day and nothing is excluded — so this changes no number it used to
+   * produce.
    */
   const loggedToday: Source<number> =
-    input.sessions.state === 'ready'
-      ? {
-          state: 'ready',
-          value: input.sessions.value.filter(
-            (s) => dayString(new Date(s.started_at)) === viewDayKey,
-          ).length,
-        }
-      : input.sessions;
+    logged.state === 'ready' ? { state: 'ready', value: logged.value.length } : logged;
 
   /*
    * `viewDay`'s owed plans, computed directly rather than through
@@ -209,7 +303,7 @@ export function buildTodayBoard(input: {
     return { kind: 'rest', loggedToday: logged };
   });
 
-  return { lead, later: board.later };
+  return { lead, later: board.later, logged };
 }
 
 /**

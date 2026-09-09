@@ -206,6 +206,14 @@ const nutrition = mod({
   is_sport: false,
   capabilities: { has_food_log: true } as Module['capabilities'],
 });
+// N548: running's catalog is `exercises`, same as strength — nothing in the
+// registry distinguishes it, which is exactly why `sessionHref` branches on
+// the sport string for it. Only the tests that need a run enable it.
+const running = mod({
+  key: 'running',
+  label: 'Running',
+  capabilities: { catalog: 'exercises' } as Module['capabilities'],
+});
 
 // `mock`-prefixed, because jest's module factory may not close over an
 // ordinary out-of-scope variable — the guard against uninitialised mocks.
@@ -1116,5 +1124,195 @@ describe('offline', () => {
     expect(await screen.findByTestId('today-plan-p1')).toBeTruthy();
     fireEvent.press(screen.getByTestId('up-next-log'));
     expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength');
+  });
+});
+
+/**
+ * N548 — what was logged is on Today, and opens.
+ *
+ * The derivation has its own tests (`lib/__tests__/todayLogged.test.ts`,
+ * against real SQLite). Three things live only in the render and are what this
+ * block is for:
+ *
+ * 1. **The rows reach the screen at all**, and say which sport and which
+ *    session without being opened.
+ * 2. **A tap routes through `sessionHref`**, so each of the three disciplines
+ *    lands on its own existing screen rather than on a new report surface.
+ * 3. **Stepping the day switcher changes WHICH day's rows are drawn.** This is
+ *    the criterion most able to be silently wrong: a list keyed on real today
+ *    looks perfect until somebody browses, and `board.logged` reaching the
+ *    render is not by itself proof that `viewDay` reached `board.logged`.
+ */
+describe('N548 — the day’s logged sessions are on Today and open', () => {
+  it('lists nothing at all when the day logged nothing', async () => {
+    render(<TodayScreen />);
+    // Waited on rather than asserted immediately: the board's reads are async,
+    // so a `queryByTestId` on the first frame is null for every screen state
+    // and would pass with the section permanently broken.
+    await screen.findByTestId('today-unplanned');
+    expect(screen.queryByTestId('today-logged')).toBeNull();
+  });
+
+  it('names the sport and the session on the row, without opening it', async () => {
+    mockListLocalSessions.mockResolvedValue([session({ id: 's1', name: 'Leg day' })]);
+    render(<TodayScreen />);
+
+    const row = within(await screen.findByTestId('today-logged-s1'));
+    expect(row.getByText('Leg day')).toBeTruthy();
+    expect(row.getByText('STRENGTH')).toBeTruthy();
+  });
+
+  it('falls back to the discipline when the session was never named', async () => {
+    mockListLocalSessions.mockResolvedValue([session({ id: 's1', name: '' })]);
+    render(<TodayScreen />);
+
+    const row = within(await screen.findByTestId('today-logged-s1'));
+    expect(row.getByText('Strength session')).toBeTruthy();
+  });
+
+  it('opens a strength session on the set logger', async () => {
+    mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
+    render(<TodayScreen />);
+
+    fireEvent.press(await screen.findByTestId('today-logged-s1'));
+    expect(mockPush).toHaveBeenCalledWith({ pathname: '/session/[id]', params: { id: 's1' } });
+  });
+
+  it('opens a BJJ session on the mat screen, not the set logger', async () => {
+    // The failure this pins is silent: a BJJ class pushed into the strength
+    // logger renders "Sets 0 · Reps 0 · Volume —" over an empty list and
+    // throws nothing.
+    mockListLocalSessions.mockResolvedValue([session({ id: 'b1', sport: 'bjj', name: 'Gi class' })]);
+    render(<TodayScreen />);
+
+    fireEvent.press(await screen.findByTestId('today-logged-b1'));
+    expect(mockPush).toHaveBeenCalledWith({ pathname: '/bjj/session/[id]', params: { id: 'b1' } });
+  });
+
+  it('opens a run on the running screen', async () => {
+    mockModules = [strength, bjj, nutrition, running];
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'r1', sport: 'running', name: 'Easy 5k' }),
+    ]);
+    render(<TodayScreen />);
+
+    fireEvent.press(await screen.findByTestId('today-logged-r1'));
+    expect(mockPush).toHaveBeenCalledWith({ pathname: '/running/[id]', params: { id: 'r1' } });
+  });
+
+  it('lists every sport the day carried, newest first', async () => {
+    mockModules = [strength, bjj, nutrition, running];
+    const noon = new Date(`${todayKey()}T12:00:00`).getTime();
+    // Deliberately handed OLDEST first, so the order asserted below can only
+    // come from the selection's own sort.
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'lift', started_at: new Date(noon - 5 * 3_600_000).toISOString() }),
+      session({ id: 'run', sport: 'running', started_at: new Date(noon).toISOString() }),
+      session({ id: 'roll', sport: 'bjj', started_at: new Date(noon + 6 * 3_600_000).toISOString() }),
+    ]);
+    render(<TodayScreen />);
+
+    await screen.findByTestId('today-logged-roll');
+    // Order, not merely presence: the evening class is what the athlete came
+    // back to review, and it belongs at the top.
+    expect(
+      screen.getAllByTestId(/^today-logged-(roll|run|lift)$/).map((n) => n.props.testID),
+    ).toEqual(['today-logged-roll', 'today-logged-run', 'today-logged-lift']);
+  });
+
+  it('does not repeat the session the resume card is already showing', async () => {
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'open', ended_at: null }),
+      session({ id: 'earlier' }),
+    ]);
+    render(<TodayScreen />);
+
+    expect(await screen.findByTestId('resume-session')).toBeTruthy();
+    expect(screen.queryByTestId('today-logged-open')).toBeNull();
+    expect(screen.getByTestId('today-logged-earlier')).toBeTruthy();
+  });
+
+  it('the way out goes to the full history, and Progress keeps its own route', async () => {
+    mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
+    render(<TodayScreen />);
+
+    fireEvent.press(await screen.findByTestId('today-logged-all'));
+    expect(mockPush).toHaveBeenCalledWith('/session/history');
+    // Unchanged by this block: the week strip still opens Progress, so the
+    // route the ticket describes is added to rather than replaced.
+    fireEvent.press(screen.getByTestId('week-strip-review'));
+    expect(mockPush).toHaveBeenCalledWith('/(tabs)/progress');
+  });
+
+  // ── the browsed day ──────────────────────────────────────────────────────
+  //
+  // Today can display a PAST day (N430/#692), and the rows have to belong to
+  // the day being shown. A version keyed on real today passes every test above
+  // and fails every one below.
+
+  it('shows the browsed day’s sessions and none of today’s', async () => {
+    const noonYesterday = new Date(`${dayFromNow(-1)}T12:00:00`);
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'today-lift' }),
+      session({
+        id: 'yesterday-roll',
+        sport: 'bjj',
+        name: 'Gi class',
+        started_at: noonYesterday.toISOString(),
+        ended_at: new Date(noonYesterday.getTime() + 3_600_000).toISOString(),
+      }),
+    ]);
+    render(<TodayScreen />);
+
+    // Today first — so an empty list after stepping cannot pass for the wrong
+    // reason (a broken section renders nothing on every day).
+    expect(await screen.findByTestId('today-logged-today-lift')).toBeTruthy();
+    expect(screen.queryByTestId('today-logged-yesterday-roll')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    expect(await screen.findByTestId('today-logged-yesterday-roll')).toBeTruthy();
+    expect(screen.queryByTestId('today-logged-today-lift')).toBeNull();
+  });
+
+  it('drops the section entirely on a browsed day that logged nothing', async () => {
+    mockListLocalSessions.mockResolvedValue([session({ id: 'today-lift' })]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-logged-today-lift');
+
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+
+    await waitFor(() => expect(screen.queryByTestId('today-logged')).toBeNull());
+    // And comes back on the way home, so the disappearance is the day and not
+    // a section that unmounted for good.
+    fireEvent.press(screen.getByTestId('today-day-next'));
+    expect(await screen.findByTestId('today-logged-today-lift')).toBeTruthy();
+  });
+
+  it('opens the BROWSED day’s session, not a same-named one from today', async () => {
+    const noonYesterday = new Date(`${dayFromNow(-1)}T12:00:00`);
+    mockListLocalSessions.mockResolvedValue([
+      session({ id: 'today-lift', name: 'Legs' }),
+      session({
+        id: 'yesterday-lift',
+        name: 'Legs',
+        started_at: noonYesterday.toISOString(),
+        ended_at: new Date(noonYesterday.getTime() + 3_600_000).toISOString(),
+      }),
+    ]);
+    render(<TodayScreen />);
+    await screen.findByTestId('today-logged-today-lift');
+
+    fireEvent.press(screen.getByTestId('today-day-prev'));
+    fireEvent.press(await screen.findByTestId('today-logged-yesterday-lift'));
+
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/session/[id]',
+      params: { id: 'yesterday-lift' },
+    });
+    expect(mockPush).not.toHaveBeenCalledWith({
+      pathname: '/session/[id]',
+      params: { id: 'today-lift' },
+    });
   });
 });

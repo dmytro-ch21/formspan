@@ -15,15 +15,12 @@ import { matchPlans, pendingPlans } from '@/lib/adherence';
 import { type PlannedSession } from '@/lib/plan';
 import type { Session } from '@/lib/sessions';
 import { listLocalSessions } from '@/lib/sessionStore';
-import { averagePaceSecPerKm } from '@/lib/running';
-import { formatDistance, formatPace, formatVolume, type UnitSystem } from '@/lib/units';
 import {
-  contributesVolume,
-  countsAsSet,
-  sessionActiveSeconds,
-  sessionDistanceMeters,
-  totalWeightKg,
-} from '@/lib/sessions';
+  sessionDurationSeconds,
+  sessionMeta,
+  sessionVolumeKg,
+} from '@/lib/sessionSummary';
+import { formatVolume, type UnitSystem } from '@/lib/units';
 
 /**
  * The training calendar: a week you can open, and a month behind it.
@@ -57,45 +54,22 @@ import {
  * limit and a both-day is exactly the day worth telling someone about.
  */
 
-/**
- * Sets the athlete would say they did — the backend's `countsAsSet`, mirrored.
- * A drop is part of the set above it and adds none; its work still counts in
- * the volume below.
+/*
+ * `workingSets` and `sessionVolume` used to live here, verbatim beside a
+ * second copy in `app/session/history.tsx` and a third on Today. They are
+ * `workingSetCount` and `sessionVolumeKg` in `lib/sessionSummary.ts` now
+ * (N548) — same rules, same #425 note about an unresolved implement factor,
+ * read from one place by every surface that draws a session's numbers.
+ *
+ * The DELIBERATE departure recorded here before the move is unchanged and
+ * still worth finding: the session screen's own Volume tile withholds the
+ * WHOLE figure rather than show any number derived from an unresolved set,
+ * while this month aggregate under-counts by that one set's tonnage instead.
+ * A month is a dozen-plus sessions read together, and blanking it because one
+ * of them has one unresolved set would hide far more correct information than
+ * the under-count costs. Both satisfy "absent beats wrong" for the number each
+ * screen is actually answering; they are not the same number.
  */
-function workingSets(s: Session): number {
-  // A drop is part of the set above it — see `countsAsSet`.
-  return s.sets.filter(countsAsSet).length;
-}
-
-function sessionVolume(s: Session): number {
-  let kg = 0;
-  for (const set of s.sets) {
-    if (contributesVolume(set) && set.weight_kg != null && set.reps != null) {
-      // `null` is the EXPLICITLY-UNRESOLVED state (#425) — an offline swap
-      // whose factor was not in the local catalog yet. Left out of THIS sum
-      // rather than guessed, so a month tile under-counts by one set's own
-      // tonnage until it syncs, then corrects.
-      //
-      // A DELIBERATE DEPARTURE from the session screen's own Volume tile,
-      // which withholds the WHOLE figure rather than show any number derived
-      // from an unresolved set — recorded here because a future reader
-      // finding two different answers to "what does #425 do" should find the
-      // reasoning, not just the asymmetry. The session tile is the number an
-      // athlete reads moments after making the swap, on the same screen that
-      // caused it — the exact "reports half its eventual tonnage" case the
-      // ticket is about, and worth withholding entirely rather than showing
-      // wrong. A month's aggregate is a dozen-plus sessions read together;
-      // blanking the whole month because ONE session has one unresolved set
-      // would hide far more real, correct information than the one set's own
-      // under-count costs — a worse trade in the other direction. Both
-      // choices satisfy "absent beats wrong" for the number each screen is
-      // actually answering; they are not the same number.
-      const total = totalWeightKg(set);
-      if (total != null) kg += total * set.reps;
-    }
-  }
-  return kg;
-}
 
 /** Plans keyed by their day. Module scope so the memos below have no stale dep. */
 function byDayOf(rows: PlannedSession[]): Map<string, PlannedSession[]> {
@@ -108,10 +82,6 @@ function byDayOf(rows: PlannedSession[]): Map<string, PlannedSession[]> {
   return map;
 }
 
-function durationSeconds(s: Session): number | null {
-  if (!s.ended_at) return null;
-  return (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000;
-}
 
 export function TrainingCalendar({
   now,
@@ -275,8 +245,8 @@ export function TrainingCalendar({
       if (d.getMonth() !== anchor.getMonth() || d.getFullYear() !== anchor.getFullYear()) continue;
       count++;
       days.add(dayString(d));
-      seconds += durationSeconds(s) ?? 0;
-      volumeKg += sessionVolume(s);
+      seconds += sessionDurationSeconds(s) ?? 0;
+      volumeKg += sessionVolumeKg(s.sets);
     }
     return { count, seconds, volumeKg, days: days.size };
   }, [pool, anchor]);
@@ -689,52 +659,23 @@ function DayRow({
       ) : (
         <>
           {sessions.map((s) => {
-            const secs = durationSeconds(s);
-            // A running session's own local `session_sets` row (written by
-            // `app/running/[id].tsx`'s `finish()`) carries distance and
-            // duration against the seeded `run` exercise, not sets or
-            // tonnage — so a run's row reads distance + pace instead of the
-            // "0 sets" / "0kg" strength-shaped line, the same fabricated-zero
-            // trap the guards below already avoid for BJJ (N462).
-            const isRunning = s.sport === 'running';
-            const distanceM = isRunning ? sessionDistanceMeters(s.sets) : 0;
-            // Pace is NOT derived from `secs` above. `secs` is wall-clock
-            // (`ended_at - started_at`), which includes any pause — the
-            // live tracking screen deliberately excludes paused time from
-            // what it writes to this same set's `seconds` field
-            // (`elapsedMsRef`, `app/running/[id].tsx`), so pacing off `secs`
-            // would understate the pace of any run that was ever paused,
-            // disagreeing with the number the athlete saw mid-run. Reading
-            // `sessionActiveSeconds` off the identical gate as the distance
-            // sum keeps the two numbers describing the same set(s).
-            const activeSeconds = isRunning ? sessionActiveSeconds(s.sets) : 0;
-            const paceSecPerKm =
-              isRunning && distanceM > 0 && activeSeconds > 0
-                ? averagePaceSecPerKm(distanceM, activeSeconds)
-                : null;
-            const kg = isRunning ? 0 : sessionVolume(s);
-            const n = isRunning ? 0 : workingSets(s);
-            // Each measure appears only when it exists — a "0 sets" chip on a
-            // mat session reads as abandoned rather than as a class.
+            // `sessionMeta` (N548) — the duration/sets/tonnage vs
+            // duration/distance/pace rule, read from `lib/sessionSummary.ts`
+            // rather than written out here. It carries the two notes this
+            // block used to: a run's own local `session_sets` row holds
+            // distance and duration against the seeded `run` exercise and no
+            // tonnage, so a run reads distance + pace instead of the "0 sets"
+            // strength-shaped line (N462); and its pace comes from
+            // `sessionActiveSeconds`, never from wall-clock, so a paused run
+            // is not silently slower here than on the tracking screen.
             const meta = [
-              secs != null ? formatDuration(secs) : null,
-              isRunning
-                ? distanceM > 0
-                  ? formatDistance(distanceM, units)
-                  : null
-                : n > 0
-                  ? `${n} ${n === 1 ? 'set' : 'sets'}`
-                  : null,
-              isRunning
-                ? paceSecPerKm != null
-                  ? formatPace(paceSecPerKm, units)
-                  : null
-                : kg > 0
-                  ? formatVolume(kg, units)
-                  : null,
+              ...sessionMeta(s, units),
               // The plan that this session met is no longer drawn as its own
               // row, so the intention would otherwise disappear entirely. It
-              // goes last: what was done outranks what was meant.
+              // goes last: what was done outranks what was meant. Appended
+              // here rather than inside `sessionMeta`, because "planned" is a
+              // fact about this CALENDAR's pairing of plans to sessions, not
+              // about the session's own numbers.
               metBy?.has(s.id) ? 'planned' : null,
             ].filter(Boolean);
             return (
