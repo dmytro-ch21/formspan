@@ -1,5 +1,6 @@
 import {
   applyEffortEntry,
+  applySuggestions,
   fillForward,
   pendingSuggestableIndices,
   repairSet,
@@ -172,6 +173,57 @@ describe('pendingSuggestableIndices', () => {
       set('back-squat', { set_type: 'working', completed: false }), // pending, eligible
     ];
     expect(pendingSuggestableIndices([0, 1, 2, 3], sets)).toEqual([1, 3]);
+  });
+});
+
+/**
+ * N551/#1013, item 7 again, one level up: the session-CREATION prefill.
+ *
+ * `pendingSuggestableIndices` guards the "Use" button; this guards the
+ * silent prefill that happens when a session is started from a template.
+ * Today no caller can hand it a non-working set — `setsFromWorkout` hardcodes
+ * `set_type: 'working'` and `WorkoutItem` has no set role at all — so these
+ * assert an invariant that is currently true by CONSTRUCTION and would become
+ * the bug #753 reported the day templates can author a backoff.
+ */
+describe('applySuggestions', () => {
+  const hit = new Map([
+    [
+      'back-squat',
+      { exercise_id: 'back-squat', target_weight_kg: 100, target_reps: 5 } as never,
+    ],
+  ]);
+
+  it('fills a blank working set', () => {
+    const [out] = applySuggestions([set('back-squat')], hit);
+    expect(out.weight_kg).toBe(100);
+    expect(out.reps).toBe(5);
+  });
+
+  it.each(['backoff', 'drop', 'amrap', 'failure', 'warmup'] as const)(
+    'leaves a blank %s set completely alone',
+    (setType) => {
+      const [out] = applySuggestions([set('back-squat', { set_type: setType })], hit);
+      expect(out.weight_kg).toBeNull();
+      expect(out.reps).toBeNull();
+    },
+  );
+
+  it('treats an undefined set_type as working, matching the backend default', () => {
+    const row = { ...set('back-squat'), set_type: undefined as unknown as LoggedSet['set_type'] };
+    const [out] = applySuggestions([row], hit);
+    expect(out.weight_kg).toBe(100);
+  });
+
+  it("never overwrites a template's own prescription", () => {
+    const [out] = applySuggestions([set('back-squat', { weight_kg: 60, reps: 12 })], hit);
+    expect(out.weight_kg).toBe(60);
+    expect(out.reps).toBe(12);
+  });
+
+  it('leaves an exercise with no suggestion untouched', () => {
+    const [out] = applySuggestions([set('bench-press')], hit);
+    expect(out.weight_kg).toBeNull();
   });
 });
 

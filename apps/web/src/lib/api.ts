@@ -1086,6 +1086,40 @@ export function sessionVolume(sets: LoggedSet[]): {
   };
 }
 
+/**
+ * The set rows a progression suggestion may be written into.
+ *
+ * N551/#1013, item 7 — and the web half of a fix that shipped on mobile alone.
+ * `apps/mobile/lib/sessions.ts`'s `pendingSuggestableIndices` is this function;
+ * this page filtered `set_type !== "warmup"` instead, which is the exact
+ * defect #753 reported: *"Suggestions are applied to every non-warm-up set,
+ * including backoffs and drops, rather than to the sets they were derived
+ * from."*
+ *
+ * Two conditions, and both matter for different reasons:
+ *
+ *   - **Not completed.** A finished set is a record of what happened, not a
+ *     slot to fill. Overwriting one rewrites history.
+ *   - **`set_type === "working"`, not merely "not a warm-up".** The engine
+ *     derives a straight-set recommendation from the straight working-set
+ *     cohort ONLY (see `straightWorkingSetsWithWeight` in
+ *     `backend/internal/modules/session/progression_v2.go`), so writing that
+ *     number into a backoff, a drop, an AMRAP or a failure set applies a
+ *     conclusion to evidence it was never drawn from. A backoff prescribed at
+ *     60% silently becoming the top-set weight is the loudest version of it.
+ *
+ * A missing `set_type` reads as `"working"`, matching the server's own
+ * `NOT NULL DEFAULT 'working'` column and mobile's identical `?? 'working'`.
+ */
+export function pendingSuggestableIndices(
+  indices: readonly number[],
+  sets: readonly Pick<LoggedSet, "completed" | "set_type">[],
+): number[] {
+  return indices.filter(
+    (i) => !sets[i]?.completed && (sets[i]?.set_type ?? "working") === "working",
+  );
+}
+
 export type UnitSystemPref = "metric" | "imperial";
 
 export type Profile = {
@@ -1395,6 +1429,14 @@ export function applySuggestions(
   return sets.map((s) => {
     const hit = suggestions.get(s.exercise_id);
     if (!hit) return s;
+    // N551/#1013 item 7 — the same guard, and the same reasoning, as mobile's
+    // twin in `apps/mobile/lib/sessions.ts`. A straight-set recommendation is
+    // derived from the straight WORKING-set cohort only, so it must never
+    // prefill a backoff, drop, AMRAP or failure set. No caller can reach this
+    // with one today (`setsFromWorkout` hardcodes `set_type: "working"`), which
+    // makes the invariant true by construction — an accident, not a decision,
+    // and one that ends the day templates can author a set role.
+    if ((s.set_type ?? "working") !== "working") return s;
     let next = s;
     if (next.weight_kg == null && hit.target_weight_kg != null) {
       next = { ...next, weight_kg: hit.target_weight_kg };

@@ -22,6 +22,7 @@ import {
   MEASURE_LABEL,
   RECORD_BASIS,
   RECORD_LABEL,
+  pendingSuggestableIndices,
   pickImage,
   replaceSets,
   setExerciseUnit,
@@ -789,11 +790,12 @@ function ExerciseBlock({
   const measures: Measure[] = exercise
     ? measuresFor(exercise.load_type)
     : ["reps"];
-  // The sets a recommendation may write to: still to come, and not warm-ups.
-  // A completed set is a record of what happened, not a slot to fill.
-  const pending = indices.filter(
-    (i) => !sets[i]?.completed && sets[i]?.set_type !== "warmup",
-  );
+  // The sets a recommendation may write to. N551/#1013 item 7: WORKING sets
+  // only, not merely "not a warm-up" — see `pendingSuggestableIndices`'s own
+  // doc comment for why a backoff or a drop must never receive a straight-set
+  // recommendation. This used to be an inline `set_type !== "warmup"` filter,
+  // which is the defect #753 reported, fixed on mobile and left standing here.
+  const pending = pendingSuggestableIndices(indices, sets);
 
   return (
     <div className="flex flex-col gap-2">
@@ -870,15 +872,15 @@ function ExerciseBlock({
         )}
       </div>
 
-      {/* The sets a recommendation may write to: still to come, and not
-          warm-ups. A completed set is a record of what happened. */}
+      {/* The sets a recommendation may write to: still to come, and plain
+          working sets. A completed set is a record of what happened. */}
       {suggestion && (
         <ProgressionCard
           suggestion={suggestion}
           exerciseName={exercise?.name ?? "this exercise"}
           units={units}
-          // Nothing left to write to — every set of this exercise is done or a
-          // warm-up — so there is no action to offer.
+          // Nothing left to write to — every set of this exercise is done, or
+          // is not a plain working set — so there is no action to offer.
           editable={editable && pending.length > 0}
           // "Applied" is judged against the first set the control would
           // actually write to, not the first set in the group: a session
