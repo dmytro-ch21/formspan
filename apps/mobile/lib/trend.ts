@@ -30,6 +30,14 @@ export type TrendWeek = {
  * continuous history over a month somebody missed, which is the flattering lie
  * this codebase refuses everywhere else — a chart that cannot show a lay-off
  * cannot show a comeback either.
+ *
+ * **No production caller since N179 removed the strip from Today, and kept
+ * anyway when N201/#637 deleted the VIEW.** The view was one screen's answer to
+ * one question, already answered on Progress by `TrainingSummary`; this is the
+ * derivation, it is purely local (no fetch), it carries thirteen tests, and it
+ * is what an offline weekly-bar block would be rebuilt from if Progress ever
+ * needs one in a gym dead-spot. Deleting a tested pure function to chase a
+ * coverage number would throw away the reusable half and keep nothing.
  */
 export function weeklyDays(sessions: Session[], now: Date, weeks: number): TrendWeek[] {
   const thisWeek = startOfWeek(now);

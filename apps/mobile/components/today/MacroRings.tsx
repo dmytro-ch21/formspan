@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
 import { vola } from '@/constants/Colors';
-import { ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
+import { ringCap, ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -197,8 +197,21 @@ function Ring({
     r: radius,
     strokeWidth: stroke,
     fill: 'none' as const,
-    strokeLinecap: 'round' as const,
   };
+
+  /*
+    The cap is per-arc, not per-ring — see {@link ringCap}. A round cap is what
+    makes four arcs read as a set, and it also gives every arc a minimum drawn
+    length of one stroke width, which at 2% of a target is a floating capsule
+    rather than a fill. The user read four of those as a second colour legend
+    (#637). Below the floor the cap comes off and a small value draws small.
+
+    Taken from the TARGET rather than from the animated value, because a
+    linecap is not an animatable property: this is the cap the arc rests at,
+    and mid-sweep it is briefly the cap of a value it has not reached yet.
+  */
+  const baseCap = ringCap(targetBase, circumference, stroke);
+  const overCap = ringCap(targetOver, circumference, stroke);
 
   return (
     <>
@@ -208,10 +221,16 @@ function Ring({
         same thing as a ring sitting at zero, which would be a claim that
         nothing was eaten.
       */}
-      <Circle {...common} stroke={colour} strokeOpacity={sweep ? 0.16 : 0.1} />
+      <Circle
+        {...common}
+        strokeLinecap="butt"
+        stroke={colour}
+        strokeOpacity={sweep ? 0.16 : 0.1}
+      />
       {sweep ? (
         <AnimatedCircle
           {...common}
+          strokeLinecap={baseCap}
           stroke={colour}
           strokeDasharray={circumference}
           strokeDashoffset={dashOffset}
@@ -227,6 +246,7 @@ function Ring({
           */}
           <AnimatedCircle
             {...common}
+            strokeLinecap={overCap}
             stroke={vola.surface}
             strokeWidth={stroke + 3}
             strokeDasharray={circumference}
@@ -234,6 +254,7 @@ function Ring({
           />
           <AnimatedCircle
             {...common}
+            strokeLinecap={overCap}
             stroke={colour}
             strokeDasharray={circumference}
             strokeDashoffset={overOffset}

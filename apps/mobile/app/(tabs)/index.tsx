@@ -187,7 +187,10 @@ function todayLabel(now: Date): string {
  *   `components/progress/ThisWeek.tsx` (N178).
  * - **`TrendStrip`** → Progress, whose `TrainingSummary` already draws a bar
  *   per week over a selectable span. Drawing a second one would be the W2/W4
- *   shape; see `components/progress/TrainingHistory.tsx`.
+ *   shape; see `components/progress/TrainingHistory.tsx`. The component itself
+ *   is **gone** — N201/#637 deleted it rather than leave a view nothing calls
+ *   sitting in the tree describing a screen it is no longer on. Its
+ *   derivation, `weeklyDays` in `lib/trend.ts`, is untouched.
  * - **`TrainingCalendar`** → Progress, through that component — the one of the
  *   three that had no equivalent there, and the last surface on the phone that
  *   opens a past session by date.
