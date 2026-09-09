@@ -88,6 +88,8 @@ type BleDevice = {
   id: string;
   name: string | null;
   localName?: string | null;
+  /** Advertisement signal strength in dBm, when the radio reported one. */
+  rssi?: number | null;
   discoverAllServicesAndCharacteristics(): Promise<BleDevice>;
   monitorCharacteristicForService(
     serviceUUID: string,
@@ -149,7 +151,17 @@ export async function ensureBluetoothPermissions(): Promise<boolean> {
   return res === PermissionsAndroid.RESULTS.GRANTED;
 }
 
-export type FoundMonitor = { id: string; name: string };
+export type FoundMonitor = {
+  id: string;
+  name: string;
+  /**
+   * W20/#986 — advertisement signal strength in dBm, `null` when the radio
+   * did not report one. Only ever shown to separate two devices advertising
+   * the SAME name (`lib/hrMonitor/monitorList.ts` decides); it is not an
+   * identifier and never appears on an unambiguous row.
+   */
+  rssi: number | null;
+};
 
 /**
  * Scans for Heart Rate Profile devices for `timeoutMs`, reporting each new
@@ -180,7 +192,13 @@ export function scanForMonitors(
   m.startDeviceScan([HEART_RATE_SERVICE_UUID], { allowDuplicates: false }, (error, device) => {
     if (error || !device || seen.has(device.id)) return;
     seen.add(device.id);
-    onFound({ id: device.id, name: device.name ?? device.localName ?? 'Heart-rate monitor' });
+    onFound({
+      id: device.id,
+      name: device.name ?? device.localName ?? 'Heart-rate monitor',
+      // `allowDuplicates: false`, so this is the first advertisement's
+      // reading and it does not then flicker under the athlete's finger.
+      rssi: typeof device.rssi === 'number' ? device.rssi : null,
+    });
   });
   setTimeout(finish, timeoutMs);
   return { done, stop: finish };

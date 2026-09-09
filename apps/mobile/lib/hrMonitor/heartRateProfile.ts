@@ -175,7 +175,15 @@ export function isLiveReadingFresh(state: LiveHRState, now: Date): boolean {
   return Number.isFinite(t) && now.getTime() - t <= LIVE_HR_STALE_AFTER_MS;
 }
 
-/** Short status copy for the indicator — never silent about a drop. */
+/**
+ * Short status copy for the in-session INDICATOR — never silent about a drop.
+ *
+ * Note `connected` returns the DEVICE NAME, deliberately: the chip is a heart
+ * icon, a number and this label, with nothing else on screen saying where the
+ * number comes from, so "Polar H10" is the useful sentence there and
+ * "Connected" would be noise. That is exactly why it is wrong anywhere the
+ * name is already on the line above — see `pairedMonitorStatusLabel`.
+ */
 export function liveHRStatusLabel(state: LiveHRState): string {
   switch (state.status) {
     case 'off':
@@ -191,4 +199,51 @@ export function liveHRStatusLabel(state: LiveHRState): string {
     case 'disconnected':
       return 'Monitor disconnected';
   }
+}
+
+/**
+ * W20/#986 — the second line of Settings' paired-monitor row, which states a
+ * CONNECTION STATE and never the device name.
+ *
+ * The row prints `remembered.name` as its title and used to print
+ * `liveHRStatusLabel(live)` underneath, which for `connected` is the device
+ * name again: "Amazfit Helio Strap / Amazfit Helio Strap". A separate
+ * function rather than a change to that one, because the chip's behaviour is
+ * correct for the chip (see above) and is still pinned by its own test.
+ *
+ * `pairedDeviceId`, when given, is the id of the monitor this row is about.
+ * The live link belongs to whatever the orchestrator last started, so if that
+ * is some other device this row's monitor is, honestly, not connected.
+ */
+export function pairedMonitorStatusLabel(state: LiveHRState, pairedDeviceId?: string | null): string {
+  if (state.status === 'unsupported') return 'Bluetooth not available';
+  if (isSomeOtherDevice(state, pairedDeviceId)) return 'Not connected';
+  switch (state.status) {
+    case 'off':
+      return 'Not connected';
+    case 'connecting':
+      return 'Connecting…';
+    case 'connected':
+      return 'Connected';
+    case 'reconnecting':
+      return 'Disconnected — reconnecting…';
+    case 'disconnected':
+      return 'Disconnected';
+  }
+}
+
+/**
+ * Whether the live link is this row's monitor, connected right now. Shares
+ * `isSomeOtherDevice` with `pairedMonitorStatusLabel` so the row's icon and
+ * its words cannot disagree — a green heart over "Not connected" is the same
+ * class of defect W20 was filed for, one element of the row overstating what
+ * the other one says.
+ */
+export function isPairedMonitorConnected(state: LiveHRState, pairedDeviceId?: string | null): boolean {
+  return state.status === 'connected' && !isSomeOtherDevice(state, pairedDeviceId);
+}
+
+/** The live link is held for a device that is not the one this row is about. */
+function isSomeOtherDevice(state: LiveHRState, pairedDeviceId?: string | null): boolean {
+  return pairedDeviceId != null && state.device != null && state.device.id !== pairedDeviceId;
 }

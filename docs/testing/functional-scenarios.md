@@ -21831,3 +21831,49 @@ disc, drop-lines, a glow, and the latest reading ringed.
   under the wrong letter.
 - The Momentum card on a lightly-logged morning: the four ring fills read as
   four rings, not as a stack of coloured pills above the centre.
+
+## Settings → Heart-rate monitor: telling two identical straps apart (W20/#986)
+
+### Happy path
+
+- **One monitor found:** the scan list shows its advertised name and nothing
+  else — no id tag, no signal word. Tapping it pairs it.
+- **Two monitors with different names:** both rows stay bare. This is the
+  common case and the one that regresses silently; assert the absence, not
+  just the presence.
+- **Two monitors advertising the SAME name:** both rows gain a second line —
+  a 4-character id tag, and a signal word when the radio reported one
+  (`9F2A · strong signal`). The tags differ. Row order is discovery order and
+  does not change between renders.
+- **Paired row:** the title is the device name and the second line is a
+  connection state — `Not connected` before the link opens, `Connecting…`,
+  then `Connected`. The name never appears twice.
+
+### Edge cases & errors
+
+- **Three monitors of the same model:** all three get distinct tags.
+- **Two ids sharing their last 4 characters:** the tag widens (6, then 8, then
+  the whole id) rather than printing the same tag twice.
+- **No RSSI reported:** the detail line is the tag alone, with no trailing
+  separator.
+- **The link drops mid-check:** the paired row reads
+  `Disconnected — reconnecting…`, then `Disconnected` after the attempts are
+  spent — never the device name, never blank.
+- **A link held for a different device** (a run connected to something else
+  while Settings is open): the paired row reads `Not connected`, not
+  `Connected`.
+- **No Bluetooth in this binary:** the block says Bluetooth isn't available and
+  no scan button appears.
+- **Scan finds nothing:** the Amazfit broadcasting note appears.
+
+### Accessibility
+
+- A row with a detail line speaks it too — `Use Amazfit Helio Strap, 9F2A ·
+  strong signal` — so two same-named devices are not two identical spoken
+  labels. A bare row still speaks `Use Polar H10`.
+
+### NEEDS HUMAN EVIDENCE
+
+- With **both Helio Straps present and broadcasting**: the two rows are
+  tellable apart, the one held against the phone is the one that pairs, and
+  the paired row reads as a status rather than a repeated name.

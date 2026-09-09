@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
-import { liveHRStatusLabel } from '@/lib/hrMonitor/heartRateProfile';
+import { isPairedMonitorConnected, pairedMonitorStatusLabel } from '@/lib/hrMonitor/heartRateProfile';
 import { forgetMonitor, readRememberedMonitor, rememberMonitor, type RememberedMonitor } from '@/lib/hrMonitor/hrMonitorStore';
 import { ensureBluetoothPermissions, isBluetoothSupported, scanForMonitors, stopLiveHR, type FoundMonitor } from '@/lib/hrMonitor/liveHR';
+import { monitorRowA11yLabel, monitorRows } from '@/lib/hrMonitor/monitorList';
 import { connectIfRemembered } from '@/lib/hrMonitor/orchestrator';
 import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 
@@ -43,6 +44,13 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
    */
   const openedHere = useRef(false);
   const supported = isBluetoothSupported();
+  /**
+   * W20/#986 — two straps of the same model advertise the same name, so the
+   * list has to say which is which. `monitorRows` adds a detail line ONLY to
+   * rows whose name is shared with another row; the common single-monitor
+   * scan stays a bare name.
+   */
+  const rows = useMemo(() => monitorRows(found), [found]);
 
   useEffect(() => {
     if (!userId) return;
@@ -93,7 +101,7 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
   }, [userId, scanning]);
 
   const pick = useCallback(
-    async (d: FoundMonitor) => {
+    async (d: { id: string; name: string }) => {
       if (!userId) return;
       stopScan.current?.();
       const m = await rememberMonitor(userId, d);
@@ -140,11 +148,11 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
         <ActivityIndicator accessibilityLabel="Loading" style={styles.spinner} />
       ) : remembered ? (
         <RNView style={styles.device} testID={`${testID}-remembered`}>
-          <Icon name="heart" size={16} color={live.status === 'connected' ? vola.green : vola.textDim} />
+          <Icon name="heart" size={16} color={isPairedMonitorConnected(live, remembered.id) ? vola.green : vola.textMuted} />
           <RNView style={styles.deviceBody}>
             <Text style={styles.deviceName}>{remembered.name}</Text>
-            <Text style={styles.muted} testID={`${testID}-status`}>
-              {live.status === 'off' ? 'Not connected' : liveHRStatusLabel(live)}
+            <Text style={styles.deviceStatus} testID={`${testID}-status`}>
+              {pairedMonitorStatusLabel(live, remembered.id)}
             </Text>
           </RNView>
           <Pressable onPress={() => void forget()} accessibilityRole="button" accessibilityLabel="Forget this monitor" hitSlop={8} testID={`${testID}-forget`}>
@@ -171,17 +179,24 @@ export function HRMonitorPairing({ userId, testID = 'settings-hr-monitor' }: { u
 
       {found.length > 0 && (
         <RNView style={styles.found} testID={`${testID}-found`}>
-          {found.map((d) => (
+          {rows.map((row) => (
             <Pressable
-              key={d.id}
-              onPress={() => void pick(d)}
+              key={row.id}
+              onPress={() => void pick({ id: row.id, name: row.name })}
               style={styles.foundRow}
               accessibilityRole="button"
-              accessibilityLabel={`Use ${d.name}`}
-              testID={`${testID}-found-${d.id}`}
+              accessibilityLabel={monitorRowA11yLabel(row)}
+              testID={`${testID}-found-${row.id}`}
             >
               <Icon name="heart" size={14} color={vola.text} />
-              <Text style={styles.foundName}>{d.name}</Text>
+              <RNView style={styles.foundBody}>
+                <Text style={styles.foundName}>{row.name}</Text>
+                {row.detail != null && (
+                  <Text style={styles.foundDetail} testID={`${testID}-found-detail-${row.id}`}>
+                    {row.detail}
+                  </Text>
+                )}
+              </RNView>
               <Text style={styles.use}>Use</Text>
             </Pressable>
           ))}
@@ -212,7 +227,19 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   found: { gap: 2, borderWidth: 1, borderColor: vola.line, borderRadius: 12, overflow: 'hidden' },
   foundRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 12 },
-  foundName: { flex: 1, fontSize: 14, color: vola.text },
+  foundBody: { flex: 1, gap: 2 },
+  foundName: { fontSize: 14, color: vola.text },
+  /**
+   * `textMuted`, NOT the `textDim` that `styles.muted` uses for this block's
+   * prose. Measured against `vola.bg`: `textDim` is 3.96:1, under the 4.5:1
+   * floor for body text; `textMuted` is 7.38:1. These two lines are the ones
+   * W20 exists to make readable — the tag that separates two identical straps
+   * and the state of the paired one — so they are information, not chrome, and
+   * a disambiguator the athlete cannot read defeats the whole fix. The
+   * surrounding explanatory paragraphs stay `muted`.
+   */
+  foundDetail: { fontSize: 12, color: vola.textMuted },
+  deviceStatus: { fontSize: 12, color: vola.textMuted, lineHeight: 17 },
   use: { fontSize: 13, fontWeight: '700', color: vola.text },
   note: { fontSize: 12, color: vola.text, lineHeight: 17 },
 });

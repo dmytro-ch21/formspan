@@ -66362,6 +66362,139 @@ goes looking for the file.
   at one; the number is in one function if it ever needs re-measuring on a
   device.
 
+## 2026-09-09 — W20: two identical straps are tellable apart, and the paired row says a state instead of the name again (#986)
+
+The athlete owns **two Amazfit Helio Straps**. Both advertise the identical
+name, so Settings → Heart-rate monitor showed *"Amazfit Helio Strap"* twice
+with nothing between the two rows, and picking one was a coin toss. After
+pairing, the row then printed the name **twice** — once as its title, once
+again where the status belongs. Both came out of the athlete's own screenshots.
+
+Two defects with one shape: the screen had information it never showed, and
+showed information it already had.
+
+### The disambiguation rule, and why it is conditional
+
+`lib/hrMonitor/monitorList.ts` (new, pure) turns a scan into rows. A row is
+**the advertised name and nothing else — unless another row in the same scan
+advertises the same name**, in which case every row of that group earns a
+second line: a short id tag, plus a signal word when the radio reported an
+RSSI.
+
+Both parts, because they answer different questions and neither answers both:
+
+- The **id** is the only thing that genuinely differs between two units of one
+  model, and it is stable, so the choice is repeatable — the row you tapped is
+  the row you will see paired. It is also unreadable: nothing is printed on the
+  strap, so on its own it says *these are two devices* and not *this is the one
+  in my hand*.
+- **Signal strength** is the half the athlete can act on: hold the one you want
+  against the phone, walk the other out of the room, scan again. It is not an
+  identifier — it moves, and two straps on one desk read alike — which is why
+  it never appears without the tag.
+
+**Conditional, because the common case is one monitor**, and a hex tag under a
+lone "Polar H10" is clutter answering a question nobody asked. The ticket's
+third criterion names that direction explicitly and it is tested as hard as the
+collision: several monitors with *different* names all stay bare — no tag, no
+signal, on any of them.
+
+The tag is **the last 4 alphanumerics of the platform id, upper-cased**. That
+id is a CoreBluetooth UUID on iOS and a MAC on Android, so stripping the
+separators and taking the tail reads the same on both — `…EF0123459F2A` → `9F2A`,
+`C4:1B:F0:12:34:56` → `3456`. If two colliding devices share that tail it
+**widens** (4 → 6 → 8 → the whole id) rather than printing two identical tags,
+and an id with no alphanumerics at all falls back to `#1`/`#2`, so the promise
+in criterion 1 — two rows are *always* tellable apart — is total rather than
+probable. All four rungs are tested.
+
+Signal is three coarse buckets (`>= -60` strong, `>= -80` good, else weak),
+deliberately coarse: this is *which of these two is nearer*, not a measurement.
+`scanForMonitors` now carries `rssi` on `FoundMonitor`; the scan runs with
+`allowDuplicates: false`, so it is the first advertisement's reading and does
+not flicker under a finger already reaching for a row. The rows' accessibility
+labels carry the detail too (`monitorRowA11yLabel`) — two identical spoken
+labels was the same defect for a screen-reader user.
+
+### The paired row's second line
+
+`liveHRStatusLabel` returns the **device name** for `connected`, and that is
+**correct and unchanged**. The in-session chip is a heart, a number and that
+label, with nothing else on screen saying where the number comes from, so
+"Polar H10" is the useful sentence there and "Connected" would be noise. Its
+test still pins `liveHRStatusLabel(connected) === 'Polar H10'`.
+
+It is wrong only where the name is already the line above, which is exactly the
+paired row. So a **separate named function**, `pairedMonitorStatusLabel`, with
+its own test: `Not connected` / `Connecting…` / `Connected` /
+`Disconnected — reconnecting…` / `Disconnected` / `Bluetooth not available`. A
+test asserts it never returns the device name in *any* state, and never returns
+the empty string (`liveHRStatusLabel` returns `''` for `off`, which is right for
+a chip that renders nothing and wrong for a row that stays on screen).
+
+It takes an optional `pairedDeviceId`. The live link belongs to whatever the
+orchestrator last started; if that is some other device, this row's monitor is
+honestly *not connected* rather than "Connected" about somebody else's link.
+The screen passes `remembered.id`, so the row can no longer inherit a state
+that was never about it.
+
+### Mutation-tested, seven ways, each confirmed on disk first
+
+Baseline green in the same session; each mutation written, re-read from disk to
+confirm it was actually applied, run, and reverted. Removing the collision
+guard so every row gets a tag → 3 red. Forcing `detail` to `null` → 7 red. Not
+stripping separators from the id → 8 red. Moving the signal boundary one dBm →
+1 red. Dropping the widening ladder to width 4 only → 2 red. Making
+`pairedMonitorStatusLabel` return the device name for `connected` → 4 red.
+Disabling the other-device check → 1 red. Restore confirmed by re-running the
+suite, not by grepping the files.
+
+### What review changed, and the one that was more than a nit
+
+Both reviewers returned **no blocking findings**. Three suggestions; all three
+were taken, and one of them mattered more than it was filed as.
+
+- **The row's icon and the row's words could disagree.** The paired row's heart
+  was still `live.status === 'connected' ? green : dim`, which does not know
+  about the device-mismatch check the new label does — so a link held for some
+  other monitor would render a green heart over the words "Not connected".
+  That is W20's own defect, one element of a row overstating what the other
+  says, surviving inside the fix for it. `isPairedMonitorConnected` now shares
+  the private `isSomeOtherDevice` guard with `pairedMonitorStatusLabel`, and a
+  test walks every status × device × id combination asserting the two can never
+  disagree.
+- **`textDim` cannot carry this line.** Both reviewers flagged the new detail
+  line's colour and both hedged, because this component's own prose already
+  uses `textDim` and `constants/Colors.ts` only measures that token against
+  `setDone`. Measured here against `vola.bg`: **`textDim` is 3.96:1**, under
+  the 4.5:1 floor for body text, and **`textMuted` is 7.38:1**. The hedge
+  understates it — the disambiguating tag is the single string this entire
+  ticket exists to make readable, and *a disambiguator the athlete cannot read
+  defeats the fix*. Both W20 lines (the scan row's detail and the paired row's
+  status) moved to `textMuted`; the surrounding explanatory paragraphs stayed
+  `muted`, because those are prose.
+- **The mismatch guard was only tested for `connected`.** It fires in every
+  connectable state; now asserted in all of them, with `unsupported` pinned as
+  the one that outranks it (that is about the binary, not about a device).
+
+A fourth thing came out of taking the first: the pure functions can be perfect
+and the *screen* can still call the wrong one — which is the bug exactly as
+filed. So a source-level wiring test, the same instrument and the same reason
+as `hrReportWiring.test.ts`: the pairing screen must reference
+`pairedMonitorStatusLabel`, `isPairedMonitorConnected` and `monitorRows`, and
+must contain neither `liveHRStatusLabel` nor a bare `live.status === 'connected'`.
+Four more mutations, each confirmed on disk, each caught — eleven in total.
+
+### Left open
+
+The last criterion is `NEEDS HUMAN EVIDENCE` and cannot be anything else: with
+**both straps present and broadcasting**, the two rows must be tellable apart,
+the right one must pair, and the paired row must read as a status. Nothing in
+the suite can produce two real advertisements. Whether a 4-hex tag is the *most
+useful* thing to print is also an on-device question — if the athlete finds
+themselves reading signal strength and ignoring the tag, the order in that line
+is the thing to change.
+
 ## Open items / known gaps as of this entry
 
 
