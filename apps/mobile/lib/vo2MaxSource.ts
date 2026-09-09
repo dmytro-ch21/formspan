@@ -48,6 +48,7 @@
  */
 
 import { shiftDate } from './anthropometry';
+import { RANGE_DAYS, RANGES, type TrendEmpty, type TrendRangeKey } from './trendSeries';
 
 export type HealthSource = 'healthkit' | 'health_connect';
 
@@ -107,6 +108,50 @@ export function vo2MaxFetchWindow(
   return { from: `${from}T00:00:00Z`, to: `${today}T23:59:59Z` };
 }
 
+/**
+ * -----------------------------------------------------------------------
+ * Which range presets this screen may OFFER — derived from the window it
+ * fetches, never listed (F34, #955)
+ * -----------------------------------------------------------------------
+ *
+ * `app/vo2max/trend.tsx` offered `RANGES` minus `Plan`, which includes
+ * **`All`** — and `All` in `trendSeries.ts` means "back to the athlete's
+ * first reading", a span with no upper bound. The fetch above is capped at
+ * `SERVER_MAX_LIST_RANGE_DAYS`, so `All` could only ever show about thirteen
+ * months while being labelled as if it showed everything. The screen was
+ * saying something untrue about its own range.
+ *
+ * **F34 chose option (1) of the three the ticket lists: relabel — `All` goes
+ * and `1Y` becomes the longest preset.** Not paging (option 2): that is
+ * machinery built to keep a label, on a screen that already re-fetches on
+ * every focus. Not a per-metric cap raise (option 3): nothing here yet asks
+ * for more than a year of VO₂max in one chart, and the athlete loses nothing
+ * visible today — `All` showed at most ~34 days more than `1Y` does, of a
+ * sparse daily-ish estimate.
+ *
+ * **Derived rather than a hand-written list**, because the failure mode is
+ * drift, not this one label: a preset whose window is wider than what the
+ * hook fetches shows a truncated series under a name that promises more, and
+ * that is the whole of this defect in a form that would recur the moment
+ * either constant moved. So a preset is offered only when its fixed window
+ * fits inside the fetch window; if `SERVER_MAX_LIST_RANGE_DAYS` ever dropped
+ * below a year, `1Y` would drop out on its own, and if it were raised (option
+ * 3), a wider preset added to `RANGES` would appear here without this
+ * function being touched.
+ *
+ * `All` and `Plan` are excluded structurally rather than by arithmetic:
+ * neither has a fixed span to compare against — `All`'s is the data's and
+ * `Plan`'s is a nutrition/weight phase this metric has nothing to do with.
+ */
+export function vo2MaxRanges(
+  fetchDays: number = VO2MAX_FETCH_DAYS,
+): { key: TrendRangeKey; label: string }[] {
+  return RANGES.filter((r) => {
+    if (r.key === 'All' || r.key === 'Plan') return false;
+    return RANGE_DAYS[r.key] <= fetchDays;
+  });
+}
+
 /** Which health data source this device has, if any. `healthKitLinked` is
  *  `isHealthKitSupported()` — meaningful only on iOS, ignored elsewhere. */
 export function healthSourceFor(platform: string, healthKitLinked: boolean): HealthSource | null {
@@ -125,6 +170,54 @@ export function healthSourceLabel(source: HealthSource): string {
  *  switch that exists under exactly that name. */
 export function healthSyncSettingLabel(source: HealthSource): string {
   return source === 'healthkit' ? 'Sync with Apple Health' : 'Sync with Health Connect';
+}
+
+/**
+ * The sentence for an empty chart, in the VO₂max screen's own voice.
+ *
+ * The read-only sibling of `emptyCopy` in `components/TrendCard.tsx`. Not
+ * reused from there: that function's `none` case reads "Record your X and the
+ * trend appears here", which presumes the athlete logs the metric by hand.
+ * Nobody records a VO₂max — it is read from a device — so the honest sentence
+ * names WHAT to do about it rather than an action this screen has no control
+ * to offer.
+ *
+ * **`hasWiderRange` is F34's (#955) half of it.** The `none-in-range`
+ * sentence ended "Try a wider one," which was true while `All` was on the
+ * chips and is not once `1Y` is the widest: an athlete whose only readings
+ * are older than a year would be told to widen a range that cannot widen —
+ * the same "screen promises what it cannot deliver" defect this ticket
+ * closes, one sentence down. So the invitation is only extended when a wider
+ * preset actually exists, and otherwise the screen says where its own edge
+ * is.
+ *
+ * Lives here rather than in the screen so it is reachable by a test: no test
+ * in this repo renders either VO₂max screen (see this file's header), which
+ * is precisely how the first version of this copy named the wrong vendor.
+ */
+export function vo2MaxEmptyCopy(
+  empty: TrendEmpty,
+  source: HealthSource | null,
+  hasWiderRange: boolean,
+): string {
+  switch (empty.kind) {
+    case 'unavailable':
+      return "Couldn't load your VO2max trend. It'll be here when the connection is back.";
+    case 'none':
+      // W16/#945 — names the source THIS device reads from; "Apple Watch …
+      // Health" on an Android phone was a sentence about somebody else's device.
+      return `No VO2max reading yet. A watch or another device that estimates it needs to have written one to ${source ? healthSourceLabel(source) : 'your health app'}.`;
+    case 'none-in-range': {
+      const held = `you have ${empty.totalReadings} ${
+        empty.totalReadings === 1 ? 'reading' : 'readings'
+      } further back`;
+      return hasWiderRange
+        ? `Nothing in this range — ${held}. Try a wider one.`
+        : `Nothing in this range — ${held} than this screen reaches.`;
+    }
+    case 'too-few':
+      return `${empty.have} of ${empty.need} readings needed for a trend line.`;
+  }
 }
 
 export type Vo2MaxScreenState =

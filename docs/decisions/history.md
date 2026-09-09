@@ -66898,6 +66898,116 @@ Four mutations, four killed, against a green baseline in the same session.
 - **NEEDS HUMAN EVIDENCE, latched on #985**: the numbers landing within a few bpm
   of Zepp's, on the 16 Pro Max with the Amazfit, after a real class.
 
+## 2026-09-09 — F34 (#955): the VO₂max trend's `All` said everything and meant thirteen months — the label goes, and the chips are now derived from what is fetched
+
+**Chosen: option (1) of the three the ticket lists — relabel.** `All` is off the
+VO₂max trend and `1Y` is the longest preset. Not option (2), paging the samples
+endpoint in ≤400-day slices: that is machinery built to keep a label, on a screen
+that already re-fetches on every focus. Not option (3), a per-metric cap raise
+for `vo2_max`: defensible on the data (a sparse daily-ish estimate is nowhere
+near `MaxSamplesPerListQuery`'s 20,000 even over years), but nothing yet asks for
+more than a year of VO₂max in one chart, and it costs a backend change, a
+contract entry and a second reviewer to buy back at most a few weeks of a metric
+most athletes have had for less than a month.
+
+### What was wrong
+
+`GET /v1/biometric/samples` refuses a span over `maxListRangeDays = 400`
+(`backend/internal/modules/biometric/handler.go`). W16 (#945) made the hook ask
+for the most the server allows — `VO2MAX_FETCH_DAYS = 400 − 14 − 1 = 385`, plus
+the 14 days of lookback slack, so ~399 days on the wire. The screen still offered
+`RANGES` minus `Plan`, and `RANGES` contains `All`, which `trendSeries.ts`
+defines as *back to the athlete's first reading* — a span with no upper bound.
+So `All` drew roughly the last thirteen months under a label promising
+everything. Before W16 nothing rendered at all, which is why this only became
+visible last week.
+
+Nothing an athlete could see is lost: `All` showed at most ~34 days more than
+`1Y` does, of a metric a watch updates every few days.
+
+### The fix is a derivation, not a deletion
+
+Deleting `All` from the screen's filter would have fixed today's label and left
+the mechanism intact — the defect is *a chip whose window is wider than the
+fetch*, and it recurs the moment either constant moves. So
+`lib/vo2MaxSource.ts` gained `vo2MaxRanges(fetchDays = VO2MAX_FETCH_DAYS)`,
+which offers a preset only when its fixed `RANGE_DAYS` span fits inside the
+fetch window. `All` and `Plan` are excluded structurally rather than by
+arithmetic — neither has a fixed span to compare against. Two consequences fall
+out for free and are pinned by tests: if the server cap ever dropped below a
+year, `1Y` would drop off the chips on its own; and if it were raised (option
+3), a wider entry in `RANGES` would appear without this function being touched.
+
+**`RANGES` itself is untouched**, and that matters — it is shared by six
+screens. `app/goals/trend.tsx` (weight), `app/trainingLoad/trend.tsx`,
+`app/running/trend.tsx`, `app/records/[exerciseId]/trend.tsx` and
+`app/goals/nutritionTrend.tsx` all read the same list and none of them changed.
+
+### The second sentence, which the first fix would have broken
+
+The `none-in-range` copy ended *"Try a wider one."* True while `All` was on the
+chips; false the moment `1Y` is the widest, for exactly the athlete this ticket
+is about — one whose readings are all older than a year is then told to widen a
+range that cannot widen. That is the same over-promise one sentence down, so
+`vo2MaxEmptyCopy` moved out of the screen into `lib/vo2MaxSource.ts`, took a
+`hasWiderRange` argument, and says *"…further back than this screen reaches"*
+when there is no wider preset. It moved rather than gaining a parameter in place
+because **no test in this repo renders either VO₂max screen** — the same reason
+this file already owns `vo2MaxStateCopy`, and the reason W16's copy named the
+wrong vendor for a year.
+
+### Weight and training load are unaffected — checked, not assumed
+
+The ticket asks for this to be restated rather than asserted, so it was read off
+the handlers:
+
+- **Weight** — `app/goals/trend.tsx` → `useWeightTrend` → `listCheckins` →
+  `GET /v1/body/checkins`. That handler validates `from`/`to` as `YYYY-MM-DD`
+  and refuses `to < from` and **has no range cap at all**; the request is
+  `365 * 3 + 14` days and is accepted whole. `All` there genuinely reaches the
+  athlete's first check-in inside three years.
+- **Training load** — `app/trainingLoad/trend.tsx` → `useTrainingLoadTrend` →
+  `listSessionLoad` → `GET /v1/biometric/sessions/load`, capped by
+  `maxSessionLoadRangeDays = 1200` against a measured ~1103-day request. Inside
+  its cap, and a different constant from the one this ticket is about.
+
+Neither screen's code is in this diff, and neither reads `vo2MaxSource.ts`.
+
+### What the tests now hold, and what they caught
+
+Three mutations, each confirmed present on disk before running, against a green
+baseline in the same session:
+
+| Mutation | Result |
+|---|---|
+| `vo2MaxRanges` back to `RANGES.filter((r) => r.key !== 'Plan')` — the exact defect | **6 tests red** across both files, including the hook test |
+| `vo2MaxFetchWindow` clamped to 200 days, so the fetch no longer covers `1Y` | **hook test red** |
+| `vo2MaxEmptyCopy` always inviting a wider range | **copy test red** |
+
+The new hook test is the one worth naming: the old one asserted only that the
+request stays **under** the cap, which says nothing about whether it **covers**
+the chips — the exact blind spot `All` lived in. It now asserts both bounds at
+once, against whatever `vo2MaxRanges` currently reports as widest, so it goes red
+if the offered set widens *or* the fetch narrows.
+
+### Open
+
+- **`app/goals/nutritionTrend.tsx` has the same shape and was left alone.**
+  `lib/nutritionTrend.ts` maps `All` to `MAX_DAY_WINDOW = 366`, so nutrition's
+  `All` is also about a year wearing a bigger name. It is a different endpoint,
+  a different constant and outside #955's scope — but it is the same defect, and
+  whoever picks it up should decide whether `vo2MaxRanges`' derivation belongs in
+  `trendSeries.ts` for every metric rather than in one metric's helper.
+- **Nothing mechanically ties `SERVER_MAX_LIST_RANGE_DAYS` to the Go constant.**
+  The tests pin the arithmetic around it, not its truth — a server-side change to
+  `maxListRangeDays` would leave this client silently wrong in whichever
+  direction it moved. That was already true before this ticket; it is stated here
+  because the derivation above makes the client's behaviour depend on it more,
+  not less.
+- Option (3) remains the answer if anyone asks for more than a year of VO₂max in
+  one chart, and this diff is the cheap half of it: raise the cap, mirror the
+  constant, and the chips follow.
+
 ## Open items / known gaps as of this entry
 
 

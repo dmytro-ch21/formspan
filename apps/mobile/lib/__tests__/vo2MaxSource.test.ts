@@ -1,3 +1,4 @@
+import { RANGE_DAYS } from '@/lib/trendSeries';
 import {
   LOOKBACK_SLACK_DAYS,
   SERVER_MAX_LIST_RANGE_DAYS,
@@ -5,6 +6,8 @@ import {
   healthSourceFor,
   healthSourceLabel,
   healthSyncSettingLabel,
+  vo2MaxEmptyCopy,
+  vo2MaxRanges,
   vo2MaxRowVisible,
   vo2MaxScreenState,
   vo2MaxFetchWindow,
@@ -213,5 +216,92 @@ describe('vo2MaxFetchWindow — what the samples endpoint will actually accept',
 
   it('keeps the default within the cap by construction', () => {
     expect(VO2MAX_FETCH_DAYS + LOOKBACK_SLACK_DAYS).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
+  });
+});
+
+
+/**
+ * F34/#955 — the range chips may not promise a window the fetch cannot fill.
+ *
+ * `All` was on this screen and means "back to the athlete's first reading";
+ * the samples endpoint caps a query at `SERVER_MAX_LIST_RANGE_DAYS`, so it
+ * showed about thirteen months under a label saying everything. The offered
+ * set is DERIVED from the fetch window now, which is what these pin — the
+ * arithmetic, not the constant, exactly as `vo2MaxFetchWindow`'s own tests do.
+ */
+describe('vo2MaxRanges — only windows this screen actually fetches', () => {
+  const keys = () => vo2MaxRanges().map((r) => r.key);
+
+  it('does not offer All — the label F34 removed', () => {
+    // The whole ticket in one assertion: an unbounded label on a capped fetch.
+    expect(keys()).not.toContain('All');
+  });
+
+  it('does not offer Plan either', () => {
+    // Unchanged from W16: a nutrition/weight phase this metric has nothing to
+    // do with. Kept here so the two exclusions cannot drift apart silently.
+    expect(keys()).not.toContain('Plan');
+  });
+
+  it('makes 1Y the longest preset, and keeps every shorter one', () => {
+    expect(keys()).toEqual(['1W', '1M', '3M', '6M', '1Y']);
+  });
+
+  it('offers nothing wider than the hook fetches', () => {
+    // The property, not the list: every offered window has to fit inside what
+    // `useVo2MaxTrend` asks the server for, or the chart is truncated under a
+    // name that promises more. This is what F34 fixed, stated generally.
+    for (const key of keys()) {
+      expect(RANGE_DAYS[key as keyof typeof RANGE_DAYS]).toBeLessThanOrEqual(VO2MAX_FETCH_DAYS);
+    }
+  });
+
+  it('DROPS a preset if the fetch window ever shrinks below it', () => {
+    // Proves the list is derived rather than hand-written — the mutation that
+    // would otherwise pass silently. If the server cap were lowered to a
+    // quarter, `1Y` and `6M` would be the same lie `All` was.
+    expect(vo2MaxRanges(100).map((r) => r.key)).toEqual(['1W', '1M', '3M']);
+    expect(vo2MaxRanges(0).map((r) => r.key)).toEqual([]);
+  });
+
+  it('would ADMIT a wider preset if the cap were raised (option 3), untouched', () => {
+    // The ticket's option (3) — a per-metric cap raise — needs no edit here:
+    // a wider entry in `RANGES` with a `RANGE_DAYS` span would simply pass the
+    // same filter. Pinned so a future raiser knows this file already follows.
+    expect(vo2MaxRanges(10_000).map((r) => r.key)).toEqual(['1W', '1M', '3M', '6M', '1Y']);
+  });
+});
+
+describe('vo2MaxEmptyCopy — never invites a range that does not exist', () => {
+  it('offers a wider range only while there IS one', () => {
+    // F34's second half. With `All` gone, `1Y` is the widest: telling an
+    // athlete whose readings are all older than a year to "try a wider one"
+    // is the same over-promise as the label this ticket removed.
+    const empty = { kind: 'none-in-range', totalReadings: 3 } as const;
+    expect(vo2MaxEmptyCopy(empty, 'healthkit', true)).toContain('Try a wider one');
+    expect(vo2MaxEmptyCopy(empty, 'healthkit', false)).not.toContain('Try a wider one');
+    expect(vo2MaxEmptyCopy(empty, 'healthkit', false)).toContain('than this screen reaches');
+  });
+
+  it('says how many readings are held either way, and pluralises', () => {
+    expect(vo2MaxEmptyCopy({ kind: 'none-in-range', totalReadings: 1 }, null, true)).toContain('1 reading ');
+    expect(vo2MaxEmptyCopy({ kind: 'none-in-range', totalReadings: 2 }, null, false)).toContain('2 readings ');
+  });
+
+  it('keeps the other three sentences exactly as W16 left them', () => {
+    // The widest-range flag must not leak into copy that has nothing to do
+    // with ranges — a failed fetch says the same thing at every width.
+    for (const wider of [true, false]) {
+      expect(vo2MaxEmptyCopy({ kind: 'unavailable' }, 'healthkit', wider)).toBe(
+        "Couldn't load your VO2max trend. It'll be here when the connection is back.",
+      );
+      // W16: names the source THIS device reads from, never the other vendor.
+      expect(vo2MaxEmptyCopy({ kind: 'none' }, 'health_connect', wider)).toContain('Health Connect');
+      expect(vo2MaxEmptyCopy({ kind: 'none' }, 'health_connect', wider)).not.toContain('Apple');
+      expect(vo2MaxEmptyCopy({ kind: 'none' }, null, wider)).toContain('your health app');
+      expect(vo2MaxEmptyCopy({ kind: 'too-few', have: 1, need: 2 }, 'healthkit', wider)).toBe(
+        '1 of 2 readings needed for a trend line.',
+      );
+    }
   });
 });

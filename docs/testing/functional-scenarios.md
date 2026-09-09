@@ -22018,3 +22018,50 @@ and — because that was terminal — could never have corrected itself.
   same numbers it did before this change and does not gain the diagnostic line.
 - On Android with Health Connect: a class recorded as an exercise session
   reports that session's window rather than the typed one.
+
+## F34 — the VO₂max trend offers only ranges it actually fetches (`apps/mobile/lib/vo2MaxSource.ts`'s `vo2MaxRanges`/`vo2MaxEmptyCopy`, `apps/mobile/app/vo2max/trend.tsx`, #955)
+
+`All` meant "back to the athlete's first reading" on a screen whose endpoint
+(`GET /v1/biometric/samples`) refuses a span over 400 days, so it showed about
+thirteen months under a label promising everything. `All` is gone; `1Y` is the
+longest preset; the chip list is derived from the fetch window rather than
+written down.
+
+### Automated (`lib/__tests__/vo2MaxSource.test.ts`, `lib/__tests__/useVo2MaxTrend.test.ts`)
+
+- **The chips are `1W 1M 3M 6M 1Y`** — no `All`, no `Plan`.
+- **No offered preset is wider than the fetch.** Every chip's `RANGE_DAYS` span
+  is inside `VO2MAX_FETCH_DAYS`, stated as a property over the list rather than
+  as a fixed expectation.
+- **The list is derived, not written down**: with a 100-day fetch window only
+  `1W 1M 3M` are offered; with a 10,000-day one the list is unchanged, because
+  `RANGES` has nothing wider to offer yet — which is what makes a future
+  per-metric cap raise (the ticket's option 3) a backend-only change.
+- **The request covers the widest chip and stays under the cap.** Both bounds
+  at once: the old test asserted only the upper one, which is the blind spot
+  `All` lived in.
+- **"Try a wider one" is only said while a wider preset exists.** With `1Y`
+  selected the `none-in-range` sentence says the readings are further back than
+  the screen reaches, and never invites a range that is not on the chips.
+- The other three empty sentences (`unavailable`, `none`, `too-few`) are
+  unchanged at every width, and `none` still names this device's own source.
+
+### Edge cases and errors
+
+- An athlete whose only readings are 380 days old: the chart is empty at every
+  preset, and the copy says how many readings are held further back — it does
+  not claim there are none, and it does not send them to a range that does not
+  exist.
+- `1Y` reaches back **364** days, not 365 — `windowStart` is
+  `shiftDate(today, -(RANGE_DAYS[range] - 1))` and the filter is `day >= 0`, so
+  a reading 364 days old is the oldest one inside the window and a reading
+  exactly 365 days old falls out with `day === -1`. Both 365 and 366 produce the
+  `none-in-range` sentence. This off-by-one is `trendSeries.ts`'s pre-existing
+  behaviour (it predates F34 and is shared by every trend screen), stated here
+  so a scenario translated into a real assertion is written against what the
+  code does rather than against the inclusive reading of "1Y".
+- Weight (`/v1/body/checkins`, no range cap) and training load
+  (`/v1/biometric/sessions/load`, capped at 1200 days against a ~1103-day
+  request) still offer their own ranges unchanged — different endpoints,
+  different constants, no shared code path with this change beyond `RANGES`,
+  which is untouched.
