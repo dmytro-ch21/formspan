@@ -69,7 +69,7 @@ it('explains a persisting transient failure instead of saying nothing is stuck',
   };
   mockBlockedRows.mockResolvedValue([]);
 
-  render(<SyncScreen />);
+  await render(<SyncScreen />);
 
   expect(await screen.findByTestId('sync-transient-error')).toBeTruthy();
   expect(screen.getByText('the server did not answer in time')).toBeTruthy();
@@ -88,7 +88,7 @@ it('still says nothing is stuck when there is truly nothing wrong', async () => 
   };
   mockBlockedRows.mockResolvedValue([]);
 
-  render(<SyncScreen />);
+  await render(<SyncScreen />);
 
   expect(await screen.findByTestId('sync-nothing-stuck')).toBeTruthy();
   expect(screen.queryByTestId('sync-transient-error')).toBeNull();
@@ -107,7 +107,7 @@ it('a permanent row still wins over the transient-error copy — it is the more 
     { kind: 'session', id: 's1', name: 'Workout 1', lastError: 'set 10: weight must be greater than 0', sport: 'strength' },
   ]);
 
-  render(<SyncScreen />);
+  await render(<SyncScreen />);
 
   expect(await screen.findByText('Needs your attention')).toBeTruthy();
   expect(screen.queryByTestId('sync-transient-error')).toBeNull();

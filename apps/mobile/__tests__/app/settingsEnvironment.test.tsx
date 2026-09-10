@@ -71,7 +71,7 @@ afterEach(() => {
 
 it('names a non-production build in the footer', async () => {
   process.env.EXPO_PUBLIC_APP_ENV = 'development';
-  render(<SettingsScreen />);
+  await render(<SettingsScreen />);
   const line = await screen.findByTestId('settings-environment');
   expect(line).toHaveTextContent(/Build environment: DEVELOPMENT/);
   expect(line).toHaveTextContent(/not a production build/);
@@ -79,7 +79,7 @@ it('names a non-production build in the footer', async () => {
 
 it('says DEV when nothing set the variable at all', async () => {
   delete process.env.EXPO_PUBLIC_APP_ENV;
-  render(<SettingsScreen />);
+  await render(<SettingsScreen />);
   expect(await screen.findByTestId('settings-environment')).toHaveTextContent(
     /Build environment: DEV\./,
   );
@@ -87,7 +87,7 @@ it('says DEV when nothing set the variable at all', async () => {
 
 it('renders NOTHING on production', async () => {
   process.env.EXPO_PUBLIC_APP_ENV = 'production';
-  render(<SettingsScreen />);
+  await render(<SettingsScreen />);
   // Wait for the screen to be up before asserting the absence, or an
   // unmounted screen would pass this for the wrong reason.
   await screen.findByTestId('settings-diagnostics');

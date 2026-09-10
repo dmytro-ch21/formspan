@@ -59,14 +59,14 @@ beforeEach(() => {
 
 it('shows the unavailable message when the day totals fail to load', async () => {
   mockListDays.mockRejectedValue(new Error('offline'));
-  render(<NutritionTrendScreen />);
+  await render(<NutritionTrendScreen />);
   const unavailable = await screen.findByTestId('nutrition-trend-unavailable');
   expect(unavailable.props.children).toMatch(/couldn.?t load/i);
 });
 
 it('renders adherence and a delta from real fetched days', async () => {
   mockListDays.mockResolvedValue([day('2026-08-25', 2100), day('2026-08-26', 2300)]);
-  render(<NutritionTrendScreen />);
+  await render(<NutritionTrendScreen />);
 
   const adherence = await screen.findByTestId('nutrition-trend-adherence');
   expect(adherence.props.children.join('')).toContain('2 of');
@@ -76,7 +76,7 @@ it('renders adherence and a delta from real fetched days', async () => {
 it('the target line reads today\'s live target, not a stale day-level one', async () => {
   mockListDays.mockResolvedValue([day('2026-08-01', 2100, 1900)]);
   mockListTargets.mockResolvedValue([target('2026-01-01', 1900), target('2026-08-15', 2600)]);
-  render(<NutritionTrendScreen />);
+  await render(<NutritionTrendScreen />);
 
   await waitFor(() => expect(mockListTargets).toHaveBeenCalled());
   // The chart itself only renders when there is data in the window; the goal
@@ -89,10 +89,10 @@ it('the target line reads today\'s live target, not a stale day-level one', asyn
 
 it('switching the range does not re-fetch — it slices what is already loaded', async () => {
   mockListDays.mockResolvedValue([day('2026-08-25', 2100), day('2026-08-26', 2300)]);
-  render(<NutritionTrendScreen />);
+  await render(<NutritionTrendScreen />);
   await waitFor(() => expect(mockListDays).toHaveBeenCalledTimes(1));
 
-  fireEvent.press(await screen.findByTestId('nutrition-trend-range-1Y'));
+  await fireEvent.press(await screen.findByTestId('nutrition-trend-range-1Y'));
   await waitFor(() =>
     expect(screen.getByTestId('nutrition-trend-range-1Y').props.accessibilityState.selected).toBe(true),
   );
@@ -107,13 +107,13 @@ it('"All" shows data outside the default 1M window, because the fetch is wide re
   // eating" — despite the day being real, logged, and simply outside the
   // window the OLD code fetched for the DEFAULT range.
   mockListDays.mockResolvedValue([day('2025-11-01', 2200)]);
-  render(<NutritionTrendScreen />);
+  await render(<NutritionTrendScreen />);
   await waitFor(() => expect(mockListDays).toHaveBeenCalledTimes(1));
 
   // Default range is 1M — nothing in that narrow window, so it reads empty.
   expect(await screen.findByTestId('nutrition-trend-empty')).toBeTruthy();
 
-  fireEvent.press(screen.getByTestId('nutrition-trend-range-All'));
+  await fireEvent.press(screen.getByTestId('nutrition-trend-range-All'));
 
   // No second fetch, and the day that was there all along is now on screen.
   await waitFor(() => expect(screen.queryByTestId('nutrition-trend-empty')).toBeNull());

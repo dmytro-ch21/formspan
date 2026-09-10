@@ -105,7 +105,7 @@ it('says the connection failed rather than claiming the athlete has no sessions'
   mockPage.mockRejectedValue(new OfflineError());
   mockLocal.mockResolvedValue([session('local-1')]);
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
 
   await waitFor(() => expect(screen.getByTestId('session-history-offline')).toBeTruthy());
   expect(screen.queryByText('No sessions match')).toBeNull();
@@ -116,7 +116,7 @@ it('an empty offline fallback still says WHY, not just "no sessions"', async () 
   mockPage.mockRejectedValue(new OfflineError());
   mockLocal.mockResolvedValue([]);
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
 
   await waitFor(() => expect(screen.getByTestId('session-history-empty')).toBeTruthy());
   expect(screen.getByText('Nothing saved on this device yet')).toBeTruthy();
@@ -133,11 +133,11 @@ it('the offline fallback respects the active sport filter, not the whole local c
     session('strength-1', { sport: 'strength' }),
   ]);
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
   await waitFor(() => expect(screen.getByTestId('session-history-row-bjj-1')).toBeTruthy());
   expect(screen.getByTestId('session-history-row-strength-1')).toBeTruthy();
 
-  fireEvent.press(screen.getByTestId('session-history-sport-strength'));
+  await fireEvent.press(screen.getByTestId('session-history-sport-strength'));
 
   await waitFor(() => expect(screen.queryByTestId('session-history-row-bjj-1')).toBeNull());
   expect(screen.getByTestId('session-history-row-strength-1')).toBeTruthy();
@@ -158,7 +158,7 @@ it('N474: a light or deload session is tagged in the list; a normal one carries 
     offset: 0,
   });
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
 
   await waitFor(() => expect(screen.getByTestId('session-history-row-normal-1')).toBeTruthy());
   expect(
@@ -178,7 +178,7 @@ it('N474: a light or deload session is tagged in the list; a normal one carries 
 it('a genuine server error is distinct from the offline fallback — no fabricated local list', async () => {
   mockPage.mockRejectedValue(new Error('Session already finished.'));
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
 
   await waitFor(() => expect(screen.getByTestId('session-history-error')).toBeTruthy());
   expect(screen.queryByTestId('session-history-offline')).toBeNull();
@@ -192,12 +192,12 @@ it('"Show older" appends the next page and asks for the offset already on screen
     .mockResolvedValueOnce({ sessions: [session('s1'), session('s2')], total: 3, limit: 2, offset: 0 })
     .mockResolvedValueOnce({ sessions: [session('s3')], total: 3, limit: 2, offset: 2 });
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
 
   await waitFor(() => expect(screen.getByTestId('session-history-row-s1')).toBeTruthy());
   expect(screen.queryByTestId('session-history-row-s3')).toBeNull();
 
-  fireEvent.press(screen.getByTestId('session-history-load-more'));
+  await fireEvent.press(screen.getByTestId('session-history-load-more'));
 
   await waitFor(() => expect(screen.getByTestId('session-history-row-s3')).toBeTruthy());
   expect(mockPage).toHaveBeenNthCalledWith(
@@ -212,10 +212,10 @@ it('"Show older" appends the next page and asks for the offset already on screen
 });
 
 it('a sport filter re-queries the server with that sport, not a client-side filter', async () => {
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
   await waitFor(() => expect(mockPage).toHaveBeenCalledTimes(1));
 
-  fireEvent.press(screen.getByTestId('session-history-sport-strength'));
+  await fireEvent.press(screen.getByTestId('session-history-sport-strength'));
 
   await waitFor(() => expect(mockPage).toHaveBeenCalledTimes(2));
   expect(mockPage).toHaveBeenNthCalledWith(
@@ -242,7 +242,7 @@ it('a stale "Show older" response that lands after a filter change is discarded,
     offset: 0,
   });
 
-  render(<SessionHistoryScreen />);
+  await render(<SessionHistoryScreen />);
   await waitFor(() => expect(screen.getByTestId('session-history-row-s1')).toBeTruthy());
 
   // Call 2: "Show older", unfiltered — held open. Its resolution is fired
@@ -256,7 +256,7 @@ it('a stale "Show older" response that lands after a filter change is discarded,
       }),
   );
 
-  fireEvent.press(screen.getByTestId('session-history-load-more'));
+  await fireEvent.press(screen.getByTestId('session-history-load-more'));
   await waitFor(() => expect(mockPage).toHaveBeenCalledTimes(2));
 
   // Call 3: the filter change's own load, sport=strength — resolves
@@ -267,7 +267,7 @@ it('a stale "Show older" response that lands after a filter change is discarded,
     limit: 20,
     offset: 0,
   });
-  fireEvent.press(screen.getByTestId('session-history-sport-strength'));
+  await fireEvent.press(screen.getByTestId('session-history-sport-strength'));
   await waitFor(() => expect(screen.getByTestId('session-history-row-s3')).toBeTruthy());
   expect(screen.queryByTestId('session-history-row-s1')).toBeNull();
 

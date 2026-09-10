@@ -132,9 +132,9 @@ beforeEach(() => {
  * weaker check while shipping the original bug intact.
  */
 it('uploads a downscaled frame, never the camera’s raw one', async () => {
-  render(<IdentifyMachineScreen />);
+  await render(<IdentifyMachineScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+    await fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
   });
   await waitFor(() => expect(mockIdentify).toHaveBeenCalled());
 
@@ -162,9 +162,9 @@ it('uploads a downscaled frame, never the camera’s raw one', async () => {
  */
 it('does not blame the network when the downscale itself fails', async () => {
   mockManipulate.mockRejectedValue(new Error('cannot read'));
-  render(<IdentifyMachineScreen />);
+  await render(<IdentifyMachineScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+    await fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
   });
 
   await waitFor(() => expect(screen.getByText(/could not be read/i)).toBeTruthy());
@@ -175,13 +175,13 @@ it('does not blame the network when the downscale itself fails', async () => {
 });
 
 async function shootAndPick(name = ROW.name) {
-  render(<IdentifyMachineScreen />);
+  await render(<IdentifyMachineScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+    await fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
   });
   await waitFor(() => expect(screen.getByLabelText(name)).toBeTruthy());
   await act(async () => {
-    fireEvent.press(screen.getByLabelText(name));
+    await fireEvent.press(screen.getByLabelText(name));
   });
 }
 
@@ -269,9 +269,9 @@ describe('an identify-driven swap', () => {
  */
 it('says so rather than rendering an empty shortlist', async () => {
   mockIdentify.mockResolvedValue(identification([]));
-  render(<IdentifyMachineScreen />);
+  await render(<IdentifyMachineScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+    await fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
   });
   await waitFor(() => expect(screen.getByTestId('identify-empty')).toBeTruthy());
   expect(screen.getByTestId('identify-empty')).toHaveTextContent(/nothing in the catalog matched/i);
@@ -302,9 +302,9 @@ it('offers no identification hint at all under a commit error', async () => {
  */
 it('still hints after a failed identification', async () => {
   mockIdentify.mockRejectedValue(Object.assign(new Error('unprocessable'), { status: 422 }));
-  render(<IdentifyMachineScreen />);
+  await render(<IdentifyMachineScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+    await fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
   });
   await waitFor(() => expect(screen.getByTestId('identify-hint')).toBeTruthy());
   // A 422 is deterministic, so the hint must say retake rather than retry.
@@ -320,9 +320,9 @@ it('still hints after a failed identification', async () => {
  */
 it('says wait, not retake, when the identify request is rate-limited', async () => {
   mockIdentify.mockRejectedValue(new ApiError('slow down', 'rate_limited', 429, 47_000));
-  render(<IdentifyMachineScreen />);
+  await render(<IdentifyMachineScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
+    await fireEvent.press(screen.getByLabelText('Take a photo of the machine'));
   });
 
   await waitFor(() => expect(screen.getByTestId('identify-error')).toBeTruthy());

@@ -81,15 +81,15 @@ function ruleColour(): string | undefined {
 }
 
 describe('the state rule', () => {
-  it('draws untouched when there is no evidence', () => {
-    renderRow({ started: false, mastered: false });
+  it('draws untouched when there is no evidence', async () => {
+    await renderRow({ started: false, mastered: false });
     expect(ruleColour()).toBe(vola.lineSoft);
   });
 
-  it('draws started for a near-miss, where NOTHING is met', () => {
+  it('draws started for a near-miss, where NOTHING is met', async () => {
     // The case the shipped bug got wrong, and the whole reason for the prop:
     // three criteria, real progress against every one, not one of them cleared.
-    renderRow({
+    await renderRow({
       started: true,
       mastered: false,
       criteria: [
@@ -104,14 +104,14 @@ describe('the state rule', () => {
     expect(ruleColour()).not.toBe(vola.lineSoft);
   });
 
-  it('draws mastered over started', () => {
-    renderRow({ started: true, mastered: true });
+  it('draws mastered over started', async () => {
+    await renderRow({ started: true, mastered: true });
     expect(ruleColour()).toBe(TONE);
   });
 
-  it('draws untouched for someone browsing, however high the targets', () => {
+  it('draws untouched for someone browsing, however high the targets', async () => {
     // Not enrolled: no progress is being counted, so no state is claimed.
-    renderRow({
+    await renderRow({
       started: false,
       mastered: false,
       criteria: [crit({ value: '25', met: false, label: 'Landed, 25 needed' })],
@@ -121,8 +121,8 @@ describe('the state rule', () => {
 });
 
 describe('what a screen reader hears', () => {
-  it('says "Mastered" when the check replaces the number', () => {
-    renderRow({ mastered: true, started: true });
+  it('says "Mastered" when the check replaces the number', async () => {
+    await renderRow({ mastered: true, started: true });
     const disc = screen.getByLabelText('Mastered');
     expect(disc).toBeTruthy();
     // The ordinal is gone from the announcement as well as from the screen.
@@ -137,16 +137,16 @@ describe('what a screen reader hears', () => {
     expect(disc.props.accessible).toBe(true);
   });
 
-  it('says "Step 3" rather than a bare "3" otherwise', () => {
-    renderRow({ step: 3, mastered: false });
+  it('says "Step 3" rather than a bare "3" otherwise', async () => {
+    await renderRow({ step: 3, mastered: false });
     const disc = screen.getByLabelText('Step 3');
     expect(disc).toBeTruthy();
     expect(disc.props.accessible).toBe(true);
     expect(screen.queryByLabelText('Mastered')).toBeNull();
   });
 
-  it('gives every chip a spoken form, not its raw digits', () => {
-    renderRow({
+  it('gives every chip a spoken form, not its raw digits', async () => {
+    await renderRow({
       criteria: [
         crit({ icon: 'goal', value: '12/25', met: false, label: 'Landed, 12 of 25' }),
         crit({ icon: 'chart', value: '43%/40%', met: true, label: 'Hit rate, 43 percent of 40 needed' }),
@@ -156,22 +156,22 @@ describe('what a screen reader hears', () => {
     expect(screen.getByLabelText('Hit rate, 43 percent of 40 needed')).toBeTruthy();
   });
 
-  it('announces the label it was given rather than the digits beside it', () => {
+  it('announces the label it was given rather than the digits beside it', async () => {
     // Deliberately NOT asserting `queryByLabelText(/0 of 25/)` is null here.
     // That would read as the honest-numbers guard and cover nothing: whether a
     // browsing row says "25 needed" or "0 of 25" is decided in
     // `criteriaChips`, which this file does not import, so the assertion could
     // never go red from any change to this component. It is covered for real
     // in `lib/__tests__/curriculumRow.test.ts`.
-    renderRow({ criteria: [crit({ value: '25', label: 'Landed, 25 needed' })] });
+    await renderRow({ criteria: [crit({ value: '25', label: 'Landed, 25 needed' })] });
     expect(screen.getByLabelText('Landed, 25 needed')).toBeTruthy();
     expect(screen.queryByText('Landed, 25 needed')).toBeNull();
   });
 });
 
 describe('the chips', () => {
-  it('tints exactly the met ones', () => {
-    renderRow({
+  it('tints exactly the met ones', async () => {
+    await renderRow({
       criteria: [
         crit({ icon: 'goal', value: '32/25', met: true, label: 'Landed, 32 of 25' }),
         crit({ icon: 'calendar', value: '9/15', met: false, label: 'Sessions, 9 of 15' }),
@@ -183,20 +183,20 @@ describe('the chips', () => {
     expect((StyleSheet.flatten(plain.props.style) as { color?: string }).color).toBe(vola.textMuted);
   });
 
-  it('says a reading item is to study, and draws no chips at all', () => {
+  it('says a reading item is to study, and draws no chips at all', async () => {
     // Chips passed alongside `reading` must be ignored, not merged — the same
     // reason the old row printed a sentence instead of an empty measure block.
-    renderRow({ reading: true, criteria: [crit({ value: '0/25' })] });
+    await renderRow({ reading: true, criteria: [crit({ value: '0/25' })] });
     expect(screen.getByText('Something to study')).toBeTruthy();
     expect(screen.queryByText('0/25')).toBeNull();
   });
 
-  it('renders a note in full rather than clipping it', () => {
+  it('renders a note in full rather than clipping it', async () => {
     // 103 characters is the longest in curricula.json — about three lines here.
     // A clamp hid the sentence explaining why the step sits where it does.
     const note =
       'You learned the early escape at white and the late one at blue — now the strangle simply does not land.';
-    renderRow({ notes: note });
+    await renderRow({ notes: note });
     expect(screen.getByText(note).props.numberOfLines).toBeUndefined();
   });
 });

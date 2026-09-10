@@ -125,7 +125,7 @@ beforeEach(() => {
 });
 
 async function scan(code = CODE) {
-  render(<ScanBarcodeScreen />);
+  await render(<ScanBarcodeScreen />);
   await waitFor(() => expect(mockScan).not.toBeNull());
   await act(async () => {
     mockScan!({ data: code });
@@ -140,7 +140,7 @@ async function scan(code = CODE) {
  */
 async function openAmountSheet() {
   await waitFor(() => expect(screen.getByTestId('scan-amount-row')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('scan-amount-row'));
+  await fireEvent.press(screen.getByTestId('scan-amount-row'));
 }
 
 describe('a resolved barcode', () => {
@@ -171,9 +171,9 @@ describe('a resolved barcode', () => {
     await scan();
     await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('scan-log'));
+      await fireEvent.press(screen.getByTestId('scan-log'));
     });
     expect(mockLogFood).toHaveBeenCalledTimes(1);
     const entry = mockLogFood.mock.calls[0][1];
@@ -204,9 +204,9 @@ describe('a resolved barcode', () => {
     await scan();
     await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '80');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('amount-sheet-done'));
+      await fireEvent.press(screen.getByTestId('amount-sheet-done'));
     });
     expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('80 g');
 
@@ -229,10 +229,10 @@ describe('a resolved barcode', () => {
     await scan();
     await openAmountSheet();
     await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '6');
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '60');
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '6');
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '60');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('scan-log'));
+      await fireEvent.press(screen.getByTestId('scan-log'));
     });
     // 60 g / 40 g basis = 1.5 servings.
     expect(mockLogFood.mock.calls[0][1].servings).toBe(1.5);
@@ -312,7 +312,7 @@ describe('a resolved barcode', () => {
       await scan();
       await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-      fireEvent.press(screen.getByTestId('food-unit-g'));
+      await fireEvent.press(screen.getByTestId('food-unit-g'));
       expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
       expect(screen.getByTestId('food-unit-g').props.accessibilityState.selected).toBe(true);
       expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
@@ -330,9 +330,9 @@ describe('a resolved barcode', () => {
       await scan();
       await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-      fireEvent.press(screen.getByTestId('food-unit-g'));
+      await fireEvent.press(screen.getByTestId('food-unit-g'));
       await act(async () => {
-        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+        await fireEvent.press(screen.getByTestId('amount-sheet-done'));
       });
 
       await openAmountSheet();
@@ -350,12 +350,12 @@ describe('a resolved barcode', () => {
       await scan();
       await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('food-quantity-input')).toBeTruthy());
-      fireEvent.changeText(screen.getByTestId('food-quantity-input'), '4');
+      await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '4');
       await act(async () => {
-        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+        await fireEvent.press(screen.getByTestId('amount-sheet-done'));
       });
       await act(async () => {
-        fireEvent.press(screen.getByTestId('scan-log'));
+        await fireEvent.press(screen.getByTestId('scan-log'));
       });
       // 4 pieces = 50 g = double the box's own 140 kcal / 0.5 g protein.
       const entry = mockLogFood.mock.calls[0][1];
@@ -367,7 +367,7 @@ describe('a resolved barcode', () => {
       await scan();
       await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
       await act(async () => {
-        fireEvent.press(screen.getByTestId('scan-log'));
+        await fireEvent.press(screen.getByTestId('scan-log'));
       });
       const entry = mockLogFood.mock.calls[0][1];
       // 140 kcal / 2 g protein — what the box says, not 560 / 2.
@@ -404,7 +404,7 @@ describe('a barcode the catalog does not have', () => {
   it('hands the barcode to the describe screen', async () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-unknown-describe')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('scan-unknown-describe'));
+    await fireEvent.press(screen.getByTestId('scan-unknown-describe'));
     expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining(`barcode=${CODE}`));
   });
 });
@@ -431,7 +431,7 @@ describe('a lookup that could not be made', () => {
   it('does not carry the barcode into the describe path', async () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-unreachable-describe')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('scan-unreachable-describe'));
+    await fireEvent.press(screen.getByTestId('scan-unreachable-describe'));
     expect(mockReplace).toHaveBeenCalledWith(expect.not.stringContaining('barcode='));
   });
 });
@@ -517,7 +517,7 @@ describe('the local cache', () => {
       await scan();
       await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
       await act(async () => {
-        fireEvent.press(screen.getByTestId('scan-log'));
+        await fireEvent.press(screen.getByTestId('scan-log'));
       });
       const entry = mockLogFood.mock.calls[0][1];
       expect(entry.kcal).toBe(78);
@@ -529,9 +529,9 @@ describe('the local cache', () => {
       await scan();
       await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
-      fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
+      await fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
       await act(async () => {
-        fireEvent.press(screen.getByTestId('scan-log'));
+        await fireEvent.press(screen.getByTestId('scan-log'));
       });
       const entry = mockLogFood.mock.calls[0][1];
       expect(entry.kcal).toBe(156);
@@ -544,9 +544,9 @@ describe('the local cache', () => {
       await scan();
       await openAmountSheet();
       await waitFor(() => expect(screen.getByTestId('scan-servings-fallback')).toBeTruthy());
-      fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
+      await fireEvent.changeText(screen.getByTestId('scan-servings-fallback'), '2');
       await act(async () => {
-        fireEvent.press(screen.getByTestId('amount-sheet-done'));
+        await fireEvent.press(screen.getByTestId('amount-sheet-done'));
       });
       expect(screen.getByTestId('scan-amount-value')).toHaveTextContent('2 × 1 egg');
 
@@ -561,7 +561,7 @@ describe('the local cache', () => {
 describe('camera permission', () => {
   it('explains why before asking, and offers a way past it', async () => {
     mockPermission = { granted: false, canAskAgain: true };
-    render(<ScanBarcodeScreen />);
+    await render(<ScanBarcodeScreen />);
     expect(screen.getByTestId('scan-request-permission')).toBeTruthy();
     expect(screen.getByTestId('scan-permission-describe')).toBeTruthy();
     // No picture is taken, and the screen has to say so before the OS prompt.
@@ -570,7 +570,7 @@ describe('camera permission', () => {
 
   it('points at Settings once the prompt can no longer be shown', async () => {
     mockPermission = { granted: false, canAskAgain: false };
-    render(<ScanBarcodeScreen />);
+    await render(<ScanBarcodeScreen />);
     expect(screen.queryByTestId('scan-request-permission')).toBeNull();
     expect(screen.getByText(/Settings/)).toBeTruthy();
   });
@@ -646,8 +646,17 @@ describe('confirming twice', () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-log')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('scan-log'));
-      fireEvent.press(screen.getByTestId('scan-log'));
+      // Both taps must land in the SAME tick, which is the whole race. The
+      // guard is a `useRef` set synchronously and cleared when the save
+      // finishes, so awaiting the first press — which in RNTL 14 waits on the
+      // handler's own promise — lets it finish, and the second tap then
+      // legitimately proceeds against a cleared guard. Nothing is being tested
+      // at that point. `fireEvent` runs the handler synchronously before its
+      // first `await`, so firing both and awaiting them together puts them in
+      // one tick, exactly as v13's synchronous `fireEvent` did.
+      const first = fireEvent.press(screen.getByTestId('scan-log'));
+      const second = fireEvent.press(screen.getByTestId('scan-log'));
+      await Promise.all([first, second]);
     });
     expect(mockLogFood).toHaveBeenCalledTimes(1);
   });
@@ -665,7 +674,7 @@ describe('a lookup that is taking too long', () => {
     await scan();
     await waitFor(() => expect(screen.getByTestId('scan-looking-up')).toBeTruthy());
 
-    fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
+    await fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
     await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
     expect(screen.queryByTestId('scan-looking-up')).toBeNull();
     release({ status: 'unknown', code: CODE });

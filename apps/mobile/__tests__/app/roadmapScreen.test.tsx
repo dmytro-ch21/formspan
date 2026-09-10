@@ -268,7 +268,7 @@ beforeEach(() => {
 });
 
 async function open() {
-  render(<CurriculumScreen />);
+  await render(<CurriculumScreen />);
   await waitFor(() => expect(screen.getByTestId('roadmap-title')).toBeTruthy());
 }
 
@@ -307,7 +307,7 @@ describe('arriving', () => {
     expect(screen.getByText('Learn the basic game')).toBeTruthy();
     expect(screen.queryByTestId('roadmap-description')).toBeNull();
 
-    fireEvent.press(screen.getByTestId('roadmap-thesis'));
+    await fireEvent.press(screen.getByTestId('roadmap-thesis'));
     expect(screen.getByTestId('roadmap-description')).toBeTruthy();
   });
 
@@ -322,7 +322,7 @@ describe('arriving', () => {
     expect(thesis.props.accessibilityLabel).toBeUndefined();
     expect(thesis).toHaveTextContent(/Learn the basic game/);
 
-    fireEvent.press(thesis);
+    await fireEvent.press(thesis);
     // Outside the pressable, so it is its own accessible node.
     expect(within(thesis).queryByTestId('roadmap-description')).toBeNull();
     expect(screen.getByTestId('roadmap-description')).toBeTruthy();
@@ -364,7 +364,7 @@ describe('the connecting rule', () => {
     // Identical shape, identical hazard — and this one is drawn per open
     // milestone, so it regresses without the outer rule changing at all.
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
 
     const first = StyleSheet.flatten(
       screen.getByTestId('roadmap-inner-rail-scissor-sweep').props.style,
@@ -385,7 +385,7 @@ describe('the connecting rule', () => {
 describe('a milestone', () => {
   it('reveals its lessons on tap, names only', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
 
     expect(screen.getByText('Scissor sweep')).toBeTruthy();
     expect(screen.getByText('Hip bump sweep')).toBeTruthy();
@@ -395,18 +395,18 @@ describe('a milestone', () => {
 
   it('closes the previous one — only ever one open at a time', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-1'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-1'));
     expect(screen.getByText('Grappling stance')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
     expect(screen.queryByText('Grappling stance')).toBeNull();
     expect(screen.getByText('Scissor sweep')).toBeTruthy();
   });
 
   it('closes again when tapped a second time', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
     expect(screen.queryByText('Scissor sweep')).toBeNull();
   });
 
@@ -431,8 +431,8 @@ describe('a milestone', () => {
 describe('a lesson', () => {
   it('expands in place and never navigates away', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
 
     expect(screen.getByTestId('roadmap-lesson-detail-scissor-sweep')).toBeTruthy();
     // The milestone is still on screen around it — that is the whole point of
@@ -445,8 +445,8 @@ describe('a lesson', () => {
 
   it('says how it is measured, and where the record stands', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
 
     expect(screen.getByText('HOW THIS IS MEASURED')).toBeTruthy();
     expect(screen.getByText('Landed live')).toBeTruthy();
@@ -457,8 +457,8 @@ describe('a lesson', () => {
 
   it('offers no way to mark itself complete', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
 
     // There is deliberately no hand-completion path in the data model, so
     // there must be none on the screen either. A checkbox or a switch here
@@ -469,9 +469,9 @@ describe('a lesson', () => {
 
   it('starts it instead — one technique, into the focus list', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
-    fireEvent.press(screen.getByTestId('roadmap-work-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-work-scissor-sweep'));
 
     await waitFor(() => expect(mockSetFocus).toHaveBeenCalled());
     const [, ids, roadmap] = mockSetFocus.mock.calls[0] as [unknown, string[], unknown];
@@ -500,8 +500,8 @@ describe('a lesson', () => {
       },
     ]);
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
 
     expect(screen.queryByTestId('roadmap-work-scissor-sweep')).toBeNull();
     expect(screen.getByTestId('roadmap-in-focus-scissor-sweep')).toHaveTextContent(
@@ -509,14 +509,14 @@ describe('a lesson', () => {
     );
 
     // And the lesson beside it, which is NOT in focus, still offers the button.
-    fireEvent.press(screen.getByTestId('roadmap-lesson-hip-bump-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-hip-bump-sweep'));
     expect(screen.getByTestId('roadmap-work-hip-bump-sweep')).toBeTruthy();
   });
 
   it('reads a concept as something to understand, with nothing to count', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
 
     expect(screen.getByTestId('roadmap-lesson-detail-c9')).toHaveTextContent(/Understand this/);
     expect(screen.queryByText('HOW THIS IS MEASURED')).toBeNull();
@@ -530,12 +530,12 @@ describe('a lesson', () => {
   describe('marking a concept read (N123)', () => {
     it('offers the read toggle on a concept, and NEVER on a technique', async () => {
       await open();
-      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
-      fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+      await fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      await fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
       expect(screen.getByTestId('roadmap-read-toggle-c9')).toBeTruthy();
 
-      fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-      fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+      await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+      await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
       // THE GUARD THIS TEST EXISTS FOR: the ticket's own acceptance criterion
       // that a technique and a concept must not share a control.
       expect(screen.queryByTestId('roadmap-read-toggle-scissor-sweep')).toBeNull();
@@ -548,8 +548,8 @@ describe('a lesson', () => {
       // toggle onto a real content shape the database refuses every time.
       // Gating on `l.kind === 'concept'` is what this test pins.
       await open();
-      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
-      fireEvent.press(screen.getByTestId('roadmap-lesson-shadow-drilling'));
+      await fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      await fireEvent.press(screen.getByTestId('roadmap-lesson-shadow-drilling'));
       expect(screen.getByTestId('roadmap-lesson-detail-shadow-drilling')).toHaveTextContent(
         /Understand this/,
       );
@@ -558,8 +558,8 @@ describe('a lesson', () => {
 
     it('marks it read, and the toggle reflects the reload', async () => {
       await open();
-      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
-      fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+      await fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      await fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
 
       const toggle = screen.getByTestId('roadmap-read-toggle-c9');
       expect(toggle.props.accessibilityState).toEqual(expect.objectContaining({ checked: false }));
@@ -587,8 +587,8 @@ describe('a lesson', () => {
       );
       mockGetCurriculum.mockResolvedValue({ ...WHITE, read_concepts: 1, items: readItems });
       await open();
-      fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
-      fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
+      await fireEvent.press(screen.getByTestId('roadmap-milestone-3'));
+      await fireEvent.press(screen.getByTestId('roadmap-lesson-c9'));
       expect(screen.getByTestId('roadmap-read-toggle-c9').props.accessibilityState).toEqual(
         expect.objectContaining({ checked: true }),
       );
@@ -623,10 +623,10 @@ describe('a lesson', () => {
 
   it('closes when a different milestone is opened', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
-    fireEvent.press(screen.getByTestId('roadmap-milestone-1'));
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-1'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
 
     expect(screen.queryByTestId('roadmap-lesson-detail-scissor-sweep')).toBeNull();
   });
@@ -686,8 +686,8 @@ describe('the summary cards', () => {
 describe('a session logged while the roadmap is open', () => {
   it('re-reads when the sync lands, so the figure moves without leaving', async () => {
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
     const detail = () => within(screen.getByTestId('roadmap-lesson-detail-scissor-sweep'));
     expect(detail().getByText('3 / 15')).toBeTruthy();
 
@@ -751,8 +751,8 @@ describe('a session logged while the roadmap is open', () => {
       ),
     });
     await open();
-    fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
-    fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
+    await fireEvent.press(screen.getByTestId('roadmap-milestone-2'));
+    await fireEvent.press(screen.getByTestId('roadmap-lesson-scissor-sweep'));
 
     const note = screen.getByTestId('roadmap-evidence-scissor-sweep');
     expect(note).toHaveTextContent(/Drilled in 6 classes/);
@@ -782,8 +782,8 @@ describe('a session logged while the roadmap is open', () => {
 describe('the overflow menu: Edit and Delete (N83)', () => {
   const MINE: Curriculum = { ...WHITE, editable: true, official: false, track: null, belt: null };
 
-  function pressMenuAndGetOptions(): { text: string; style?: string; onPress?: () => void }[] {
-    fireEvent.press(screen.getByTestId('roadmap-menu'));
+  async function pressMenuAndGetOptions(): Promise<{ text: string; style?: string; onPress?: () => void }[]> {
+    await fireEvent.press(screen.getByTestId('roadmap-menu'));
     const call = jest.mocked(Alert.alert).mock.calls.at(-1);
     if (!call) throw new Error('Alert.alert was not called');
     return call[2] as { text: string; style?: string; onPress?: () => void }[];
@@ -796,7 +796,7 @@ describe('the overflow menu: Edit and Delete (N83)', () => {
   it('offers neither option on a curriculum that is not editable', async () => {
     mockGetCurriculum.mockResolvedValue(WHITE);
     await open();
-    const options = pressMenuAndGetOptions();
+    const options = await pressMenuAndGetOptions();
     expect(options.map((o) => o.text)).not.toContain('Edit');
     expect(options.map((o) => o.text)).not.toContain('Delete curriculum');
   });
@@ -804,7 +804,7 @@ describe('the overflow menu: Edit and Delete (N83)', () => {
   it('offers Edit on one that is, and it pushes the N83 edit route', async () => {
     mockGetCurriculum.mockResolvedValue(MINE);
     await open();
-    const options = pressMenuAndGetOptions();
+    const options = await pressMenuAndGetOptions();
     const edit = options.find((o) => o.text === 'Edit');
     expect(edit).toBeTruthy();
     edit!.onPress?.();
@@ -814,7 +814,7 @@ describe('the overflow menu: Edit and Delete (N83)', () => {
   it('Delete asks a second time before it deletes anything', async () => {
     mockGetCurriculum.mockResolvedValue(MINE);
     await open();
-    const options = pressMenuAndGetOptions();
+    const options = await pressMenuAndGetOptions();
     const del = options.find((o) => o.text === 'Delete curriculum');
     expect(del).toBeTruthy();
     expect(del!.style).toBe('destructive');
@@ -837,7 +837,7 @@ describe('the overflow menu: Edit and Delete (N83)', () => {
   it('Cancel on the confirm leaves the curriculum alone', async () => {
     mockGetCurriculum.mockResolvedValue(MINE);
     await open();
-    const del = pressMenuAndGetOptions().find((o) => o.text === 'Delete curriculum');
+    const del = (await pressMenuAndGetOptions()).find((o) => o.text === 'Delete curriculum');
     del!.onPress?.();
 
     const confirmOptions = jest.mocked(Alert.alert).mock.calls.at(-1)![2] as {
@@ -866,8 +866,8 @@ describe('the overflow menu: Edit and Delete (N83)', () => {
  * focus while this roadmap was still counting it.
  */
 describe('the overflow menu: applying focus when a technique is already there (N100)', () => {
-  function pressMenuAndGetOptions(): { text: string; style?: string; onPress?: () => void }[] {
-    fireEvent.press(screen.getByTestId('roadmap-menu'));
+  async function pressMenuAndGetOptions(): Promise<{ text: string; style?: string; onPress?: () => void }[]> {
+    await fireEvent.press(screen.getByTestId('roadmap-menu'));
     const call = jest.mocked(Alert.alert).mock.calls.at(-1);
     if (!call) throw new Error('Alert.alert was not called');
     return call[2] as { text: string; style?: string; onPress?: () => void }[];
@@ -918,7 +918,7 @@ describe('the overflow menu: applying focus when a technique is already there (N
     mockFetchFocus.mockResolvedValue(allThreeInFocus(['blue-belt-basics']));
     await open();
 
-    const options = pressMenuAndGetOptions();
+    const options = await pressMenuAndGetOptions();
     const apply = options.find(
       (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',
     );
@@ -947,7 +947,7 @@ describe('the overflow menu: applying focus when a technique is already there (N
     mockFetchFocus.mockResolvedValue(allThreeInFocus(['white-belt-basics']));
     await open();
 
-    const options = pressMenuAndGetOptions();
+    const options = await pressMenuAndGetOptions();
     expect(
       options.find(
         (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',
@@ -969,7 +969,7 @@ describe('the overflow menu: applying focus when a technique is already there (N
     mockFetchFocus.mockResolvedValue(allThreeInFocus([]));
     await open();
 
-    const options = pressMenuAndGetOptions();
+    const options = await pressMenuAndGetOptions();
     expect(
       options.find(
         (o) => o.text.startsWith('Work these next') || o.text === 'Update your focus for this roadmap',

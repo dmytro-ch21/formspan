@@ -44,7 +44,7 @@ const TARGET: TargetView = {
   },
 };
 
-function renderCard(isToday: boolean) {
+async function renderCard(isToday: boolean) {
   return render(
     <MomentumCard
       eaten={EATEN}
@@ -62,30 +62,30 @@ function renderCard(isToday: boolean) {
 }
 
 describe('MomentumCard — the day-open link text agrees with the title (W13, #693)', () => {
-  it('reads "See today\'s food" on today, with a real target set', () => {
-    const screen = renderCard(true);
+  it('reads "See today\'s food" on today, with a real target set', async () => {
+    const screen = await renderCard(true);
     const link = screen.getByTestId('today-open-food');
     expect(within(link).getByText("See today's food")).toBeTruthy();
     expect(within(link).queryByText('See logged food')).toBeNull();
   });
 
-  it('reads "See logged food" on a browsed day — the visible text, not just the a11y label', () => {
+  it('reads "See logged food" on a browsed day — the visible text, not just the a11y label', async () => {
     // ac-verifier's finding on the review pass: the a11y-label fix alone left
     // the ON-SCREEN string still saying "today's food" on a browsed day. A
     // sighted athlete would see a MOMENTUM title and a link underneath still
     // claiming "today's food" — the exact overclaim this ticket removes.
-    const screen = renderCard(false);
+    const screen = await renderCard(false);
     const link = screen.getByTestId('today-open-food');
     expect(within(link).getByText('See logged food')).toBeTruthy();
     expect(within(link).queryByText("See today's food")).toBeNull();
   });
 
-  it('keeps the accessibility label and the visible text in agreement on both days', () => {
-    const today = renderCard(true);
+  it('keeps the accessibility label and the visible text in agreement on both days', async () => {
+    const today = await renderCard(true);
     const todayLink = today.getByTestId('today-open-food');
     expect(todayLink.props.accessibilityLabel).toBe("Open today's food log");
 
-    const browsed = renderCard(false);
+    const browsed = await renderCard(false);
     const browsedLink = browsed.getByTestId('today-open-food');
     expect(browsedLink.props.accessibilityLabel).toBe('Open food log');
   });
@@ -175,30 +175,30 @@ describe('MomentumCard — the rings do not carry a previous day\'s fill (W15, #
     try {
       // SAME key across the switch — the pre-fix shape: no remount, so `base`
       // animates smoothly FROM its current (filled) value.
-      const sameKey = render(<Host day="2026-08-20" eaten={FULL} />);
+      const sameKey = await render(<Host day="2026-08-20" eaten={FULL} />);
       await act(async () => {
         await Promise.resolve();
       });
-      act(() => {
+      await act(() => {
         jest.advanceTimersByTime(700);
       });
-      sameKey.rerender(<Host day="2026-08-20" eaten={NOTHING} />);
-      act(() => {
+      await sameKey.rerender(<Host day="2026-08-20" eaten={NOTHING} />);
+      await act(() => {
         jest.advanceTimersByTime(50);
       });
       const sameKeySoon = kcalOffset(sameKey.toJSON());
 
       // NEW key across the switch — the actual fix: a fresh mount, so `base`
       // starts over at 0 and animates from empty toward empty.
-      const newKey = render(<Host day="2026-08-20" eaten={FULL} />);
+      const newKey = await render(<Host day="2026-08-20" eaten={FULL} />);
       await act(async () => {
         await Promise.resolve();
       });
-      act(() => {
+      await act(() => {
         jest.advanceTimersByTime(700);
       });
-      newKey.rerender(<Host day="2026-08-21" eaten={NOTHING} />);
-      act(() => {
+      await newKey.rerender(<Host day="2026-08-21" eaten={NOTHING} />);
+      await act(() => {
         jest.advanceTimersByTime(50);
       });
       const newKeySoon = kcalOffset(newKey.toJSON());
@@ -217,8 +217,8 @@ describe('MomentumCard — the rings do not carry a previous day\'s fill (W15, #
 });
 
 describe('MomentumCard — the headline figure sits on its own legibility plate (N443, #739)', () => {
-  it('wraps the "left" figure in the plate, not directly on the ring', () => {
-    const screen = renderCard(true);
+  it('wraps the "left" figure in the plate, not directly on the ring', async () => {
+    const screen = await renderCard(true);
     const plate = screen.getByTestId('today-centre-plate');
     // TARGET is 2000 kcal, EATEN totals 1200 — "800 left" is what should be
     // ON the plate. Asserting `within(plate)` rather than just `getByText`
@@ -235,8 +235,8 @@ describe('MomentumCard — the headline figure sits on its own legibility plate 
     expect(style.backgroundColor).toBe('rgba(8,11,18,0.72)');
   });
 
-  it('wraps the "eaten" figure in the plate when no target is set', () => {
-    const screen = render(
+  it('wraps the "eaten" figure in the plate when no target is set', async () => {
+    const screen = await render(
       <MomentumCard
         eaten={EATEN}
         view={{ state: 'none' }}
@@ -260,8 +260,8 @@ describe('MomentumCard — the headline figure sits on its own legibility plate 
   // return statement wrapping its own `CentrePlate`. Covered separately so
   // an edit that unwraps just this one (the rarest of the three to hit on a
   // device) cannot stay green.
-  it('wraps the "eaten" figure in the plate when the target check itself failed', () => {
-    const screen = render(
+  it('wraps the "eaten" figure in the plate when the target check itself failed', async () => {
+    const screen = await render(
       <MomentumCard
         eaten={EATEN}
         view={{ state: 'unknown' }}

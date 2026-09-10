@@ -94,7 +94,7 @@ beforeEach(() => {
 });
 
 test('renders the prose a beginner came for', async () => {
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-detail')).toBeTruthy());
   expect(screen.getByText('Closed Guard')).toBeTruthy();
@@ -108,7 +108,7 @@ test('renders the prose a beginner came for', async () => {
  * plausible and is why it is asserted rather than eyeballed.
  */
 test('splits priorities into the two players', async () => {
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByText('BOTTOM')).toBeTruthy());
   expect(screen.getByText('TOP')).toBeTruthy();
@@ -152,7 +152,7 @@ test('lists only the techniques from this position family', async () => {
     }),
   ]);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByText('Armbar from Closed Guard')).toBeTruthy());
   expect(screen.getByText('Scissor Sweep')).toBeTruthy();
@@ -181,12 +181,12 @@ test('the detail filter separates closed guard from open guard', async () => {
   mockFetchTechniques.mockResolvedValue(library);
 
   // Closed guard whitelists its two details.
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
   await waitFor(() => expect(screen.getByText('Armbar from Closed Guard')).toBeTruthy());
   expect(screen.getByText('Gogoplata')).toBeTruthy();
   expect(screen.queryByText('De La Riva Sweep')).toBeNull();
   expect(screen.queryByText('Butterfly Sweep')).toBeNull();
-  screen.unmount();
+  await screen.unmount();
 
   // Open guard blacklists the same two and takes the rest of the family.
   mockFetchPosition.mockResolvedValue({
@@ -198,7 +198,7 @@ test('the detail filter separates closed guard from open guard', async () => {
   });
   mockFetchTechniques.mockResolvedValue(library);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
   await waitFor(() => expect(screen.getByText('De La Riva Sweep')).toBeTruthy());
   expect(screen.getByText('Butterfly Sweep')).toBeTruthy();
   expect(screen.queryByText('Armbar from Closed Guard')).toBeNull();
@@ -231,7 +231,7 @@ test('names the family when the list is borrowed from a sibling', async () => {
     technique({ id: 'kob-mount', name: 'Knee on Belly to Mount', position: 'Side Control - Top' }),
   ]);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() =>
     expect(screen.getByText('TECHNIQUES FROM THE SIDE CONTROL FAMILY · 1')).toBeTruthy(),
@@ -257,7 +257,7 @@ test('does not qualify back control, whose family is a naming artefact', async (
     technique({ id: 'rnc', name: 'Rear Naked Choke', position: 'Back - Top (Back Control)' }),
   ]);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByText('TECHNIQUES FROM HERE · 1')).toBeTruthy());
 });
@@ -271,12 +271,12 @@ test('a technique row opens that technique', async () => {
     technique({ id: 'armbar-closed-guard', name: 'Armbar from Closed Guard' }),
   ]);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
   await waitFor(() =>
     expect(screen.getByTestId('position-technique-armbar-closed-guard')).toBeTruthy(),
   );
 
-  fireEvent.press(screen.getByTestId('position-technique-armbar-closed-guard'));
+  await fireEvent.press(screen.getByTestId('position-technique-armbar-closed-guard'));
   expect(mockPush).toHaveBeenCalledWith('/technique/armbar-closed-guard');
 });
 
@@ -287,7 +287,7 @@ test('a technique row opens that technique', async () => {
  * the position.
  */
 test('renders no techniques heading when there are none', async () => {
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-detail')).toBeTruthy());
   expect(screen.queryByText(/TECHNIQUES FROM HERE/)).toBeNull();
@@ -300,7 +300,7 @@ test('renders no techniques heading when there are none', async () => {
 test('still renders the position when the library fails', async () => {
   mockFetchTechniques.mockRejectedValue(new Error('Request failed (500).'));
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-detail')).toBeTruthy());
   expect(screen.getByText('Closed Guard')).toBeTruthy();
@@ -311,7 +311,7 @@ test('still renders the position when the library fails', async () => {
 test('reports a failure to load the position', async () => {
   mockFetchPosition.mockRejectedValue(new Error('Request failed (500).'));
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-error')).toBeTruthy());
   expect(screen.queryByTestId('position-detail')).toBeNull();
@@ -326,7 +326,7 @@ test('reports a failure to load the position', async () => {
 test('says a missing position is missing, not that the network is down', async () => {
   mockFetchPosition.mockRejectedValue(new Error('Request failed (404).'));
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-error')).toBeTruthy());
   expect(screen.getByText('That position is not in the library.')).toBeTruthy();
@@ -360,7 +360,7 @@ test('asks the transport for its deadline', async () => {
   mockFetchPosition.mockResolvedValue(CLOSED_GUARD);
   mockFetchTechniques.mockResolvedValue([]);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
   await waitFor(() => expect(screen.getByTestId('position-detail')).toBeTruthy());
 
   for (const call of [mockFetchPosition.mock.calls[0], mockFetchTechniques.mock.calls[0]]) {
@@ -373,7 +373,7 @@ test('a timed-out request reports an error instead of spinning forever', async (
   mockFetchPosition.mockRejectedValue(new TimeoutError());
   mockFetchTechniques.mockResolvedValue([]);
 
-  render(<PositionScreen />);
+  await render(<PositionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('position-error')).toBeTruthy());
   // Its own sentence, not the generic "could not load" — a timeout ran over a

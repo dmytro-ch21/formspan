@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react-native';
 import { TrendChart } from '../TrendChart';
 import { plotBox, polylineHitsRect, rectsOverlap, type Pt, type Rect } from '@/lib/trendChartLayout';
 import { buildTrend, projectToGoal, RANGES, type Reading, type TrendSeries } from '@/lib/trendSeries';
+import { findAllByType } from '@/lib/__tests__/support/tree';
 
 /**
  * What the DRAWING has to get right.
@@ -53,10 +54,10 @@ function daily(days: number, from: number, delta: number): Reading[] {
  */
 const fmt4 = (v: number) => v.toFixed(4);
 
-const paths = () => screen.UNSAFE_root.findAllByType('RNSVGPath' as never);
-const circles = () => screen.UNSAFE_root.findAllByType('RNSVGCircle' as never);
-const texts = () => screen.UNSAFE_root.findAllByType('RNSVGText' as never);
-const rects = () => screen.UNSAFE_root.findAllByType('RNSVGRect' as never);
+const paths = () => findAllByType(screen.root, 'RNSVGPath');
+const circles = () => findAllByType(screen.root, 'RNSVGCircle');
+const texts = () => findAllByType(screen.root, 'RNSVGText');
+const rects = () => findAllByType(screen.root, 'RNSVGRect');
 
 function chart(props: Partial<React.ComponentProps<typeof TrendChart>> = {}) {
   const readings = props.series ? [] : daily(60, 100, -0.05);
@@ -143,7 +144,7 @@ function axisScale(): (py: number) => number {
  * own domain (their own bounds, their own padding, their own height) separates
  * them here.
  */
-test('a reading renders at exactly the height the line gives the same value', () => {
+test('a reading renders at exactly the height the line gives the same value', async () => {
   // A noisy fortnight, then a fortnight of identical weigh-ins — over which the
   // seven-day mean IS each reading, to the last decimal place.
   const readings: Reading[] = [];
@@ -151,7 +152,7 @@ test('a reading renders at exactly the height the line gives the same value', ()
     readings.push({ on: shift(TODAY, -(29 - day)), value: day < 15 ? (day % 2 === 0 ? 95.5 : 94.5) : 95 });
   }
   const series = buildTrend({ readings, today: TODAY, range: '1M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
 
   // A day deep inside the flat stretch: the mean over the trailing week is
   // exactly the reading taken that morning.
@@ -176,10 +177,10 @@ test('a reading renders at exactly the height the line gives the same value', ()
  * it fails for any independent scaling of one against the other, including one
  * that happens to coincide at a single value.
  */
-test('dots and line agree on how many pixels a kilogram is', () => {
+test('dots and line agree on how many pixels a kilogram is', async () => {
   const readings = daily(60, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
 
   const scale = axisScale();
 
@@ -210,12 +211,12 @@ test('dots and line agree on how many pixels a kilogram is', () => {
  * mark landed inside y 31.7–46.1 of this 200px chart — 14px — which is why a
  * dot 1.4 lb off the line looked like it belonged to another picture.
  */
-test('a distant goal no longer flattens a week of readings into a strip', () => {
+test('a distant goal no longer flattens a week of readings into a strip', async () => {
   const lb = (v: number) => v / 2.2046226218;
   const readings: Reading[] = [209.5, 208.4, 209.1, 207.6, 208.9, 207.4, 208.1, 206.9, 207.8, 206.2, 207.1, 205.9, 206.8, 205.2]
     .map((v, i) => ({ on: shift(TODAY, -(13 - i)), value: lb(v) }));
   const series = buildTrend({ readings, today: TODAY, range: '1W', smooth: meanSmoother(readings, 3) });
-  chart({ series, goal: lb(190) });
+  await chart({ series, goal: lb(190) });
 
   const ys = circles()
     .filter((c: any) => String(c.props.testID ?? '').startsWith('trend-reading-'))
@@ -234,10 +235,10 @@ test('a distant goal no longer flattens a week of readings into a strip', () => 
 // The labels
 // ---------------------------------------------------------------------------
 
-test('the latest label is joined to its own point', () => {
+test('the latest label is joined to its own point', async () => {
   const readings = daily(30, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '1M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
 
   const rect = screen.getByTestId('trend-label-latest');
   const leader = screen.getByTestId('trend-label-latest-leader');
@@ -284,7 +285,7 @@ describe('nothing overlaps, at every window', () => {
 
   for (const shape of shapes) {
     for (const range of RANGES) {
-      test(`${shape.name} — ${range.key}`, () => {
+      test(`${shape.name} — ${range.key}`, async () => {
         const series = buildTrend({
           readings: shape.readings,
           today: TODAY,
@@ -293,7 +294,7 @@ describe('nothing overlaps, at every window', () => {
           planFrom: shift(TODAY, -40),
         });
         if (series.empty) return expectSkippedEmpty(series);
-        chart({ series, goal: 94, projection: projectToGoal(series, 94) });
+        await chart({ series, goal: 94, projection: projectToGoal(series, 94) });
 
         const boxes = labelRects();
         const lines = pathPoints();
@@ -346,10 +347,10 @@ function expectSkippedEmpty(series: TrendSeries) {
  * The 3M screenshot. Measured on the old code: every mark between x=273 and
  * x=320 of a 320-wide viewBox — 15% of the width, 90% of the chart empty.
  */
-test('a fortnight of readings in a 3M window fills the chart rather than a corner', () => {
+test('a fortnight of readings in a 3M window fills the chart rather than a corner', async () => {
   const readings = daily(14, 95, -0.06);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
 
   const xs = circles()
     .filter((c: any) => String(c.props.testID ?? '').startsWith('trend-reading-'))
@@ -366,13 +367,13 @@ test('a fortnight of readings in a 3M window fills the chart rather than a corne
  * reading that could be weeks old. Time appeared to end when the athlete
  * stopped logging.
  */
-test('a trailing gap leaves empty space, rather than the axis ending at the last reading', () => {
+test('a trailing gap leaves empty space, rather than the axis ending at the last reading', async () => {
   const readings: Reading[] = [];
   for (let i = 75; i >= 45; i--) readings.push({ on: shift(TODAY, -i), value: 100 - (75 - i) * 0.05 });
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
 
   expect(series.to).toBe(TODAY); // the window really does run to today
-  chart({ series });
+  await chart({ series });
 
   // The rightmost mark sits where its DAY falls in the WINDOW, not at the right
   // edge. Asserted as a proportion rather than a pixel threshold: a loose
@@ -393,9 +394,9 @@ test('a trailing gap leaves empty space, rather than the axis ending at the last
 // Degrading legibly
 // ---------------------------------------------------------------------------
 
-test('one reading draws one labelled dot, a readable axis, and no trend line', () => {
+test('one reading draws one labelled dot, a readable axis, and no trend line', async () => {
   const series = buildTrend({ readings: [{ on: TODAY, value: 97.3 }], today: TODAY, range: '1M' });
-  chart({ series });
+  await chart({ series });
 
   expect(paths()).toHaveLength(0);
   const dots = circles().filter((c: any) => String(c.props.testID ?? '').startsWith('trend-reading-'));
@@ -406,9 +407,9 @@ test('one reading draws one labelled dot, a readable axis, and no trend line', (
   expect(scale(Number((dots[0] as any).props.cy))).toBeCloseTo(97.3, 3);
 });
 
-test('no readings draws no marks and says so, rather than an empty box', () => {
+test('no readings draws no marks and says so, rather than an empty box', async () => {
   const series = buildTrend({ readings: [], today: TODAY, range: '1M' });
-  chart({ series });
+  await chart({ series });
   expect(paths()).toHaveLength(0);
   expect(circles()).toHaveLength(0);
   expect(screen.getByTestId('trend-chart-nothing')).toBeTruthy();
@@ -421,7 +422,7 @@ test('no readings draws no marks and says so, rather than an empty box', () => {
 
 // A single path across the hole would be the app inventing a fortnight of
 // weigh-ins, and it would look completely normal.
-test('a gap is drawn as separate paths, never one line across it', () => {
+test('a gap is drawn as separate paths, never one line across it', async () => {
   const readings: Reading[] = [
     { on: shift(TODAY, -60), value: 100 },
     { on: shift(TODAY, -59), value: 100 },
@@ -431,39 +432,39 @@ test('a gap is drawn as separate paths, never one line across it', () => {
     { on: shift(TODAY, -1), value: 96 },
   ];
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
   expect(series.segments.length).toBeGreaterThan(1);
   expect(paths().length).toBeGreaterThanOrEqual(series.segments.filter((s) => s.length > 1).length);
 });
 
 describe('the two dashed marks appear only when they are true', () => {
-  test('no goal set means no goal line', () => {
-    chart({ goal: null });
+  test('no goal set means no goal line', async () => {
+    await chart({ goal: null });
     expect(screen.queryByTestId('trend-goal-line')).toBeNull();
     expect(screen.queryByTestId('trend-goal-offscale')).toBeNull();
   });
 
-  test('a goal draws the line', () => {
-    chart({ goal: 96 });
+  test('a goal draws the line', async () => {
+    await chart({ goal: 96 });
     expect(screen.getByTestId('trend-goal-line')).toBeTruthy();
     expect(screen.getByTestId('trend-goal-label')).toBeTruthy();
   });
 
   // The absence that must not read as an all-clear: a refused projection draws
   // nothing, and the SENTENCE beside the chart is what says why.
-  test('a refused projection draws no dashed line', () => {
+  test('a refused projection draws no dashed line', async () => {
     const readings = daily(60, 100, +0.05); // gaining, goal is below
     const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
     const p = projectToGoal(series, 90);
     expect(p.kind).toBe('none');
-    chart({ series, goal: 90, projection: p });
+    await chart({ series, goal: 90, projection: p });
     expect(screen.queryByTestId('trend-projection')).toBeNull();
   });
 
-  test('a real projection draws one', () => {
+  test('a real projection draws one', async () => {
     const readings = daily(60, 100, -0.05);
     const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-    chart({ series, goal: 96, projection: projectToGoal(series, 96) });
+    await chart({ series, goal: 96, projection: projectToGoal(series, 96) });
     expect(screen.getByTestId('trend-projection')).toBeTruthy();
   });
 
@@ -474,10 +475,10 @@ describe('the two dashed marks appear only when they are true', () => {
    * somewhere the reader is not looking, saying something untrue about where
    * the chart ends.
    */
-  test('a projection toward an off-scale goal is clipped to the plot', () => {
+  test('a projection toward an off-scale goal is clipped to the plot', async () => {
     const readings = daily(60, 100, -0.05);
     const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-    chart({ series, goal: 60, projection: projectToGoal(series, 60) });
+    await chart({ series, goal: 60, projection: projectToGoal(series, 60) });
     const d = String((screen.getByTestId('trend-projection') as any).props.d);
     for (const m of d.matchAll(/[ML]([-\d.]+),([-\d.]+)/g)) {
       expect(Number(m[2])).toBeGreaterThanOrEqual(BOX.top - 0.001);
@@ -489,13 +490,13 @@ describe('the two dashed marks appear only when they are true', () => {
 // The callouts read the RAW reading, never the smoothed line. An athlete who
 // steps off a scale and sees a different number on the card than the scale gave
 // them will not trust either.
-test('the callouts show the measurements, not the trend line', () => {
+test('the callouts show the measurements, not the trend line', async () => {
   const readings: Reading[] = [
     ...daily(30, 100, 0).slice(0, 29),
     { on: TODAY, value: 93.4 }, // a sharp last reading the mean would not follow
   ];
   const series = buildTrend({ readings, today: TODAY, range: '1M', smooth: meanSmoother(readings, 3) });
-  chart({ series, format: (v) => v.toFixed(1) });
+  await chart({ series, format: (v) => v.toFixed(1) });
 
   // Queried off the serialised tree rather than with `getByText`: react-native-
   // svg renders an `RNSVGText` host node, which RNTL's text matcher does not
@@ -512,10 +513,10 @@ test('the callouts show the measurements, not the trend line', () => {
 // latest reading — a negative `daysAway`. The first attempt at this guard
 // floored the domain only and left `projEnd` reading the raw value, so the
 // dashed line still ran BACKWARD from the latest point to the goal.
-test('a projection dated before the latest reading draws nothing, never backwards', () => {
+test('a projection dated before the latest reading draws nothing, never backwards', async () => {
   const readings = daily(60, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({
+  await chart({
     series,
     goal: 90,
     projection: {
@@ -533,10 +534,10 @@ test('a projection dated before the latest reading draws nothing, never backward
 });
 
 // Zero would otherwise draw a degenerate vertical dash, which reads as a cliff.
-test('an arrival dated today draws nothing rather than a vertical dash', () => {
+test('an arrival dated today draws nothing rather than a vertical dash', async () => {
   const readings = daily(60, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({
+  await chart({
     series,
     goal: 90,
     projection: {
@@ -551,10 +552,10 @@ test('an arrival dated today draws nothing rather than a vertical dash', () => {
 // computed labels from the window's nominal start printed dates the drawing did
 // not use the moment the left edge started moving — which is why `formatDate`
 // is a function rather than three finished strings.
-test('the x-axis names the day the plot really starts on', () => {
+test('the x-axis names the day the plot really starts on', async () => {
   const readings = daily(14, 95, -0.06);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
   const shown = texts().map(textOf);
   expect(shown).toContain('Today');
   // The window nominally starts 90 days back; the plot does not, and says so.
@@ -573,12 +574,12 @@ test('the x-axis names the day the plot really starts on', () => {
  * Same class as an axis that ends at the last reading (#462), from the other
  * side — and the common case, since both callers pass a projection.
  */
-test('the Today tick sits on today, not at the right edge, when a projection extends the domain', () => {
+test('the Today tick sits on today, not at the right edge, when a projection extends the domain', async () => {
   const readings = daily(30, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '1M', smooth: meanSmoother(readings, 3) });
   const projection = projectToGoal(series, 96);
   expect(projection.kind).toBe('projected');
-  chart({ series, goal: 96, projection });
+  await chart({ series, goal: 96, projection });
 
   const todayTick = texts().find((t: any) => textOf(t) === 'Today') as any;
   const todayDot = circles().find((c: any) => c.props.testID === `trend-reading-${TODAY}`) as any;
@@ -587,10 +588,10 @@ test('the Today tick sits on today, not at the right edge, when a projection ext
   expect(Number(todayTick.props.x)).toBeLessThan(BOX.right - 20);
 });
 
-test('with no projection the Today tick is the right edge', () => {
+test('with no projection the Today tick is the right edge', async () => {
   const readings = daily(30, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '1M', smooth: meanSmoother(readings, 3) });
-  chart({ series });
+  await chart({ series });
   const todayTick = texts().find((t: any) => textOf(t) === 'Today') as any;
   expect(Number(todayTick.props.x)).toBeCloseTo(BOX.right, 3);
 });
@@ -603,10 +604,10 @@ test('with no projection the Today tick is the right edge', () => {
  * the overlap matrix could not see the collision, because that assertion reads
  * rectangles and this draws bare text.
  */
-test('the off-scale goal marker keeps clear of the labels and the line', () => {
+test('the off-scale goal marker keeps clear of the labels and the line', async () => {
   const readings = daily(60, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({ series, goal: 60, projection: projectToGoal(series, 60) });
+  await chart({ series, goal: 60, projection: projectToGoal(series, 60) });
 
   const marker = screen.getByTestId('trend-goal-offscale');
   const mx = Number(marker.props.x);
@@ -626,10 +627,10 @@ test('the off-scale goal marker keeps clear of the labels and the line', () => {
 // marker is drawn text inside one `image` node — so without this clause
 // VoiceOver hears a chart with no goal at all, which is the same collapse the
 // drawing refuses to make.
-test('an off-scale goal is named in the accessibility label', () => {
+test('an off-scale goal is named in the accessibility label', async () => {
   const readings = daily(60, 100, -0.05);
   const series = buildTrend({ readings, today: TODAY, range: '3M', smooth: meanSmoother(readings, 3) });
-  chart({ series, goal: 60, format: (v) => v.toFixed(1), accessibilityLabel: 'Weight over the last three months' });
-  const svg = screen.UNSAFE_root.findAllByType('RNSVGSvgView' as never)[0] as any;
+  await chart({ series, goal: 60, format: (v) => v.toFixed(1), accessibilityLabel: 'Weight over the last three months' });
+  const svg = findAllByType(screen.root, 'RNSVGSvgView')[0] as any;
   expect(String(svg.props.accessibilityLabel)).toMatch(/60\.0 is below the range shown/);
 });

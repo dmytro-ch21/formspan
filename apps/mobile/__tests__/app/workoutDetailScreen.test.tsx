@@ -220,7 +220,7 @@ it('the intent picker defaults to Normal and is not shown for a non-strength pla
   mockCachedWorkouts.mockResolvedValue([plan('Squat Day')]);
   mockGetWorkout.mockResolvedValue(plan('Squat Day'));
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
   await waitFor(() => expect(screen.getByTestId('workout-intent-picker')).toBeTruthy());
   expect(screen.getByTestId('workout-intent-normal')).toBeTruthy();
 
@@ -228,7 +228,7 @@ it('the intent picker defaults to Normal and is not shown for a non-strength pla
   const bjjPlan = plan('Rolling', { sport: 'bjj' });
   mockCachedWorkouts.mockResolvedValue([bjjPlan]);
   mockGetWorkout.mockResolvedValue(bjjPlan);
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
   await waitFor(() => expect(screen.getByLabelText('Start a session from Rolling')).toBeTruthy());
   expect(screen.queryByTestId('workout-intent-picker')).toBeNull();
 });
@@ -237,11 +237,11 @@ it('starting a session from a template sends the chosen intent, not always norma
   mockCachedWorkouts.mockResolvedValue([plan('Squat Day')]);
   mockGetWorkout.mockResolvedValue(plan('Squat Day'));
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
   await waitFor(() => expect(screen.getByTestId('workout-intent-picker')).toBeTruthy());
 
-  fireEvent.press(screen.getByTestId('workout-intent-light'));
-  fireEvent.press(screen.getByTestId('workout-start-session'));
+  await fireEvent.press(screen.getByTestId('workout-intent-light'));
+  await fireEvent.press(screen.getByTestId('workout-start-session'));
 
   await waitFor(() => expect(mockStartLocalSession).toHaveBeenCalled());
   expect(mockStartLocalSession).toHaveBeenCalledWith(
@@ -257,7 +257,7 @@ it('keeps the LOCAL copy on screen when the local row is dirty', async () => {
   mockGetWorkout.mockResolvedValue(plan('Old Server Name'));
   mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
 
   await waitFor(() => expect(mockGetWorkout).toHaveBeenCalled());
   expect(await screen.findByLabelText('Start a session from Edited In The Gym')).toBeTruthy();
@@ -272,7 +272,7 @@ it('DOES adopt the server copy when the local row is clean', async () => {
   mockGetWorkout.mockResolvedValue(plan('Fresh From Server'));
   mockDirtyWorkoutIDs.mockResolvedValue(new Set<string>());
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
 
   expect(await screen.findByLabelText('Start a session from Fresh From Server')).toBeTruthy();
 });
@@ -283,7 +283,7 @@ it('renders the cached plan before the network answers', async () => {
   mockCachedWorkouts.mockResolvedValue([plan('Cached Plan')]);
   mockGetWorkout.mockRejectedValue(new Error('Network request failed'));
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
 
   expect(await screen.findByLabelText('Start a session from Cached Plan')).toBeTruthy();
 });
@@ -294,7 +294,7 @@ it('does not treat a failed refresh as an error when a cached copy is showing', 
   mockCachedWorkouts.mockResolvedValue([plan('Cached Plan')]);
   mockGetWorkout.mockRejectedValue(new Error('Network request failed'));
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
 
   await screen.findByLabelText('Start a session from Cached Plan');
   expect(screen.queryByText(/Network request failed/)).toBeNull();
@@ -314,16 +314,16 @@ describe('renaming', () => {
   const openEditor = async () => {
     mockCachedWorkouts.mockResolvedValue([plan('Legs')]);
     mockGetWorkout.mockResolvedValue(plan('Legs'));
-    render(<WorkoutDetailScreen />);
+    await render(<WorkoutDetailScreen />);
     await waitFor(() => expect(screen.getByTestId('workout-rename')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('workout-rename'));
+    await fireEvent.press(screen.getByTestId('workout-rename'));
     await waitFor(() => expect(screen.getByTestId('workout-name-input')).toBeTruthy());
   };
 
   it('writes the new name to the store', async () => {
     await openEditor();
-    fireEvent.changeText(screen.getByTestId('workout-name-input'), 'Legs B');
-    fireEvent.press(screen.getByTestId('workout-name-save'));
+    await fireEvent.changeText(screen.getByTestId('workout-name-input'), 'Legs B');
+    await fireEvent.press(screen.getByTestId('workout-name-save'));
 
     await waitFor(() => expect(mockRenameLocal).toHaveBeenCalledTimes(1));
     expect(mockRenameLocal.mock.calls[0][2]).toBe('Legs B');
@@ -343,8 +343,8 @@ describe('renaming', () => {
     // mutation, which is the only reason it is not still written that way.
     await openEditor();
     const input = screen.getByTestId('workout-name-input');
-    fireEvent.changeText(input, 'Legs B');
-    fireEvent(input, 'blur');
+    await fireEvent.changeText(input, 'Legs B');
+    await fireEvent(input, 'blur');
 
     await waitFor(() => expect(mockRenameLocal).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('workout-name-input')).toBeNull();
@@ -352,8 +352,8 @@ describe('renaming', () => {
 
   it('does not write a blank name', async () => {
     await openEditor();
-    fireEvent.changeText(screen.getByTestId('workout-name-input'), '   ');
-    fireEvent.press(screen.getByTestId('workout-name-save'));
+    await fireEvent.changeText(screen.getByTestId('workout-name-input'), '   ');
+    await fireEvent.press(screen.getByTestId('workout-name-save'));
 
     await waitFor(() => expect(screen.queryByTestId('workout-name-input')).toBeNull());
     expect(mockRenameLocal).not.toHaveBeenCalled();
@@ -366,7 +366,7 @@ describe('renaming', () => {
     const official = plan('VOLA Full Body', { owner_user_id: null, visibility: 'public' });
     mockCachedWorkouts.mockResolvedValue([official]);
     mockGetWorkout.mockResolvedValue(official);
-    render(<WorkoutDetailScreen />);
+    await render(<WorkoutDetailScreen />);
 
     await waitFor(() => expect(screen.getByTestId('workout-readonly')).toBeTruthy());
     expect(screen.queryByTestId('workout-rename')).toBeNull();
@@ -402,7 +402,7 @@ describe('sharing a plan the server does not have', () => {
     mockUnsyncedWorkoutIDs.mockResolvedValue(new Set(['w1']));
     mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
 
-    render(<WorkoutDetailScreen />);
+    await render(<WorkoutDetailScreen />);
 
     // `includeHiddenElements`, because the visible reason is deliberately
     // hidden from assistive tech — the button's own accessibilityLabel carries
@@ -422,7 +422,7 @@ describe('sharing a plan the server does not have', () => {
     mockGetWorkout.mockResolvedValue(plan('Push Day A'));
     mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
 
-    render(<WorkoutDetailScreen />);
+    await render(<WorkoutDetailScreen />);
 
     const reason = await screen.findByTestId('share-disabled-reason', {
       includeHiddenElements: true,
@@ -434,7 +434,7 @@ describe('sharing a plan the server does not have', () => {
     mockCachedWorkouts.mockResolvedValue([plan('Push Day A')]);
     mockGetWorkout.mockResolvedValue(plan('Push Day A'));
 
-    render(<WorkoutDetailScreen />);
+    await render(<WorkoutDetailScreen />);
 
     await screen.findByTestId('workout-share');
     await waitFor(() =>
@@ -456,7 +456,7 @@ describe('sharing a plan the server does not have', () => {
     mockCachedWorkouts.mockResolvedValue([theirs]);
     mockGetWorkout.mockResolvedValue(theirs);
 
-    render(<WorkoutDetailScreen />);
+    await render(<WorkoutDetailScreen />);
 
     await screen.findByTestId('workout-readonly');
     // PRESENT AND USABLE. Asserting presence alone left this green against a
@@ -485,7 +485,7 @@ it('re-enables Share once the background push lands', async () => {
   // Saved locally, push still in flight.
   mockDirtyWorkoutIDs.mockResolvedValue(new Set(['w1']));
 
-  render(<WorkoutDetailScreen />);
+  await render(<WorkoutDetailScreen />);
   expect(
     (await screen.findByTestId('share-disabled-reason', { includeHiddenElements: true }))
       .props.children,
@@ -493,7 +493,7 @@ it('re-enables Share once the background push lands', async () => {
 
   // The push lands: SQLite is clean, and sync announces it.
   mockDirtyWorkoutIDs.mockResolvedValue(new Set<string>());
-  act(() => emitSync({ lastSyncAt: '2026-08-07T12:00:00Z' }));
+  await act(() => emitSync({ lastSyncAt: '2026-08-07T12:00:00Z' }));
 
   await waitFor(() =>
     expect(screen.getByTestId('workout-share').props.accessibilityState.disabled).toBe(false),

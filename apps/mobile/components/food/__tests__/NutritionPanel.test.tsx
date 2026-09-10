@@ -25,13 +25,13 @@ function macros(over: Partial<Macros> = {}): Macros {
 }
 
 describe('the nutrition panel', () => {
-  it('shows the calorie total, rounded', () => {
-    render(<NutritionPanel macros={macros({ kcal: 247.6 })} />);
+  it('shows the calorie total, rounded', async () => {
+    await render(<NutritionPanel macros={macros({ kcal: 247.6 })} />);
     expect(screen.getByTestId('nutrition-panel-kcal').props.children).toBe(248);
   });
 
-  it('shows n/a for every value this food does not state, never a zero', () => {
-    render(<NutritionPanel macros={macros()} />);
+  it('shows n/a for every value this food does not state, never a zero', async () => {
+    await render(<NutritionPanel macros={macros()} />);
     // A zero would read as "this food has no sodium" — a claim the data does
     // not support. `n/a` is the only honest rendering of an absence.
     expect(screen.getByTestId('nutrition-panel-saturated_fat_g-value')).toHaveTextContent('n/a');
@@ -42,15 +42,15 @@ describe('the nutrition panel', () => {
     expect(screen.getByTestId('nutrition-panel-added_sugar_g-value')).toHaveTextContent('n/a');
   });
 
-  it('renders a genuine zero as a zero, not as n/a', () => {
+  it('renders a genuine zero as a zero, not as n/a', async () => {
     // The case the n/a rule must not sweep up: a food that states zero sodium
     // has stated zero sodium, and that is a fact worth showing as one.
-    render(<NutritionPanel macros={macros({ sodium_mg: 0 })} />);
+    await render(<NutritionPanel macros={macros({ sodium_mg: 0 })} />);
     expect(screen.getByTestId('nutrition-panel-sodium_mg-value')).toHaveTextContent('0mg');
   });
 
-  it('renders every stated N52 label macro with its unit', () => {
-    render(
+  it('renders every stated N52 label macro with its unit', async () => {
+    await render(
       <NutritionPanel
         macros={macros({
           saturated_fat_g: 2.5,
@@ -68,10 +68,10 @@ describe('the nutrition panel', () => {
     expect(screen.getByTestId('nutrition-panel-cholesterol_mg-value')).toHaveTextContent('65mg');
   });
 
-  it('recalculates as the amount changes — a re-render with new macros shows the new figures', () => {
-    const { rerender } = render(<NutritionPanel macros={macros({ kcal: 100, sodium_mg: 50 })} />);
+  it('recalculates as the amount changes — a re-render with new macros shows the new figures', async () => {
+    const { rerender } = await render(<NutritionPanel macros={macros({ kcal: 100, sodium_mg: 50 })} />);
     expect(screen.getByTestId('nutrition-panel-kcal').props.children).toBe(100);
-    rerender(<NutritionPanel macros={macros({ kcal: 200, sodium_mg: 100 })} />);
+    await rerender(<NutritionPanel macros={macros({ kcal: 200, sodium_mg: 100 })} />);
     expect(screen.getByTestId('nutrition-panel-kcal').props.children).toBe(200);
     expect(screen.getByTestId('nutrition-panel-sodium_mg-value')).toHaveTextContent('100mg');
   });
@@ -79,8 +79,8 @@ describe('the nutrition panel', () => {
   // Refused deliberately — see the component's own doc comment. Asserted here
   // so the refusal cannot be quietly reversed by somebody restoring the
   // button from the design reference without re-reading why it isn't there.
-  it('offers no "View Full Nutrition Label" button', () => {
-    render(<NutritionPanel macros={macros()} />);
+  it('offers no "View Full Nutrition Label" button', async () => {
+    await render(<NutritionPanel macros={macros()} />);
     expect(screen.queryByText(/view full nutrition label/i)).toBeNull();
   });
 });

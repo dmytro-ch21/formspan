@@ -79,7 +79,7 @@ const ICE_CREAM = entry({ id: 'e4', name: 'Ice cream', kcal: 200, protein_g: 3 }
 async function open(ids = 'e1,e2,e3,e4', rows = [MILK, PROTEIN, BERRIES, ICE_CREAM]) {
   mockParams = { date: '2026-09-01', meal: 'breakfast', ids };
   mockLocalEntries.mockResolvedValue(rows);
-  render(<CombineScreen />);
+  await render(<CombineScreen />);
   await waitFor(() => expect(screen.getByTestId('combine-name')).toBeTruthy());
 }
 
@@ -108,16 +108,16 @@ it('says plainly when so much of the selection is gone that combining makes no s
   // (another device, or the same day screen in another tab). Fewer than two
   // is not "combine one thing with nothing", it is nothing to combine.
   mockLocalEntries.mockResolvedValue([MILK]);
-  render(<CombineScreen />);
+  await render(<CombineScreen />);
   await waitFor(() => expect(screen.getByTestId('combine-too-few')).toBeTruthy());
 });
 
 describe('saving', () => {
   async function save() {
     await open();
-    fireEvent.changeText(screen.getByTestId('combine-name'), 'Protein shake');
+    await fireEvent.changeText(screen.getByTestId('combine-name'), 'Protein shake');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('combine-save'));
+      await fireEvent.press(screen.getByTestId('combine-save'));
     });
   }
 

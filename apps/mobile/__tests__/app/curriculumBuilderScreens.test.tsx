@@ -130,24 +130,24 @@ beforeEach(() => {
 
 describe('creating a curriculum', () => {
   it('disables Save until a name is entered', async () => {
-    render(<NewCurriculumScreen />);
+    await render(<NewCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-save')).toBeTruthy());
     expect(screen.getByTestId('curriculum-save').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: true }),
     );
-    fireEvent.changeText(screen.getByTestId('curriculum-name'), 'Guard retention');
+    await fireEvent.changeText(screen.getByTestId('curriculum-name'), 'Guard retention');
     expect(screen.getByTestId('curriculum-save').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: false }),
     );
   });
 
   it('adds a technique from the picker and saves it in the create payload', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'Guard retention');
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'Guard retention');
 
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
     await waitFor(() => expect(screen.getByTestId('technique-picker')).toBeTruthy());
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
 
     // Back on the builder, with the picked technique in the list.
     expect(await screen.findByText('Knee cut')).toBeTruthy();
@@ -163,27 +163,27 @@ describe('creating a curriculum', () => {
   });
 
   it('a technique already added shows as disabled in the picker, not a second time in the list', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
     await screen.findByText('Knee cut');
 
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
     const disabledRow = await screen.findByTestId('technique-picker-t-knee-cut');
     expect(disabledRow.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
   });
 
   it('adds a concept, and refuses to save it untitled', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-concept'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-concept'));
 
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
     expect(screen.getByTestId('curriculum-error')).toHaveTextContent(/concept/i);
     expect(mockCreateCurriculum).not.toHaveBeenCalled();
 
-    fireEvent.changeText(screen.getByTestId('curriculum-item-0-title'), 'Posture before passing');
+    await fireEvent.changeText(screen.getByTestId('curriculum-item-0-title'), 'Posture before passing');
     mockCreateCurriculum.mockResolvedValue(curriculum());
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
     const [, payload] = mockCreateCurriculum.mock.calls[0];
@@ -193,20 +193,20 @@ describe('creating a curriculum', () => {
   });
 
   it('reorders items with the up/down buttons, and the new order is what saves', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
     await screen.findByText('Knee cut');
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-armbar'));
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-armbar'));
     await screen.findByText('Armbar');
 
     // Armbar was added second, so it starts at index 1.
     expect(screen.getByTestId('curriculum-item-1-up').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: false }),
     );
-    fireEvent.press(screen.getByTestId('curriculum-item-1-up'));
+    await fireEvent.press(screen.getByTestId('curriculum-item-1-up'));
 
     mockCreateCurriculum.mockResolvedValue(curriculum());
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
@@ -218,30 +218,30 @@ describe('creating a curriculum', () => {
   });
 
   it('removes an item', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
     await screen.findByText('Knee cut');
 
-    fireEvent.press(screen.getByTestId('curriculum-item-0-remove'));
+    await fireEvent.press(screen.getByTestId('curriculum-item-0-remove'));
     expect(screen.queryByText('Knee cut')).toBeNull();
     expect(screen.getByTestId('curriculum-no-items')).toBeTruthy();
   });
 
   it('adds completion criteria with the shipped defaults, editable, and removable', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
     await screen.findByText('Knee cut');
 
-    fireEvent.press(screen.getByTestId('curriculum-item-0-add-criteria'));
+    await fireEvent.press(screen.getByTestId('curriculum-item-0-add-criteria'));
     expect(screen.getByTestId('curriculum-item-0-target-scored').props.value).toBe('25');
     expect(screen.getByTestId('curriculum-item-0-target-sessions').props.value).toBe('12');
     expect(screen.getByTestId('curriculum-item-0-hit-rate').props.value).toBe('35');
 
-    fireEvent.changeText(screen.getByTestId('curriculum-item-0-target-scored'), '40');
+    await fireEvent.changeText(screen.getByTestId('curriculum-item-0-target-scored'), '40');
 
     mockCreateCurriculum.mockResolvedValue(curriculum());
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
@@ -250,7 +250,7 @@ describe('creating a curriculum', () => {
       expect.objectContaining({ target_scored: 40, target_sessions: 12, min_hit_rate: 0.35 }),
     );
 
-    fireEvent.press(screen.getByTestId('curriculum-item-0-remove-criteria'));
+    await fireEvent.press(screen.getByTestId('curriculum-item-0-remove-criteria'));
     expect(screen.queryByTestId('curriculum-item-0-target-scored')).toBeNull();
     expect(screen.getByTestId('curriculum-item-0-add-criteria')).toBeTruthy();
   });
@@ -261,27 +261,27 @@ describe('creating a curriculum', () => {
    * is the mobile side of `CurriculumBuilder.tsx`'s identical guard.
    */
   it('clears the hit rate when the offensive target is cleared', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
     await screen.findByText('Knee cut');
-    fireEvent.press(screen.getByTestId('curriculum-item-0-add-criteria'));
+    await fireEvent.press(screen.getByTestId('curriculum-item-0-add-criteria'));
 
-    fireEvent.changeText(screen.getByTestId('curriculum-item-0-target-scored'), '');
+    await fireEvent.changeText(screen.getByTestId('curriculum-item-0-target-scored'), '');
     expect(screen.getByTestId('curriculum-item-0-hit-rate').props.value).toBe('');
   });
 
   it('adds a phase, assigns an item to it, and reorders phases', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-phase'));
-    fireEvent.changeText(screen.getByTestId('curriculum-phase-0-title'), 'Foundations');
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-phase'));
+    await fireEvent.changeText(screen.getByTestId('curriculum-phase-0-title'), 'Foundations');
 
-    fireEvent.press(screen.getByTestId('curriculum-add-technique'));
-    fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
+    await fireEvent.press(screen.getByTestId('curriculum-add-technique'));
+    await fireEvent.press(await screen.findByTestId('technique-picker-t-knee-cut'));
     await screen.findByText('Knee cut');
-    fireEvent.press(screen.getByTestId('curriculum-item-0-phase-0'));
+    await fireEvent.press(screen.getByTestId('curriculum-item-0-phase-0'));
 
     mockCreateCurriculum.mockResolvedValue(curriculum());
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
@@ -291,9 +291,9 @@ describe('creating a curriculum', () => {
   });
 
   it('refuses to save an untitled phase, and blames the phase', async () => {
-    render(<NewCurriculumScreen />);
-    fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
-    fireEvent.press(screen.getByTestId('curriculum-add-phase'));
+    await render(<NewCurriculumScreen />);
+    await fireEvent.changeText(await screen.findByTestId('curriculum-name'), 'X');
+    await fireEvent.press(screen.getByTestId('curriculum-add-phase'));
 
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
     expect(screen.getByTestId('curriculum-error')).toHaveTextContent(/phase/i);
@@ -305,14 +305,14 @@ describe('editing an existing curriculum', () => {
   it('shows a loading state before the curriculum arrives', async () => {
     let settle: (v: Curriculum) => void = () => {};
     mockGetCurriculum.mockReturnValue(new Promise((res) => { settle = res; }));
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     expect(screen.getByTestId('curriculum-edit-loading')).toBeTruthy();
     await act(async () => settle(curriculum()));
     await waitFor(() => expect(screen.getByTestId('curriculum-name')).toBeTruthy());
   });
 
   it('loads the existing fields and items', async () => {
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-name').props.value).toBe('Guard passing for winter'));
     expect(screen.getByTestId('curriculum-description').props.value).toBe('Half guard focus');
     expect(await screen.findByText('Knee cut')).toBeTruthy();
@@ -320,21 +320,21 @@ describe('editing an existing curriculum', () => {
 
   it('refuses to render an editor for a curriculum that is not yours', async () => {
     mockGetCurriculum.mockResolvedValue(curriculum({ editable: false }));
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-edit-not-editable')).toBeTruthy());
     expect(screen.queryByTestId('curriculum-name')).toBeNull();
   });
 
   it('shows the load error rather than a blank editor when the fetch fails', async () => {
     mockGetCurriculum.mockRejectedValue(new Error('offline'));
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-edit-error')).toBeTruthy());
   });
 
   it('saves under the id it was opened with, and navigates to the roadmap viewer', async () => {
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-name')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('curriculum-name'), 'Guard passing, revised');
+    await fireEvent.changeText(screen.getByTestId('curriculum-name'), 'Guard passing, revised');
 
     mockUpdateCurriculum.mockResolvedValue(curriculum({ name: 'Guard passing, revised' }));
     await act(async () => fireEvent.press(screen.getByTestId('curriculum-save')));
@@ -347,7 +347,7 @@ describe('editing an existing curriculum', () => {
   });
 
   it('deletes the curriculum and returns to the list', async () => {
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-delete')).toBeTruthy());
 
     mockDeleteCurriculum.mockResolvedValue(undefined);
@@ -365,7 +365,7 @@ describe('editing an existing curriculum', () => {
    * frontend-reviewer's finding on this PR.
    */
   it('shows an error and stays put when the delete request fails', async () => {
-    render(<EditCurriculumScreen />);
+    await render(<EditCurriculumScreen />);
     await waitFor(() => expect(screen.getByTestId('curriculum-delete')).toBeTruthy());
 
     mockDeleteCurriculum.mockRejectedValue(new Error('offline'));

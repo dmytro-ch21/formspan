@@ -21,8 +21,8 @@ import { TrainingCard, TRAINING_WINDOW_DAYS } from '../today/MiniCards';
  * `1000%` to wrap.
  */
 
-it('rounds a repeating percentage instead of rendering all its digits', () => {
-  render(
+it('rounds a repeating percentage instead of rendering all its digits', async () => {
+  await render(
     <ProgressRing
       percent={(22 / TRAINING_WINDOW_DAYS) * 100}
       color="#B8FF2C"
@@ -37,30 +37,30 @@ it('rounds a repeating percentage instead of rendering all its digits', () => {
   expect(screen.queryByText(/78\.57/)).toBeNull();
 });
 
-it('keeps the label on one line, so no value can ever stack again', () => {
-  render(<ProgressRing percent={78.57142857142857} color="#B8FF2C" label="x" testID="ring" />);
+it('keeps the label on one line, so no value can ever stack again', async () => {
+  await render(<ProgressRing percent={78.57142857142857} color="#B8FF2C" label="x" testID="ring" />);
   // Rounding fixes today's value; this is what stops the CLASS coming back —
   // a future caller passing 1000 would round cleanly and still wrap.
   expect(screen.getByText('79%').props.numberOfLines).toBe(1);
 });
 
-it('still distinguishes nothing-to-report from zero', () => {
+it('still distinguishes nothing-to-report from zero', async () => {
   // `null` is not 0%: a window with nothing counted at all is not a score of
   // zero, and this is the pre-existing rule the rounding must not disturb.
-  render(<ProgressRing percent={null} color="#B8FF2C" label="x" testID="ring" />);
+  await render(<ProgressRing percent={null} color="#B8FF2C" label="x" testID="ring" />);
   expect(screen.getByText('—')).toBeTruthy();
   expect(screen.queryByText('0%')).toBeNull();
 });
 
-it('clamps rather than overflowing when a caller passes more than 100', () => {
-  render(<ProgressRing percent={140} color="#B8FF2C" label="x" testID="ring" />);
+it('clamps rather than overflowing when a caller passes more than 100', async () => {
+  await render(<ProgressRing percent={140} color="#B8FF2C" label="x" testID="ring" />);
   expect(screen.getByText('100%')).toBeTruthy();
 });
 
 describe('the Training card that surfaced it', () => {
-  it('renders one legible percentage for the exact device figures', () => {
+  it('renders one legible percentage for the exact device figures', async () => {
     // 29 sessions on 22 days in 28 — the numbers on the screenshot.
-    render(<TrainingCard training={{ sessions: 29, days: 22 }} onPress={() => {}} />);
+    await render(<TrainingCard training={{ sessions: 29, days: 22 }} onPress={() => {}} />);
 
     expect(screen.getByText('29')).toBeTruthy();
     expect(screen.getByText('on 22 days')).toBeTruthy();
@@ -68,11 +68,11 @@ describe('the Training card that surfaced it', () => {
     expect(screen.queryByText(/78\.57/)).toBeNull();
   });
 
-  it('draws no ring at all when nothing was logged', () => {
+  it('draws no ring at all when nothing was logged', async () => {
     // Pre-existing rule, asserted here because the change above touches the
     // only text the ring renders: an empty window drew a ring labelled `0%`,
     // which is a zero rendered as a score.
-    render(<TrainingCard training={{ sessions: 0, days: 0 }} onPress={() => {}} />);
+    await render(<TrainingCard training={{ sessions: 0, days: 0 }} onPress={() => {}} />);
 
     expect(screen.queryByTestId('training-ring')).toBeNull();
     expect(screen.getByText(`Nothing logged in the last ${TRAINING_WINDOW_DAYS} days`)).toBeTruthy();

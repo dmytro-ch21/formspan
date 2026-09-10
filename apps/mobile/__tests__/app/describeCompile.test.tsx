@@ -96,10 +96,10 @@ beforeEach(() => {
 
 async function describeOnce(res = response()) {
   mockDescribe.mockResolvedValue(res);
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'chipotle bowl');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'chipotle bowl');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
 }
@@ -121,7 +121,7 @@ describe('the totals footer', () => {
   it('updates live when a row is removed', async () => {
     await describeOnce();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-remove-2')); // Fajita veggies
+      await fireEvent.press(screen.getByTestId('describe-remove-2')); // Fajita veggies
     });
     // 180+105 = 285 kcal, 32+2 = 34g protein.
     expect(screen.getByTestId('describe-totals')).toHaveTextContent(/285 kcal.*34g protein/);
@@ -129,7 +129,7 @@ describe('the totals footer', () => {
 
   it('updates live when a field is hand-edited', async () => {
     await describeOnce();
-    fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '300');
+    await fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '300');
     // 300+105+10 = 415, replacing the original 295.
     expect(screen.getByTestId('describe-totals')).toHaveTextContent(/415 kcal/);
   });
@@ -137,8 +137,8 @@ describe('the totals footer', () => {
   it('does not appear once removals leave exactly one row', async () => {
     await describeOnce();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-remove-2'));
-      fireEvent.press(screen.getByTestId('describe-remove-1'));
+      await fireEvent.press(screen.getByTestId('describe-remove-2'));
+      await fireEvent.press(screen.getByTestId('describe-remove-1'));
     });
     expect(screen.queryByTestId('describe-totals')).toBeNull();
   });
@@ -152,17 +152,17 @@ describe('compiling into one meal', () => {
 
   it('seeds the editable name from the model\'s own meal_name', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
     expect(screen.getByTestId('describe-meal-name').props.value).toBe('Chipotle chicken bowl');
   });
 
   it('logs ONE combined entry with the summed macros and the (possibly edited) name', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
-    fireEvent.changeText(screen.getByTestId('describe-meal-name'), 'My chipotle order');
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.changeText(screen.getByTestId('describe-meal-name'), 'My chipotle order');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
@@ -196,11 +196,11 @@ describe('compiling into one meal', () => {
 
   it('reflects a hand-edited field, not the original estimate', async () => {
     await describeOnce();
-    fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '300');
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '300');
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
@@ -211,11 +211,11 @@ describe('compiling into one meal', () => {
 
   it('reflects a removed row, not the original three items', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-remove-2')); // Fajita veggies
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.press(screen.getByTestId('describe-remove-2')); // Fajita veggies
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
@@ -226,8 +226,8 @@ describe('compiling into one meal', () => {
 
   it('the Log button states the compiled name, before and after a tap', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
-    fireEvent.changeText(screen.getByTestId('describe-meal-name'), 'My chipotle order');
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.changeText(screen.getByTestId('describe-meal-name'), 'My chipotle order');
 
     const button = screen.getByTestId('describe-log');
     expect(button.props.accessibilityLabel).toBe('Log My chipotle order');
@@ -236,11 +236,11 @@ describe('compiling into one meal', () => {
 
   it('leaves every row on screen, and logs nothing, when the save fails', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
     mockLogFood.mockRejectedValueOnce(new Error('offline'));
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     // Unlike `logAll`'s land-as-you-go loop, a failed compile drops nothing —
@@ -255,17 +255,17 @@ describe('compiling into one meal', () => {
 
   it('a retry after a failed log reuses the same saved-food id, rather than minting a duplicate', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
     mockLogFood.mockRejectedValueOnce(new Error('offline'));
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     expect(screen.getByTestId('describe-error')).toBeTruthy();
 
     mockLogFood.mockResolvedValueOnce('entry-2');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(2));
@@ -278,11 +278,11 @@ describe('compiling into one meal', () => {
 
   it('falls back to a joined-names default when the athlete clears the name field', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
-    fireEvent.changeText(screen.getByTestId('describe-meal-name'), '');
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.changeText(screen.getByTestId('describe-meal-name'), '');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
@@ -292,11 +292,11 @@ describe('compiling into one meal', () => {
 
   it('unticking the toggle returns to logging every row separately', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
-    fireEvent.press(screen.getByTestId('describe-compile-toggle')); // back off
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle')); // back off
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(3));
@@ -304,16 +304,16 @@ describe('compiling into one meal', () => {
 
   it('a fresh estimate starts uncompiled, even after a previous draft was compiled', async () => {
     await describeOnce();
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
     expect(screen.getByTestId('describe-meal-name').props.value).toBe('Chipotle chicken bowl');
 
     // A DIFFERENT meal_name, so re-seeding is actually observable — reusing
     // the same name would let a version that dropped `setMealName` from
     // `receive` pass this test by coincidence.
     mockDescribe.mockResolvedValue(response(CHIPOTLE_ITEMS, 'Bacon and eggs'));
-    fireEvent.changeText(screen.getByTestId('describe-input'), 'bacon and eggs');
+    await fireEvent.changeText(screen.getByTestId('describe-input'), 'bacon and eggs');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-submit'));
+      await fireEvent.press(screen.getByTestId('describe-submit'));
     });
     await waitFor(() => expect(mockDescribe).toHaveBeenCalledTimes(2));
 

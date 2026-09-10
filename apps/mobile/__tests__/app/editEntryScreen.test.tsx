@@ -84,7 +84,7 @@ function entry(over: Record<string, unknown> = {}) {
 
 async function open(e = entry()) {
   mockLocalEntry.mockResolvedValue(e);
-  render(<EditEntryScreen />);
+  await render(<EditEntryScreen />);
   await waitFor(() => expect(screen.getByTestId('edit-save')).toBeTruthy());
 }
 
@@ -101,9 +101,9 @@ beforeEach(() => {
 it('rescales the five hidden N52 macros exactly as it rescales the visible four', async () => {
   await open();
 
-  fireEvent.changeText(screen.getByTestId('edit-servings'), '1.5');
+  await fireEvent.changeText(screen.getByTestId('edit-servings'), '1.5');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('edit-save'));
+    await fireEvent.press(screen.getByTestId('edit-save'));
   });
 
   await waitFor(() => expect(mockEditEntry).toHaveBeenCalledTimes(1));
@@ -124,9 +124,9 @@ it('rescales the five hidden N52 macros exactly as it rescales the visible four'
 it('keeps a null N52 field null rather than scaling it into a zero', async () => {
   await open(entry({ sodium_mg: null }));
 
-  fireEvent.changeText(screen.getByTestId('edit-servings'), '2');
+  await fireEvent.changeText(screen.getByTestId('edit-servings'), '2');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('edit-save'));
+    await fireEvent.press(screen.getByTestId('edit-save'));
   });
 
   await waitFor(() => expect(mockEditEntry).toHaveBeenCalledTimes(1));
@@ -138,7 +138,7 @@ it('leaves the hidden macros at 1x when servings is never touched', async () => 
   await open();
 
   await act(async () => {
-    fireEvent.press(screen.getByTestId('edit-save'));
+    await fireEvent.press(screen.getByTestId('edit-save'));
   });
 
   await waitFor(() => expect(mockEditEntry).toHaveBeenCalledTimes(1));
@@ -252,7 +252,7 @@ describe('"Made of" and splitting a combined meal back into its parts (N115)', (
     await waitFor(() => expect(screen.getByTestId('entry-split')).toBeTruthy());
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('entry-split'));
+      await fireEvent.press(screen.getByTestId('entry-split'));
     });
 
     await waitFor(() => expect(mockSplitEntry).toHaveBeenCalledTimes(1));

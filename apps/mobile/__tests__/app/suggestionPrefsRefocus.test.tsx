@@ -331,7 +331,7 @@ beforeEach(async () => {
 
 /** Today, mounted and focused, with its suggestion on screen. */
 async function renderTodayShowingASuggestion() {
-  const view = render(<Today />);
+  const view = await render(<Today />);
   await waitFor(() => expect(view.getByTestId('today-suggestion')).toBeTruthy());
   return view;
 }
@@ -459,10 +459,10 @@ describe('the switches in Settings', () => {
     // Pushed OVER the tabs, so Today blurs and stays mounted — the arrangement
     // that made this bug reachable in the first place.
     blur();
-    const settings = render(<SuggestionSettingsScreen />);
+    const settings = await render(<SuggestionSettingsScreen />);
     const master = await waitFor(() => settings.getByTestId('suggestions-master'));
     await act(async () => {
-      fireEvent(master, 'valueChange', false);
+      await fireEvent(master, 'valueChange', false);
     });
 
     await act(async () => {
@@ -478,10 +478,10 @@ describe('the switches in Settings', () => {
     const today = await renderTodayShowingASuggestion();
 
     blur();
-    const settings = render(<SuggestionSettingsScreen />);
+    const settings = await render(<SuggestionSettingsScreen />);
     const bjj = await waitFor(() => settings.getByTestId('suggestions-bjj'));
     await act(async () => {
-      fireEvent(bjj, 'valueChange', false);
+      await fireEvent(bjj, 'valueChange', false);
     });
 
     // The master is untouched, so a card that vanishes here can only have done
@@ -504,10 +504,10 @@ describe('the switches in Settings', () => {
     const today = await renderTodayShowingASuggestion();
 
     blur();
-    const settings = render(<SuggestionSettingsScreen />);
+    const settings = await render(<SuggestionSettingsScreen />);
     const strength = await waitFor(() => settings.getByTestId('suggestions-strength'));
     await act(async () => {
-      fireEvent(strength, 'valueChange', false);
+      await fireEvent(strength, 'valueChange', false);
     });
 
     await act(async () => {
@@ -542,21 +542,21 @@ describe('the undo', () => {
     const today = await renderTodayShowingASuggestion();
 
     await act(async () => {
-      fireEvent.press(today.getByTestId('today-suggestion-dismiss'));
+      await fireEvent.press(today.getByTestId('today-suggestion-dismiss'));
     });
     // Optimistic — the card goes immediately rather than after the write lands,
     // so this says nothing yet about what reached SQLite.
     await waitFor(() => expect(today.queryByTestId('today-suggestion')).toBeNull());
 
     blur();
-    const settings = render(<SuggestionSettingsScreen />);
+    const settings = await render(<SuggestionSettingsScreen />);
     // That it is listed at all is the assertion: the id had to survive
     // serialisation, the database and parsing to get here. `fetchTechniques` is
     // mocked empty, so the row falls back to the raw id — which is the branch
     // that matters, since a failed name lookup must not cost the undo.
     const restore = await waitFor(() => settings.getByTestId('suggestions-restore-arm-drag'));
     await act(async () => {
-      fireEvent.press(restore);
+      await fireEvent.press(restore);
     });
 
     await act(async () => {

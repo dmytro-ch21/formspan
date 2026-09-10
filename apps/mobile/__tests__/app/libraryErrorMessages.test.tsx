@@ -107,7 +107,7 @@ beforeEach(() => {
 describe("describeError, on the catalog fetch's own failure", () => {
   it('reads the expired session off the STATUS, not the message text', async () => {
     mockFetchExercises.mockRejectedValue(new ApiError('unauthorized', 'unauthorized', 401));
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-error')).toBeTruthy());
     expect(screen.getByTestId('library-error')).toHaveTextContent(
       'Your session expired. Sign in again.',
@@ -124,7 +124,7 @@ describe("describeError, on the catalog fetch's own failure", () => {
     mockFetchExercises.mockRejectedValue(
       new ApiError('Your Clerk session has expired', 'unauthorized', 401),
     );
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-error')).toBeTruthy());
     expect(screen.getByTestId('library-error')).toHaveTextContent(
       'Your session expired. Sign in again.',
@@ -133,7 +133,7 @@ describe("describeError, on the catalog fetch's own failure", () => {
 
   it('shows the server message as-is for a different status, not the expired-session copy', async () => {
     mockFetchExercises.mockRejectedValue(new ApiError('catalog unavailable', 'internal', 500));
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-error')).toBeTruthy());
     expect(screen.getByTestId('library-error')).toHaveTextContent('catalog unavailable');
     expect(screen.getByTestId('library-error')).not.toHaveTextContent('session expired');

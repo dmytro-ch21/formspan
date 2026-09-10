@@ -86,7 +86,7 @@ function resolvedIosSources(): Record<string, { uri: string }> {
   return sources;
 }
 
-function declare(state: {
+async function declare(state: {
   modules: Module[];
   ready: boolean;
   raster: { host: React.ReactNode; sources: Record<string, unknown> | null };
@@ -96,12 +96,12 @@ function declare(state: {
   mockModuleState.modules = state.modules;
   mockModuleState.ready = state.ready;
   mockRaster.current = state.raster;
-  render(<TabLayout />);
+  await render(<TabLayout />);
 }
 
 describe('before the module set has been read', () => {
-  it('renders nothing at all — not even the icon rig', () => {
-    declare({ modules: [], ready: false, raster: { host: <Text testID="icon-host" />, sources: null } });
+  it('renders nothing at all — not even the icon rig', async () => {
+    await declare({ modules: [], ready: false, raster: { host: <Text testID="icon-host" />, sources: null } });
     expect(mockNativeTabsProps.current).toBeNull();
     expect(mockTriggers).toEqual([]);
     expect(screen.queryByTestId('icon-host')).toBeNull();
@@ -109,8 +109,8 @@ describe('before the module set has been read', () => {
 });
 
 describe('while icons are still being rasterised', () => {
-  it('renders the capture rig, not NativeTabs', () => {
-    declare({ modules: [], ready: true, raster: { host: <Text testID="icon-host" />, sources: null } });
+  it('renders the capture rig, not NativeTabs', async () => {
+    await declare({ modules: [], ready: true, raster: { host: <Text testID="icon-host" />, sources: null } });
     expect(screen.getByTestId('icon-host')).toBeTruthy();
     expect(mockNativeTabsProps.current).toBeNull();
     expect(mockTriggers).toEqual([]);
@@ -118,18 +118,18 @@ describe('while icons are still being rasterised', () => {
 });
 
 describe('once ready and every icon has landed', () => {
-  function declareReady() {
-    declare({ modules: [], ready: true, raster: { host: null, sources: resolvedIosSources() } });
+  async function declareReady() {
+    await declare({ modules: [], ready: true, raster: { host: null, sources: resolvedIosSources() } });
   }
 
-  it('gives NativeTabs Today, Food, Progress, Plan, You, in that order', () => {
-    declareReady();
+  it('gives NativeTabs Today, Food, Progress, Plan, You, in that order', async () => {
+    await declareReady();
     expect(mockTriggers.map((t) => t.name)).toEqual(['index', 'food', 'progress', 'workouts', 'you']);
     expect(mockTriggers.map((t) => t.labelText)).toEqual(['Today', 'Food', 'Progress', 'Plan', 'You']);
   });
 
-  it('gives every tab an icon source', () => {
-    declareReady();
+  it('gives every tab an icon source', async () => {
+    await declareReady();
     for (const t of mockTriggers) {
       const src = t.iconProps?.src as { default: unknown; selected: unknown } | undefined;
       expect(src?.default).toBeTruthy();
@@ -140,8 +140,8 @@ describe('once ready and every icon has landed', () => {
   // jest-expo reports `Platform.OS === 'ios'` — the Android branch is
   // `lib/__tests__/tabIconPlan.test.ts`'s job, since a component test here
   // cannot observe it (see that file's own top-of-file comment).
-  it('reuses the same image for default and selected on iOS, in template mode', () => {
-    declareReady();
+  it('reuses the same image for default and selected on iOS, in template mode', async () => {
+    await declareReady();
     for (const t of mockTriggers) {
       const src = t.iconProps?.src as { default: unknown; selected: unknown };
       expect(src.default).toBe(src.selected);
@@ -149,8 +149,8 @@ describe('once ready and every icon has landed', () => {
     }
   });
 
-  it('feeds the navigator the accent for tinting, and vola.textDim for inactive', () => {
-    declareReady();
+  it('feeds the navigator the accent for tinting, and vola.textDim for inactive', async () => {
+    await declareReady();
     const props = mockNativeTabsProps.current!;
     expect(props.tintColor).toBe('#B8FF2C');
     expect(props.iconColor).toEqual({ default: expect.any(String), selected: '#B8FF2C' });
@@ -159,13 +159,13 @@ describe('once ready and every icon has landed', () => {
     expect(labelStyle.default.color).not.toBe('#B8FF2C');
   });
 
-  it('minimises on scroll down, the iOS 26 behaviour this ticket asked for', () => {
-    declareReady();
+  it('minimises on scroll down, the iOS 26 behaviour this ticket asked for', async () => {
+    await declareReady();
     expect(mockNativeTabsProps.current?.minimizeBehavior).toBe('onScrollDown');
   });
 
-  it('leaves exactly five triggers, with Train and Goals nowhere in the list', () => {
-    declareReady();
+  it('leaves exactly five triggers, with Train and Goals nowhere in the list', async () => {
+    await declareReady();
     expect(mockTriggers).toHaveLength(5);
     expect(mockTriggers.map((t) => t.name)).not.toContain('train');
     expect(mockTriggers.map((t) => t.name)).not.toContain('goals');

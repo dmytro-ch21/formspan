@@ -38,8 +38,8 @@ function selectionOn(testID: string): unknown {
 }
 
 /** RNTL has no selection engine, so the native echo is synthesised. */
-function reportSelection(testID: string, start: number, end: number) {
-  fireEvent(screen.getByTestId(testID), 'selectionChange', {
+async function reportSelection(testID: string, start: number, end: number) {
+  await fireEvent(screen.getByTestId(testID), 'selectionChange', {
     nativeEvent: { selection: { start, end } },
   });
 }
@@ -77,8 +77,8 @@ describe('isAskedFor', () => {
 });
 
 describe('the rename field', () => {
-  it('opens with the whole name selected', () => {
-    render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
+  it('opens with the whole name selected', async () => {
+    await render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
 
     expect(selectionOn(ID)).toEqual({ start: 0, end: 16 });
   });
@@ -91,44 +91,44 @@ describe('the rename field', () => {
    * control before the selection ever took effect — and would do it invisibly,
    * because the prop was still set for one render.
    */
-  it('keeps the selection when the platform echoes it back', () => {
-    render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
+  it('keeps the selection when the platform echoes it back', async () => {
+    await render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
 
-    reportSelection(ID, 0, 16);
+    await reportSelection(ID, 0, 16);
 
     expect(selectionOn(ID)).toEqual({ start: 0, end: 16 });
   });
 
-  it('hands control back when the athlete places a caret', () => {
-    render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
+  it('hands control back when the athlete places a caret', async () => {
+    await render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
 
-    reportSelection(ID, 4, 4);
-
-    expect(selectionOn(ID)).toBeUndefined();
-  });
-
-  it('hands control back on the first keystroke', () => {
-    render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
-
-    fireEvent.changeText(screen.getByTestId(ID), 'Push A');
+    await reportSelection(ID, 4, 4);
 
     expect(selectionOn(ID)).toBeUndefined();
   });
 
-  it('stays released once released', () => {
+  it('hands control back on the first keystroke', async () => {
+    await render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
+
+    await fireEvent.changeText(screen.getByTestId(ID), 'Push A');
+
+    expect(selectionOn(ID)).toBeUndefined();
+  });
+
+  it('stays released once released', async () => {
     // Guards the obvious wrong shape — recomputing the range from `value` on
     // every render, which would re-select everything after each keystroke.
-    const view = render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
+    const view = await render(<SelectAllTextInput testID={ID} value="Maestro Push Day" />);
 
-    fireEvent.changeText(screen.getByTestId(ID), 'P');
-    view.rerender(<SelectAllTextInput testID={ID} value="P" />);
+    await fireEvent.changeText(screen.getByTestId(ID), 'P');
+    await view.rerender(<SelectAllTextInput testID={ID} value="P" />);
 
     expect(selectionOn(ID)).toBeUndefined();
   });
 
-  it('still forwards the caller and its props through', () => {
+  it('still forwards the caller and its props through', async () => {
     const onChangeText = jest.fn();
-    render(
+    await render(
       <SelectAllTextInput
         testID={ID}
         value="Maestro Push Day"
@@ -138,7 +138,7 @@ describe('the rename field', () => {
       />,
     );
 
-    fireEvent.changeText(screen.getByTestId(ID), 'Push A');
+    await fireEvent.changeText(screen.getByTestId(ID), 'Push A');
 
     expect(onChangeText).toHaveBeenCalledWith('Push A');
     expect(screen.getByTestId(ID).props.maxLength).toBe(120);

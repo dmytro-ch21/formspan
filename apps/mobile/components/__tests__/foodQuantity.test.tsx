@@ -57,75 +57,75 @@ beforeEach(() => {
   mockSetFoodUnit.mockClear();
 });
 
-test('logs the grams the athlete chose, not one 100 g serving', () => {
+test('logs the grams the athlete chose, not one 100 g serving', async () => {
   const onLog = jest.fn();
-  render(<FoodQuantity food={egg} onLog={onLog} />);
+  await render(<FoodQuantity food={egg} onLog={onLog} />);
 
-  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
-  fireEvent.press(screen.getByTestId('food-quantity-log'));
+  await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
+  await fireEvent.press(screen.getByTestId('food-quantity-log'));
 
   expect(onLog).toHaveBeenCalledWith(150);
 });
 
-test('tapping a portion fills the field rather than bypassing it', () => {
+test('tapping a portion fills the field rather than bypassing it', async () => {
   const onLog = jest.fn();
-  render(<FoodQuantity food={egg} onLog={onLog} />);
+  await render(<FoodQuantity food={egg} onLog={onLog} />);
 
-  fireEvent.press(screen.getByTestId('food-portion-63'));
+  await fireEvent.press(screen.getByTestId('food-portion-63'));
   // The field must SHOW the change — a portion that logged straight through
   // would leave the athlete unable to nudge it to 65.
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('63');
 
-  fireEvent.press(screen.getByTestId('food-quantity-log'));
+  await fireEvent.press(screen.getByTestId('food-quantity-log'));
   expect(onLog).toHaveBeenCalledWith(63);
 });
 
-test('switching to oz CONVERTS the displayed number', () => {
+test('switching to oz CONVERTS the displayed number', async () => {
   // The failure this exists for: a toggle that relabels turns 150 grams into
   // 150 ounces — a 28x overcount, with nothing on screen changing but two
   // letters.
-  render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  await render(<FoodQuantity food={egg} onLog={jest.fn()} />);
 
-  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
-  fireEvent.press(screen.getByTestId('food-unit-oz'));
+  await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
+  await fireEvent.press(screen.getByTestId('food-unit-oz'));
 
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('5.29');
   expect(mockSetFoodUnit).toHaveBeenCalledWith('oz');
 });
 
-test('a quantity typed in oz logs the equivalent GRAMS', () => {
+test('a quantity typed in oz logs the equivalent GRAMS', async () => {
   mockUnit = 'oz';
   const onLog = jest.fn();
-  render(<FoodQuantity food={egg} onLog={onLog} />);
+  await render(<FoodQuantity food={egg} onLog={onLog} />);
 
-  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '4');
-  fireEvent.press(screen.getByTestId('food-quantity-log'));
+  await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '4');
+  await fireEvent.press(screen.getByTestId('food-quantity-log'));
 
   // 4 oz = 113.4 g. Storage is always grams.
   expect(onLog.mock.calls[0][0]).toBeCloseTo(113.4, 1);
 });
 
-test('the macros shown update before anything is logged', () => {
-  render(<FoodQuantity food={egg} onLog={jest.fn()} />);
-  fireEvent.press(screen.getByTestId('food-portion-50'));
+test('the macros shown update before anything is logged', async () => {
+  await render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  await fireEvent.press(screen.getByTestId('food-portion-50'));
   // Half of 143 kcal.
   expect(screen.getByTestId('food-quantity-macros').props.children).toContain('71.5 kcal');
 });
 
-test('an unusable quantity cannot be logged', () => {
+test('an unusable quantity cannot be logged', async () => {
   const onLog = jest.fn();
-  render(<FoodQuantity food={egg} onLog={onLog} />);
+  await render(<FoodQuantity food={egg} onLog={onLog} />);
 
   for (const bad of ['', '0', 'abc']) {
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), bad);
-    fireEvent.press(screen.getByTestId('food-quantity-log'));
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), bad);
+    await fireEvent.press(screen.getByTestId('food-quantity-log'));
   }
   // servings CHECKs > 0 server-side; a zero would be a 500, not an empty meal.
   expect(onLog).not.toHaveBeenCalled();
 });
 
-test('a food with no portions still offers 100 g', () => {
-  render(<FoodQuantity food={{ ...egg, portions: [] }} onLog={jest.fn()} />);
+test('a food with no portions still offers 100 g', async () => {
+  await render(<FoodQuantity food={{ ...egg, portions: [] }} onLog={jest.fn()} />);
   expect(screen.getByTestId('food-portion-100')).toBeTruthy();
 });
 
@@ -138,9 +138,9 @@ test('a food with no portions still offers 100 g', () => {
  * the fix is that the control must default to THAT, not to "100" while it
  * waits for `portions` to resolve.
  */
-test('defaults to the natural serving on the FIRST render, before portions ever load', () => {
+test('defaults to the natural serving on the FIRST render, before portions ever load', async () => {
   const onLog = jest.fn();
-  render(
+  await render(
     <FoodQuantity
       // The exact shape `add.tsx`'s `openQuantity` passes in before its
       // `fetchCatalogFood` upgrade resolves: no `portions` at all.
@@ -157,14 +157,14 @@ test('defaults to the natural serving on the FIRST render, before portions ever 
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('258');
   expect(screen.getByTestId('food-portion-258')).toBeTruthy();
 
-  fireEvent.press(screen.getByTestId('food-quantity-log'));
+  await fireEvent.press(screen.getByTestId('food-quantity-log'));
   expect(onLog).toHaveBeenCalledWith(258);
 });
 
-test('a food with no natural serving AND no portions still opens at 100g, honestly', () => {
+test('a food with no natural serving AND no portions still opens at 100g, honestly', async () => {
   // The ticket's own third acceptance criterion, checked at the control
   // level too: no portion data anywhere means no invented default.
-  render(
+  await render(
     <FoodQuantity
       food={{ ...egg, portions: undefined, natural_serving_label: null, natural_serving_grams: null }}
       onLog={jest.fn()}
@@ -182,25 +182,25 @@ test('a food with no natural serving AND no portions still opens at 100g, honest
  * accessibility label flipped while the number did not — a relabel nobody
  * touched, and editing the field then committed a ~28x quantity.
  */
-test('a unit change from the provider re-renders the field, it does not relabel it', () => {
-  const { rerender } = render(<FoodQuantity food={egg} onLog={jest.fn()} />);
-  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
+test('a unit change from the provider re-renders the field, it does not relabel it', async () => {
+  const { rerender } = await render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '150');
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('150');
 
   // The provider adopts 'oz' from the server. Nothing in this component was
   // touched.
   mockUnit = 'oz';
-  rerender(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  await rerender(<FoodQuantity food={egg} onLog={jest.fn()} />);
 
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('5.29');
 });
 
-test('an outside unit change does not fight the athlete mid-keystroke', () => {
+test('an outside unit change does not fight the athlete mid-keystroke', async () => {
   // The effect is keyed on the unit alone. Keyed on grams too, it would rewrite
   // the field on every edit and make "10" un-typeable on the way to "100".
-  render(<FoodQuantity food={egg} onLog={jest.fn()} />);
-  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '1');
-  fireEvent.changeText(screen.getByTestId('food-quantity-input'), '10');
+  await render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '1');
+  await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '10');
   expect(screen.getByTestId('food-quantity-input').props.value).toBe('10');
 });
 
@@ -210,8 +210,8 @@ test('an outside unit change does not fight the athlete mid-keystroke', () => {
  * literal, wrong "Kinder Kinder Chocolate" via a naive `${brand} ${name}`.
  * Screen-reported against a device running this exact product.
  */
-test('does not repeat the brand when the name already states it', () => {
-  render(
+test('does not repeat the brand when the name already states it', async () => {
+  await render(
     <FoodQuantity
       food={{ ...egg, name: 'Kinder Chocolate', brand: 'Kinder' }}
       onLog={jest.fn()}
@@ -227,8 +227,8 @@ test('does not repeat the brand when the name already states it', () => {
  * time inside the sheet, which is the duplicate-DISPLAY half of the same bug
  * the test above fixes the duplicate-TEXT half of.
  */
-test('hideName suppresses the name line entirely', () => {
-  render(<FoodQuantity food={egg} onLog={jest.fn()} hideName />);
+test('hideName suppresses the name line entirely', async () => {
+  await render(<FoodQuantity food={egg} onLog={jest.fn()} hideName />);
   expect(screen.queryByText('Egg')).toBeNull();
 });
 
@@ -241,11 +241,11 @@ test('hideName suppresses the name line entirely', () => {
 describe('naturalUnit', () => {
   const KINDER_25G = { word: 'piece', wordPlural: 'pieces', gramsPerUnit: 12.5 };
 
-  test('opens showing the packet’s own unit, not grams', () => {
+  test('opens showing the packet’s own unit, not grams', async () => {
     // `portions: []`, deliberately — `egg`'s own portions would otherwise
     // become the default amount (via `quantityOptions`), which is a
     // different behaviour this test isn't about; falls back to `serving_grams`.
-    render(
+    await render(
       <FoodQuantity food={{ ...egg, serving_grams: 100, portions: [] }} onLog={jest.fn()} naturalUnit={KINDER_25G} />,
     );
     // 100 g / 12.5 g-per-piece = 8 pieces — the default amount in the
@@ -254,47 +254,47 @@ describe('naturalUnit', () => {
     expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(true);
   });
 
-  test('typing a piece count converts to the correct grams', () => {
+  test('typing a piece count converts to the correct grams', async () => {
     const onLog = jest.fn();
-    render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={onLog} naturalUnit={KINDER_25G} />);
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '2');
-    fireEvent.press(screen.getByTestId('food-quantity-log'));
+    await render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={onLog} naturalUnit={KINDER_25G} />);
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '2');
+    await fireEvent.press(screen.getByTestId('food-quantity-log'));
     expect(onLog).toHaveBeenCalledWith(25);
   });
 
   /** CONVERTS, the same rule the existing g/oz toggle already enforces — not
    *  a relabel of the same digits onto a new unit. */
-  test('switching to grams converts the piece count, it does not relabel it', () => {
-    render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={jest.fn()} naturalUnit={KINDER_25G} />);
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '2');
-    fireEvent.press(screen.getByTestId('food-unit-g'));
+  test('switching to grams converts the piece count, it does not relabel it', async () => {
+    await render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={jest.fn()} naturalUnit={KINDER_25G} />);
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '2');
+    await fireEvent.press(screen.getByTestId('food-unit-g'));
     expect(screen.getByTestId('food-quantity-input').props.value).toBe('25');
     expect(screen.getByTestId('food-unit-natural').props.accessibilityState.selected).toBe(false);
   });
 
-  test('switching back to pieces after grams converts again, correctly', () => {
-    render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={jest.fn()} naturalUnit={KINDER_25G} />);
-    fireEvent.press(screen.getByTestId('food-unit-g'));
-    fireEvent.changeText(screen.getByTestId('food-quantity-input'), '50');
-    fireEvent.press(screen.getByTestId('food-unit-natural'));
+  test('switching back to pieces after grams converts again, correctly', async () => {
+    await render(<FoodQuantity food={{ ...egg, serving_grams: 100 }} onLog={jest.fn()} naturalUnit={KINDER_25G} />);
+    await fireEvent.press(screen.getByTestId('food-unit-g'));
+    await fireEvent.changeText(screen.getByTestId('food-quantity-input'), '50');
+    await fireEvent.press(screen.getByTestId('food-unit-natural'));
     expect(screen.getByTestId('food-quantity-input').props.value).toBe('4');
   });
 
-  test('a portion chip re-renders in the currently selected unit', () => {
-    render(
+  test('a portion chip re-renders in the currently selected unit', async () => {
+    await render(
       <FoodQuantity
         food={{ ...egg, serving_grams: 100, portions: [{ seq: 1, label: '1 large', grams: 50 }] }}
         onLog={jest.fn()}
         naturalUnit={KINDER_25G}
       />,
     );
-    fireEvent.press(screen.getByTestId('food-portion-50'));
+    await fireEvent.press(screen.getByTestId('food-portion-50'));
     // Still in pieces mode (the chip doesn't itself change the unit) — 4.
     expect(screen.getByTestId('food-quantity-input').props.value).toBe('4');
   });
 
-  test('no naturalUnit prop means no third pill — today’s g/oz-only toggle, unaffected', () => {
-    render(<FoodQuantity food={egg} onLog={jest.fn()} />);
+  test('no naturalUnit prop means no third pill — today’s g/oz-only toggle, unaffected', async () => {
+    await render(<FoodQuantity food={egg} onLog={jest.fn()} />);
     expect(screen.queryByTestId('food-unit-natural')).toBeNull();
   });
 });

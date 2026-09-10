@@ -89,10 +89,10 @@ beforeEach(() => {
 
 async function describeOnce(remaining: number) {
   mockDescribe.mockResolvedValue(response(remaining));
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'Chicken bowl');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'Chicken bowl');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
 }
@@ -111,9 +111,9 @@ describe('an exhausted quota (remaining === 0)', () => {
     await describeOnce(0);
     mockDescribe.mockClear();
 
-    fireEvent.changeText(screen.getByTestId('describe-input'), 'Another meal');
+    await fireEvent.changeText(screen.getByTestId('describe-input'), 'Another meal');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-submit'));
+      await fireEvent.press(screen.getByTestId('describe-submit'));
     });
 
     // The callback's own guard is the backstop for anything that is not the
@@ -139,7 +139,7 @@ describe('an exhausted quota (remaining === 0)', () => {
     expect(screen.getByTestId('describe-log').props.accessibilityState.disabled).toBe(false);
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
   });
@@ -178,10 +178,10 @@ it('states the actual clock time the quota resets, not a placeholder', async () 
 
 it('falls back to a plain statement when resets_at is missing', async () => {
   mockDescribe.mockResolvedValue(response(0, { resets_at: null }));
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'Chicken bowl');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'Chicken bowl');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-quota-exhausted')).toBeTruthy());
 

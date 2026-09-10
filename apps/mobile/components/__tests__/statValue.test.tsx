@@ -28,10 +28,10 @@ import { Stat, StatRow, StatValue } from '../ui/Stat';
  */
 type Node = { type: string; props: { style?: unknown }; children: (Node | string)[] | null };
 
-const tree = (ui: React.ReactElement): Node => {
-  const r = render(ui);
+const tree = async (ui: React.ReactElement): Promise<Node> => {
+  const r = await render(ui);
   const json = r.toJSON() as unknown as Node;
-  r.unmount();
+  await r.unmount();
   return json;
 };
 
@@ -47,8 +47,8 @@ const nested = (n: Node): Node[] =>
   (n.children ?? []).filter((c): c is Node => typeof c === 'object' && c !== null);
 
 describe('StatValue', () => {
-  it('sets the unit smaller than the figures', () => {
-    const t = tree(<StatValue value="480kg" size={22} />);
+  it('sets the unit smaller than the figures', async () => {
+    const t = await tree(<StatValue value="480kg" size={22} />);
 
     expect(strings(t)).toEqual(['480']);
     expect(fontSize(t)).toBe(22);
@@ -59,31 +59,31 @@ describe('StatValue', () => {
     expect(fontSize(unit)).toBe(Math.round(22 * 0.62));
   });
 
-  it('keeps a thousands separator inside the figure', () => {
+  it('keeps a thousands separator inside the figure', async () => {
     // "12,450" is one number. Split on the comma, the "," would render small
     // and muted in the middle of the figure.
-    const t = tree(<StatValue value="12,450kg" size={22} />);
+    const t = await tree(<StatValue value="12,450kg" size={22} />);
     expect(strings(t)).toEqual(['12,450']);
     expect(strings(nested(t)[0])).toEqual(['kg']);
   });
 
-  it('shrinks a long figure but only when asked to fit', () => {
+  it('shrinks a long figure but only when asked to fit', async () => {
     // The case the session summary hits: pounds run an order of magnitude
     // longer than kilos, so one session reads "553.7k lb".
-    expect(fontSize(tree(<StatValue value="553.7k lb" size={22} fit />))!).toBeLessThan(22);
+    expect(fontSize(await tree(<StatValue value="553.7k lb" size={22} fit />))!).toBeLessThan(22);
     // ...and a short one is untouched, so a row of stats does not end up at
     // three different sizes — which is exactly what the old session summary did.
-    expect(fontSize(tree(<StatValue value="8" size={22} fit />))).toBe(22);
+    expect(fontSize(await tree(<StatValue value="8" size={22} fit />))).toBe(22);
     // Without `fit`, nothing shrinks: the ladder is opt-in because most screens
     // give a figure all the room it wants.
-    expect(fontSize(tree(<StatValue value="553.7k lb" size={22} />))).toBe(22);
+    expect(fontSize(await tree(<StatValue value="553.7k lb" size={22} />))).toBe(22);
   });
 
-  it('renders an unknown value as a full-size dash, not a unit', () => {
+  it('renders an unknown value as a full-size dash, not a unit', async () => {
     // The em dash is this codebase's "we don't know". Treated as a unit it
     // would render small and muted, collapsing the column instead of holding a
     // number's worth of space.
-    const t = tree(<StatValue value="—" size={22} />);
+    const t = await tree(<StatValue value="—" size={22} />);
     expect(strings(t)).toEqual(['—']);
     expect(fontSize(t)).toBe(22);
     expect(nested(t)).toHaveLength(0);
@@ -91,64 +91,64 @@ describe('StatValue', () => {
 });
 
 describe('Stat', () => {
-  it('reads the figure and its label as one thing', () => {
+  it('reads the figure and its label as one thing', async () => {
     // Ungrouped, VoiceOver announces the number and the word as two unrelated
     // stops with nothing connecting them.
-    render(<Stat label="Volume" value="480kg" />);
+    await render(<Stat label="Volume" value="480kg" />);
     expect(screen.getByLabelText('480kg Volume')).toBeTruthy();
   });
 });
 
 describe('the values the session summary actually shows', () => {
-  it('keeps a clock together', () => {
+  it('keeps a clock together', async () => {
     // `2:39` is one quantity. Split on the colon it rendered as two full-size
     // figures either side of a muted 14pt `:` — worse than the problem this
     // component was brought in to fix, and `1:23:45` did it twice.
     for (const clock of ['2:39', '1:23:45']) {
-      const t = tree(<StatValue value={clock} size={22} />);
+      const t = await tree(<StatValue value={clock} size={22} />);
       expect(strings(t)).toEqual([clock]);
       expect(nested(t)).toHaveLength(0);
     }
   });
 
-  it('shrinks harder in a four-column row than a three', () => {
+  it('shrinks harder in a four-column row than a three', async () => {
     // The ladder was tuned for thirds (~90pt of content); the session summary
     // is quarters (~60pt). `1:23:45`, `251.1t` and `12,450lb` all overflowed a
     // quarter at the three-column sizes.
     for (const value of ['1:23:45', '251.1t', '12,450lb', '553.7k lb']) {
-      const three = fontSize(tree(<StatValue value={value} size={22} fit slots={3} />))!;
-      const four = fontSize(tree(<StatValue value={value} size={22} fit slots={4} />))!;
+      const three = fontSize(await tree(<StatValue value={value} size={22} fit slots={3} />))!;
+      const four = fontSize(await tree(<StatValue value={value} size={22} fit slots={4} />))!;
       expect(four).toBeLessThanOrEqual(three);
     }
     // ...and at least one of them genuinely moves, or the rung shift is inert.
-    expect(fontSize(tree(<StatValue value="251.1t" size={22} fit slots={4} />))!).toBeLessThan(
-      fontSize(tree(<StatValue value="251.1t" size={22} fit slots={3} />))!,
+    expect(fontSize(await tree(<StatValue value="251.1t" size={22} fit slots={4} />))!).toBeLessThan(
+      fontSize(await tree(<StatValue value="251.1t" size={22} fit slots={3} />))!,
     );
   });
 
-  it('never shrinks below two-thirds, however long the value', () => {
+  it('never shrinks below two-thirds, however long the value', async () => {
     // A floor, so a pathological string cannot render as unreadable specks.
-    const smallest = fontSize(tree(<StatValue value="1,234,567,890kg" size={22} fit slots={4} />))!;
+    const smallest = fontSize(await tree(<StatValue value="1,234,567,890kg" size={22} fit slots={4} />))!;
     expect(smallest).toBeGreaterThanOrEqual(Math.round(22 * 0.62));
   });
 });
 
 describe('StatRow', () => {
-  it('does not render an empty slot for a single falsy child', () => {
+  it('does not render an empty slot for a single falsy child', async () => {
     // `<StatRow>{finished && <Stat/>}</StatRow>` is not an array, so the old
     // Array.isArray form fell through to `[children]` and rendered one empty
     // column. The session summary gates its Volume stat exactly this way.
-    const t = tree(<StatRow>{false}</StatRow>);
+    const t = await tree(<StatRow>{false}</StatRow>);
     expect(nested(t)).toHaveLength(0);
   });
 
-  it('tells its children how many columns they are sharing', () => {
+  it('tells its children how many columns they are sharing', async () => {
     // Four stats must shrink on the four-column ladder without every call site
     // having to pass the count itself.
     // Measured FIRST: `tree` unmounts, which would tear down the row's screen.
-    const solo = fontSize(tree(<StatValue value="251.1t" size={22} fit slots={3} />))!;
+    const solo = fontSize(await tree(<StatValue value="251.1t" size={22} fit slots={3} />))!;
 
-    render(
+    await render(
       <StatRow>
         <Stat label="Time" value="1:23:45" size={22} fit />
         <Stat label="Sets" value="12" size={22} fit />

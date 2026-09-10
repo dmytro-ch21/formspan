@@ -99,9 +99,25 @@ jest.mock('@/lib/techniques', () => ({
 
 /** Dictate a sentence and get the draft back. */
 async function speak(text = 'Five rounds, caught an armbar') {
-  render(<DictateReflectionScreen />);
-  fireEvent.changeText(screen.getByLabelText('What happened in the session'), text);
-  fireEvent.press(screen.getByLabelText('Read what I said'));
+  await render(<DictateReflectionScreen />);
+  await fireEvent.changeText(screen.getByLabelText('What happened in the session'), text);
+  await fireEvent.press(screen.getByLabelText('Read what I said'));
+}
+
+/**
+ * `speak`, but without awaiting the press.
+ *
+ * RNTL 14 resolves a press with the HANDLER's own return value, so a test that
+ * deliberately holds the dictation call pending cannot await the press: it
+ * would not settle until the test releases the call, which the test cannot do
+ * while it is blocked on the press. The pending press is handed back — wrapped,
+ * so `await speakInFlight()` cannot adopt it by accident — to be awaited once
+ * the call has been released.
+ */
+async function speakInFlight(text = 'Five rounds, caught an armbar') {
+  await render(<DictateReflectionScreen />);
+  await fireEvent.changeText(screen.getByLabelText('What happened in the session'), text);
+  return { pressed: fireEvent.press(screen.getByLabelText('Read what I said')) };
 }
 
 jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
@@ -145,7 +161,7 @@ it('offers a choice for an unresolved phrase and adds NO tag for it', async () =
   // And saving without answering writes no technique at all. This is the
   // assertion the whole file exists for: an auto-selected top match would
   // still render a plausible screen and still save — silently, and wrongly.
-  fireEvent.press(screen.getByLabelText('Save this session'));
+  await fireEvent.press(screen.getByLabelText('Save this session'));
   await waitFor(() => {
     expect(saveLocalBjjDetail).toHaveBeenCalled();
   });
@@ -179,7 +195,7 @@ describe('a technique the library does not know', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Keep “pool guards” as said, not matched to the library')).toBeTruthy();
     });
-    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+    await fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
 
     // The unresolved prompt is gone — it has been answered, the same as a
     // real pick would have closed it.
@@ -192,7 +208,7 @@ describe('a technique the library does not know', () => {
     expect(screen.getByText('“pool guards”')).toBeTruthy();
     expect(screen.getByText('Not matched to the library')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -222,18 +238,18 @@ describe('a technique the library does not know', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Keep “armbar” as said, not matched to the library')).toBeTruthy();
     });
-    fireEvent.press(screen.getByLabelText('Keep “armbar” as said, not matched to the library'));
+    await fireEvent.press(screen.getByLabelText('Keep “armbar” as said, not matched to the library'));
 
     // Correcting it is not a one-way door: the same screen that offered
     // "Keep as said" lets the athlete change their mind and match it after
     // all, without having to redo the dictation.
-    fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
+    await fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
     await waitFor(() => {
       expect(screen.getByText('Armbar from Mount')).toBeTruthy();
     });
-    fireEvent.press(screen.getByText('Armbar from Mount'));
+    await fireEvent.press(screen.getByText('Armbar from Mount'));
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -285,7 +301,7 @@ describe('a technique the library does not know', () => {
 
     // This is the last unresolved phrase, so `unresolved.length` drops to 0
     // right here — the moment that used to cancel the in-flight fetch.
-    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+    await fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
 
     // Only now does the fetch resolve. Under the bug, nothing would still be
     // listening for it.
@@ -304,7 +320,7 @@ describe('a technique the library does not know', () => {
       },
     ]);
 
-    fireEvent.press(screen.getByLabelText('Match “pool guards” to a technique'));
+    await fireEvent.press(screen.getByLabelText('Match “pool guards” to a technique'));
     await waitFor(() => {
       expect(screen.getByText('Pull Guard')).toBeTruthy();
     });
@@ -325,9 +341,9 @@ it('adds the technique the athlete picked, and only that one', async () => {
   await waitFor(() => {
     expect(screen.getByText('Armbar from Mount')).toBeTruthy();
   });
-  fireEvent.press(screen.getByText('Armbar from Mount'));
+  await fireEvent.press(screen.getByText('Armbar from Mount'));
 
-  fireEvent.press(screen.getByLabelText('Save this session'));
+  await fireEvent.press(screen.getByLabelText('Save this session'));
   await waitFor(() => {
     expect(saveLocalBjjDetail).toHaveBeenCalled();
   });
@@ -438,15 +454,15 @@ describe('a tag count the server could not verify', () => {
     // as "−": the underlying value is already 1, and jumping straight to 2
     // would silently double-count for an athlete who tapped once meaning "yes,
     // one". Matches the session-level `Stepper`'s own null-count semantics.
-    fireEvent.press(screen.getByLabelText('Set scored pass to 1'));
+    await fireEvent.press(screen.getByLabelText('Set scored pass to 1'));
     expect(screen.queryByLabelText('scored pass: how many? not set')).toBeNull();
     expect(screen.getByLabelText('1 scored pass')).toBeTruthy();
 
     // Now an ordinary, un-flagged stepper — a second "+" behaves normally.
-    fireEvent.press(screen.getByLabelText('One more scored pass'));
+    await fireEvent.press(screen.getByLabelText('One more scored pass'));
     expect(screen.getByLabelText('2 scored pass')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -468,7 +484,7 @@ describe('a tag count the server could not verify', () => {
       expect(screen.getByLabelText('Confirm scored takedown at 1')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByLabelText('Confirm scored takedown at 1'));
+    await fireEvent.press(screen.getByLabelText('Confirm scored takedown at 1'));
 
     // Confirmed at 1, not removed — a blind "−" on an uncertain count must not
     // read as "delete this", which would silently drop a real event.
@@ -530,9 +546,9 @@ it('lets a miscounted round be corrected before anything is saved', async () => 
   await waitFor(() => {
     expect(screen.getByLabelText('One fewer Rounds')).toBeTruthy();
   });
-  fireEvent.press(screen.getByLabelText('One fewer Rounds'));
+  await fireEvent.press(screen.getByLabelText('One fewer Rounds'));
 
-  fireEvent.press(screen.getByLabelText('Save this session'));
+  await fireEvent.press(screen.getByLabelText('Save this session'));
   await waitFor(() => {
     expect(saveLocalBjjDetail).toHaveBeenCalled();
   });
@@ -554,12 +570,12 @@ it('keeps the note field mounted when it is emptied', async () => {
     expect(screen.getByLabelText('Session note')).toBeTruthy();
   });
 
-  fireEvent.changeText(screen.getByLabelText('Session note'), '');
+  await fireEvent.changeText(screen.getByLabelText('Session note'), '');
   // Still there, still editable.
   expect(screen.getByLabelText('Session note')).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Session note'), 'Actually, felt flat.');
+  await fireEvent.changeText(screen.getByLabelText('Session note'), 'Actually, felt flat.');
 
-  fireEvent.press(screen.getByLabelText('Save this session'));
+  await fireEvent.press(screen.getByLabelText('Save this session'));
   await waitFor(() => {
     expect(saveLocalBjjDetail).toHaveBeenCalled();
   });
@@ -680,7 +696,7 @@ describe('when the draft fails', () => {
       return mockResponse;
     });
 
-    await speak();
+    const { pressed } = await speakInFlight();
 
     await waitFor(() => {
       expect(screen.getByTestId('dictate-retrying')).toBeTruthy();
@@ -702,6 +718,7 @@ describe('when the draft fails', () => {
     // And it goes away when the retry lands, because the whole pre-draft block
     // it lives in does.
     release!();
+    await pressed;
     await waitFor(() => {
       expect(screen.getByLabelText('Save this session')).toBeTruthy();
     });
@@ -727,7 +744,7 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Save this session')).toBeTruthy();
     });
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalled();
@@ -764,9 +781,9 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     expect(screen.getByLabelText('Note about your body')).toBeTruthy();
     expect(screen.getByLabelText('Note about your body').props.placeholder).toMatch(/nothing said/i);
 
-    fireEvent.changeText(screen.getByLabelText('Session note'), 'Sharp today.');
-    fireEvent.changeText(screen.getByLabelText('Note about your body'), 'Knee twinge.');
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.changeText(screen.getByLabelText('Session note'), 'Sharp today.');
+    await fireEvent.changeText(screen.getByLabelText('Note about your body'), 'Knee twinge.');
+    await fireEvent.press(screen.getByLabelText('Save this session'));
 
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
@@ -786,11 +803,11 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Add a technique')).toBeTruthy();
     });
-    fireEvent.changeText(screen.getByLabelText('Add a technique'), 'knee cut');
+    await fireEvent.changeText(screen.getByLabelText('Add a technique'), 'knee cut');
     await waitFor(() => {
       expect(screen.getByLabelText('Add Knee Cut Pass')).toBeTruthy();
     });
-    fireEvent.press(screen.getByLabelText('Add Knee Cut Pass'));
+    await fireEvent.press(screen.getByLabelText('Add Knee Cut Pass'));
 
     // Added as `drilled` — the wizard's own default for a technique picked by
     // search rather than named in an exchange.
@@ -798,7 +815,7 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
       expect(screen.getByText('drilled pass · Half Guard')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -825,13 +842,13 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Add a technique')).toBeTruthy();
     });
-    fireEvent.changeText(screen.getByLabelText('Add a technique'), 'knee cut');
+    await fireEvent.changeText(screen.getByLabelText('Add a technique'), 'knee cut');
     await waitFor(() => {
       expect(screen.getByLabelText('Knee Cut Pass, already added')).toBeTruthy();
     });
-    fireEvent.press(screen.getByLabelText('Knee Cut Pass, already added'));
+    await fireEvent.press(screen.getByLabelText('Knee Cut Pass, already added'));
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -854,9 +871,9 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     });
     // The model read this as scored; the athlete corrects it to conceded —
     // same tag, same count, a different outcome.
-    fireEvent.press(screen.getByTestId('dictate-tag-0-event-conceded'));
+    await fireEvent.press(screen.getByTestId('dictate-tag-0-event-conceded'));
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -881,9 +898,9 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     });
     // The dictation named the technique but not where it happened — the
     // athlete fills that in without re-entering anything already correct.
-    fireEvent.press(screen.getByTestId('dictate-tag-0-position-Guard'));
+    await fireEvent.press(screen.getByTestId('dictate-tag-0-position-Guard'));
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -924,10 +941,10 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
 
     // Reclassifying it into one of the two clears the flag and makes it a
     // tag the read view can display.
-    fireEvent.press(screen.getByTestId('dictate-tag-0-event-scored'));
+    await fireEvent.press(screen.getByTestId('dictate-tag-0-event-scored'));
     expect(screen.queryByText(/no technique named/i)).toBeNull();
 
-    fireEvent.press(screen.getByLabelText('Save this session'));
+    await fireEvent.press(screen.getByLabelText('Save this session'));
     await waitFor(() => {
       expect(saveLocalBjjDetail).toHaveBeenCalled();
     });
@@ -984,7 +1001,7 @@ describe('N120/#509: the confirm screen is the whole flow', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Keep “pool guards” as said, not matched to the library')).toBeTruthy();
     });
-    fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
+    await fireEvent.press(screen.getByLabelText('Keep “pool guards” as said, not matched to the library'));
 
     await waitFor(() => {
       expect(screen.getByText('“pool guards”')).toBeTruthy();

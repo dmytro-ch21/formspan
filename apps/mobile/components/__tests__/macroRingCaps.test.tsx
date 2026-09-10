@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react-native';
 
 import { MacroRings } from '../today/MacroRings';
 import { RING_SHORT, type RingReading } from '@/lib/macroRings';
+import { findAllByType } from '@/lib/__tests__/support/tree';
 
 /**
  * The cap actually reaching the drawn arc (N201/#637).
@@ -22,7 +23,7 @@ const reading = (key: RingReading['key'], percent: number | null): RingReading =
 });
 
 /** Every stroked circle in the SVG, in draw order: track, then fill. */
-const circles = () => screen.UNSAFE_root.findAllByType('RNSVGCircle' as never);
+const circles = () => findAllByType(screen.root, 'RNSVGCircle');
 
 /**
  * `react-native-svg` normalises `strokeLinecap` to the SVG enum on its way to
@@ -39,7 +40,7 @@ const CAP = ['butt', 'round', 'square'] as const;
  * act warning on every case.
  */
 async function caps(readings: RingReading[]): Promise<string[]> {
-  render(<MacroRings readings={readings} testID="rings" />);
+  await render(<MacroRings readings={readings} testID="rings" />);
   await act(async () => {});
   return circles().map((c) => CAP[c.props.strokeLinecap as number] ?? String(c.props.strokeLinecap));
 }

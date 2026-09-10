@@ -164,15 +164,15 @@ beforeEach(() => {
  * moved it there from the fixed header.
  */
 async function openExtras() {
-  fireEvent.press(await screen.findByTestId('library-extras-toggle'));
+  await fireEvent.press(await screen.findByTestId('library-extras-toggle'));
 }
 
 describe('the sequences entry (N181)', () => {
   it('is here, and goes to the chain list', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     await openExtras();
-    fireEvent.press(await screen.findByTestId('library-sequences-link'));
+    await fireEvent.press(await screen.findByTestId('library-sequences-link'));
     expect(mockPush).toHaveBeenCalledWith('/sequence');
   });
 
@@ -184,7 +184,7 @@ describe('the sequences entry (N181)', () => {
     // *and the ones partners sent you*, is spoken: the athlete who accepted a
     // shared chain last week and is hunting for the copy is the whole reason
     // the entry point exists.
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     await openExtras();
     const link = await screen.findByTestId('library-sequences-link');
@@ -199,7 +199,7 @@ describe('the sequences entry (N181)', () => {
     // remove the app's only route to the athlete's own chains. Rejecting rather
     // than resolving empty, so this is a genuinely failed read.
     mockPositions.mockRejectedValue(new Error('Network request failed'));
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     await openExtras();
     expect(await screen.findByTestId('library-sequences-link')).toBeTruthy();
@@ -218,7 +218,7 @@ describe('the sequences entry (N181)', () => {
     mockReadPref.mockImplementation(async (_userId: unknown, key: unknown) =>
       key === PREF_LIBRARY_SPORT ? 'strength' : null,
     );
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     // WAIT FOR THE FILTER FIRST. The pref is read asynchronously, so the screen
     // renders unfiltered for a tick or two — and asserting the link before that
@@ -238,7 +238,7 @@ describe('the sequences entry (N181)', () => {
     // The arm that makes the others mean something, and the gate itself: a
     // strength-only account has no use for a chain list that can only be empty.
     mockModules = [{ ...BJJ_ON, enabled: false }, STRENGTH_ON];
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     // Wait for the screen itself before asserting an absence, or this passes
     // against a screen that has not rendered at all.
@@ -276,22 +276,22 @@ describe('the sequences entry (N181)', () => {
  */
 describe('closing "More from your library" (N469)', () => {
   it('closes on Done, and the sheet contents go with it', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     await openExtras();
     expect(await screen.findByTestId('library-sequences-link')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('library-extras-close'));
+    await fireEvent.press(screen.getByTestId('library-extras-close'));
     await waitFor(() =>
       expect(screen.queryByTestId('library-sequences-link')).toBeNull(),
     );
   });
 
   it('closes when a row inside it is pressed, on the way to that row\'s screen', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     await openExtras();
-    fireEvent.press(await screen.findByTestId('library-sequences-link'));
+    await fireEvent.press(await screen.findByTestId('library-sequences-link'));
 
     expect(mockPush).toHaveBeenCalledWith('/sequence');
     // The navigation and the close both fire from the same `onPress` — this
@@ -315,10 +315,10 @@ describe('closing "More from your library" (N469)', () => {
  */
 describe('class plans and the round map are reachable and asserted (N469)', () => {
   it('"Your class plans" goes to the class-plan list', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
     await openExtras();
-    fireEvent.press(await screen.findByTestId('library-classplans-link'));
+    await fireEvent.press(await screen.findByTestId('library-classplans-link'));
     expect(mockPush).toHaveBeenCalledWith('/classplans');
   });
 
@@ -343,11 +343,11 @@ describe('class plans and the round map are reachable and asserted (N469)', () =
         priorities: '',
       },
     ]);
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
 
-    fireEvent.press(await screen.findByTestId('library-filter-bjj'));
+    await fireEvent.press(await screen.findByTestId('library-filter-bjj'));
     await openExtras();
-    fireEvent.press(await screen.findByTestId('library-roundmap-link'));
+    await fireEvent.press(await screen.findByTestId('library-roundmap-link'));
     expect(mockPush).toHaveBeenCalledWith('/bjj/roundmap');
   });
 });

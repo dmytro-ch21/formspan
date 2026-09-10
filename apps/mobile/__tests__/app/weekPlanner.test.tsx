@@ -163,29 +163,29 @@ beforeEach(() => {
 });
 
 it('reads the week it is showing, not the current one', async () => {
-  render(<WeekPlanner userId="u1" modules={modules} />);
+  await render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   const thisWeek = lastFrom();
 
-  fireEvent.press(screen.getByTestId('plan-week-next'));
+  await fireEvent.press(screen.getByTestId('plan-week-next'));
 
   // Exactly seven days later. Under the pinned read this is 0 — the rows move
   // and the query does not, which is the whole bug.
   await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(7));
 
-  fireEvent.press(screen.getByTestId('plan-week-prev'));
+  await fireEvent.press(screen.getByTestId('plan-week-prev'));
   await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(0));
 });
 
 it('stays on a past week picked from the month grid', async () => {
-  render(<WeekPlanner userId="u1" modules={modules} />);
+  await render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   const thisWeek = lastFrom();
 
   // Two weeks back, reached with the arrows — the same anchor change the
   // month grid makes, without needing the sheet open.
-  fireEvent.press(screen.getByTestId('plan-week-prev'));
-  fireEvent.press(screen.getByTestId('plan-week-prev'));
+  await fireEvent.press(screen.getByTestId('plan-week-prev'));
+  await fireEvent.press(screen.getByTestId('plan-week-prev'));
   await waitFor(() => expect(daysBetween(thisWeek, lastFrom())).toBe(-14));
 
   // And it STAYS there. With `[refresh]` on the focus effect, changing the
@@ -203,11 +203,11 @@ it('names the week in the switcher, which is the only thing saying you moved', a
   // text, so it survives greyscale and reaches a screen reader, and it says
   // WHICH week rather than only that it is not this one. Getting back is the
   // month grid, one tap from the same control.
-  render(<WeekPlanner userId="u1" modules={modules} />);
+  await render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   expect(screen.getByTestId('plan-week-label')).toHaveTextContent('THIS WEEK');
 
-  fireEvent.press(screen.getByTestId('plan-week-next'));
+  await fireEvent.press(screen.getByTestId('plan-week-next'));
   // The actual range, not merely "not THIS WEEK" — that passes against empty
   // text, and against a range formatted off `now` instead of `anchor`, which
   // is the class of bug this file exists for. The week after the pinned
@@ -216,7 +216,7 @@ it('names the week in the switcher, which is the only thing saying you moved', a
     expect(screen.getByTestId('plan-week-label')).toHaveTextContent('AUG 10 – AUG 16'),
   );
 
-  fireEvent.press(screen.getByTestId('plan-week-prev'));
+  await fireEvent.press(screen.getByTestId('plan-week-prev'));
   await waitFor(() =>
     expect(screen.getByTestId('plan-week-label')).toHaveTextContent('THIS WEEK'),
   );
@@ -231,7 +231,7 @@ it('keeps the authoring rows behind a collapse, open by default', async () => {
   // checked only that the label flipped HIDE WEEK → SHOW WEEK, which stays
   // green if the `{expanded && …}` gate is deleted entirely — it tested the
   // button, not the collapse.
-  render(<WeekPlanner userId="u1" modules={modules} />);
+  await render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   expect(screen.getAllByText('Rest').length).toBeGreaterThan(0);
   // Asserted PRESENT here so its absence below means the collapse removed it.
@@ -242,14 +242,14 @@ it('keeps the authoring rows behind a collapse, open by default', async () => {
   expect(screen.getByTestId('plan-add-2026-08-05')).toBeTruthy();
   expect(screen.getByTestId('plan-toggle-week')).toHaveTextContent('HIDE WEEK');
 
-  fireEvent.press(screen.getByTestId('plan-toggle-week'));
+  await fireEvent.press(screen.getByTestId('plan-toggle-week'));
   expect(screen.queryAllByText('Rest')).toHaveLength(0);
   expect(screen.queryByTestId('plan-add-2026-08-05')).toBeNull();
   expect(screen.getByTestId('plan-toggle-week')).toHaveTextContent('SHOW WEEK');
 
   // And the strip survives the collapse — it is what the week becomes, so a
   // collapse that took it too would leave the header alone on the screen.
-  fireEvent.press(screen.getByTestId('plan-toggle-week'));
+  await fireEvent.press(screen.getByTestId('plan-toggle-week'));
   expect(screen.getAllByText('Rest').length).toBeGreaterThan(0);
 });
 
@@ -258,17 +258,17 @@ it('offers a way back to this week from the month sheet', async () => {
   // This is where the capability went, and `openMonth` opens on the NAVIGATED
   // month — so without it, returning from three months out is five taps and
   // today is not even on the grid.
-  render(<WeekPlanner userId="u1" modules={modules} />);
+  await render(<WeekPlanner userId="u1" modules={modules} />);
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
 
-  fireEvent.press(screen.getByTestId('plan-week-next'));
-  fireEvent.press(screen.getByTestId('plan-week-next'));
+  await fireEvent.press(screen.getByTestId('plan-week-next'));
+  await fireEvent.press(screen.getByTestId('plan-week-next'));
   await waitFor(() =>
     expect(screen.getByTestId('plan-week-label')).not.toHaveTextContent('THIS WEEK'),
   );
 
-  fireEvent.press(screen.getByTestId('plan-week-label'));
-  fireEvent.press(await screen.findByTestId('plan-month-today'));
+  await fireEvent.press(screen.getByTestId('plan-week-label'));
+  await fireEvent.press(await screen.findByTestId('plan-month-today'));
   await waitFor(() =>
     expect(screen.getByTestId('plan-week-label')).toHaveTextContent('THIS WEEK'),
   );
@@ -285,25 +285,37 @@ it('does not build the month grid until it is opened', async () => {
   // that call is what distinguishes the two.
   const spy = jest.spyOn(Date.prototype, 'toLocaleDateString');
   try {
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
 
-    // Measured, not guessed, and RE-measured: 87 with the gate, 237 without,
-    // across the renders a mount does. It was 45/195 when written with a bound
-    // of 100 — the week strip's own seven labels ate most of that headroom, and
-    // a bound with 13 points of slack fails next for a reason unrelated to the
-    // gate it guards. 160 is the midpoint of the current pair, which is the
-    // most room in both directions.
+    // Measured, not guessed, and RE-measured on every renderer change: 72 with
+    // the gate and 222 without, under RNTL 14 / test-renderer. (It was 87/237
+    // under RNTL 13, and 45/195 when first written with a bound of 100 — the
+    // week strip's own seven labels ate most of that headroom, and a bound with
+    // 13 points of slack fails next for a reason unrelated to the gate it
+    // guards.) 160 still sits between the current pair with room on both sides.
     //
     // Re-measure this when the header grows anything; do not just raise it.
     expect(spy.mock.calls.length).toBeLessThan(160);
 
     spy.mockClear();
-    fireEvent.press(screen.getByTestId('plan-week-label'));
+    await fireEvent.press(screen.getByTestId('plan-week-label'));
     await waitFor(() => expect(screen.getByTestId('plan-month-close')).toBeTruthy());
     // And opening it genuinely does the work — otherwise the assertion above
     // would also pass against a grid that had simply stopped rendering.
-    expect(spy.mock.calls.length).toBeGreaterThan(100);
+    //
+    // RE-MEASURED under RNTL 14, and LOWERED rather than raised, which needs
+    // saying because the note above forbids the lazy version of this move. The
+    // open count is now 74 both with the gate and without it — under RNTL 13 it
+    // was over 100 — so `> 100` here could no longer pass at all, and `> 40`
+    // is what the measurement supports: a full month grid is ~42 cells, each
+    // formatting its own label, so a grid that came back degenerate still
+    // fails. The case the comment above actually names — a grid that stopped
+    // rendering entirely — is caught one line earlier instead: `plan-month-close`
+    // lives inside the gated block, so the `waitFor` never resolves without it.
+    // Verified by mutation, all three ways: gate present (74), gate removed
+    // (74), gate replaced with `false` (the waitFor fails first).
+    expect(spy.mock.calls.length).toBeGreaterThan(40);
   } finally {
     spy.mockRestore();
   }
@@ -325,26 +337,26 @@ describe('the week theme', () => {
   }
 
   it("reads the shown week's Monday, not the current one", async () => {
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
     expect(lastThemeRange()).toEqual({ from: '2026-08-03', to: '2026-08-03' });
 
-    fireEvent.press(screen.getByTestId('plan-week-next'));
+    await fireEvent.press(screen.getByTestId('plan-week-next'));
     await waitFor(() =>
       expect(lastThemeRange()).toEqual({ from: '2026-08-10', to: '2026-08-10' }),
     );
   });
 
   it('shows a "+ Theme" affordance when the week has none, and setting one PUTs the title', async () => {
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
 
     const opener = screen.getByTestId('plan-theme-open');
     expect(opener).toHaveTextContent('+ Theme');
 
-    fireEvent.press(opener);
-    fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
-    fireEvent.press(screen.getByTestId('plan-theme-save'));
+    await fireEvent.press(opener);
+    await fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
+    await fireEvent.press(screen.getByTestId('plan-theme-save'));
 
     await waitFor(() =>
       expect(mockSetTheme).toHaveBeenCalledWith(mockGetToken, '2026-08-03', {
@@ -360,18 +372,18 @@ describe('the week theme', () => {
     mockFetchThemes.mockResolvedValue([
       { week_start: '2026-08-03', title: 'Guard retention', notes: '' },
     ]);
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() =>
       expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('Guard retention'),
     );
 
-    fireEvent.press(screen.getByTestId('plan-theme-open'));
+    await fireEvent.press(screen.getByTestId('plan-theme-open'));
     // Prefilled with the existing title, matching web's ThemeRow — this is
     // an edit, not a blank form.
     expect(screen.getByTestId('plan-theme-input').props.value).toBe('Guard retention');
 
-    fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Chase the squat');
-    fireEvent.press(screen.getByTestId('plan-theme-save'));
+    await fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Chase the squat');
+    await fireEvent.press(screen.getByTestId('plan-theme-save'));
 
     await waitFor(() =>
       expect(mockSetTheme).toHaveBeenCalledWith(mockGetToken, '2026-08-03', {
@@ -384,27 +396,27 @@ describe('the week theme', () => {
     mockFetchThemes.mockResolvedValue([
       { week_start: '2026-08-03', title: 'Guard retention', notes: '' },
     ]);
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() =>
       expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('Guard retention'),
     );
 
-    fireEvent.press(screen.getByTestId('plan-theme-open'));
-    fireEvent.changeText(screen.getByTestId('plan-theme-input'), '   ');
-    fireEvent.press(screen.getByTestId('plan-theme-save'));
+    await fireEvent.press(screen.getByTestId('plan-theme-open'));
+    await fireEvent.changeText(screen.getByTestId('plan-theme-input'), '   ');
+    await fireEvent.press(screen.getByTestId('plan-theme-save'));
 
     await waitFor(() => expect(mockDeleteTheme).toHaveBeenCalledWith(mockGetToken, '2026-08-03'));
     expect(mockSetTheme).not.toHaveBeenCalled();
   });
 
   it('saving an empty draft on an already-themeless week makes no request at all', async () => {
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('plan-theme-open'));
+    await fireEvent.press(screen.getByTestId('plan-theme-open'));
     // No `changeText` — the draft stays empty, the way a tap-then-immediate-Save
     // would on a themeless week.
-    fireEvent.press(screen.getByTestId('plan-theme-save'));
+    await fireEvent.press(screen.getByTestId('plan-theme-save'));
 
     await waitFor(() => expect(screen.queryByTestId('plan-theme-edit')).toBeNull());
     expect(mockSetTheme).not.toHaveBeenCalled();
@@ -412,14 +424,14 @@ describe('the week theme', () => {
   });
 
   it('navigating away from an open edit drops the draft rather than saving it onto the new week', async () => {
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('plan-theme-open'));
-    fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Half-typed');
+    await fireEvent.press(screen.getByTestId('plan-theme-open'));
+    await fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Half-typed');
     expect(screen.getByTestId('plan-theme-edit')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('plan-week-next'));
+    await fireEvent.press(screen.getByTestId('plan-week-next'));
 
     // The edit box for the week just left closes — it must not carry into the
     // next one and it must not have written anything on the way out.
@@ -429,12 +441,12 @@ describe('the week theme', () => {
   });
 
   it('Cancel closes the edit without writing anything', async () => {
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('plan-theme-open'));
-    fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
-    fireEvent.press(screen.getByTestId('plan-theme-cancel'));
+    await fireEvent.press(screen.getByTestId('plan-theme-open'));
+    await fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
+    await fireEvent.press(screen.getByTestId('plan-theme-cancel'));
 
     expect(screen.queryByTestId('plan-theme-edit')).toBeNull();
     expect(mockSetTheme).not.toHaveBeenCalled();
@@ -446,17 +458,25 @@ describe('the week theme', () => {
     // second trigger arriving before the first PUT settles is exactly the
     // race under test.
     mockSetTheme.mockReturnValue(new Promise(() => {}));
-    render(<WeekPlanner userId="u1" modules={modules} />);
+    await render(<WeekPlanner userId="u1" modules={modules} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('plan-theme-open'));
-    fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
+    await fireEvent.press(screen.getByTestId('plan-theme-open'));
+    await fireEvent.changeText(screen.getByTestId('plan-theme-input'), 'Deload week');
 
-    fireEvent.press(screen.getByTestId('plan-theme-save'));
+    // Not awaited. RNTL 14 resolves a press with the HANDLER's own return value,
+    // and `save()`'s promise never settles here because `setTheme` is mocked
+    // above to hang by design — awaiting it times the test out instead of
+    // failing it. Waiting for `busy` to be committed is the part that matters,
+    // and is what the synchronous v13 `fireEvent` gave us for free: without it
+    // both triggers read the same pre-commit `busy: false` closure and BOTH
+    // send.
+    void fireEvent.press(screen.getByTestId('plan-theme-save'));
+    await waitFor(() => expect(screen.getByTestId('plan-theme-save')).toBeDisabled());
     // The Save Pressable's own `disabled={busy}` covers a second TAP once
     // React has re-rendered with `busy: true` — this exercises the other
     // trigger, `onSubmitEditing`, which is not gated by `disabled` at all.
-    fireEvent(screen.getByTestId('plan-theme-input'), 'submitEditing');
+    await fireEvent(screen.getByTestId('plan-theme-input'), 'submitEditing');
 
     expect(mockSetTheme).toHaveBeenCalledTimes(1);
   });
@@ -475,7 +495,7 @@ describe('WeekThemeRow read resilience', () => {
       .mockResolvedValueOnce([{ week_start: '2026-08-03', title: 'Guard retention', notes: '' }])
       .mockRejectedValueOnce(new Error('offline'));
 
-    const { rerender } = render(<WeekThemeRow {...props} reloadAt={0} />);
+    const { rerender } = await render(<WeekThemeRow {...props} reloadAt={0} />);
     await waitFor(() =>
       expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('Guard retention'),
     );
@@ -484,7 +504,7 @@ describe('WeekThemeRow read resilience', () => {
     // component is NOT remounted (no key change; `weekStart` is unchanged),
     // so this is the one path where a failure could stomp what is already
     // correctly on screen.
-    rerender(<WeekThemeRow {...props} reloadAt={1} />);
+    await rerender(<WeekThemeRow {...props} reloadAt={1} />);
     await waitFor(() => expect(mockFetchThemes).toHaveBeenCalledTimes(2));
     // Real timers here (the file's fake-timer setup explicitly excludes
     // `setTimeout`), giving the rejected promise's `.catch` a tick to run.
@@ -496,7 +516,7 @@ describe('WeekThemeRow read resilience', () => {
   it('a failed FIRST read shows the themeless state, not stale UI', async () => {
     mockFetchThemes.mockRejectedValueOnce(new Error('offline'));
 
-    render(<WeekThemeRow {...props} reloadAt={0} />);
+    await render(<WeekThemeRow {...props} reloadAt={0} />);
 
     await waitFor(() => expect(screen.getByTestId('plan-theme-open')).toHaveTextContent('+ Theme'));
   });

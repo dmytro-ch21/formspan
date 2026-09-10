@@ -76,14 +76,14 @@ function taps(t: Tracker, n: number, lastAt = '2026-08-20T23:40:00.000Z'): Track
   }));
 }
 
-function renderCard(
+async function renderCard(
   tracker: Tracker,
   entries: TrackerEntry[],
   over: Partial<React.ComponentProps<typeof TrackerCard>> = {},
 ) {
   const onAdd = jest.fn();
   const onRemove = jest.fn();
-  render(
+  await render(
     <TrackerCard
       tracker={tracker}
       entries={entries}
@@ -106,23 +106,23 @@ function fillInset(glyphTestID: string): number {
 }
 
 describe('the card shows when the last one was', () => {
-  it('renders the clock, which is the reading N77 was written around', () => {
+  it('renders the clock, which is the reading N77 was written around', async () => {
     // The suite runs under TZ=America/Los_Angeles, so 23:40 UTC is 16:40 local
     // — the exact string the ticket asks for.
-    renderCard(coffee, taps(coffee, 3));
+    await renderCard(coffee, taps(coffee, 3));
     expect(screen.getByTestId('tracker-foot-cof')).toHaveTextContent(/last at 16:40/);
   });
 
-  it('shows it for water too, because the card does not know what coffee is', () => {
+  it('shows it for water too, because the card does not know what coffee is', async () => {
     // A branch on `tracker.preset` anywhere in this component would be the
     // CoffeeCard the ticket forbids. The clock is unconditional.
-    renderCard(water, taps(water, 2));
+    await renderCard(water, taps(water, 2));
     expect(screen.getByTestId('tracker-foot-wat')).toHaveTextContent(/last at 16:40/);
   });
 
-  it('says nothing at all when there is no target and nothing logged', () => {
+  it('says nothing at all when there is no target and nothing logged', async () => {
     // An athlete who declined a ceiling is not handed an empty goal line.
-    renderCard(coffee, []);
+    await renderCard(coffee, []);
     expect(screen.queryByTestId('tracker-foot-cof')).toBeNull();
   });
 });
@@ -134,57 +134,57 @@ describe('N431: the cutoff line is wired to the card, not just the model', () =>
   // and draws what it returns.
   const withCutoff: Tracker = { ...coffee, cutoff_minutes: 960 }; // 16:00
 
-  it('is absent when the tracker has no cutoff configured', () => {
-    renderCard(coffee, [], { now: new Date('2026-08-20T19:00:00.000Z') });
+  it('is absent when the tracker has no cutoff configured', async () => {
+    await renderCard(coffee, [], { now: new Date('2026-08-20T19:00:00.000Z') });
     expect(screen.queryByTestId('tracker-cutoff-cof')).toBeNull();
   });
 
-  it('counts down before the cutoff, on the live card', () => {
+  it('counts down before the cutoff, on the live card', async () => {
     // 2026-08-20T19:00:00.000Z is 12:00 local — four hours before 16:00.
-    renderCard(withCutoff, [], { now: new Date('2026-08-20T19:00:00.000Z') });
+    await renderCard(withCutoff, [], { now: new Date('2026-08-20T19:00:00.000Z') });
     expect(screen.getByTestId('tracker-cutoff-cof')).toHaveTextContent('cutoff in 4h');
   });
 
-  it('names the late cup once one crosses the line', () => {
+  it('names the late cup once one crosses the line', async () => {
     // 2026-08-20T23:10:00.000Z is 16:10 local — past the 16:00 cutoff.
     const late = taps(withCutoff, 1, '2026-08-20T23:10:00.000Z');
-    renderCard(withCutoff, late, { now: new Date('2026-08-20T23:10:00.000Z') });
+    await renderCard(withCutoff, late, { now: new Date('2026-08-20T23:10:00.000Z') });
     expect(screen.getByTestId('tracker-cutoff-cof')).toHaveTextContent(
       'last at 16:10 — past your 16:00 cutoff',
     );
   });
 
-  it('is absent on a browsed PAST day nothing crossed the cutoff on', () => {
+  it('is absent on a browsed PAST day nothing crossed the cutoff on', async () => {
     // `now: null` (the default, and what a browsed-day screen passes) — a cup
     // logged well before the cutoff leaves nothing to warn about.
     const early = taps(withCutoff, 1, '2026-08-20T21:00:00.000Z'); // 14:00 local
-    renderCard(withCutoff, early);
+    await renderCard(withCutoff, early);
     expect(screen.queryByTestId('tracker-cutoff-cof')).toBeNull();
   });
 
-  it('still states a crossed cutoff on a browsed PAST day — a fact, not a live reading', () => {
+  it('still states a crossed cutoff on a browsed PAST day — a fact, not a live reading', async () => {
     const late = taps(withCutoff, 1, '2026-08-20T23:10:00.000Z');
-    renderCard(withCutoff, late); // now: null — not real today
+    await renderCard(withCutoff, late); // now: null — not real today
     expect(screen.getByTestId('tracker-cutoff-cof')).toHaveTextContent(
       'last at 16:10 — past your 16:00 cutoff',
     );
   });
 
-  it('reads no differently from the foot line above it — same register, no verdict', () => {
-    renderCard(withCutoff, [], { now: new Date('2026-08-20T23:10:00.000Z') });
+  it('reads no differently from the foot line above it — same register, no verdict', async () => {
+    await renderCard(withCutoff, [], { now: new Date('2026-08-20T23:10:00.000Z') });
     const text = screen.getByTestId('tracker-cutoff-cof').props.children;
     expect(String(text)).not.toMatch(/warn|careful|stop|too (much|late)|!/i);
   });
 });
 
 describe('the count, and the limit if one is set', () => {
-  it('reads the count first when there is no ceiling', () => {
-    renderCard(coffee, taps(coffee, 3));
+  it('reads the count first when there is no ceiling', async () => {
+    await renderCard(coffee, taps(coffee, 3));
     expect(screen.getByTestId('tracker-value-cof')).toHaveTextContent('3 cups');
   });
 
-  it('states the limit second once one exists, and never refuses a cup past it', () => {
-    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+  it('states the limit second once one exists, and never refuses a cup past it', async () => {
+    await renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
     expect(screen.getByTestId('tracker-value-cof')).toHaveTextContent('5 of 3 cups');
     expect(screen.getByTestId('tracker-foot-cof')).toHaveTextContent(
       /2 past your target of 3/,
@@ -196,8 +196,8 @@ describe('the count, and the limit if one is set', () => {
 });
 
 describe('cups past the limit render distinctly', () => {
-  it('draws the ones past the target with a different fill and the rest alike', () => {
-    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+  it('draws the ones past the target with a different fill and the rest alike', async () => {
+    await renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
     const within = [0, 1, 2].map((i) => fillInset(`tracker-glyph-cof-${i}`));
     const past = [3, 4].map((i) => fillInset(`tracker-glyph-cof-${i}`));
     // Within the target they are identical to each other...
@@ -207,10 +207,10 @@ describe('cups past the limit render distinctly', () => {
     expect(past[0]).not.toBe(within[0]);
   });
 
-  it('changes the SHAPE, never the colour — nothing here reads as an error', () => {
+  it('changes the SHAPE, never the colour — nothing here reads as an error', async () => {
     // The criterion is "visually distinct without being coloured as an error".
     // Every glyph on the card carries the tracker's own fill, over or not.
-    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    await renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
     const colours = [0, 1, 2, 3, 4].map((i) => {
       const flat = StyleSheet.flatten(
         screen.getByTestId(`tracker-glyph-cof-${i}-fill`).props.style,
@@ -220,27 +220,27 @@ describe('cups past the limit render distinctly', () => {
     expect(new Set(colours).size).toBe(1);
   });
 
-  it('marks nothing when there is no target to be past', () => {
+  it('marks nothing when there is no target to be past', async () => {
     // Coffee's shipped default. Five cups, no ceiling, five identical glyphs.
-    renderCard(coffee, taps(coffee, 5));
+    await renderCard(coffee, taps(coffee, 5));
     const insets = [0, 1, 2, 3, 4].map((i) => fillInset(`tracker-glyph-cof-${i}`));
     expect(new Set(insets).size).toBe(1);
   });
 
-  it('an over-target cup still un-taps, by its own entry id', () => {
+  it('an over-target cup still un-taps, by its own entry id', async () => {
     // "Cups past the limit log normally" — a cup you cannot remove is not
     // logged normally. The id, not the index: two quick taps on one glyph must
     // not remove two cups.
     const entries = taps(coffee, 5);
-    const { onRemove } = renderCard({ ...coffee, target: 3 }, entries);
-    fireEvent.press(screen.getByTestId('tracker-glyph-cof-4'));
+    const { onRemove } = await renderCard({ ...coffee, target: 3 }, entries);
+    await fireEvent.press(screen.getByTestId('tracker-glyph-cof-4'));
     expect(onRemove).toHaveBeenCalledWith(entries[4].id);
   });
 });
 
 describe('VoiceOver names coffee, not water', () => {
-  it('labels the add control and every glyph with the tracker it belongs to', () => {
-    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+  it('labels the add control and every glyph with the tracker it belongs to', async () => {
+    await renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
     expect(screen.getByLabelText('Add a cup of Coffee')).toBeTruthy();
     expect(screen.getByLabelText('Coffee, cup 1 of 5, filled')).toBeTruthy();
     // The over state is spoken, so a VoiceOver user learns from the label what
@@ -248,22 +248,22 @@ describe('VoiceOver names coffee, not water', () => {
     expect(screen.getByLabelText('Coffee, cup 4 of 5, filled, past your target')).toBeTruthy();
   });
 
-  it('never says the tracker is empty when a cup is past the target', () => {
+  it('never says the tracker is empty when a cup is past the target', async () => {
     // The subtractive fill is only unambiguous because empty and over cannot
     // coexist. If that ever breaks, this is the assertion that says so.
-    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    await renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
     expect(screen.queryByLabelText(/empty/)).toBeNull();
   });
 });
 
 describe('no praise, no scolding, anywhere on the card', () => {
-  it('reads every rendered string and finds no verdict', () => {
+  it('reads every rendered string and finds no verdict', async () => {
     const JUDGEMENTS = [
       'great', 'well done', 'nice', 'good job', 'amazing', 'keep it up', 'smashed',
       'too much', 'too many', 'over the limit', 'careful', 'warning', 'failed',
       'behind', 'you should', 'try harder', 'only', 'just', '!',
     ];
-    renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
+    await renderCard({ ...coffee, target: 3 }, taps(coffee, 5));
     const rendered = screen.root ? collectText(screen.root) : [];
     // The apparatus, not the subject: a walk that collected nothing would pass
     // this test in silence.
@@ -287,69 +287,69 @@ describe('addChoices: a picker instead of a plain increment tap', () => {
     { key: 'drip', label: 'Drip', accessibilityLabel: 'Drip — about 95 mg caffeine' },
   ];
 
-  it('with no addChoices, `+` still calls onAdd directly — the ordinary tap is unchanged', () => {
-    const { onAdd } = renderCard(coffee, []);
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+  it('with no addChoices, `+` still calls onAdd directly — the ordinary tap is unchanged', async () => {
+    const { onAdd } = await renderCard(coffee, []);
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
     expect(onAdd).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('tracker-choices-cof')).toBeNull();
   });
 
-  it('with addChoices, `+` opens the picker instead of calling onAdd', () => {
+  it('with addChoices, `+` opens the picker instead of calling onAdd', async () => {
     const onAddChoice = jest.fn();
-    const { onAdd } = renderCard(coffee, [], { addChoices: choices, onAddChoice });
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    const { onAdd } = await renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
 
     expect(onAdd).not.toHaveBeenCalled();
     expect(screen.getByTestId('tracker-choice-cof-espresso')).toBeTruthy();
     expect(screen.getByTestId('tracker-choice-cof-drip')).toBeTruthy();
   });
 
-  it('announces the picker opening, and does not re-announce on close', () => {
+  it('announces the picker opening, and does not re-announce on close', async () => {
     // frontend-reviewer, N432 review: opening the chip row moved no focus
     // and announced nothing, so a VoiceOver user double-tapped, heard
     // silence, and had to discover the row by swiping.
     (AccessibilityInfo.announceForAccessibility as jest.Mock).mockClear();
     const onAddChoice = jest.fn();
-    renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    await renderCard(coffee, [], { addChoices: choices, onAddChoice });
 
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
       'Choose a drink type',
     );
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
 
-    fireEvent.press(screen.getByTestId('tracker-add-cof')); // closes it again
+    await fireEvent.press(screen.getByTestId('tracker-add-cof')); // closes it again
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
   });
 
-  it('picking a choice fires onAddChoice with its key, and closes the picker', () => {
+  it('picking a choice fires onAddChoice with its key, and closes the picker', async () => {
     const onAddChoice = jest.fn();
-    renderCard(coffee, [], { addChoices: choices, onAddChoice });
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
-    fireEvent.press(screen.getByTestId('tracker-choice-cof-espresso'));
+    await renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    await fireEvent.press(screen.getByTestId('tracker-choice-cof-espresso'));
 
     expect(onAddChoice).toHaveBeenCalledWith('espresso');
     expect(screen.queryByTestId('tracker-choices-cof')).toBeNull();
   });
 
-  it('pressing `+` again while open closes it without picking anything', () => {
+  it('pressing `+` again while open closes it without picking anything', async () => {
     const onAddChoice = jest.fn();
-    renderCard(coffee, [], { addChoices: choices, onAddChoice });
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    await renderCard(coffee, [], { addChoices: choices, onAddChoice });
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
     expect(screen.getByTestId('tracker-choices-cof')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
     expect(screen.queryByTestId('tracker-choices-cof')).toBeNull();
     expect(onAddChoice).not.toHaveBeenCalled();
   });
 
-  it('an empty glyph opens the picker too, not just the `+` button', () => {
+  it('an empty glyph opens the picker too, not just the `+` button', async () => {
     // `+` is not the only add gesture — an empty glyph adds directly on every
     // other tracker (N77/N78), so a coffee card with choices must route that
     // through the SAME picker rather than silently logging a default.
     const onAdd = jest.fn();
     const onAddChoice = jest.fn();
-    render(
+    await render(
       <TrackerCard
         tracker={coffee}
         entries={[]}
@@ -362,17 +362,17 @@ describe('addChoices: a picker instead of a plain increment tap', () => {
         onAddChoice={onAddChoice}
       />,
     );
-    fireEvent.press(screen.getByTestId('tracker-glyph-cof-0'));
+    await fireEvent.press(screen.getByTestId('tracker-glyph-cof-0'));
 
     expect(onAdd).not.toHaveBeenCalled();
     expect(screen.getByTestId('tracker-choice-cof-espresso')).toBeTruthy();
   });
 
-  it('labels the add control as a chooser, using the choice\'s own label when picking', () => {
-    renderCard(coffee, [], { addChoices: choices, onAddChoice: jest.fn() });
+  it('labels the add control as a chooser, using the choice\'s own label when picking', async () => {
+    await renderCard(coffee, [], { addChoices: choices, onAddChoice: jest.fn() });
     expect(screen.getByLabelText('Add a cup of Coffee — choose a type')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('tracker-add-cof'));
+    await fireEvent.press(screen.getByTestId('tracker-add-cof'));
     expect(screen.getByLabelText('Espresso — about 63 mg caffeine')).toBeTruthy();
   });
 });

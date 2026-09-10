@@ -123,8 +123,8 @@ describe('the list', () => {
       { id: 'seq-2', name: 'B', description: '', start_position_id: null, step_count: 1, editable: true },
     ]);
 
-    render(<SequencesScreen />);
-    fireEvent.press(await screen.findByTestId('sequence-row-seq-2'));
+    await render(<SequencesScreen />);
+    await fireEvent.press(await screen.findByTestId('sequence-row-seq-2'));
 
     // Pinned to the literal path. The screen builds it from a template, so an
     // assertion derived from the same expression would survive the route being
@@ -150,7 +150,7 @@ describe('the list', () => {
       },
     ]);
 
-    render(<SequencesScreen />);
+    await render(<SequencesScreen />);
 
     const err = await screen.findByTestId('sequences-error');
     expect(err).toHaveTextContent('Request failed (500).');
@@ -173,7 +173,7 @@ describe('the list', () => {
     mockList.mockRejectedValue(new Error('Request failed (500).'));
     mockPending.mockResolvedValue([]);
 
-    render(<SequencesScreen />);
+    await render(<SequencesScreen />);
 
     expect(await screen.findByTestId('sequences-error')).toBeTruthy();
     expect(screen.queryByTestId('sequences-empty')).toBeNull();
@@ -182,7 +182,7 @@ describe('the list', () => {
   it('shows the empty state only when the answer really is empty', async () => {
     // The arm that makes the previous test mean anything — without it, a
     // screen that never rendered `sequences-empty` at all would pass.
-    render(<SequencesScreen />);
+    await render(<SequencesScreen />);
     expect(await screen.findByTestId('sequences-empty')).toBeTruthy();
     expect(screen.queryByTestId('sequences-error')).toBeNull();
   });
@@ -202,7 +202,7 @@ describe('the list', () => {
       { id: 'seq-9', name: 'Synced', description: '', start_position_id: null, step_count: 2, editable: true },
     ]);
 
-    render(<SequencesScreen />);
+    await render(<SequencesScreen />);
 
     expect(await screen.findByTestId('sequence-pending-local-1')).toBeTruthy();
     // And not on the one that HAS reached the server, or the marker means
@@ -215,7 +215,7 @@ describe('the detail', () => {
   it('renders the steps in the order they were recorded', async () => {
     mockGet.mockResolvedValue(serverChain());
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     await screen.findByTestId('sequence-screen');
     // Position, not just presence: the order IS the content of a chain, and a
@@ -227,7 +227,7 @@ describe('the detail', () => {
   it('shows where a step leaves you, and stays quiet when nothing was recorded', async () => {
     mockGet.mockResolvedValue(serverChain());
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     expect(await screen.findByTestId('sequence-node-1')).toHaveTextContent(/ends in Side control/);
     // Step 0 has no `ends_at_position_name`. Rendering "Not recorded" on every
@@ -238,8 +238,8 @@ describe('the detail', () => {
   it('opens the technique behind a step', async () => {
     mockGet.mockResolvedValue(serverChain());
 
-    render(<SequenceScreen />);
-    fireEvent.press(await screen.findByTestId('sequence-step-1'));
+    await render(<SequenceScreen />);
+    await fireEvent.press(await screen.findByTestId('sequence-step-1'));
 
     expect(mockPush).toHaveBeenCalledWith('/technique/knee-cut');
   });
@@ -260,7 +260,7 @@ describe('the detail', () => {
     });
     mockFetchTechniques.mockResolvedValue([{ id: 'knee-cut', name: 'Knee cut pass' }]);
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     expect(await screen.findByTestId('sequence-step-0')).toHaveTextContent(/Knee cut pass/);
     expect(await screen.findByTestId('sequence-pending')).toBeTruthy();
@@ -282,7 +282,7 @@ describe('the detail', () => {
     });
     mockFetchTechniques.mockRejectedValue(new Error('Network request failed'));
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     expect(await screen.findByTestId('sequence-step-unresolved-0')).toBeTruthy();
     expect(screen.queryByText('knee-cut')).toBeNull();
@@ -297,7 +297,7 @@ describe('the detail', () => {
     // athlete their chain was deleted — a different and much worse claim.
     mockGet.mockResolvedValue(null);
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     expect(await screen.findByTestId('sequence-unreachable')).toBeTruthy();
     expect(screen.queryByTestId('sequence-error')).toBeNull();
@@ -315,7 +315,7 @@ describe('the detail', () => {
     // Note even `OfflineError` says "Can't reach VOLA" rather than "offline".
     mockGet.mockResolvedValue(null);
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     const card = await screen.findByTestId('sequence-unreachable');
     expect(card).toHaveTextContent(/Can't reach VOLA/);
@@ -332,7 +332,7 @@ describe('the detail', () => {
     // already on the page.
     mockGet.mockResolvedValueOnce(serverChain()).mockResolvedValue(null);
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
     await screen.findByTestId('sequence-step-1');
 
     // Fire the focus callback again — see the `expo-router` mock for why a
@@ -350,7 +350,7 @@ describe('the detail', () => {
     // The arm that makes the previous test mean anything.
     mockGet.mockRejectedValue(new Error('Request failed (500).'));
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     const err = await screen.findByTestId('sequence-error');
     expect(err).toHaveTextContent('Request failed (500).');
@@ -363,7 +363,7 @@ describe('the detail', () => {
     // implementation fetches unconditionally and nothing else would notice.
     mockGet.mockResolvedValue(serverChain());
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     await screen.findByTestId('sequence-step-1');
     expect(mockFetchTechniques).not.toHaveBeenCalled();
@@ -375,7 +375,7 @@ describe('the detail', () => {
     // rest lives beats a screen that silently has no edit affordance.
     mockGet.mockResolvedValue(serverChain());
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     expect(await screen.findByText(/on the web app/)).toBeTruthy();
   });
@@ -383,7 +383,7 @@ describe('the detail', () => {
   it('calls a VOLA reference chain what it is', async () => {
     mockGet.mockResolvedValue(serverChain({ editable: false }));
 
-    render(<SequenceScreen />);
+    await render(<SequenceScreen />);
 
     expect(await screen.findByText(/reference chain/)).toBeTruthy();
   });

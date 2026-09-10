@@ -88,7 +88,7 @@ describe('when the catalog cannot be reached', () => {
     mockFetchExercises.mockRejectedValue(new ApiError('exercise catalog unavailable', 'internal', 500));
     mockCachedExercises.mockResolvedValue([SQUAT, BENCH]);
 
-    render(<AddExerciseToSessionScreen />);
+    await render(<AddExerciseToSessionScreen />);
 
     await waitFor(() => expect(mockCachedExercises).toHaveBeenCalledWith('strength'));
     expect(await screen.findByText('Back Squat')).toBeTruthy();
@@ -100,7 +100,7 @@ describe('when the catalog cannot be reached', () => {
     mockFetchExercises.mockRejectedValue(new OfflineError());
     mockCachedExercises.mockResolvedValue([SQUAT]);
 
-    render(<AddExerciseToSessionScreen />);
+    await render(<AddExerciseToSessionScreen />);
 
     await waitFor(() => expect(mockCachedExercises).toHaveBeenCalledWith('strength'));
     expect(await screen.findByText('Back Squat')).toBeTruthy();
@@ -110,7 +110,7 @@ describe('when the catalog cannot be reached', () => {
     mockFetchExercises.mockRejectedValue(new ApiError('boom', 'internal', 500));
     mockCachedExercises.mockResolvedValue([SQUAT, BENCH]);
 
-    render(<AddExerciseToSessionScreen />);
+    await render(<AddExerciseToSessionScreen />);
     await waitFor(() => expect(screen.getByTestId('session-add-search')).toBeTruthy());
 
     await act(async () => {
@@ -124,7 +124,7 @@ describe('when the catalog cannot be reached', () => {
 
 it('renders the live catalog when the request succeeds', async () => {
   mockFetchExercises.mockResolvedValue([SQUAT]);
-  render(<AddExerciseToSessionScreen />);
+  await render(<AddExerciseToSessionScreen />);
   expect(await screen.findByText('Back Squat')).toBeTruthy();
   expect(mockCachedExercises).not.toHaveBeenCalled();
 });

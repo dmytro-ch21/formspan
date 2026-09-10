@@ -27,17 +27,17 @@ const card = (over: Partial<CardData> = {}): CardData => ({
   ...over,
 });
 
-it('falls back to the deterministic mountain when no photo was picked', () => {
+it('falls back to the deterministic mountain when no photo was picked', async () => {
   const data = card();
-  render(<SessionCard data={data} width={360} />);
+  await render(<SessionCard data={data} width={360} />);
 
   const photo = screen.getByTestId('session-card-photo');
   expect(photo.props.source).toBe(MOUNTAINS[mountainFor(data.id)]);
 });
 
-it('renders the athlete\'s own photo in the mountain\'s place when one is set', () => {
+it('renders the athlete\'s own photo in the mountain\'s place when one is set', async () => {
   const data = card({ backgroundUri: 'file:///cache/picked-1080.jpg' });
-  render(<SessionCard data={data} width={360} />);
+  await render(<SessionCard data={data} width={360} />);
 
   const photo = screen.getByTestId('session-card-photo');
   // THE assertion this ticket is about — not merely "an Image exists", but
@@ -48,12 +48,12 @@ it('renders the athlete\'s own photo in the mountain\'s place when one is set', 
   expect(photo.props.source).not.toBe(MOUNTAINS[mountainFor(data.id)]);
 });
 
-it('an empty string is treated as "no photo" rather than an empty image source', () => {
+it('an empty string is treated as "no photo" rather than an empty image source', async () => {
   // Defensive: a caller that clears the picked photo by resetting to '' (as
   // opposed to `undefined`) must still see the mountain, not a broken Image
   // pointed at nothing.
   const data = card({ backgroundUri: '' });
-  render(<SessionCard data={data} width={360} />);
+  await render(<SessionCard data={data} width={360} />);
 
   const photo = screen.getByTestId('session-card-photo');
   expect(photo.props.source).toBe(MOUNTAINS[mountainFor(data.id)]);

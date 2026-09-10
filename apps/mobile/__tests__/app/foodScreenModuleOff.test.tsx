@@ -149,9 +149,9 @@ beforeEach(() => {
   mockFocusCbs.length = 0;
 });
 
-it('names the module that is off instead of rendering an empty day', () => {
+it('names the module that is off instead of rendering an empty day', async () => {
   withModules([nutrition(false)]);
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
 
   expect(screen.getByTestId('food-disabled')).toBeTruthy();
   expect(screen.getByText('Nutrition is turned off')).toBeTruthy();
@@ -163,9 +163,9 @@ it('names the module that is off instead of rendering an empty day', () => {
 // Guarded, not merely hidden: without this the screen asks the server for a
 // target on every focus while showing an explanation instead. Both render
 // identically, so only this assertion tells them apart.
-it('reads nothing, locally or from the server, while it is off', () => {
+it('reads nothing, locally or from the server, while it is off', async () => {
   withModules([nutrition(false)]);
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
 
   expect(listTargets).not.toHaveBeenCalled();
   expect(localEntries).not.toHaveBeenCalled();
@@ -183,7 +183,7 @@ it('reads nothing, locally or from the server, while it is off', () => {
  */
 it('is unaffected by a different module being turned off', async () => {
   withModules([nutrition(true), runningOff]);
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
 
   expect(screen.queryByTestId('food-disabled')).toBeNull();
   await waitFor(() => expect(listTargets).toHaveBeenCalled());
@@ -200,7 +200,7 @@ it('is unaffected by a different module being turned off', async () => {
 // tab bar that holds a frame for the same reason.
 it('claims nothing before the module set has been read', async () => {
   withModules([], false);
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
 
   expect(screen.queryByTestId('food-disabled')).toBeNull();
   // The screen proceeds to load normally in this state, so its reads have to be

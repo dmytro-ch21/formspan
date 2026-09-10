@@ -61,7 +61,7 @@ describe('an observed maximum', () => {
   });
 
   it('says which maximum is in force, and does not call it estimated', async () => {
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-hrmax')).toBeTruthy());
     expect(screen.getByTestId('hr-zones-hrmax')).toHaveTextContent('191 bpm');
     expect(screen.getByTestId('hr-zones-source')).toHaveTextContent(
@@ -71,7 +71,7 @@ describe('an observed maximum', () => {
   });
 
   it('shows all five zones in beats, not just in words', async () => {
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-zone-1')).toBeTruthy());
     // 191 bpm: floors at ceil(0.5..0.9 x 191) = 96 / 115 / 134 / 153 / 172.
     expect(screen.getByTestId('hr-zones-zone-1')).toHaveTextContent(/96-114 bpm/);
@@ -80,7 +80,7 @@ describe('an observed maximum', () => {
   });
 
   it('shows when it was recorded and how much evidence is behind it', async () => {
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones')).toBeTruthy());
     // The date is formatted for the DEVICE's locale (`toLocaleDateString`
     // with no locale argument), so this asserts the parts rather than one
@@ -91,7 +91,7 @@ describe('an observed maximum', () => {
   });
 
   it('does not nag an athlete who already has a measured maximum', async () => {
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones')).toBeTruthy());
     expect(screen.queryByTestId('hr-zones-upgrade-note')).toBeNull();
   });
@@ -104,14 +104,14 @@ describe('an age-estimated maximum', () => {
   });
 
   it('says so, and shows the arithmetic rather than only the answer', async () => {
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-source')).toBeTruthy());
     expect(screen.getByTestId('hr-zones-source')).toHaveTextContent('Estimated from your age');
     expect(screen.getByText(/^220 − \d+ = \d+$/)).toBeTruthy();
   });
 
   it('says how to replace it with a measured one', async () => {
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-upgrade-note')).toBeTruthy());
   });
 });
@@ -120,7 +120,7 @@ describe('nothing to go on', () => {
   it('names what is missing and shows no number at all', async () => {
     mockGetObservedHRMax.mockResolvedValue(null);
     mockGetProfile.mockResolvedValue({ date_of_birth: null });
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-unresolved')).toBeTruthy());
 
     expect(screen.getByText('We cannot work out your zones yet')).toBeTruthy();
@@ -134,7 +134,7 @@ describe('nothing to go on', () => {
   it('an unreachable profile is a different sentence from an empty one', async () => {
     mockGetObservedHRMax.mockResolvedValue(null);
     mockGetProfile.mockRejectedValue(new Error('offline'));
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-error')).toBeTruthy());
     expect(screen.queryByTestId('hr-zones-unresolved')).toBeNull();
   });
@@ -144,7 +144,7 @@ describe('nothing to go on', () => {
     // this endpoint must not cost the athlete the zones they already had.
     mockGetObservedHRMax.mockRejectedValue(new Error('404'));
     mockGetProfile.mockResolvedValue({ date_of_birth: '1990-03-01' });
-    render(<HRZonesScreen />);
+    await render(<HRZonesScreen />);
     await waitFor(() => expect(screen.getByTestId('hr-zones-source')).toBeTruthy());
     expect(screen.getByTestId('hr-zones-source')).toHaveTextContent('Estimated from your age');
   });

@@ -145,7 +145,7 @@ beforeEach(() => {
 it('names a planned day the week on screen cannot reach', async () => {
   mockListPlannedBetween.mockResolvedValue([planned(BEYOND_THIS_WEEK)]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   const row = await screen.findByTestId('plan-later');
   expect(row.props.accessibilityLabel).toBe('Next planned: BJJ session, 12 Aug');
@@ -154,7 +154,7 @@ it('names a planned day the week on screen cannot reach', async () => {
 it('leaves a day inside the visible week to the planner that already draws it', async () => {
   mockListPlannedBetween.mockResolvedValue([planned(INSIDE_THIS_WEEK)]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   // Sequenced on a POSITIVE artifact of the same resolved read, not on the
   // Templates heading. That heading renders on first paint whatever the reads
@@ -168,7 +168,7 @@ it('leaves a day inside the visible week to the planner that already draws it', 
 });
 
 it('draws nothing at all when nothing is planned ahead', async () => {
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   expect(await screen.findByText('TEMPLATES')).toBeTruthy();
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
@@ -185,7 +185,7 @@ it('says nothing while the plan read is still in flight', async () => {
   // lasts exactly long enough to be read and never long enough to be reported.
   mockListPlannedBetween.mockReturnValue(new Promise<PlannedSession[]>(() => {}));
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   expect(await screen.findByText('TEMPLATES')).toBeTruthy();
   expect(screen.queryByTestId('plan-later')).toBeNull();
@@ -199,7 +199,7 @@ it('says the plan could not be read, because the week above will not', async () 
   // rows are not a fact about them.
   mockListPlannedBetween.mockRejectedValue(new Error('disk'));
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   expect(await screen.findByTestId('plan-later-unavailable')).toBeTruthy();
   expect(screen.queryByTestId('plan-later')).toBeNull();
@@ -211,7 +211,7 @@ it('does not offer to start a day that has not arrived', async () => {
   // athlete who means it.
   mockListPlannedBetween.mockResolvedValue([planned(BEYOND_THIS_WEEK)]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   const row = await screen.findByTestId('plan-later');
   expect(row.props.accessibilityRole).toBe('text');

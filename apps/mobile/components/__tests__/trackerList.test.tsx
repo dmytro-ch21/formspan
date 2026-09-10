@@ -73,17 +73,17 @@ const props = {
   testID: 'today-trackers',
 };
 
-it('draws every tracker when no limit is given — Food gets all of them', () => {
+it('draws every tracker when no limit is given — Food gets all of them', async () => {
   const ts = ['a', 'b', 'c', 'd', 'e'].map((id) => tracker(id));
-  render(<TrackerList day={day(ts)} {...props} />);
+  await render(<TrackerList day={day(ts)} {...props} />);
 
   for (const t of ts) expect(screen.getByTestId(`tracker-card-${t.id}`)).toBeTruthy();
   expect(screen.queryByTestId('today-trackers-more')).toBeNull();
 });
 
-it('collapses past the limit, and the hidden ones are genuinely not drawn', () => {
+it('collapses past the limit, and the hidden ones are genuinely not drawn', async () => {
   const ts = ['a', 'b', 'c', 'd', 'e'].map((id) => tracker(id));
-  render(<TrackerList day={day(ts)} collapseAfter={3} {...props} />);
+  await render(<TrackerList day={day(ts)} collapseAfter={3} {...props} />);
 
   expect(screen.getByTestId('tracker-card-a')).toBeTruthy();
   expect(screen.getByTestId('tracker-card-c')).toBeTruthy();
@@ -93,34 +93,34 @@ it('collapses past the limit, and the hidden ones are genuinely not drawn', () =
   expect(screen.queryByTestId('tracker-card-e')).toBeNull();
 });
 
-it('does not collapse when the list exactly fits', () => {
+it('does not collapse when the list exactly fits', async () => {
   // The boundary. `> limit` and `>= limit` differ by exactly this case, and
   // the wrong one hides a card behind a row reading "0 more".
   const ts = ['a', 'b', 'c'].map((id) => tracker(id));
-  render(<TrackerList day={day(ts)} collapseAfter={3} {...props} />);
+  await render(<TrackerList day={day(ts)} collapseAfter={3} {...props} />);
   expect(screen.getByTestId('tracker-card-c')).toBeTruthy();
   expect(screen.queryByTestId('today-trackers-more')).toBeNull();
 });
 
-it('says how many of the hidden ones still have something to log', () => {
+it('says how many of the hidden ones still have something to log', async () => {
   const ts = ['a', 'b', 'c', 'd', 'e'].map((id) => tracker(id));
   // `d` is done (1 of 1), `e` is not. The whole reason the row states this
   // rather than "2 more": a finished tracker is not a reason to expand, and
   // being on Today is about the ones you have NOT done.
-  render(<TrackerList day={day(ts, { d: 1 })} collapseAfter={3} {...props} />);
+  await render(<TrackerList day={day(ts, { d: 1 })} collapseAfter={3} {...props} />);
 
   expect(screen.getByText('2 more trackers, 1 still to log')).toBeTruthy();
 });
 
-it('says so plainly when nothing hidden is outstanding', () => {
+it('says so plainly when nothing hidden is outstanding', async () => {
   const ts = ['a', 'b', 'c', 'd'].map((id) => tracker(id));
-  render(<TrackerList day={day(ts, { d: 1 })} collapseAfter={3} {...props} />);
+  await render(<TrackerList day={day(ts, { d: 1 })} collapseAfter={3} {...props} />);
   // Singular, and no scolding. This project does not do shame-based messaging,
   // and praise is the same mechanism wearing a friendlier face.
   expect(screen.getByText('1 more tracker, all done')).toBeTruthy();
 });
 
-it('never counts a tracker with no target as outstanding', () => {
+it('never counts a tracker with no target as outstanding', async () => {
   // A count with no ceiling can never be finished, so counting it as
   // outstanding would make the row permanently urgent and therefore useless.
   const ts = [
@@ -129,13 +129,13 @@ it('never counts a tracker with no target as outstanding', () => {
     tracker('c'),
     tracker('d', { target: null }),
   ];
-  render(<TrackerList day={day(ts)} collapseAfter={3} {...props} />);
+  await render(<TrackerList day={day(ts)} collapseAfter={3} {...props} />);
   expect(screen.getByText('1 more tracker, all done')).toBeTruthy();
 });
 
-it('says nothing at all when this device has never been told', () => {
+it('says nothing at all when this device has never been told', async () => {
   const unknown: TrackerDay = { ...day([]), view: { state: 'unknown' } };
-  render(<TrackerList day={unknown} collapseAfter={3} {...props} />);
+  await render(<TrackerList day={unknown} collapseAfter={3} {...props} />);
   // Not "you have no trackers" — that is a claim from a read that never
   // happened, on the screen whose whole job is the reminder.
   expect(screen.queryByTestId('today-trackers-empty')).toBeNull();
@@ -154,20 +154,20 @@ it('says nothing at all when this device has never been told', () => {
  * re-render with a NEW one (must collapse). A test that only checked the second
  * would pass against a component that collapsed on every render.
  */
-it('stays expanded within a day and collapses when the day changes', () => {
+it('stays expanded within a day and collapses when the day changes', async () => {
   const ts = ['a', 'b', 'c', 'd', 'e'].map((id) => tracker(id));
-  const { rerender } = render(
+  const { rerender } = await render(
     <TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-20" {...props} />,
   );
   expect(screen.queryByTestId('tracker-card-e')).toBeNull();
 
-  fireEvent.press(screen.getByTestId('today-trackers-more'));
+  await fireEvent.press(screen.getByTestId('today-trackers-more'));
   expect(screen.getByTestId('tracker-card-e')).toBeTruthy();
 
-  rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-20" {...props} />);
+  await rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-20" {...props} />);
   expect(screen.getByTestId('tracker-card-e')).toBeTruthy();
 
-  rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-21" {...props} />);
+  await rerender(<TrackerList day={day(ts)} collapseAfter={3} collapseKey="2026-08-21" {...props} />);
   expect(screen.queryByTestId('tracker-card-e')).toBeNull();
 });
 
@@ -182,28 +182,28 @@ describe('N432: coffee taps also post to caffeine, when the athlete has one', ()
   const caffeine = tracker('caf-1', { preset: 'caffeine', name: 'Caffeine', target: 400 });
   const water = tracker('water-1', { preset: 'water', name: 'Water' });
 
-  it('offers a drink-type picker on the coffee card when there is a caffeine tracker to feed, and not on water', () => {
-    render(<TrackerList day={day([coffee, caffeine, water])} {...props} />);
+  it('offers a drink-type picker on the coffee card when there is a caffeine tracker to feed, and not on water', async () => {
+    await render(<TrackerList day={day([coffee, caffeine, water])} {...props} />);
 
-    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    await fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
     expect(screen.getByTestId('tracker-choice-coffee-1-espresso')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('tracker-add-water-1'));
+    await fireEvent.press(screen.getByTestId('tracker-add-water-1'));
     expect(screen.queryByTestId('tracker-choices-water-1')).toBeNull();
   });
 
-  it('passes the caffeine tracker and the picked mg figure through to addCoffeeTap', () => {
+  it('passes the caffeine tracker and the picked mg figure through to addCoffeeTap', async () => {
     const addCoffeeTap = jest.fn(async () => {});
     const d = { ...day([coffee, caffeine]), addCoffeeTap };
-    render(<TrackerList day={d} {...props} />);
+    await render(<TrackerList day={d} {...props} />);
 
-    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
-    fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-espresso'));
+    await fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    await fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-espresso'));
 
     expect(addCoffeeTap).toHaveBeenCalledWith(coffee, caffeine, 63, '2026-08-20');
   });
 
-  it('taps a plain cup with no picker at all when the athlete has no caffeine tracker', () => {
+  it('taps a plain cup with no picker at all when the athlete has no caffeine tracker', async () => {
     // No caffeine tracker at all in this athlete's list — the criterion that
     // a coffee tap must behave as if this ticket never shipped. Offering a
     // picker whose every choice discards its mg is a behaviour change in
@@ -212,45 +212,45 @@ describe('N432: coffee taps also post to caffeine, when the athlete has one', ()
     const addTap = jest.fn(async () => {});
     const addCoffeeTap = jest.fn(async () => {});
     const d = { ...day([coffee]), addTap, addCoffeeTap };
-    render(<TrackerList day={d} {...props} />);
+    await render(<TrackerList day={d} {...props} />);
 
     expect(screen.queryByTestId('tracker-choice-coffee-1-drip')).toBeNull();
-    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    await fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
 
     expect(addTap).toHaveBeenCalledWith(coffee, '2026-08-20');
     expect(addCoffeeTap).not.toHaveBeenCalled();
   });
 
-  it('passes null mg for "Other" — never an invented figure', () => {
+  it('passes null mg for "Other" — never an invented figure', async () => {
     const addCoffeeTap = jest.fn(async () => {});
     const d = { ...day([coffee, caffeine]), addCoffeeTap };
-    render(<TrackerList day={d} {...props} />);
+    await render(<TrackerList day={d} {...props} />);
 
-    fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
-    fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-other'));
+    await fireEvent.press(screen.getByTestId('tracker-add-coffee-1'));
+    await fireEvent.press(screen.getByTestId('tracker-choice-coffee-1-other'));
 
     expect(addCoffeeTap).toHaveBeenCalledWith(coffee, caffeine, null, '2026-08-20');
   });
 
-  it('removing a coffee tap goes through removeCoffeeTap, which also undoes the paired entry', () => {
+  it('removing a coffee tap goes through removeCoffeeTap, which also undoes the paired entry', async () => {
     const removeCoffeeTap = jest.fn(async () => {});
     const removeEntry = jest.fn(async () => {});
     const d = { ...day([coffee], { 'coffee-1': 1 }), removeCoffeeTap, removeEntry };
-    render(<TrackerList day={d} {...props} />);
+    await render(<TrackerList day={d} {...props} />);
 
-    fireEvent.press(screen.getByTestId('tracker-glyph-coffee-1-0'));
+    await fireEvent.press(screen.getByTestId('tracker-glyph-coffee-1-0'));
 
     expect(removeCoffeeTap).toHaveBeenCalledWith('coffee-1-0', '2026-08-20');
     expect(removeEntry).not.toHaveBeenCalled();
   });
 
-  it('removing a WATER tap still goes through the ordinary removeEntry — water carries no caffeine', () => {
+  it('removing a WATER tap still goes through the ordinary removeEntry — water carries no caffeine', async () => {
     const removeCoffeeTap = jest.fn(async () => {});
     const removeEntry = jest.fn(async () => {});
     const d = { ...day([water], { 'water-1': 1 }), removeCoffeeTap, removeEntry };
-    render(<TrackerList day={d} {...props} />);
+    await render(<TrackerList day={d} {...props} />);
 
-    fireEvent.press(screen.getByTestId('tracker-glyph-water-1-0'));
+    await fireEvent.press(screen.getByTestId('tracker-glyph-water-1-0'));
 
     expect(removeEntry).toHaveBeenCalledWith('water-1-0', '2026-08-20');
     expect(removeCoffeeTap).not.toHaveBeenCalled();

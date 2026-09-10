@@ -112,14 +112,14 @@ function estimate(items: unknown[]) {
 }
 
 async function draftAndLog() {
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-log'));
+    await fireEvent.press(screen.getByTestId('describe-log'));
   });
 }
 
@@ -207,23 +207,23 @@ it('does not learn the packet from the remainder of a failed multi-item save', a
   mockDescribe.mockResolvedValue(estimate([item(), item({ name: 'Banana' })]));
   mockLogFood.mockResolvedValueOnce('entry-1').mockRejectedValueOnce(new Error('offline'));
 
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'a bar and a banana');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'a bar and a banana');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
 
   // First attempt: one lands, one fails and stays on screen.
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-log'));
+    await fireEvent.press(screen.getByTestId('describe-log'));
   });
   expect(mockRemember).not.toHaveBeenCalled();
 
   // The retry now sees a single row. It must still refuse to teach the packet.
   mockLogFood.mockResolvedValue('entry-2');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-log'));
+    await fireEvent.press(screen.getByTestId('describe-log'));
   });
   expect(mockLogFood).toHaveBeenCalledTimes(3);
   expect(mockRemember).not.toHaveBeenCalled();
@@ -237,10 +237,10 @@ it('says which barcode a confirm will be remembered for', async () => {
   mockParams.barcode = '4006381333931';
   mockDescribe.mockResolvedValue(estimate([item()]));
 
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-barcode-note')).toBeTruthy());
   expect(screen.getByTestId('describe-barcode-note')).toHaveTextContent(/4006381333931/);
@@ -250,10 +250,10 @@ it('says which barcode a confirm will be remembered for', async () => {
 it('shows no barcode note when there was no barcode', async () => {
   mockDescribe.mockResolvedValue(estimate([item()]));
 
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'a protein bar');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
   expect(screen.queryByTestId('describe-barcode-note')).toBeNull();

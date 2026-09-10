@@ -36,25 +36,27 @@ function card(readings: Reading[] | null, range: '1W' | '1M' | '1Y' = '1M') {
 // THE ONE THAT MATTERS. "We could not load it" is a claim about the network;
 // "record your weight and the trend appears" is a claim about the athlete.
 // Rendering the second when the first is true blames somebody for a tunnel.
-test('a failed load never says "you have no readings"', () => {
-  card(null);
+test('a failed load never says "you have no readings"', async () => {
+  await card(null);
   const said = screen.getByTestId('trend-card-empty').props.children as string;
   expect(said).toMatch(/couldn't load/i);
   expect(said).not.toMatch(/record your weight/i);
 });
 
-test('never having recorded says so, and invites the first one', () => {
-  card([]);
+test('never having recorded says so, and invites the first one', async () => {
+  await card([]);
   expect(screen.getByTestId('trend-card-empty').props.children).toMatch(/record your weight/i);
 });
 
 // An athlete with two years of weigh-ins must not be told they have none
 // because they are looking at a week.
-test('readings outside the window point at the wider range, not at emptiness', () => {
-  const said = (() => {
-    card([{ on: shift(TODAY, -300), value: 100 }], '1W');
-    return screen.getByTestId('trend-card-empty').props.children as string;
-  })();
+test('readings outside the window point at the wider range, not at emptiness', async () => {
+  // The wrapper this used to be — a synchronous IIFE — became an ASYNC one when
+  // `card` did, which left `said` holding a promise that every matcher below
+  // then compared against as if it were the copy. Flattened rather than
+  // awaited: the IIFE was never doing anything the test body could not.
+  await card([{ on: shift(TODAY, -300), value: 100 }], '1W');
+  const said = screen.getByTestId('trend-card-empty').props.children as string;
   expect(said).toMatch(/nothing in this range/i);
   expect(said).toMatch(/1 reading/);
   expect(said).not.toMatch(/record your weight/i);
@@ -62,12 +64,12 @@ test('readings outside the window point at the wider range, not at emptiness', (
 
 // The count is what separates a trend from two weigh-ins, and the athlete
 // cannot tell them apart from the change alone.
-test('a delta is never shown without how many readings produced it', () => {
+test('a delta is never shown without how many readings produced it', async () => {
   const readings: Reading[] = [
     { on: shift(TODAY, -20), value: 100 },
     { on: shift(TODAY, -1), value: 97 },
   ];
-  card(readings);
+  await card(readings);
   expect(screen.getByTestId('trend-card-delta')).toBeTruthy();
   const evidence = screen.getByTestId('trend-card-evidence').props.children;
   expect(JSON.stringify(evidence)).toContain('2');
@@ -75,8 +77,8 @@ test('a delta is never shown without how many readings produced it', () => {
 
 // A delta that fell back to raw readings carries the day-to-day water swing the
 // smoothed line exists to remove, and must not wear the line's credibility.
-test('a delta measured off readings admits it on screen', () => {
-  card([
+test('a delta measured off readings admits it on screen', async () => {
+  await card([
     { on: shift(TODAY, -20), value: 100 },
     { on: shift(TODAY, -1), value: 97 },
   ]);
@@ -87,16 +89,16 @@ test('a delta measured off readings admits it on screen', () => {
 
 // The scale's number, not the seven-day mean. Somebody who steps off a scale
 // and sees a different figure here will not trust either again.
-test('TODAY shows the latest raw reading', () => {
-  card([
+test('TODAY shows the latest raw reading', async () => {
+  await card([
     { on: shift(TODAY, -2), value: 100 },
     { on: shift(TODAY, -1), value: 93.4 },
   ]);
   expect(JSON.stringify(screen.getByTestId('trend-card-today').props.children)).toContain('93.4');
 });
 
-test('the action is always reachable, even with nothing to draw', () => {
-  card(null);
+test('the action is always reachable, even with nothing to draw', async () => {
+  await card(null);
   expect(screen.getByTestId('trend-card-action')).toBeTruthy();
 });
 
@@ -110,8 +112,8 @@ test('the action is always reachable, even with nothing to draw', () => {
 // must be able to shrink, or RN's default `flexShrink: 0` reproduces the
 // overflow regardless of what the device check finds. Removing either
 // `flexShrink` fails this test.
-test('the action pill and its label can both give up width rather than overflow the card', () => {
-  card([{ on: shift(TODAY, -1), value: 97 }]);
+test('the action pill and its label can both give up width rather than overflow the card', async () => {
+  await card([{ on: shift(TODAY, -1), value: 97 }]);
   const pillStyle = StyleSheet.flatten(screen.getByTestId('trend-card-action').props.style);
   const labelStyle = StyleSheet.flatten(screen.getByTestId('trend-card-action-label').props.style);
   expect(pillStyle.flexShrink).toBe(1);
@@ -134,12 +136,12 @@ test('the action pill and its label can both give up width rather than overflow 
 // reintroduce a way around.
 // ---------------------------------------------------------------------------
 
-test('an in-flight first load is not an empty series', () => {
+test('an in-flight first load is not an empty series', async () => {
   // What the card was handed while loading, before the fix.
   const looksEmpty = buildTrend({ readings: [], today: TODAY, range: '1M' });
   expect(looksEmpty.empty).toEqual({ kind: 'none' });
 
-  render(
+  await render(
     <TrendCard
       title="WEIGHT"
       series={looksEmpty}

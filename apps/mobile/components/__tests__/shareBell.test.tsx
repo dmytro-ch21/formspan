@@ -50,27 +50,27 @@ beforeEach(async () => {
   await settle();
 });
 
-it('is always there, with no badge while nothing is known', () => {
-  render(<ShareBell />);
+it('is always there, with no badge while nothing is known', async () => {
+  await render(<ShareBell />);
   expect(screen.getByTestId('share-bell')).toBeTruthy();
   expect(screen.queryByTestId('share-bell-badge', hidden)).toBeNull();
   expect(screen.getByLabelText('Shares')).toBeTruthy();
 });
 
 it('shows the count as a badge and says it as a sentence', async () => {
-  render(<ShareBell />);
-  act(() => publishShareInboxCount(3));
+  await render(<ShareBell />);
+  await act(() => publishShareInboxCount(3));
 
   expect(await screen.findByTestId('share-bell-badge', hidden)).toHaveTextContent('3');
   expect(screen.getByLabelText('Shares, 3 waiting')).toBeTruthy();
 });
 
 it('shows no badge at zero — not a "0"', async () => {
-  render(<ShareBell />);
-  act(() => publishShareInboxCount(3));
+  await render(<ShareBell />);
+  await act(() => publishShareInboxCount(3));
   await screen.findByTestId('share-bell-badge', hidden);
 
-  act(() => publishShareInboxCount(0));
+  await act(() => publishShareInboxCount(0));
   await waitFor(() => expect(screen.queryByTestId('share-bell-badge', hidden)).toBeNull());
   expect(screen.queryByText('0', hidden)).toBeNull();
   expect(screen.getByLabelText('Shares')).toBeTruthy();
@@ -83,7 +83,7 @@ it('shows no badge after a FAILED read — and not "0" either', async () => {
   setShareInboxIdentity(token);
   await settle();
 
-  render(<ShareBell />);
+  await render(<ShareBell />);
   await waitFor(() => expect(mockList).toHaveBeenCalled());
   await settle();
 
@@ -99,14 +99,14 @@ it('reflects a count the read did find', async () => {
   mockList.mockResolvedValue([{ id: 'a' }, { id: 'b' }]);
   setShareInboxIdentity(token);
 
-  render(<ShareBell />);
+  await render(<ShareBell />);
 
   expect(await screen.findByTestId('share-bell-badge', hidden)).toHaveTextContent('2');
 });
 
-it('opens the share inbox', () => {
-  render(<ShareBell />);
-  fireEvent.press(screen.getByTestId('share-bell'));
+it('opens the share inbox', async () => {
+  await render(<ShareBell />);
+  await fireEvent.press(screen.getByTestId('share-bell'));
   expect(mockPush).toHaveBeenCalledWith('/shared');
 });
 
@@ -117,7 +117,7 @@ it('refreshes on focus', async () => {
 
   // Past the throttle window, so the focus read is not skipped.
   const now = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
-  render(<ShareBell />);
+  await render(<ShareBell />);
   await waitFor(() => expect(mockList.mock.calls.length).toBe(before + 1));
   now.mockRestore();
 });

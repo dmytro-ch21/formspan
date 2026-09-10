@@ -70,111 +70,111 @@ function renderCard(over: Partial<React.ComponentProps<typeof NutritionCard>> = 
 }
 
 describe('the four absent states, which are four different sentences', () => {
-  it('not loaded says so, rather than claiming nothing was logged', () => {
+  it('not loaded says so, rather than claiming nothing was logged', async () => {
     // Asserting "nothing logged yet" while offline is a false claim about the
     // athlete's day — the same distinction CheckinCard makes.
-    renderCard({ view: { state: 'checking' } });
+    await renderCard({ view: { state: 'checking' } });
     expect(screen.getByText('Checking your target…')).toBeTruthy();
   });
 
-  it('an unreachable target is NOT reported as no target', () => {
+  it('an unreachable target is NOT reported as no target', async () => {
     // The pair that matters. "Set a target" is an instruction to go and do
     // homework; saying it to somebody who set one on web because this phone is
     // in a basement is the app being wrong rather than uninformed.
-    renderCard({ view: { state: 'unknown' } });
+    await renderCard({ view: { state: 'unknown' } });
     expect(screen.queryByText('Set a target to see what is left')).toBeNull();
     expect(screen.getByText('Cannot check your target from here — logging still works')).toBeTruthy();
   });
 
-  it('no target asks for one rather than inventing a number', () => {
-    renderCard({ view: { state: 'none' } });
+  it('no target asks for one rather than inventing a number', async () => {
+    await renderCard({ view: { state: 'none' } });
     expect(screen.getByText('Set a target to see what is left')).toBeTruthy();
     // And the figures are dashes, never zeros: zero would read as "you have
     // nothing left", which is the opposite of the truth.
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('—');
   });
 
-  it('a target with nothing logged shows the whole target as remaining', () => {
-    renderCard({ eaten: eatenFrom([]) });
+  it('a target with nothing logged shows the whole target as remaining', async () => {
+    await renderCard({ eaten: eatenFrom([]) });
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('2,400');
     expect(screen.getByText('nothing logged yet')).toBeTruthy();
   });
 });
 
 describe('the day total, which is what N54 reported missing', () => {
-  it('shows what was eaten even with NO target', () => {
+  it('shows what was eaten even with NO target', async () => {
     // The reported bug, exactly. The eaten figure used to live only in the
     // caption of the has-a-target branch, so an athlete who had not set one saw
     // per-meal subtotals and no day total anywhere — the number they said did
     // not add up was simply never drawn. What you ate does not depend on
     // whether you have a goal.
-    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'none' } });
+    await renderCard({ eaten: eatenFrom([entry()]), view: { state: 'none' } });
     expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
   });
 
-  it('shows what was eaten when the target could not be checked', () => {
-    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'unknown' } });
+  it('shows what was eaten when the target could not be checked', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]), view: { state: 'unknown' } });
     expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
   });
 
-  it('shows what was eaten while the target is still loading', () => {
-    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'checking' } });
+  it('shows what was eaten while the target is still loading', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]), view: { state: 'checking' } });
     expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
   });
 
-  it('labels the total with how many entries it came from', () => {
+  it('labels the total with how many entries it came from', async () => {
     // N28's honesty rule, which applies to a total exactly as to an average.
-    renderCard({ eaten: eatenFrom([entry(), entry()]) });
+    await renderCard({ eaten: eatenFrom([entry(), entry()]) });
     expect(screen.getByText('360 eaten · 2 entries')).toBeTruthy();
   });
 });
 
 describe('a failed read is not a day nobody ate on', () => {
-  it('says it could not read, rather than claiming nothing was logged', () => {
+  it('says it could not read, rather than claiming nothing was logged', async () => {
     // The N28 failure on the phone: an empty list means BOTH "nothing logged"
     // and "the read failed", and the screen used to render the second as the
     // first. `.catch(() => {})` in both callers is what produced it.
-    renderCard({ eaten: { state: 'unavailable' } });
+    await renderCard({ eaten: { state: 'unavailable' } });
     expect(screen.queryByText('nothing logged yet')).toBeNull();
     expect(screen.getByText('Could not read today’s food from this device')).toBeTruthy();
   });
 
-  it('shows dashes, not zeros, when the read failed', () => {
+  it('shows dashes, not zeros, when the read failed', async () => {
     // A zero here reads as "you have your whole target left", which is a
     // confident claim built on a read that never happened.
-    renderCard({ eaten: { state: 'unavailable' } });
+    await renderCard({ eaten: { state: 'unavailable' } });
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('—');
   });
 
-  it('does not claim nothing was logged while still loading', () => {
-    renderCard({ eaten: { state: 'loading' } });
+  it('does not claim nothing was logged while still loading', async () => {
+    await renderCard({ eaten: { state: 'loading' } });
     expect(screen.queryByText('nothing logged yet')).toBeNull();
     expect(screen.getByText('Loading your day…')).toBeTruthy();
   });
 
-  it('a genuine zero is still reported as a zero', () => {
+  it('a genuine zero is still reported as a zero', async () => {
     // The case that must NOT be swept up by the two above: an athlete who has
     // logged nothing has logged nothing, and saying so is correct.
-    renderCard({ eaten: eatenFrom([]) });
+    await renderCard({ eaten: eatenFrom([]) });
     expect(screen.getByText('nothing logged yet')).toBeTruthy();
   });
 });
 
 describe('remaining, not consumed', () => {
-  it('leads with what is left', () => {
-    renderCard({ eaten: eatenFrom([entry()]) });
+  it('leads with what is left', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]) });
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('2,220');
     expect(screen.getByTestId('fuel-remaining-protein').props.children).toBe('155 g');
   });
 
-  it('shows eaten once, as context, not as the headline', () => {
-    renderCard({ eaten: eatenFrom([entry()]) });
+  it('shows eaten once, as context, not as the headline', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]) });
     expect(screen.getByText('2,400 target')).toBeTruthy();
     expect(screen.getByText('180 eaten · 1 entry')).toBeTruthy();
   });
 
-  it('says "over" past the target rather than a negative number', () => {
-    renderCard({ eaten: eatenFrom([entry({ kcal: 2500 })]) });
+  it('says "over" past the target rather than a negative number', async () => {
+    await renderCard({ eaten: eatenFrom([entry({ kcal: 2500 })]) });
     expect(screen.getByText('kcal over')).toBeTruthy();
     expect(screen.getByTestId('fuel-remaining-kcal').props.children).toBe('100');
   });
@@ -197,8 +197,8 @@ describe('what it does not show', () => {
    * it would have thrown away the guard along with the old position — and the
    * thing being guarded (no dashboard) was never the thing that changed.
    */
-  it('shows the three macros on one row, and refuses the dashboard beyond them', () => {
-    renderCard({ eaten: eatenFrom([entry()]) });
+  it('shows the three macros on one row, and refuses the dashboard beyond them', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]) });
 
     // The approved split: three macros, each against its goal.
     expect(screen.getByTestId('macro-protein_g')).toBeTruthy();
@@ -220,27 +220,27 @@ describe('what it does not show', () => {
     expect(screen.queryByText(/%/)).toBeNull();
   });
 
-  it('shows a macro goal only when there is a target', () => {
-    renderCard({ eaten: eatenFrom([entry()]), view: { state: 'none' } });
+  it('shows a macro goal only when there is a target', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]), view: { state: 'none' } });
     // `60 / 0g` reads as being over a limit nobody set.
     expect(screen.queryByText(/\/ 0g/)).toBeNull();
   });
 
-  it('says nothing about the week until the count has been read', () => {
+  it('says nothing about the week until the count has been read', async () => {
     // Null, not zero. "0 of 7 days logged" from a query that has not run is a
     // claim about the athlete's week — and a discouraging one, which is the
     // shape the no-shame rule exists to avoid.
-    renderCard({ logged: null });
+    await renderCard({ logged: null });
     expect(screen.queryByTestId('fuel-days-logged')).toBeNull();
   });
 
-  it('labels the logged-day count with its denominator', () => {
-    renderCard({ logged: { logged: 5, considered: 7 } });
+  it('labels the logged-day count with its denominator', async () => {
+    await renderCard({ logged: { logged: 5, considered: 7 } });
     expect(screen.getByText('5 of 7 days logged this week')).toBeTruthy();
   });
 
-  it('shows no streak', () => {
-    renderCard({ eaten: eatenFrom([entry()]) });
+  it('shows no streak', async () => {
+    await renderCard({ eaten: eatenFrom([entry()]) });
     expect(screen.queryByText(/streak/i)).toBeNull();
   });
 });
@@ -267,24 +267,24 @@ describe('quick add', () => {
     items: [],
   };
 
-  it('offers the ranked foods as one-tap chips', () => {
+  it('offers the ranked foods as one-tap chips', async () => {
     const onQuickAdd = jest.fn();
-    renderCard({ quickAdd: [oats], onQuickAdd });
-    fireEvent.press(screen.getByTestId('fuel-quick-f1'));
+    await renderCard({ quickAdd: [oats], onQuickAdd });
+    await fireEvent.press(screen.getByTestId('fuel-quick-f1'));
     expect(onQuickAdd).toHaveBeenCalledWith(oats);
   });
 
-  it('renders no chip row at all when there is nothing to offer', () => {
-    renderCard({ quickAdd: [] });
+  it('renders no chip row at all when there is nothing to offer', async () => {
+    await renderCard({ quickAdd: [] });
     expect(screen.queryByTestId(/fuel-quick-/)).toBeNull();
   });
 });
 
 describe('the primary action', () => {
-  it('opens the log directly, which is the design doc’s one-tap quick log', () => {
+  it('opens the log directly, which is the design doc’s one-tap quick log', async () => {
     const onLog = jest.fn();
-    renderCard({ onLog });
-    fireEvent.press(screen.getByTestId('fuel-log'));
+    await renderCard({ onLog });
+    await fireEvent.press(screen.getByTestId('fuel-log'));
     expect(onLog).toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react-native';
 
 import { BeltPhoto } from '../BeltPhoto';
+import { findAllByType } from '@/lib/__tests__/support/tree';
 
 /**
  * Which number the belt is drawing, and that it reaches the drawing at all.
@@ -16,28 +17,28 @@ import { BeltPhoto } from '../BeltPhoto';
  * mounted rather than computed and dropped.
  */
 
-const stripes = () => screen.UNSAFE_root.findAllByType('RNSVGPath' as never);
+const stripes = () => findAllByType(screen.root, 'RNSVGPath');
 
 describe('BeltPhoto', () => {
-  it('draws stripes for a coloured belt and ignores its degree', () => {
-    render(<BeltPhoto belt="purple" stripes={3} degree={5} width={215} label="Purple belt" />);
+  it('draws stripes for a coloured belt and ignores its degree', async () => {
+    await render(<BeltPhoto belt="purple" stripes={3} degree={5} width={215} label="Purple belt" />);
     expect(stripes()).toHaveLength(3);
   });
 
-  it('draws degrees for a black belt and ignores its stripes', () => {
+  it('draws degrees for a black belt and ignores its stripes', async () => {
     // The one that matters: a black belt's `stripes` is 0 by convention, so
     // reading the wrong field draws nothing at all and looks like a plain belt.
-    render(<BeltPhoto belt="black" stripes={0} degree={4} width={215} label="Black belt" />);
+    await render(<BeltPhoto belt="black" stripes={0} degree={4} width={215} label="Black belt" />);
     expect(stripes()).toHaveLength(4);
   });
 
-  it('draws a bare belt at zero', () => {
-    render(<BeltPhoto belt="white" stripes={0} degree={0} width={215} label="White belt" />);
+  it('draws a bare belt at zero', async () => {
+    await render(<BeltPhoto belt="white" stripes={0} degree={0} width={215} label="White belt" />);
     expect(stripes()).toHaveLength(0);
   });
 
-  it('is one image to a screen reader, not a belt plus some shapes', () => {
-    render(<BeltPhoto belt="blue" stripes={2} degree={0} width={215} label="Blue belt, 2 stripes" />);
+  it('is one image to a screen reader, not a belt plus some shapes', async () => {
+    await render(<BeltPhoto belt="blue" stripes={2} degree={0} width={215} label="Blue belt, 2 stripes" />);
     expect(screen.getByLabelText('Blue belt, 2 stripes')).toBeTruthy();
   });
 });

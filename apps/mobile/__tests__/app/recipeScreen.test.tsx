@@ -114,7 +114,7 @@ describe('a recipe the server refused', () => {
         owed: false,
         rejected: 'name must be between 1 and 120 characters',
       });
-      render(<RecipeScreen />);
+      await render(<RecipeScreen />);
 
       await waitFor(() => expect(screen.getByTestId('recipe-rejected')).toBeTruthy());
       const copy = String(screen.getByTestId('recipe-rejected').props.children);
@@ -133,7 +133,7 @@ describe('a recipe the server refused', () => {
       .spyOn(AccessibilityInfo, 'announceForAccessibility')
       .mockImplementation(() => {});
     try {
-      render(<RecipeScreen />);
+      await render(<RecipeScreen />);
       await waitFor(() => expect(screen.getByTestId('recipe-name')).toBeTruthy());
       expect(screen.queryByTestId('recipe-rejected')).toBeNull();
       expect(announce).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ describe('which state the screen is in', () => {
     let settle: (v: unknown) => void = () => {};
     mockLocalFood.mockReturnValue(new Promise((res) => { settle = res; }));
 
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
 
     expect(screen.getByTestId('recipe-loading')).toBeTruthy();
     expect(screen.queryByTestId('recipe-missing')).toBeNull();
@@ -176,7 +176,7 @@ describe('which state the screen is in', () => {
    */
   it('says so when the recipe is not on this phone', async () => {
     mockLocalFood.mockResolvedValue(null);
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-missing')).toBeTruthy());
     expect(screen.queryByTestId('recipe-name')).toBeNull();
   });
@@ -188,7 +188,7 @@ describe('which state the screen is in', () => {
    */
   it('opens a blank editor for a new recipe without asking the database', async () => {
     mockParams = { id: 'r2', fresh: '1' };
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-name')).toBeTruthy());
     expect(mockLocalFood).not.toHaveBeenCalled();
     expect(screen.queryByTestId('recipe-missing')).toBeNull();
@@ -199,20 +199,20 @@ describe('which state the screen is in', () => {
     // and an ingredient list for something that has neither, and saving it
     // would turn a food into a recipe by accident.
     mockLocalFood.mockResolvedValue({ ...recipe(), kind: 'food', yield_servings: null, items: [] });
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-missing')).toBeTruthy());
   });
 });
 
 describe('editing an existing recipe', () => {
   it('loads the ingredients that are in it', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByText('Chicken breast')).toBeTruthy());
     expect(screen.getByText('Basmati rice, dry')).toBeTruthy();
   });
 
   it('shows what one portion contains', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     // (990 x 1 + 356 x 2) / 4 = 425.5
     await waitFor(() => expect(screen.getByTestId('recipe-per-kcal')).toHaveTextContent('426 kcal'));
   });
@@ -224,7 +224,7 @@ describe('editing an existing recipe', () => {
    * spreadsheet.
    */
   it('shows the quantity only when there is one to show', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByText('600 g')).toBeTruthy());
     expect(screen.getByText('2 × 100 g')).toBeTruthy();
   });
@@ -236,7 +236,7 @@ describe('editing an existing recipe', () => {
    * unchanged and undiscoverable — which is worse than either alternative.
    */
   it('tells the author that meals already logged keep their numbers', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-history-note')).toBeTruthy());
     expect(screen.getByTestId('recipe-history-note')).toHaveTextContent(
       /keep the numbers they were\s+logged with/,
@@ -244,9 +244,9 @@ describe('editing an existing recipe', () => {
   });
 
   it('saves under the id it was opened with, so a retry is the same row', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-save')).toBeTruthy());
-    await act(async () => { fireEvent.press(screen.getByTestId('recipe-save')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('recipe-save')); });
 
     expect(mockSaveFoodLocally).toHaveBeenCalledTimes(1);
     const [, food] = mockSaveFoodLocally.mock.calls[0];
@@ -263,9 +263,9 @@ describe('editing an existing recipe', () => {
    * derive 0 kcal per portion from it. Nothing would throw.
    */
   it('never saves a recipe without the ingredients it is showing', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-save')).toBeTruthy());
-    await act(async () => { fireEvent.press(screen.getByTestId('recipe-save')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('recipe-save')); });
 
     const [, food] = mockSaveFoodLocally.mock.calls[0];
     expect(food.items.map((i: { name: string }) => i.name)).toEqual([
@@ -283,9 +283,9 @@ describe('what it refuses to save', () => {
    */
   it('refuses a recipe with no ingredients, and says why', async () => {
     mockParams = { id: 'r2', fresh: '1' };
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-name')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('recipe-name'), 'Empty pot');
+    await fireEvent.changeText(screen.getByTestId('recipe-name'), 'Empty pot');
 
     expect(screen.getByTestId('recipe-problem')).toHaveTextContent(/at least one ingredient/);
     // **The disabled STATE, asserted separately from the press.**
@@ -299,7 +299,7 @@ describe('what it refuses to save', () => {
     expect(screen.getByTestId('recipe-save').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: true }),
     );
-    await act(async () => { fireEvent.press(screen.getByTestId('recipe-save')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('recipe-save')); });
     expect(mockSaveFoodLocally).not.toHaveBeenCalled();
   });
 
@@ -307,7 +307,7 @@ describe('what it refuses to save', () => {
     // The other half, and it is what stops the assertion above being satisfied
     // by a button that is ALWAYS disabled — which would pass every refusal test
     // in this block while making the screen unusable.
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-save')).toBeTruthy());
     expect(screen.getByTestId('recipe-save').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: false }),
@@ -315,12 +315,12 @@ describe('what it refuses to save', () => {
   });
 
   it('refuses a recipe with no name, and blames the name rather than the pot', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-name')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('recipe-name'), '   ');
+    await fireEvent.changeText(screen.getByTestId('recipe-name'), '   ');
 
     expect(screen.getByTestId('recipe-problem')).toHaveTextContent(/name/i);
-    await act(async () => { fireEvent.press(screen.getByTestId('recipe-save')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('recipe-save')); });
     expect(mockSaveFoodLocally).not.toHaveBeenCalled();
   });
 
@@ -330,16 +330,16 @@ describe('what it refuses to save', () => {
    * "Infinity kcal" over a form somebody is still filling in.
    */
   it('refuses an empty yield rather than dividing by it', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-yield')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('recipe-yield'), '');
+    await fireEvent.changeText(screen.getByTestId('recipe-yield'), '');
 
     expect(screen.getByTestId('recipe-problem')).toHaveTextContent(/how many portions/i);
     expect(screen.getByTestId('recipe-per-kcal')).toHaveTextContent('0 kcal');
   });
 
   it('accepts a complete recipe', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() => expect(screen.getByTestId('recipe-save')).toBeTruthy());
     expect(screen.queryByTestId('recipe-problem')).toBeNull();
   });
@@ -363,14 +363,14 @@ describe('fibre', () => {
         ],
       }),
     );
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() =>
       expect(screen.getByTestId('recipe-per-macros')).toHaveTextContent(/fibre not stated/),
     );
   });
 
   it('gives the figure when an ingredient did state it', async () => {
-    render(<RecipeScreen />);
+    await render(<RecipeScreen />);
     await waitFor(() =>
       expect(screen.getByTestId('recipe-per-macros')).toHaveTextContent(/\d+ fibre/),
     );

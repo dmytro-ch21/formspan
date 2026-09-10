@@ -51,14 +51,14 @@ beforeEach(() => mockFetch.mockReset());
 
 it('shows the unavailable message on a failed load, not "no training yet"', async () => {
   mockFetch.mockRejectedValue(new Error('offline'));
-  render(<TrainingLoadTrendScreen />);
+  await render(<TrainingLoadTrendScreen />);
   const empty = await screen.findByTestId('training-load-empty');
   expect(empty.props.children).toMatch(/couldn.?t load/i);
 });
 
 it('says so honestly when the account genuinely has no computed load yet', async () => {
   mockFetch.mockResolvedValue([]);
-  render(<TrainingLoadTrendScreen />);
+  await render(<TrainingLoadTrendScreen />);
   const empty = await screen.findByTestId('training-load-empty');
   expect(empty.props.children).toMatch(/no training load yet/i);
 });
@@ -67,7 +67,7 @@ it('renders sessions as entries and a readable delta once loaded', async () => {
   const older = daysAgo(60);
   const recent = daysAgo(5);
   mockFetch.mockResolvedValue([load('ses-1', older, 80), load('ses-2', recent, 120)]);
-  render(<TrainingLoadTrendScreen />);
+  await render(<TrainingLoadTrendScreen />);
 
   expect(await screen.findByTestId('training-load-delta')).toBeTruthy();
   expect(screen.getByTestId(`training-load-entry-${dayOf(older)}`)).toBeTruthy();
@@ -83,7 +83,7 @@ it('sums two sessions on the same day into one entry', async () => {
     load('ses-am', on, 50, 'strength'),
     load('ses-pm', on, 30, 'bjj'),
   ]);
-  render(<TrainingLoadTrendScreen />);
+  await render(<TrainingLoadTrendScreen />);
 
   const entry = await screen.findByTestId(`training-load-entry-${dayOf(on)}`);
   expect(entry).toBeTruthy();
@@ -94,10 +94,10 @@ it('sums two sessions on the same day into one entry', async () => {
 
 it('switching the range does not re-fetch — it slices what is already loaded', async () => {
   mockFetch.mockResolvedValue([load('ses-1', daysAgo(5), 100)]);
-  render(<TrainingLoadTrendScreen />);
+  await render(<TrainingLoadTrendScreen />);
   await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
 
-  fireEvent.press(await screen.findByTestId('training-load-range-1Y'));
+  await fireEvent.press(await screen.findByTestId('training-load-range-1Y'));
   await waitFor(() =>
     expect(screen.getByTestId('training-load-range-1Y').props.accessibilityState.selected).toBe(true),
   );
@@ -116,7 +116,7 @@ it('switching the range does not re-fetch — it slices what is already loaded',
 // rather than only in production.
 it('requests a window that stays under the backend range cap', async () => {
   mockFetch.mockResolvedValue([]);
-  render(<TrainingLoadTrendScreen />);
+  await render(<TrainingLoadTrendScreen />);
   await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
 
   const [, from, to] = mockFetch.mock.calls[0] as [unknown, string, string];

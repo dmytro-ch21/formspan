@@ -155,25 +155,25 @@ beforeEach(() => {
  */
 describe('the back button — N484', () => {
   it('is present, reachable by accessibility label', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-back')).toBeTruthy());
     expect(screen.getByLabelText('Back')).toBeTruthy();
   });
 
   it('goes back when there is somewhere to go back to', async () => {
     mockCanGoBack.mockReturnValue(true);
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-back')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('library-back'));
+    await fireEvent.press(screen.getByTestId('library-back'));
     expect(mockBack).toHaveBeenCalledTimes(1);
     expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it('falls back to the home route with nothing to go back to — a deep link, say', async () => {
     mockCanGoBack.mockReturnValue(false);
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-back')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('library-back'));
+    await fireEvent.press(screen.getByTestId('library-back'));
     expect(mockReplace).toHaveBeenCalledWith('/');
     expect(mockBack).not.toHaveBeenCalled();
   });
@@ -181,7 +181,7 @@ describe('the back button — N484', () => {
 
 describe("the edge beneath Library's fixed chrome", () => {
   it('draws the rule on the chrome wrap, in the SAME token as the header/tab-bar edge', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-chrome')).toBeTruthy());
     // LITERAL, per `screenHeader.test.tsx`'s own convention — `vola.lineBoundary`.
     // Reusing the token by reference here would pass even if `library.tsx` had
@@ -194,14 +194,14 @@ describe("the edge beneath Library's fixed chrome", () => {
   });
 
   it('draws NO rule on the inner controls block itself — the wrap owns it, not the block', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-controls')).toBeTruthy());
     const controls = screen.getByTestId('library-controls');
     expect(StyleSheet.flatten(controls.props.style).borderBottomWidth).toBeUndefined();
   });
 
   it('leaves the shared ScreenHeader carrying none — one rule, not two stacked seams', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-chrome')).toBeTruthy());
     const header = screen.getByTestId('screen-header');
     expect(header).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });
@@ -219,7 +219,7 @@ describe("the edge beneath Library's fixed chrome", () => {
    */
   it('keeps the error banner INSIDE the bordered wrap, so the rule stays below it too', async () => {
     mockFetchExercises.mockRejectedValue(new ApiError('offline', 'internal', 500));
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('library-error')).toBeTruthy());
     const chrome = screen.getByTestId('library-chrome');
     // The error banner is a DESCENDANT of the bordered wrap — proving the

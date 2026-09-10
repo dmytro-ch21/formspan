@@ -28,39 +28,39 @@ beforeEach(() => {
 });
 
 describe('past (a day already gone, unmet)', () => {
-  it('is a real button, not inert text', () => {
-    render(<UpNextCard {...BASE} past testID="card" />);
+  it('is a real button, not inert text', async () => {
+    await render(<UpNextCard {...BASE} past testID="card" />);
     const card = screen.getByTestId('card');
     expect(card.props.accessibilityRole).toBe('button');
   });
 
-  it('tapping the card calls onOpen', () => {
-    render(<UpNextCard {...BASE} past testID="card" />);
-    fireEvent.press(screen.getByTestId('card'));
+  it('tapping the card calls onOpen', async () => {
+    await render(<UpNextCard {...BASE} past testID="card" />);
+    await fireEvent.press(screen.getByTestId('card'));
     expect(BASE.onOpen).toHaveBeenCalledTimes(1);
     expect(BASE.onLog).not.toHaveBeenCalled();
   });
 
-  it('says the status label, still', () => {
-    render(<UpNextCard {...BASE} past pastLabel="Not logged" testID="card" />);
+  it('says the status label, still', async () => {
+    await render(<UpNextCard {...BASE} past pastLabel="Not logged" testID="card" />);
     expect(screen.getByText('Not logged')).toBeTruthy();
   });
 
-  it('folds pastLabel into the DEFAULT accessibilityLabel, so a future caller cannot omit it silently', () => {
+  it('folds pastLabel into the DEFAULT accessibilityLabel, so a future caller cannot omit it silently', async () => {
     // The one real call site always passes an explicit accessibilityLabel —
     // this guards the fallback a second caller would get if it didn't.
-    render(<UpNextCard {...BASE} past pastLabel="Not logged" testID="card" />);
+    await render(<UpNextCard {...BASE} past pastLabel="Not logged" testID="card" />);
     const card = screen.getByTestId('card');
     expect(card.props.accessibilityLabel).toBe('Strength session, Today. Not logged');
   });
 
-  it('renders no second, nested Log control — the card itself is the one target', () => {
-    render(<UpNextCard {...BASE} past testID="card" />);
+  it('renders no second, nested Log control — the card itself is the one target', async () => {
+    await render(<UpNextCard {...BASE} past testID="card" />);
     expect(screen.queryByTestId('up-next-log')).toBeNull();
   });
 
-  it('never marks the card disabled — the fold that made VoiceOver say "dimmed"', () => {
-    render(<UpNextCard {...BASE} past testID="card" />);
+  it('never marks the card disabled — the fold that made VoiceOver say "dimmed"', async () => {
+    await render(<UpNextCard {...BASE} past testID="card" />);
     const card = screen.getByTestId('card');
     // `Pressable` always reports an `accessibilityState` object (RN
     // populates every field, even ones nobody set) — what matters is that
@@ -72,8 +72,8 @@ describe('past (a day already gone, unmet)', () => {
     expect(card.props.accessibilityState?.disabled).toBeUndefined();
   });
 
-  it('does not composite a blanket opacity over the card', () => {
-    render(<UpNextCard {...BASE} past testID="card" />);
+  it('does not composite a blanket opacity over the card', async () => {
+    await render(<UpNextCard {...BASE} past testID="card" />);
     const card = screen.getByTestId('card');
     const style = Array.isArray(card.props.style) ? card.props.style : [card.props.style];
     for (const s of style) {
@@ -83,23 +83,23 @@ describe('past (a day already gone, unmet)', () => {
 });
 
 describe('not past (today or a future day) — unaffected', () => {
-  it('is a button and tapping the card calls onOpen', () => {
-    render(<UpNextCard {...BASE} testID="card" />);
+  it('is a button and tapping the card calls onOpen', async () => {
+    await render(<UpNextCard {...BASE} testID="card" />);
     const card = screen.getByTestId('card');
     expect(card.props.accessibilityRole).toBe('button');
-    fireEvent.press(card);
+    await fireEvent.press(card);
     expect(BASE.onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('renders a separate Log control that calls onLog without triggering onOpen', () => {
-    render(<UpNextCard {...BASE} testID="card" />);
-    fireEvent.press(screen.getByTestId('up-next-log'));
+  it('renders a separate Log control that calls onLog without triggering onOpen', async () => {
+    await render(<UpNextCard {...BASE} testID="card" />);
+    await fireEvent.press(screen.getByTestId('up-next-log'));
     expect(BASE.onLog).toHaveBeenCalledTimes(1);
     expect(BASE.onOpen).not.toHaveBeenCalled();
   });
 
-  it('does not render the past status label', () => {
-    render(<UpNextCard {...BASE} testID="card" />);
+  it('does not render the past status label', async () => {
+    await render(<UpNextCard {...BASE} testID="card" />);
     expect(screen.queryByText('Not logged')).toBeNull();
   });
 });

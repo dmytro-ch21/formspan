@@ -38,8 +38,8 @@ function mod(over: Partial<Module> & { key: string }): Module {
   };
 }
 
-it('names the module that is off, and says where to turn it back on', () => {
-  render(<ModuleOffNotice module={mod({ key: 'nutrition', label: 'Nutrition' })} action="log food" />);
+it('names the module that is off, and says where to turn it back on', async () => {
+  await render(<ModuleOffNotice module={mod({ key: 'nutrition', label: 'Nutrition' })} action="log food" />);
 
   expect(screen.getByText('Nutrition is turned off')).toBeTruthy();
   // The destination is NAMED. #370's whole finding was that the athlete never
@@ -52,8 +52,8 @@ it('names the module that is off, and says where to turn it back on', () => {
 // The registry's LABEL, not the key. "1 discipline is off" does not tell an
 // athlete it is the one they went looking for, and capitalising a key gives
 // "Bjj" where the registry says "BJJ".
-it('uses the registry label rather than the key', () => {
-  render(<ModuleOffNotice module={mod({ key: 'bjj', label: 'BJJ' })} action="log rolls" />);
+it('uses the registry label rather than the key', async () => {
+  await render(<ModuleOffNotice module={mod({ key: 'bjj', label: 'BJJ' })} action="log rolls" />);
 
   expect(screen.getByText('BJJ is turned off')).toBeTruthy();
   expect(screen.queryByText(/bjj is turned off/)).toBeNull();
@@ -71,8 +71,8 @@ it('uses the registry label rather than the key', () => {
  * presence of some other text. Without the assertion on "turned off" a
  * component that rendered both blocks would pass.
  */
-it('makes no offer when this deployment has no such module', () => {
-  render(<ModuleOffNotice module={undefined} action="log food" />);
+it('makes no offer when this deployment has no such module', async () => {
+  await render(<ModuleOffNotice module={undefined} action="log food" />);
 
   expect(screen.getByText('Not available')).toBeTruthy();
   expect(screen.getByText(/Nothing here is set up to log food/)).toBeTruthy();

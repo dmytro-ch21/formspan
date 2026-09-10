@@ -63,38 +63,38 @@ function show(modules: Module[]) {
 
 beforeEach(() => mockPush.mockClear());
 
-it('names the discipline that is turned off instead of just omitting it', () => {
-  show([strength, bjjOff]);
+it('names the discipline that is turned off instead of just omitting it', async () => {
+  await show([strength, bjjOff]);
   // The row exists AND names BJJ. "1 discipline is off" would not tell an
   // athlete it is the one they were looking for.
   expect(screen.getByTestId('pick-disabled-sports')).toBeTruthy();
   expect(screen.getByText(/BJJ/)).toBeTruthy();
 });
 
-it('leads somewhere that can actually turn it on', () => {
-  show([strength, bjjOff]);
-  fireEvent.press(screen.getByTestId('pick-disabled-sports'));
+it('leads somewhere that can actually turn it on', async () => {
+  await show([strength, bjjOff]);
+  await fireEvent.press(screen.getByTestId('pick-disabled-sports'));
   // A row that explains but cannot act is the same dead end as the Sports row
   // in You, which displayed the answer and was inert.
   expect(mockPush).toHaveBeenCalledWith('/profile/edit');
 });
 
-it('says nothing when every discipline is already on', () => {
-  show([strength, mod({ key: 'bjj', label: 'BJJ' })]);
+it('says nothing when every discipline is already on', async () => {
+  await show([strength, mod({ key: 'bjj', label: 'BJJ' })]);
   expect(screen.queryByTestId('pick-disabled-sports')).toBeNull();
 });
 
 // Nutrition is a module you can turn off, and "log a nutrition session" is
 // nonsense — so offering to turn it on from a SESSION picker would be too.
-it('does not offer to turn on something you cannot log a session for', () => {
-  show([strength, nutritionOff]);
+it('does not offer to turn on something you cannot log a session for', async () => {
+  await show([strength, nutritionOff]);
   expect(screen.queryByTestId('pick-disabled-sports')).toBeNull();
 });
 
 // With nothing enabled the sheet already says "You haven't chosen what you
 // train yet". Two prompts saying the same thing is worse than one.
-it('defers to the existing empty state when nothing is on at all', () => {
-  show([bjjOff, mod({ key: 'strength', label: 'Strength', enabled: false })]);
+it('defers to the existing empty state when nothing is on at all', async () => {
+  await show([bjjOff, mod({ key: 'strength', label: 'Strength', enabled: false })]);
   expect(screen.queryByTestId('pick-disabled-sports')).toBeNull();
   expect(screen.getByText(/haven't chosen what you train/i)).toBeTruthy();
 });

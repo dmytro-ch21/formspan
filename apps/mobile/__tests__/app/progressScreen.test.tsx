@@ -197,7 +197,7 @@ async function answerEverything() {
 
 describe('section order', () => {
   it('leads with This week and What changed, then the drill-downs', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
 
     // A literal list, in document order. Written out rather than derived from
@@ -215,7 +215,7 @@ describe('section order', () => {
   });
 
   it('puts the interpretation above the first chart', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
 
     // The narrower claim the ticket actually makes, asserted against the chart
@@ -231,8 +231,8 @@ describe('section order', () => {
 });
 
 describe('the first frame, with every read still outstanding', () => {
-  it('claims nothing about the athlete while nothing has answered', () => {
-    render(<ProgressScreen />);
+  it('claims nothing about the athlete while nothing has answered', async () => {
+    await render(<ProgressScreen />);
 
     // The three sentences this screen is allowed to say ONLY from an answer.
     // Each has shipped, on some screen, over a request in flight.
@@ -254,7 +254,7 @@ describe('the first frame, with every read still outstanding', () => {
   });
 
   it('says a read failed rather than that there is nothing to show', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     mockSessions.reject(new Error('offline'));
     mockRecords.reject(new Error('offline'));
     mockCheckins.reject(new Error('offline'));
@@ -280,28 +280,33 @@ describe('the first frame, with every read still outstanding', () => {
     // same sentence that must be absent on the first frame must APPEAR the
     // moment an answer with zero sessions lands. A test that only checked the
     // absence would pass against a screen that never rendered the card at all.
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
-    expect(screen.getByText('Nothing logged yet.')).toBeTruthy();
+    // `findBy`, not `getBy`: `answerEverything` returns as soon as the RECORDS
+    // read has landed, and under RNTL 14 the week card's own commit is a tick
+    // behind it rather than flushed by the same synchronous render. Still fails
+    // if the sentence never appears, which is the assertion.
+    expect(await screen.findByText('Nothing logged yet.')).toBeTruthy();
   });
 
   it('says nothing stands out only once every read has answered', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
-    expect(screen.getByTestId('what-changed-quiet')).toBeTruthy();
+    // `findBy` for the same reason as the test above.
+    expect(await screen.findByTestId('what-changed-quiet')).toBeTruthy();
   });
 });
 
 describe('what each athlete sees', () => {
   it('offers the position map to a grappler and explains its absence otherwise', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
     expect(screen.getByTestId('progress-bjj-positions')).toBeTruthy();
     expect(screen.queryByTestId('progress-bjj-off')).toBeNull();
 
     mockModules = [STRENGTH, bjj(false), nutrition(true)];
-    screen.unmount();
-    render(<ProgressScreen />);
+    await screen.unmount();
+    await render(<ProgressScreen />);
     await answerEverything();
     // Not silence. An athlete cannot tell "turned off" from "not built" from
     // "broken", and this app has had that reported from a real phone.
@@ -309,10 +314,10 @@ describe('what each athlete sees', () => {
     expect(screen.getByTestId('progress-bjj-off')).toHaveTextContent(/^BJJ is turned off,/);
   });
 
-  it('draws no BJJ row and no BJJ explanation until the module list has answered', () => {
+  it('draws no BJJ row and no BJJ explanation until the module list has answered', async () => {
     mockModules = [];
     mockModulesReady = false;
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     // An empty module list is an unanswered question, not a "no" — saying
     // "BJJ is turned off" here would be a claim about a setting nobody read.
     expect(screen.queryByTestId('progress-bjj-positions')).toBeNull();
@@ -331,13 +336,13 @@ describe('what each athlete sees', () => {
     // row is absent here and this goes red.
     mockModulesReady = false;
     mockModules = [];
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     expect(within(screen.getByTestId('progress-week-nutrition')).getByText('—')).toBeTruthy();
   });
 
   it('drops the food line for an athlete with nutrition off, and keeps the link', async () => {
     mockModules = [STRENGTH, bjj(true), nutrition(false)];
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
     // No "0 of 3 days" about a feature this athlete does not use…
     expect(screen.queryByTestId('progress-week-nutrition')).toBeNull();
@@ -350,7 +355,7 @@ describe('what each athlete sees', () => {
   it('counts logged days against days elapsed, not against seven', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-26T12:00:00'));
     try {
-      render(<ProgressScreen />);
+      await render(<ProgressScreen />);
       mockSessions.resolve([]);
       mockRecords.resolve([]);
       mockCheckins.resolve([]);
@@ -374,7 +379,7 @@ describe('what each athlete sees', () => {
 // feeding it any load data of its own.
 describe('training load row', () => {
   it('offers a way into the cross-sport training-load trend, inside the training section', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
     const training = screen.getByTestId('progress-section-training');
     expect(within(training).getByTestId('progress-training-load')).toBeTruthy();
@@ -383,7 +388,7 @@ describe('training load row', () => {
 
 describe('what moved here from You', () => {
   it('renders the training summary and the records list', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
     // `training-span-1m` is TrainingSummary's span control; `records-manage`
     // is RecordsCard's "Choose". Both render unconditionally in their
@@ -393,7 +398,7 @@ describe('what moved here from You', () => {
   });
 
   it('reaches the weight trend and the records screen', async () => {
-    render(<ProgressScreen />);
+    await render(<ProgressScreen />);
     await answerEverything();
     expect(screen.getByTestId('progress-weight-trend')).toBeTruthy();
     expect(screen.getByTestId('records-manage')).toBeTruthy();
@@ -419,7 +424,7 @@ describe('the weight is never stated in a system nobody chose', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-26T12:00:00'));
     try {
       mockUnits = { units: 'metric', unitsReady: false };
-      render(<ProgressScreen />);
+      await render(<ProgressScreen />);
       mockSessions.resolve([]);
       mockPlanned.resolve([]);
       mockRecords.resolve([]);
@@ -440,7 +445,7 @@ describe('the weight is never stated in a system nobody chose', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-26T12:00:00'));
     try {
       mockUnits = { units: 'imperial', unitsReady: true };
-      render(<ProgressScreen />);
+      await render(<ProgressScreen />);
       mockSessions.resolve([]);
       mockPlanned.resolve([]);
       mockRecords.resolve([]);

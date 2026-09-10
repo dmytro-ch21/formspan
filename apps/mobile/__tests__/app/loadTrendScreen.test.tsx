@@ -64,7 +64,7 @@ beforeEach(() => mockFetch.mockReset());
 
 it('shows the unavailable message on a failed load, not "no sessions yet"', async () => {
   mockFetch.mockRejectedValue(new Error('offline'));
-  render(<LoadTrendScreen />);
+  await render(<LoadTrendScreen />);
   const empty = await screen.findByTestId('load-trend-empty');
   expect(empty.props.children).toMatch(/couldn.?t load/i);
 });
@@ -77,7 +77,7 @@ it('renders sessions as entries and a readable delta once loaded', async () => {
     load_type: 'weight_reps',
     points: [point(older, 100), point(recent, 110)],
   });
-  render(<LoadTrendScreen />);
+  await render(<LoadTrendScreen />);
 
   expect(await screen.findByTestId('load-trend-delta')).toBeTruthy();
   expect(screen.getByTestId(`load-trend-entry-${older}`)).toBeTruthy();
@@ -86,7 +86,7 @@ it('renders sessions as entries and a readable delta once loaded', async () => {
 
 it('says a non-strength exercise needs a logged weight, rather than drawing an empty chart', async () => {
   mockFetch.mockResolvedValue({ exercise_id: 'plank', load_type: 'time', points: [point(daysAgo(5), null)] });
-  render(<LoadTrendScreen />);
+  await render(<LoadTrendScreen />);
   expect(await screen.findByTestId('load-trend-no-weight')).toBeTruthy();
   expect(screen.queryByTestId('load-trend-chart')).toBeNull();
 });
@@ -97,10 +97,10 @@ it('switching the range does not re-fetch — it slices what is already loaded',
     load_type: 'weight_reps',
     points: [point(daysAgo(5), 100)],
   });
-  render(<LoadTrendScreen />);
+  await render(<LoadTrendScreen />);
   await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
 
-  fireEvent.press(await screen.findByTestId('load-trend-range-1Y'));
+  await fireEvent.press(await screen.findByTestId('load-trend-range-1Y'));
   await waitFor(() => expect(screen.getByTestId('load-trend-range-1Y').props.accessibilityState.selected).toBe(true));
   expect(mockFetch).toHaveBeenCalledTimes(1);
 });

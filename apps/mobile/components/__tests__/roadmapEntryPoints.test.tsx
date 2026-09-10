@@ -192,8 +192,8 @@ beforeEach(() => {
 });
 
 describe('RoadmapLine — where you are, on Today', () => {
-  it('leads with the milestone in words, and still names the next step', () => {
-    render(
+  it('leads with the milestone in words, and still names the next step', async () => {
+    await render(
       <RoadmapLine
         curriculum={curriculum({
           phases: phases('The map', 'Mount: get out, then hold', 'Escape'),
@@ -210,10 +210,10 @@ describe('RoadmapLine — where you are, on Today', () => {
     expect(screen.getByText('1 of 3 mastered')).toBeTruthy();
   });
 
-  it('falls back to the next step on a roadmap with no phases', () => {
+  it('falls back to the next step on a roadmap with no phases', async () => {
     // Unphased curricula are legal, and inventing "Milestone 1 of 0" for one
     // is worse than the line this component had before.
-    render(
+    await render(
       <RoadmapLine
         curriculum={curriculum({
           items: [step(null, false, 'Arm drag')],
@@ -225,8 +225,8 @@ describe('RoadmapLine — where you are, on Today', () => {
     expect(screen.queryByText(/Milestone/)).toBeNull();
   });
 
-  it('says nothing about a milestone once the roadmap is finished', () => {
-    render(
+  it('says nothing about a milestone once the roadmap is finished', async () => {
+    await render(
       <RoadmapLine
         curriculum={curriculum({
           phases: phases('The map', 'Escape'),
@@ -253,7 +253,7 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
 
   it('names the roadmap and what moves it, and points at that roadmap', async () => {
     mockListCurricula.mockResolvedValue([offerable]);
-    render(<RoadmapOffer />);
+    await render(<RoadmapOffer />);
 
     await waitFor(() => expect(screen.getByTestId('roadmap-offer')).toBeTruthy());
     expect(screen.getByText('Start a roadmap')).toBeTruthy();
@@ -281,7 +281,7 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     // in it is worse than silence, and a banner here would make an offline
     // Today look broken over something nobody asked for.
     mockListCurricula.mockRejectedValue(new Error('offline'));
-    render(<RoadmapOffer />);
+    await render(<RoadmapOffer />);
 
     await act(async () => {});
     expect(screen.queryByTestId('roadmap-offer')).toBeNull();
@@ -293,7 +293,7 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
     // process — so a mount-only read leaves Today offering something the
     // athlete is already working. `CurriculaStrip` shipped that bug once.
     mockListCurricula.mockResolvedValue([offerable]);
-    render(<RoadmapOffer />);
+    await render(<RoadmapOffer />);
     await waitFor(() => expect(screen.getByTestId('roadmap-offer')).toBeTruthy());
 
     mockListCurricula.mockResolvedValue([{ ...offerable, enrolled: true }]);
@@ -334,7 +334,7 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
           });
         }),
     );
-    render(<RoadmapOffer />);
+    await render(<RoadmapOffer />);
 
     // Away and back — and in between, the athlete enrolled.
     mockListCurricula.mockResolvedValue([{ ...offerable, enrolled: true }]);

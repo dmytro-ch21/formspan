@@ -65,7 +65,7 @@ it('renders the funnel headline from the summary the endpoint sends', async () =
     techniques: [row()],
     summary: { techniques: 1, drilled: 10, tried_live: 4, landed: 2 },
   });
-  render(<ProficiencyScreen />);
+  await render(<ProficiencyScreen />);
   const funnel = await screen.findByTestId('proficiency-funnel');
   expect(funnel).toBeTruthy();
   expect(screen.getByText('10')).toBeTruthy();
@@ -75,7 +75,7 @@ it('renders the funnel headline from the summary the endpoint sends', async () =
 
 it('shows the load-failure message rather than an empty funnel', async () => {
   mockFetchProficiencyFull.mockRejectedValue(new Error('offline'));
-  render(<ProficiencyScreen />);
+  await render(<ProficiencyScreen />);
   expect(await screen.findByTestId('proficiency-unavailable')).toBeTruthy();
 });
 
@@ -87,11 +87,11 @@ it('filtering to "Never tried live" hides a technique that has been tried', asyn
     ],
     summary: { techniques: 2, drilled: 6, tried_live: 1, landed: 1 },
   });
-  render(<ProficiencyScreen />);
+  await render(<ProficiencyScreen />);
   await screen.findByTestId('proficiency-row-untried-one');
   expect(screen.getByTestId('proficiency-row-tried-one')).toBeTruthy();
 
-  fireEvent.press(screen.getByTestId('proficiency-bucket-untried'));
+  await fireEvent.press(screen.getByTestId('proficiency-bucket-untried'));
 
   expect(screen.getByTestId('proficiency-row-untried-one')).toBeTruthy();
   expect(screen.queryByTestId('proficiency-row-tried-one')).toBeNull();
@@ -107,7 +107,7 @@ it('bucket counts sum to "Everything", each technique landing in exactly one', a
     ],
     summary: { techniques: 4, drilled: 3, tried_live: 3, landed: 1 },
   });
-  render(<ProficiencyScreen />);
+  await render(<ProficiencyScreen />);
   await screen.findByTestId('proficiency-bucket-all');
 
   // Each chip's own visible text carries its count — reading it back this way
@@ -126,10 +126,10 @@ it('starring a technique writes through setFocus, and rolls back on failure', as
     summary: { techniques: 1, drilled: 4, tried_live: 3, landed: 1 },
   });
   mockSetFocus.mockRejectedValue(new Error('offline'));
-  render(<ProficiencyScreen />);
+  await render(<ProficiencyScreen />);
   const star = await screen.findByTestId('proficiency-star-armbar-closed-guard');
 
-  fireEvent.press(star);
+  await fireEvent.press(star);
   await waitFor(() => expect(mockSetFocus).toHaveBeenCalledWith(expect.anything(), ['armbar-closed-guard']));
 
   await waitFor(() => expect(screen.getByTestId('proficiency-notice')).toBeTruthy());

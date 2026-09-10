@@ -157,23 +157,23 @@ beforeEach(() => {
 
 describe('when running is on', () => {
   it('lists the run types', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('run-type-easy')).toBeTruthy());
     expect(screen.getByTestId('run-type-long')).toBeTruthy();
     expect(screen.getByTestId('run-type-tempo')).toBeTruthy();
   });
 
   it('says what a run trains and how hard, without needing a heart-rate strap', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('run-type-tempo')).toBeTruthy());
     // The meta line is the whole reason the row is worth more than its name.
     expect(screen.getByText('Threshold · Zones 3-4')).toBeTruthy();
   });
 
   it('opens the run type when tapped', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('run-type-long')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('run-type-long'));
+    await fireEvent.press(screen.getByTestId('run-type-long'));
     expect(mockPush).toHaveBeenCalledWith('/run-type/long');
   });
 });
@@ -182,7 +182,7 @@ describe('when running is off', () => {
   it('shows no run types at all', async () => {
     mockModules = [STRENGTH_ON];
     mockExercises = [KETTLEBELL];
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     // Wait for something that DOES render, so this is not asserting against a
     // screen that simply has not finished loading — the shape of absence-is-
     // not-evidence that would make this test pass on a broken screen.
@@ -201,7 +201,7 @@ describe('the sport filter', () => {
     mockReadPref.mockImplementation((_u: unknown, key: unknown) =>
       Promise.resolve(String(key).includes('sport') ? 'strength' : null),
     );
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('exercise-kb-swing')).toBeTruthy());
     expect(screen.queryByTestId('run-type-easy')).toBeNull();
   });
@@ -209,15 +209,15 @@ describe('the sport filter', () => {
 
 describe('the focus filter', () => {
   it('narrows the list to one focus, and does not touch the others', async () => {
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     await waitFor(() => expect(screen.getByTestId('run-type-easy')).toBeTruthy());
 
     // The Focus control only exists under the Running chip — `usesFacet` keys
     // on the SELECTED sport, exactly as muscle/movement do for strength. Under
     // "All" there is deliberately no control, so the chip comes first.
-    fireEvent.press(screen.getByTestId('library-filter-running'));
-    fireEvent.press(await screen.findByTestId('library-facet-focus'));
-    fireEvent.press(await screen.findByTestId('library-option-focus-Speed'));
+    await fireEvent.press(screen.getByTestId('library-filter-running'));
+    await fireEvent.press(await screen.findByTestId('library-facet-focus'));
+    await fireEvent.press(await screen.findByTestId('library-option-focus-Speed'));
 
     await waitFor(() => expect(screen.queryByTestId('run-type-easy')).toBeNull());
     // Speed is strides and sprints; everything else must be gone, and both of
@@ -233,7 +233,7 @@ describe('the merge', () => {
   it('interleaves runs with exercises alphabetically rather than appending them', async () => {
     mockModules = [RUNNING_ON, STRENGTH_ON];
     mockExercises = [KETTLEBELL];
-    render(<LibraryScreen />);
+    await render(<LibraryScreen />);
     // Waits on the EXERCISE, not on a run — and the difference is the whole
     // apparatus. Run types come from a local constant and are on screen in the
     // first render; exercises arrive from a promise. Waiting for a run row
