@@ -67968,6 +67968,54 @@ with a suite blind to the call site. A source-level guard now asserts the
 component asks for the tint on `kcal` and no other, the way
 `hrReportWiring.test.ts` does for the HR screens.
 
+## 2026-09-09 — W22: an empty estimate told the athlete to do the thing they had just done
+
+Found on device: the athlete described a boiled egg, nothing came back, and
+the screen said *"Try describing it instead."*
+
+`app/food/describe.tsx` rendered ONE string for both input paths:
+
+    estimate.note || 'Nothing recognisable came back. Try describing it instead.'
+
+The copy is right for the camera, where "describe it instead" names the OTHER
+way in. On the text path it names the way just used. And the screen could not
+have done better: `receive()` is shared by both submits and stored nothing
+about which one produced the estimate, so there was no fact to branch on. The
+wording was the symptom; the missing state was the bug.
+
+**A second, quieter defect in the same expression.** `note || advice` lets a
+model's note REPLACE the advice, so whenever the model had something to say
+the athlete got a diagnosis and no next step — which is likely what actually
+happened here, since the reported wording ("could not read that as a meal")
+reads like a note rather than the fallback. The note is the useful half; it is
+now kept AND followed by advice rather than chosen between. An empty estimate
+spends a quota unit either way, which is why this moment cannot afford to
+waste the next attempt on the wrong suggestion.
+
+`askedBy` records the path; `emptyEstimateAdvice`/`emptyEstimateMessage` are
+pure and live in `lib/estimateApi.ts`, so the copy is testable without a
+component test.
+
+**Both source guards I wrote first were wrong, in ways worth recording because
+neither was about the code.** The regex `receive\(\s*await describeMeal\([^)]*\)`
+matches nothing: the call contains its own parentheses (`description.trim()`),
+so `[^)]*` stops inside it. And `expect(src).not.toContain('Nothing
+recognisable came back')` failed — correctly — because the string is still in
+the file, in the doc comment explaining what it got wrong. **An absence check
+on a file that documents its own history fails for the one reason that is not
+a defect.** The guard now asserts what the screen RENDERS
+(`testID="describe-empty"` followed by `emptyEstimateMessage(`), which is the
+property that matters.
+
+Mutation-checked four ways, restores re-run: restoring the original one-size
+string, letting the note replace the advice again, tagging the photo path as
+text, and collapsing both paths to one message.
+
+Still open on #1018: the athlete's exact on-device string was never captured,
+so whether a row went missing for a separate reason — a `servings: 0` from the
+model should be FITTED to 1 by N542, not dropped — is unresolved and not
+assumed to be this bug.
+
 ## Open items / known gaps as of this entry
 
 

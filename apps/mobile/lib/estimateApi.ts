@@ -448,3 +448,45 @@ export function itemToEntry(it: EstimatedItem): Macros & {
     cholesterol_mg: it.cholesterol_mg,
   };
 }
+
+/**
+ * What to say when an estimate comes back with nothing in it — W22/#1018.
+ *
+ * ## The bug this replaces
+ *
+ * `app/food/describe.tsx` rendered ONE string for both input paths:
+ *
+ *     estimate.note || 'Nothing recognisable came back. Try describing it instead.'
+ *
+ * That copy was written for the camera, where *"try describing it instead"*
+ * names the other way in. On the text path it names the way just used — the
+ * athlete described a boiled egg, got told to describe it instead, and
+ * reported it. The screen could not do better because it kept no record of
+ * which path produced the estimate; the fix there is `askedBy`, and this is
+ * what it feeds.
+ *
+ * ## Why the note is no longer an EITHER/OR
+ *
+ * The old expression let a model `note` REPLACE the advice, so whenever the
+ * model had something to say the athlete got its words and no actionable
+ * next step. The note is the useful half — it is where the model says what it
+ * could not see — so it is kept AND followed by advice, rather than chosen
+ * between.
+ *
+ * An empty estimate costs a quota unit whether or not anything came back
+ * (`describe.tsx` says so at the render site), which is exactly why this
+ * moment cannot afford to waste the athlete's next attempt on the wrong
+ * suggestion.
+ */
+export function emptyEstimateAdvice(askedBy: 'text' | 'photo'): string {
+  return askedBy === 'photo'
+    ? 'Nothing recognisable in that photo. Try a clearer one, or describe the meal in words instead.'
+    : 'Nothing recognisable in that description. Try naming each food and roughly how much — or take a photo instead.';
+}
+
+/** The whole empty-state message: the model's note, then what to do next. */
+export function emptyEstimateMessage(note: string | undefined, askedBy: 'text' | 'photo'): string {
+  const advice = emptyEstimateAdvice(askedBy);
+  const said = note?.trim();
+  return said ? `${said} ${advice}` : advice;
+}
