@@ -45,6 +45,25 @@ describe("Reduce Motion (F40)", () => {
     expect(reducedMotionBlock(css)).not.toBeNull();
   });
 
+  it("names the block exactly once, so the brace matching above cannot pick the wrong one", () => {
+    // Raised in review, and the reason is this repo's own history: an anchor
+    // taken by FIRST match is safe right up until a later comment quotes the
+    // string it anchors on — which is exactly how `history.md`'s heading trap
+    // works, and this file's house style is to quote config verbatim in prose.
+    // The parser below is only correct while the marker is unique; assert it.
+    const marker = "@media (prefers-reduced-motion: reduce)";
+    expect(css.indexOf(marker)).toBe(css.lastIndexOf(marker));
+  });
+
+  it("keeps `filter`, so the primary CTA's hover does not simply snap", () => {
+    // `hover:brightness-110` is this app's solid-button hover and every one of
+    // its call sites pairs it with `transition`. Brightness is luminance, not
+    // movement — dropping it would be the "too aggressive" failure the block
+    // warns about, rather than the caution it looks like.
+    const property = /transition-property:([^;]*);/.exec(reducedMotionBlock(css)!)?.[1] ?? "";
+    expect(property).toContain("filter");
+  });
+
   it("narrows the transition list rather than disabling transitions outright", () => {
     const block = reducedMotionBlock(css)!;
     // Reduce Motion is a request not to be MOVED, not a request to see

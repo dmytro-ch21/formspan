@@ -69120,10 +69120,25 @@ This is the cheapest real accessibility gap the motion audit found: one
 So the block *narrows* the transition property list rather than setting
 `transition: none` or slamming every duration to `0.01ms`:
 
-    transition-property: opacity, color, background-color, border-color, fill, stroke;
+    transition-property:
+      opacity, color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, filter;
 
 Colour and opacity explain a state change and are kept; position, scale and
-rotation are dropped. The failure mode to watch for is the opposite of the
+rotation are dropped.
+
+**`filter` is in that list because review caught what dropping it would do.**
+The first version narrowed to colour and opacity alone, which silently kills
+`hover:brightness-110` — this app's solid-button hover, and all TEN of its call
+sites pair it with `transition`. Those buttons would have stopped easing and
+snapped, which is precisely the "too aggressive" failure the block's own
+comment warns about, arriving by omission rather than by intent. Brightness is
+a luminance change with no spatial component. The counter-argument is that
+`filter` also covers `blur` and `hue-rotate`, which are motion-adjacent — so it
+was measured rather than argued: neither is transitioned anywhere in either app
+(`backdrop-blur` 0 uses, `blur-` 1 static use, 0 in a transition), so keeping
+`filter` cannot re-admit them today. `outline-color` and `text-decoration-color`
+joined for consistency with Tailwind's own `.transition-colors` bundle. The failure mode to watch for is the opposite of the
 obvious one — if a hover stops giving colour feedback under the emulation, the
 block has gone too far, and that is stated in the CSS comment so the next
 person tightening it knows which direction is wrong.

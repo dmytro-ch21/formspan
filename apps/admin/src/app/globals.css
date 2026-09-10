@@ -100,7 +100,9 @@ body {
   *,
   *::before,
   *::after {
-    transition-property: opacity, color, background-color, border-color, fill, stroke;
+    transition-property:
+      opacity, color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, filter;
   }
 
   /* Nothing in admin matches this yet — it is the same guard web needs for its

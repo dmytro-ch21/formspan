@@ -22520,7 +22520,13 @@ colour and opacity survive, position/scale/rotation do not.
   is leaking.
 - With **Reduce Motion on** (macOS System Settings → Accessibility → Display →
   Reduce Motion, or DevTools → Rendering → *Emulate `prefers-reduced-motion`*),
-  hover a button and a nav link: the colour still changes. **Colour feedback
+  hover a **solid primary button** (the `hover:brightness-110` pattern — Save on
+  a class plan, on a BJJ rank, on a workout): its brightness must still EASE,
+  not snap. This is the case an earlier draft of the rule broke by omitting
+  `filter`, and it is the most likely thing to regress if the property list is
+  ever tightened.
+- With Reduce Motion on, hover a button and a nav link: the colour still
+  changes. **Colour feedback
   disappearing is the failure**, not the success — it means the block went too
   far and disabled transitions outright rather than narrowing them.
 - With Reduce Motion on, nothing moves, scales or rotates on hover, focus or

@@ -377,8 +377,35 @@ input[type="number"] {
   *,
   *::before,
   *::after {
-    transition-property: opacity, color, background-color, border-color, fill, stroke;
+    transition-property:
+      opacity, color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, filter;
   }
+
+  /*
+    `filter` is in that list, and it is the one entry worth defending.
+
+    Raised in review: dropping it silently kills the hover feedback on the
+    primary CTA. `hover:brightness-110` is this app's solid-button hover, and
+    all TEN of its call sites pair it with `transition` — so without `filter`
+    those buttons stop easing and snap, which is the exact "too aggressive"
+    failure this block's own comment warns about.
+
+    Brightness is a luminance change with no spatial component: nearer in kind
+    to the colour channel deliberately kept than to the movement channel
+    deliberately dropped. The counter-argument is that `filter` also covers
+    `blur` and `hue-rotate`, which are motion-adjacent — measured, and neither
+    is transitioned anywhere in either app (`backdrop-blur`: 0 uses, `blur-`: 1
+    static use, 0 in a transition). So keeping `filter` cannot re-admit those
+    today; if a blurring transition is ever added, split this entry rather than
+    widening it further.
+
+    `outline-color` and `text-decoration-color` are here for consistency rather
+    than need — Tailwind's own `.transition-colors` bundles them with the
+    colours already kept, and this app has 46 `outline-` and 76 `underline`
+    utilities. Nothing animates either today; omitting them would just be an
+    inconsistency waiting to surprise someone.
+  */
 
   /*
     The infinite loops, named explicitly rather than swept up by the wildcard
