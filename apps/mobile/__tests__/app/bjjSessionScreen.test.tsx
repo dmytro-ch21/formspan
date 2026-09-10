@@ -390,6 +390,12 @@ it('offers no share card while the class is still open', async () => {
  * So step the clock while the press is still in flight, and stop at the first
  * step that settles it — leaving the rest to each test's own `waitFor`, exactly
  * as before this migration.
+ *
+ * The step size means the fake clock can end up to ~100ms past the moment the
+ * press actually settled. Nothing in this file is sensitive to that today — the
+ * backdated-day test asserts a DAY, and the corrected-end-time test computes its
+ * expected timestamp before this runs — but a test here that asserts an exact
+ * `ended_at` would be, so read this before adding one.
  */
 async function holdToFinish(element: Parameters<typeof fireEvent.press>[0]) {
   let settled = false;
