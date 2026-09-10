@@ -282,6 +282,44 @@ export function peakLabelAnchor(fractionAcross: number): 'start' | 'middle' | 'e
   return 'middle';
 }
 
+/**
+ * Width of one character of the PEAK label, in the chart's own logical units,
+ * at the 10px semibold size it renders. Same estimate-rather-than-measure
+ * caveat as `TICK_CHAR_WIDTH`, and generous for the same reason.
+ */
+export const PEAK_LABEL_CHAR_WIDTH = 6.2;
+
+/**
+ * Nudges a label back inside the canvas when its own width would carry it
+ * off the edge — the anchor above chooses which SIDE the label hangs from,
+ * which is not the same as guaranteeing it fits.
+ *
+ * Added after review (N545) pointed out the asymmetry: `chooseTimeTicks`
+ * proves its labels fit by measuring them, while the peak label was merely
+ * "empirically fine today" — no constructed case actually clipped, but
+ * nothing said one could not. A long label on a long session (`220 bpm at
+ * 2h 10m`) is exactly the combination that gets closest, so the guard is
+ * about the arithmetic rather than about a bug anybody saw.
+ *
+ * The LEFT edge wins when a label is wider than the space it has: text is
+ * read from its start, so a label running off the right is still partly
+ * useful and one running off the left is not.
+ */
+export function clampLabelX(
+  x: number,
+  anchor: 'start' | 'middle' | 'end',
+  label: string,
+  minX: number,
+  maxX: number,
+): number {
+  const width = label.length * PEAK_LABEL_CHAR_WIDTH;
+  const left = anchor === 'start' ? x : anchor === 'end' ? x - width : x - width / 2;
+  let shift = 0;
+  if (left + width > maxX) shift = maxX - (left + width);
+  if (left + shift < minX) shift = minX - left;
+  return x + shift;
+}
+
 export type HRZoneRun = {
   /** `zoneForBPM`'s answer — 1-5, or 0 for below zone 1 (`trimp.go`'s
    *  `ZoneNone`, which is not a zone). */

@@ -384,8 +384,11 @@ function HRWindowMismatchNote({
   sessionEndedAt: string | undefined;
   testID: string;
 }) {
-  if (!timelineWindowDiffers(hrWindow, sessionStartedAt, sessionEndedAt)) return null;
+  // The presence check first, so the clock-time formatting below narrows —
+  // `timelineWindowDiffers` already answers `false` for a missing pair, which
+  // made the second line unreachable when they were the other way round.
   if (!sessionStartedAt || !sessionEndedAt) return null;
+  if (!timelineWindowDiffers(hrWindow, sessionStartedAt, sessionEndedAt)) return null;
   return (
     <Text style={styles.windowNote} testID={testID}>
       Heart rate found {formatClockTime(hrWindow.start)}–{formatClockTime(hrWindow.end)} (session logged{' '}

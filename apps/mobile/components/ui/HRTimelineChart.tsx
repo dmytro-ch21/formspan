@@ -6,6 +6,7 @@ import type { HRTimelinePoint } from '@/lib/hrTimeline';
 import { zoneColor, zoneForBPM } from '@/lib/hrZones';
 import {
   chooseBpmAxis,
+  clampLabelX,
   chooseTimeTicks,
   findTimelinePeak,
   peakLabel,
@@ -60,6 +61,9 @@ const PAD_BOTTOM = 22;
 const PLOT_WIDTH = WIDTH - PAD_LEFT - PAD_RIGHT;
 const PLOT_HEIGHT = HEIGHT - PAD_TOP - PAD_BOTTOM;
 
+/** Keeps a label's own edge off the very edge of the card. */
+const LABEL_MARGIN = 2;
+
 const AXIS_FONT_SIZE = 9;
 const PEAK_FONT_SIZE = 10;
 
@@ -101,7 +105,16 @@ export function HRTimelineChart({
   const peakX = peak ? x(peak.minutesElapsed) : 0;
   const peakY = peak ? y(peak.bpm) : 0;
   const anchor = peak ? peakLabelAnchor((peakX - PAD_LEFT) / PLOT_WIDTH) : 'middle';
-  const peakTextX = anchor === 'start' ? peakX - 2 : anchor === 'end' ? peakX + 2 : peakX;
+  const peakText = peak ? peakLabel(peak) : '';
+  // The anchor picks which side the label hangs from; `clampLabelX` is what
+  // guarantees it lands inside the canvas at any bpm/duration combination.
+  const peakTextX = clampLabelX(
+    anchor === 'start' ? peakX - 2 : anchor === 'end' ? peakX + 2 : peakX,
+    anchor,
+    peakText,
+    LABEL_MARGIN,
+    WIDTH - LABEL_MARGIN,
+  );
 
   return (
     <Svg
@@ -210,7 +223,7 @@ export function HRTimelineChart({
             textAnchor={anchor}
             testID={`${testID}-peak-label`}
           >
-            {peakLabel(peak)}
+            {peakText}
           </SvgText>
         </>
       )}

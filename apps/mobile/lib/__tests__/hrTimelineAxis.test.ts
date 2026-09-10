@@ -10,8 +10,10 @@ import {
   PEAK_LABEL_START_FRACTION,
   TICK_CHAR_WIDTH,
   TICK_MIN_GAP,
+  PEAK_LABEL_CHAR_WIDTH,
   chooseBpmAxis,
   chooseTimeTicks,
+  clampLabelX,
   findTimelinePeak,
   formatElapsed,
   peakLabel,
@@ -267,6 +269,52 @@ describe('peakLabelAnchor', () => {
 
   test('a nonsense fraction is centred rather than throwing', () => {
     expect(peakLabelAnchor(Number.NaN)).toBe('middle');
+  });
+});
+
+describe('clampLabelX', () => {
+  // 300-wide canvas with a 2-unit margin, matching HRTimelineChart's own.
+  const MIN = 2;
+  const MAX = 298;
+  const LONG = '220 bpm at 2h 10m'; // 17 characters
+
+  test('a label with room to spare is left exactly where the anchor put it', () => {
+    expect(clampLabelX(150, 'middle', LONG, MIN, MAX)).toBe(150);
+  });
+
+  test('a middle-anchored label near the right edge is pulled back inside', () => {
+    // 17 chars at 6.2 = 105.4 wide; centred on 290 it would end at 342.7.
+    const x = clampLabelX(290, 'middle', LONG, MIN, MAX);
+    expect(x).toBeLessThan(290);
+    expect(x + 105.4 / 2).toBeCloseTo(MAX, 6);
+  });
+
+  test('a middle-anchored label near the left edge is pushed back inside', () => {
+    const x = clampLabelX(10, 'middle', LONG, MIN, MAX);
+    expect(x).toBeGreaterThan(10);
+    expect(x - 105.4 / 2).toBeCloseTo(MIN, 6);
+  });
+
+  test('an end-anchored label whose text runs off the left is pushed right', () => {
+    const x = clampLabelX(40, 'end', LONG, MIN, MAX);
+    expect(x - 105.4).toBeCloseTo(MIN, 6);
+  });
+
+  test('a start-anchored label whose text runs off the right is pulled left', () => {
+    const x = clampLabelX(260, 'start', LONG, MIN, MAX);
+    expect(x + 105.4).toBeCloseTo(MAX, 6);
+  });
+
+  test('a label wider than the whole canvas is pinned to the LEFT edge, not the right', () => {
+    // Text is read from its start: overflowing the right is still partly
+    // useful, overflowing the left is not.
+    const enormous = 'x'.repeat(80);
+    const x = clampLabelX(150, 'start', enormous, MIN, MAX);
+    expect(x).toBeCloseTo(MIN, 6);
+  });
+
+  test('the character-width estimate is the value this behaviour was measured against', () => {
+    expect(PEAK_LABEL_CHAR_WIDTH).toBe(6.2);
   });
 });
 
