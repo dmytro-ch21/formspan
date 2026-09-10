@@ -162,14 +162,27 @@ describe('the live-session screen is out of scope, by rule', () => {
  * regression that adds a bare pressable back cannot hide in the noise.
  */
 
-/** Files whose pressables must NOT scale, and why. */
-const EXEMPT: Record<string, string> = {
-  'app/library.tsx':
-    'two full-screen backdrops behind sheets — a backdrop that shrinks when tapped is visibly wrong',
-  'components/ShareToFriend.tsx': 'sheet backdrop',
-  'components/ui/OptionSelect.tsx': 'scrim behind the option list',
-  'components/SessionCelebration.tsx': 'full-screen dismiss target',
-};
+/**
+ * The ONE pressable in the app that must not scale.
+ *
+ * This was a FILE list of four, and two of the four were wrong — a lesson
+ * worth keeping. `SessionCelebration.tsx` was exempted as a "full-screen
+ * dismiss target"; its only pressable is a **Done button** with an accent
+ * background. `app/library.tsx` and `OptionSelect.tsx` were exempted on a
+ * keyword match against the word "scrim", which in two other files turned out
+ * to be a comment about padding and a gradient overlay.
+ *
+ * Exempting a FILE also over-reaches even when the file does contain a
+ * backdrop: `ShareToFriend.tsx` has five pressables and only one of them is
+ * the scrim. The other four are a trigger, a retry, a send and a close — all
+ * controls, all of which should answer a finger.
+ *
+ * So the exemption is now per-PRESSABLE and stated by what it is rather than
+ * where it lives: a full-bleed tap target behind a sheet, whose whole job is
+ * to be invisible and dismiss. Shrinking one when the athlete taps outside is
+ * visibly wrong, and there is no affordance to reinforce.
+ */
+const BACKDROP_FILE = 'components/ShareToFriend.tsx';
 
 /**
  * Feedback-less files remaining, as of the tranche that last touched this.
@@ -177,7 +190,7 @@ const EXEMPT: Record<string, string> = {
  * Lower it when a tranche lands. It may never rise: a new bare `<Pressable>`
  * in a file that had none is exactly the regression F38 and F48 exist to end.
  */
-const REMAINING = 61;
+const REMAINING = 1;
 
 describe('the PressableScale primitive', () => {
   /**
@@ -309,17 +322,18 @@ describe('F48 — the press-feedback migration', () => {
     expect(left).not.toContain('components/Timer.tsx');
   });
 
-  it('leaves backdrops and scrims alone, on purpose', () => {
-    // Named here so the exemption is a decision on the record rather than a
-    // file somebody forgot. If one of these ever gains a scale, this fails and
-    // asks why.
-    for (const [file, why] of Object.entries(EXEMPT)) {
-      const src = codeOnly(readFileSync(join(MOBILE, file), 'utf8'));
-      expect({ file, why, scales: src.includes('PressableScale') }).toEqual({
-        file,
-        why,
-        scales: false,
-      });
-    }
+  it('leaves the one real backdrop alone, and scales everything else in its file', () => {
+    // Both halves matter. The scrim must stay a plain `Pressable`, and the
+    // four controls beside it must not — exempting the whole file would have
+    // left a trigger, a retry, a send and a close unresponsive to protect one
+    // invisible rectangle.
+    const src = codeOnly(readFileSync(join(MOBILE, BACKDROP_FILE), 'utf8'));
+    expect(src).toMatch(/<Pressable\n\s+style=\{styles\.backdrop\}/);
+    // `toContain('PressableScale')` was the first version and it passed on the
+    // IMPORT line — reverting every control in this file to a bare Pressable
+    // left the test green. The count cannot catch it either, since this file is
+    // already the one permitted entry. Assert the JSX, and assert how MANY:
+    // four controls beside one scrim.
+    expect(src.match(/<PressableScale\b/g) ?? []).toHaveLength(4);
   });
 });

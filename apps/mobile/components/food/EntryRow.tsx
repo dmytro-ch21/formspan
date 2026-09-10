@@ -64,7 +64,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Animated, PanResponder, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { Animated, PanResponder, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -73,6 +73,7 @@ import { glyphFor } from '@/lib/foodGlyph';
 import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { type Entry, type Meal } from '@/lib/nutrition';
 import type { FoodUnit } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /** How long the finger has to hold still before a move becomes a drag. */
 export const LONG_PRESS_MS = 300;
@@ -268,7 +269,7 @@ export function EntryRow({
       {...responder.panHandlers}
       testID={`food-entry-${entry.id}-row`}
     >
-      <Pressable
+      <PressableScale
         style={[styles.row, isDragging && styles.rowDragging]}
         onPress={onPress}
         onPressIn={flags.reset}
@@ -332,7 +333,7 @@ export function EntryRow({
           </Text>
         </RNView>
         <Text style={styles.rowKcal}>{Math.round(entry.kcal)}</Text>
-      </Pressable>
+      </PressableScale>
       {/* OUTSIDE the row's Pressable, as a sibling — nested pressables fight
           over one touch, and neither of these may be reachable while the row
           is a checkbox. Both reach 44 × 44 over the icon's own 18, and by
@@ -375,7 +376,7 @@ export function EntryRow({
           <Icon name="grip" size={18} color={vola.textMuted} />
         </RNView>
       ) : onMenu && !selecting ? (
-        <Pressable
+        <PressableScale
           onPress={onMenu}
           style={styles.more}
           // 30 across + 7 either side = 44. It was 6 (giving 42), which is
@@ -411,7 +412,7 @@ export function EntryRow({
             left to live on either. A quieter dot is the whole available move.
           */}
           <Icon name="more" size={18} color={vola.textDim} />
-        </Pressable>
+        </PressableScale>
       ) : null}
     </Animated.View>
   );

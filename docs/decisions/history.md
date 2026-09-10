@@ -68652,6 +68652,51 @@ minute rather than a tranche.
 Tranche three's two carried-forward fixes both held: the whole-file import
 scan, and restoring a mutation from a file copy rather than `git checkout`.
 
+## 2026-09-10 — F48 finished: one pressable in the app does not answer a finger, and it is a backdrop
+
+136 pressables across 61 files. **F38 started at 411 of 493 unresponsive; the
+app now has ONE**, and it is the scrim behind the share sheet.
+
+The athlete settled the question that had gated the rest: *"scale them like
+everything else."* Full-bleed list rows were the last design call — the
+platform convention for a row is a background highlight — and with that
+decided, everything except genuine backdrops became mechanical.
+
+**The exemption list was wrong in two ways, and both only surfaced by
+looking.**
+
+It was a list of four FILES. Two were not backdrops at all:
+`SessionCelebration.tsx` was exempted as a "full-screen dismiss target" and
+its only pressable is a **Done button** with an accent background;
+`app/library.tsx` and `OptionSelect.tsx` were exempted on a keyword match
+against "scrim", which elsewhere turned out to be a comment about padding and
+a gradient overlay for title legibility.
+
+And exempting a FILE over-reaches even when the file is right:
+`ShareToFriend.tsx` has five pressables and exactly one is the scrim. The
+other four — a trigger, a retry, a send, a close — would have stayed
+unresponsive to protect one invisible rectangle. The guard is now
+per-PRESSABLE and states what a backdrop IS rather than where it lives.
+
+**Two instrument bugs, both the same substring family that has recurred all
+day.**
+
+The import-removal guard now strips comments before asking "is `Pressable`
+still referenced" — tranche four left a stale import because a COMMENT
+mentioned a Pressable handler. With that fixed, 59 files converted and
+typechecked clean on the first attempt.
+
+And the backdrop test's first version asserted `toContain('PressableScale')`,
+which passed on the **import line**: reverting every control in that file to a
+bare `Pressable` left the test green, and the remaining-count could not catch
+it either because that file is already the one permitted entry. It now counts
+the JSX — four controls beside one scrim.
+
+**Final: 209 → 340 controls migrated across five tranches**, every recording
+path, the entry and account path including the app's very first tap, and every
+remaining surface. Nothing here has been felt on a device; #1037's three
+device criteria still stand.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -29,13 +29,14 @@
  */
 
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import type { Adjustment, AdjustmentResponse, BlockedBy } from '@/lib/nutritionApi';
 import { formatEnergyCoefficient, formatWeight, type UnitSystem } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The copy for every blocked state, carried over from web verbatim in
@@ -136,7 +137,7 @@ export function AdjustmentCard({
       </Text>
 
       {b ? (
-        <Pressable
+        <PressableScale
           onPress={() => setOpen((v) => !v)}
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
@@ -146,7 +147,7 @@ export function AdjustmentCard({
           <Text style={[styles.link, { color: accent.ink }]}>
             {open ? 'Hide the arithmetic' : 'Show the arithmetic'}
           </Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
 
       {open && b ? (
@@ -203,7 +204,7 @@ export function AdjustmentCard({
         </View>
       ) : null}
 
-      <Pressable
+      <PressableScale
         onPress={() => onAccept(adjustment)}
         disabled={accepting}
         style={[styles.primary, { backgroundColor: accent.accent }, accepting && styles.off]}
@@ -215,7 +216,7 @@ export function AdjustmentCard({
         <Text style={[styles.primaryText, { color: accent.on }]}>
           {accepting ? 'Saving…' : `Eat ${adjustment.to_kcal} from ${adjustment.effective_on}`}
         </Text>
-      </Pressable>
+      </PressableScale>
       {/* NOT a button. Declining is doing nothing, and a Decline control would
           imply something is recorded when you press it. Nothing is. */}
       <Text style={styles.footnote}>

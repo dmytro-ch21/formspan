@@ -1,11 +1,12 @@
 import { Stack } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { UNIT_SYSTEMS } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Units, as its own screen under Settings.
@@ -26,7 +27,7 @@ export default function UnitsSettingsScreen() {
         {UNIT_SYSTEMS.map((u, i) => {
           const selected = units === u.key;
           return (
-            <Pressable
+            <PressableScale
               key={u.key}
               style={[styles.row, i > 0 && styles.rowDivided]}
               onPress={() => setUnits(u.key)}
@@ -40,7 +41,7 @@ export default function UnitsSettingsScreen() {
                 <Text style={styles.muted}>{u.detail}</Text>
               </View>
               {selected && <Text style={[styles.tick, { color: accent.ink }]}>✓</Text>}
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>

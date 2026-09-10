@@ -1,7 +1,7 @@
 import { request as requestSync } from '@/lib/sync';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput } from 'react-native';
 
 import { useAuth } from '@clerk/clerk-expo';
 
@@ -19,6 +19,7 @@ import {
   readLocalSession,
   saveLocalSets,
 } from '@/lib/sessionStore';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Picking an exercise mid-session — either to add one, or to swap one you've
@@ -146,7 +147,7 @@ export default function AddExerciseToSessionScreen() {
     const uri = pickImage(item, 'thumbnail');
     const carries = current ? item.load_type === current.load_type : true;
     return (
-      <Pressable
+      <PressableScale
         style={[styles.row, busy !== null && busy !== item.id && styles.dimmed]}
         onPress={() => choose(item)}
         disabled={busy !== null}
@@ -178,7 +179,7 @@ export default function AddExerciseToSessionScreen() {
           </Text>
         </View>
         {busy === item.id && <ActivityIndicator />}
-      </Pressable>
+      </PressableScale>
     );
   }
 
@@ -204,7 +205,7 @@ export default function AddExerciseToSessionScreen() {
           machine you cannot name, which is the only case it helps with. It
           stays visible while searching so an empty result set is not the only
           way to discover it. */}
-      <Pressable
+      <PressableScale
         onPress={() =>
           router.push(
             swapping
@@ -217,7 +218,7 @@ export default function AddExerciseToSessionScreen() {
         style={styles.identify}
       >
         <Text style={styles.identifyText}>Don&apos;t know its name? Photograph the machine</Text>
-      </Pressable>
+      </PressableScale>
 
       {error && (
         <Text style={styles.error} accessibilityLiveRegion="polite">

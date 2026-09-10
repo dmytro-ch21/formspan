@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { Modal, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * "What time did it actually end?" — the correction N487/#848 adds to BJJ's
@@ -116,7 +117,7 @@ export function EndTimeCorrection({
 
   return (
     <>
-      <Pressable
+      <PressableScale
         onPress={openSheet}
         style={styles.row}
         accessibilityRole="button"
@@ -130,7 +131,7 @@ export function EndTimeCorrection({
           </Text>
         </RNView>
         <Text style={[styles.rowHint, { color: accent.ink }]}>Correct</Text>
-      </Pressable>
+      </PressableScale>
 
       <Modal
         visible={open}
@@ -142,7 +143,7 @@ export function EndTimeCorrection({
         <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg} testID={`${testID}-sheet`}>
           <RNView style={styles.sheetHead}>
             <Text style={styles.sheetTitle}>When did it actually end?</Text>
-            <Pressable
+            <PressableScale
               onPress={() => setOpen(false)}
               hitSlop={12}
               accessibilityRole="button"
@@ -150,7 +151,7 @@ export function EndTimeCorrection({
               testID={`${testID}-cancel`}
             >
               <Text style={[styles.close, { color: accent.ink }]}>Cancel</Text>
-            </Pressable>
+            </PressableScale>
           </RNView>
 
           <Text style={styles.sectionLabel}>How long ago</Text>
@@ -163,7 +164,7 @@ export function EndTimeCorrection({
                 notBefore != null &&
                 new Date(openedAt.getTime() - min * 60_000).getTime() < notBefore.getTime();
               return (
-                <Pressable
+                <PressableScale
                   key={min}
                   onPress={() => applyOffset(min)}
                   disabled={disabled}
@@ -175,7 +176,7 @@ export function EndTimeCorrection({
                   <Text style={[styles.chipText, disabled && styles.chipTextDisabled]}>
                     {formatOffset(min)}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </RNView>
@@ -189,7 +190,7 @@ export function EndTimeCorrection({
               const atFloor =
                 notBefore != null && draft.getTime() - 15 * 60_000 < notBefore.getTime();
               return (
-                <Pressable
+                <PressableScale
                   onPress={() => nudge(-15)}
                   disabled={atFloor}
                   style={[styles.nudgeBtn, atFloor && styles.nudgeBtnDisabled]}
@@ -199,13 +200,13 @@ export function EndTimeCorrection({
                   testID={`${testID}-nudge-back`}
                 >
                   <Text style={[styles.nudgeSign, atFloor && styles.nudgeSignDisabled]}>−15m</Text>
-                </Pressable>
+                </PressableScale>
               );
             })()}
             <Text style={styles.exactValue} testID={`${testID}-draft-value`}>
               {formatClock(draft)}
             </Text>
-            <Pressable
+            <PressableScale
               onPress={() => nudge(15)}
               style={styles.nudgeBtn}
               accessibilityRole="button"
@@ -213,17 +214,17 @@ export function EndTimeCorrection({
               testID={`${testID}-nudge-forward`}
             >
               <Text style={styles.nudgeSign}>+15m</Text>
-            </Pressable>
+            </PressableScale>
           </RNView>
 
-          <Pressable
+          <PressableScale
             onPress={save}
             style={[styles.save, { backgroundColor: accent.accent }]}
             accessibilityRole="button"
             testID={`${testID}-save`}
           >
             <Text style={[styles.saveText, { color: accent.on }]}>Save</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </Modal>
     </>

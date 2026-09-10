@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View as RNView, View } from 'react-native';
+import { ScrollView, StyleSheet, View as RNView, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -15,6 +15,7 @@ import {
   type TrackerView,
 } from '@/lib/trackers';
 import { unitNoun, pluralise, targetCount, type Tracker } from '@/lib/trackerModel';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Every tracker the athlete is running, in the order Today shows them.
@@ -133,7 +134,7 @@ export default function TrackersScreen() {
             </Text>
             {trackers.map((t, i) => (
               <RNView key={t.id} style={styles.row}>
-                <Pressable
+                <PressableScale
                   style={styles.rowBody}
                   onPress={() => router.push(`/trackers/${t.id}`)}
                   accessibilityRole="button"
@@ -148,8 +149,8 @@ export default function TrackersScreen() {
                     </Text>
                     <Text style={styles.rowMeta}>{describe(t)}</Text>
                   </RNView>
-                </Pressable>
-                <Pressable
+                </PressableScale>
+                <PressableScale
                   onPress={() => void move(i, -1)}
                   disabled={i === 0}
                   hitSlop={10}
@@ -164,8 +165,8 @@ export default function TrackersScreen() {
                   testID={`tracker-up-${t.id}`}
                 >
                   <Text style={styles.arrowText}>↑</Text>
-                </Pressable>
-                <Pressable
+                </PressableScale>
+                <PressableScale
                   onPress={() => void move(i, 1)}
                   disabled={i === trackers.length - 1}
                   hitSlop={10}
@@ -176,7 +177,7 @@ export default function TrackersScreen() {
                   testID={`tracker-down-${t.id}`}
                 >
                   <Text style={styles.arrowText}>↓</Text>
-                </Pressable>
+                </PressableScale>
               </RNView>
             ))}
           </>
@@ -188,7 +189,7 @@ export default function TrackersScreen() {
           </Text>
         ) : null}
 
-        <Pressable
+        <PressableScale
           onPress={() => router.push('/trackers/new')}
           style={[styles.add, { borderColor: accent.accent }]}
           accessibilityRole="button"
@@ -197,7 +198,7 @@ export default function TrackersScreen() {
         >
           <Icon name="plus" size={16} color={accent.accent} />
           <Text style={[styles.addText, { color: accent.accent }]}>Track something new</Text>
-        </Pressable>
+        </PressableScale>
         {trackers && trackers.length >= MAX_LIVE_TRACKERS ? (
           <Text style={styles.hint} testID="trackers-manage-full">
             {`You are tracking ${MAX_LIVE_TRACKERS} things, which is the most at once. ` +
@@ -205,7 +206,7 @@ export default function TrackersScreen() {
           </Text>
         ) : null}
 
-        <Pressable
+        <PressableScale
           onPress={() => router.push('/trackers/archived')}
           style={styles.secondary}
           accessibilityRole="button"
@@ -213,7 +214,7 @@ export default function TrackersScreen() {
           testID="tracker-archived-link"
         >
           <Text style={styles.secondaryText}>Stopped trackers</Text>
-        </Pressable>
+        </PressableScale>
       </ScrollView>
     </View>
   );

@@ -1,7 +1,8 @@
-import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The "Continue with Google" control plus the divider under it, as one piece
@@ -30,7 +31,7 @@ export function GoogleAuthButton({
 }) {
   return (
     <View style={styles.wrap}>
-      <Pressable
+      <PressableScale
         style={[styles.button, (busy || disabled) && styles.buttonDisabled]}
         onPress={onPress}
         disabled={busy || disabled}
@@ -44,7 +45,7 @@ export function GoogleAuthButton({
         ) : (
           <Text style={styles.buttonText}>{label}</Text>
         )}
-      </Pressable>
+      </PressableScale>
 
       <View style={styles.dividerRow}>
         <View style={styles.rule} />

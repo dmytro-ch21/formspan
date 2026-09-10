@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Modal, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The ⓘ beside a section label, and the explanation behind it.
@@ -58,7 +59,7 @@ export function InfoMark({
 
   return (
     <>
-      <Pressable
+      <PressableScale
         onPress={() => setOpen(true)}
         hitSlop={12}
         style={styles.mark}
@@ -78,7 +79,7 @@ export function InfoMark({
         >
           <Text style={styles.markGlyph}>i</Text>
         </RNView>
-      </Pressable>
+      </PressableScale>
 
       <Modal
         visible={open}
@@ -89,7 +90,7 @@ export function InfoMark({
         <View style={styles.sheet}>
           <RNView style={styles.head}>
             <Text style={styles.title}>{title ?? about}</Text>
-            <Pressable
+            <PressableScale
               onPress={() => setOpen(false)}
               hitSlop={12}
               accessibilityRole="button"
@@ -97,7 +98,7 @@ export function InfoMark({
               testID={testID ? `${testID}-close` : undefined}
             >
               <Icon name="close" size={20} color={accent.ink} />
-            </Pressable>
+            </PressableScale>
           </RNView>
           <ScrollView contentContainerStyle={styles.body}>
             {body.map((p, i) => (

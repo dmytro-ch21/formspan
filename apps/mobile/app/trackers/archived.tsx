@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View as RNView, View } from 'react-native';
+import { ScrollView, StyleSheet, View as RNView, View } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { Text } from '@/components/Themed';
@@ -16,6 +16,7 @@ import {
 import * as api from '@/lib/trackersApi';
 import { unitNoun, pluralise, type Tracker } from '@/lib/trackerModel';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The trackers an athlete has stopped — and the only place anything is
@@ -146,7 +147,7 @@ export default function ArchivedTrackersScreen() {
                   {unitNoun(t) ? `, in ${pluralise(unitNoun(t), 2)}` : ''}.
                 </Text>
 
-                <Pressable
+                <PressableScale
                   onPress={() => void restore(t)}
                   style={styles.restore}
                   accessibilityRole="button"
@@ -154,7 +155,7 @@ export default function ArchivedTrackersScreen() {
                   testID={`tracker-restore-${t.id}`}
                 >
                   <Text style={styles.restoreText}>Start tracking it again</Text>
-                </Pressable>
+                </PressableScale>
 
                 {provisioned ? (
                   <Text style={styles.locked} testID={`tracker-undeletable-${t.id}`}>

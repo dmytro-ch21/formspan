@@ -23,7 +23,7 @@
  * that specific failure.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -38,6 +38,7 @@ import {
 import type { Macros } from '@/lib/nutrition';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 const UNITS: FoodUnit[] = ['g', 'oz'];
 
@@ -284,7 +285,7 @@ export function FoodQuantity({
               since it is the primary/default reading, matching what the
               athlete actually saw printed on the box. */}
           {naturalUnit && (
-            <Pressable
+            <PressableScale
               onPress={switchToNatural}
               accessibilityRole="button"
               accessibilityState={{ selected: usingNatural }}
@@ -295,10 +296,10 @@ export function FoodQuantity({
               <Text style={[styles.unitText, usingNatural && styles.unitTextOn]}>
                 {naturalUnit.wordPlural}
               </Text>
-            </Pressable>
+            </PressableScale>
           )}
           {UNITS.map((u) => (
-            <Pressable
+            <PressableScale
               key={u}
               onPress={() => switchUnit(u)}
               accessibilityRole="button"
@@ -310,7 +311,7 @@ export function FoodQuantity({
               <Text style={[styles.unitText, !usingNatural && u === foodUnit && styles.unitTextOn]}>
                 {foodUnitLabel(u)}
               </Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </View>
       </View>
@@ -318,7 +319,7 @@ export function FoodQuantity({
       {options.length > 0 && (
         <View style={styles.portions}>
           {options.map((o) => (
-            <Pressable
+            <PressableScale
               key={`${o.label}-${o.grams}`}
               onPress={() => pickPortion(o.grams)}
               accessibilityRole="button"
@@ -330,7 +331,7 @@ export function FoodQuantity({
             >
               <Text style={styles.chipText}>{o.label}</Text>
               <Text style={styles.chipGrams}>{o.grams} g</Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </View>
       )}
@@ -343,7 +344,7 @@ export function FoodQuantity({
               : 'Enter a quantity'}
           </Text>
 
-          <Pressable
+          <PressableScale
             onPress={() => valid && !busy && onLog(grams)}
             disabled={!valid || busy}
             accessibilityRole="button"
@@ -352,7 +353,7 @@ export function FoodQuantity({
             style={[styles.log, (!valid || busy) && styles.logOff]}
           >
             <Text style={styles.logText}>{cta}</Text>
-          </Pressable>
+          </PressableScale>
         </>
       )}
     </View>

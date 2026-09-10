@@ -44,7 +44,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -61,6 +61,7 @@ import {
   type RecipeDraft,
 } from '@/lib/recipe';
 import { request } from '@/lib/sync';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 type Load =
   | { status: 'loading' }
@@ -274,7 +275,7 @@ export default function CombineScreen() {
         </Text>
       ) : null}
 
-      <Pressable
+      <PressableScale
         onPress={() => void combine()}
         disabled={!!problem || saving}
         accessibilityRole="button"
@@ -285,7 +286,7 @@ export default function CombineScreen() {
         <Text style={[styles.saveText, { color: accent.on }]}>
           {saving ? 'Combining…' : 'Combine & log'}
         </Text>
-      </Pressable>
+      </PressableScale>
     </KeyboardAwareScrollView>
   );
 }

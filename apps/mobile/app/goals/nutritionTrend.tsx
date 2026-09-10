@@ -1,6 +1,6 @@
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
@@ -13,6 +13,7 @@ import { MAX_DAY_WINDOW, MEAN_WINDOW_DAYS, buildNutritionTrend } from '@/lib/nut
 import { listDays, listTargets, type DayTotals, type StoredTarget } from '@/lib/nutritionApi';
 import { type TrendRangeKey, RANGES } from '@/lib/trendSeries';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * "Am I hitting my target lately?" — N84, row 6 of the phone-impossible audit.
@@ -107,7 +108,7 @@ export default function NutritionTrendScreen() {
               {RANGES.filter((r) => r.key !== 'Plan').map((r) => {
                 const on = r.key === range;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={r.key}
                     onPress={() => setRange(r.key)}
                     hitSlop={8}
@@ -118,7 +119,7 @@ export default function NutritionTrendScreen() {
                     testID={`nutrition-trend-range-${r.key}`}
                   >
                     <Text style={[styles.rangeText, on && { color: accent.on }]}>{r.label}</Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </RNView>

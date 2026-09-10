@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { SelectAllTextInput } from '@/components/SelectAllTextInput';
 import { Text } from '@/components/Themed';
@@ -20,6 +20,7 @@ import {
   type TrackerUnit,
 } from '@/lib/trackerModel';
 import { fromDisplayFluid, toDisplayFluid, type UnitSystem } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The fields of a tracker, as one form.
@@ -333,7 +334,7 @@ export function TrackerForm({
           {(Object.keys(trackerColors) as TrackerColor[]).map((key) => {
             const selected = value.colorKey === key;
             return (
-              <Pressable
+              <PressableScale
                 key={key}
                 onPress={() => set('colorKey', key)}
                 hitSlop={6}
@@ -478,7 +479,7 @@ function Chips({
       {options.map((o) => {
         const on = o.key === selected;
         return (
-          <Pressable
+          <PressableScale
             key={o.key || 'none'}
             onPress={() => onSelect(o.key)}
             style={[styles.chip, on && styles.chipOn]}
@@ -488,7 +489,7 @@ function Chips({
             testID={`tracker-form-${name}-${o.key || 'none'}`}
           >
             <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
-          </Pressable>
+          </PressableScale>
         );
       })}
     </RNView>

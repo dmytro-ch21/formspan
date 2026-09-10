@@ -1,6 +1,6 @@
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -17,6 +17,7 @@ import { archiveTrackerLocally, localTrackers, updateTrackerLocally } from '@/li
 import { type Tracker } from '@/lib/trackerModel';
 import { request as requestSync } from '@/lib/sync';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * A tracker's settings, ON THE PHONE.
@@ -177,16 +178,16 @@ export default function TrackerSettingsScreen() {
         </Text>
       ) : null}
 
-      <Pressable
+      <PressableScale
         onPress={() => void save()}
         style={[styles.save, { backgroundColor: accent.accent }]}
         accessibilityRole="button"
         testID="tracker-settings-save"
       >
         <Text style={[styles.saveText, { color: accent.on }]}>Save</Text>
-      </Pressable>
+      </PressableScale>
 
-      <Pressable
+      <PressableScale
         onPress={confirmArchive}
         style={styles.secondary}
         accessibilityRole="button"
@@ -194,7 +195,7 @@ export default function TrackerSettingsScreen() {
         testID="tracker-settings-archive"
       >
         <Text style={styles.secondaryText}>Stop tracking {tracker.name}</Text>
-      </Pressable>
+      </PressableScale>
     </ScreenShell>
   );
 }

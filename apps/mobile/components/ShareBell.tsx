@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback } from 'react';
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -9,6 +9,7 @@ import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { badgeLabel, bellLabel, refreshShareInbox, useShareInboxCount } from '@/lib/shareInbox';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The bell — where shares arrive (N529/#960).
@@ -52,7 +53,7 @@ export function ShareBell() {
   const badge = badgeLabel(count);
 
   return (
-    <Pressable
+    <PressableScale
       onPress={() => router.push('/shared')}
       hitSlop={HIT_SLOP}
       style={styles.target}
@@ -73,7 +74,7 @@ export function ShareBell() {
           <Text style={[styles.badgeText, { color: accent.on }]}>{badge}</Text>
         </RNView>
       )}
-    </Pressable>
+    </PressableScale>
   );
 }
 

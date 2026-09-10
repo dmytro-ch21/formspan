@@ -16,6 +16,7 @@ import { listFriends, type FriendCard } from '@/lib/friends';
 import { shareResource } from '@/lib/shares';
 import { useAccent } from '@/lib/AccentProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Send this thing to a training partner.
@@ -67,7 +68,7 @@ export function ShareToFriend({
 
   return (
     <>
-      <Pressable
+      <PressableScale
         onPress={() => setOpen(true)}
         disabled={disabled}
         style={[styles.trigger, { borderColor: accent.accent }, disabled && styles.disabled]}
@@ -80,7 +81,7 @@ export function ShareToFriend({
         testID={testID ?? 'share-open'}
       >
         <Text style={[styles.triggerText, { color: accent.ink }]}>Share</Text>
-      </Pressable>
+      </PressableScale>
       {/* Said where it applies rather than inside a sheet you cannot open. */}
       {disabled && disabledReason && (
         <Text
@@ -252,13 +253,13 @@ export function ShareSheet({
                 {friends === null && (
                   // Reachable only for a failed LOAD. Without it the only
                   // retry is close-and-reopen, which nothing announces.
-                  <Pressable
+                  <PressableScale
                     onPress={() => setAttempt((n) => n + 1)}
                     accessibilityRole="button"
                     testID="share-retry"
                   >
                     <Text style={[styles.retry, { color: accent.ink }]}>Try again</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </RNView>
             )}
@@ -286,7 +287,7 @@ export function ShareSheet({
               {friends?.map((f) => {
                 const sent = sentTo.includes(f.username);
                 return (
-                  <Pressable
+                  <PressableScale
                     key={f.username}
                     onPress={() => send(f.username)}
                     disabled={sending !== null || sent}
@@ -317,7 +318,7 @@ export function ShareSheet({
                     >
                       {sending === f.username ? 'Sending…' : sent ? 'Sent ✓' : ''}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </ScrollView>
@@ -328,14 +329,14 @@ export function ShareSheet({
               They get their own copy. Your later edits stay yours.
             </Text>
 
-            <Pressable
+            <PressableScale
               onPress={onClose}
               style={styles.close}
               accessibilityRole="button"
               testID="share-close"
             >
               <Text style={styles.closeText}>Done</Text>
-            </Pressable>
+            </PressableScale>
           </View>
       </RNView>
     </Modal>

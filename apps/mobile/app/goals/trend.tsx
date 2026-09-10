@@ -1,6 +1,6 @@
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
@@ -23,6 +23,7 @@ import { useWeightTrend } from '@/lib/useWeightTrend';
 import { toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The weight trend, in full.
@@ -130,7 +131,7 @@ export default function WeightTrendScreen() {
               {RANGES.map((r) => {
                 const on = r.key === range;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={r.key}
                     onPress={() => setRange(r.key)}
                     hitSlop={8}
@@ -141,7 +142,7 @@ export default function WeightTrendScreen() {
                     testID={`trend-range-${r.key}`}
                   >
                     <Text style={[styles.rangeText, on && { color: accent.on }]}>{r.label}</Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </RNView>
@@ -187,7 +188,7 @@ export default function WeightTrendScreen() {
                 the axis dates say where it starts and this says why. */}
             <ClipNote series={series} />
 
-            <Pressable
+            <PressableScale
               // The check-in for TODAY. `/checkin` is not a route — the typed
               // routes caught that, which is the whole reason N45 keeps the
               // generator honest.
@@ -197,7 +198,7 @@ export default function WeightTrendScreen() {
               testID="trend-record"
             >
               <Text style={[styles.primaryText, { color: accent.on }]}>Record Weight</Text>
-            </Pressable>
+            </PressableScale>
 
             <ProjectionLine projection={projection} fmt={fmt} unit={unit} />
 

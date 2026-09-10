@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { Animated, Easing, Modal, StyleSheet, View as RNView } from 'react-native';
 import MapView, { Polyline } from 'react-native-maps';
 
 import { Medal } from '@/components/ui/Medal';
@@ -22,6 +22,7 @@ import {
 import { RECORD_LABEL } from '@/lib/records';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
 import { playSound } from '@/lib/sounds';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The card a finished session ends on.
@@ -571,14 +572,14 @@ export function SessionCelebration({
               textStyle={styles.shareText}
               testID="celebration-share"
             />
-            <Pressable
+            <PressableScale
               onPress={onDismiss}
               style={[styles.done, { backgroundColor: accent.accent }]}
               accessibilityRole="button"
               testID="celebration-done"
             >
               <Text style={[styles.doneText, { color: accent.on }]}>Done</Text>
-            </Pressable>
+            </PressableScale>
           </RNView>
         </View>
 

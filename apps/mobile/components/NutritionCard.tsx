@@ -20,7 +20,7 @@
  * correct on the one screen it was written against.
  */
 
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -29,6 +29,7 @@ import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { type EatenView, type Food, type TargetView } from '@/lib/nutrition';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export function NutritionCard({
   eaten,
@@ -85,7 +86,7 @@ export function NutritionCard({
       {quickAdd.length > 0 && (
         <View style={styles.quick}>
           {quickAdd.map((f) => (
-            <Pressable
+            <PressableScale
               key={f.id}
               onPress={() => onQuickAdd(f)}
               style={styles.chip}
@@ -98,13 +99,13 @@ export function NutritionCard({
               <Text style={styles.chipText} numberOfLines={1}>
                 {f.name}
               </Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </View>
       )}
 
       <View style={styles.actions}>
-        <Pressable
+        <PressableScale
           onPress={onLog}
           style={[styles.primary, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
@@ -112,8 +113,8 @@ export function NutritionCard({
           testID="fuel-log"
         >
           <Text style={[styles.primaryText, { color: accent.on }]}>Log food</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={onOpenDay}
           style={styles.secondary}
           accessibilityRole="button"
@@ -121,7 +122,7 @@ export function NutritionCard({
           testID="fuel-open-day"
         >
           <Text style={styles.secondaryText}>Day</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );

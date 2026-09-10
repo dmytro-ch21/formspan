@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -16,6 +16,7 @@ import {
 } from '@/lib/anthropometry';
 import { PHASE_LABELS, type Checkin } from '@/lib/body';
 import { formatWeight, type UnitSystem } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The Today screen's check-in card.
@@ -169,7 +170,7 @@ export function CheckinCard({
       )}
 
       <RNView style={styles.actions}>
-        <Pressable
+        <PressableScale
           onPress={() => router.push(`/checkin/${today}`)}
           style={[styles.primary, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
@@ -179,14 +180,14 @@ export function CheckinCard({
           <Text style={[styles.primaryText, { color: accent.on }]}>
             {loggedToday ? 'Edit check-in' : 'Check in'}
           </Text>
-        </Pressable>
+        </PressableScale>
         {/* The trend, one tap away rather than on the card. Secondary
             styling on purpose: the card's job is today's decision, and a
             chart competing with "Check in" for the thumb would invert that.
             See `app/goals/trend.tsx` for why it is a screen at all. The
             path below still points at `checkin/trend`, which redirects there —
             keeping this door open is deliberate (N56). */}
-        <Pressable
+        <PressableScale
           onPress={() => router.push('/checkin/trend')}
           style={styles.secondary}
           accessibilityRole="button"
@@ -194,7 +195,7 @@ export function CheckinCard({
           testID="checkin-trend"
         >
           <Text style={styles.secondaryText}>Trend</Text>
-        </Pressable>
+        </PressableScale>
         {/* Surfaced only when it is actually due — a permanent "measure
             yourself" prompt is the thing people learn to ignore. */}
         {dueGirths && (
