@@ -68620,6 +68620,38 @@ migration reliably leaves exactly this residue — the fix is cheap, the
 detection is free, and pretending the script is complete is what would cost
 something.
 
+## 2026-09-10 — F48 tranche four: the entry and account path, including the first tap
+
+32 pressables across sign-in, sign-up, forgot-password, profile edit, friends
+and starting a session. **67 → 61 files, 169 → 137 pressables.**
+
+`#1037` named `app/sign-in.tsx` specifically — *the app's very first tap*
+answered a finger with nothing. It does now, along with everything between
+opening the app for the first time and having an account that works.
+
+**Two text-matching mistakes, and they are the same mistake in two places.**
+
+The survey's keyword heuristic flagged `components/SessionShare.tsx` and
+`app/technique/[id].tsx` as backdrop-exempt. Neither is: SessionShare's
+"scrim" is a COMMENT about padding, and technique's is a gradient overlay for
+title legibility. Both would have been wrongly excluded from every future
+tranche on the strength of a word.
+
+Then the conversion script left a stale `Pressable` import in
+`app/profile/edit.tsx`, because its "is Pressable still referenced?" guard
+matched **a comment on line 225** that mentions a Pressable handler.
+
+That is the FOURTH time in one day that a text match has been fooled by a
+comment — W22's absence check, W23's first draft, F38's `friction:` guard, and
+now twice here. The tests already learned this and strip comments via
+`codeOnly()`; the migration TOOLING had not. The lesson is not "be careful
+with greps", it is that **any check about code should be run against code**,
+and comments are not code. Typecheck caught this one, which is why it cost a
+minute rather than a tranche.
+
+Tranche three's two carried-forward fixes both held: the whole-file import
+scan, and restoring a mutation from a file copy rather than `git checkout`.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

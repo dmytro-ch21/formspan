@@ -177,7 +177,7 @@ const EXEMPT: Record<string, string> = {
  * Lower it when a tranche lands. It may never rise: a new bare `<Pressable>`
  * in a file that had none is exactly the regression F38 and F48 exist to end.
  */
-const REMAINING = 67;
+const REMAINING = 61;
 
 describe('the PressableScale primitive', () => {
   /**
@@ -242,6 +242,25 @@ describe('F48 — the press-feedback migration', () => {
     // A COUNT, not a list: naming all 79 would make this test a changelog that
     // fails on every unrelated rename. The direction is what matters.
     expect(feedbackLessFiles().length).toBeLessThanOrEqual(REMAINING);
+  });
+
+  it('has finished the entry and account path — including the first tap', () => {
+    // Tranche four. #1037 named `sign-in.tsx` specifically: the app's very
+    // first tap answered a finger with nothing. Sign-up, forgot-password,
+    // profile edit, friends and starting a session go with it — everything
+    // between opening the app for the first time and having an account that
+    // works.
+    const left = feedbackLessFiles();
+    for (const f of [
+      'app/sign-in.tsx',
+      'app/sign-up.tsx',
+      'app/forgot-password.tsx',
+      'app/profile/edit.tsx',
+      'app/friends/index.tsx',
+      'app/session/start.tsx',
+    ]) {
+      expect({ f, left: left.includes(f) }).toEqual({ f, left: false });
+    }
   });
 
   it('has finished the training-logging path', () => {

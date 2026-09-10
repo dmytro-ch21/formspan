@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   TextInput,
 } from 'react-native';
@@ -21,6 +20,7 @@ import {
   SetActive,
   SignInResource,
 } from '@/lib/secondFactor';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Password reset: emailed code, then a new password, then straight into the app.
@@ -470,7 +470,7 @@ export default function ForgotPasswordScreen() {
             </Text>
           )}
           {unknownEmail && (
-            <Pressable
+            <PressableScale
               onPress={() =>
                 router.replace(
                   email.trim()
@@ -483,7 +483,7 @@ export default function ForgotPasswordScreen() {
               testID="forgot-to-sign-up"
             >
               <Text style={styles.inlineLink}>Create an account with that email instead</Text>
-            </Pressable>
+            </PressableScale>
           )}
         </View>
       )}
@@ -544,7 +544,7 @@ export default function ForgotPasswordScreen() {
                 accessibilityLabel="New password"
                 testID="forgot-password-input"
               />
-              <Pressable
+              <PressableScale
                 style={styles.reveal}
                 onPress={() => setShowPassword((v) => !v)}
                 hitSlop={8}
@@ -553,7 +553,7 @@ export default function ForgotPasswordScreen() {
                 testID="forgot-reveal"
               >
                 <Text style={styles.revealText}>{showPassword ? 'Hide' : 'Show'}</Text>
-              </Pressable>
+              </PressableScale>
             </View>
             <Text style={[styles.hint, meetsLength && styles.hintMet]}>
               {meetsLength ? '✓' : '•'} At least {MIN_PASSWORD} characters
@@ -575,7 +575,7 @@ export default function ForgotPasswordScreen() {
                 Resend in {resendIn}s
               </Text>
             ) : (
-              <Pressable
+              <PressableScale
                 onPress={onResend}
                 disabled={busy}
                 hitSlop={12}
@@ -585,9 +585,9 @@ export default function ForgotPasswordScreen() {
                 testID="forgot-resend"
               >
                 <Text style={[styles.inlineLink, busy && styles.dimmed]}>Resend code</Text>
-              </Pressable>
+              </PressableScale>
             )}
-            <Pressable
+            <PressableScale
               onPress={() => {
                 setStep('request');
                 setCode('');
@@ -602,7 +602,7 @@ export default function ForgotPasswordScreen() {
               testID="forgot-change-email"
             >
               <Text style={[styles.mutedLink, busy && styles.dimmed]}>Use a different email</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       )}
@@ -649,7 +649,7 @@ export default function ForgotPasswordScreen() {
         </Text>
       )}
 
-      <Pressable
+      <PressableScale
         style={[styles.button, submitting && styles.buttonDisabled]}
         onPress={submitAction}
         disabled={submitting}
@@ -663,9 +663,9 @@ export default function ForgotPasswordScreen() {
         ) : (
           <Text style={styles.buttonText}>{submitLabel}</Text>
         )}
-      </Pressable>
+      </PressableScale>
 
-      <Pressable
+      <PressableScale
         style={styles.footer}
         onPress={goToSignIn}
         hitSlop={12}
@@ -679,7 +679,7 @@ export default function ForgotPasswordScreen() {
           {passwordChanged ? 'Password saved — ' : ''}
           <Text style={styles.footerLink}>Back to sign in</Text>
         </Text>
-      </Pressable>
+      </PressableScale>
     </KeyboardAwareScrollView>
   );
 }
