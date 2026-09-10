@@ -110,6 +110,8 @@ import { useAuthToken } from '@/lib/useAuthToken';
 import { useTrackerDay } from '@/lib/useTrackerDay';
 import { useUnits } from '@/lib/useUnits';
 import { countsAsSet } from '@/lib/sessions';
+import { useSessionHRSummaries } from '@/lib/useSessionHRSummaries';
+import type { SessionHRSummary } from '@/lib/sessionHR';
 
 /**
  * Room under the scroll so the floating New Log never covers the last row.
@@ -294,6 +296,20 @@ export default function TodayScreen() {
     sessions,
     refresh: refreshBoard,
   } = useTodayBoard(userId ?? null, modules, now, viewDay);
+
+  /**
+   * N547/#990 — heart rate for the logged rows below, read from the local
+   * cache in ONE batched query rather than one per row.
+   *
+   * Loaded here rather than inside `LoggedBlock` because that component
+   * returns early when there is nothing logged, before any hook — so it
+   * cannot legally load its own. An absent entry omits the measure; it never
+   * shows a zero, and the rows never wait on this to render.
+   */
+  const loggedHR = useSessionHRSummaries(
+    userId,
+    board.logged.state === 'ready' ? board.logged.value.map((s) => s.id) : [],
+  );
 
   // Moved up from beside its other render-time uses so Momentum's own food
   // read (below) can see `resume` — a running session means "right now",
@@ -1156,6 +1172,7 @@ export default function TodayScreen() {
             logged={board.logged}
             modules={modules}
             units={units}
+            hr={loggedHR}
             onOpenSession={(s) => router.push(sessionHref(s, modules))}
             onAll={() => router.push('/session/history')}
           />
@@ -1995,12 +2012,19 @@ function LoggedBlock({
   logged,
   modules,
   units,
+  hr,
   onOpenSession,
   onAll,
 }: {
   logged: Source<Session[]>;
   modules: Module[];
   units: UnitSystem;
+  /**
+   * N547/#990 — cached heart rate per session id. Loaded by the parent (this
+   * component returns early before any hook, so it cannot load its own), and
+   * absent entries simply omit the measure rather than showing a zero.
+   */
+  hr: Map<string, SessionHRSummary>;
   onOpenSession: (s: Session) => void;
   onAll: () => void;
 }) {
@@ -2017,7 +2041,7 @@ function LoggedBlock({
             sport={s.sport}
             sportLabel={sportLabel}
             title={s.name || `${sportLabel} session`}
-            meta={sessionMeta(s, units)}
+            meta={sessionMeta(s, units, hr.get(s.id))}
             inProgress={!s.ended_at}
             onOpen={() => onOpenSession(s)}
             testID={`today-logged-${s.id}`}
