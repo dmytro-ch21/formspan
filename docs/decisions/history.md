@@ -68590,6 +68590,36 @@ imports sit past line 100 and the script only scanned the first 100 lines, so
 it threw before writing. It threw rather than silently skipping, which is the
 right failure, and the five files already written were unaffected.
 
+## 2026-09-10 — F48 tranche three: the training-logging path
+
+81 pressables across logging a workout and the four BJJ surfaces — dictate,
+reflect, the session screen, the log — plus the curriculum editor. **73 → 67
+files, 250 → 169 pressables.**
+
+With tranches one and two this closes **every path an athlete uses to record
+something**: the live strength session and its timer, the food path, and now
+training. Recording is the app's whole job, so the surfaces that do it are
+finished before the ones that display.
+
+Vetted the same way before converting: no backdrops, no scrims, no render-prop
+styles in any of the six. That check has now paid twice — a `CameraView`
+`absoluteFill` in tranche two that would have read as a dismiss target to a
+careless grep, and nothing here.
+
+**Two script fixes carried forward from tranche two's mistakes**, which is
+what a tranche sequence is for. The import scan now covers the WHOLE file
+rather than the first 100 lines — the window that made `MealCard` throw last
+time. And the mutation restore used a **file copy**, never `git checkout`,
+which is the error tranche two repeated from tranche one's own written-down
+lesson. The restore held on the first re-run.
+
+`bjj/log.tsx` still needed a hand edit: its `react-native` import is
+multi-line, which the single-line regex does not match. Caught by typecheck
+rather than by review, and worth noting that the scripted part of this
+migration reliably leaves exactly this residue — the fix is cheap, the
+detection is free, and pretending the script is complete is what would cost
+something.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

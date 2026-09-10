@@ -177,7 +177,7 @@ const EXEMPT: Record<string, string> = {
  * Lower it when a tranche lands. It may never rise: a new bare `<Pressable>`
  * in a file that had none is exactly the regression F38 and F48 exist to end.
  */
-const REMAINING = 73;
+const REMAINING = 67;
 
 describe('the PressableScale primitive', () => {
   /**
@@ -242,6 +242,24 @@ describe('F48 — the press-feedback migration', () => {
     // A COUNT, not a list: naming all 79 would make this test a changelog that
     // fails on every unrelated rename. The direction is what matters.
     expect(feedbackLessFiles().length).toBeLessThanOrEqual(REMAINING);
+  });
+
+  it('has finished the training-logging path', () => {
+    // Tranche three: logging a workout, and the four BJJ surfaces — dictate,
+    // reflect, the session screen and the log. 81 pressables. With tranches
+    // one and two this closes every path an athlete uses to RECORD something,
+    // which is the app's whole job.
+    const left = feedbackLessFiles();
+    for (const f of [
+      'app/workout/[id].tsx',
+      'app/bjj/dictate.tsx',
+      'app/bjj/reflect/[id].tsx',
+      'app/bjj/session/[id].tsx',
+      'app/bjj/log.tsx',
+      'components/curriculum/CurriculumEditor.tsx',
+    ]) {
+      expect({ f, left: left.includes(f) }).toEqual({ f, left: false });
+    }
   });
 
   it('has finished the food-logging path — the highest-frequency logging there is', () => {

@@ -1,12 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View as RNView,
-} from 'react-native';
+import { ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { EndTimeCorrection } from '@/components/EndTimeCorrection';
 import { Text, View } from '@/components/Themed';
@@ -29,6 +24,7 @@ import { PREF_BJJ_LAST_LOG, readPref, writePref } from '@/lib/prefs';
 import { saveLocalBjjDetail, startLocalSession } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Logging a BJJ session — the floor.
@@ -339,7 +335,7 @@ export default function LogBjjScreen() {
 
             It is an ALTERNATIVE, not a replacement — the form below stays the
             three-tap floor, works with no signal and spends nothing. */}
-        <Pressable
+        <PressableScale
           onPress={() => router.push(date ? `/bjj/dictate?date=${date}` : '/bjj/dictate')}
           style={[styles.dictate, { borderColor: accent.accent }]}
           accessibilityRole="button"
@@ -350,7 +346,7 @@ export default function LogBjjScreen() {
           <Text style={styles.dictateBlurb}>
             Talk it through with your keyboard’s mic and we’ll fill this in
           </Text>
-        </Pressable>
+        </PressableScale>
 
         {/* Read-only — no Pressable here, so this costs nothing on the tap
             floor. A reminder of what the athlete already decided to work on,
@@ -371,7 +367,7 @@ export default function LogBjjScreen() {
           {KINDS.map((k) => {
             const active = draft.kind === k.key;
             return (
-              <Pressable
+              <PressableScale
                 key={k.key}
                 onPress={() => setKind(k.key)}
                 style={[
@@ -385,7 +381,7 @@ export default function LogBjjScreen() {
               >
                 <Text style={[styles.kindLabel, active && styles.kindLabelActive]}>{k.label}</Text>
                 <Text style={[styles.kindBlurb, active && styles.kindBlurbActive]}>{k.blurb}</Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </RNView>
@@ -401,7 +397,7 @@ export default function LogBjjScreen() {
           ].map((o) => {
             const active = draft.gi === o.value;
             return (
-              <Pressable
+              <PressableScale
                 key={o.key}
                 onPress={() => setDraft((d) => ({ ...d, gi: o.value }))}
                 style={[
@@ -416,7 +412,7 @@ export default function LogBjjScreen() {
                 testID={`bjj-gi-${o.key}`}
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.label}</Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </RNView>
@@ -428,7 +424,7 @@ export default function LogBjjScreen() {
           {DURATIONS.map((m) => {
             const active = draft.durationMinutes === m;
             return (
-              <Pressable
+              <PressableScale
                 key={m}
                 onPress={() => setDraft((d) => ({ ...d, durationMinutes: m }))}
                 style={[styles.pill, active && styles.pillActive]}
@@ -438,7 +434,7 @@ export default function LogBjjScreen() {
                 testID={`bjj-duration-${m}`}
               >
                 <Text style={[styles.pillText, active && styles.pillTextActive]}>{m}m</Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </ScrollView>
@@ -480,7 +476,7 @@ export default function LogBjjScreen() {
             {ROUND_MINUTES.map((m) => {
               const active = draft.round_minutes === m;
               return (
-                <Pressable
+                <PressableScale
                   key={m}
                   onPress={() => setDraft((d) => ({ ...d, round_minutes: m }))}
                   style={[styles.pill, active && styles.pillActive]}
@@ -490,7 +486,7 @@ export default function LogBjjScreen() {
                   testID={`bjj-roundlen-${m}`}
                 >
                   <Text style={[styles.pillText, active && styles.pillTextActive]}>{m} min</Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </ScrollView>
@@ -512,7 +508,7 @@ export default function LogBjjScreen() {
             complete, valid session — see the file header — so this is styled
             as the single unambiguous primary action, not one of two equally
             weighted buttons. */}
-        <Pressable
+        <PressableScale
           onPress={() => commit('done')}
           disabled={saving}
           style={[styles.cta, { backgroundColor: accent.accent }, saving && styles.disabled]}
@@ -522,7 +518,7 @@ export default function LogBjjScreen() {
           <Text style={[styles.ctaText, { color: accent.on }]}>
             {saving ? 'Logging…' : 'Log it'}
           </Text>
-        </Pressable>
+        </PressableScale>
 
         <Text style={styles.footnote}>
           That’s a complete session — three taps, no more required. What you drilled and what
@@ -535,7 +531,7 @@ export default function LogBjjScreen() {
             session that is already saved by the button above. Reduced to a
             plain text row so looking optional and being optional finally
             agree with each other. */}
-        <Pressable
+        <PressableScale
           onPress={() => commit('detail')}
           disabled={saving}
           style={[styles.secondary, saving && styles.disabled]}
@@ -544,7 +540,7 @@ export default function LogBjjScreen() {
           testID="bjj-log-detail"
         >
           <Text style={styles.secondaryText}>Log and add detail (optional) →</Text>
-        </Pressable>
+        </PressableScale>
       </ScrollView>
     </View>
   );
@@ -574,7 +570,7 @@ function RpeScale({
       {Array.from({ length: MAX_RPE }, (_, i) => i + 1).map((n) => {
         const filled = value !== null && n <= value;
         return (
-          <Pressable
+          <PressableScale
             key={n}
             onPress={() => onChange(n)}
             style={[
@@ -598,7 +594,7 @@ function RpeScale({
             testID={`bjj-rpe-${n}`}
           >
             <Text style={[styles.rpeNumber, filled && styles.rpeNumberFilled]}>{n}</Text>
-          </Pressable>
+          </PressableScale>
         );
       })}
     </RNView>
@@ -638,7 +634,7 @@ function Stepper({
   const accent = useAccent();
   return (
     <RNView style={styles.stepper}>
-      <Pressable
+      <PressableScale
         onPress={() => onChange(Math.max(0, value - 1))}
         style={styles.stepperButton}
         accessibilityRole="button"
@@ -646,14 +642,14 @@ function Stepper({
         testID={`${testID}-minus`}
       >
         <Text style={[styles.stepperSign, { color: accent.ink }]}>−</Text>
-      </Pressable>
+      </PressableScale>
       <RNView style={styles.stepperValue}>
         <Text style={styles.stepperNumber} testID={`${testID}-value`}>
           {value === 0 ? 'None' : value}
         </Text>
         {value > 0 && <Text style={styles.stepperSuffix}>{suffix}</Text>}
       </RNView>
-      <Pressable
+      <PressableScale
         onPress={() => onChange(Math.min(max, value + 1))}
         style={styles.stepperButton}
         accessibilityRole="button"
@@ -661,7 +657,7 @@ function Stepper({
         testID={`${testID}-plus`}
       >
         <Text style={[styles.stepperSign, { color: accent.ink }]}>+</Text>
-      </Pressable>
+      </PressableScale>
     </RNView>
   );
 }

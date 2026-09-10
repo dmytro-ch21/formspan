@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, Alert, Modal, StyleSheet, View as RNView } from 'react-native';
 
 import { EndTimeCorrection } from '@/components/EndTimeCorrection';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
@@ -61,6 +61,7 @@ import { milestoneForSession, type Milestone } from '@/lib/milestones';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
 import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
 import { cacheSessionHR } from '@/lib/sessionHR';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Reading a BJJ session back.
@@ -715,12 +716,12 @@ export default function BjjSessionScreen() {
             accessibilityLabel="Session name"
             testID="bjj-session-name-input"
           />
-          <Pressable onPress={commitRename} hitSlop={10} accessibilityRole="button" testID="bjj-session-name-save">
+          <PressableScale onPress={commitRename} hitSlop={10} accessibilityRole="button" testID="bjj-session-name-save">
             <Text style={[styles.renameAction, { color: accent.ink }]}>Save</Text>
-          </Pressable>
+          </PressableScale>
         </RNView>
       ) : (
-        <Pressable
+        <PressableScale
           onPress={() => {
             setDraftName(session.name);
             setRenaming(true);
@@ -731,13 +732,13 @@ export default function BjjSessionScreen() {
         >
           <Text style={styles.title}>{session.name}</Text>
           <Text style={styles.renameHint}>Tap to rename</Text>
-        </Pressable>
+        </PressableScale>
       )}
 
       {/* N436: the date is the one field the "Edit detail" wizard below can't
           touch — it lives on the session record, not the reflection blob
           that wizard edits. Tap-to-edit, mirroring the name above it. */}
-      <Pressable
+      <PressableScale
         style={styles.whenPress}
         onPress={() => {
           setReschedulingError(null);
@@ -760,7 +761,7 @@ export default function BjjSessionScreen() {
           })}
         </Text>
         <Text style={styles.renameHint}>Tap to change date</Text>
-      </Pressable>
+      </PressableScale>
 
       {/* The numbers a mat session actually has. Deliberately not a volume
           tile — see the file header.
@@ -938,7 +939,7 @@ export default function BjjSessionScreen() {
           reached by `replace` from the log screen and nothing else links to
           it, so a session logged with "Log it" could never gain detail and a
           mis-tapped counter could never be corrected. */}
-      <Pressable
+      <PressableScale
         onPress={() => router.push({ pathname: '/bjj/reflect/[id]', params: { id: session.id } })}
         style={styles.cta}
         accessibilityRole="button"
@@ -947,7 +948,7 @@ export default function BjjSessionScreen() {
         <Text style={[styles.ctaText, { color: accent.ink }]}>
           {drilled.length + live.length > 0 ? 'Edit detail' : 'Add detail'}
         </Text>
-      </Pressable>
+      </PressableScale>
 
       {/* Only for a session with no end time. A BJJ session is normally
           logged complete, so this is the recovery path for one that was not —
@@ -1011,14 +1012,14 @@ export default function BjjSessionScreen() {
         testID="bjj-session-share"
       />
 
-      <Pressable
+      <PressableScale
         onPress={confirmDelete}
         style={styles.destructive}
         accessibilityRole="button"
         testID="bjj-session-delete"
       >
         <Text style={styles.destructiveText}>Delete session</Text>
-      </Pressable>
+      </PressableScale>
 
       {/* Counts EVERY field the wizard writes, not just the tags: skipping
           both tag steps and typing a body note used to render the note above
@@ -1085,7 +1086,7 @@ export default function BjjSessionScreen() {
     >
       <View style={styles.sheet} lightColor={vola.bg} darkColor={vola.bg} testID="bjj-reschedule-sheet">
         <RNView style={styles.sheetHead}>
-          <Pressable
+          <PressableScale
             onPress={() =>
               setReschedulingAnchor((a) => (a ? new Date(a.getFullYear(), a.getMonth() - 1, 1) : a))
             }
@@ -1097,14 +1098,14 @@ export default function BjjSessionScreen() {
             <RNView style={{ transform: [{ rotate: '180deg' }] }}>
               <Icon name="chevron" size={16} color={vola.text} />
             </RNView>
-          </Pressable>
+          </PressableScale>
           <Text style={styles.sheetTitle}>
             {(reschedulingAnchor ?? new Date()).toLocaleDateString(undefined, {
               month: 'long',
               year: 'numeric',
             })}
           </Text>
-          <Pressable
+          <PressableScale
             onPress={() =>
               setReschedulingAnchor((a) => (a ? new Date(a.getFullYear(), a.getMonth() + 1, 1) : a))
             }
@@ -1114,8 +1115,8 @@ export default function BjjSessionScreen() {
             testID="bjj-reschedule-next-month"
           >
             <Icon name="chevron" size={16} color={vola.text} />
-          </Pressable>
-          <Pressable
+          </PressableScale>
+          <PressableScale
             onPress={() => setReschedulingAnchor(null)}
             hitSlop={12}
             style={styles.sheetClose}
@@ -1124,7 +1125,7 @@ export default function BjjSessionScreen() {
             testID="bjj-reschedule-cancel"
           >
             <Text style={[styles.close, { color: accent.ink }]}>Cancel</Text>
-          </Pressable>
+          </PressableScale>
         </RNView>
 
         {/* `KeyboardAwareScrollView`, not a bare `ScrollView` — this sheet has
@@ -1139,22 +1140,22 @@ export default function BjjSessionScreen() {
             nothing extra engaged. */}
         <KeyboardAwareScrollView contentContainerStyle={styles.sheetBody}>
           <RNView style={styles.quickRow}>
-            <Pressable
+            <PressableScale
               onPress={() => void commitReschedule(new Date())}
               style={styles.quickChip}
               accessibilityRole="button"
               testID="bjj-reschedule-today"
             >
               <Text style={styles.quickChipText}>Today</Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
               onPress={() => void commitReschedule(addDays(new Date(), -1))}
               style={styles.quickChip}
               accessibilityRole="button"
               testID="bjj-reschedule-yesterday"
             >
               <Text style={styles.quickChipText}>Yesterday</Text>
-            </Pressable>
+            </PressableScale>
           </RNView>
 
           {!!reschedulingError && (
@@ -1177,7 +1178,7 @@ export default function BjjSessionScreen() {
                 const isToday = cell.key === dayString(new Date());
                 const isCurrent = cell.key === dayString(new Date(session.started_at));
                 return (
-                  <Pressable
+                  <PressableScale
                     key={cell.key}
                     style={styles.gridCell}
                     onPress={() => void commitReschedule(cell.date)}
@@ -1214,7 +1215,7 @@ export default function BjjSessionScreen() {
                         {cell.date.getDate()}
                       </Text>
                     </RNView>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </RNView>

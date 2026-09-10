@@ -3,7 +3,6 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -53,6 +52,7 @@ import { LEARNING_STATE_LABEL, displayLearningState } from '@/lib/learningState'
 import { LearningStateBadge } from '@/components/LearningStateBadge';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { RoadmapLine } from '@/components/RoadmapLine';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The reflection wizard — everything past the three-tap floor.
@@ -268,9 +268,9 @@ export default function ReflectScreen() {
           options={{
             title: `Step ${step + 1} of ${STEPS.length}`,
             headerRight: () => (
-              <Pressable onPress={finish} hitSlop={12} accessibilityRole="button" testID="bjj-reflect-done">
+              <PressableScale onPress={finish} hitSlop={12} accessibilityRole="button" testID="bjj-reflect-done">
                 <Text style={[styles.headerAction, { color: accent.ink }]}>Done</Text>
-              </Pressable>
+              </PressableScale>
             ),
           }}
         />
@@ -327,22 +327,22 @@ export default function ReflectScreen() {
             keyboard sat straight over the only control that finishes the
             wizard. */}
         <KeyboardAwareFooter style={styles.footer}>
-          <Pressable
+          <PressableScale
             onPress={() => (last ? finish() : setStep((s) => s + 1))}
             style={styles.skip}
             accessibilityRole="button"
             testID="bjj-reflect-skip"
           >
             <Text style={styles.skipText}>{last ? 'Skip' : 'Skip this'}</Text>
-          </Pressable>
-          <Pressable
+          </PressableScale>
+          <PressableScale
             onPress={() => (last ? finish() : setStep((s) => s + 1))}
             style={[styles.next, { backgroundColor: accent.accent }]}
             accessibilityRole="button"
             testID="bjj-reflect-next"
           >
             <Text style={[styles.nextText, { color: accent.on }]}>{last ? 'Save it' : 'Next'}</Text>
-          </Pressable>
+          </PressableScale>
         </KeyboardAwareFooter>
       </View>
     </KeyboardAwareScreen>
@@ -619,7 +619,7 @@ function DrilledStep({
           <Text style={styles.label}>Drilled a sequence?</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {usable.map((sq) => (
-              <Pressable
+              <PressableScale
                 key={sq.id}
                 onPress={() => void addChain(sq)}
                 disabled={chainBusy !== null}
@@ -636,7 +636,7 @@ function DrilledStep({
                     ? 'Opening…'
                     : `${sq.step_count} steps${sq.pending ? ' · not synced' : ''}`}
                 </Text>
-              </Pressable>
+              </PressableScale>
             ))}
           </ScrollView>
           {chainError && (
@@ -721,7 +721,7 @@ function DrilledStep({
         // drilling it a fourth time.
         const state = displayLearningState(proficiency, detail.tags, t.id);
         return (
-          <Pressable
+          <PressableScale
             key={t.id}
             onPress={() => add(t)}
             style={styles.result}
@@ -740,7 +740,7 @@ function DrilledStep({
               <LearningStateBadge state={state} testID={`bjj-drilled-add-${t.id}-state`} />
             )}
             <Text style={[styles.plus, { color: ui.ink }]}>＋</Text>
-          </Pressable>
+          </PressableScale>
         );
       })}
 
@@ -789,7 +789,7 @@ function DrilledStep({
                       />
                     )}
                   </RNView>
-                  <Pressable
+                  <PressableScale
                     onPress={() => remove(t.technique_id)}
                     style={styles.drilledRemove}
                     hitSlop={12}
@@ -798,7 +798,7 @@ function DrilledStep({
                     testID={`bjj-drilled-chip-${t.technique_id}`}
                   >
                     <Text style={styles.tagChipX}>×</Text>
-                  </Pressable>
+                  </PressableScale>
                 </RNView>
               </RNView>
             );
@@ -810,7 +810,7 @@ function DrilledStep({
           {drilled.length >= 2 && !chainSaved && (
             <RNView style={styles.captureBox}>
               {!capturing ? (
-                <Pressable
+                <PressableScale
                   onPress={() => setCapturing(true)}
                   accessibilityRole="button"
                   accessibilityLabel="Save these techniques as a sequence"
@@ -819,7 +819,7 @@ function DrilledStep({
                   <Text style={[styles.captureCta, { color: ui.ink }]}>
                     Save these {drilled.length} as a sequence
                   </Text>
-                </Pressable>
+                </PressableScale>
               ) : (
                 <>
                   <TextInput
@@ -838,7 +838,7 @@ function DrilledStep({
                     web app — this is the part that is gone by tomorrow.
                   </Text>
                   <RNView style={styles.captureRow}>
-                    <Pressable
+                    <PressableScale
                       onPress={saveChain}
                       disabled={savingChain || chainName.trim() === ''}
                       accessibilityRole="button"
@@ -853,8 +853,8 @@ function DrilledStep({
                       >
                         {savingChain ? 'Saving…' : 'Save'}
                       </Text>
-                    </Pressable>
-                    <Pressable
+                    </PressableScale>
+                    <PressableScale
                       onPress={() => {
                         setCapturing(false);
                         setChainName('');
@@ -863,7 +863,7 @@ function DrilledStep({
                       testID="bjj-chain-cancel"
                     >
                       <Text style={styles.captureCancel}>Cancel</Text>
-                    </Pressable>
+                    </PressableScale>
                   </RNView>
                 </>
               )}
@@ -1109,7 +1109,7 @@ function LiveStep({
         {['', ...POSITIONS].map((p) => {
           const active = position === p;
           return (
-            <Pressable
+            <PressableScale
               key={p || 'any'}
               onPress={() => setPosition(p)}
               style={[styles.pill, active && styles.pillActive]}
@@ -1124,7 +1124,7 @@ function LiveStep({
               <Text style={[styles.pillText, active && styles.pillTextActive]}>
                 {p || 'Not saying'}
               </Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </ScrollView>
@@ -1288,7 +1288,7 @@ function LiveStep({
                 <Text style={[styles.gridLabel, styles.unmatchedLabel]} numberOfLines={2}>
                   “{t.label}”{t.count > 1 ? ` ×${t.count}` : ''}
                 </Text>
-                <Pressable
+                <PressableScale
                   onPress={() => setMatchingTag((cur) => (cur === t ? null : t))}
                   accessibilityRole="button"
                   accessibilityLabel={
@@ -1300,8 +1300,8 @@ function LiveStep({
                   <Text style={[styles.footnote, { color: accent.ink, fontWeight: '700' }]}>
                     {matchingTag === t ? 'Hide' : 'Match'}
                   </Text>
-                </Pressable>
-                <Pressable
+                </PressableScale>
+                <PressableScale
                   onPress={() => removeUnmatched(i, t)}
                   accessibilityRole="button"
                   accessibilityLabel={`Remove “${t.label}”`}
@@ -1309,7 +1309,7 @@ function LiveStep({
                   <Text style={[styles.footnote, { color: vola.textDim, fontWeight: '700' }]}>
                     Remove
                   </Text>
-                </Pressable>
+                </PressableScale>
               </RNView>
               {matchingTag === t && (
                 <RNView style={styles.unmatchedMatches}>
@@ -1319,7 +1319,7 @@ function LiveStep({
                     </Text>
                   ) : (
                     matches.map((m) => (
-                      <Pressable
+                      <PressableScale
                         key={m.id}
                         onPress={() => resolveUnmatched(i, m)}
                         style={styles.pill}
@@ -1327,7 +1327,7 @@ function LiveStep({
                         accessibilityLabel={`${m.name}, for “${t.label}”`}
                       >
                         <Text style={styles.pillText}>{m.name}</Text>
-                      </Pressable>
+                      </PressableScale>
                     ))
                   )}
                 </RNView>
@@ -1369,7 +1369,7 @@ function Counter({
   const accent = useAccent();
   const on = value > 0;
   return (
-    <Pressable
+    <PressableScale
       onPress={onAdd}
       onLongPress={onRemove}
       style={[
@@ -1390,7 +1390,7 @@ function Counter({
       <Text style={[styles.counterLabel, on && styles.counterLabelOn]} numberOfLines={1}>
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

@@ -103,7 +103,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -142,6 +141,7 @@ import { saveLocalBjjDetail, startLocalSession } from '@/lib/sessionStore';
 import { request as requestSync } from '@/lib/sync';
 import { fetchTechniques, rankTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /** The fallback when the athlete never said what kind of session it was. */
 const DEFAULT_KIND: Kind = 'class';
@@ -562,7 +562,7 @@ export default function DictateReflectionScreen() {
             Your keyboard does the listening on this phone — no audio is recorded or sent. The
             words you end up with are sent to an AI service to be read into chips.
           </Text>
-          <Pressable
+          <PressableScale
             onPress={read}
             disabled={!text.trim() || sending}
             style={[
@@ -578,7 +578,7 @@ export default function DictateReflectionScreen() {
             ) : (
               <Text style={styles.primaryLabel}>Read it</Text>
             )}
-          </Pressable>
+          </PressableScale>
           {/* Said only once a first attempt has already failed, so the ordinary
               case never sees it. Not styled as an error, because it is not one
               — the athlete has nothing to do and nothing has gone wrong yet. */}
@@ -613,7 +613,7 @@ export default function DictateReflectionScreen() {
             It didn’t come back as a session this time. You can send the same words again, or log
             it by hand instead.
           </Text>
-          <Pressable
+          <PressableScale
             onPress={() => {
               setDraft(null);
               setDetail(null);
@@ -623,7 +623,7 @@ export default function DictateReflectionScreen() {
             accessibilityLabel="Try saying it again"
           >
             <Text style={[styles.secondaryLabel, { color: accent.ink }]}>Try again</Text>
-          </Pressable>
+          </PressableScale>
           {/* An empty draft still spent one. Inviting a retry without saying so
               sends the athlete into a 429 they had no way to see coming. */}
           <QuotaLine quota={quota} />
@@ -641,7 +641,7 @@ export default function DictateReflectionScreen() {
             <Row label="Type">
               <View style={styles.chips}>
                 {KINDS.map((k) => (
-                  <Pressable
+                  <PressableScale
                     key={k.key}
                     onPress={() => patch({ kind: k.key })}
                     style={[
@@ -654,7 +654,7 @@ export default function DictateReflectionScreen() {
                     <Text style={[styles.chipLabel, detail.kind === k.key && { color: vola.bg }]}>
                       {k.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 ))}
               </View>
             </Row>
@@ -664,7 +664,7 @@ export default function DictateReflectionScreen() {
                   { v: true, label: 'Gi' },
                   { v: false, label: 'No-gi' },
                 ].map((o) => (
-                  <Pressable
+                  <PressableScale
                     key={o.label}
                     onPress={() => patch({ gi: detail.gi === o.v ? null : o.v })}
                     style={[
@@ -677,7 +677,7 @@ export default function DictateReflectionScreen() {
                     <Text style={[styles.chipLabel, detail.gi === o.v && { color: vola.bg }]}>
                       {o.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 ))}
               </View>
             </Row>
@@ -811,7 +811,7 @@ export default function DictateReflectionScreen() {
             />
           </View>
 
-          <Pressable
+          <PressableScale
             onPress={save}
             disabled={saving}
             style={[styles.primary, { backgroundColor: accent.ink }, saving && styles.disabled]}
@@ -823,7 +823,7 @@ export default function DictateReflectionScreen() {
             ) : (
               <Text style={styles.primaryLabel}>Save it</Text>
             )}
-          </Pressable>
+          </PressableScale>
           {/* N120/#509: used to say "in the next screen", true when Save
               always continued into the wizard. It no longer does — this
               screen is the whole correction surface now, and the true
@@ -888,28 +888,28 @@ function Stepper({
         {!!hint && <Text style={styles.rowHint}>{hint}</Text>}
       </View>
       <View style={styles.stepper}>
-        <Pressable
+        <PressableScale
           onPress={() => onChange(value === null || value <= 1 ? null : value - 1)}
           style={styles.stepButton}
           accessibilityRole="button"
           accessibilityLabel={`One fewer ${label}`}
         >
           <Text style={styles.stepGlyph}>−</Text>
-        </Pressable>
+        </PressableScale>
         <Text
           style={[styles.stepValue, value === null && styles.stepBlank]}
           accessibilityLabel={value === null ? `${label}: not set` : `${label}: ${value}`}
         >
           {value === null ? '—' : value}
         </Text>
-        <Pressable
+        <PressableScale
           onPress={() => onChange(Math.min(max, (value ?? 0) + 1))}
           style={styles.stepButton}
           accessibilityRole="button"
           accessibilityLabel={`One more ${label}`}
         >
           <Text style={[styles.stepGlyph, { color: accent.ink }]}>+</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );
@@ -1028,7 +1028,7 @@ function TagRow({
           )}
         </View>
         <View style={styles.stepper}>
-          <Pressable
+          <PressableScale
             onPress={() => {
               // Blank confirms downward first — a "−" here means "it happened,
               // but not more than that", which is the floor already on record.
@@ -1047,14 +1047,14 @@ function TagRow({
             }
           >
             <Text style={styles.stepGlyph}>−</Text>
-          </Pressable>
+          </PressableScale>
           <Text
             style={[styles.stepValue, countUncertain && styles.stepBlank]}
             accessibilityLabel={countUncertain ? `${title}: how many? not set` : `${tag.count} ${title}`}
           >
             {countUncertain ? '—' : tag.count}
           </Text>
-          <Pressable
+          <PressableScale
             onPress={() => {
               // Same reasoning as "−": the count is already floored to 1
               // underneath a blank stepper, invisibly. Incrementing THAT (to 2)
@@ -1071,7 +1071,7 @@ function TagRow({
             accessibilityLabel={countUncertain ? `Set ${title} to ${tag.count}` : `One more ${title}`}
           >
             <Text style={styles.stepGlyph}>+</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
       {/* N120/#509: what this tag actually was, correctable — five outcomes,
@@ -1081,7 +1081,7 @@ function TagRow({
         {eventChoices.map((o) => {
           const active = tag.event === o.key;
           return (
-            <Pressable
+            <PressableScale
               key={o.key}
               onPress={() => onEvent(o.key)}
               style={[styles.eventChip, active && { backgroundColor: accent.ink, borderColor: accent.ink }]}
@@ -1091,7 +1091,7 @@ function TagRow({
               testID={`dictate-tag-${index}-event-${o.key}`}
             >
               <Text style={[styles.eventChipLabel, active && { color: vola.bg }]}>{o.label}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -1107,7 +1107,7 @@ function TagRow({
         {(['', ...POSITIONS] as const).map((p) => {
           const active = tag.position === p;
           return (
-            <Pressable
+            <PressableScale
               key={p || 'any'}
               onPress={() => onPosition(p)}
               style={[styles.eventChip, active && { backgroundColor: accent.ink, borderColor: accent.ink }]}
@@ -1117,7 +1117,7 @@ function TagRow({
               testID={`dictate-tag-${index}-position-${p || 'any'}`}
             >
               <Text style={[styles.eventChipLabel, active && { color: vola.bg }]}>{p || 'Not saying'}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -1125,7 +1125,7 @@ function TagRow({
           an ordinary matched or category-grid row renders exactly as before. */}
       {!!tag.label && (
         <>
-          <Pressable
+          <PressableScale
             onPress={() => setMatching((m) => !m)}
             style={styles.secondary}
             accessibilityRole="button"
@@ -1136,7 +1136,7 @@ function TagRow({
             <Text style={[styles.secondaryLabel, { color: accent.ink }]}>
               {matching ? 'Hide matches' : 'Match in library'}
             </Text>
-          </Pressable>
+          </PressableScale>
           {matching && (
             <View style={styles.matchList}>
               {catalogFailed ? (
@@ -1147,7 +1147,7 @@ function TagRow({
                 <Text style={styles.muted}>Nothing in the library matches that yet.</Text>
               ) : (
                 matches.map((t) => (
-                  <Pressable
+                  <PressableScale
                     key={t.id}
                     onPress={() => {
                       onMatch(t);
@@ -1158,7 +1158,7 @@ function TagRow({
                     accessibilityLabel={`${t.name}, for “${tag.label}”`}
                   >
                     <Text style={styles.pickOptionLabel}>{t.name}</Text>
-                  </Pressable>
+                  </PressableScale>
                 ))
               )}
             </View>
@@ -1247,7 +1247,7 @@ function AddTechnique({
             const [code, badgeAccent] = categoryBadge(t.category);
             const added = already.has(t.id);
             return (
-              <Pressable
+              <PressableScale
                 key={t.id}
                 onPress={() => {
                   if (added) return;
@@ -1264,7 +1264,7 @@ function AddTechnique({
                   {t.name}
                 </Text>
                 {!added && <Text style={[styles.techPlus, { color: accent.ink }]}>＋</Text>}
-              </Pressable>
+              </PressableScale>
             );
           })
         ))}
@@ -1350,7 +1350,7 @@ function PickOne({
     body = (
       <>
         {matches.map((t) => (
-          <Pressable
+          <PressableScale
             key={t.id}
             onPress={() => onPick(t)}
             style={styles.pickOption}
@@ -1358,7 +1358,7 @@ function PickOne({
             accessibilityLabel={`${t.name}, for “${phrase.phrase}”`}
           >
             <Text style={styles.pickOptionLabel}>{t.name}</Text>
-          </Pressable>
+          </PressableScale>
         ))}
       </>
     );
@@ -1373,7 +1373,7 @@ function PickOne({
       {/* N119/#508's third path. Never pre-selected, never automatic — the
           athlete taps this exactly the way they would tap a real match, and
           it costs the same one tap "Skip this one" always did. */}
-      <Pressable
+      <PressableScale
         onPress={onKeep}
         style={styles.secondary}
         accessibilityRole="button"
@@ -1382,15 +1382,15 @@ function PickOne({
         <Text style={[styles.secondaryLabel, { color: accent.ink }]}>
           Keep as “{phrase.phrase}”
         </Text>
-      </Pressable>
-      <Pressable
+      </PressableScale>
+      <PressableScale
         onPress={onSkip}
         style={styles.secondary}
         accessibilityRole="button"
         accessibilityLabel={`Skip “${phrase.phrase}”`}
       >
         <Text style={[styles.secondaryLabel, { color: accent.ink }]}>Skip this one</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
