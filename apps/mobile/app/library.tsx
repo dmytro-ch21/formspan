@@ -60,6 +60,7 @@ import {
   usesBelt,
 } from '@/lib/modules';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * The Library — **one** library.
@@ -1811,7 +1812,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backButtonPressed: { opacity: 0.6 },
+  backButtonPressed: { opacity: PRESS_OPACITY },
   // F21 (#497): the boundary the ScreenHeader call site above opts out of —
   // content scrolls under THIS chrome, not under the header, so this is where
   // W10's mechanism actually needed marking. Wraps `styles.controls` AND the
@@ -2039,7 +2040,7 @@ const styles = StyleSheet.create({
   // form an even row — "Knee on Belly" and "Mount" cannot share an intrinsic
   // width without one of them looking broken.
   posCard: { width: 92, gap: 7 },
-  posCardPressed: { opacity: 0.6 },
+  posCardPressed: { opacity: PRESS_OPACITY },
   posCardText: { color: vola.text, fontSize: 12, fontWeight: '600', lineHeight: 16 },
 
   error: { color: vola.danger, fontSize: 13, paddingHorizontal: 20, paddingTop: 10 },

@@ -7,6 +7,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * "My curricula" (N83) — the entry point findability was missing before this
@@ -142,7 +143,7 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 4,
   },
-  cardPressed: { opacity: 0.7 },
+  cardPressed: { opacity: PRESS_OPACITY },
   cardName: { fontSize: 16, fontWeight: '700', color: vola.text },
   cardNote: { fontSize: 13, color: vola.textMuted },
   cardMeta: { fontSize: 12, color: vola.textDim, marginTop: 2 },

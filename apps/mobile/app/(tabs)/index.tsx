@@ -72,6 +72,7 @@ import { enabledSports, labelFor, logsAfterwards, type Module } from '@/lib/modu
 import { sessionHref, startSessionHref } from '@/lib/startSession';
 import { formatPlanTime } from '@/lib/planTime';
 import type { PlannedOffer, Source } from '@/lib/trainBoard';
+import { PRESS_OPACITY } from '@/constants/Motion';
 import {
   momentumDayKey,
   momentumLogFoodHref,
@@ -2131,7 +2132,7 @@ const styles = StyleSheet.create({
     // have done it: `shadowColor` defaults to BLACK, and Android draws
     // `elevation` regardless of colour.
   },
-  fabPressed: { opacity: 0.85 },
+  fabPressed: { opacity: PRESS_OPACITY },
   fabText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
   body: { paddingHorizontal: 20, gap: 16 },
 
@@ -2261,7 +2262,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 2,
   },
-  fuelOffPressed: { opacity: 0.6 },
+  fuelOffPressed: { opacity: PRESS_OPACITY },
   fuelOffTitle: { color: vola.text, fontWeight: '600', fontSize: 14 },
   // textMuted, not textDim: at 12pt this is small text, and textDim measures
   // 3.96:1 on `bg` — below AA's 4.5:1. This sits on `bg` rather than a card, so

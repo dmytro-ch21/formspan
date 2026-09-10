@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
+import Animated, { cubicBezier, type CSSStyle } from 'react-native-reanimated';
 
 import { Text } from '@/components/Themed';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { PRESS_BEZIER, PRESS_MS, PRESS_RETENTION, PRESS_SCALE } from '@/constants/Motion';
 import { useAccent } from '@/lib/AccentProvider';
 import { withAlpha } from '@/lib/palette';
 
@@ -110,12 +113,35 @@ export function Button({
   const labelColor =
     variant === 'primary' ? primaryLabelColor : variant === 'secondary' ? vola.text : accent.ink;
 
+  /*
+    F38/#1037 — a press that answers the finger.
+
+    `useState` rather than a shared value, deliberately: this fires twice per
+    press, not per frame, so a worklet would be the mobile equivalent of
+    installing a motion library for a fade. A two-state change with no gesture
+    is a CSS TRANSITION — Reanimated 4.5.1 is already here, so this adds no
+    dependency.
+
+    **0ms in, 120ms out**, which is the whole reason press feedback is allowed
+    on a control tapped forty times a session. The shrink is a press STATE,
+    not an animation: it must already be there when the athlete looks. Only
+    the release is worth easing, because nothing is waiting on it.
+
+    `scale` and not `opacity` because scale takes the label and the icon with
+    it, which is what makes a control read as a physical thing rather than a
+    rectangle that dimmed.
+  */
+  const [pressed, setPressed] = useState(false);
+
   return (
-    <Pressable
+    <AnimatedPressable
       onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={[
         styles.base,
+        pressTransition,
         fullWidth && styles.fullWidth,
         floating && styles.floating,
         fillStyle,
@@ -129,15 +155,43 @@ export function Button({
       // Matches the two FABs' own `hitSlop` — the target this replaces
       // first, and the one most often tapped one-handed.
       hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+      // Baked in here rather than left to each call site: zero controls in
+      // this app set it before F38, and "remember it per button" is a rule
+      // every screen re-forgets independently. A thumb drifting between sets
+      // no longer cancels a press the athlete meant.
+      pressRetentionOffset={PRESS_RETENTION}
       testID={testID}
     >
       {icon && <Icon name={icon} size={16} color={labelColor} />}
       <Text numberOfLines={1} style={[styles.label, { color: labelColor }]}>
         {label}
       </Text>
-    </Pressable>
+    </AnimatedPressable>
   );
 }
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/*
+  Declared outside `StyleSheet.create`, and that is not a style preference:
+  React Native's own `NamedStyles` has no `transitionProperty`, so putting
+  this in the sheet is a type error. These are Reanimated's CSS transition
+  properties and `CSSStyle` is where they are typed.
+
+  The transition sits on the RESTING style, not the pressed one — that is what
+  makes the press instant and only the release eased. Declared on `pressed` it
+  would animate the way IN as well, which is the half nobody should wait for.
+
+  `transitionProperty: 'transform'` and nothing else: transform and opacity are
+  the two free properties, and anything else here re-runs layout on every frame
+  of every press.
+*/
+const pressTransition: CSSStyle = {
+  transform: [{ scale: 1 }],
+  transitionProperty: 'transform',
+  transitionDuration: `${PRESS_MS}ms`,
+  transitionTimingFunction: cubicBezier(...PRESS_BEZIER),
+};
 
 const styles = StyleSheet.create({
   base: {
@@ -153,6 +207,6 @@ const styles = StyleSheet.create({
   fullWidth: { alignSelf: 'stretch' },
   floating: { position: 'absolute', right: 16, bottom: 16 },
   disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.85 },
+  pressed: { transform: [{ scale: PRESS_SCALE }] },
   label: { fontWeight: '700', fontSize: 15 },
 });

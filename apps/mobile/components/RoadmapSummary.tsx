@@ -11,6 +11,7 @@ import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
 import { roadmapMilestone } from '@/lib/roadmapEntry';
 import { subscribeSync, syncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * On You: what the record says you have, and what you are working now.
@@ -213,7 +214,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   linkMain: { flex: 1, gap: 2 },
   linkText: { color: vola.text, fontSize: 14, fontWeight: '600' },
   linkSub: { color: vola.textMuted, fontSize: 12 },

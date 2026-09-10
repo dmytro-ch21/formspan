@@ -216,3 +216,39 @@ afterEach(async () => {
 // screen kicks off and that resolves DURING the test body has to be awaited
 // by the test itself — see the catalog wait in workoutDetailScreen.test.tsx.
 // This hook only covers what is still pending when the body ends.
+
+/*
+  F38/#1037 — Reanimated, mocked.
+
+  `components/ui/Button.tsx` is the app's shared control, and F38 gave it a
+  Reanimated CSS transition for press feedback. That made every component test
+  that renders a Button — which is most of them — import Reanimated, whose
+  entry point reaches for the native worklets module and dies in jest with
+  `Cannot read properties of undefined (reading 'loadUnpackers')`. It takes
+  the whole SUITE down, not a test, so the failure reads as unrelated screens
+  breaking.
+
+  Declared here rather than per-file because the trigger is a shared
+  primitive: any component test that renders a button needs it, and "remember
+  to mock Reanimated" is a rule each new test file would re-forget.
+
+  The mock is deliberately MINIMAL, and safe to be: the whole app has exactly
+  one Reanimated import site (`components/ui/Button.tsx`). Grow it when a
+  second appears — a broad stub would let a real API mistake pass here and
+  fail on device, which is the trade this repo's testing rules refuse.
+*/
+jest.mock('react-native-reanimated', () => {
+  // NOT `react-native-reanimated/mock`. The shipped mock re-imports the real
+  // package, so it dies exactly where the real one does — measured, not
+  // assumed: same `loadUnpackers` throw, same stack through
+  // `react-native-worklets`. A factory that never touches the package is the
+  // only thing that works.
+  const { View } = require('react-native');
+  return {
+    __esModule: true,
+    // `Animated.createAnimatedComponent(Pressable)` must return something
+    // renderable that still forwards props — the tests below press it.
+    default: { createAnimatedComponent: (c) => c, View },
+    cubicBezier: (...points) => `cubic-bezier(${points.join(', ')})`,
+  };
+});

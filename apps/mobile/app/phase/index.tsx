@@ -48,6 +48,7 @@ import { dayString } from '@/lib/calendar';
 import { formatWeight, fromDisplayWeight, weightUnit, weightUnitName } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 const KINDS: PhaseKind[] = ['cut', 'lean_bulk', 'recomposition', 'maintenance', 'making_weight'];
 
@@ -387,5 +388,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backButtonPressed: { opacity: 0.6 },
+  backButtonPressed: { opacity: PRESS_OPACITY },
 });

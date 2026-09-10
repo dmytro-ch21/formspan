@@ -7,6 +7,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { listClassPlans, type ClassPlan } from '@/lib/classplans';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * Pick a class plan to run.
@@ -150,7 +151,7 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   rowBody: { flex: 1, gap: 2 },
   name: { fontSize: 15, fontWeight: '700' },
   muted: { color: vola.textMuted, fontSize: 12 },

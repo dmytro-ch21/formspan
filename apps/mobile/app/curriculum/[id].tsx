@@ -30,6 +30,7 @@ import { proposeFocus, proposeOneFocus, type FocusProposal } from '@/lib/roadmap
 import { buildRoadmap, percent, type Lesson, type Milestone } from '@/lib/roadmapView';
 import { subscribeSync, syncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * One belt's roadmap: a numbered timeline of milestones, each opening onto its
@@ -1128,7 +1129,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   secondaryText: { fontSize: 13, fontWeight: '700' },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: PRESS_OPACITY },
   disabled: { opacity: 0.5 },
 
   timeline: { marginTop: 4 },
