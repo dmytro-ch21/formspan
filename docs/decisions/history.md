@@ -69101,6 +69101,107 @@ default curve in practice. And nothing stops a future component hand-typing
 `200` instead of reaching for `MS.control`; there is no check for that today,
 and it is the obvious thing to want once the tokens are actually applied.
 
+## 2026-09-10 — F40: Reduce Motion, which neither web app had ever heard of (#1039)
+
+`prefers-reduced-motion` appeared **nowhere** in `apps/web` or `apps/admin`.
+Not in either `globals.css`, not in a single component — re-measured on current
+`main` rather than taken from the audit: zero hits, against **100 `transition`
+utilities across 32 files** and **11 infinite `animate-pulse` skeletons**. A
+user who has asked their OS not to animate things got every animation anyway,
+and an infinite pulse on a network-bound dashboard is the exact case the
+setting most often exists for.
+
+This is the cheapest real accessibility gap the motion audit found: one
+`@media` block per app, in a file that already existed.
+
+### The rule adopted, and what it deliberately does NOT do
+
+**Reduce Motion is a request not to be MOVED, not a request to see nothing.**
+So the block *narrows* the transition property list rather than setting
+`transition: none` or slamming every duration to `0.01ms`:
+
+    transition-property:
+      opacity, color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, filter;
+
+Colour and opacity explain a state change and are kept; position, scale and
+rotation are dropped.
+
+**`filter` is in that list because review caught what dropping it would do.**
+The first version narrowed to colour and opacity alone, which silently kills
+`hover:brightness-110` — this app's solid-button hover, and all TEN of its call
+sites pair it with `transition`. Those buttons would have stopped easing and
+snapped, which is precisely the "too aggressive" failure the block's own
+comment warns about, arriving by omission rather than by intent. Brightness is
+a luminance change with no spatial component. The counter-argument is that
+`filter` also covers `blur` and `hue-rotate`, which are motion-adjacent — so it
+was measured rather than argued: neither is transitioned anywhere in either app
+(`backdrop-blur` 0 uses, `blur-` 1 static use, 0 in a transition), so keeping
+`filter` cannot re-admit them today. `outline-color` and `text-decoration-color`
+joined for consistency with Tailwind's own `.transition-colors` bundle. The failure mode to watch for is the opposite of the
+obvious one — if a hover stops giving colour feedback under the emulation, the
+block has gone too far, and that is stated in the CSS comment so the next
+person tightening it knows which direction is wrong.
+
+The infinite loops get their own line, because a `transition-property`
+narrowing does not touch `animation` at all — without it the skeletons keep
+pulsing forever. `animation-iteration-count: 1` rather than `animation: none`,
+because Tailwind's `pulse` keyframes animate OPACITY, the one channel this
+block deliberately keeps: one fade still reads as "loading", then it stops.
+Both settle on the same final frame, so the choice costs nothing visually.
+
+### The failure mode with no symptom, and the test that catches it
+
+The block is **unlayered**, and that is load-bearing rather than incidental.
+An unlayered declaration beats every layered one regardless of specificity —
+the same mechanism `globals.css`'s own layer statement exists to work around
+for Clerk. Layered into `base`, this block would parse cleanly, ship cleanly,
+and **do nothing at all**, because Tailwind's `transition-*` utilities live in
+the `utilities` layer, which would win.
+
+Verified in the built stylesheet rather than argued: a brace-depth walk of both
+apps' compiled CSS puts `.transition-colors` inside `@layer utilities` and the
+reduced-motion rule at **top level, unlayered**.
+
+Each app now carries `src/app/__tests__/reducedMotion.test.ts` asserting five
+things, of which the last is the one worth having: the block exists, narrows
+rather than disables, admits no `transform`/`translate`/`scale`/`rotate`, stops
+the pulse loop by an explicit rule, and **is unlayered**. All five were
+mutation-verified — block deleted, block layered into `base`, `transform`
+re-admitted, pulse rule removed — each going red on the right assertion, then
+green again on a re-run.
+
+`apps/admin` gets the identical block while having **zero** motion of any kind
+(measured: no `transition`, no `animate-*` in 31 `.tsx` files). That is not
+dead code so much as a floor: the failure here was never that somebody wrote a
+bad animation, it was that nobody wrote the floor. Adding interaction feedback
+to admin remains L14's question, deliberately untouched here.
+
+### An apparatus error worth recording, because it produced a confident wrong answer
+
+The browser check I ran to confirm the rule actually wins reported that it did
+**not** — the button's computed `transition-property` still carried Tailwind's
+full list including `transform`. That reading was worthless: the preview tool
+resolved `.claude/launch.json` from the session root, so the dev server was
+serving `/Users/…/fitness-platform/apps/web` — **the primary checkout**, which
+does not contain this branch's change at all. The measurement was of a
+codebase without the feature in it.
+
+Caught by asking which directory the server process actually had as its cwd,
+which is the same discipline as checking that a mutation applied. Worth knowing
+generally: **`preview_start` does not follow you into a worktree**, so any
+browser-based verification of worktree code is measuring the primary checkout
+unless something forces otherwise. The cascade question was settled statically
+instead, against this branch's own built CSS.
+
+### What is not covered
+
+Whether the result actually *looks* calm. The tests read CSS text; they cannot
+tell that a surviving colour transition is still legible or that a page feels
+settled rather than dead. That needs the DevTools emulation, and it is written
+up in `docs/testing/functional-scenarios.md` under F40 with the specific trap
+named — colour feedback disappearing is the failure, not the success.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

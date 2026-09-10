@@ -76,3 +76,38 @@ body {
   color: var(--color-text);
   font-family: var(--font-barlow), system-ui;
 }
+
+/*
+  Reduce Motion (F40). The same block `apps/web/src/app/globals.css` carries —
+  see that file for the fuller reasoning.
+
+  **This app has no motion at all today**, and that is judged correct rather
+  than an omission: `apps/admin/src` contains zero `transition` and zero
+  `animate-*` across its `.tsx` files (adding interaction feedback here is
+  L14's question, deliberately not this ticket's). So this block currently
+  disables nothing.
+
+  It is here anyway, for four lines, so that the next feature added to admin
+  does not have to remember — the failure this ticket exists to fix is not that
+  someone wrote a bad animation, it is that nobody wrote the floor.
+
+  Reduce Motion is a request not to be MOVED, not a request to see nothing:
+  colour and opacity are kept, position/scale/rotation are dropped. Unlayered
+  on purpose — an unlayered declaration beats every layered one, so layering
+  this into `base` would lose to Tailwind's utilities and do nothing.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-property:
+      opacity, color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, filter;
+  }
+
+  /* Nothing in admin matches this yet — it is the same guard web needs for its
+     skeletons, kept identical so the two files do not drift. */
+  .animate-pulse {
+    animation-iteration-count: 1;
+  }
+}

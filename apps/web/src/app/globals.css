@@ -351,3 +351,80 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/*
+  Reduce Motion (F40).
+
+  A user who has asked their OS not to animate things was getting every
+  animation in this app anyway: `prefers-reduced-motion` appeared nowhere in
+  `apps/web` or `apps/admin`, against 100 `transition` utilities across 32
+  files and 11 infinite `animate-pulse` skeletons.
+
+  **Reduce Motion is a request not to be MOVED, not a request to see nothing.**
+  So this narrows the transition property list rather than setting
+  `transition: none` or slamming every duration to `0.01ms`: colour and opacity
+  changes explain a state change and are kept, while every position, scale and
+  rotation change is dropped. If a hover stops giving colour feedback under the
+  emulation, this block has gone too far and is the thing to fix.
+
+  UNLAYERED on purpose, and that is load-bearing rather than incidental. An
+  unlayered declaration beats every layered one regardless of specificity or
+  source order — the same mechanism the layer statement at the top of this file
+  exists to work around for Clerk. Layered into `base`, this would lose to
+  Tailwind's `utilities` layer and silently do nothing at all.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-property:
+      opacity, color, background-color, border-color, outline-color,
+      text-decoration-color, fill, stroke, filter;
+  }
+
+  /*
+    `filter` is in that list, and it is the one entry worth defending.
+
+    Raised in review: dropping it silently kills the hover feedback on the
+    primary CTA. `hover:brightness-110` is this app's solid-button hover, and
+    all TEN of its call sites pair it with `transition` — so without `filter`
+    those buttons stop easing and snap, which is the exact "too aggressive"
+    failure this block's own comment warns about.
+
+    Brightness is a luminance change with no spatial component: nearer in kind
+    to the colour channel deliberately kept than to the movement channel
+    deliberately dropped. The counter-argument is that `filter` also covers
+    `blur` and `hue-rotate`, which are motion-adjacent — measured, and neither
+    is transitioned anywhere in either app (`backdrop-blur`: 0 uses, `blur-`: 1
+    static use, 0 in a transition). So keeping `filter` cannot re-admit those
+    today; if a blurring transition is ever added, split this entry rather than
+    widening it further.
+
+    `outline-color` and `text-decoration-color` are here for consistency rather
+    than need — Tailwind's own `.transition-colors` bundles them with the
+    colours already kept, and this app has 46 `outline-` and 76 `underline`
+    utilities. Nothing animates either today; omitting them would just be an
+    inconsistency waiting to surprise someone.
+  */
+
+  /*
+    The infinite loops, named explicitly rather than swept up by the wildcard
+    above — a `transition-property` narrowing does not touch `animation`, so
+    without this the skeletons keep pulsing forever, which is the single case
+    reduced-motion settings most often exist for. On a network-bound dashboard
+    an `animate-pulse` can run for seconds.
+
+    `animation-iteration-count: 1` rather than `animation: none`, because
+    Tailwind's `pulse` keyframes animate OPACITY — the one channel this block
+    deliberately keeps. One fade still reads as "loading", then it stops. Both
+    settle on the same final frame (the keyframes end at opacity 1), so the
+    choice costs nothing visually and keeps the skeleton legible either way.
+
+    `animate-pulse` is the only animation utility either app uses today
+    (verified: it is the sole `animate-*` match in both `src` trees). Anything
+    added later that loops — a spinner, a shimmer — needs its own line here.
+  */
+  .animate-pulse {
+    animation-iteration-count: 1;
+  }
+}
