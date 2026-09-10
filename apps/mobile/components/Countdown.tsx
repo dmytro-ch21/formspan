@@ -152,7 +152,12 @@ export function useCountdown(
     // may still run before React commits.
     timerRef.current = started;
     setTimer(started);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // F49/#1061 — `Soft`, one step below `Light`. A countdown STARTING is an
+    // acknowledgement, not an alert: nothing depends on it being felt from a
+    // pocket, unlike the notification when it ENDS. The athlete asked for the
+    // haptics "10-20% more subtle", and iOS offers steps rather than a dial —
+    // this is the step.
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {});
   }, []);
 
   /**

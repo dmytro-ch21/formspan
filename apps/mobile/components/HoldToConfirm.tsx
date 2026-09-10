@@ -176,7 +176,9 @@ export function HoldToConfirm({
   const start = useCallback(() => {
     if (timer.current) return;
     setHolding(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // F49/#1061 — `Soft`. The hold BEGINNING says "I have it"; the success
+    // notification when it completes is the one that has to land.
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {});
     Animated.timing(progress, {
       toValue: 1,
       duration: durationMs,
