@@ -22563,3 +22563,49 @@ colour and opacity survive, position/scale/rotation do not.
   The tests read CSS text; they cannot tell that a surviving colour transition
   is still legible, or that a page feels settled rather than dead. That is the
   browser check above.
+
+## F39 — the discipline toggle's knob actually slides (`apps/web/src/app/dashboard/settings/page.tsx`, #1038)
+
+The knob moved with `ml-0 ↔ ml-4` under a bare `transition`, and Tailwind's
+transition list does not contain `margin` — so it teleported for as long as the
+control existed. The track's colour animated correctly, which is why it read as
+half-finished rather than broken.
+
+### Happy path
+
+- On `/dashboard/settings`, toggle a discipline. The knob **slides** across the
+  track — roughly 180ms, decelerating. Before this change it jumped.
+- The knob's colour change and its movement **start and finish together**. They
+  are one control; two events that merely happen nearby is the defect this
+  replaces, in the other direction.
+- The track's own border/background change is unchanged by this work — it always
+  animated and still should.
+
+### Edge cases & errors
+
+- Toggle rapidly, back and forth, faster than 180ms. The knob must reverse from
+  wherever it currently is, not jump to one end and restart.
+- With **Reduce Motion** on (F40), the knob must **not** slide — `translate` is
+  deliberately excluded from the reduced-motion property list — while the
+  colour change survives. This is the one place F39 and F40 interact, and it is
+  worth checking both together after either changes.
+- The toggle's disabled/loading state, if the module list is still loading:
+  nothing should animate into a position that then corrects itself.
+
+### Auth/security
+
+- Nothing new. `/dashboard/settings` is behind Clerk as before; this is a
+  presentational change to one control.
+
+### What a test can and cannot reach
+
+- **Automated** (`apps/web/src/app/__tests__/toggleKnob.test.ts`): the knob
+  moves by `translate` and not margin, names an explicit duration and easing,
+  uses the token syntax that actually compiles (`duration-(--x)`, not
+  `duration-[--x]`, which emits invalid CSS and silently falls back to 150ms),
+  and narrows the transition to what it changes. All mutation-verified.
+- **Not reachable**: whether it looks right. The tests read source text. That a
+  slide is *smooth*, that 180ms feels correct rather than sluggish, and that the
+  two channels start together, all need a browser — and the "before" observation
+  (that it jumped) needed one too, which is why the ticket made it a human
+  criterion.

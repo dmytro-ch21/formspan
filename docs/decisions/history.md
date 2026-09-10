@@ -69202,6 +69202,93 @@ settled rather than dead. That needs the DevTools emulation, and it is written
 up in `docs/testing/functional-scenarios.md` under F40 with the specific trap
 named — colour feedback disappearing is the failure, not the success.
 
+## 2026-09-10 — F39: the one piece of motion somebody designed for the web app had never run (#1038)
+
+The discipline toggle on `/dashboard/settings` is the only deliberate animation
+in `apps/web`. Its author wrote `transition` intending the knob to slide across
+the track. **It teleported, and always had.** The track's colour change animated
+correctly, so the control read as half-finished rather than broken — which is
+why it survived unreported.
+
+The knob moved with `ml-0 ↔ ml-4`, and Tailwind's bare `transition` utility
+animates a curated list that **does not contain `margin`**. Not a timing bug or
+a specificity fight: the transition named a property the utility never animates,
+so it did nothing. `margin` is also a layout property, which this repo's motion
+rubric forbids animating even where it works.
+
+### Verified against the compiled stylesheet, not inferred
+
+The ticket was explicit that its finding was *"a strong inference from the
+installed Tailwind source, not something anyone watched happen"*, and made
+"observe the bug before fixing it" its first criterion for that reason.
+
+The audit read `node_modules/tailwindcss/dist/lib.js`. This checked the artifact
+that actually ships — `apps/web/.next/static/**/*.css` — and the bare
+`.transition` utility resolves to 23 properties, of which `margin` and
+`margin-left` are absent while `translate` and `background-color` are both
+present. That is the whole mechanism, and it also explains the symptom exactly:
+the knob's `bg-lime ↔ bg-text-dim` animated (background-color is in the list)
+while its position could not.
+
+The remaining half of that criterion — watching the knob jump in the running app
+— stays with the athlete: `/dashboard/settings` is behind Clerk, and this
+session does not hold credentials. It is marked `NEEDS HUMAN EVIDENCE` on the
+ticket.
+
+### The ticket's own suggested code would have shipped a silent no-op
+
+P3 proposed `duration-[--duration-control] ease-[--ease-out]`. **Measured: that
+bracket form compiles to `transition-duration: --duration-control`** — invalid
+CSS, silently ignored by the browser, falling back to the 150ms default. It
+looks entirely correct in a diff.
+
+Tailwind v4's parenthesis shorthand is what emits a `var()`:
+`duration-(--duration-control)` compiles to
+`transition-duration: var(--duration-control)`, confirmed in the built CSS along
+with `transition-timing-function: var(--ease-out)`.
+
+Both forms are one character apart and neither errors. So the fix would have
+been a second silent no-op sitting inside the fix for the first one — the same
+failure the ticket exists to correct, arriving through its own remedy. The guard
+below asserts the working form by name for exactly that reason.
+
+### What shipped
+
+    transition-[translate,background-color]
+    duration-(--duration-control) ease-(--ease-out)
+    translate-x-0 ↔ translate-x-4
+
+`ml-4` is `1rem` and `translate-x-4` is the same 16px, so the geometry and the
+end state are unchanged; only the mechanism moved. The transition is narrowed to
+the two things the knob actually changes rather than left bare — with N556's
+tokens landed, the duration is the 180ms "toggle / small state change" budget
+and the curve is `ease-out`, because the knob is entering its new position.
+
+The outer track `<span>` is untouched, as P3 required: its transition is on
+`border-color`/`background-color` and already worked.
+
+### The same bug elsewhere: none
+
+P3 asked for a search rather than a sweep. A loose grep for `transition` beside
+a margin utility returns three hits, and all three are false — static `mt-*`
+spacing that never changes between states. Asked precisely — a `className`
+carrying `transition` whose TERNARY branches switch a non-animatable property —
+the answer across both apps is **zero** other instances. The toggle was the only
+one.
+
+### The guard
+
+`apps/web/src/app/__tests__/toggleKnob.test.ts` asserts the knob moves by
+translate and not margin, names a duration and an easing, uses the compiling
+token syntax rather than the bracket form, and narrows the transition to what it
+changes. Mutation-verified: reverting to the original margin knob fails four of
+them, and swapping the parenthesis syntax for the bracket syntax fails exactly
+the one written for it.
+
+A source test rather than a rendered one, deliberately — this bug's whole nature
+is that the rendered page looks plausible either way, and the source is where
+the mistake is legible.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

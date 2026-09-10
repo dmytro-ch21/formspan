@@ -104,9 +104,31 @@ export default function SettingsPage() {
                       : "border-line bg-surface-hover"
                   }`}
                 >
+                  {/*
+                    The knob moves by `translate`, NOT by margin: Tailwind's
+                    transition property list has never contained `margin`, so
+                    the `ml-0 ↔ ml-4` this used to carry could not animate and
+                    the knob teleported for as long as the control existed.
+
+                    The bracket/paren mix below is deliberate and is NOT a
+                    style inconsistency to tidy up. `transition-[a,b]` is an
+                    arbitrary VALUE; `duration-(--x)` is a custom-property
+                    REFERENCE, and only the parenthesis form emits `var(--x)`.
+                    Written with SQUARE brackets instead, it compiles to a
+                    bare `transition-duration: --duration-control` — invalid
+                    CSS, silently ignored, falling back to the 150ms default.
+                    Measured, not assumed; `__tests__/toggleKnob.test.ts`
+                    asserts the working form by name.
+
+                    That broken form is deliberately not spelled out anywhere
+                    in this repo: Tailwind v4's content scanner reads class
+                    candidates out of raw file text, comments included, so
+                    writing it even in prose emits the invalid rule into the
+                    production bundle.
+                  */}
                   <span
-                    className={`block h-5 w-5 rounded-pill transition ${
-                      on ? "ml-4 bg-lime" : "ml-0 bg-text-dim"
+                    className={`block h-5 w-5 rounded-pill transition-[translate,background-color] duration-(--duration-control) ease-(--ease-out) ${
+                      on ? "translate-x-4 bg-lime" : "translate-x-0 bg-text-dim"
                     }`}
                   />
                 </span>
