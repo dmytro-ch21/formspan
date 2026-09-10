@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Switch, TextInput, View as RNView } from 'react-native';
+import { StyleSheet, Switch, TextInput, View as RNView } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
@@ -32,6 +32,7 @@ import type { TechniqueSummary } from '@/lib/techniques';
 import type { TokenGetter } from '@/lib/useAuthToken';
 
 import { TechniquePicker } from './TechniquePicker';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Build or correct a curriculum, on the phone (N83).
@@ -229,7 +230,7 @@ export function CurriculumEditor({
         <Text style={styles.label}>Belt</Text>
         <RNView style={styles.chipRow}>
           {BELT_OPTIONS.map((b) => (
-            <Pressable
+            <PressableScale
               key={b || 'none'}
               onPress={() => setBelt(b)}
               accessibilityRole="button"
@@ -243,7 +244,7 @@ export function CurriculumEditor({
               <Text style={[styles.chipText, belt === b && { color: accent.on }]}>
                 {b === '' ? 'Not belt-specific' : b.charAt(0).toUpperCase() + b.slice(1)}
               </Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </RNView>
       </View>
@@ -335,22 +336,22 @@ export function CurriculumEditor({
       )}
 
       <RNView style={styles.addRow}>
-        <Pressable
+        <PressableScale
           onPress={() => setPicking(true)}
           style={[styles.addButton, { borderColor: accent.accent }]}
           accessibilityRole="button"
           testID="curriculum-add-technique"
         >
           <Text style={[styles.addButtonText, { color: accent.ink }]}>+ Add technique</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={addConcept}
           style={styles.addButton}
           accessibilityRole="button"
           testID="curriculum-add-concept"
         >
           <Text style={styles.addButtonText}>+ Add a concept</Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       {error && (
@@ -360,7 +361,7 @@ export function CurriculumEditor({
       )}
 
       <RNView style={styles.saveRow}>
-        <Pressable
+        <PressableScale
           onPress={() => void save()}
           disabled={saving || name.trim() === ''}
           accessibilityRole="button"
@@ -375,10 +376,10 @@ export function CurriculumEditor({
           <Text style={[styles.saveText, { color: accent.on }]}>
             {saving ? 'Saving…' : existing ? 'Save changes' : 'Create'}
           </Text>
-        </Pressable>
-        <Pressable onPress={onCancel} accessibilityRole="button" testID="curriculum-cancel">
+        </PressableScale>
+        <PressableScale onPress={onCancel} accessibilityRole="button" testID="curriculum-cancel">
           <Text style={styles.cancelText}>Cancel</Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       {footer}
@@ -408,9 +409,9 @@ function BuilderHeader({
   return (
     <RNView style={styles.builderHead}>
       <Text style={styles.builderHeadLabel}>{label.toUpperCase()}</Text>
-      <Pressable onPress={onAction} hitSlop={10} accessibilityRole="button" testID={testID}>
+      <PressableScale onPress={onAction} hitSlop={10} accessibilityRole="button" testID={testID}>
         <Text style={[styles.builderHeadAction, { color: accent.ink }]}>{action}</Text>
-      </Pressable>
+      </PressableScale>
     </RNView>
   );
 }
@@ -448,7 +449,7 @@ function RowActions({
 }) {
   return (
     <RNView style={styles.rowActions}>
-      <Pressable
+      <PressableScale
         onPress={onUp}
         disabled={upDisabled}
         style={[styles.smallButton, upDisabled && styles.disabled]}
@@ -458,8 +459,8 @@ function RowActions({
         testID={`${testIDPrefix}-up`}
       >
         <Text style={styles.smallButtonText}>↑</Text>
-      </Pressable>
-      <Pressable
+      </PressableScale>
+      <PressableScale
         onPress={onDown}
         disabled={downDisabled}
         style={[styles.smallButton, downDisabled && styles.disabled]}
@@ -469,8 +470,8 @@ function RowActions({
         testID={`${testIDPrefix}-down`}
       >
         <Text style={styles.smallButtonText}>↓</Text>
-      </Pressable>
-      <Pressable
+      </PressableScale>
+      <PressableScale
         onPress={onRemove}
         style={styles.smallButton}
         accessibilityRole="button"
@@ -478,7 +479,7 @@ function RowActions({
         testID={`${testIDPrefix}-remove`}
       >
         <Text style={[styles.smallButtonText, styles.removeText]}>✕</Text>
-      </Pressable>
+      </PressableScale>
     </RNView>
   );
 }
@@ -572,7 +573,7 @@ function ItemRow({
 
       {!isConcept &&
         (!hasCriteria ? (
-          <Pressable
+          <PressableScale
             onPress={() => {
               setOpen(true);
               onPatch({
@@ -586,7 +587,7 @@ function ItemRow({
             testID={`curriculum-item-${index}-add-criteria`}
           >
             <Text style={styles.linkText}>+ Add completion criteria</Text>
-          </Pressable>
+          </PressableScale>
         ) : (
           <RNView style={styles.criteria}>
             <NumField
@@ -622,7 +623,7 @@ function ItemRow({
               onChange={(v) => onPatch({ min_hit_rate: v == null ? null : v / 100 })}
               testID={`curriculum-item-${index}-hit-rate`}
             />
-            <Pressable
+            <PressableScale
               onPress={() => {
                 setOpen(false);
                 onPatch({
@@ -637,7 +638,7 @@ function ItemRow({
               testID={`curriculum-item-${index}-remove-criteria`}
             >
               <Text style={styles.linkTextSmall}>Remove criteria — just something to study</Text>
-            </Pressable>
+            </PressableScale>
           </RNView>
         ))}
 
@@ -667,7 +668,7 @@ function PhaseChip({
 }) {
   const accent = useAccent();
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
@@ -675,7 +676,7 @@ function PhaseChip({
       testID={testID}
     >
       <Text style={[styles.chipText, selected && { color: accent.on }]}>{label}</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

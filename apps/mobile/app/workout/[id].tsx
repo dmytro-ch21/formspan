@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
-  Pressable,
   StyleSheet,
   TextInput,
 } from 'react-native';
@@ -64,6 +63,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { useModules } from '@/lib/ModulesProvider';
 import { fromDisplayWeight, toDisplayWeight, weightUnit } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export default function WorkoutDetailScreen() {
   const accent = useAccent();
@@ -388,11 +388,11 @@ export default function WorkoutDetailScreen() {
           title: workout.name,
           headerRight: () =>
             canEdit && dirty ? (
-              <Pressable onPress={save} disabled={saving} hitSlop={12} testID="workout-save">
+              <PressableScale onPress={save} disabled={saving} hitSlop={12} testID="workout-save">
                 <Text style={[styles.headerAction, { color: accent.ink }]}>
                   {saving ? 'Saving…' : 'Save'}
                 </Text>
-              </Pressable>
+              </PressableScale>
             ) : null,
         }}
       />
@@ -444,17 +444,17 @@ export default function WorkoutDetailScreen() {
               accessibilityLabel="Workout name"
               testID="workout-name-input"
             />
-            <Pressable
+            <PressableScale
               onPress={commitRename}
               hitSlop={12}
               accessibilityRole="button"
               testID="workout-name-save"
             >
               <Text style={styles.renameAction}>Done</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         ) : canEdit ? (
-          <Pressable
+          <PressableScale
             onPress={() => {
               setDraftName(workout.name);
               setRenaming(true);
@@ -465,7 +465,7 @@ export default function WorkoutDetailScreen() {
           >
             <Text style={styles.title}>{workout.name}</Text>
             <Text style={styles.renameHint}>Tap to rename</Text>
-          </Pressable>
+          </PressableScale>
         ) : (
           <Text style={styles.title}>{workout.name}</Text>
         )}
@@ -489,7 +489,7 @@ export default function WorkoutDetailScreen() {
               {SESSION_INTENTS.map((i) => {
                 const active = intent === i.key;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={i.key}
                     style={[
                       styles.intentPill,
@@ -503,14 +503,14 @@ export default function WorkoutDetailScreen() {
                     <Text style={[styles.intentPillText, active && { color: accent.on }]}>
                       {i.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </View>
           </View>
         )}
 
-        <Pressable
+        <PressableScale
           style={[
             styles.startButton,
             { backgroundColor: accent.accent },
@@ -532,7 +532,7 @@ export default function WorkoutDetailScreen() {
               {dirty ? 'Save to start a session' : 'Start session'}
             </Text>
           )}
-        </Pressable>
+        </PressableScale>
 
         {/*
           Send it to a training partner.
@@ -572,7 +572,7 @@ export default function WorkoutDetailScreen() {
               it later must not touch the original, and a deploy refreshing the
               seeded plan must not reach into somebody's copy.
             */}
-            <Pressable
+            <PressableScale
               onPress={async () => {
                 if (!userId || copying) return;
                 setCopying(true);
@@ -600,7 +600,7 @@ export default function WorkoutDetailScreen() {
               <Text style={[styles.copyText, { color: accent.ink }]}>
                 {copying ? 'Copying…' : 'Copy to my workouts'}
               </Text>
-            </Pressable>
+            </PressableScale>
           </>
         )}
 
@@ -638,14 +638,14 @@ export default function WorkoutDetailScreen() {
 
         {canEdit && (
           <>
-            <Pressable
+            <PressableScale
               style={styles.addButton}
               onPress={() => setPicking(true)}
               accessibilityRole="button"
               testID="workout-add-exercise"
             >
               <Text style={styles.addButtonText}>+ Add exercise</Text>
-            </Pressable>
+            </PressableScale>
 
             <HoldToConfirm
               label="Delete workout"
@@ -709,7 +709,7 @@ function ItemRow({
 
   return (
     <View style={styles.item}>
-      <Pressable
+      <PressableScale
         style={styles.itemHead}
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
@@ -730,7 +730,7 @@ function ItemRow({
           <Text style={styles.muted}>{summariseTargets(item, units)}</Text>
         </View>
         {editable && <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>}
-      </Pressable>
+      </PressableScale>
 
       {open && editable && (
         <View style={styles.itemEditor}>
@@ -804,7 +804,7 @@ function ItemRow({
           />
 
           <View style={styles.itemActions}>
-            <Pressable
+            <PressableScale
               onPress={() => onMove(-1)}
               disabled={index === 0}
               style={[styles.smallButton, index === 0 && styles.disabled]}
@@ -813,8 +813,8 @@ function ItemRow({
               testID={`workout-item-${index}-up`}
             >
               <Text style={styles.smallButtonText}>↑</Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
               onPress={() => onMove(1)}
               disabled={index === total - 1}
               style={[styles.smallButton, index === total - 1 && styles.disabled]}
@@ -823,9 +823,9 @@ function ItemRow({
               testID={`workout-item-${index}-down`}
             >
               <Text style={styles.smallButtonText}>↓</Text>
-            </Pressable>
+            </PressableScale>
             <View style={{ flex: 1 }} />
-            <Pressable
+            <PressableScale
               onPress={onRemove}
               style={styles.smallButton}
               accessibilityRole="button"
@@ -833,7 +833,7 @@ function ItemRow({
               testID={`workout-item-${index}-remove`}
             >
               <Text style={[styles.smallButtonText, styles.removeText]}>Remove</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       )}
@@ -924,7 +924,7 @@ function ProtocolEditor({
 
   return (
     <View style={styles.protocolSection}>
-      <Pressable
+      <PressableScale
         onPress={() => setOpen((v) => !v)}
         accessibilityRole="button"
         accessibilityLabel={`Protocol${configured ? ', configured' : ''}. ${open ? 'Collapse' : 'Expand'}`}
@@ -937,7 +937,7 @@ function ProtocolEditor({
           Protocol{configured ? ' · configured' : ''}
         </Text>
         <Text style={styles.disclosure}>{open ? '⌃' : '⌄'}</Text>
-      </Pressable>
+      </PressableScale>
 
       {open && (
         <View style={styles.protocolBody}>
@@ -977,7 +977,7 @@ function ProtocolEditor({
             {PROGRESSION_STRATEGIES.map((s) => {
               const active = protocol.progression_strategy === s.key;
               return (
-                <Pressable
+                <PressableScale
                   key={s.key}
                   style={[styles.protocolPill, active && styles.protocolPillActive]}
                   onPress={() => set({ progression_strategy: active ? null : (s.key as ProgressionStrategy) })}
@@ -988,7 +988,7 @@ function ProtocolEditor({
                   <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
                     {s.label}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
@@ -998,7 +998,7 @@ function ProtocolEditor({
             {(['total', 'per_side'] as RepCountMode[]).map((mode) => {
               const active = protocol.rep_count_mode === mode;
               return (
-                <Pressable
+                <PressableScale
                   key={mode}
                   style={[styles.protocolPill, active && styles.protocolPillActive]}
                   onPress={() => set({ rep_count_mode: active ? null : mode })}
@@ -1009,7 +1009,7 @@ function ProtocolEditor({
                   <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
                     {mode === 'total' ? 'Total' : 'Per side'}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
@@ -1025,7 +1025,7 @@ function ProtocolEditor({
             {EXERCISE_PROFILES.map((p) => {
               const active = protocol.exercise_profile === p.key;
               return (
-                <Pressable
+                <PressableScale
                   key={p.key}
                   style={[styles.protocolPill, active && styles.protocolPillActive]}
                   onPress={() => set({ exercise_profile: active ? null : p.key })}
@@ -1036,7 +1036,7 @@ function ProtocolEditor({
                   <Text style={[styles.protocolPillText, active && styles.protocolPillTextActive]}>
                     {p.label}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
@@ -1144,9 +1144,9 @@ function ExercisePicker({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.sheet}>
         <View style={styles.sheetHead}>
-          <Pressable onPress={onClose} accessibilityRole="button" hitSlop={12}>
+          <PressableScale onPress={onClose} accessibilityRole="button" hitSlop={12}>
             <Text style={[styles.headerAction, { color: accent.ink }]}>Cancel</Text>
-          </Pressable>
+          </PressableScale>
           <Text style={styles.sheetTitle}>Add exercise</Text>
           <View style={{ width: 56 }} />
         </View>
@@ -1182,7 +1182,7 @@ function ExercisePicker({
           renderItem={({ item }) => {
             const uri = pickImage(item, 'thumbnail');
             return (
-              <Pressable
+              <PressableScale
                 style={styles.pickerRow}
                 onPress={() => onPick(item)}
                 accessibilityRole="button"
@@ -1201,7 +1201,7 @@ function ExercisePicker({
                     {item.equipment.length ? ` · ${item.equipment[0].replace(/-/g, ' ')}` : ''}
                   </Text>
                 </View>
-              </Pressable>
+              </PressableScale>
             );
           }}
         />
