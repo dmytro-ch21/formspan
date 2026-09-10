@@ -351,3 +351,53 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/*
+  Reduce Motion (F40).
+
+  A user who has asked their OS not to animate things was getting every
+  animation in this app anyway: `prefers-reduced-motion` appeared nowhere in
+  `apps/web` or `apps/admin`, against 100 `transition` utilities across 32
+  files and 11 infinite `animate-pulse` skeletons.
+
+  **Reduce Motion is a request not to be MOVED, not a request to see nothing.**
+  So this narrows the transition property list rather than setting
+  `transition: none` or slamming every duration to `0.01ms`: colour and opacity
+  changes explain a state change and are kept, while every position, scale and
+  rotation change is dropped. If a hover stops giving colour feedback under the
+  emulation, this block has gone too far and is the thing to fix.
+
+  UNLAYERED on purpose, and that is load-bearing rather than incidental. An
+  unlayered declaration beats every layered one regardless of specificity or
+  source order — the same mechanism the layer statement at the top of this file
+  exists to work around for Clerk. Layered into `base`, this would lose to
+  Tailwind's `utilities` layer and silently do nothing at all.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-property: opacity, color, background-color, border-color, fill, stroke;
+  }
+
+  /*
+    The infinite loops, named explicitly rather than swept up by the wildcard
+    above — a `transition-property` narrowing does not touch `animation`, so
+    without this the skeletons keep pulsing forever, which is the single case
+    reduced-motion settings most often exist for. On a network-bound dashboard
+    an `animate-pulse` can run for seconds.
+
+    `animation-iteration-count: 1` rather than `animation: none`, because
+    Tailwind's `pulse` keyframes animate OPACITY — the one channel this block
+    deliberately keeps. One fade still reads as "loading", then it stops. Both
+    settle on the same final frame (the keyframes end at opacity 1), so the
+    choice costs nothing visually and keeps the skeleton legible either way.
+
+    `animate-pulse` is the only animation utility either app uses today
+    (verified: it is the sole `animate-*` match in both `src` trees). Anything
+    added later that loops — a spinner, a shimmer — needs its own line here.
+  */
+  .animate-pulse {
+    animation-iteration-count: 1;
+  }
+}

@@ -22503,3 +22503,57 @@ rather than from the session's own logged start.
   at arm's length in a gym has not passed.
 - The tick labels and the peak label are legible at the real font size on a real
   phone, in both light and dark, without overlapping the curve.
+
+## F40 — Reduce Motion is respected in web and admin (`apps/web/src/app/globals.css`, `apps/admin/src/app/globals.css`, #1039)
+
+Before this, `prefers-reduced-motion` appeared **nowhere** in either app: 100
+`transition` utilities across 32 files and 11 infinite `animate-pulse`
+skeletons all ran regardless of the OS setting. The rule adopted is that
+**Reduce Motion is a request not to be MOVED, not a request to see nothing** —
+colour and opacity survive, position/scale/rotation do not.
+
+### Happy path
+
+- With the OS setting off, everything behaves exactly as before. This is the
+  scenario most likely to be skipped and most likely to catch an over-broad
+  selector: the block is scoped to a media query, so a regression here means it
+  is leaking.
+- With **Reduce Motion on** (macOS System Settings → Accessibility → Display →
+  Reduce Motion, or DevTools → Rendering → *Emulate `prefers-reduced-motion`*),
+  hover a button and a nav link: the colour still changes. **Colour feedback
+  disappearing is the failure**, not the success — it means the block went too
+  far and disabled transitions outright rather than narrowing them.
+- With Reduce Motion on, nothing moves, scales or rotates on hover, focus or
+  toggle.
+- With Reduce Motion on, load a dashboard list slowly enough to see the
+  skeletons (throttle the network): they must **not** pulse indefinitely. One
+  fade and then still is correct; a permanent loop is the defect.
+
+### Edge cases & errors
+
+- Toggle the OS setting **while a page is open**. The media query re-evaluates
+  live — no reload should be needed.
+- A page with no motion at all (most of `/content` in admin) must look
+  identical either way. Admin ships the block while having zero motion, so the
+  test there is that nothing regressed, not that something changed.
+- Reduced motion plus dark mode together: the colour transitions that survive
+  must still be the dark-theme colours, not a light-theme leak.
+
+### Auth/security
+
+- Nothing new. This is a stylesheet-only change with no data, route or
+  authorization surface.
+
+### What a test can and cannot reach
+
+- **Automated** (`apps/web` and `apps/admin` each carry
+  `src/app/__tests__/reducedMotion.test.ts`): the block exists, it narrows
+  rather than disables, no `transform`/`translate`/`scale`/`rotate` survives,
+  the pulse loop is stopped by an explicit rule, and — the one worth having —
+  the block is **unlayered**. Layered into `base` it would parse, ship, and
+  silently do nothing, because an unlayered declaration beats every layered
+  one. All five were mutation-verified.
+- **Not reachable by those tests**: whether the result actually *looks* calm.
+  The tests read CSS text; they cannot tell that a surviving colour transition
+  is still legible, or that a page feels settled rather than dead. That is the
+  browser check above.
