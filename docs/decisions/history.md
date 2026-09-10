@@ -70896,6 +70896,174 @@ lag, are the two questions this change exists to answer and neither is reachable
 from a test — the suite asserts that the velocity is converted and handed over,
 never that the result feels right.
 
+## 2026-09-09 — N555 (#1032): the ratchet was mobile-only, so a rule extracted for testability could be put back in one line
+
+N551 (entry above) extracted `pendingSuggestableIndices` into
+`apps/web/src/lib/api.ts` and gave it 19 tests. Its own "Open items" bullet
+recorded what those tests did not buy: **revert only the page's call site back
+to the old inline `set_type !== "warmup"` filter, leaving the function and all
+19 tests untouched, and nothing goes red.** The #753 defect — a straight-set
+recommendation written into backoffs, drops, AMRAPs and failure sets — comes
+straight back.
+
+**Reproduced first, before anything was built**, per CLAUDE.md's "verify that a
+check can fail". On this branch against `origin/main` @ `6d834a4e`, with the
+revert confirmed on disk:
+
+| gate | result with the defect reinstated |
+|---|---|
+| `pnpm --filter web exec tsc --noEmit` | exit **0** |
+| `pnpm --filter web lint` | exit **0** — one `no-unused-vars` **warning** |
+| `pnpm run test:web` | exit **0** — 24 files, **301 tests pass** |
+| `pnpm run check:lint-ratchet` | **out of scope** — `MOBILE_DIR = apps/mobile` |
+
+### Two measurements picked the fix, and one of the two candidates lost
+
+N551's bullet named two candidates. Both were measured rather than argued:
+
+- **A `no-restricted-syntax` ban on inline set-role filters is NOT viable as
+  stated, and the reason is worth keeping.** There are ~20 live `set_type`
+  comparisons across web and mobile, and the legitimate ones are *syntactically
+  indistinguishable* from the defect: `apps/web/src/lib/api.ts:1079` and
+  `page.tsx:228` both read `completed && set_type !== "warmup"` — the exact
+  shape — and both are volume counting, not suggestion targeting. What separates
+  them is which value reaches the apply path, i.e. dataflow, not syntax. A ban
+  would need a file/line allowlist, and an allowlist of line numbers in a
+  1,500-line page rots on the next edit.
+- **Extending the ratchet to `apps/web` surfaces ZERO pre-existing warnings.**
+  The stated worry about that candidate ("broader, will surface pre-existing
+  warnings") is simply false for web, measured: `apps/web` has **0** live
+  warnings, `apps/admin` has **8**, `apps/mobile` has its capped 50.
+
+And the measurement that settled it: **mobile was already covered and web was
+the precise hole.** Apply the same revert to `apps/mobile/app/session/[id].tsx`
+and `check:lint-ratchet` exits **1** on the orphaned import. The existing
+mechanism already caught on one app exactly what nothing caught on the other;
+the only difference was one constant's value.
+
+### What shipped: two guards that fail for different reasons
+
+**1. `scripts/check-lint-ratchet.mjs` now covers three apps, with caps per app.**
+`MOBILE_DIR` became `APP_BUDGETS`, a list of `{dir, caps}`. The pure
+`evaluate()` is untouched — a new `evaluateApps()` applies it per app and keeps
+each verdict attributed, and `failureMessages()` stamps every blocking line with
+its app, because "`no-unused-vars` is over budget" is not actionable across three
+apps that all lint it.
+
+Caps deliberately **do not pool**. One shared table across three apps would let
+each app's cap be satisfied out of another's debt, which is the same "the total
+didn't move" blindness N153 built this script to end, relocated one level up.
+Four new self-test cases hold that line on synthetic data, including the one that
+matters most: the same rule over budget in one app while fully cleared in
+another, in a single run.
+
+- `apps/web` enters with an **empty caps table**, which is the strongest state
+  rather than an unfinished one: any new warning is UNCAPPED, i.e. a hard
+  failure.
+- `apps/admin` enters with its 8 `no-unused-vars` recorded at their measured
+  count — visible debt that cannot grow. They are `_prev`/`_form` arguments in
+  two `content` action files, `useActionState` signatures whose leading
+  parameters genuinely are unused. **Recorded, not fixed, on purpose**: the real
+  fix is an `argsIgnorePattern` in `apps/admin/eslint.config.mjs`, which is a
+  change to admin's lint config and reviewable on its own. Admin is in this
+  change at all for the reason CLAUDE.md already records against it by name —
+  `typecheck:admin` was once added to CI and not to `verify`. Fixing web and
+  leaving admin out would be that omission, filed fresh.
+
+The UNCAPPED message now says what the fix *is not*: adding a cap is for debt
+that already existed when an app was first brought under the ratchet, never for
+a warning your own diff introduced. That sentence is the difference between a
+ratchet and a rubber stamp, and without it the message's old advice ("add a cap
+for it at its current live count") was actively wrong for an app sitting at zero.
+
+**2. A branded `SuggestableIndices` type makes the web wiring a compile error.**
+`pendingSuggestableIndices` now returns it, and both `applySuggestion` and the
+`onApplySuggestion` prop demand it. A bare `indices.filter(...)` produces
+`number[]`, which is not assignable — so the revert fails `tsc` outright:
+
+```
+page.tsx: error TS2345: Argument of type 'number[]' is not assignable
+  to parameter of type 'SuggestableIndices'.
+  Property '__brand' is missing in type 'number[]'.
+```
+
+(Line and column are deliberately not quoted: they differ by one between the two
+mutations below — deleting the orphaned import moves the call site up a line —
+and a pinned coordinate here would read as stale against whichever one the next
+person runs.)
+
+This exists because **the ratchet's coverage of this specific revert is
+incidental**, and saying so is the point: it fires on the *unused import*, not on
+the wiring. Delete the import as well and lint is clean again. That residual was
+measured, not reasoned about, and it is what the brand closes.
+
+### Mutation-checked four ways, baseline green in the same session first
+
+A red gate is only evidence once the green one is, so the full set was re-run
+clean before any mutation (tsc 0, lint 0, 301 tests, ratchet 0 across 3 apps):
+
+| mutation | ratchet | `tsc` |
+|---|---|---|
+| A — web call site reverted, import kept | **fails**, names `apps/web` | **fails** |
+| B — web call site reverted **and import deleted** | passes (lint is clean) | **fails** |
+| C — mobile call site reverted | **fails**, names `apps/mobile` | — |
+| D — one extra unused var in `apps/admin` | **fails**, `OVER 9 / 8` | — |
+
+B is the one that justifies the second guard: one gate covers it, and it is not
+the gate that looks like it should. C confirms the generalization did not drop
+the coverage mobile already had. D confirms admin's recorded 8 is a live cap and
+not decoration — the newly-added app's gate can fail, which is the half of
+"verify that a check can fail" that gets skipped when a check is merely added.
+
+### Gaps this leaves
+
+- **The brand is not mirrored on mobile, deliberately.** Mobile's apply path is
+  an inline `onPress` in `app/session/[id].tsx` with no typed boundary to hang a
+  brand on, so adding one there would be a guard with no sink — one that cannot
+  fail, which is the thing the "verify that a check can fail" section is about.
+  Mobile is covered by the ratchet instead, which C measured. If that apply
+  mapping is ever lifted into `lib/`, that extraction is the moment to give it
+  the type too.
+- **The two `pendingSuggestableIndices` are no longer byte-identical** — web's
+  returns the brand, mobile's returns `number[]`. The bullet below that asked for
+  a parity check comparing them has to mean *behavioural* parity now, not
+  textual.
+- **The ratchet is three ESLint runs, not one**, so `verify` pays for web's and
+  admin's lint twice over (once in `lint:web`/`lint:admin`, once here). Measured
+  at a few seconds and not optimised; sharing one report between the two would
+  mean this script trusting another step's output instead of taking its own live
+  measurement, which is the property its doc comment opens by defending.
+- **Nothing catches the general shape.** This closes it for one rule on one
+  surface, plus a net under every future `apps/web` and `apps/admin` warning. A
+  rule extracted from a component and then quietly re-inlined *without* leaving
+  an unused import, in a file where no typed boundary exists, is still invisible.
+  The brand is the pattern to reach for there; it has to be reached for.
+- **Every cap now has zero headroom, in all three apps, and other sessions will
+  meet that before they meet this entry.** Mobile's seven rules each sit exactly
+  at cap (50/50), admin is 8/8, web is 0/0 with an empty table. That is the
+  design — a ratchet with slack is a ratchet that hasn't closed — but the
+  practical consequence is that the *next* PR to introduce a stray warning
+  anywhere in web or admin fails a gate that has never fired on it before, and
+  the failure will look like it came from nowhere. The message names the app and
+  says the fix is the warning rather than the table; that wording is the whole
+  mitigation.
+- **Running `/pre-merge`'s three gates in parallel in ONE worktree corrupts the
+  checker, and that is new.** CLAUDE.md's N91/#432 rule covers the case this
+  session avoided — do not stage or commit while a reviewer is working, and this
+  branch was committed before any agent launched. What it does not cover is
+  gate-on-gate interference: `ac-verifier` has to mutate the tree to answer a
+  mutation-check criterion, and `pre-merge-checker` was running `verify` against
+  that same tree at the same time. Two of its three `verify` attempts failed —
+  once with `UNCAPPED [apps/web]` because the working tree literally held the
+  #753 defect mid-mutation, once with `OVER BUDGET [apps/admin] 9/8` — and
+  **both false reds were self-corroborating**, because they name exactly the
+  failures this branch's own table predicts. `frontend-reviewer` independently
+  saw the same two mutations land and correctly diagnosed them as a concurrent
+  actor rather than a defect. Nothing was lost, because all three noticed. The
+  cheap fix if this recurs is to give `ac-verifier` its own worktree, or to run
+  it after the checker rather than beside it; filed here rather than as a ticket
+  because it is a property of how `/pre-merge` is invoked, not of any file.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
@@ -70969,5 +71137,5 @@ never that the result feels right.
 - **`WeekStepper`'s `done` state is honest, not complete.** It means "this day's slot has passed," never "you trained" — see the N510 entry above for why a real completion join (`lib/adherence.ts`'s `matchPlans`) was deliberately left out. A future ticket that wants the stepper to show real completion has that function ready to reach for; it just isn't reached for yet.
 - **BJJ's HR report shows the raw shape of a session, never a drill/roll boundary** (N491, entry above). Automatic detection is filed as N512/#895 and explicitly blocked — this dev environment has no real recorded HR data from an actual BJJ rolling session to validate a step-change heuristic against, only ephemeral worktree-scoped test Postgres instances. Also unverified on a real device: whether the timeline's shape is legible at a glance on a real phone screen, and whether a genuine drilling-to-rolling transition is visually obvious in practice.
 - **The strength-suggestion preference is device-local, so `apps/web` cannot honour it** (N551/#1013). `PREF_SUGGESTIONS` and `PREF_SUGGESTIONS_OFF` live in mobile's own SQLite `prefs` table and are never pushed to the account, so an athlete who silences strength suggestions on their phone still sees a `ProgressionCard` on every web session page. Not a bug in the web screen — there is nothing there for it to read. Closing it means promoting the preference to an account property (a backend module plus an endpoint), which is why it was left out of phase 1 rather than patched around.
-- **Two copies of `pendingSuggestableIndices` now exist**, one in `apps/mobile/lib/sessions.ts` and one in `apps/web/src/lib/api.ts`, deliberately byte-identical including their shared indifference to an out-of-range index. A parity test on the web side pins that, but nothing mechanical compares the two files — the same standing risk `check:grip-parity` and `check:units` exist to close for other shared vocabularies, and a candidate for the same treatment if a third surface ever needs the rule.
-- **A rule can be lifted out of a page component and still be re-inlined in one line with nothing going red.** N551 extracted `pendingSuggestableIndices` into `apps/web/src/lib/api.ts` and gave it 19 tests; reverting only the *call site* in `apps/web/src/app/dashboard/sessions/[id]/page.tsx` back to the old inline `set_type !== "warmup"` filter passes `tsc --noEmit` (exit 0) and `pnpm --filter web lint` (exit 0, one `no-unused-vars` **warning**), and `scripts/check-lint-ratchet.mjs` is mobile-only so no ratchet sees it. Measured, not assumed, and reproduced independently by both review agents. The candidate fixes are a `no-restricted-syntax` rule banning inline set-role filters outside that function's own definition, or extending the ratchet to `apps/web`; page-level render coverage is NOT the answer, because 0 of 40 web/admin pages have any (`docs/testing/device-checks.md`). The same shape applies to every other rule this repo has extracted from a component for testability.
+- **Two copies of `pendingSuggestableIndices` now exist**, one in `apps/mobile/lib/sessions.ts` and one in `apps/web/src/lib/api.ts`, with identical predicates including their shared indifference to an out-of-range index. **No longer byte-identical as of #1032 (N555)** — web's returns a branded `SuggestableIndices` where mobile's returns `number[]`, because only web has a typed apply boundary to enforce it against; so parity here means *behavioural* parity, and a future check comparing them must compare the predicate, not the text. A parity test on the web side pins the behaviour, but nothing mechanical compares the two files — the same standing risk `check:grip-parity` and `check:units` exist to close for other shared vocabularies, and a candidate for the same treatment if a third surface ever needs the rule.
+- **CLOSED by #1032 (N555, entry above, 2026-09-09) for this rule — the general shape is still open.** This bullet recorded that N551 extracted `pendingSuggestableIndices` into `apps/web/src/lib/api.ts` with 19 tests, and that reverting only the *call site* in `apps/web/src/app/dashboard/sessions/[id]/page.tsx` back to the old inline `set_type !== "warmup"` filter passed `tsc --noEmit`, passed `pnpm --filter web lint` with one `no-unused-vars` **warning**, passed all 301 web tests, and was invisible to the then-mobile-only `check-lint-ratchet.mjs`. All of that was re-reproduced on #1032's branch before anything was built. Two guards now catch it: the ratchet covers `apps/web` (at a cap of zero) and `apps/admin`, and a branded `SuggestableIndices` type makes re-inlining the filter a `tsc` error even when the orphaned import is deleted too — which lint cannot see, and which was the residual the ratchet alone left. Of the two candidates this bullet named, the `no-restricted-syntax` ban was measured and **rejected**: ~20 live `set_type` comparisons exist and the legitimate ones (`api.ts:1079`, `page.tsx:228`) are syntactically identical to the defect, so a ban needs a line-number allowlist that rots. Page-level render coverage remains NOT the answer (0 of 40 web/admin pages have any — `docs/testing/device-checks.md`). **Still open, and restated rather than quietly dropped**: the same shape applies to every other rule this repo has extracted from a component for testability, and a re-inline that leaves no unused import in a file with no typed boundary is still invisible.
