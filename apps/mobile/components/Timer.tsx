@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 import { countdownCopy } from '@/components/Countdown';
@@ -8,6 +8,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { formatCountdown, isAdjustable, stepOf, type Countdown } from '@/lib/countdown';
 import { runProgress, type Run } from '@/lib/intervalRun';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The timer, at the top of the screen, in two sizes.
@@ -207,7 +208,7 @@ function TimerCard({
           <RNView style={[styles.kindDot, { backgroundColor: accent.accent }]} />
           <Text style={[styles.kind, { color: accent.ink }]}>{copy.title.toUpperCase()}</Text>
         </RNView>
-        <Pressable
+        <PressableScale
           onPress={onMinimize}
           hitSlop={12}
           style={styles.headButton}
@@ -216,7 +217,7 @@ function TimerCard({
           testID="countdown-minimize"
         >
           <Icon name="minimise" size={18} color={vola.textMuted} />
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       <Ring
@@ -257,7 +258,7 @@ function TimerCard({
       )}
 
       <RNView style={styles.controls}>
-        <Pressable
+        <PressableScale
           onPress={() => onAdjust(-step)}
           disabled={!adjustable}
           style={[styles.adjust, !adjustable && styles.off]}
@@ -267,9 +268,9 @@ function TimerCard({
           testID="countdown-minus"
         >
           <Text style={styles.adjustText}>−{step}</Text>
-        </Pressable>
+        </PressableScale>
 
-        <Pressable
+        <PressableScale
           onPress={onTogglePause}
           disabled={!adjustable}
           style={[
@@ -287,9 +288,9 @@ function TimerCard({
           testID="countdown-toggle"
         >
           <Icon name={paused ? 'play' : 'pause'} size={22} color={accent.on} strokeWidth={2} />
-        </Pressable>
+        </PressableScale>
 
-        <Pressable
+        <PressableScale
           onPress={() => onAdjust(step)}
           disabled={!adjustable}
           style={[styles.adjust, !adjustable && styles.off]}
@@ -299,12 +300,12 @@ function TimerCard({
           testID="countdown-plus"
         >
           <Text style={styles.adjustText}>+{step}</Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       <RNView style={styles.footer}>
         {inRun && (
-          <Pressable
+          <PressableScale
             onPress={onSkip}
             style={styles.footerButton}
             accessibilityRole="button"
@@ -318,9 +319,9 @@ function TimerCard({
             <Text style={[styles.footerText, { color: accent.ink }]}>
               {timer.kind === 'work' ? 'Done early' : 'Skip'}
             </Text>
-          </Pressable>
+          </PressableScale>
         )}
-        <Pressable
+        <PressableScale
           onPress={onStop}
           style={styles.footerButton}
           accessibilityRole="button"
@@ -328,7 +329,7 @@ function TimerCard({
           testID="countdown-skip"
         >
           <Text style={styles.footerStop}>{done ? 'Done' : inRun ? 'End' : copy.stop}</Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
     </View>
   );
@@ -364,7 +365,7 @@ function TimerBar({
   return (
     <View style={styles.bar} testID="countdown-timer">
       <RNView style={styles.barRow}>
-        <Pressable
+        <PressableScale
           onPress={onExpand}
           hitSlop={8}
           style={styles.barLabel}
@@ -374,9 +375,9 @@ function TimerBar({
         >
           <RNView style={[styles.kindDot, { backgroundColor: accent.accent }]} />
           <Text style={[styles.barKind, { color: accent.ink }]}>{copy.title}</Text>
-        </Pressable>
+        </PressableScale>
 
-        <Pressable
+        <PressableScale
           onPress={onExpand}
           style={styles.barClockTap}
           accessibilityRole="button"
@@ -392,9 +393,9 @@ function TimerBar({
               ? ` · ${run.steps[run.at].ordinal}/${run.steps[run.at].total}`
               : ''}
           </Text>
-        </Pressable>
+        </PressableScale>
 
-        <Pressable
+        <PressableScale
           onPress={() => onAdjust(-step)}
           disabled={!adjustable}
           hitSlop={6}
@@ -405,8 +406,8 @@ function TimerBar({
           testID="countdown-minus"
         >
           <Text style={styles.barChipText}>−{step}</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={() => onAdjust(step)}
           disabled={!adjustable}
           hitSlop={6}
@@ -417,8 +418,8 @@ function TimerBar({
           testID="countdown-plus"
         >
           <Text style={styles.barChipText}>+{step}</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={onTogglePause}
           disabled={!adjustable}
           hitSlop={6}
@@ -429,7 +430,7 @@ function TimerBar({
           testID="countdown-toggle"
         >
           <Icon name={paused ? 'play' : 'pause'} size={14} color={accent.on} strokeWidth={2.2} />
-        </Pressable>
+        </PressableScale>
         {/*
           Inside a run the bar gets BOTH controls, and that is a bug fix rather
           than parity for its own sake.
@@ -442,7 +443,7 @@ function TimerBar({
           first, which is precisely the state an athlete mid-circuit is in.
         */}
         {inRun && (
-          <Pressable
+          <PressableScale
             onPress={onSkip}
             hitSlop={6}
             style={styles.barStop}
@@ -457,9 +458,9 @@ function TimerBar({
             <Text style={[styles.barStopText, { color: accent.ink }]}>
               {timer.kind === 'work' ? 'Done' : 'Skip'}
             </Text>
-          </Pressable>
+          </PressableScale>
         )}
-        <Pressable
+        <PressableScale
           onPress={onStop}
           hitSlop={6}
           style={styles.barStop}
@@ -472,7 +473,7 @@ function TimerBar({
           <Text style={styles.barStopText}>
             {done ? 'Done' : inRun ? 'End' : copy.stop}
           </Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       {/* Drains left to right. Readable from across a gym without reading the
