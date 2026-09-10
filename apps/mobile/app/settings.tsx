@@ -33,6 +33,7 @@ import { environmentLabel } from '@/lib/environmentLabel';
 import { getProfile, updateProfile } from '@/lib/profile';
 import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { healthSourceFor } from '@/lib/vo2MaxSource';
 import { HRMonitorPairing } from '@/components/settings/HRMonitorPairing';
 
 /**
@@ -73,7 +74,10 @@ export default function SettingsScreen() {
   // linked into this binary or it is not, same reasoning as
   // cameraModule.ts's CameraView).
   const [healthKitSupported] = useState(() => isHealthKitSupported());
-  const [healthKitImport, setHealthKitImport] = useState(false);
+  // N552/#1021: `null` while the preference read is in flight, so
+  // `HRMonitorPairing` below can tell "off" from "not read yet" and stay on
+  // its loading state instead of asserting no path is set up for a frame.
+  const [healthKitImport, setHealthKitImport] = useState<boolean | null>(null);
   useEffect(() => {
     if (userId) readHealthKitImportEnabled(userId).then(setHealthKitImport).catch(() => {});
   }, [userId]);
@@ -101,7 +105,7 @@ export default function SettingsScreen() {
     if (Platform.OS !== 'android') return;
     isHealthConnectSupported().then(setHealthConnectSupported).catch(() => {});
   }, []);
-  const [healthConnectImport, setHealthConnectImportState] = useState(false);
+  const [healthConnectImport, setHealthConnectImportState] = useState<boolean | null>(null);
   useEffect(() => {
     if (userId) readHealthConnectImportEnabled(userId).then(setHealthConnectImportState).catch(() => {});
   }, [userId]);
@@ -329,7 +333,7 @@ export default function SettingsScreen() {
                   : '')
               : 'Not available on this device.'
           }
-          value={healthKitImport}
+          value={healthKitImport ?? false}
           disabled={!healthKitSupported}
           last={Platform.OS !== 'android'}
           onChange={(on) => {
@@ -391,7 +395,7 @@ export default function SettingsScreen() {
                   "Heart rate and VO2max recorded by your watch or fitness app, via Android's Health Connect, enrich your session history with load and heart-rate zones. Other activity, like a walk or hike, appears on Today so you can log it or skip it — VOLA only reads, and never writes anything back. Only the last 30 days of history are readable by default. Turning this on asks for Health Connect access."
                 : 'Not available on this device.'
             }
-            value={healthConnectImport}
+            value={healthConnectImport ?? false}
             disabled={!healthConnectSupported}
             last
             onChange={(on) => {
@@ -414,7 +418,14 @@ export default function SettingsScreen() {
             testID="settings-health-connect-import"
           />
         )}
-        <HRMonitorPairing userId={userId} />
+        {/* N552/#1021: the pairing block also names the two heart-rate
+            paths and says which one this athlete is on, so it needs the
+            live state of whichever health toggle above applies here. */}
+        <HRMonitorPairing
+          userId={userId}
+          healthSource={healthSourceFor(Platform.OS, healthKitSupported)}
+          healthSyncOn={Platform.OS === 'android' ? healthConnectImport : healthKitImport}
+        />
       </Section>
 
       {/* Its own section, because it is not a display preference like the ones

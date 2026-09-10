@@ -67353,6 +67353,327 @@ Mutation-checked four ways, restores re-run: dropping the contrast floor,
 removing the red entirely, starting the ramp at the base, and a ramp that
 never darkens.
 
+## 2026-09-09 — N552 (#1021): "works with any wearable" was never a device-support problem — it was that nothing said which of the two paths you were on
+
+The athlete, on the W21 run checks: *"Here what i want to add is it should work
+with any wearable."* The obvious reading is "support more devices", and it is
+wrong in both directions — which is why this entry starts with what was already
+true.
+
+### The BLE path was already vendor-neutral, and still is
+
+`lib/hrMonitor/liveHR.ts` scans on the standard GATT Heart Rate Service
+(`0x180D`) and `lib/hrMonitor/heartRateProfile.ts` parses the standard
+measurement characteristic (`0x2A37`) per HRS 1.0 §3.1.1. Neither has ever
+looked at a brand, a model or a device name — which is exactly why `source:
+'hr_monitor'` is one vendor-neutral value rather than a vendor list. Polar,
+Garmin, Wahoo, Coospo, Magene, essentially any chest strap, an Amazfit with
+broadcasting switched on, a Whoop in broadcast mode: all already worked, with
+no per-brand code, and nothing in this ticket added a device.
+
+**Both of the issue's code claims were re-verified against `origin/main` before
+any of this was built, and both still hold exactly as written** — the scan is
+still `liveHR.ts:192` (`m.startDeviceScan([HEART_RATE_SERVICE_UUID], …)`) and
+`heartRateProfile.ts` still declares `00002a37-…` and parses the measurement
+per HRS 1.0 §3.1.1. W19 (#1016), which landed hours before this branch was cut,
+moved a great deal around them and none of it.
+
+### What cannot work over BLE is not ours to fix
+
+An Apple Watch never exposes live heart rate to a third-party app over
+Bluetooth; HealthKit is the only route. Fitbit and Oura have no standard
+broadcast. Most Samsung / Wear OS goes through Health Connect. No amount of
+work on the scan reaches any of them.
+
+### So the actual defect: Settings offered a scan and said nothing
+
+An Apple Watch owner opened Settings, scanned, found nothing, and reasonably
+concluded the feature was broken. Their path existed, worked, and simply was
+not the scan — and the app never said so. That is a W-class "the screen says
+something untrue about itself" defect wearing an N-class ticket.
+
+Four things changed.
+
+**1. Settings names the two paths and says which one you are on.**
+`lib/hrPath.ts` is the pure decision: `hrPathState` resolves
+`live` / `health` / `health_quiet` / `health_unknown` / `nothing` / `loading`
+from four facts, and `hrPathName` gives each path its one name — *"Live over
+Bluetooth"* and *"From Apple Health afterwards"* — which is the same function
+the finished report now calls, so the two surfaces cannot drift into calling a
+path different things.
+
+`'live'` is decided from the PAIRING, not from a live connection: W21/#992 made
+the link belong to a run, so a paired strap in a drawer with the app open is
+correctly on the live path — that is what happens next time they start a run. A
+remembered monitor on a build with no Bluetooth is *not* the live path, and
+that distinction turned out to be load-bearing in a way that was not obvious:
+the first cut skipped the health probe whenever a monitor was remembered, which
+left exactly that athlete on a spinner forever, because the state they land in
+is one that waits for a probe that never runs. Caught by writing the state test
+before the component.
+
+**2. It is an observation, not a promise.** `lib/hrPathProbe.ts` does one
+bounded read — the last 24 hours of heart rate from whichever store this device
+has — so the screen can say *"Apple Health has heart rate from the last day, so
+that route is working"* rather than merely *"VOLA will read it from Apple
+Health"*. Without that, an athlete with no wearable at all and an athlete whose
+Watch feeds Health every few minutes read identical copy.
+
+It runs only when the athlete is actually on that path (no monitor, a store on
+this device, its sync switch already on), so it can never provoke a permission
+prompt nobody asked for, and a paired-strap athlete pays nothing for it.
+
+**The `null` return is the point, and it is W15/#954's rule applied again.** A
+refused Health Connect grant throws, and it comes back as *unknown*, never as
+*found none* — because "we looked and found none" and "we could not look" are
+different situations and the copy for each says something different. On iOS the
+distinction genuinely does not exist (`queryHeartRateSamples` returns `[]` for a
+declined grant exactly as for an empty store, per design doc §5.1), so the
+`health_quiet` sentence states an observation and an action and deliberately
+never asserts a cause.
+
+**3. The broadcast guidance is generic.** The shipped copy named the Amazfit
+that produced N528, in two places — which read as "VOLA supports Amazfit" to
+everybody holding anything else, about a scan that is vendor-neutral by
+construction. `BROADCAST_RULE` now leads (*VOLA reads the standard Bluetooth
+heart-rate profile… it never checks which watch or strap it is*), followed by
+seven short rows — chest straps, Garmin, Amazfit/Zepp, Polar, Coros, Suunto,
+Whoop — as examples of ONE setting under different names, not as a list of
+supported devices. Collapsed by default, and expanded automatically by a scan
+that found nothing, which is precisely when it is wanted.
+
+`nonBroadcastingNote` is the sentence that exists for the athlete this ticket
+is about: Apple Watch, Fitbit, Oura and most Samsung/Wear OS watches never
+broadcast, a scan will never find them, that is how they are built rather than
+a fault, and VOLA reads those from the health store instead — *which is a
+supported way to train, it just is not live.*
+
+**4. `healthPathTip` — the one gesture that changes the report.** An
+Apple Watch merely WORN writes background heart rate, one reading every few
+minutes. A workout STARTED ON THE WATCH writes a continuous recording. VOLA
+reads the same window either way, so that gesture is the entire difference
+between a report worth reading and the thin one W19/#985's incident produced —
+469 readings for a 90-minute class, every one of them background, the class
+itself never written. Nothing in the app had ever said so.
+
+### The non-broadcasting path no longer needs poking
+
+W18/#957's "Sync heart rate" made that path *recoverable*. It did not make it
+*automatic*: an athlete whose wearable only reaches VOLA through Apple Health /
+Health Connect finished a session, opened it, and had to press a button to see
+their own numbers. Two changes, both small, and the second is the one that
+matters.
+
+**`useHRRecording`'s finish edge no longer gates the enrichment kick on `n >
+0`.** That guard was right for N528 (compute the report with the monitor's own
+samples already in place) and wrong for this ticket: a run finished with a
+non-broadcasting wearable flushes zero rows, so the pass was not kicked, so the
+health store was not asked until the next foreground return — and an athlete
+who finishes a run and stays in the app has no foreground return. It is now
+kicked on both the flushed and the failed-flush branch (a failed flush is about
+the MONITOR's rows and says nothing about what the store holds), and
+platform-switched through `healthSourceFor`, because the HealthKit pass returns
+immediately on Android and vice versa. Kicking the full pass also picks up
+VO₂max, which is the other half of the ticket's third criterion and is exactly
+what a Watch writes shortly after an outdoor run.
+
+**`useSessionHRSync` makes ONE automatic attempt**, decided by
+`autoSyncNowDue` (pure, in `lib/hrAbsence.ts`). Three guards, each
+load-bearing: once per screen instance; never for a session that already has
+heart rate (`sessionHasHeartRate`, from the metrics read all three screens
+already hold — without it the hook would fire on every open of every session
+inside the retry window, with the report on screen); and only while
+`absence === 'checking'`, pointedly **not** `'gave_up'`. Past
+`RETRY_WINDOW_DAYS` the orchestrator has deliberately stopped, and an automatic
+attempt there would re-ask the store on every open of every old session forever
+— the unbounded ongoing cost that window exists to bound. The BUTTON still
+works there, because a tap is explicit intent; W18's distinction is untouched.
+
+**How this sits with W19 (#1016), which landed hours earlier.** W19 changed
+which window is read and when a result is terminal — `hrSampleCoverage`, the
+`coverage` column, schema 41 — and nothing here touches any of it. The
+relationship is that W19 decides *whether to look again*; N552 decides *when
+something makes it look*. A session enriched automatically here writes the same
+ledger row with the same coverage as one enriched by the orchestrator, so a
+thin first answer still rides W19's retry ladder exactly as it would have. The
+one interaction worth stating: because the finish-edge kick now fires for a
+non-broadcasting run, W19's `retryCooldownMs(age < 2h) === 0` means that first
+attempt is genuinely free of cadence — which is what makes "open the report and
+it is already looking" true rather than aspirational.
+
+### The report says which path produced its numbers
+
+`hrSourceSentence` used to open "From …" for both cases, so *"From your Amazfit
+GTR 4"* and *"From Apple Health"* read as two devices rather than as the two
+different routes they are — right after Settings had spent a paragraph teaching
+that the difference between those routes is the whole story. It now reads
+*"Live over Bluetooth, from your Amazfit GTR 4"*, *"…· 3 readings from Apple
+Health filled gaps"*, or *"From Apple Health afterwards"*, and the path names
+come from `hrPathName` rather than from literals — asserted against that
+function in the test, because the failure being guarded is drift, and a literal
+would pass straight through it.
+
+### The watchOS companion app: DEFERRED, and here is the cost
+
+The ticket asks for a decision either way, so: **not now, and not soon.** The
+reasoning, and the numbers behind it, so this can be reversed on evidence
+rather than re-argued from scratch.
+
+A watchOS companion is the ONLY way to get live heart rate off an Apple Watch
+during a session. What it actually requires here:
+
+- **A second build target that Expo does not manage.** `apps/mobile` is a
+  managed Expo project whose `ios/` directory is generated by prebuild, so a
+  hand-added watchOS target is destroyed by the next `expo prebuild --clean`.
+  Keeping one alive means writing and maintaining a config plugin that re-adds
+  the target, its build phases, its `Info.plist` and its entitlements on every
+  prebuild — a permanent piece of native build tooling, not a one-off.
+- **Its own identity end to end**: a `…watchkitapp` bundle id, its own
+  provisioning profile, its own App Store Connect record and its own review.
+  Note what that does to this project's *current* install story: device builds
+  here run on a free Apple ID with 7-day provisioning expiry, and a second
+  target doubles that ceremony on every reinstall.
+- **The watch app itself**: SwiftUI, plus `HKWorkoutSession` /
+  `HKLiveWorkoutBuilder`, which is the only API that keeps heart rate streaming
+  with the wrist down and the app backgrounded, plus the HealthKit entitlement
+  and the workout-processing background mode.
+- **A transport**: `WatchConnectivity` on the watch, and a native Expo module on
+  the phone side to receive readings and hand them to `hrRecorder.ts`.
+- **Forever after**: two binaries to version, ship, crash-report and debug, and
+  a second OS's annual updates.
+
+Weeks, not days, and it roughly doubles the release surface permanently. It is
+a project, and it is the kind of project that should be started because someone
+decided to, not because a ticket implied it.
+
+**What it would actually buy, stated precisely, because this is the part that
+makes the deferral defensible.** After this ticket, an Apple Watch owner who
+starts the workout on the watch gets a *dense, correctly-windowed* HR series,
+zones, TRIMP and VO₂max on their finished report, automatically, with no
+button. What a companion adds is not those numbers — it is **live** heart rate:
+the chip during the run, in-run zone coaching, and the screen-locked stream
+W21/#992 built. That is a real feature and a real gap, and it is a smaller gap
+than "works with my Apple Watch" sounds.
+
+**This is recorded as a deferral, not as a closed door, and the reversal
+condition is the user's to state.** The two live options remain (a) stay here —
+the Apple Health path is now a named, supported, automatic path — or (b) fund
+the companion as its own epic with its own tickets. Nothing in this branch
+forecloses (b); `hrPath.ts`'s two-path vocabulary would need a third name and
+essentially nothing else.
+
+### Verification
+
+14 mutations, 14 killed, against a baseline green in the same session and green
+again afterwards: each of `autoSyncNowDue`'s three guards and its `'checking'`
+bound; `sessionHasHeartRate`'s sample-count clause; `hrPathState`'s
+`bluetoothSupported &&`, its probe-settled wait and its `null`-versus-`false`
+split; `hrPathName`'s "afterwards"; `nonBroadcastingNote`'s device list; the
+probe's `null`-on-failure; the restored `if (n > 0)` gate in `useHRRecording`;
+a brand name creeping back into the Settings copy; and `settings.tsx` ceasing
+to hand the pairing block its toggle.
+
+Two of those are source-level wiring guards in `hrReportWiring.test.ts`, in the
+style that file already uses, because both invariants are "a call site agrees
+with a module" — the same shape as the missing-`hrSourceLine` defect that file
+was written for. The brand-copy guard strips comments before matching, and that
+is not a loophole: this file's own doc comment has to be free to say which
+watch the old copy named, and a check that forbade the explanation along with
+the defect is one somebody deletes rather than satisfies.
+
+### What this leaves open
+
+- **The whole thing is unverified on a device.** The ticket's sixth criterion —
+  a run with a broadcasting strap and a run with an Apple-Health-only wearable
+  both producing a usable report, with Settings having described each
+  beforehand — cannot be answered by reading code, and is left for the evidence
+  latch.
+- **The probe cannot tell a declined HealthKit grant from an empty store**, and
+  no iOS API lets it. `health_quiet`'s copy is worded around that rather than
+  solving it.
+- **`healthPathTip` asserts a behaviour of watches generally** — worn writes
+  sparse, recording writes dense — which is measured for the Apple Watch (the
+  W19 incident) and assumed for the rest.
+
+### The review pass, and the one thing it caught that reading the code twice had not
+
+`ac-verifier` returned five code criteria `MET` and the sixth as
+`NEEDS HUMAN EVIDENCE`; `frontend-reviewer` hand-traced all three new
+effects/hooks and found them correct. The one `[blocking]` finding was not
+about behaviour at all, and it is worth recording because the commit contained
+its own refutation.
+
+**The feature's explanatory copy was below this app's stated contrast floor,
+and the comment arguing for the one line that wasn't proved the arithmetic had
+already been done.** `HRMonitorPairing`'s `pathHeadline` was set to
+`vola.textMuted` under a doc comment stating that `textDim` measures 3.96:1
+against `vola.bg` — under the 4.5:1 body-text floor — and `textMuted` 7.38:1.
+Re-measured independently: `#667085` on `#080B12` is **3.957:1**, `#949FB3` is
+**7.376:1**; against `surface` (`#10151F`) they are 3.674:1 and 6.848:1, so the
+verdict does not depend on which ground the row is drawn over. The floor is
+this repo's own, written down in `constants/Colors.ts`, which says in as many
+words that dropping `textMuted` to 3.98:1 *"fails"*.
+
+Everything underneath that one headline stayed at 3.957:1: `hrPathDetail` (the
+actual explanation of what to do), `healthPathTip` (described in its own doc
+comment as *"the one gesture that changes the report"*), `nonBroadcastingNote`
+(*"the reason this ticket was filed"*), `BROADCAST_RULE` and every `step.how`
+row. A Settings block that exists so an Apple Watch owner stops concluding the
+app is broken cannot render its substance at a ratio the codebase calls a
+failure — and it was inconsistent *within the one commit*, which is the part
+no amount of re-reading the diff had surfaced.
+
+Fixed by a `bodyCopy` style — identical metrics to `muted`, only the ink
+differs, because what is being fixed is legibility and not hierarchy — applied
+to those five plus the no-Bluetooth branch's one sentence (the only prose that
+branch has, and leaving it dim would have stranded one unreadable line under
+three readable ones). `pathHeadline` is now set apart by size and weight
+rather than by ink; its doc comment says so. Deliberately left on `muted`: the
+state stub "No monitor paired." and the paragraph describing the Scan button
+sitting directly beneath it — neither is new in this ticket and both are
+chrome around a control the athlete can already see. A general contrast sweep
+of `settings.tsx` is a different ticket.
+
+**The guard is a rendered-colour assertion, not a token assertion**
+(`components/__tests__/hrPairingContrast.test.tsx`). It renders the block,
+flattens each substantive node's style, and asserts `contrastRatio(ink, ground)
+>= 4.5` for both `bg` and `surface` — so a future paragraph that reaches for
+`styles.muted` fails, which a doc comment demonstrably cannot achieve: this
+exact reasoning had already been written out twice in this one file (W20's
+`foundDetail`, N552's `pathHeadline`) and the next paragraph added went dim
+anyway. It carries its own apparatus check — that `textDim` really is below
+the floor on both grounds — because a floor nothing can fall below is not a
+floor. Nine mutations, nine killed, green baseline before and after, restore
+confirmed by re-running rather than by grepping.
+
+**Two `[suggestion]`s, both taken.** First: `hrPathDetail`'s `'nothing'` branch
+told the athlete to *"switch `<store>` sync on above"* — at a `<Toggle>`
+rendered `disabled` with "Not available on this device" whenever there is no
+store at all. That is this ticket's own failure mode, one block down: telling
+somebody to do what the same screen has just said they cannot. Guarded on
+`healthSource === null`, which is safe from a flash-and-correct because
+Settings computes it synchronously from `isHealthKitSupported()`. Second:
+`BROADCAST_STEPS` asserts menu paths inside five third-party apps this repo
+does not ship and cannot watch; `BROADCAST_RULE` now closes by saying the paths
+are where each app kept the setting *when this was written* and to look for
+anything called "broadcast" if they have moved. Nothing in this suite can
+notice a vendor menu change — a test asserting "Toolbox → Heart Rate
+Broadcast" only asserts that we still say it — so the hedge is the honest
+version and is itself guarded.
+
+### One residual the review opened, deliberately not closed here
+
+**On Android the "switch sync on above" sentence can still point at a disabled
+toggle.** `healthSourceFor` returns `'health_connect'` unconditionally for
+Android, so a phone with no Health Connect available still reads as having a
+store. Closing it needs Settings to distinguish *not yet checked* from *not
+available* — `healthConnectSupported` starts `false` and resolves async — and a
+naive guard on it would trade one wrong sentence for a wrong sentence that
+flashes and then corrects itself, which is precisely the monotonic-screen rule
+`healthProbeSettled` exists in this same module to honour. Recorded in
+`hrPath.ts` next to the guard that does land, and worth its own ticket rather
+than a widened guard here.
+
 ## Open items / known gaps as of this entry
 
 

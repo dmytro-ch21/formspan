@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
+import type { SessionMetrics } from './biometric';
 import { enrichSessionNow } from './biometricSync';
 import { enrichHealthConnectSessionNow, readHealthConnectImportEnabled } from './healthConnectSync';
 import { isHealthKitSupported } from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
-import { hrAbsenceState, type HRAbsenceState, type SyncNowOutcome } from './hrAbsence';
+import { autoSyncNowDue, hrAbsenceState, sessionHasHeartRate, type HRAbsenceState, type SyncNowOutcome } from './hrAbsence';
 import { readRememberedMonitor } from './hrMonitor/hrMonitorStore';
 import type { TokenGetter } from './useAuthToken';
 import { healthSourceFor, healthSourceLabel } from './vo2MaxSource';
@@ -29,6 +30,16 @@ export function useSessionHRSync(input: {
   sessionID: string | undefined;
   startedAt: string | undefined;
   endedAt: string | null | undefined;
+  /**
+   * N552/#1021 — the screen's own metrics read, so the automatic attempt
+   * below can skip a session that already has heart rate. `metrics` is the
+   * row (or `null`), `metricsLoaded` says whether the read has answered at
+   * all — the two are separate on all three screens for exactly the reason
+   * they are separate here: `null` means both "not asked yet" and "asked,
+   * and there is genuinely nothing".
+   */
+  metrics: Pick<SessionMetrics, 'hr_source' | 'sample_count'> | null;
+  metricsLoaded: boolean;
   /** Called after a `found` outcome — the screen re-reads its metrics so the
    *  report replaces the card. */
   onFound: () => void;
@@ -39,7 +50,7 @@ export function useSessionHRSync(input: {
   /** The remembered heart-rate monitor's name on this phone, or null. */
   monitorName: string | null;
 } {
-  const { userId, getToken, sessionID, startedAt, endedAt, onFound } = input;
+  const { userId, getToken, sessionID, startedAt, endedAt, metrics, metricsLoaded, onFound } = input;
   // Same platform resolution as `app/vo2max/trend.tsx` (W16/#945) — iOS
   // without the HealthKit module (a Simulator build) resolves to Health
   // Connect's *label* there too; harmless, `enrichSessionNow` answers
@@ -85,6 +96,26 @@ export function useSessionHRSync(input: {
     if (outcome.status === 'found') onFound();
     return outcome;
   }, [userId, getToken, sessionID, startedAt, endedAt, source, onFound]);
+
+  /**
+   * N552/#1021 — ONE automatic attempt, so an athlete whose wearable only
+   * reaches VOLA through the health store never has to press anything to see
+   * their own session. See `autoSyncNowDue` for every guard and why each one
+   * is there; the ref is the "once per screen instance" half of it, kept in a
+   * ref rather than state because flipping it must not itself re-render.
+   *
+   * Fire-and-forget: `syncNow` never throws (every failure is a
+   * `SyncNowOutcome`), and a `found` outcome already calls `onFound`, which
+   * is what replaces the card with the report. Nothing here needs the result.
+   */
+  const autoAttempted = useRef(false);
+  useEffect(() => {
+    if (!autoSyncNowDue({ absence, metricsLoaded, hasHeartRate: sessionHasHeartRate(metrics), alreadyAttempted: autoAttempted.current })) {
+      return;
+    }
+    autoAttempted.current = true;
+    void syncNow();
+  }, [absence, metricsLoaded, metrics, syncNow]);
 
   // N528/#958: the remembered monitor's name, for the report's source line
   // ("From your Amazfit GTR 4"). Local to this phone by design.

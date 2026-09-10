@@ -288,21 +288,21 @@ describe('W18/#957 — the no-HR card says WHICH absence this is, and offers "Sy
 
 describe('N528/#958 — the report says where its numbers came from', () => {
   test('a source line renders under the header in the full state, with its own testID', () => {
-    render(<HRSessionReport metrics={metrics()} hrSourceLine="From your Amazfit GTR 4 · 3 readings from Apple Health filled gaps" />);
+    render(<HRSessionReport metrics={metrics()} hrSourceLine="Live over Bluetooth, from your Amazfit GTR 4 · 3 readings from Apple Health filled gaps" />);
     expect(screen.getByTestId('hr-session-report-source').props.children).toBe(
-      'From your Amazfit GTR 4 · 3 readings from Apple Health filled gaps',
+      'Live over Bluetooth, from your Amazfit GTR 4 · 3 readings from Apple Health filled gaps',
     );
   });
 
   test('and in the limited state (no TRIMP)', () => {
-    render(<HRSessionReport metrics={metrics({ trimp: null, time_in_zones: {} })} hrSourceLine="From Apple Health" />);
-    expect(screen.getByTestId('hr-session-report-source').props.children).toBe('From Apple Health');
+    render(<HRSessionReport metrics={metrics({ trimp: null, time_in_zones: {} })} hrSourceLine="From Apple Health afterwards" />);
+    expect(screen.getByTestId('hr-session-report-source').props.children).toBe('From Apple Health afterwards');
   });
 
   test('no line without one, and never on the unavailable card', () => {
     render(<HRSessionReport metrics={metrics()} />);
     expect(screen.queryByTestId('hr-session-report-source')).toBeNull();
-    render(<HRSessionReport metrics={null} hrSourceLine="From Apple Health" testID="r2" />);
+    render(<HRSessionReport metrics={null} hrSourceLine="From Apple Health afterwards" testID="r2" />);
     expect(screen.queryByTestId('r2-source')).toBeNull();
   });
 });

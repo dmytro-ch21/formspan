@@ -122,3 +122,86 @@ describe('the running screen prunes the fix queue wherever it restores a track',
     expect(prunes.length).toBe(restores.length);
   });
 });
+
+/**
+ * N552/#1021 — two wiring invariants that no unit test can reach, in the
+ * same source-level style as the ones above and for the same reason: both
+ * failed silently once already in this area (the running screen missing
+ * `hrSourceLine` entirely), and both are "a call site agrees with a module",
+ * which is a fact about text.
+ */
+/** Source with `//` and block comments removed — see the brand-copy check
+ *  below for why that distinction is the point rather than a weakening. */
+function withoutComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+describe('Settings names the two heart-rate paths', () => {
+  const PAIRING = 'components/settings/HRMonitorPairing.tsx';
+
+  it.each(['hrPathState', 'hrPathHeadline', 'hrPathDetail', 'nonBroadcastingNote', 'BROADCAST_STEPS'])(
+    'renders %s',
+    (symbol) => {
+      expect(screenSource(PAIRING)).toContain(symbol);
+    },
+  );
+
+  it('holds no brand-specific broadcast copy of its own', () => {
+    // The defect: the shipped copy named the Amazfit that produced N528, in
+    // two places, which read as "VOLA supports Amazfit". Brand names now
+    // live in `BROADCAST_STEPS` — one generic list, under a rule that says
+    // the brand is never checked — so any reappearing here is drift back to
+    // the thing this ticket removed.
+    //
+    // COMMENTS ARE STRIPPED FIRST, and that is not a loophole: this file's
+    // own doc comment has to be free to say which watch the old copy named,
+    // and a check that forbade the explanation along with the defect is one
+    // somebody deletes rather than satisfies. What is asserted is that no
+    // brand reaches the SCREEN.
+    const src = withoutComments(screenSource(PAIRING));
+    // Guards the guard: without a positive assertion, deleting the file's
+    // copy altogether would pass — and, since the stripper is itself the
+    // apparatus here, this also proves it did not blank the whole file.
+    expect(src).toContain('BROADCAST_RULE');
+    for (const brand of ['Amazfit', 'Zepp', 'Garmin', 'Polar', 'Coros', 'Suunto']) {
+      expect(src).not.toContain(brand);
+    }
+  });
+
+  it('is given the health toggle it describes, rather than re-reading it', () => {
+    const settings = screenSource('app/settings.tsx');
+    expect(settings).toContain('<HRMonitorPairing');
+    expect(settings).toContain('healthSyncOn=');
+    expect(settings).toContain('healthSource=');
+  });
+});
+
+describe('finishing a session kicks enrichment whichever path it was on', () => {
+  const REL = 'lib/hrMonitor/useHRRecording.ts';
+
+  it('never gates the kick on how many monitor rows flushed', () => {
+    const src = screenSource(REL);
+    // Guards the guard: the flush still has to be there for the assertion
+    // below to be about anything.
+    expect(src).toContain('flushHRMonitorSamples(');
+    // The N528 shape, and this ticket's third criterion's actual bug: a run
+    // finished with a non-broadcasting wearable flushes zero rows, so the
+    // health store was never asked until the next foreground return.
+    expect(src).not.toMatch(/if \(n > 0\)/);
+  });
+
+  it('kicks it on both the flushed and the failed-flush branch', () => {
+    const src = screenSource(REL);
+    expect(src).toContain('.then(kickEnrichment)');
+    // The catch calls it too — offline is about the MONITOR's rows and says
+    // nothing about what the health store holds for this session.
+    expect(src).toContain('kickEnrichment();');
+  });
+
+  it('dispatches to the platform that actually has a health store', () => {
+    const src = screenSource(REL);
+    expect(src).toContain('healthSourceFor(');
+    expect(src).toContain('triggerBiometricSyncNow');
+    expect(src).toContain('triggerHealthConnectSyncNow');
+  });
+});

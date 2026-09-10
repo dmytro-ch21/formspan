@@ -1,5 +1,12 @@
 import { RETRY_WINDOW_DAYS } from '../biometric';
-import { hrAbsenceCopy, hrAbsenceState, syncNowButtonVisible, syncNowOutcomeCopy } from '../hrAbsence';
+import {
+  autoSyncNowDue,
+  hrAbsenceCopy,
+  hrAbsenceState,
+  sessionHasHeartRate,
+  syncNowButtonVisible,
+  syncNowOutcomeCopy,
+} from '../hrAbsence';
 
 /**
  * W18/#957 — the no-HR card's state machine and its copy, proven apart from
@@ -85,5 +92,67 @@ describe('syncNowOutcomeCopy', () => {
     expect(syncNowOutcomeCopy({ status: 'sync_off' }, 'Health Connect')).toContain('Health Connect');
     expect(syncNowOutcomeCopy({ status: 'no_hrmax' }, 'Apple Health')).toMatch(/date of birth/);
     expect(syncNowOutcomeCopy({ status: 'error' }, 'Apple Health')).toMatch(/Try again/);
+  });
+});
+
+/**
+ * N552/#1021 — the ONE automatic attempt, so an athlete on the health-store
+ * path never has to press anything to get their own session.
+ */
+
+describe('sessionHasHeartRate', () => {
+  it('is false for every shape of "nothing"', () => {
+    expect(sessionHasHeartRate(null)).toBe(false);
+    expect(sessionHasHeartRate(undefined)).toBe(false);
+    // The server's honest empty result: a row exists, and says so.
+    expect(sessionHasHeartRate({ hr_source: 'none', sample_count: 0 })).toBe(false);
+    // A 'window' row with nothing behind it is still nothing.
+    expect(sessionHasHeartRate({ hr_source: 'window', sample_count: 0 })).toBe(false);
+    // ...and so is a 'none' row that somehow carries a count.
+    expect(sessionHasHeartRate({ hr_source: 'none', sample_count: 40 })).toBe(false);
+  });
+
+  it('is true only for a real result', () => {
+    expect(sessionHasHeartRate({ hr_source: 'window', sample_count: 1 })).toBe(true);
+    expect(sessionHasHeartRate({ hr_source: 'workout', sample_count: 400 })).toBe(true);
+  });
+});
+
+describe('autoSyncNowDue', () => {
+  const due = {
+    absence: 'checking' as const,
+    metricsLoaded: true,
+    hasHeartRate: false,
+    alreadyAttempted: false,
+  };
+
+  it('fires exactly once, for a fresh session with no heart rate and sync on', () => {
+    expect(autoSyncNowDue(due)).toBe(true);
+    expect(autoSyncNowDue({ ...due, alreadyAttempted: true })).toBe(false);
+  });
+
+  it('never fires for a session that already has heart rate', () => {
+    // Without this the hook would re-ask the health store on every open of
+    // every session inside the retry window, with the report on screen.
+    expect(autoSyncNowDue({ ...due, hasHeartRate: true })).toBe(false);
+  });
+
+  it('waits for the screen\'s own metrics read before deciding', () => {
+    expect(autoSyncNowDue({ ...due, metricsLoaded: false })).toBe(false);
+    // Including when that unfinished read is why `hasHeartRate` is false.
+    expect(autoSyncNowDue({ ...due, metricsLoaded: false, hasHeartRate: false })).toBe(false);
+  });
+
+  it("does NOT fire once the orchestrator has given up — the button still does", () => {
+    // Past RETRY_WINDOW_DAYS an automatic attempt would re-ask on every open,
+    // for every old session, forever: precisely the unbounded cost that
+    // window exists to bound. A tap is explicit intent (W18); this is not.
+    expect(autoSyncNowDue({ ...due, absence: 'gave_up' })).toBe(false);
+    expect(syncNowButtonVisible('gave_up')).toBe(true);
+  });
+
+  it('does not fire while sync is off, or before the toggle read answers', () => {
+    expect(autoSyncNowDue({ ...due, absence: 'sync_off' })).toBe(false);
+    expect(autoSyncNowDue({ ...due, absence: 'loading' })).toBe(false);
   });
 });

@@ -22151,3 +22151,117 @@ templates can author a set role (#753's phase 2), not defects today.
   this document that would catch it — which is the strongest reason to write
   the backoff scenario above as a real test rather than leave it a
   recommendation.
+
+## N552 — "works with any wearable": Settings names the two heart-rate paths, and the non-broadcasting one runs unattended (`apps/mobile/lib/hrPath.ts`, `lib/hrPathProbe.ts`, `lib/hrAbsence.ts`'s `autoSyncNowDue`/`sessionHasHeartRate`, `lib/useSessionHRSync.ts`, `lib/hrMonitor/useHRRecording.ts`, `lib/hrMonitor/hrSourceLine.ts`, `components/settings/HRMonitorPairing.tsx`, `app/settings.tsx`, #1021)
+
+The ticket is not a device-support ticket. The BLE scan has always been
+vendor-neutral (standard GATT `0x180D` / `0x2A37`, no brand ever read), and no
+work on it can ever reach an Apple Watch, a Fitbit or an Oura, none of which
+broadcast at all. What was wrong is that Settings offered a scan and said
+nothing about a device that can never appear in one.
+
+### Happy path — Settings says which path you are on
+
+1. **A paired strap.** Settings → Integrations → Heart rate: the block opens
+   with `You're on "Live over Bluetooth".` and a detail naming the strap.
+   Nothing about the health store's contents is read, so the block does not
+   spin waiting for one.
+2. **No monitor, health sync on, a wearable that feeds the store.**
+   `You're on "From Apple Health afterwards".` plus *"Apple Health has heart
+   rate from the last day, so that route is working."*
+3. **No monitor, health sync on, an empty store.** The same headline, and the
+   detail says VOLA *found none* there from the last day and what to do — never
+   that nothing is writing, which iOS does not let the app know.
+4. **No monitor, health sync off.** `No heart-rate path is set up.` naming both
+   remedies.
+5. **The tip, on every health-path state.** *Start the workout on your watch as
+   well as in VOLA* — worn writes a reading every few minutes, recording writes
+   a continuous one.
+6. **The non-broadcasting note, in every state.** Apple Watch, Fitbit, Oura and
+   most Samsung/Wear OS named; "a scan will never find them"; "not a fault";
+   "a supported way to train".
+7. **Generic broadcast guidance.** "How do I turn broadcasting on?" expands to
+   the rule (VOLA reads the standard profile, never the brand) plus rows for
+   chest straps, Garmin, Amazfit/Zepp, Polar, Coros, Suunto and Whoop. A scan
+   that finds nothing expands it automatically.
+
+### The non-broadcasting run, end to end — the criterion that matters
+
+8. **Finish a session with no monitor paired and stay in the app.** The
+   enrichment pass is kicked on the finish edge (it used to be gated on
+   monitor rows having flushed, so a non-broadcasting run kicked nothing), and
+   opening the session makes ONE automatic attempt. PASS: the report appears
+   with no button pressed. FAIL: the "Sync heart rate" card sits there until
+   tapped, or until the app is backgrounded and foregrounded.
+9. **Open the same session again.** No second automatic attempt (once per
+   screen instance), and none at all once the report is on screen.
+10. **Open a session older than `RETRY_WINDOW_DAYS` with no heart rate.** No
+    automatic attempt — the button is still offered, because a tap is explicit
+    intent (W18) and an automatic re-ask on every open of every old session is
+    the unbounded cost that window exists to bound.
+11. **VO₂max after a run with an Apple-Health-only wearable.** The finish-edge
+    kick runs the full pass, so the trend picks up the Watch's post-run
+    estimate without waiting for a foreground return.
+
+### The report names the path
+
+12. Strap only → `Live over Bluetooth, from your Polar H10`.
+13. Strap with gaps → `… · 3 readings from Apple Health filled gaps`.
+14. Health store only → `From Apple Health afterwards`.
+15. On Android every one of these says **Health Connect** and never Apple
+    Health, and vice versa.
+
+### Edge cases and errors
+
+16. **A remembered monitor on a build with no Bluetooth.** Not the live path —
+    the pairing survives in SQLite, the radio does not survive the build — and
+    the block must still resolve rather than spin, which is exactly the bug the
+    first cut had.
+17. **Health Connect access declined.** The probe reports *unknown*, never
+    *found none*: the copy says VOLA could not check and names permission as
+    one reason. This is W15/#954's rule, and getting it wrong here would put
+    "found none" on the screen of an athlete whose store is full.
+18. **Flip the health-sync toggle with the block on screen.** The path block
+    updates in the same frame — it is handed the toggle rather than re-reading
+    it.
+19. **Sign-in mid-read.** No frame where the block claims "No heart-rate path
+    is set up" before the toggle and pairing reads have answered.
+
+### Not reachable by any automated check
+
+- **The whole of criterion 6.** A run with a broadcasting strap and a run with
+  an Apple-Health-only wearable, both producing a usable report, with Settings
+  having correctly described each beforehand. No test in this repo can pair a
+  strap, wear a watch, or make Apple Health hold real samples.
+- **Whether the path block is legible on a phone** — it is the longest block of
+  prose in Settings, and its whole value is that somebody reads it.
+
+### Review pass — legibility and copy that points at a real control (#1021)
+
+20. **Every substantive line in the heart-rate block clears 4.5:1.** The path
+    headline and detail, the health-path tip, the non-broadcasting note, the
+    broadcast rule and every per-device step, on both the `bg` and `surface`
+    grounds. Covered mechanically by
+    `components/__tests__/hrPairingContrast.test.tsx`, which asserts the
+    RENDERED ink rather than the token name — the regression to guard is a new
+    paragraph reaching for `styles.muted`, not the palette changing.
+21. **A device with no health store is never told to switch one on.** On a
+    build where HealthKit is not linked (Simulator, web) the toggle above the
+    block is `disabled` with "Not available on this device"; the copy must say
+    pairing a monitor is the only route here, and must not contain "sync on
+    above".
+22. **With a store present, the same copy still points at the switch** — the
+    guard above must not have removed the useful half.
+23. **The broadcast steps read as "where it was last seen", not as fact.** The
+    rule closes by saying the paths move between app updates and to look for
+    anything called "broadcast". A vendor renaming a menu must not read to the
+    athlete as their watch being unsupported.
+
+### Still not reachable by any automated check (added by the review pass)
+
+- **Whether 7.38:1 at 12px is actually comfortable on a phone in daylight.**
+  The ratio is arithmetic; legibility is not. The floor being met is a
+  necessary condition, not the answer to the question the device check asks.
+- **The Android case where Health Connect is unavailable.** The copy can still
+  point at a disabled toggle there — see the residual recorded in
+  `lib/hrPath.ts` and in `docs/decisions/history.md`.

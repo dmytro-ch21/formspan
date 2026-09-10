@@ -640,6 +640,10 @@ export default function RunningSessionScreen() {
     sessionID: id,
     startedAt: sessionTimes?.startedAt,
     endedAt: sessionTimes?.endedAt,
+    // N552/#1021: so the hook's one automatic enrichment attempt skips a
+    // session that already has heart rate.
+    metrics: hrMetrics,
+    metricsLoaded: hrLoaded,
     onFound: () => {
       if (!id) return;
       getSessionMetrics(getToken, id)
