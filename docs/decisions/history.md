@@ -68978,6 +68978,121 @@ unawaited `act` — will not fail the typechecker and may not fail the suite
 either. There is no check in `verify` for that today, and the AST pass this
 migration was steered by is the obvious candidate if it recurs.
 
+## 2026-09-10 — N556: the brand kit gets an opinion about time (#1036)
+
+`assets/brand/design-tokens.json` had five top-level keys — `brand`, `icon`,
+`spacing`, `radius`, `pillRadius` — and **not one of them was temporal**. A
+design system rigorous enough to argue ΔE under deuteranopia in a CSS comment
+had nothing at all to say about how anything moves, so every animation in the
+repo hand-typed its own number and no two agreed except by luck.
+
+Web had it worse than mobile: all 100 `transition` utilities across 32 files
+carried **zero** `duration-*` and **zero** `ease-*` classes, so the entire web
+app ran on Tailwind's default `150ms cubic-bezier(0.4, 0, 0.2, 1)` — an
+ease-**in**-out, applied uniformly, including to entrances where `ease-out`
+belongs.
+
+This adds the `motion` key and the two generated artefacts that carry it. It
+deliberately applies them to **nothing**: no component file appears in the diff.
+That is what keeps it reviewable, and applying them is what F41, F46, N557,
+N558 and N559 are for.
+
+### The scale, and the two things it refuses to offer
+
+    duration: press 120 · control 180 · surface 240 · sheet 320
+    easing:   out [0.23, 1, 0.32, 1] · inOut [0.77, 0, 0.175, 1] · sheet [0.32, 0.72, 0, 1]
+
+**No duration above 320ms, and no `in` curve.** `ease-in` starts slow, delaying
+the exact moment the user is looking at, so the scale does not offer one to
+reach for. The app's existing long animations are deliberately NOT on this
+scale and were left alone: `MacroRings`' 620ms sweep, `LiveHRIndicator`'s
+90/220 and `AnimatedSplash`'s launch sequence are outside the UI budget on
+purpose — a ring sweep and a launch sequence are not UI transitions.
+
+### One generator, two outputs, and a `--check` that had to get more specific
+
+`scripts/generate_design_tokens.mjs` already existed, already emitted
+`apps/mobile/constants/designTokens.generated.ts`, and its `--check` was
+already in `verify` as `check:design-tokens`. So this extends it rather than
+adding a mechanism — and adds **no new link to `verify`**, which
+`check:verify-chain` would have failed anyway.
+
+The new part is that there are now two consumers that cannot share a format: a
+TypeScript module for mobile, and `apps/web/src/app/motion.generated.css` with
+`--duration-*` / `--ease-*` custom properties for web. **With two outputs,
+"stale" stops being a single fact** — regenerate after editing one app and the
+other is silently left behind — so `--check` now reports WHICH file is stale,
+and collects every stale file rather than exiting on the first, so one edit
+does not send you round the loop twice.
+
+It also validates that each easing is four numbers. A malformed
+`cubic-bezier()` is not an error in a browser: it is ignored, and the
+transition silently falls back to the default curve — exactly the failure this
+ticket exists to end, so it is caught at generation instead.
+
+### The gate was watched failing, in four directions
+
+A check that cannot fail proves nothing, and with two outputs the interesting
+question is not "does it fail" but "does it fail about the right file":
+
+- baseline green first, so a later red means something (`exit 0`);
+- token `press: 120 → 121` — both outputs named stale, `exit 1`;
+- **only** the web file hand-edited — names the web file alone;
+- **only** the mobile file hand-edited — names the mobile file alone;
+- web file deleted — `does not exist`, distinct from `is stale`;
+- restored, and confirmed green by RE-RUNNING rather than by reading the file.
+
+The typechecker was checked the same way before its clean result was believed —
+a deliberate `const x: number = "s"` was introduced, `tsc` reported it, and the
+file was restored. This worktree had `node_modules` present, but "0 errors"
+from a grep is indistinguishable from a binary that never ran.
+
+### `Motion.ts` is now sourced rather than restated, without touching a component
+
+F38 landed **ahead of the ticket meant to unblock it** and hand-wrote
+`constants/Motion.ts` with `PRESS_MS = 120` and
+`PRESS_BEZIER = [0.23, 1, 0.32, 1]` — which are exactly the values
+`motion.duration.press` and `motion.easing.out` now carry. Its own doc comment
+said so at the time: *"A full duration/easing token scale is N556's ticket, not
+this one."*
+
+So the file now imports the generated tokens and adds `MS` and `EASE`, shaped
+like `Spacing.ts` — while **keeping every name F38 introduced**. That is not
+tidiness: roughly forty files import `PRESS_OPACITY`, and `Button.tsx` spreads
+`PRESS_BEZIER` into `cubicBezier(...)`. Reshaping the exports would have put
+all of them in this diff and broken the ticket's own boundary.
+
+The one property that had to survive is that **`Motion.ts` still imports
+nothing with a native runtime behind it**. `designTokens.generated.ts` is plain
+numbers, so it costs nothing; importing `cubicBezier` from Reanimated to build
+the curves here would drag Reanimated's native runtime in and make the file
+unreadable to any test — which is not hypothetical, it threw
+`Cannot read properties of undefined (reading 'loadUnpackers')` during F38. The
+file states the control points; the consumer builds the curve.
+
+### The web import, and the hazard next to it
+
+`globals.css` now opens with `@import "./motion.generated.css";`. The file it
+sits above carries a warning worth taking seriously: the FIRST `@layer`
+statement fixes the layer order, and getting that wrong silently breaks Clerk's
+styling, because Clerk injects its stylesheet UNLAYERED and an unlayered
+declaration beats every layered one regardless of specificity.
+
+The generated file is `:root` custom properties and no rules, so it cannot win
+or lose a cascade fight — but that is an argument, and the repo's own rule is
+to measure. **Built both ways and compared**: `main`'s `globals.css` and this
+one produce the byte-identical first layer statement in the built CSS
+(`@layer clerk,components;`), and the tokens do reach the output
+(`--duration-press:.12s`, `--ease-out:cubic-bezier(.23, 1, .32, 1)`).
+
+### What this leaves open
+
+Nothing consumes the tokens yet, on either platform — that is the next five
+tickets, and until one of them lands the web app still runs on Tailwind's
+default curve in practice. And nothing stops a future component hand-typing
+`200` instead of reaching for `MS.control`; there is no check for that today,
+and it is the obvious thing to want once the tokens are actually applied.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
