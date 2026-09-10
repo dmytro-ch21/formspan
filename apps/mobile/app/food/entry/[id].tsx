@@ -75,7 +75,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -89,6 +89,7 @@ import { entriesFromRecipeItems } from '@/lib/recipe';
 import { request } from '@/lib/sync';
 import { useUnits } from '@/lib/UnitsProvider';
 import { foodUnitLabel, fromDisplayGrams, toDisplayGrams, type FoodUnit } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 const FOOD_UNITS: FoodUnit[] = ['g', 'oz'];
 
@@ -436,7 +437,7 @@ export default function EditEntryScreen() {
         {MEALS.map((m) => {
           const on = m === meal;
           return (
-            <Pressable
+            <PressableScale
               key={m}
               onPress={() => setMeal(m)}
               style={[styles.slotPill, on && { backgroundColor: accent.accent }]}
@@ -446,7 +447,7 @@ export default function EditEntryScreen() {
               testID={`edit-slot-${m}`}
             >
               <Text style={[styles.slotText, on && { color: accent.on }]}>{mealLabel(m)}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -463,7 +464,7 @@ export default function EditEntryScreen() {
               const g = quantityBasis * f;
               const on = Math.abs(parse(servings) - f) < 0.001;
               return (
-                <Pressable
+                <PressableScale
                   key={f}
                   onPress={() => pickGrams(g)}
                   style={[styles.chip, on && { borderColor: accent.accent }]}
@@ -476,7 +477,7 @@ export default function EditEntryScreen() {
                     {toDisplayGrams(g, foodUnit)}
                     {foodUnitLabel(foodUnit)}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
           </View>
@@ -492,7 +493,7 @@ export default function EditEntryScreen() {
             />
             <View style={styles.toggle}>
               {FOOD_UNITS.map((u) => (
-                <Pressable
+                <PressableScale
                   key={u}
                   onPress={() => void switchUnit(u)}
                   accessibilityRole="button"
@@ -504,7 +505,7 @@ export default function EditEntryScreen() {
                   <Text style={[styles.unitText, u === foodUnit && { color: accent.on }]}>
                     {foodUnitLabel(u)}
                   </Text>
-                </Pressable>
+                </PressableScale>
               ))}
             </View>
           </View>
@@ -514,7 +515,7 @@ export default function EditEntryScreen() {
           <Text style={styles.fieldLabel}>Servings</Text>
           <View style={styles.stepRow}>
             {['0.5', '1', '1.5', '2'].map((s) => (
-              <Pressable
+              <PressableScale
                 key={s}
                 onPress={() => setServingCount(s)}
                 style={[styles.chip, servings === s && { borderColor: accent.accent }]}
@@ -524,7 +525,7 @@ export default function EditEntryScreen() {
                 testID={`edit-servings-${s}`}
               >
                 <Text style={styles.chipText}>{s}</Text>
-              </Pressable>
+              </PressableScale>
             ))}
             <TextInput
               style={[styles.input, styles.stepInput]}
@@ -598,7 +599,7 @@ export default function EditEntryScreen() {
           ))}
 
           {entry.eaten_on === todayString() ? (
-            <Pressable
+            <PressableScale
               onPress={() => void split()}
               disabled={splitting}
               style={[styles.split, splitting && styles.off]}
@@ -609,7 +610,7 @@ export default function EditEntryScreen() {
               <Text style={styles.splitText}>
                 {splitting ? 'Splitting…' : 'Split into separate entries'}
               </Text>
-            </Pressable>
+            </PressableScale>
           ) : (
             <Text style={styles.splitNote} testID="entry-split-unavailable">
               This can’t be split back into separate entries — that would change
@@ -634,7 +635,7 @@ export default function EditEntryScreen() {
           refused with the same reason. */}
 
       <View style={styles.actions}>
-        <Pressable
+        <PressableScale
           onPress={() => void save()}
           style={[styles.primary, { backgroundColor: accent.accent }, saving && styles.off]}
           accessibilityRole="button"
@@ -644,8 +645,8 @@ export default function EditEntryScreen() {
           <Text style={[styles.primaryText, { color: accent.on }]}>
             {saving ? 'Saving…' : 'Save'}
           </Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={async () => {
             if (!userId) return;
             await removeEntry(userId, entry.id);
@@ -658,7 +659,7 @@ export default function EditEntryScreen() {
           testID="edit-delete"
         >
           <Text style={styles.secondaryText}>Delete</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </KeyboardAwareScrollView>
   );

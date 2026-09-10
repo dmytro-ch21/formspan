@@ -177,7 +177,7 @@ const EXEMPT: Record<string, string> = {
  * Lower it when a tranche lands. It may never rise: a new bare `<Pressable>`
  * in a file that had none is exactly the regression F38 and F48 exist to end.
  */
-const REMAINING = 79;
+const REMAINING = 73;
 
 describe('the PressableScale primitive', () => {
   /**
@@ -242,6 +242,24 @@ describe('F48 — the press-feedback migration', () => {
     // A COUNT, not a list: naming all 79 would make this test a changelog that
     // fails on every unrelated rename. The direction is what matters.
     expect(feedbackLessFiles().length).toBeLessThanOrEqual(REMAINING);
+  });
+
+  it('has finished the food-logging path — the highest-frequency logging there is', () => {
+    // Tranche two. `vola-athlete-ux` calls nutrition the highest-frequency
+    // logging in the app, 3-6x a day — more often than training. 59
+    // pressables across the six screens that make up describing, scanning,
+    // picking and correcting a meal.
+    const left = feedbackLessFiles();
+    for (const f of [
+      'app/food/add.tsx',
+      'app/food/scan.tsx',
+      'app/food/describe.tsx',
+      'app/food/entry/[id].tsx',
+      'components/food/IngredientPicker.tsx',
+      'components/food/MealCard.tsx',
+    ]) {
+      expect({ f, left: left.includes(f) }).toEqual({ f, left: false });
+    }
   });
 
   it('has finished the set-logging path — the surface touched most', () => {

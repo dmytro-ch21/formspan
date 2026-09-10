@@ -44,7 +44,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { FoodQuantity } from '@/components/FoodQuantity';
@@ -79,6 +79,7 @@ import { MEALS, slotForClock, todayString, type Macros, type Meal } from '@/lib/
 import { request as requestSync } from '@/lib/sync';
 import { momentumOpenFoodHref } from '@/lib/todayBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * What the screen is currently doing.
@@ -452,7 +453,7 @@ export default function ScanBarcodeScreen() {
           The camera can&apos;t be reached, so a barcode can&apos;t be read. Describing the food
           works, and gives you the same entry to check.
         </Text>
-        <Pressable
+        <PressableScale
           onPress={() => router.replace(describeHref(meal, date))}
           style={[styles.primary, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
@@ -463,7 +464,7 @@ export default function ScanBarcodeScreen() {
           testID="scan-unavailable-describe"
         >
           <Text style={[styles.primaryText, { color: accent.on }]}>Describe it instead</Text>
-        </Pressable>
+        </PressableScale>
       </Shell>
     );
   }
@@ -489,7 +490,7 @@ export default function ScanBarcodeScreen() {
           the digits are sent, to look the food up.
         </Text>
         {permission.canAskAgain ? (
-          <Pressable
+          <PressableScale
             onPress={() => void requestPermission()}
             style={[styles.primary, { backgroundColor: accent.accent }]}
             accessibilityRole="button"
@@ -497,18 +498,18 @@ export default function ScanBarcodeScreen() {
             testID="scan-request-permission"
           >
             <Text style={[styles.primaryText, { color: accent.on }]}>Allow the camera</Text>
-          </Pressable>
+          </PressableScale>
         ) : (
           <Text style={styles.body}>You can turn it on in Settings, under VOLA.</Text>
         )}
-        <Pressable
+        <PressableScale
           onPress={() => router.replace(describeHref(meal, date))}
           accessibilityRole="button"
           accessibilityLabel="Describe the food instead"
           testID="scan-permission-describe"
         >
           <Text style={styles.link}>Describe the food instead</Text>
-        </Pressable>
+        </PressableScale>
       </Shell>
     );
   }
@@ -536,14 +537,14 @@ export default function ScanBarcodeScreen() {
             ? "That didn't read cleanly — try again, flatter to the light."
             : 'Point the camera at the barcode on the packet.'}
         </Text>
-        <Pressable
+        <PressableScale
           onPress={() => router.replace(describeHref(meal, date))}
           accessibilityRole="button"
           accessibilityLabel="Describe the food instead"
           testID="scan-describe"
         >
           <Text style={styles.link}>No barcode? Describe it instead</Text>
-        </Pressable>
+        </PressableScale>
       </Shell>
     );
   }
@@ -560,14 +561,14 @@ export default function ScanBarcodeScreen() {
             environment — the OS can take tens of seconds to give up, and a
             spinner with no way out is indistinguishable from a hang. Raised in
             review. */}
-        <Pressable
+        <PressableScale
           onPress={scanAgain}
           accessibilityRole="button"
           accessibilityLabel="Stop looking this up"
           testID="scan-cancel-lookup"
         >
           <Text style={styles.link}>Cancel</Text>
-        </Pressable>
+        </PressableScale>
       </Shell>
     );
   }
@@ -584,7 +585,7 @@ export default function ScanBarcodeScreen() {
           Barcode {phase.code} isn&apos;t in the food catalog. That means we haven&apos;t got it
           yet — not that anything went wrong.
         </Text>
-        <Pressable
+        <PressableScale
           onPress={() => router.replace(describeHref(meal, date, phase.code))}
           style={[styles.primary, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
@@ -592,19 +593,19 @@ export default function ScanBarcodeScreen() {
           testID="scan-unknown-describe"
         >
           <Text style={[styles.primaryText, { color: accent.on }]}>Describe it instead</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.footnote}>
           Photograph the label or say what it is, and we&apos;ll draft the numbers for you to
           check. Confirm it and this barcode will find it next time.
         </Text>
-        <Pressable
+        <PressableScale
           onPress={scanAgain}
           accessibilityRole="button"
           accessibilityLabel="Scan another barcode"
           testID="scan-unknown-again"
         >
           <Text style={styles.link}>Scan another</Text>
-        </Pressable>
+        </PressableScale>
       </Shell>
     );
   }
@@ -619,7 +620,7 @@ export default function ScanBarcodeScreen() {
           Couldn&apos;t check this one.
         </Text>
         <Text style={styles.body}>{phase.message}</Text>
-        <Pressable
+        <PressableScale
           onPress={() => void resolve(phase.code)}
           style={[styles.primary, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
@@ -627,15 +628,15 @@ export default function ScanBarcodeScreen() {
           testID="scan-retry"
         >
           <Text style={[styles.primaryText, { color: accent.on }]}>Try again</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={() => router.replace(describeHref(meal, date))}
           accessibilityRole="button"
           accessibilityLabel="Describe the food instead"
           testID="scan-unreachable-describe"
         >
           <Text style={styles.link}>Describe it instead</Text>
-        </Pressable>
+        </PressableScale>
       </Shell>
     );
   }
@@ -656,7 +657,7 @@ export default function ScanBarcodeScreen() {
         {MEALS.map((m) => {
           const on = m === meal;
           return (
-            <Pressable
+            <PressableScale
               key={m}
               onPress={() => setMeal(m)}
               style={[styles.slotPill, on && { backgroundColor: accent.accent }]}
@@ -666,7 +667,7 @@ export default function ScanBarcodeScreen() {
               testID={`scan-slot-${m}`}
             >
               <Text style={[styles.slotText, on && { color: accent.on }]}>{mealLabel(m)}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -691,7 +692,7 @@ export default function ScanBarcodeScreen() {
             where the amount is the first thing the athlete acts on. Tapping
             it opens the editor rather than showing it inline; the editor
             itself (below, in the sheet) is unchanged N117 machinery. */}
-        <Pressable
+        <PressableScale
           onPress={() => setAmountSheetOpen(true)}
           style={styles.amountRow}
           accessibilityRole="button"
@@ -708,7 +709,7 @@ export default function ScanBarcodeScreen() {
               ? amountSummary(phase.food, canWeigh, effectiveQuantity.servings, naturalUnit)
               : '—'}
           </Text>
-        </Pressable>
+        </PressableScale>
 
         <View style={styles.divider} />
 
@@ -786,7 +787,7 @@ export default function ScanBarcodeScreen() {
         </Text>
       ) : null}
 
-      <Pressable
+      <PressableScale
         onPress={() => void confirm()}
         style={[
           styles.primary,
@@ -807,9 +808,9 @@ export default function ScanBarcodeScreen() {
         <Text style={[styles.primaryText, { color: accent.on }]}>
           {saving ? 'Logging…' : 'Log it'}
         </Text>
-      </Pressable>
+      </PressableScale>
 
-      <Pressable
+      <PressableScale
         onPress={scanAgain}
         accessibilityRole="button"
         accessibilityLabel="Scan a different packet"
@@ -818,7 +819,7 @@ export default function ScanBarcodeScreen() {
         testID="scan-again"
       >
         <Text style={[styles.link, saving && styles.off]}>Scan a different packet</Text>
-      </Pressable>
+      </PressableScale>
     </Shell>
   );
 }

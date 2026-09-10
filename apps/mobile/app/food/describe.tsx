@@ -30,7 +30,7 @@ import { randomUUID } from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView, useEnsureVisible } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -67,6 +67,7 @@ import {
 import { request as requestSync } from '@/lib/sync';
 import { momentumOpenFoodHref } from '@/lib/todayBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export default function DescribeMealScreen() {
   const router = useRouter();
@@ -674,7 +675,7 @@ export default function DescribeMealScreen() {
         {MEALS.map((m) => {
           const on = m === meal;
           return (
-            <Pressable
+            <PressableScale
               key={m}
               onPress={() => setMeal(m)}
               style={[styles.slotPill, on && { backgroundColor: accent.accent }]}
@@ -684,7 +685,7 @@ export default function DescribeMealScreen() {
               testID={`describe-slot-${m}`}
             >
               <Text style={[styles.slotText, on && { color: accent.on }]}>{mealLabel(m)}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -701,7 +702,7 @@ export default function DescribeMealScreen() {
         testID="describe-input"
       />
 
-      <Pressable
+      <PressableScale
         onPress={() => void describe()}
         style={[
           styles.primary,
@@ -719,7 +720,7 @@ export default function DescribeMealScreen() {
         <Text style={[styles.primaryText, { color: accent.on }]}>
           {busy ? 'Working it out…' : 'Work it out'}
         </Text>
-      </Pressable>
+      </PressableScale>
 
       {/* F17 (#403): said BEFORE a doomed request, not after. `quota` is
           fetched from the LAST response, so this is silent on a screen the
@@ -746,7 +747,7 @@ export default function DescribeMealScreen() {
         and sends no picture at all.
       </Text>
       <View style={styles.photoRow}>
-        <Pressable
+        <PressableScale
           onPress={() => void photograph(true)}
           style={[styles.secondary, (busy || quotaExhausted) && styles.off]}
           accessibilityRole="button"
@@ -756,8 +757,8 @@ export default function DescribeMealScreen() {
           testID="describe-camera"
         >
           <Text style={styles.secondaryText}>Take a photo</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={() => void photograph(false)}
           style={[styles.secondary, (busy || quotaExhausted) && styles.off]}
           accessibilityRole="button"
@@ -767,7 +768,7 @@ export default function DescribeMealScreen() {
           testID="describe-library"
         >
           <Text style={styles.secondaryText}>Choose one</Text>
-        </Pressable>
+        </PressableScale>
       </View>
 
       {busy ? <ActivityIndicator accessibilityLabel="Working it out" /> : null}
@@ -828,7 +829,7 @@ export default function DescribeMealScreen() {
                   food with wrong numbers is one the athlete can never ask to be
                   read again — the feature would have replaced one complaint
                   with a worse one. Says what it costs, because it does cost. */}
-              <Pressable
+              <PressableScale
                 onPress={() => void describe(false)}
                 accessibilityRole="button"
                 accessibilityLabel="Estimate this again instead of reusing the saved food"
@@ -843,13 +844,13 @@ export default function DescribeMealScreen() {
                 <Text style={[styles.regenerate, (locked || quotaExhausted) && styles.off]}>
                   Not right? Estimate it again — uses one estimate
                 </Text>
-              </Pressable>
+              </PressableScale>
               {/* Correcting the STORED food, which is what makes the reuse
                   right next time rather than wrong every time. The copy says
                   what an edit does and does not touch, because "does this
                   rewrite what I already ate?" is the first question it raises
                   and the answer is no. */}
-              <Pressable
+              <PressableScale
                 onPress={() =>
                   router.push({
                     pathname: '/food/saved/[id]',
@@ -865,7 +866,7 @@ export default function DescribeMealScreen() {
                 <Text style={[styles.regenerate, locked && styles.off]}>
                   Fix these numbers for next time
                 </Text>
-              </Pressable>
+              </PressableScale>
             </>
           ) : null}
           {estimate.note ? <Text style={styles.note}>{estimate.note}</Text> : null}
@@ -937,7 +938,7 @@ export default function DescribeMealScreen() {
                   land: removing one from under it would let a row the athlete
                   deleted reach the log anyway, since the loop iterates a copy
                   taken at tap time. */}
-              <Pressable
+              <PressableScale
                 onPress={() => setRows((rs) => rs.filter((r) => r.key !== row.key))}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove ${row.name}`}
@@ -946,7 +947,7 @@ export default function DescribeMealScreen() {
                 accessibilityState={{ disabled: saving }}
               >
                 <Text style={[styles.remove, saving && styles.off]}>Remove</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           ))}
 
@@ -984,7 +985,7 @@ export default function DescribeMealScreen() {
               `receive` should not be tickable in the first place. */}
           {rows.length > 1 ? (
             <>
-              <Pressable
+              <PressableScale
                 onPress={() => setCompileMeal((c) => !c)}
                 style={styles.compileRow}
                 accessibilityRole="checkbox"
@@ -999,7 +1000,7 @@ export default function DescribeMealScreen() {
                 <Text style={styles.compileLabel}>
                   Combine into one meal — log all {rows.length} as a single entry
                 </Text>
-              </Pressable>
+              </PressableScale>
 
               {/* The name is a SUGGESTION, editable exactly like every other
                   AI-authored value on this screen (see the file's own doc
@@ -1009,7 +1010,7 @@ export default function DescribeMealScreen() {
             </>
           ) : null}
 
-          <Pressable
+          <PressableScale
             onPress={() => void (compiling ? logCompiled() : logAll())}
             style={[styles.primary, { backgroundColor: accent.accent }, (locked || blocked) && styles.off]}
             accessibilityRole="button"
@@ -1037,7 +1038,7 @@ export default function DescribeMealScreen() {
                   ? `Log “${mealName.trim() || defaultMealName(rows)}”`
                   : `Log ${rows.length === 1 ? 'it' : `all ${rows.length}`}`}
             </Text>
-          </Pressable>
+          </PressableScale>
         </>
       ) : null}
 

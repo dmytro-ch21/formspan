@@ -37,7 +37,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { FoodQuantity } from '@/components/FoodQuantity';
 import { CatalogCard, spokenName } from '@/components/food/CatalogCard';
@@ -56,6 +56,7 @@ import { localFoods } from '@/lib/foodLog';
 import type { Food, RecipeItem } from '@/lib/nutrition';
 import { clampName, itemFromCatalog, itemFromSavedFood } from '@/lib/recipe';
 import type { TokenGetter } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The by-hand ingredient form, as data.
@@ -201,14 +202,14 @@ export function IngredientPicker({
   if (picking) {
     return (
       <View style={styles.wrap}>
-        <Pressable
+        <PressableScale
           onPress={() => setPicking(null)}
           accessibilityRole="button"
           accessibilityLabel="Back to the ingredient search"
           testID="ingredient-quantity-cancel"
         >
           <Text style={styles.back}>← Back</Text>
-        </Pressable>
+        </PressableScale>
         <FoodQuantity
           food={picking}
           cta="Add to recipe"
@@ -226,14 +227,14 @@ export function IngredientPicker({
     const valid = Number.isFinite(n) && n > 0 && n < 10000;
     return (
       <View style={styles.wrap}>
-        <Pressable
+        <PressableScale
           onPress={() => setSavedPick(null)}
           accessibilityRole="button"
           accessibilityLabel="Back to the ingredient search"
           testID="ingredient-saved-cancel"
         >
           <Text style={styles.back}>← Back</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.pickName}>{savedPick.food.name}</Text>
         <Text style={styles.hint}>How many × {savedPick.food.serving_label}?</Text>
         <TextInput
@@ -247,7 +248,7 @@ export function IngredientPicker({
           accessibilityLabel="How many servings"
           testID="ingredient-saved-quantity"
         />
-        <Pressable
+        <PressableScale
           onPress={() => {
             if (!valid) return;
             onPick(itemFromSavedFood(savedPick.food, n));
@@ -260,7 +261,7 @@ export function IngredientPicker({
           testID="ingredient-saved-add"
         >
           <Text style={[styles.addText, { color: accent.on }]}>Add to recipe</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   }
@@ -280,14 +281,14 @@ export function IngredientPicker({
 
     return (
       <View style={styles.wrap}>
-        <Pressable
+        <PressableScale
           onPress={() => setManual(null)}
           accessibilityRole="button"
           accessibilityLabel="Back to the ingredient search"
           testID="ingredient-manual-cancel"
         >
           <Text style={styles.back}>← Back</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.hint}>
           The numbers for ONE of what you name below — the quantity multiplies them.
         </Text>
@@ -307,7 +308,7 @@ export function IngredientPicker({
             />
           </View>
         ))}
-        <Pressable
+        <PressableScale
           onPress={() => {
             if (!valid) return;
             onPick({
@@ -340,21 +341,21 @@ export function IngredientPicker({
           testID="ingredient-manual-add"
         >
           <Text style={[styles.addText, { color: accent.on }]}>Add to recipe</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   }
 
   return (
     <View style={styles.wrap}>
-      <Pressable
+      <PressableScale
         onPress={onCancel}
         accessibilityRole="button"
         accessibilityLabel="Back to the recipe"
         testID="ingredient-cancel"
       >
         <Text style={styles.back}>← Back to the recipe</Text>
-      </Pressable>
+      </PressableScale>
 
       <TextInput
         value={q}
@@ -371,7 +372,7 @@ export function IngredientPicker({
         <>
           <SectionHeader label="Your saved foods" />
           {mine.map((f) => (
-            <Pressable
+            <PressableScale
               key={f.id}
               style={styles.savedRow}
               onPress={() => setSavedPick({ food: f, text: '1' })}
@@ -387,7 +388,7 @@ export function IngredientPicker({
                   {Math.round(f.kcal)} cals per {f.serving_label}
                 </Text>
               </View>
-            </Pressable>
+            </PressableScale>
           ))}
         </>
       ) : null}
@@ -442,7 +443,7 @@ export function IngredientPicker({
       {/* Always offered, not only after a search comes back empty. Somebody
           adding their own sauce knows the catalog will not have it and should
           not have to prove that first. */}
-      <Pressable
+      <PressableScale
         onPress={() =>
           setManual({
             name: searched,
@@ -463,7 +464,7 @@ export function IngredientPicker({
         <Text style={[styles.byHandText, { color: accent.ink }]}>
           Not in the catalog? Type it in
         </Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
