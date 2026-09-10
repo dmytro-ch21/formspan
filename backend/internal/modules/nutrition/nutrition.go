@@ -279,10 +279,13 @@ type LabelMacro struct {
 	Value  *float64
 }
 
-// labelOrder is the five in the order every SQL statement lists them. One
-// slice rather than five hand-written repetitions, because a transposed pair
-// here is a 1000x error between sodium_mg and everything measured in grams and
-// nothing downstream would catch it.
+// resolve answers, for each of the five, "is this column written at all, and to
+// what?" — the three states collapsed into the two things SQL needs.
+//
+// The five are listed ONCE here, in the order every SQL statement lists them,
+// rather than as five hand-written repetitions at each call site. A transposed
+// pair would be a 1000x error between sodium_mg and everything measured in
+// grams, and nothing downstream would catch it.
 func (l LabelWanted) resolve(m Macros) [5]LabelMacro {
 	pairs := [5]struct {
 		wanted apihttp.Field[float64]

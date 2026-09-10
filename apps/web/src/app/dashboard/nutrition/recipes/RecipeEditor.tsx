@@ -100,7 +100,15 @@ function emptyItem(): ItemDraft {
     carb_g: "",
     fat_g: "",
     // A hand-typed ingredient states no label figures. F37.
-    labels: NO_LABEL_MACROS,
+    //
+    // SPREAD, not the constant itself. `as const` makes the constant readonly
+    // where it is declared; it does not make `ItemDraft.labels` readonly, so
+    // assigning the reference would hand every draft item ever built — on
+    // every recipe, since this is a module singleton — the SAME object. No
+    // current path mutates it in place (`update` always replaces via spread),
+    // so this is fragility rather than a live bug; a fresh copy costs nothing
+    // and removes the trap instead of documenting it.
+    labels: { ...NO_LABEL_MACROS },
     fibre_g: "",
   };
 }

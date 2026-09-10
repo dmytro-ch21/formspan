@@ -292,3 +292,40 @@ func TestEditingARecipeDownToItemsThatStateNothingClearsTheDerivedLabel(t *testi
 		}
 	}
 }
+
+// The food path's half of the three-state contract.
+//
+// **Written because `ac-verifier` pointed out it was missing, and the reason it
+// was missing is the interesting part**: the entry path has this test, the code
+// path is shared (`LabelWanted.resolve` plus an identically-shaped `CASE WHEN`),
+// and so "the food side clears too" was true by construction and believed
+// without being measured. That is precisely the inference this ticket's own
+// acceptance criteria forbid — *confirmed for each rather than inferred from
+// one* — and the discipline had been applied to KEEP and not to CLEAR.
+//
+// Two statements, one arrangement of columns, and no test that the second one's
+// boolean parameters line up with its values the way the first one's do. This
+// is the test that would fail if they did not.
+func TestPutFoodClearsLabelMacrosSentAsExplicitNull(t *testing.T) {
+	repo := repoFor(t, uid)
+	h := NewHandler(repo)
+
+	if w := putFood(t, h, uid, foodID, scannedFoodBody); w.Code != http.StatusOK {
+		t.Fatalf("seed PUT: %d %s", w.Code, w.Body)
+	}
+	const clearing = `{
+		"kind": "food", "name": "Scanned bar", "brand": "Acme",
+		"serving_label": "1 bar",
+		"kcal": 240, "protein_g": 9, "carb_g": 27, "fat_g": 11, "fibre_g": 3,
+		"saturated_fat_g": null, "sugar_g": null, "added_sugar_g": null,
+		"sodium_mg": null, "cholesterol_mg": null
+	}`
+	if w := putFood(t, h, uid, foodID, clearing); w.Code != http.StatusOK {
+		t.Fatalf("clearing PUT: %d %s", w.Code, w.Body)
+	}
+	for i, v := range labelMacros(t, repo, "nutrition_foods", "id", foodID) {
+		if v != nil {
+			t.Errorf("%s = %v; an explicit null must CLEAR, not be ignored", labelNames[i], *v)
+		}
+	}
+}

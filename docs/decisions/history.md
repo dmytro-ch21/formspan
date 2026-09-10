@@ -71148,6 +71148,47 @@ Five mutations, all caught, each restored and the package re-run green:
 
 The third is the one that matters: it is the only evidence that three states are load-bearing rather than decoration, and it is the mutation that turns the fix into the `COALESCE` version the ticket proposed.
 
+### What the review round caught, and the one that stings
+
+Three reviewers and `ac-verifier`, no blocking findings — and one genuine gap
+that is worth more than the absence of blockers.
+
+**The food path's "an explicit null CLEARS" behaviour had no test.** The entry
+path had one. The code path is shared — one `resolve`, two identically-shaped
+`CASE WHEN` statements — so the food side was true *by construction*, and
+believed on that basis. Which is exactly what this ticket's own acceptance
+criteria forbid: *confirmed for each rather than inferred from one*. The
+discipline had been applied to KEEP and not to CLEAR, in the same file, by
+somebody who had just written the sentence about why inference is not
+confirmation. Two statements, one arrangement of columns, and nothing checking
+that the second one's five boolean parameters line up with its five values the
+way the first one's do. `TestPutFoodClearsLabelMacrosSentAsExplicitNull` is
+that check, and it goes red under the same mutation the entry-side one does.
+
+**A commit-boundary claim was overstated, and the correction is small but the
+habit is not.** The split reads as "the tests, red; then the fix" — true of four
+of the five. `TestEditingARecipeDownToItemsThatStateNothingClearsTheDerivedLabel`
+was written in the fix's own commit, because the `derived` concept it exercises
+did not exist before it. It is not a restore-path test for the reported bug; it
+covers a branch the fix introduced. CLAUDE.md's rule is satisfied where it
+applies — but "written first" is a claim about a specific property, and rounding
+four-of-five up to all-of-it is how that property quietly stops being real.
+
+Smaller, all fixed: a doc comment above `resolve` still named a `labelOrder`
+that no longer exists; `apihttp.Field` had no direct test now that it is shared
+platform code with two callers, only coverage through two modules' fixtures;
+`emptyItem()` handed every draft item the same `NO_LABEL_MACROS` object by
+reference (`as const` makes the constant readonly, not the field it is assigned
+to — not a live bug, since nothing mutates it in place, but a trap rather than a
+guarantee); and `RecipeEditor.perServing` — the function backing "web must not
+clear a scanned ingredient's labels just by opening and saving" — had no test at
+all, while its server counterpart had several.
+
+Worth recording that the frontend reviewer **declined to mark that last one
+blocking** because it could not cite a CLAUDE.md rule requiring unit tests for
+new web functions, and said so explicitly rather than inventing the convention.
+That is the behaviour #436 asked for, working.
+
 ### What this leaves open
 
 **Nothing structural prevents a fifth instance**, and this fix does not add a guard that would catch one — it fixes three sites and writes down why. The generalisable check would be something that compares a domain struct's fields against the wire struct that feeds it and fails on a silent gap; that is a real piece of work and is not this ticket. What is available cheaply, and is what this entry is for, is that the class now has four dated instances in one file.
