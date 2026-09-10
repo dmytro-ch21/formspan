@@ -986,7 +986,7 @@ more when they know which properties are load-bearing.
 
 ## The interface bar: motion and Apple's design principles
 
-Seven skills vendored from [emilkowalski/skills](https://github.com/emilkowalski/skills)
+Eight skills vendored from [emilkowalski/skills](https://github.com/emilkowalski/skills)
 (MIT) live in `.claude/skills/` and carry the bar for anything an athlete
 looks at. `.claude/skills/ATTRIBUTION.md` records what each is and the upstream
 commit. They **complement** `vola-design-system` and `vola-athlete-ux` rather
@@ -1000,6 +1000,7 @@ general rubric.
 |---|---|
 | Building or reviewing any screen's feel, depth, typography, gestures | `apple-design` |
 | Writing animation in `apps/mobile` | `animate-expo` |
+| Writing animation in `apps/web` or `apps/admin` | `animate` |
 | Reviewing a motion diff (**`/review-animations`**, user-invoked) | `review-animations` |
 | Auditing motion across an app and planning fixes | `improve-animations` |
 | Asking whether something *should* animate | `find-animation-opportunities` |

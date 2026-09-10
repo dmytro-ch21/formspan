@@ -68264,9 +68264,9 @@ comments a change falsifies are rarely the ones it edits.**
 
 ### 2026-09-09 — H22: the interface bar becomes the repo's, and three audits say where it stands
 
-**What.** Seven skills from [emilkowalski/skills](https://github.com/emilkowalski/skills)
+**What.** Eight skills from [emilkowalski/skills](https://github.com/emilkowalski/skills)
 (MIT, upstream `d23d7f8`) are vendored into `.claude/skills/`: `apple-design`,
-`animate-expo`, `review-animations`, `improve-animations`,
+`animate`, `animate-expo`, `review-animations`, `improve-animations`,
 `find-animation-opportunities`, `animation-vocabulary`, `pick-ui-library`.
 `/pre-merge` gains a fourth gate — `review-animations` on any diff containing
 motion — and CLAUDE.md gains a section saying which skill answers which
@@ -68331,10 +68331,12 @@ their thumb with no explanation.
 
 **What this does not do.** Nothing was verified on a device; every claim about
 feel is derived from source. No source file was changed by any audit — all three
-ran read-only and the tree was clean at the end of each. The `animate` skill
-(upstream's web counterpart to `animate-expo`) is **not** vendored, so
-`animate-expo`'s "for web animation use `animate`" is a dangling reference,
-recorded in `ATTRIBUTION.md`; vendor it if the web motion work in N559 picks up.
+ran read-only and the tree was clean at the end of each. `animate` (upstream's web
+counterpart to `animate-expo`) was added on the same branch after review, so the
+vendored set is now closed under its own cross-references: every skill referenced
+by a vendored skill is itself vendored. That property is worth re-checking
+whenever one is added or dropped — a skill telling an agent to "use `X`" when `X`
+is absent fails silently.
 
 ## Open items / known gaps as of this entry
 
