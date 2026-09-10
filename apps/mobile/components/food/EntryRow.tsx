@@ -388,7 +388,29 @@ export function EntryRow({
           accessibilityHint="Duplicate, remove or share this entry"
           testID={`food-entry-${entry.id}-more`}
         >
-          <Icon name="more" size={18} color={vola.textMuted} />
+          {/*
+            W23/#1020 — `textDim`, not `textMuted`, and the difference is the
+            whole ticket. The athlete's verdict on the row was *"it is ugly
+            they better blend into the item somehow"*, and measured against the
+            card (`vola.surface` #10151F) `textMuted` sits at **6.85:1** —
+            louder than most of the row's own text, on a control almost nobody
+            taps. `textDim` is **3.67:1**: it recedes into the row and still
+            clears WCAG 1.4.11's 3:1 for an interactive component.
+
+            That floor is the reason this stops here rather than going quieter.
+            Everything below `textDim` fails it — `textMuted` at 55% opacity is
+            2.93, `textDim` at 80% is 2.81 — and a control the athlete cannot
+            find is not a subtler control, it is a missing one. See the tests
+            in `entryRowAffordance.test.ts`, which pin both numbers.
+
+            Reveal-on-interaction is the obvious next idea and there is nowhere
+            to put it: this dot is a sibling of the row's `Pressable` (nested
+            pressables fight), the row's own press OPENS the entry, and mobile
+            has no hover. Long-press and swipe are both spoken for — edit mode
+            and reorder (N553), and delete — so a context menu has no gesture
+            left to live on either. A quieter dot is the whole available move.
+          */}
+          <Icon name="more" size={18} color={vola.textDim} />
         </Pressable>
       ) : null}
     </Animated.View>

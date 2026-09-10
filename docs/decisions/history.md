@@ -68016,6 +68016,55 @@ so whether a row went missing for a separate reason — a `servings: 0` from the
 model should be FITTED to 1 by N542, not dropped — is unresolved and not
 assumed to be this bug.
 
+## 2026-09-09 — W23: the food row's 3-dot recedes as far as the contrast floor allows, and no further
+
+The athlete, on the food day view: *"there are 3 dots and i can see the
+options but it is ugly they better blend into the item somehow."*
+
+Measured against the card (`vola.surface` `#10151F`), the dot was drawn in
+`textMuted` at **6.85:1** — louder than most of the row's own text, on a
+control almost nobody taps. It is now `textDim` at **3.67:1**: it recedes into
+the row and still clears WCAG 1.4.11's 3:1 for a non-text interactive
+component.
+
+**The interesting part is that this is the WHOLE available move, and the
+research said something different.** The ticket was filed with findings from
+Apple's HIG and from comparable apps: Cronometer edits a diary entry by swipe
+or tap, MyFitnessPal makes the row itself the target, and a permanent "more"
+button is the Files-app pattern reserved for infrequent actions. The pattern
+across all of them is **the row is the affordance**, and a persistent dot is
+what you add when the row cannot carry the action itself.
+
+That answer is unavailable here, and the reason is worth recording because it
+is a consequence of work that landed the same day. Every gesture on this row is
+spoken for: **long-press is edit mode and reorder** (N553/#1029, shipped hours
+earlier), **swipe is delete** (`SwipeToDelete`), and **tap opens the entry**.
+A context menu has no gesture left to live on. Reveal-on-interaction has
+nowhere to hook either — the dot is a SIBLING of the row's `Pressable` because
+nested pressables fight, the row's own press navigates away, and mobile has no
+hover.
+
+So the affordance stays and gets quieter, and the floor is what stops it
+getting quieter still: `textMuted` at 55% opacity measures 2.93, `textDim` at
+80% measures 2.81, both under the floor. A control the athlete cannot find is
+not a subtler control, it is a missing one.
+
+**The grip deliberately does not recede with it.** While a meal is in edit
+mode the grip is the PRIMARY affordance, so it keeps `textMuted` — a single
+sweeping token change would have taken it along, and the test asserts it did
+not.
+
+`lib/__tests__/entryRowAffordance.test.ts` pins both bounds (quieter than the
+old value, above the floor), the token at the source, the grip's exemption,
+and that receding stayed visual — the 44pt target and the screen-reader label
+and hint are asserted unchanged, because a quieter control that also became
+harder to hit would trade one accessibility problem for two. It reuses
+`contrastRatio` from `macroRings.ts` rather than reimplementing it, so the
+rings' overtake floor and this one mean the same thing.
+
+Mutation-checked three ways: restoring `textMuted`, sweeping the grip dim too,
+and shrinking the touch target back to its old near-miss.
+
 ## Open items / known gaps as of this entry
 
 
