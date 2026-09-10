@@ -1,6 +1,5 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { request as requestSync } from '@/lib/sync';
-import { dayString } from '@/lib/calendar';
 import { useSessionVo2Max } from '@/lib/useSessionVo2Max';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -151,7 +150,7 @@ import {
   type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
-import { finishTimestampFor } from '@/lib/calendar';
+import { dayString, finishTimestampFor } from '@/lib/calendar';
 import { OptionSelect } from '@/components/ui/OptionSelect';
 import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';

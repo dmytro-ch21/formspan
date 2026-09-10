@@ -3,6 +3,7 @@ import { useFocusEffect } from 'expo-router';
 
 import { listBiometricSamples } from './biometric';
 import type { TokenGetter } from './useAuthToken';
+import { shiftDate } from './anthropometry';
 import { vo2MaxFetchWindow } from './vo2MaxSource';
 import { vo2MaxAsOf, vo2MaxAsOfLine, type Vo2MaxReading } from './sessionVo2Max';
 
@@ -44,7 +45,15 @@ export function useSessionVo2Max(
     useCallback(() => {
       if (sessionDay === null) return;
       let live = true;
-      const { from, to } = vo2MaxFetchWindow(sessionDay);
+      // The window is asked for one day PAST the session's, and that extra day
+      // is load-bearing rather than slack. `vo2MaxFetchWindow` ends its range
+      // at `${day}T23:59:59Z` — UTC — which for an athlete at UTC-8 is 4pm
+      // local. A VO₂max sync between 4pm and midnight on the session's own day
+      // would fall outside the request entirely, and unlike a live trend chart
+      // a finished session never refetches, so it would be missing for good.
+      // Asking a day wider covers every offset; `vo2MaxAsOf` then does the
+      // precise cut on the LOCAL day. Raised in review.
+      const { from, to } = vo2MaxFetchWindow(shiftDate(sessionDay, 1));
 
       listBiometricSamples(getToken, 'vo2_max', from, to)
         .then((rows) => {

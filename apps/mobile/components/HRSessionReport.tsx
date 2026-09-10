@@ -118,6 +118,15 @@ export function HRSessionReport({
    * to decide how the number is described. It also sits BELOW the stat row on
    * purpose — inside it, next to average and max heart rate, it would read as
    * "your VO₂max for this session", which is what the ticket forbids.
+   *
+   * Rendered in ALL THREE report states, including `unavailable` and
+   * `limited`, and that is the point rather than an oversight. VO₂max does not
+   * come from this session's heart rate — it is a separate series — so gating
+   * it on the session having good HR data would hide it from exactly the
+   * athletes it is most use to: someone who trains without a monitor, or has
+   * no date of birth set, for whom it is their only slow-moving fitness
+   * signal. It was `full`-only until review pointed out that this contradicted
+   * the feature's own premise.
    */
   vo2MaxLine?: string | null;
   /** The per-exercise breakdown (N490/#851) — `null` for sports with no
@@ -197,6 +206,11 @@ export function HRSessionReport({
             {hrAbsenceCopy(absenceState, sourceLabel)}
           </Text>
         </RNView>
+        {vo2MaxLine !== null && (
+          <Text style={styles.sourceLine} testID={`${testID}-vo2max`}>
+            {vo2MaxLine}
+          </Text>
+        )}
         {showSyncNow && (
           <RNView style={syncStyles.row} testID={`${testID}-sync-now`}>
             <Button
@@ -243,6 +257,11 @@ export function HRSessionReport({
               : 'Add your date of birth in your profile, or wear a heart-rate monitor for a session or two, to unlock training load and zone breakdown.'}
           </Text>
         </RNView>
+        {vo2MaxLine !== null && (
+          <Text style={styles.sourceLine} testID={`${testID}-vo2max`}>
+            {vo2MaxLine}
+          </Text>
+        )}
         <HRWindowMismatchNote
           hrWindow={report.hrWindow}
           sessionStartedAt={sessionStartedAt}

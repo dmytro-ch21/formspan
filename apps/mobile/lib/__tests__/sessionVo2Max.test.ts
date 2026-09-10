@@ -52,6 +52,30 @@ describe('vo2MaxAsOf', () => {
     expect(vo2MaxAsOf(shuffled, '2026-09-05')).toEqual({ value: 47.8, measuredOn: '2026-09-01' });
   });
 
+  it('uses the LOCAL day, not the UTC one', () => {
+    // THE regression this file exists for after review. The suite runs at
+    // TZ=America/Los_Angeles, so `2026-09-06T02:00:00Z` is 7pm on the 5th
+    // LOCALLY — an evening sync on the session's own day. Sliced as a UTC
+    // date it reads `2026-09-06`, lands after the session, and is silently
+    // dropped; the athlete's reading disappears on the day they took it.
+    //
+    // `lib/useWeightTrend.ts` carries the same warning about the same slice
+    // and ends "Banned once in review already." It was in this file too.
+    const eveningLocal = [sample('2026-09-06T02:00:00Z', 49.4)];
+    expect(vo2MaxAsOf(eveningLocal, '2026-09-05')).toEqual({
+      value: 49.4,
+      measuredOn: '2026-09-05',
+    });
+  });
+
+  it('still excludes a reading that is genuinely the next local day', () => {
+    // The other side of the same line — the fix must not simply widen the
+    // window by a day. 9am UTC on the 6th is 2am local on the 6th: after the
+    // session, and correctly dropped.
+    const nextDay = [sample('2026-09-06T09:00:00Z', 49.4)];
+    expect(vo2MaxAsOf(nextDay, '2026-09-05')).toBeNull();
+  });
+
   it('compares by DAY, so a later instant on the session day still counts', () => {
     const lateInDay = [sample('2026-09-05T23:30:00Z', 49.1)];
     expect(vo2MaxAsOf(lateInDay, '2026-09-05')).toEqual({ value: 49.1, measuredOn: '2026-09-05' });

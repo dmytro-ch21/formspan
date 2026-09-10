@@ -69362,6 +69362,37 @@ previous one's fixtures. **That reset is defensive rather than a fix** — the
 suite passes either way today, because the tests that install an implementation
 happen to be ordered harmlessly.
 
+### Three things review caught that the tests did not
+
+**A local-vs-UTC day mismatch, in the rule the whole feature turns on.**
+`dayOf` was `measuredAt.slice(0, 10)` — the UTC calendar day — compared against
+a `sessionDay` the callers build with `dayString`, which is LOCAL. For an
+athlete at UTC-8 an evening sync on the session's own day reads as the next
+day and is dropped: the reading disappears on the day it was taken. This repo
+had already banned the identical form once — `lib/useWeightTrend.ts`'s comment
+ends *"Banned once in review already."* — and `slice(0, 10)` on a `Z`
+timestamp is that banned form spelled differently.
+
+It compounded, too. `vo2MaxFetchWindow` ends its range at `${day}T23:59:59Z`,
+which at UTC-8 is 4pm local, so such a reading never even reached the filter —
+and unlike a live trend chart, a finished session never refetches, so it would
+have been missing permanently. The window is now asked one day wider and the
+precise cut happens on the local day. The regression test is the concrete case:
+`2026-09-06T02:00:00Z` is 7pm on the 5th in the suite's own timezone.
+
+**The line was unreachable on two of the three report states.** It rendered
+only in `full`, so an athlete with no monitor (`unavailable`) or no date of
+birth (`limited`) never saw it — precisely the people for whom VO₂max is the
+only slow-moving fitness signal they have, and a direct contradiction of this
+module's own premise that VO₂max has nothing to do with a session's heart
+rate. Now rendered in all three, with the reasoning recorded on the prop.
+
+**And `verify` went red on the lint ratchet**, not on anything semantic: a
+blind import insertion added a second `@/lib/calendar` statement to
+`app/session/[id].tsx` where one already existed, putting `import/no-duplicates`
+at 4 against a cap of 2. The ratchet only ever moves down, so this would have
+failed CI. Merged into the existing import.
+
 ### Two apparatus notes, both the same lesson
 
 A mutation **appeared to survive**: removing the date from the rendered line

@@ -1,4 +1,5 @@
 import type { BiometricSample } from './biometric';
+import { dayString } from './calendar';
 
 /**
  * N547/#990 part two — VO₂max beside a session, without claiming the session
@@ -52,9 +53,21 @@ export type Vo2MaxReading = {
   measuredOn: string;
 };
 
-/** The day part of an RFC3339 instant, without constructing a Date. */
+/**
+ * The LOCAL calendar day an instant falls on.
+ *
+ * `dayString(new Date(...))`, never `measuredAt.slice(0, 10)` — that is the UTC
+ * date, and it is compared here against a `sessionDay` the callers build with
+ * `dayString` from the session's own start, which is local. Mixing the two
+ * misclassifies every reading near local midnight, in both directions.
+ *
+ * This is not a new hazard: `lib/useWeightTrend.ts` carries the same warning
+ * about the same slice, and its comment ends "Banned once in review already."
+ * `slice(0, 10)` on a `Z`-suffixed timestamp is that banned form wearing a
+ * different spelling, and it was in this file until review caught it.
+ */
 function dayOf(measuredAt: string): string {
-  return measuredAt.slice(0, 10);
+  return dayString(new Date(measuredAt));
 }
 
 /**

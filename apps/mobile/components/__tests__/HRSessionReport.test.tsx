@@ -456,3 +456,45 @@ describe('which maximum the zones were scored against (N535)', () => {
     expect(screen.queryByText(/bpm:/)).toBeNull();
   });
 });
+
+/**
+ * N547/#990 part two — the VO₂max line.
+ *
+ * The point of these is the STATE coverage. The line was `full`-only until
+ * review pointed out that this hid it from exactly the athletes it is most
+ * use to: VO₂max does not come from a session's heart rate, so an athlete
+ * who trains without a monitor — or has no date of birth set — would never
+ * see it on any session, while it is their only slow-moving fitness signal.
+ */
+describe('the VO₂max estimate line (N547/#990)', () => {
+  const LINE = 'VO₂max 47.8 · estimate from 1 Sep';
+
+  test('renders on the full report', async () => {
+    await render(<HRSessionReport metrics={metrics()} vo2MaxLine={LINE} />);
+    expect(screen.getByTestId('hr-session-report-vo2max')).toHaveTextContent(LINE);
+  });
+
+  test('renders on the LIMITED state — sparse samples do not withhold it', async () => {
+    await render(<HRSessionReport metrics={metrics({ sample_count: 5 })} vo2MaxLine={LINE} />);
+    expect(screen.getByTestId('hr-session-report-limited')).toBeTruthy();
+    expect(screen.getByTestId('hr-session-report-vo2max')).toHaveTextContent(LINE);
+  });
+
+  test('renders on the UNAVAILABLE state — no heart rate at all does not withhold it', async () => {
+    // The athlete this exists for: no monitor, so no session HR ever, and
+    // VO₂max is the only fitness number they have.
+    await render(<HRSessionReport metrics={null} vo2MaxLine={LINE} />);
+    expect(screen.getByTestId('hr-session-report-unavailable')).toBeTruthy();
+    expect(screen.getByTestId('hr-session-report-vo2max')).toHaveTextContent(LINE);
+  });
+
+  test('is absent — not an empty row — when there is no reading', async () => {
+    await render(<HRSessionReport metrics={metrics()} />);
+    expect(screen.queryByTestId('hr-session-report-vo2max')).toBeNull();
+  });
+
+  test('is absent on the unavailable state too, rather than an empty caveat', async () => {
+    await render(<HRSessionReport metrics={null} />);
+    expect(screen.queryByTestId('hr-session-report-vo2max')).toBeNull();
+  });
+});
