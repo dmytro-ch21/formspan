@@ -966,3 +966,288 @@ func TestLabelMacrosPersistThroughAnEntry(t *testing.T) {
 		}
 	}
 }
+
+// --- N553/#1019: where an entry sits inside its meal -------------------------
+
+// i64 is a *int64 literal, for PositionWanted.
+func i64(v int64) *int64 { return &v }
+
+// entryIn is anEntry with an explicit meal and a distinguishing name, so a
+// test can build a meal several rows deep and then assert on the ORDER of the
+// names rather than on a set of ids.
+func entryIn(id string, meal Meal, name string) Entry {
+	return Entry{
+		ID: id, UserID: uid, EatenOn: "2026-08-18", Meal: meal,
+		Name: name, Servings: 1, ServingLabel: "100 g",
+		Macros: Macros{Kcal: 100, ProteinG: 10, CarbG: 5, FatG: 2},
+	}
+}
+
+// names is the list a client would render, in the order this list arrived.
+func names(entries []Entry, meal Meal) []string {
+	out := []string{}
+	for _, e := range entries {
+		if e.Meal == meal {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
+func sameOrder(got []string, want ...string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// THE RESTORE-PATH TEST. Read CLAUDE.md's "Adding a column to exercise's
+// updateWithin has silently blanked data three times" before touching the
+// upsert this covers.
+//
+// `position` is on a create-or-replace SET clause, which is the exact shape
+// that has cost this repository three columns' worth of authored data. Every
+// existing caller of PUT /v1/nutrition/entries/{id} predates the column: web's
+// entry editor, web's scale-by-a-factor button, and every installed build of
+// the phone. All of them send an entryBody with no `position` key at all. If
+// the SET clause read `position = EXCLUDED.position`, that omission would
+// arrive as Go's zero value, every edited entry would drop to 0, and a meal
+// with two edited rows would silently reorder itself into id order — which
+// reads as the reorder feature misbehaving rather than as data loss, so
+// nobody would look here.
+//
+// Mutated to confirm it can fail: replacing the CASE in SaveEntry's SET clause
+// with `position = EXCLUDED.position` turns the second assertion red with
+// "position 0 after an edit that never mentioned it".
+func TestAnEditThatNeverMentionsPositionDoesNotMoveTheEntry(t *testing.T) {
+	r := repoFor(t, uid)
+
+	first, err := r.SaveEntry(ctx(), entryIn(entryID, MealBreakfast, "Eggs"))
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if first.Position != PositionStep {
+		t.Fatalf("first entry of a meal got position %d, want %d", first.Position, PositionStep)
+	}
+
+	moved := entryIn(entryID, MealBreakfast, "Eggs")
+	moved.PositionWanted = i64(4096)
+	if _, err := r.SaveEntry(ctx(), moved); err != nil {
+		t.Fatalf("reorder: %v", err)
+	}
+
+	// The shape of every pre-N553 caller: same row, changed numbers, no
+	// mention of position anywhere.
+	edited := entryIn(entryID, MealBreakfast, "Eggs")
+	edited.Servings = 2
+	edited.Kcal = 200
+	back, err := r.SaveEntry(ctx(), edited)
+	if err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if back.Servings != 2 {
+		t.Fatalf("the edit did not land: servings %v", back.Servings)
+	}
+	if back.Position != 4096 {
+		t.Errorf("position %d after an edit that never mentioned it, want 4096 — a caller that does not know about this column has just silently reordered a meal", back.Position)
+	}
+}
+
+// A new entry lands at the END of its meal, not on top of whatever is there.
+//
+// The gap is what makes a later move a ONE-ROW write, so this asserts the
+// step rather than merely "greater than": two entries a single unit apart
+// would be correct order and no room, and the difference only shows up much
+// later as a rebalance nobody expected.
+func TestANewEntryAppendsToTheEndOfItsMeal(t *testing.T) {
+	r := repoFor(t, uid)
+
+	a, err := r.SaveEntry(ctx(), entryIn(entryID, MealBreakfast, "Eggs"))
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	b, err := r.SaveEntry(ctx(), entryIn("22222222-2222-4222-8222-222222222223", MealBreakfast, "Toast"))
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if b.Position != a.Position+PositionStep {
+		t.Fatalf("second entry at %d, want %d — the gap between neighbours is what makes a reorder one write", b.Position, a.Position+PositionStep)
+	}
+
+	// A DIFFERENT meal is a different list. Its first row starts over at one
+	// step, rather than continuing breakfast's numbering.
+	c, err := r.SaveEntry(ctx(), entryIn("22222222-2222-4222-8222-222222222224", MealDinner, "Steak"))
+	if err != nil {
+		t.Fatalf("dinner: %v", err)
+	}
+	if c.Position != PositionStep {
+		t.Fatalf("first dinner entry at %d, want %d — position is per meal, not per day", c.Position, PositionStep)
+	}
+}
+
+// The whole feature, at the level the athlete sees it: put the eggs above the
+// toast, and have the list say so afterwards.
+//
+// Note what is NOT written — the toast. One row changed, one row saved. This
+// is the "reordering N rows does not write N rows" criterion expressed as the
+// only thing that can actually demonstrate it: `back` is read fresh, and the
+// toast's position is asserted UNCHANGED.
+func TestReorderingWithinAMealWritesOnlyTheRowThatMoved(t *testing.T) {
+	r := repoFor(t, uid)
+
+	eggs, _ := r.SaveEntry(ctx(), entryIn(entryID, MealBreakfast, "Eggs"))
+	toast, _ := r.SaveEntry(ctx(), entryIn("22222222-2222-4222-8222-222222222223", MealBreakfast, "Toast"))
+	oats, _ := r.SaveEntry(ctx(), entryIn("22222222-2222-4222-8222-222222222225", MealBreakfast, "Oats"))
+
+	before, err := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 100)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if got := names(before, MealBreakfast); !sameOrder(got, "Eggs", "Toast", "Oats") {
+		t.Fatalf("logged order %v", got)
+	}
+
+	// Drag Oats to the top: its new position is below the current first, and
+	// nothing else is touched.
+	move := entryIn(oats.ID, MealBreakfast, "Oats")
+	move.PositionWanted = i64(eggs.Position - PositionStep)
+	if _, err := r.SaveEntry(ctx(), move); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+
+	after, err := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 100)
+	if err != nil {
+		t.Fatalf("list back: %v", err)
+	}
+	if got := names(after, MealBreakfast); !sameOrder(got, "Oats", "Eggs", "Toast") {
+		t.Fatalf("order after the move %v, want [Oats Eggs Toast]", got)
+	}
+	for _, e := range after {
+		switch e.ID {
+		case eggs.ID:
+			if e.Position != eggs.Position {
+				t.Errorf("eggs moved from %d to %d — a reorder rewrote a row nobody dragged", eggs.Position, e.Position)
+			}
+		case toast.ID:
+			if e.Position != toast.Position {
+				t.Errorf("toast moved from %d to %d — a reorder rewrote a row nobody dragged", toast.Position, e.Position)
+			}
+		}
+	}
+}
+
+// A row that changes MEAL and says nothing about position is appended to the
+// end of the meal it joins — its old number was a coordinate in a list it has
+// left, and keeping it would drop the row into the middle of a meal it has
+// never been in.
+func TestAnEntryThatChangesMealLandsAtTheEndOfTheNewOne(t *testing.T) {
+	r := repoFor(t, uid)
+
+	if _, err := r.SaveEntry(ctx(), entryIn(entryID, MealBreakfast, "Eggs")); err != nil {
+		t.Fatalf("eggs: %v", err)
+	}
+	steak, _ := r.SaveEntry(ctx(), entryIn("22222222-2222-4222-8222-222222222224", MealDinner, "Steak"))
+
+	moved := entryIn(entryID, MealDinner, "Eggs")
+	// No PositionWanted — the shape web's meal picker sends.
+	back, err := r.SaveEntry(ctx(), moved)
+	if err != nil {
+		t.Fatalf("move meal: %v", err)
+	}
+	if back.Position != steak.Position+PositionStep {
+		t.Fatalf("moved entry at %d, want %d (after the steak already in dinner)", back.Position, steak.Position+PositionStep)
+	}
+}
+
+// Position is a per-entry field like every other, so the conflict rule is the
+// one already in place: the later write wins for THAT ROW, and a row nobody
+// touched is untouched. Two devices reordering different rows in one meal both
+// keep their move.
+//
+// This is what makes the offline story converge rather than fight — see
+// entryOrder.ts on the phone, which states the same rule from the other end.
+func TestTwoReordersOfDifferentRowsBothSurvive(t *testing.T) {
+	r := repoFor(t, uid)
+
+	eggs, _ := r.SaveEntry(ctx(), entryIn(entryID, MealBreakfast, "Eggs"))
+	toast, _ := r.SaveEntry(ctx(), entryIn("22222222-2222-4222-8222-222222222223", MealBreakfast, "Toast"))
+
+	// Device A dragged the toast to the top while offline.
+	a := entryIn(toast.ID, MealBreakfast, "Toast")
+	a.PositionWanted = i64(eggs.Position - PositionStep)
+	// Device B dragged a third row in, also while offline.
+	b := entryIn("22222222-2222-4222-8222-222222222225", MealBreakfast, "Oats")
+	b.PositionWanted = i64(eggs.Position - 2*PositionStep)
+
+	if _, err := r.SaveEntry(ctx(), a); err != nil {
+		t.Fatalf("a: %v", err)
+	}
+	if _, err := r.SaveEntry(ctx(), b); err != nil {
+		t.Fatalf("b: %v", err)
+	}
+
+	back, _ := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 100)
+	if got := names(back, MealBreakfast); !sameOrder(got, "Oats", "Toast", "Eggs") {
+		t.Fatalf("order %v, want [Oats Toast Eggs] — both devices' moves should survive", got)
+	}
+}
+
+// Reordering somebody else's entry is 404, exactly as editing it is.
+//
+// The reorder rides the existing upsert rather than a new endpoint, so it
+// inherits SaveEntry's ownership predicate — but "inherits" is an argument,
+// and this is the measurement. Without `WHERE nutrition_entries.user_id = $2`
+// a caller could rearrange a stranger's day by guessing UUIDs, and the 404
+// (rather than 403) is what stops the response confirming the row exists.
+func TestReorderingAnotherAthletesEntryIsNotFound(t *testing.T) {
+	r := repoFor(t, uid, other)
+
+	mine, err := r.SaveEntry(ctx(), entryIn(entryID, MealBreakfast, "Eggs"))
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	theft := entryIn(entryID, MealBreakfast, "Eggs")
+	theft.UserID = other
+	theft.PositionWanted = i64(1)
+	if _, err := r.SaveEntry(ctx(), theft); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reorder as another user: %v, want ErrNotFound", err)
+	}
+
+	back, err := r.ListEntries(ctx(), uid, "2026-08-01", "2026-08-31", 100)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(back) != 1 || back[0].Position != mine.Position {
+		t.Fatalf("the entry moved to %v — a stranger reordered somebody's breakfast", back)
+	}
+}
+
+// A position outside the range JSON carries exactly is refused, not clamped.
+//
+// The bound exists because every client computes midpoints in a JavaScript
+// number, where anything past 2^53 stops being an exact integer — two rows
+// that "differ" by one would compare equal and the order would go undefined.
+// Refusing names the bug; clamping would hide it.
+func TestAnAbsurdPositionIsRefused(t *testing.T) {
+	e := entryIn(entryID, MealBreakfast, "Eggs")
+	e.PositionWanted = i64(PositionBound + 1)
+	if err := e.Validate(); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("position %d: %v, want ErrInvalidInput", PositionBound+1, err)
+	}
+	e.PositionWanted = i64(-PositionBound - 1)
+	if err := e.Validate(); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("position %d: %v, want ErrInvalidInput", -PositionBound-1, err)
+	}
+	// Negative is ORDINARY, not an error: dragging to the top of a meal is
+	// `min - step`, which is what keeps "make this first" a one-row write.
+	e.PositionWanted = i64(-4096)
+	if err := e.Validate(); err != nil {
+		t.Errorf("a negative position is how drag-to-top works: %v", err)
+	}
+}

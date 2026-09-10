@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -55,7 +56,7 @@ const entryCols = `
 	name, servings, serving_label,
 	kcal, protein_g, carb_g, fat_g, fibre_g,
 	saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-	source_food_id::text, category, notes, created_at, updated_at`
+	source_food_id::text, category, notes, position, created_at, updated_at`
 
 func scanEntry(row pgx.Row) (Entry, error) {
 	var e Entry
@@ -64,7 +65,7 @@ func scanEntry(row pgx.Row) (Entry, error) {
 		&e.Name, &e.Servings, &e.ServingLabel,
 		&e.Kcal, &e.ProteinG, &e.CarbG, &e.FatG, &e.FibreG,
 		&e.SaturatedFatG, &e.SugarG, &e.AddedSugarG, &e.SodiumMG, &e.CholesterolMG,
-		&e.SourceFoodID, &e.Category, &e.Notes, &e.CreatedAt, &e.UpdatedAt,
+		&e.SourceFoodID, &e.Category, &e.Notes, &e.Position, &e.CreatedAt, &e.UpdatedAt,
 	)
 	return e, err
 }
@@ -77,11 +78,19 @@ func (r *PostgresRepository) ListEntries(ctx context.Context, userID, from, to s
 	// ORDER BY carries a total order — eaten_on alone ties for every entry in a
 	// day, and a tie makes the page boundary non-deterministic between two
 	// requests that should agree.
+	//
+	// `position` (N553) sits ahead of created_at, and it is per (day, meal) —
+	// so two entries in DIFFERENT meals routinely share a value and interleave
+	// here. That is harmless and deliberate: every client groups a day by meal
+	// before rendering it (mobile's bySlot, web's entries.filter), so what each
+	// one actually reads off this list is the order WITHIN one meal, which
+	// position alone decides. created_at and id still follow, so the total
+	// order — the thing pagination depends on — is unchanged.
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+entryCols+`
 		FROM nutrition_entries
 		WHERE user_id = $1 AND eaten_on BETWEEN $2::date AND $3::date
-		ORDER BY eaten_on DESC, created_at, id
+		ORDER BY eaten_on DESC, position, created_at, id
 		LIMIT $4`, userID, from, to, limit)
 	if err != nil {
 		return nil, translate(err)
@@ -99,7 +108,56 @@ func (r *PostgresRepository) ListEntries(ctx context.Context, userID, from, to s
 	return out, translate(rows.Err())
 }
 
+// endOfMeal is the position an entry gets when nobody asked for one: one step
+// past whatever is currently last in the meal it is being written into.
+//
+// A scalar subquery over the same table the statement is writing, which is
+// safe here because it reads the statement's own snapshot — the row being
+// inserted is not yet visible to it, and the row being UPDATED is excluded by
+// id so a cross-meal move cannot measure itself.
+//
+// MAX over an empty meal is null, so COALESCE gives the first entry of a meal
+// position 1024 rather than null — matching the migration's backfill and the
+// phone's, which is what lets the two stores land on the same numbers without
+// ever comparing notes.
+//
+// 0 itself is an ORDINARY position, not a sentinel: dragging the second row of
+// a meal above the first is 1024 - 1024. Nothing anywhere may read 0 as "unset".
+//
+// $1 id, $2 user_id, $3 eaten_on, $4 meal — the same placeholders SaveEntry
+// already binds, which is why this is a fragment rather than its own query.
+var endOfMeal = `(
+	SELECT COALESCE(MAX(x.position), 0) + ` + positionStepSQL + `
+	FROM nutrition_entries x
+	WHERE x.user_id = $2 AND x.eaten_on = $3::date AND x.meal = $4 AND x.id <> $1::uuid
+)`
+
+// positionStepSQL is PositionStep, as SQL text. Deriving it rather than
+// typing 1024 again is what stops the constant and the query drifting apart.
+var positionStepSQL = strconv.Itoa(PositionStep)
+
 // SaveEntry is a create-or-replace on a client-generated id.
+//
+// # position is PRESERVED when the caller does not mention it
+//
+// `PositionWanted` nil means "leave the order alone", and the CASE in the SET
+// clause is what honours that. This is not a nicety — it is the guard against
+// the failure this repository has shipped three times on exercise's
+// updateWithin: a column added to a SET clause, a caller that predates it
+// sending the zero value, and an authored fact silently overwritten with an
+// empty one. Every existing caller of PUT /v1/nutrition/entries/{id} is
+// exactly such a caller. Web's entry editor and its scale-by-a-factor button
+// send an entryBody with no position at all; so does any build of the phone
+// older than N553. If position were `= EXCLUDED.position` like every line
+// above it, the first edit to any entry would drop it to 0 and a meal edited
+// twice would collapse into id order — a reordering the athlete never made,
+// looking exactly like the feature misbehaving rather than like data loss.
+//
+// The one case where a nil PositionWanted does NOT preserve is a row that has
+// MOVED — a different meal or a different day than the stored row. Its old
+// position is a coordinate in a list it has left, so it is appended to the end
+// of the list it has joined instead. A caller that wants it dropped somewhere
+// specific says so; the phone's drag always does.
 //
 // # The WHERE clause in the conflict is the entire security property
 //
@@ -120,9 +178,10 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			name, servings, serving_label,
 			kcal, protein_g, carb_g, fat_g, fibre_g,
 			saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-			source_food_id, category, notes)
+			source_food_id, category, notes, position)
 		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-		        $13, $14, $15, $16, $17, $18, $19, $20)
+		        $13, $14, $15, $16, $17, $18, $19, $20,
+		        COALESCE($21, `+endOfMeal+`))
 		ON CONFLICT (id) DO UPDATE SET
 			eaten_on = EXCLUDED.eaten_on,
 			meal = EXCLUDED.meal,
@@ -142,6 +201,12 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			source_food_id = EXCLUDED.source_food_id,
 			category = EXCLUDED.category,
 			notes = EXCLUDED.notes,
+			position = CASE
+				WHEN $21::bigint IS NOT NULL THEN $21::bigint
+				WHEN nutrition_entries.meal = $4 AND nutrition_entries.eaten_on = $3::date
+					THEN nutrition_entries.position
+				ELSE `+endOfMeal+`
+			END,
 			updated_at = now()
 		WHERE nutrition_entries.user_id = $2
 		RETURNING `+entryCols,
@@ -149,7 +214,7 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 		e.Name, e.Servings, e.ServingLabel,
 		e.Kcal, e.ProteinG, e.CarbG, e.FatG, e.FibreG,
 		e.SaturatedFatG, e.SugarG, e.AddedSugarG, e.SodiumMG, e.CholesterolMG,
-		e.SourceFoodID, e.Category, e.Notes)
+		e.SourceFoodID, e.Category, e.Notes, e.PositionWanted)
 
 	out, err := scanEntry(row)
 	if errors.Is(err, pgx.ErrNoRows) {

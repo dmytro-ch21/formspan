@@ -148,6 +148,10 @@ export function MealCard({
   drag,
   containerRef,
   isDropTarget = false,
+  editing = false,
+  onDoneEditing,
+  dropSlot = null,
+  rowRef,
   testID,
 }: {
   meal: Meal;
@@ -186,6 +190,24 @@ export function MealCard({
   containerRef?: Ref<RNView>;
   /** N531 — a lifted row is over this section right now. */
   isDropTarget?: boolean;
+  /**
+   * N553 — this meal is in edit mode: every row shows a grip, and the header
+   * offers Done. Entered by a long-press on any of its rows, so it is a state
+   * the athlete put THIS CARD into rather than a mode the screen is in.
+   */
+  editing?: boolean;
+  /** N553 — leave edit mode. Rendered as "Done" where "Combine" sits. */
+  onDoneEditing?: () => void;
+  /**
+   * N553 — the slot a lifted row would land in, or null. Only meaningful
+   * while `isDropTarget`; drives the gap that opens under the finger, which is
+   * the ONLY thing that says where a within-meal drop will put the row. A card
+   * highlight cannot say that, and "the move looked like it did nothing" is
+   * precisely the report this ticket came from.
+   */
+  dropSlot?: number | null;
+  /** N553 — one row's window frame, so the day view can find the slot. */
+  rowRef?: (id: string, view: RNView | null) => void;
   testID?: string;
 }) {
   const hasEntries = entries.length > 0;
@@ -214,6 +236,41 @@ export function MealCard({
   // per-parent, so `EntryRow`'s own `lifted` style alone would still leave
   // the row under the NEXT card once it crossed into it.
   const carriesLifted = !!drag?.activeId && entries.some((e) => e.id === drag.activeId);
+  // N553 — EVERY row stays MOUNTED for the whole drag, the dragged one
+  // included, and that is load-bearing rather than a preference.
+  //
+  // A draft of this ticket filtered the dragged row out of the list this card
+  // renders, to express "a row being dragged should not also sit in the list
+  // it is being dragged through". **frontend-reviewer caught it as blocking,
+  // and it was a regression against N531's cross-meal drag as well as a break
+  // in this ticket's own reorder.** `drag.activeId` is set SYNCHRONOUSLY by
+  // `EntryRow`'s `onLongPress`, before the finger has moved a pixel — so the
+  // very next render removed the row under the finger, React unmounted its
+  // `SwipeToDelete`/`EntryRow` subtree, and that `EntryRow` instance is the
+  // one holding the live `PanResponder` (and, in edit mode, the grip's) that
+  // has to track the rest of the gesture. Unmounting a native view that holds
+  // an active touch responder terminates or corrupts the gesture: the drag
+  // died at the moment it began.
+  //
+  // The hole in the list that filter was reaching for is already there for
+  // free, and always was: `EntryRow` translates the lifted row by the finger's
+  // `dy`, and a transform does not occupy layout — so the row's own slot
+  // empties visually while the row itself follows the finger, over its
+  // siblings (`lifted`) and over the next card (`cardLifted`). That is exactly
+  // how N531's drag has read since it shipped, and the accent `dropGap` below
+  // is what says where the row will LAND.
+  const activeId = drag?.activeId ?? null;
+  const draggedAt = activeId === null ? -1 : entries.findIndex((e) => e.id === activeId);
+  // `dropSlot` counts against this meal WITHOUT the dragged row — that is what
+  // an insertion index means, and what `slotFor` returns and `plan` takes. So
+  // rendering every row needs the translation: each row carries the index it
+  // holds in THAT list, and the dragged row holds none of them, which is what
+  // null says here.
+  const rows = entries.map((e, i) => ({
+    entry: e,
+    slot: i === draggedAt ? null : draggedAt >= 0 && i > draggedAt ? i - 1 : i,
+  }));
+  const slotCount = draggedAt >= 0 ? entries.length - 1 : entries.length;
 
   return (
     <RNView
@@ -270,11 +327,27 @@ export function MealCard({
           </Text>
           <Icon name={effectiveExpanded ? 'chevron-down' : 'chevron'} size={13} color={vola.textDim} />
         </Pressable>
+        {/* N553 — the way OUT of edit mode, in the slot Combine occupies, and
+            never both at once: a card in edit mode is not a card you start a
+            selection from. A visible exit is not optional — edit mode is
+            entered by a gesture, and a mode with no stated way out is one the
+            athlete escapes by leaving the screen. */}
+        {editing && onDoneEditing ? (
+          <Pressable
+            onPress={onDoneEditing}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`Done reordering ${label}`}
+            testID={testID ? `${testID}-reorder-done` : undefined}
+          >
+            <Text style={[styles.combineLink, { color: addColor }]}>Done</Text>
+          </Pressable>
+        ) : null}
         {/* Two or more rows only — combining one thing with nothing is not a
             meal, it is the entry that is already there. Offered only while
             expanded: starting a selection on rows the section is currently
             hiding makes no sense. */}
-        {effectiveExpanded && !selecting && entries.length >= 2 && onStartCombine ? (
+        {effectiveExpanded && !selecting && !editing && entries.length >= 2 && onStartCombine ? (
           <Pressable
             onPress={onStartCombine}
             accessibilityRole="button"
@@ -313,28 +386,61 @@ export function MealCard({
             )
           )}
 
-          {entries.map((e) => (
-            <SwipeToDelete
-              key={e.id}
-              onDelete={() => onDelete(e.id)}
-              accessibilityLabel={e.name}
-              enabled={!selecting}
-              closeOn={entries.length}
-              testID={`food-entry-${e.id}`}
-            >
-              <EntryRow
-                entry={e}
-                selecting={selecting}
-                isSelected={selecting && !!selectedIds?.has(e.id)}
-                addColor={addColor}
-                checkColor={accent.on}
-                foodUnit={foodUnit}
-                onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
-                onMenu={onEntryMenu ? () => onEntryMenu(e.id) : undefined}
-                drag={drag}
-              />
-            </SwipeToDelete>
+          {/* N553 — the rows, with a gap opened at the slot a lifted row would
+              land in. Every row is drawn, the lifted one included (see the
+              `rows` comment above — unmounting it kills the gesture it is
+              holding); `slot` is that row's index in the list WITHOUT the
+              lifted row, which is the coordinate `dropSlot` speaks in. */}
+          {rows.map(({ entry: e, slot }) => (
+            <RNView key={e.id}>
+              {isDropTarget && slot !== null && dropSlot === slot ? (
+                <RNView
+                  style={[styles.dropGap, { backgroundColor: addColor }]}
+                  testID={testID ? `${testID}-drop-gap` : undefined}
+                />
+              ) : null}
+              {/* `collapsable={false}` or this wrapper is optimised away on
+                  Android and the ref measures nothing — the same reason the
+                  card's own container keeps one. */}
+              <RNView ref={rowRef ? (v) => rowRef(e.id, v) : undefined} collapsable={false}>
+                <SwipeToDelete
+                  onDelete={() => onDelete(e.id)}
+                  accessibilityLabel={e.name}
+                  // Off in edit mode, exactly as it is off while selecting and
+                  // for the identical reason: a gesture that is not offered
+                  // cannot fight the one that is, and a horizontal swipe on a
+                  // row the athlete is dragging vertically is a delete they
+                  // did not ask for.
+                  enabled={!selecting && !editing}
+                  closeOn={entries.length}
+                  testID={`food-entry-${e.id}`}
+                >
+                  <EntryRow
+                    entry={e}
+                    selecting={selecting}
+                    editing={editing}
+                    isSelected={selecting && !!selectedIds?.has(e.id)}
+                    addColor={addColor}
+                    checkColor={accent.on}
+                    foodUnit={foodUnit}
+                    onPress={() => (selecting ? onToggleSelect?.(e.id) : onEntryPress(e.id))}
+                    onMenu={onEntryMenu ? () => onEntryMenu(e.id) : undefined}
+                    drag={drag}
+                  />
+                </SwipeToDelete>
+              </RNView>
+            </RNView>
           ))}
+          {/* The gap at the END of the meal — one past the last row, which is
+              where a finger over the card's padding or its Add Food button
+              resolves to. Separate from the map, which has no index for
+              "after the last one". */}
+          {isDropTarget && dropSlot !== null && dropSlot >= slotCount ? (
+            <RNView
+              style={[styles.dropGap, { backgroundColor: addColor }]}
+              testID={testID ? `${testID}-drop-gap` : undefined}
+            />
+          ) : null}
         </>
       )}
 
@@ -424,6 +530,10 @@ const styles = StyleSheet.create({
 
   // The row's own styles moved to `EntryRow.tsx` with the row (N531).
   cardLifted: { zIndex: 10, elevation: 10 },
+  // N553 — where the lifted row will land. A 2pt rule in the athlete's accent,
+  // the colour every "this is the action" affordance on this screen already
+  // uses, sized so it reads as a seam opening rather than as a row of its own.
+  dropGap: { height: 2, borderRadius: 1, marginVertical: 2 },
 
   add: {
     flexDirection: 'row',

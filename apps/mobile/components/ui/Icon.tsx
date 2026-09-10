@@ -96,6 +96,29 @@ const EXTRA = {
     { t: 'c', cx: 12, cy: 12, r: 1 },
     { t: 'c', cx: 19, cy: 12, r: 1 },
   ],
+  /**
+   * The drag handle a food row grows in edit mode (N553/#1019) — two stacked
+   * rows of three dots.
+   *
+   * Chrome in the same sense as `more` directly above, which it is
+   * deliberately built out of: the same 1-radius stroked circles, the same
+   * horizontal rhythm, doubled vertically. The two glyphs sit in the same
+   * place on the same row in the two different modes, so a handle drawn in a
+   * different vocabulary would read as a different control rather than as the
+   * same row saying "now you can move me".
+   *
+   * Narrower than `more` (7…17 rather than 5…19) because it is an affordance
+   * rather than a button: the whole row is draggable, and a handle spanning
+   * the full width would claim to be the only place a finger works.
+   */
+  grip: [
+    { t: 'c', cx: 7, cy: 9, r: 1 },
+    { t: 'c', cx: 12, cy: 9, r: 1 },
+    { t: 'c', cx: 17, cy: 9, r: 1 },
+    { t: 'c', cx: 7, cy: 15, r: 1 },
+    { t: 'c', cx: 12, cy: 15, r: 1 },
+    { t: 'c', cx: 17, cy: 15, r: 1 },
+  ],
 } as const satisfies Record<string, readonly Primitive[]>;
 
 /**

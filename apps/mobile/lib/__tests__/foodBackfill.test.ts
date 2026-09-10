@@ -101,6 +101,8 @@ function serverEntry(over: Partial<Entry> = {}): Entry {
     source_food_id: null,
     category: null,
     notes: '',
+    // N553 — a default so a test only states the order when order is the point.
+    position: 1024,
     ...over,
   };
 }

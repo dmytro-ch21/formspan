@@ -12,6 +12,7 @@
  * amount is unit-aware (#483), not the raw stored label.
  */
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { MealCard } from '../MealCard';
 import type { Entry, Macros } from '@/lib/nutrition';
@@ -52,6 +53,8 @@ function entry(over: Partial<Entry> = {}): Entry {
     source_food_id: null,
     category: null,
     notes: '',
+    // N553 — a default so a test only states the order when order is the point.
+    position: 1024,
     ...over,
   };
 }
@@ -382,6 +385,8 @@ describe('long-press lifts a row for the drag (N531)', () => {
     return {
       enabled: true,
       activeId: null,
+      onEnterEdit: jest.fn(),
+      onNudge: jest.fn(),
       onStart: jest.fn(),
       onMove: jest.fn(),
       onEnd: jest.fn(),
@@ -395,6 +400,17 @@ describe('long-press lifts a row for the drag (N531)', () => {
     renderCard({ entries: [entry({ id: 'a', meal: 'breakfast' })], drag });
     fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
     expect(drag.onStart).toHaveBeenCalledWith('a', 'breakfast');
+  });
+
+  // N553 — the ONE meaning long-press now has. It picks the row up (above)
+  // AND puts the meal into edit mode, which is what survives the finger
+  // lifting. Both, from one gesture; see `EntryRow`'s doc comment for why
+  // that is one meaning rather than two.
+  it('a long-press also puts the meal into edit mode', () => {
+    const drag = dragHandlers();
+    renderCard({ entries: [entry({ id: 'a', meal: 'dinner' })], drag, meal: 'dinner' });
+    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    expect(drag.onEnterEdit).toHaveBeenCalledWith('dinner');
   });
 
   it('is inert while selecting, even with drag enabled — a checkbox does not lift', () => {
@@ -449,5 +465,205 @@ describe('long-press lifts a row for the drag (N531)', () => {
     expect(screen.getByTestId('meal-breakfast').props.accessibilityState).toEqual({ selected: true });
     renderCard({ entries: [entry({ id: 'b' })], isDropTarget: false, testID: 'meal-lunch' });
     expect(screen.getByTestId('meal-lunch').props.accessibilityState).toBeUndefined();
+  });
+});
+
+/**
+ * N553/#1019 — the row under the finger STAYS MOUNTED for the whole drag,
+ * and this block exists because the first draft of the ticket unmounted it.
+ *
+ * `drag.activeId` is set SYNCHRONOUSLY by the long-press, before the finger
+ * has moved: a card that filtered the active row out of its list therefore
+ * destroyed, on the very next render, the `EntryRow` instance holding the
+ * `PanResponder` that was supposed to track the rest of the gesture — and in
+ * edit mode the grip's responder with it. `frontend-reviewer` caught it;
+ * nothing in this file could have, because no test here had ever rendered a
+ * card with one of its OWN entries lifted. That absence is the gap, so these
+ * tests are written against `activeId` rather than against a gesture.
+ */
+describe('the row under the finger stays mounted (N553)', () => {
+  function dragging(activeId: string) {
+    return {
+      enabled: true,
+      activeId,
+      onEnterEdit: jest.fn(),
+      onNudge: jest.fn(),
+      onStart: jest.fn(),
+      onMove: jest.fn(),
+      onEnd: jest.fn(),
+      onCancel: jest.fn(),
+    };
+  }
+
+  const three = [
+    entry({ id: 'a', name: 'Oats' }),
+    entry({ id: 'b', name: 'Greek yoghurt' }),
+    entry({ id: 'c', name: 'Banana' }),
+  ];
+
+  it('the lifted row is still rendered, with its pan handlers still on it', () => {
+    renderCard({ entries: three, drag: dragging('b') });
+    const row = screen.getByTestId('food-entry-b-row');
+    // The handlers `EntryRow` spreads onto this view ARE the drag. A row that
+    // has been unmounted cannot hold them — which is the bug — and a row
+    // rendered without them would be the same bug wearing a mount.
+    expect(typeof row.props.onMoveShouldSetResponder).toBe('function');
+    expect(typeof row.props.onResponderMove).toBe('function');
+    expect(typeof row.props.onResponderRelease).toBe('function');
+  });
+
+  it('leaves the other rows exactly where they were', () => {
+    renderCard({ entries: three, drag: dragging('b') });
+    expect(screen.getByTestId('food-entry-a-row')).toBeTruthy();
+    expect(screen.getByTestId('food-entry-c-row')).toBeTruthy();
+  });
+
+  it('the lifted row is still the interactive one — a press still reaches it', () => {
+    const onEntryPress = jest.fn();
+    renderCard({ entries: three, drag: dragging('b'), onEntryPress });
+    fireEvent.press(screen.getByTestId('food-entry-b-open'));
+    expect(onEntryPress).toHaveBeenCalledWith('b');
+  });
+
+  it('keeps the lifted row GRIP mounted in edit mode — it owns the touch-down responder', () => {
+    renderCard({ entries: three, drag: dragging('b'), editing: true });
+    const grip = screen.getByTestId('food-entry-b-grip');
+    expect(typeof grip.props.onStartShouldSetResponder).toBe('function');
+    expect(typeof grip.props.onResponderMove).toBe('function');
+  });
+});
+
+/**
+ * N553/#1019, acceptance criterion 5 — "reachable one-handed: the reorder
+ * target must be draggable without a second hand."
+ *
+ * This is a test about a NUMBER, which is unusual here and is the point. The
+ * grip shipped 30 points across while `EntryRow`'s own comments said "44
+ * points of grip", and a comment cannot fail: the missing 14 belonged to the
+ * row's `Pressable`, so a thumb landing just left of the icon OPENED the
+ * entry instead of picking it up. Asserting the arithmetic against the icon's
+ * own size is the only form of this that a future padding tweak cannot
+ * quietly walk back.
+ */
+describe('the drag grip is a real 44 × 44 (N553)', () => {
+  /** Must match the `size` `EntryRow` passes its grip/more `Icon`. */
+  const ICON = 18;
+  const APPLE_MINIMUM = 44;
+
+  function editingCard() {
+    return renderCard({
+      entries: [entry({ id: 'a' }), entry({ id: 'b' })],
+      editing: true,
+      onEntryMenu: () => {},
+      drag: {
+        enabled: true,
+        activeId: null,
+        onEnterEdit: jest.fn(),
+        onNudge: jest.fn(),
+        onStart: jest.fn(),
+        onMove: jest.fn(),
+        onEnd: jest.fn(),
+        onCancel: jest.fn(),
+      },
+    });
+  }
+
+  it('measures 44 across and 44 down in padding alone', () => {
+    editingCard();
+    const style = StyleSheet.flatten(screen.getByTestId('food-entry-a-grip').props.style) as {
+      paddingLeft: number;
+      paddingRight: number;
+      paddingVertical: number;
+    };
+    expect(style.paddingLeft + ICON + style.paddingRight).toBe(APPLE_MINIMUM);
+    expect(style.paddingVertical * 2 + ICON).toBe(APPLE_MINIMUM);
+  });
+
+  it('the 3-dot it replaces reaches the same 44 across, its last 14 from hitSlop', () => {
+    // Not in this ticket's criteria, but it is the same control in the other
+    // mode and it was 42 — near-misses are what this block exists to stop
+    // being invisible.
+    renderCard({ entries: [entry({ id: 'a' })], onEntryMenu: () => {} });
+    const more = screen.getByTestId('food-entry-a-more');
+    const style = StyleSheet.flatten(more.props.style) as {
+      paddingLeft: number;
+      paddingRight: number;
+    };
+    const slop = more.props.hitSlop as number;
+    expect(style.paddingLeft + ICON + style.paddingRight + slop * 2).toBe(APPLE_MINIMUM);
+  });
+});
+
+/**
+ * The gap is the ONLY thing that says where a within-meal drop will put the
+ * row, and `dropSlot` counts against the meal WITHOUT the lifted row — so
+ * with every row rendered, the card has to translate. These two ask that the
+ * translation exists: one gap, in one place, never two.
+ */
+describe('the drop gap counts slots without the lifted row (N553)', () => {
+  const three = [
+    entry({ id: 'a', name: 'Oats' }),
+    entry({ id: 'b', name: 'Greek yoghurt' }),
+    entry({ id: 'c', name: 'Banana' }),
+  ];
+
+  function dragCard(activeId: string, dropSlot: number) {
+    return renderCard({
+      entries: three,
+      drag: {
+        enabled: true,
+        activeId,
+        onEnterEdit: jest.fn(),
+        onNudge: jest.fn(),
+        onStart: jest.fn(),
+        onMove: jest.fn(),
+        onEnd: jest.fn(),
+        onCancel: jest.fn(),
+      },
+      isDropTarget: true,
+      dropSlot,
+    });
+  }
+
+  /**
+   * Every testID in the tree, in render order — the gap and the rows share no
+   * parent testID to scope a `within` to, and WHICH row the seam opens above
+   * is the whole point of it. `findAll` walks depth-first, so this is document
+   * order. Asserting the walk found the rows at all is the apparatus check: an
+   * empty list would satisfy a naive "the gap comes first" in silence.
+   */
+  function testIdOrder(): string[] {
+    const root = screen.root;
+    if (!root) return [];
+    return root
+      .findAll((n) => typeof n.props.testID === 'string')
+      .map((n) => n.props.testID as string);
+  }
+
+  it('opens exactly one gap, immediately above the row the drop would push down', () => {
+    // Lifting the FIRST row leaves [b, c]; slot 1 is "between b and c", which
+    // is the seam above c and nowhere else.
+    dragCard('a', 1);
+    expect(screen.getAllByTestId('meal-breakfast-drop-gap')).toHaveLength(1);
+    const order = testIdOrder();
+    expect(order).toContain('food-entry-b-row');
+    expect(order).toContain('food-entry-c-row');
+    const gap = order.indexOf('meal-breakfast-drop-gap');
+    expect(gap).toBeGreaterThan(order.indexOf('food-entry-b-row'));
+    expect(gap).toBeLessThan(order.indexOf('food-entry-c-row'));
+  });
+
+  it('a drop at the END of the meal opens the seam below the last row', () => {
+    // Lifting `a` leaves [b, c], which has two slots — so slot 2 is the end of
+    // the meal, and the seam belongs BELOW c. Asserting the position and not
+    // merely the count is what makes this fail on an untranslated index, which
+    // would put a single seam above c and look identical to a bare count.
+    dragCard('a', 2);
+    expect(screen.getAllByTestId('meal-breakfast-drop-gap')).toHaveLength(1);
+    const order = testIdOrder();
+    expect(order).toContain('food-entry-c-row');
+    expect(order.indexOf('meal-breakfast-drop-gap')).toBeGreaterThan(
+      order.indexOf('food-entry-c-row'),
+    );
   });
 });

@@ -77,6 +77,7 @@ import {
   localTargetView,
   moveEntry,
   removeEntry,
+  reorderEntries,
 } from '@/lib/foodLog';
 import {
   bySlot,
@@ -90,7 +91,8 @@ import {
   type TargetView,
 } from '@/lib/nutrition';
 import { shareBlockedReason } from '@/lib/shares';
-import { useEntryDrag, type SectionFrame } from '@/lib/useEntryDrag';
+import { plan, planInto } from '@/lib/entryOrder';
+import { useEntryDrag, type Frames, type RowFrame, type SectionFrame } from '@/lib/useEntryDrag';
 import { FoodSummaryCard } from '@/components/food/FoodSummaryCard';
 import { useModules } from '@/lib/ModulesProvider';
 import { foodLogGate } from '@/lib/modules';
@@ -169,18 +171,47 @@ export default function FoodScreen() {
    * is not a row that lifts.
    */
   const cardRefs = useRef<Partial<Record<Meal, RNView | null>>>({});
+  // N553 — one entry ROW's view, so a drop can name a slot inside a meal and
+  // not merely the meal. Keyed by entry id and by meal, because a row's meal
+  // is what `slotFor` filters on and reading it back off the day's state at
+  // drop time would race a re-read that has already moved it.
+  const rowRefs = useRef<Map<string, { meal: Meal; view: RNView }>>(new Map());
+  const registerRow = useCallback((meal: Meal) => (id: string, view: RNView | null) => {
+    if (view) rowRefs.current.set(id, { meal, view });
+    else rowRefs.current.delete(id);
+  }, []);
   const measure = useCallback(
-    () =>
-      Promise.all(
-        MEALS.map(
-          (meal) =>
-            new Promise<SectionFrame | null>((resolve) => {
-              const v = cardRefs.current[meal];
-              if (!v) return resolve(null);
-              v.measureInWindow((_x, y, _w, h) => resolve({ meal, top: y, bottom: y + h }));
-            }),
+    (): Promise<Frames> =>
+      Promise.all([
+        Promise.all(
+          MEALS.map(
+            (meal) =>
+              new Promise<SectionFrame | null>((resolve) => {
+                const v = cardRefs.current[meal];
+                if (!v) return resolve(null);
+                v.measureInWindow((_x, y, _w, h) => resolve({ meal, top: y, bottom: y + h }));
+              }),
+          ),
         ),
-      ).then((frames) => frames.filter((f): f is SectionFrame => f !== null)),
+        Promise.all(
+          [...rowRefs.current.entries()].map(
+            ([id, { meal, view }]) =>
+              new Promise<RowFrame | null>((resolve) => {
+                view.measureInWindow((_x, y, _w, h) =>
+                  // A row inside a COLLAPSED card measures zero height at the
+                  // card's origin; four of those stacked on one pixel would
+                  // hand `slotFor` four midpoints in the same place. Dropped
+                  // here rather than guarded downstream, because "it has no
+                  // extent" and "it is not on screen" are the same fact.
+                  resolve(h > 0 ? { id, meal, top: y, bottom: y + h } : null),
+                );
+              }),
+          ),
+        ),
+      ]).then(([sections, rows]) => ({
+        sections: sections.filter((f): f is SectionFrame => f !== null),
+        rows: rows.filter((f): f is RowFrame => f !== null),
+      })),
     [],
   );
 
@@ -193,6 +224,21 @@ export default function FoodScreen() {
   // a day must not move the screen behind it until a day is actually picked
   // — and `monthDays` is which of that month's days already have an entry, so
   // the grid can mark them the way `WeekPlanner`'s marks a planned day.
+  /**
+   * N553/#1019 — which meal is in EDIT MODE, or null. At most one, exactly
+   * like `combining` one state below, and for the same reason: two cards both
+   * offering "Done" is two answers to "what am I in the middle of".
+   *
+   * Owned here rather than in `MealCard` so that entering it is a consequence
+   * of a gesture on a ROW (the long-press, which the row reports upward) and
+   * so that starting a combine can end it.
+   *
+   * KEYED TO THE DAY, the same shape `loaded` and `dated` already use on this
+   * screen: stepping to another day must not leave yesterday's card in edit
+   * mode, and clearing it in an effect would be the synchronous setState the
+   * lint ratchet forbids. Deriving `editingMeal` from it is free.
+   */
+  const [editState, setEditState] = useState<{ on: string; meal: Meal } | null>(null);
   const [monthOpen, setMonthOpen] = useState(false);
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
   const [monthDays, setMonthDays] = useState<Set<string>>(new Set());
@@ -512,14 +558,44 @@ export default function FoodScreen() {
     await reloadDay(wroteOn);
   }
 
-  // N531 — the drop half of a drag. `useEntryDrag` only calls this for a
-  // section DIFFERENT from the one the row started in; `moveEntry` guards
-  // the same thing again at the row, so a no-op never dirties anything.
+  /**
+   * The drop half of a drag — N531's cross-meal move and N553's within-meal
+   * reorder, as ONE handler, because they are one gesture.
+   *
+   * `slot` is the index the row should occupy in the destination meal WITHOUT
+   * itself, which is what `slotFor` returns and what `plan`/`planInto` take.
+   *
+   * The arithmetic lives in `entryOrder.ts`, not here: a rule inside a screen
+   * is a rule no test can reach, which is the same reasoning `nutrition.ts`
+   * states about the macro totals this file used to compute inline.
+   *
+   * `plan` returns NO writes for a drop that changes nothing, and that guard
+   * is load-bearing rather than tidy — a write marks the row dirty, and a
+   * dirty row is one `entrySyncState` reports as `owed`, which disables
+   * sharing with "Save your changes first".
+   */
   const onDropMove = useCallback(
-    (id: string, _from: Meal, to: Meal) => {
+    (id: string, from: Meal, to: Meal, slot: number) => {
       if (!userId) return;
       const wroteOn = on;
-      moveEntry(userId, id, to)
+      const rowsIn = (meal: Meal) => slots.find((sl) => sl.meal === meal)?.entries ?? [];
+      const write =
+        from === to
+          ? // Same meal: a reorder. One row, unless the gap ran out.
+            reorderEntries(userId, plan(rowsIn(to), id, slot).writes)
+          : // Another meal: the row changes meal AND takes a position inside
+            // it. `planInto` gives the moved row's own number plus, if the
+            // destination had no room, that meal's rebalance — applied first,
+            // so the number `moveEntry` writes is one that still fits.
+            (() => {
+              const p = planInto(rowsIn(to), id, slot);
+              const mine = p.writes.find((w) => w.id === id);
+              const others = p.writes.filter((w) => w.id !== id);
+              return reorderEntries(userId, others).then(() =>
+                moveEntry(userId, id, to, mine?.position),
+              );
+            })();
+      write
         .then(() => {
           requestSync('food moved');
           return reloadDay(wroteOn);
@@ -530,7 +606,43 @@ export default function FoodScreen() {
           return reloadDay(wroteOn);
         });
     },
-    [userId, on, reloadDay],
+    [userId, on, reloadDay, slots],
+  );
+
+  /**
+   * N553 — move a row one place without a gesture: VoiceOver's answer to a
+   * drag, wired to the grip's `accessibilityActions`.
+   *
+   * Goes through the same `plan` as the drag rather than swapping two
+   * positions, so a nudge and a drag cannot disagree about what "one place up"
+   * means, and so a nudge into an exhausted gap rebalances exactly as a drop
+   * there would.
+   */
+  const onNudge = useCallback(
+    (id: string, meal: Meal, delta: number) => {
+      if (!userId) return;
+      const wroteOn = on;
+      const rows = slots.find((sl) => sl.meal === meal)?.entries ?? [];
+      const at = rows.findIndex((e) => e.id === id);
+      if (at === -1) return;
+      // `plan` indexes into the list WITHOUT this row, so moving DOWN by one
+      // is `at + 1` in that list, and moving up is `at - 1`. Clamped by `plan`
+      // itself; an out-of-range nudge at either end is a no-op, which is the
+      // right answer for "move the first row up".
+      reorderEntries(userId, plan(rows, id, at + delta).writes)
+        .then(() => {
+          requestSync('food reordered');
+          return reloadDay(wroteOn);
+        })
+        .catch(() => reloadDay(wroteOn));
+    },
+    [userId, on, reloadDay, slots],
+  );
+
+  const editingMeal = editState?.on === on ? editState.meal : null;
+  const setEditingMeal = useCallback(
+    (meal: Meal | null) => setEditState(meal === null ? null : { on, meal }),
+    [on],
   );
 
   const drag = useEntryDrag({
@@ -546,12 +658,24 @@ export default function FoodScreen() {
     () => ({
       enabled: !!userId && combining === null,
       activeId: drag.active?.id ?? null,
+      onEnterEdit: setEditingMeal,
+      onNudge,
       onStart: drag.start,
       onMove: drag.move,
       onEnd: drag.end,
       onCancel: drag.cancel,
     }),
-    [userId, combining, drag.active?.id, drag.start, drag.move, drag.end, drag.cancel],
+    [
+      userId,
+      combining,
+      drag.active?.id,
+      drag.start,
+      drag.move,
+      drag.end,
+      drag.cancel,
+      onNudge,
+      setEditingMeal,
+    ],
   );
 
   // N531 — what the 3-dot menu does. Each closes the sheet first: the
@@ -782,7 +906,15 @@ export default function FoodScreen() {
                   // already is, rather than offered on a past day and then
                   // contradicted a screen later.
                   onStartCombine={
-                    isToday ? () => setCombining({ meal: slot.meal, selected: new Set() }) : undefined
+                    isToday
+                      ? () => {
+                          // One mode at a time (N553): a card cannot be both
+                          // reordering and selecting, and `MealCard` renders
+                          // Done and Combine into the same slot in its header.
+                          setEditingMeal(null);
+                          setCombining({ meal: slot.meal, selected: new Set() });
+                        }
+                      : undefined
                   }
                   onCancelCombine={() => setCombining(null)}
                   onConfirmCombine={confirmCombine}
@@ -796,6 +928,11 @@ export default function FoodScreen() {
                     cardRefs.current[slot.meal] = v;
                   }}
                   isDropTarget={drag.active !== null && drag.target === slot.meal}
+                  // N553 — edit mode, and where a lifted row would land.
+                  editing={editingMeal === slot.meal}
+                  onDoneEditing={() => setEditingMeal(null)}
+                  dropSlot={drag.target === slot.meal ? drag.slot : null}
+                  rowRef={registerRow(slot.meal)}
                   testID={`food-meal-${slot.meal}`}
                 />
               ))}

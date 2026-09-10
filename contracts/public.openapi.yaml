@@ -343,7 +343,7 @@ components:
           description: >
             One item eaten on one day. Macros are ABSOLUTE for the quantity
             logged, already multiplied by `servings`.
-          required: [id, user_id, eaten_on, meal, name, servings, serving_label, notes, created_at, updated_at]
+          required: [id, user_id, eaten_on, meal, name, servings, serving_label, notes, position, created_at, updated_at]
           properties:
             id: { type: string, format: uuid, description: Client-generated. It is the idempotency key for an offline push. }
             user_id: { type: string }
@@ -383,6 +383,26 @@ components:
                 degrades a null category to a neutral one rather than
                 guessing from the name.
             notes: { type: string }
+            position:
+              type: integer
+              format: int64
+              description: >
+                Where this entry sits INSIDE its meal on its day — N553.
+                Neighbours are 1024 apart rather than 0,1,2,…, so moving a row
+                between two others is the midpoint of the two and writes ONE
+                row; a dense rank would renumber everything after the moved
+                one, which offline is a sync conflict per untouched entry. May
+                be negative: dragging to the top of a meal is `min - 1024`,
+                which is what keeps "make this first" a one-row write.
+
+                Scoped to (day, meal). Two entries in DIFFERENT meals routinely
+                share a value — never compare them across meals. Entries come
+                back sorted by it, so a client that groups a day by meal and
+                renders each group in the order received is already correct.
+
+                Not unique, and not a rank: a client must not read "3072" as
+                "third". If two entries in one meal ever collide, order them by
+                id — every client does, so they all agree.
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
 
@@ -408,6 +428,33 @@ components:
                 built from, if any. The server stores it as sent and never
                 derives it — see `NutritionEntry.category`.
             notes: { type: string, maxLength: 500 }
+            position:
+              type: integer
+              format: int64
+              minimum: -1099511627776
+              maximum: 1099511627776
+              description: >
+                OPTIONAL, and OMITTING IT IS MEANINGFUL — N553. Omit it and the
+                entry keeps the order it already has; send it and the entry
+                moves there. Only a reorder should send it.
+
+                This is not a nicety. Every client that predates N553 — web's
+                entry editor, web's scale-by-a-factor button, any installed
+                build of the phone — omits it, and a server that treated the
+                omission as 0 would flatten a meal onto one position the first
+                time any of its rows was edited. See the `SaveEntry` doc
+                comment in `backend/internal/modules/nutrition/postgres.go`.
+
+                A NEW entry with no position is appended to the END of its
+                meal. An entry whose `meal` or `eaten_on` CHANGED and that
+                sends no position is likewise appended to the end of the list
+                it has joined, because its old number was a coordinate in a
+                list it has left.
+
+                The bounds are ±2^40 — far inside 2^53, where a JavaScript
+                number stops being an exact integer and two positions that
+                differ by one would compare equal. Out of range is refused,
+                never clamped.
 
     NutritionRecipeItem:
       allOf:

@@ -1,19 +1,23 @@
 /**
- * Drag a food entry from one meal section to another — N531/#962.
+ * Drag a food entry to a place — N531/#962, completed by N553/#1019.
  *
- * ## What this is, and what it deliberately is not
+ * ## What this used to be, and what changed
  *
- * A drop lands on a SECTION, never on a position inside one. Neither
- * `nutrition_entries` on the server nor `food_entries` on the phone has an
- * order column — both list a meal by `logged_at, id` — so there is nothing a
- * within-meal reorder could be written to, and a drag that let the athlete
- * "put the eggs above the toast" would snap back on the next pull. The
- * ticket's own rule is "do not ship a drag that silently forgets", and the
- * honest way to obey it without a server change is to not offer the thing
- * that would be forgotten: the target is the meal, the highlight is the
- * whole card, and the row sorts into its new section by its log time. See
- * `docs/decisions/history.md`'s N531 entry for the alternative (an order
- * column: migration, OpenAPI, sync, web) and why it was not taken here.
+ * Through N531 a drop landed on a SECTION and never on a position inside one,
+ * and this comment said why: neither store had an order column, both listed a
+ * meal by `logged_at, id`, so "put the eggs above the toast" had nowhere to be
+ * written and would have snapped back on the next pull. That was the right
+ * call and it is now obsolete — the athlete asked for the within-meal move a
+ * second time, and N553 built the missing half (a `position` column on both
+ * stores, through the sync path, rendered by web). The alternative that entry
+ * named as not-taken is what this ticket took.
+ *
+ * So a drop now names TWO things: the meal it landed on, and the SLOT inside
+ * that meal. `dropTargetFor` answers the first from the section frames;
+ * `slotFor` answers the second from the row frames. A drop on a card's header
+ * or its "Add Food" row — over the section but over no row — resolves to the
+ * end of the meal, which is the honest reading of "this meal, unspecified
+ * where".
  *
  * ## Why a hook rather than logic inside `MealCard`
  *
@@ -44,6 +48,45 @@ import type { Meal } from '@/lib/nutrition';
 /** One meal card's vertical extent, in window coordinates. */
 export type SectionFrame = { meal: Meal; top: number; bottom: number };
 
+/** One ENTRY row's vertical extent, in the same window coordinates. */
+export type RowFrame = { id: string; meal: Meal; top: number; bottom: number };
+
+/** Everything measured at the moment a drag starts. */
+export type Frames = { sections: SectionFrame[]; rows: RowFrame[] };
+
+/**
+ * Which slot inside `meal` a finger at `pageY` is over — the index the dragged
+ * row would occupy in that meal WITHOUT itself.
+ *
+ * Compared against each row's MIDPOINT rather than its edges, which is what
+ * makes the drop feel like it follows the finger: crossing the halfway line of
+ * the row above is the moment the athlete expects the gap to open, and using
+ * the row's top instead means the swap happens a whole row late.
+ *
+ * The dragged row is excluded before indexing, because "index 2 in the list
+ * without me" is what a reorder means and what {@link plan} takes. Rows are
+ * sorted by `top`, not trusted in call order — they are measured concurrently
+ * and a `Promise.all` preserves input order, but the input order is the
+ * caller's map over a card and nothing here should depend on that.
+ *
+ * A finger below every row (the "Add Food" button, the card's padding) returns
+ * the length: the end of the meal.
+ */
+export function slotFor(
+  pageY: number,
+  meal: Meal,
+  rows: readonly RowFrame[],
+  draggedId: string,
+): number {
+  const mine = rows
+    .filter((r) => r.meal === meal && r.id !== draggedId)
+    .sort((a, b) => a.top - b.top);
+  for (let i = 0; i < mine.length; i += 1) {
+    if (pageY < (mine[i].top + mine[i].bottom) / 2) return i;
+  }
+  return mine.length;
+}
+
 /**
  * Which section a finger at `pageY` is over, or null between/outside them.
  *
@@ -65,6 +108,14 @@ export type EntryDrag = {
   active: { id: string; meal: Meal } | null;
   /** The section under the finger right now — the card that should light up. */
   target: Meal | null;
+  /**
+   * The slot inside {@link target} the row would land in, or null when the
+   * finger is over no card. Drives the gap the day view opens under the
+   * finger, which is the only thing that tells the athlete WHERE a within-meal
+   * drop will put the row — a whole-card highlight cannot say that, and N531's
+   * feedback was exactly that the move looked like it did nothing.
+   */
+  slot: number | null;
   /** Long-press fired on a row. No-op while `enabled` is false. */
   start: (id: string, meal: Meal) => void;
   /** The finger moved; `pageY` is its window y. */
@@ -85,28 +136,36 @@ export function useEntryDrag({
    * is not a row that can be lifted. Also false with nobody signed in.
    */
   enabled: boolean;
-  /** The four cards' window frames, fresh. Resolves to whatever could be
-   *  measured; a card that has not laid out yet is simply absent. */
-  measure: () => Promise<SectionFrame[]>;
-  /** A drop on a DIFFERENT section than the entry started in. */
-  onDrop: (id: string, from: Meal, to: Meal) => void;
+  /** The cards' AND rows' window frames, fresh. Resolves to whatever could be
+   *  measured; anything that has not laid out yet is simply absent. */
+  measure: () => Promise<Frames>;
+  /**
+   * A drop that actually moves the row — a different meal, a different slot,
+   * or both. `to`/`slot` name the destination; a drop that lands where the row
+   * already was never reaches here (the caller's `plan` guards it a second
+   * time, because a no-op write dirties a row and dirtying a row blocks
+   * sharing).
+   */
+  onDrop: (id: string, from: Meal, to: Meal, slot: number) => void;
 }): EntryDrag {
   const [active, setActive] = useState<{ id: string; meal: Meal } | null>(null);
   const [target, setTarget] = useState<Meal | null>(null);
+  const [slot, setSlot] = useState<number | null>(null);
   // Refs, not state, for what the gesture reads on every move: a
   // `PanResponder` is built once and would otherwise close over the first
   // render's values.
   const activeRef = useRef<{ id: string; meal: Meal } | null>(null);
-  const framesRef = useRef<SectionFrame[]>([]);
+  const framesRef = useRef<Frames>({ sections: [], rows: [] });
   // A measurement that resolves after the drag it was started for has
   // already ended must not arm the NEXT drag with the previous one's frames.
   const dragSeq = useRef(0);
 
   const clear = useCallback(() => {
     activeRef.current = null;
-    framesRef.current = [];
+    framesRef.current = { sections: [], rows: [] };
     setActive(null);
     setTarget(null);
+    setSlot(null);
   }, []);
 
   const start = useCallback(
@@ -115,11 +174,14 @@ export function useEntryDrag({
       dragSeq.current += 1;
       const seq = dragSeq.current;
       activeRef.current = { id, meal };
-      framesRef.current = [];
+      framesRef.current = { sections: [], rows: [] };
       setActive({ id, meal });
       // The row lifts over its own section first, so the highlight starts
-      // there rather than on nothing.
+      // there rather than on nothing. No slot yet: until the frames arrive
+      // there is no honest answer to "where in it", and guessing one would
+      // open a gap under a finger that has not moved.
       setTarget(meal);
+      setSlot(null);
       measure()
         .then((frames) => {
           if (seq !== dragSeq.current || !activeRef.current) return;
@@ -134,23 +196,26 @@ export function useEntryDrag({
   );
 
   const move = useCallback((pageY: number) => {
-    if (!activeRef.current) return;
-    setTarget(dropTargetFor(pageY, framesRef.current));
+    const a = activeRef.current;
+    if (!a) return;
+    const to = dropTargetFor(pageY, framesRef.current.sections);
+    setTarget(to);
+    setSlot(to === null ? null : slotFor(pageY, to, framesRef.current.rows, a.id));
   }, []);
 
   const end = useCallback(
     (pageY: number) => {
       const a = activeRef.current;
       if (!a) return;
-      const to = dropTargetFor(pageY, framesRef.current);
+      const to = dropTargetFor(pageY, framesRef.current.sections);
       // The frames may not have arrived yet (a lift-and-release faster than
       // a measure round trip) — then `to` is null and this is a cancel,
       // which is the right answer for a gesture that never really began.
-      if (to && to !== a.meal) onDrop(a.id, a.meal, to);
+      if (to) onDrop(a.id, a.meal, to, slotFor(pageY, to, framesRef.current.rows, a.id));
       clear();
     },
     [onDrop, clear],
   );
 
-  return { active, target, start, move, end, cancel: clear };
+  return { active, target, slot, start, move, end, cancel: clear };
 }

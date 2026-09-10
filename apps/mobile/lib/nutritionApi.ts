@@ -41,6 +41,15 @@ export type EntryInput = Macros & {
   /** See `Entry.category`'s own doc comment in `nutrition.ts`. */
   category?: string | null;
   notes?: string;
+  /**
+   * Where this entry sits inside its meal — N553/#1019.
+   *
+   * OPTIONAL on the wire, and the server reads an omission as "leave the
+   * order alone". The phone always sends it, because a local row always has
+   * one; the option exists for web, which never does. See
+   * `NutritionEntryInput.position` in `contracts/public.openapi.yaml`.
+   */
+  position?: number;
 };
 
 /**

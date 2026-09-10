@@ -32,6 +32,7 @@ import { randomUUID } from 'expo-crypto';
 import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
 import { addDays, dayString } from './calendar';
 import { getDb, withTransaction } from './db';
+import { POSITION_STEP } from './entryOrder';
 import { caffeineMgForFoodEntry } from './foodCaffeine';
 import type { Entry, Food, Macros, Meal, RecipeItem, Target, TargetView } from './nutrition';
 import { localTrackers, removeFoodCaffeineEntry, syncFoodCaffeineEntry } from './trackers';
@@ -87,6 +88,8 @@ type EntryRow = {
   source_food_id: string | null;
   category: string | null;
   notes: string;
+  /** N553 — where this row sits inside its meal. See `lib/entryOrder.ts`. */
+  position: number;
   updated_at: string;
   deleted_at: string | null;
 };
@@ -112,6 +115,7 @@ function toEntry(r: EntryRow): Entry {
     source_food_id: r.source_food_id,
     category: r.category,
     notes: r.notes,
+    position: r.position,
   };
 }
 
@@ -129,6 +133,31 @@ export type NewEntry = Macros & {
 };
 
 /**
+ * One step past whatever is currently last in that meal, on that day.
+ *
+ * Tombstones EXCLUDED, deliberately: a deleted row is not in the list the
+ * athlete is looking at, so its position should not push the next entry into
+ * a gap. Two live rows at 1024 and 2048 with a tombstone at 3072 give the
+ * next entry 2048 + step, not 3072 + step — the numbers are not a rank and
+ * nothing reads them as a count.
+ *
+ * MAX in SQL rather than `appendPosition` over a fetched list: this runs on
+ * every single log, and reading a meal's rows back to take a maximum is a
+ * query that grows with the meal for an answer one aggregate already has.
+ * `appendPosition` is the same rule for callers that are holding the rows
+ * anyway, and `entryOrder.test.ts` is where the rule itself is pinned.
+ */
+async function nextPositionIn(userId: string, eatenOn: string, meal: Meal): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ last: number | null }>(
+    `SELECT MAX(position) AS last FROM food_entries
+      WHERE user_id = ? AND eaten_on = ? AND meal = ? AND deleted_at IS NULL`,
+    userId, eatenOn, meal,
+  );
+  return row?.last == null ? POSITION_STEP : row.last + POSITION_STEP;
+}
+
+/**
  * Log something, locally, now.
  *
  * Returns as soon as SQLite has it; the network is never awaited. The design
@@ -143,17 +172,18 @@ export async function logFood(userId: string, input: NewEntry): Promise<string> 
   const db = await getDb();
   const id = randomUUID();
   const now = stamp();
+  const position = await nextPositionIn(userId, input.eaten_on, input.meal);
   await db.runAsync(
     `INSERT INTO food_entries (
        id, user_id, eaten_on, meal, name, servings, serving_label,
        kcal, protein_g, carb_g, fat_g, fibre_g,
        saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-       source_food_id, category, notes, logged_at, updated_at, dirty, remote)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)`,
+       source_food_id, category, notes, position, logged_at, updated_at, dirty, remote)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)`,
     id, userId, input.eaten_on, input.meal, input.name, input.servings, input.serving_label,
     input.kcal, input.protein_g, input.carb_g, input.fat_g, input.fibre_g,
     input.saturated_fat_g, input.sugar_g, input.added_sugar_g, input.sodium_mg, input.cholesterol_mg,
-    input.source_food_id ?? null, input.category ?? null, input.notes ?? '', now, now,
+    input.source_food_id ?? null, input.category ?? null, input.notes ?? '', position, now, now,
   );
   if (input.source_food_id) await noteFoodUsed(userId, input.source_food_id, input.eaten_on);
   await syncFoodCaffeine(userId, id, input);
@@ -243,35 +273,94 @@ export async function duplicateEntry(userId: string, id: string): Promise<string
 }
 
 /**
- * Move an entry to another meal on the same day — the drop half of
- * N531/#962's drag.
+ * Move an entry to another meal on the same day — the cross-meal half of the
+ * drag, N531/#962, now also carrying a position (N553/#1019).
  *
- * ONLY `meal` changes. Not `logged_at`: that is when the athlete ate it, and
- * a lunch dragged to breakfast was still eaten when it was eaten. (It is also
- * what `localEntries` orders by, so a moved row sorts into its new section by
- * its log time rather than landing at the bottom — this file has no order
- * column to persist a position with, see `docs/decisions/history.md`'s N531
- * entry for why the drag deliberately does not offer one.)
+ * `meal` changes, and so does `position`, because the two are one fact: a
+ * position is a coordinate INSIDE a meal, so a row that has changed meal is
+ * holding a number from a list it has left. `position` omitted means "append
+ * to the end of the meal you have joined" — the honest answer when the finger
+ * landed on a card rather than between two of its rows. The server applies
+ * exactly the same rule to a `PUT` that changes `meal` without a position;
+ * see `SaveEntry`'s doc comment.
  *
- * A drop on the section the entry is already in is a NO-OP, and that is a
+ * NOT `logged_at`: that is when the athlete ate it, and a lunch dragged to
+ * breakfast was still eaten when it was eaten. Since N553, `logged_at` no
+ * longer decides where the row sorts either — `position` does — so this is
+ * now purely a record of the clock rather than a de facto order.
+ *
+ * A drop that changes NEITHER meal nor position is a NO-OP, and that is a
  * guard rather than an optimisation: an edit marks the row `dirty`, and a
  * dirty row is one `entrySyncState` reports as `owed` — which disables
  * sharing with "Save your changes first". A finger that lifted where it
  * started must not cost the athlete a share for nothing.
  */
-export async function moveEntry(userId: string, id: string, meal: Meal): Promise<void> {
+export async function moveEntry(
+  userId: string,
+  id: string,
+  meal: Meal,
+  position?: number,
+): Promise<void> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ meal: string }>(
-    `SELECT meal FROM food_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+  const row = await db.getFirstAsync<{ meal: string; position: number }>(
+    `SELECT meal, position FROM food_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     id, userId,
   );
   if (!row) throw new Error('That entry no longer exists on this device.');
-  if (row.meal === meal) return;
+  const to = position ?? (row.meal === meal ? row.position : await nextPositionIn(userId, await dayOf(db, userId, id), meal));
+  if (row.meal === meal && row.position === to) return;
   await db.runAsync(
-    `UPDATE food_entries SET meal = ?, dirty = 1, updated_at = ?, last_error = NULL
+    `UPDATE food_entries SET meal = ?, position = ?, dirty = 1, updated_at = ?, last_error = NULL
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
-    meal, stamp(), id, userId,
+    meal, to, stamp(), id, userId,
   );
+}
+
+/** The day an entry is on — needed to scope `nextPositionIn` to the right list. */
+async function dayOf(db: Awaited<ReturnType<typeof getDb>>, userId: string, id: string): Promise<string> {
+  const row = await db.getFirstAsync<{ eaten_on: string }>(
+    `SELECT eaten_on FROM food_entries WHERE id = ? AND user_id = ?`,
+    id, userId,
+  );
+  if (!row) throw new Error('That entry no longer exists on this device.');
+  return row.eaten_on;
+}
+
+/**
+ * Apply an {@link OrderPlan} — the writes a within-meal reorder decided on.
+ *
+ * ONE row for an ordinary move, which is the whole point of the gapped
+ * scheme: `plan()` gives the moved row the midpoint of its two new
+ * neighbours, so nothing else has to be renumbered, so nothing else is
+ * dirtied and nothing else can conflict on the next sync. Only an exhausted
+ * gap produces more, and then it is one meal's worth.
+ *
+ * One transaction, because a rebalance that half-applied would leave a meal
+ * with two rows on the same number — recoverable (the `id` tiebreak still
+ * gives a defined order) but not what the athlete arranged.
+ *
+ * Every write goes through the outbox exactly like an edit: `dirty = 1`, a
+ * fresh `updated_at` for the push's compare-and-swap, and `last_error`
+ * cleared. There is no reorder endpoint on the server and there deliberately
+ * is not one — position rides the entry's own upsert, so a reorder made in a
+ * basement gym syncs by the same machinery as everything else the athlete did
+ * down there.
+ */
+export async function reorderEntries(
+  userId: string,
+  writes: readonly { id: string; position: number }[],
+): Promise<void> {
+  if (writes.length === 0) return;
+  const db = await getDb();
+  await withTransaction(db, async () => {
+    for (const w of writes) {
+      await db.runAsync(
+        `UPDATE food_entries SET position = ?, dirty = 1, updated_at = ?, last_error = NULL
+          WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+        w.position, stamp(), w.id, userId,
+      );
+    }
+  });
 }
 
 /**
@@ -399,13 +488,32 @@ async function removeFoodCaffeineSafely(userId: string, foodEntryId: string): Pr
   }
 }
 
-/** One day's entries, tombstones excluded. SQLite only — works offline. */
+/**
+ * One day's entries, tombstones excluded. SQLite only — works offline.
+ *
+ * `position, id` (N553), NOT `logged_at, id` as it was through N531. The
+ * athlete's own arrangement is what a meal shows, and `logged_at` no longer
+ * decides it — an entry logged at 07:05 sits above one logged at 07:00 if
+ * that is where it was dragged.
+ *
+ * `id` is the tiebreak and it is load-bearing rather than tidy: it is what
+ * makes the sort a TOTAL order, so two devices that independently landed two
+ * rows on the same position still show them in the same sequence. Identical
+ * to `compareEntries` in `entryOrder.ts` and to the server's own trailing
+ * `id` — three implementations of one rule, which is exactly why it is
+ * written down in all three places.
+ *
+ * Position is per (day, meal), so this sorts a whole DAY by a key that is only
+ * meaningful within a meal. That is fine and deliberate: every caller groups
+ * by meal (`bySlot`) before rendering, so what anyone actually reads off this
+ * is the order within one meal.
+ */
 export async function localEntries(userId: string, on: string): Promise<Entry[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<EntryRow>(
     `SELECT * FROM food_entries
       WHERE user_id = ? AND eaten_on = ? AND deleted_at IS NULL
-      ORDER BY logged_at, id`,
+      ORDER BY position, id`,
     userId, on,
   );
   return rows.map(toEntry);
@@ -558,8 +666,8 @@ export async function cacheEntries(
            id, user_id, eaten_on, meal, name, servings, serving_label,
            kcal, protein_g, carb_g, fat_g, fibre_g,
            saturated_fat_g, sugar_g, added_sugar_g, sodium_mg, cholesterol_mg,
-           source_food_id, category, notes, logged_at, updated_at, dirty, remote)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
+           source_food_id, category, notes, position, logged_at, updated_at, dirty, remote)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,1)
          ON CONFLICT(id) DO UPDATE SET
            eaten_on = excluded.eaten_on, meal = excluded.meal, name = excluded.name,
            servings = excluded.servings, serving_label = excluded.serving_label,
@@ -569,12 +677,22 @@ export async function cacheEntries(
            added_sugar_g = excluded.added_sugar_g, sodium_mg = excluded.sodium_mg,
            cholesterol_mg = excluded.cholesterol_mg,
            source_food_id = excluded.source_food_id, category = excluded.category,
-           notes = excluded.notes, remote = 1
+           notes = excluded.notes,
+           -- N553: the server's position, not a locally re-derived one. This
+           -- is what makes a reorder made on one phone show up on another,
+           -- and on a reinstall. It matters more here than it looks: this
+           -- path synthesises logged_at from a LOCAL stamp (see the bind
+           -- list below), so after a fresh install logged_at records when the
+           -- backfill happened to run and says nothing about the meal at all.
+           -- position is the only thing in this row that still knows what the
+           -- athlete arranged. (No backticks in here: this is inside a
+           -- template literal.)
+           position = excluded.position, remote = 1
          WHERE food_entries.dirty = 0 AND food_entries.deleted_at IS NULL`,
         e.id, userId, e.eaten_on, e.meal, e.name, e.servings, e.serving_label,
         e.kcal, e.protein_g, e.carb_g, e.fat_g, e.fibre_g,
         e.saturated_fat_g, e.sugar_g, e.added_sugar_g, e.sodium_mg, e.cholesterol_mg,
-        e.source_food_id, e.category, e.notes, now, now,
+        e.source_food_id, e.category, e.notes, e.position, now, now,
       );
     }
   });
@@ -1418,6 +1536,11 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
           saturated_fat_g: r.saturated_fat_g, sugar_g: r.sugar_g, added_sugar_g: r.added_sugar_g,
           sodium_mg: r.sodium_mg, cholesterol_mg: r.cholesterol_mg,
           source_food_id: r.source_food_id, category: r.category, notes: r.notes,
+          // N553 — the reorder rides the entry's own upsert. There is no
+          // reorder endpoint and deliberately is not one: a drag made offline
+          // syncs through the outbox that was already carrying everything
+          // else the athlete did offline.
+          position: r.position,
         });
         // COMPARE-AND-SWAP on updated_at: an edit that landed while this push
         // was in flight leaves the row dirty for the next pass rather than
