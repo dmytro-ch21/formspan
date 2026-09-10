@@ -256,7 +256,7 @@ it('renders through the loading transition without changing its hook count', asy
   // Render one throws if a hook count changes between renders, which is the
   // whole bug: the loading render returns before the memo, every later render
   // reaches it.
-  render(<BjjSessionScreen />);
+  await render(<BjjSessionScreen />);
 
   // The loading branch is what renders first, and it must — see `deferred`.
   expect(screen.getByLabelText('Loading your session')).toBeTruthy();
@@ -270,7 +270,7 @@ it('renders through the loading transition without changing its hook count', asy
 it('shows the session it loaded, not an empty shell', async () => {
   // Guards the fix being "made the crash go away" rather than "made the screen
   // work" — an early `return null` would satisfy the test above.
-  render(<BjjSessionScreen />);
+  await render(<BjjSessionScreen />);
 
   await waitFor(() => {
     expect(screen.getByText('Gi class')).toBeTruthy();
@@ -306,7 +306,7 @@ it('shows a technique the library never matched, distinctly from a named one', a
     }),
   );
 
-  render(<BjjSessionScreen />);
+  await render(<BjjSessionScreen />);
 
   await waitFor(() => {
     expect(screen.getByText('Gi class')).toBeTruthy();
@@ -344,7 +344,7 @@ it('shows a technique the library never matched, distinctly from a named one', a
  * `session.ended_at` the screen gates on.
  */
 it('offers the share card on a class that has finished', async () => {
-  render(<BjjSessionScreen />);
+  await render(<BjjSessionScreen />);
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-session-share')).toBeTruthy();
@@ -356,7 +356,7 @@ it('offers no share card while the class is still open', async () => {
     deferred({ ...mockSession, ended_at: null }),
   );
 
-  render(<BjjSessionScreen />);
+  await render(<BjjSessionScreen />);
 
   await waitFor(() => {
     expect(screen.getByText('Gi class')).toBeTruthy();
@@ -376,6 +376,45 @@ it('offers no share card while the class is still open', async () => {
  * wires the result through, rather than only being true in the pure-logic
  * layer.
  */
+
+/**
+ * Press the finish control under FAKE timers.
+ *
+ * In RNTL 14 `fireEvent` RETURNS the handler's return value and
+ * `fireEvent.press` awaits it — so `await fireEvent.press(x)` awaits the
+ * screen's own `async` press handler, not just React's re-render. This screen's
+ * finish handler does not settle until the clock moves, so with a frozen clock
+ * the press never returns and the test TIMES OUT rather than failing: it reads
+ * as a hung screen instead of a test that needs its clock advanced.
+ *
+ * So step the clock while the press is still in flight, and stop at the first
+ * step that settles it — leaving the rest to each test's own `waitFor`, exactly
+ * as before this migration.
+ *
+ * The step size means the fake clock can end up to ~100ms past the moment the
+ * press actually settled. Nothing in this file is sensitive to that today — the
+ * backdated-day test asserts a DAY, and the corrected-end-time test computes its
+ * expected timestamp before this runs — but a test here that asserts an exact
+ * `ended_at` would be, so read this before adding one.
+ */
+async function holdToFinish(element: Parameters<typeof fireEvent.press>[0]) {
+  let settled = false;
+  const pressed = fireEvent.press(element).then(() => {
+    settled = true;
+  });
+  for (let step = 0; step < 20 && !settled; step++) {
+    try {
+      await jest.advanceTimersByTimeAsync(100);
+    } catch {
+      // Real timers in this test — there is no frozen clock to step, and the
+      // press settles on its own. `finishTheClass` below is shared by tests on
+      // both kinds of clock, which is why this is caught rather than avoided.
+      break;
+    }
+  }
+  await pressed;
+}
+
 describe('the HR timeline (N491/#852)', () => {
   afterEach(() => {
     (getSessionMetrics as jest.Mock).mockClear();
@@ -415,7 +454,7 @@ describe('the HR timeline (N491/#852)', () => {
     }));
     (listBiometricSamples as jest.Mock).mockResolvedValueOnce(samples);
 
-    render(<BjjSessionScreen />);
+    await render(<BjjSessionScreen />);
 
     await waitFor(() => {
       expect(screen.getByTestId('bjj-session-hr-timeline')).toBeTruthy();
@@ -442,7 +481,7 @@ describe('the HR timeline (N491/#852)', () => {
       },
     ]);
 
-    render(<BjjSessionScreen />);
+    await render(<BjjSessionScreen />);
 
     await waitFor(() => {
       expect(screen.getByTestId('bjj-session-hr')).toBeTruthy();
@@ -454,7 +493,7 @@ describe('the HR timeline (N491/#852)', () => {
     (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
     (listBiometricSamples as jest.Mock).mockRejectedValueOnce(new Error('network'));
 
-    render(<BjjSessionScreen />);
+    await render(<BjjSessionScreen />);
 
     await waitFor(() => {
       expect(screen.getByTestId('bjj-session-hr-stats')).toBeTruthy();
@@ -498,9 +537,9 @@ describe('finishing with a corrected end time', () => {
   });
 
   it('leaves the fast path alone: no correction opened, ended_at is real now', async () => {
-    render(<BjjSessionScreen />);
+    await render(<BjjSessionScreen />);
     const finish = await screen.findByTestId('bjj-session-finish');
-    fireEvent.press(finish);
+    await holdToFinish(finish);
 
     await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
     // `undefined` — the session started TODAY, so `finishTimestampFor`
@@ -511,7 +550,7 @@ describe('finishing with a corrected end time', () => {
   });
 
   it('sends the corrected end time when the athlete sets one before finishing', async () => {
-    render(<BjjSessionScreen />);
+    await render(<BjjSessionScreen />);
     await screen.findByTestId('bjj-session-finish');
     // Read the fake clock back rather than trusting the literal set in
     // `beforeEach`: `findByTestId` above polls under fake timers, which
@@ -521,10 +560,10 @@ describe('finishing with a corrected end time', () => {
     // AT THAT MOMENT, so the assertion has to start from the same place.
     const openedAt = new Date();
 
-    fireEvent.press(screen.getByTestId('bjj-session-finish-end-time-row'));
-    fireEvent.press(screen.getByTestId('bjj-session-finish-end-time-offset-120'));
+    await fireEvent.press(screen.getByTestId('bjj-session-finish-end-time-row'));
+    await fireEvent.press(screen.getByTestId('bjj-session-finish-end-time-offset-120'));
 
-    fireEvent.press(screen.getByTestId('bjj-session-finish'));
+    await holdToFinish(screen.getByTestId('bjj-session-finish'));
 
     await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
     expect(finishLocalSession).toHaveBeenCalledWith(
@@ -571,9 +610,9 @@ describe('finishing a session backdated to a past day', () => {
   });
 
   it("lands ended_at on the session's own day, not the real day it was finished", async () => {
-    render(<BjjSessionScreen />);
+    await render(<BjjSessionScreen />);
     const finish = await screen.findByTestId('bjj-session-finish');
-    fireEvent.press(finish);
+    await holdToFinish(finish);
 
     await waitFor(() => expect(finishLocalSession).toHaveBeenCalledTimes(1));
 
@@ -642,9 +681,9 @@ async function finishTheClass() {
   (readLocalSession as jest.Mock).mockImplementation(() =>
     deferred({ ...mockSession, ended_at: null }),
   );
-  render(<BjjSessionScreen />);
+  await render(<BjjSessionScreen />);
   const finish = await screen.findByTestId('bjj-session-finish');
-  fireEvent.press(finish);
+  await holdToFinish(finish);
 }
 
 it('shows the rung when the class on the mat is what carried the streak', async () => {

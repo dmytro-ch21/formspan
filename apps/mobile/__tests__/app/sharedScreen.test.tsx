@@ -103,8 +103,8 @@ it('opens the RECIPIENT’S copy after accepting, never the sender’s', async (
   // end of an accept that actually worked.
   mockInbox.mockResolvedValue([card({ id: 's1', resource_id: 'w-hers' })]);
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s1'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s1'));
 
   await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/workout/new-copy'));
   // And the pull that makes the copy exist on THIS device. It was made
@@ -130,8 +130,8 @@ it('drops the accepted row locally, rather than waiting for a refetch', async ()
   // mocked `push` was tried and fails against the correct code.
   mockInbox.mockResolvedValue([card({ id: 's1' })]);
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s1'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s1'));
 
   await waitFor(() => expect(screen.queryByTestId('share-card-s1')).toBeNull());
 });
@@ -143,8 +143,8 @@ it('accepts a kind it has never heard of, and simply does not navigate', async (
   mockInbox.mockResolvedValue([card({ id: 's9', resource_type: 'spaceship' })]);
   mockAccept.mockResolvedValue({ resource_type: 'spaceship', resource_id: 'x' });
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s9'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s9'));
 
   await waitFor(() => expect(mockAccept).toHaveBeenCalled());
   expect(mockPush).not.toHaveBeenCalled();
@@ -166,8 +166,8 @@ it('opens an accepted sequence, rather than describing where it went', async () 
   mockInbox.mockResolvedValue([card({ id: 's8', resource_type: 'sequence' })]);
   mockAccept.mockResolvedValue({ resource_type: 'sequence', resource_id: 'seq-copy' });
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s8'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s8'));
 
   await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/sequence/seq-copy'));
   // And nothing is said about where it went, because it went there.
@@ -188,8 +188,8 @@ it('never names the Library as where an accepted thing lands', async () => {
   mockInbox.mockResolvedValue([card({ id: 's7', resource_type: 'spaceship' })]);
   mockAccept.mockResolvedValue({ resource_type: 'spaceship', resource_id: 'x' });
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s7'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s7'));
 
   const landed = await screen.findByTestId('shared-landed');
   expect(landed).toHaveTextContent('Accepted — the copy is yours now.');
@@ -202,7 +202,7 @@ it('says the load failed rather than showing an empty inbox', async () => {
   mockInbox.mockRejectedValue(new Error('Network request failed'));
   mockSent.mockRejectedValue(new Error('Network request failed'));
 
-  render(<SharedScreen />);
+  await render(<SharedScreen />);
 
   expect(await screen.findByTestId('shared-load-error')).toBeTruthy();
   expect(screen.queryByTestId('shared-inbox-empty')).toBeNull();
@@ -210,7 +210,7 @@ it('says the load failed rather than showing an empty inbox', async () => {
 
 it('shows the empty inbox when it really is empty', async () => {
   // The arm that makes the previous test mean anything.
-  render(<SharedScreen />);
+  await render(<SharedScreen />);
   expect(await screen.findByTestId('shared-inbox-empty')).toBeTruthy();
 });
 
@@ -218,7 +218,7 @@ it('says shares vanish either way, even with nothing sent', async () => {
   // Declining DELETES, so a sender who comes back to an empty list is exactly
   // the person about to conclude they were turned down. Rendering the note
   // only beside surviving rows put it everywhere except the moment it is for.
-  render(<SharedScreen />);
+  await render(<SharedScreen />);
   await screen.findByTestId('shared-sent-empty');
   expect(await screen.findByText(/don't say which way/)).toBeTruthy();
 });
@@ -228,8 +228,8 @@ it('confirms an accept out loud, because the row vanishing is otherwise the whol
   // disappearing — which reads as much like a failure as a success.
   mockInbox.mockResolvedValue([card({ id: 's1' })]);
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s1'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s1'));
 
   await waitFor(() => expect(mockPlay).toHaveBeenCalledWith('success'));
 });
@@ -238,7 +238,7 @@ describe('Accept all (N529/#960)', () => {
   it('is absent with one waiting, present with two', async () => {
     // "Accept all" over a single card is a second button for the same tap.
     mockInbox.mockResolvedValue([card({ id: 's1' })]);
-    render(<SharedScreen />);
+    await render(<SharedScreen />);
     await screen.findByTestId('share-card-s1');
     expect(screen.queryByTestId('share-accept-all')).toBeNull();
   });
@@ -246,10 +246,10 @@ describe('Accept all (N529/#960)', () => {
   it('accepts every card, navigates NOWHERE, syncs once, and reports the count', async () => {
     mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' }), card({ id: 's3' })]);
 
-    render(<SharedScreen />);
+    await render(<SharedScreen />);
     const all = await screen.findByTestId('share-accept-all');
     expect(all).toHaveTextContent('Accept all 3');
-    fireEvent.press(all);
+    await fireEvent.press(all);
 
     await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(3));
     expect(await screen.findByTestId('shared-landed')).toHaveTextContent(
@@ -280,8 +280,8 @@ describe('Accept all (N529/#960)', () => {
     );
     mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' })]);
 
-    render(<SharedScreen />);
-    fireEvent.press(await screen.findByTestId('share-accept-all'));
+    await render(<SharedScreen />);
+    await fireEvent.press(await screen.findByTestId('share-accept-all'));
 
     await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(1));
     expect(mockAccept.mock.calls[0][1]).toBe('s1');
@@ -305,8 +305,8 @@ describe('Accept all (N529/#960)', () => {
     );
     mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' }), card({ id: 's3' })]);
 
-    render(<SharedScreen />);
-    fireEvent.press(await screen.findByTestId('share-accept-all'));
+    await render(<SharedScreen />);
+    await fireEvent.press(await screen.findByTestId('share-accept-all'));
 
     await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(3));
     // The count on screen is the count that happened — "2 of 3", never "2".
@@ -330,8 +330,8 @@ describe('Accept all (N529/#960)', () => {
     mockAccept.mockRejectedValue(new Error('offline'));
     mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' })]);
 
-    render(<SharedScreen />);
-    fireEvent.press(await screen.findByTestId('share-accept-all'));
+    await render(<SharedScreen />);
+    await fireEvent.press(await screen.findByTestId('share-accept-all'));
 
     await waitFor(() => expect(mockAccept).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId('shared-action-error')).toHaveTextContent(
@@ -349,11 +349,11 @@ describe('Accept all (N529/#960)', () => {
     // request, and no lag behind a card that just vanished.
     mockInbox.mockResolvedValue([card({ id: 's1' }), card({ id: 's2' })]);
 
-    render(<SharedScreen />);
+    await render(<SharedScreen />);
     await screen.findByTestId('share-accept-all');
     expect(shareInboxCount()).toBe(2);
 
-    fireEvent.press(screen.getByTestId('share-accept-all'));
+    await fireEvent.press(screen.getByTestId('share-accept-all'));
     await waitFor(() => expect(screen.queryByTestId('share-card-s2')).toBeNull());
     await waitFor(() => expect(shareInboxCount()).toBe(0));
   });
@@ -368,11 +368,11 @@ describe('Accept all (N529/#960)', () => {
       .mockResolvedValueOnce([card({ id: 's1' }), card({ id: 's2' })])
       .mockResolvedValue([card({ id: 's1' })]);
 
-    render(<SharedScreen />);
+    await render(<SharedScreen />);
     await screen.findByTestId('share-card-s2');
     expect(shareInboxCount()).toBe(2);
 
-    fireEvent.press(screen.getByTestId('share-decline-s2'));
+    await fireEvent.press(screen.getByTestId('share-decline-s2'));
     await waitFor(() => expect(mockDismiss).toHaveBeenCalled());
     await waitFor(() => expect(shareInboxCount()).toBe(1));
   });
@@ -385,8 +385,8 @@ it('stays silent when the accept fails', async () => {
   mockInbox.mockResolvedValue([card({ id: 's1' })]);
   mockAccept.mockRejectedValue(new Error('offline'));
 
-  render(<SharedScreen />);
-  fireEvent.press(await screen.findByTestId('share-accept-s1'));
+  await render(<SharedScreen />);
+  await fireEvent.press(await screen.findByTestId('share-accept-s1'));
 
   await waitFor(() => expect(mockAccept).toHaveBeenCalled());
   expect(mockPlay).not.toHaveBeenCalled();

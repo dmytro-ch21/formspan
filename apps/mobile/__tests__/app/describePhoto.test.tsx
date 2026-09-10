@@ -115,9 +115,9 @@ const draft = {
 const NETWORK_WORDS = [/signal/i, /connection/i, /offline/i, /reach/i];
 
 async function tapCamera() {
-  render(<DescribeMealScreen />);
+  await render(<DescribeMealScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-camera'));
+    await fireEvent.press(screen.getByTestId('describe-camera'));
   });
 }
 
@@ -192,9 +192,9 @@ it('tells someone who CHOSE a photo to try a different one, not to take one', as
   // advice they cannot follow, on a screen whose other button is "Choose one".
   mockManipulate.mockRejectedValue(new Error('decode failed'));
 
-  render(<DescribeMealScreen />);
+  await render(<DescribeMealScreen />);
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-library'));
+    await fireEvent.press(screen.getByTestId('describe-library'));
   });
 
   const shown = await screen.findByTestId('describe-error');
@@ -244,7 +244,7 @@ describe('arriving with photo=1', () => {
       photo: '1',
     });
 
-    render(<DescribeMealScreen />);
+    await render(<DescribeMealScreen />);
 
     await waitFor(() => expect(mockPermission).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockLaunchCamera).toHaveBeenCalledTimes(1));
@@ -257,18 +257,18 @@ describe('arriving with photo=1', () => {
       photo: '1',
     });
 
-    render(<DescribeMealScreen />);
+    await render(<DescribeMealScreen />);
     await waitFor(() => expect(mockLaunchCamera).toHaveBeenCalledTimes(1));
 
     // A description typed afterwards re-renders the screen; the auto-photo
     // effect must not fire a second time off that re-render.
-    fireEvent.changeText(screen.getByTestId('describe-input'), 'and some toast');
+    await fireEvent.changeText(screen.getByTestId('describe-input'), 'and some toast');
     expect(mockLaunchCamera).toHaveBeenCalledTimes(1);
   });
 
   it('does not open the camera on an ordinary visit', async () => {
     // The default `beforeEach` mock — no `photo` param at all.
-    render(<DescribeMealScreen />);
+    await render(<DescribeMealScreen />);
     await act(async () => {});
     expect(mockLaunchCamera).not.toHaveBeenCalled();
   });

@@ -141,7 +141,7 @@ it('keeps an offline-created workout the server has never heard of', async () =>
     workout({ id: 'local-1', name: 'Made In The Gym' }),
   ]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   await waitFor(() => expect(mockCacheWorkouts).toHaveBeenCalled());
   expect(await screen.findByText('Made In The Gym')).toBeTruthy();
@@ -158,7 +158,7 @@ it('re-reads the cache AFTER writing the response to it', async () => {
     return [workout()];
   });
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   await waitFor(() => expect(order).toContain('write'));
   // Asserted as a PATTERN, not as the whole sequence: a focus effect can run
@@ -186,7 +186,7 @@ it('renders the plan when the cache write fails, instead of a SQLite error', asy
   // empty-cache guard is the thing being exercised.
   mockCachedWorkouts.mockResolvedValue([]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   expect(await screen.findByText('Legs')).toBeTruthy();
   expect(screen.queryByText(/cannot rollback/)).toBeNull();
@@ -212,7 +212,7 @@ it('falls back to READING the cache when the cache WRITE fails', async () => {
   mockCacheWorkouts.mockRejectedValue(new Error('cannot rollback - no transaction is active'));
   mockCachedWorkouts.mockResolvedValue([workout({ id: 'local-1', name: 'Made In The Gym' })]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   expect(await screen.findByText('Made In The Gym')).toBeTruthy();
   expect(warn).toHaveBeenCalled();
@@ -239,11 +239,11 @@ it('drops a superseded load instead of overwriting the newer one', async () => {
   mockCacheWorkouts.mockImplementation(() => parked);
   mockCachedWorkouts.mockResolvedValue([workout({ id: 'w1', name: 'Legs' })]);
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
   await waitFor(() => expect(mockCacheWorkouts).toHaveBeenCalled());
 
   // Supersede it before it can finish.
-  fireEvent.press(screen.getByText('VOLA Workouts'));
+  await fireEvent.press(screen.getByText('VOLA Workouts'));
   expect(await screen.findByText('Someone Else Plan')).toBeTruthy();
 
   // Now let the stale load resume. Waited on as an INCREASE from a baseline,
@@ -272,10 +272,10 @@ it('still renders the network list for the shared scope, which has no cache', as
       : [workout({ id: 'w1', name: 'Legs' })],
   );
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
   await screen.findByText('Legs');
 
-  fireEvent.press(screen.getByText('VOLA Workouts'));
+  await fireEvent.press(screen.getByText('VOLA Workouts'));
 
   expect(await screen.findByText('Someone Else Plan')).toBeTruthy();
   // And the cached `mine` row must not leak into the shared tab.
@@ -298,8 +298,8 @@ it('marks a community plan on the shelf that carries VOLA’s name', async () =>
       : [],
   );
 
-  render(<WorkoutsScreen />);
-  fireEvent.press(screen.getByText('VOLA Workouts'));
+  await render(<WorkoutsScreen />);
+  await fireEvent.press(screen.getByText('VOLA Workouts'));
   await screen.findByText('Ours');
 
   // Scoped to each tile, not to the screen. Asserting both strings exist
@@ -325,8 +325,8 @@ it('says "1 exercise" on a one-movement plan', async () => {
       : [],
   );
 
-  render(<WorkoutsScreen />);
-  fireEvent.press(screen.getByText('VOLA Workouts'));
+  await render(<WorkoutsScreen />);
+  await fireEvent.press(screen.getByText('VOLA Workouts'));
 
   expect(await screen.findByText('1 exercise')).toBeTruthy();
 });
@@ -344,7 +344,7 @@ it('renders the error banner below the header, not flush against the safe area',
   mockCachedWorkouts.mockResolvedValue([]);
   mockListWorkouts.mockRejectedValue(new Error('offline'));
 
-  render(<WorkoutsScreen />);
+  await render(<WorkoutsScreen />);
 
   await screen.findByTestId('workouts-error');
 

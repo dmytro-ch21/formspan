@@ -122,7 +122,7 @@ it('does NOT auto-start a planned STRENGTH session — the picker must be reacha
   mockListWorkouts.mockResolvedValue([planned]);
   mockParams = { sport: 'strength', workout: 'w1' };
 
-  render(<StartSessionScreen />);
+  await render(<StartSessionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('session-intent-picker')).toBeTruthy());
   // N499/#870: this is now the distinct "Start Squat Day" primary card, not
@@ -140,7 +140,7 @@ it('still auto-starts a planned BJJ session — only strength gained a picker', 
   mockListWorkouts.mockResolvedValue([planned]);
   mockParams = { sport: 'bjj', workout: 'w2' };
 
-  render(<StartSessionScreen />);
+  await render(<StartSessionScreen />);
 
   await waitFor(() => expect(mockStartLocalSession).toHaveBeenCalledTimes(1));
   expect(screen.queryByTestId('session-intent-picker')).toBeNull();
@@ -153,7 +153,7 @@ it('renders a planned strength template as the distinct primary action, not the 
   mockListWorkouts.mockResolvedValue([planned, other]);
   mockParams = { sport: 'strength', workout: 'w1' };
 
-  render(<StartSessionScreen />);
+  await render(<StartSessionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('start-workout-w1')).toBeTruthy());
   // The whole bug report: Plan already named this template, so it must not
@@ -170,13 +170,13 @@ it('starts the planned template with the selected intent in one tap — no re-se
   mockListWorkouts.mockResolvedValue([planned]);
   mockParams = { sport: 'strength', workout: 'w1' };
 
-  render(<StartSessionScreen />);
+  await render(<StartSessionScreen />);
 
   await waitFor(() => expect(screen.getByTestId('start-workout-w1')).toBeTruthy());
   // Mark today as a Light day BEFORE starting — the whole point of the
   // ticket is that this is reachable without re-picking the template.
-  fireEvent.press(screen.getByTestId('session-intent-light'));
-  fireEvent.press(screen.getByTestId('start-workout-w1'));
+  await fireEvent.press(screen.getByTestId('session-intent-light'));
+  await fireEvent.press(screen.getByTestId('start-workout-w1'));
 
   await waitFor(() => expect(mockStartLocalSession).toHaveBeenCalledTimes(1));
   expect(mockStartLocalSession).toHaveBeenCalledWith(
@@ -193,7 +193,7 @@ it('an ad-hoc strength session with no plan still shows the full chooser, unchan
   mockListWorkouts.mockResolvedValue([a, b]);
   mockParams = { sport: 'strength' }; // no `workout` param at all
 
-  render(<StartSessionScreen />);
+  await render(<StartSessionScreen />);
 
   await waitFor(() => expect(screen.getByText('From a workout')).toBeTruthy());
   expect(screen.getByTestId('start-workout-w4')).toBeTruthy();
@@ -210,7 +210,7 @@ it('falls through to the generic chooser when the plan points at a template that
   // the template it points at, since there is no foreign key by design.
   mockParams = { sport: 'strength', workout: 'gone' };
 
-  render(<StartSessionScreen />);
+  await render(<StartSessionScreen />);
 
   await waitFor(() => expect(screen.getByText('From a workout')).toBeTruthy());
   expect(screen.getByTestId('start-workout-w6')).toBeTruthy();

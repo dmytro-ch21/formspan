@@ -106,7 +106,7 @@ it('keeps the newer load’s result even when the older call’s response arrive
   listCheckinsMock.mockImplementationOnce(() => first.promise);
   listCheckinsMock.mockImplementationOnce(() => second.promise);
 
-  render(<CheckinScreen />);
+  await render(<CheckinScreen />);
 
   // The first `load()` (units='metric') is now in flight.
   await waitFor(() => expect(listCheckinsMock).toHaveBeenCalledTimes(1));
@@ -114,7 +114,7 @@ it('keeps the newer load’s result even when the older call’s response arrive
   // Simulate `UnitsProvider` correcting a frame later — this is the same
   // mechanism that fires the second `load()` in the real app, via the
   // changed `useCallback` identity and the `useFocusEffect` re-running.
-  act(() => {
+  await act(() => {
     triggerUnitsCorrection?.();
   });
   await waitFor(() => expect(listCheckinsMock).toHaveBeenCalledTimes(2));
@@ -176,10 +176,10 @@ it('does not let a stale rejection paint an error over a correct result', async 
   listCheckinsMock.mockImplementationOnce(() => first.promise);
   listCheckinsMock.mockImplementationOnce(() => second.promise);
 
-  render(<CheckinScreen />);
+  await render(<CheckinScreen />);
   await waitFor(() => expect(listCheckinsMock).toHaveBeenCalledTimes(1));
 
-  act(() => {
+  await act(() => {
     triggerUnitsCorrection?.();
   });
   await waitFor(() => expect(listCheckinsMock).toHaveBeenCalledTimes(2));

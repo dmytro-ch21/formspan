@@ -166,13 +166,13 @@ afterEach(() => {
 });
 
 it('saves nothing new and still navigates back when Done is pressed with no edits', async () => {
-  render(<ReflectScreen />);
+  await render(<ReflectScreen />);
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
   });
 
-  fireEvent.press(screen.getByTestId('bjj-reflect-done'));
+  await fireEvent.press(screen.getByTestId('bjj-reflect-done'));
 
   // The whole point: pressing Done with nothing changed must not write a
   // blank reflection over the one `app/bjj/log.tsx` already saved, and it
@@ -182,21 +182,21 @@ it('saves nothing new and still navigates back when Done is pressed with no edit
 });
 
 it('flushes an in-flight note before Done can lose it', async () => {
-  render(<ReflectScreen />);
+  await render(<ReflectScreen />);
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
   });
 
   // Step 0 (drilled) -> step 1 (live) -> step 2 (note).
-  fireEvent.press(screen.getByTestId('bjj-reflect-next'));
-  fireEvent.press(screen.getByTestId('bjj-reflect-next'));
+  await fireEvent.press(screen.getByTestId('bjj-reflect-next'));
+  await fireEvent.press(screen.getByTestId('bjj-reflect-next'));
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-note')).toBeTruthy();
   });
 
-  fireEvent.changeText(
+  await fireEvent.changeText(
     screen.getByTestId('bjj-note'),
     'His grip broke my posture before I could frame',
   );
@@ -211,7 +211,7 @@ it('flushes an in-flight note before Done can lose it', async () => {
   // anything. Asserting immediately, before any timer could possibly have
   // fired, is what actually pins "Done flushes now" rather than "the debounce
   // eventually happens".
-  fireEvent.press(screen.getByTestId('bjj-reflect-done'));
+  await fireEvent.press(screen.getByTestId('bjj-reflect-done'));
 
   expect(saveLocalBjjDetail).toHaveBeenCalledWith(
     'u1',
@@ -222,13 +222,13 @@ it('flushes an in-flight note before Done can lose it', async () => {
 });
 
 it('shows Reliable on a technique the funnel already has three live hits for', async () => {
-  render(<ReflectScreen />);
+  await render(<ReflectScreen />);
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
   });
 
-  fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'armbar');
+  await fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'armbar');
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-drilled-add-armbar-closed-guard-state')).toBeTruthy();
@@ -239,7 +239,7 @@ it('shows Reliable on a technique the funnel already has three live hits for', a
 
   // Adding it must not regress the badge — the "drilled today" row reads the
   // SAME state (the funnel already dominates the local floor here).
-  fireEvent.press(screen.getByTestId('bjj-drilled-add-armbar-closed-guard'));
+  await fireEvent.press(screen.getByTestId('bjj-drilled-add-armbar-closed-guard'));
 
   await waitFor(() => {
     expect(screen.getByTestId('bjj-drilled-chip-armbar-closed-guard-state')).toBeTruthy();
@@ -272,13 +272,13 @@ it('shows a tag kept unmatched from dictation, and resolves it to a real techniq
     }),
   );
 
-  render(<ReflectScreen />);
+  await render(<ReflectScreen />);
   await waitFor(() => {
     expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
   });
 
   // Step 0 (drilled) -> step 1 (live), where this list lives.
-  fireEvent.press(screen.getByTestId('bjj-reflect-next'));
+  await fireEvent.press(screen.getByTestId('bjj-reflect-next'));
 
   await waitFor(() => {
     expect(screen.getByText('Said, not matched to the library')).toBeTruthy();
@@ -287,11 +287,11 @@ it('shows a tag kept unmatched from dictation, and resolves it to a real techniq
   // recognised" half of the acceptance criteria.
   expect(screen.getByText('“armbar”')).toBeTruthy();
 
-  fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
+  await fireEvent.press(screen.getByLabelText('Match “armbar” to a technique'));
   await waitFor(() => {
     expect(screen.getByLabelText('Armbar from Closed Guard, for “armbar”')).toBeTruthy();
   });
-  fireEvent.press(screen.getByLabelText('Armbar from Closed Guard, for “armbar”'));
+  await fireEvent.press(screen.getByLabelText('Armbar from Closed Guard, for “armbar”'));
 
   // Resolved: the section is gone, and what got persisted carries the real
   // technique id with no leftover label.
@@ -343,13 +343,13 @@ it('never lets the plain grid touch a labelled tag, in either direction', async 
     }),
   );
 
-  render(<ReflectScreen />);
+  await render(<ReflectScreen />);
   await waitFor(() => {
     expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
   });
 
   // Step 0 (drilled) -> step 1 (live).
-  fireEvent.press(screen.getByTestId('bjj-reflect-next'));
+  await fireEvent.press(screen.getByTestId('bjj-reflect-next'));
 
   await waitFor(() => {
     expect(screen.getByText('“pool guards”')).toBeTruthy();
@@ -367,7 +367,7 @@ it('never lets the plain grid touch a labelled tag, in either direction', async 
 
   // Tap "+": must create a NEW, separate tag rather than incrementing the
   // labelled one. Overstating "pool guards" is the miscount half of the bug.
-  fireEvent.press(screen.getByTestId('bjj-live-sweep-scored'));
+  await fireEvent.press(screen.getByTestId('bjj-live-sweep-scored'));
   await waitFor(() => {
     expect(saveLocalBjjDetail).toHaveBeenLastCalledWith(
       'u1',
@@ -388,7 +388,7 @@ it('never lets the plain grid touch a labelled tag, in either direction', async 
   // Long-press "−" on the same cell: must delete only the freshly-added
   // plain tag, never the labelled one — the deletion half of the bug, and
   // the one N119 itself exists to end.
-  fireEvent(screen.getByTestId('bjj-live-sweep-scored'), 'longPress');
+  await fireEvent(screen.getByTestId('bjj-live-sweep-scored'), 'longPress');
   await waitFor(() => {
     expect((saveLocalBjjDetail as jest.Mock).mock.calls.at(-1)?.[2].tags).toEqual([
       expect.objectContaining({ label: 'pool guards', count: 1 }),
@@ -412,7 +412,7 @@ it('shows no learning-state badge on a drilled row whose technique was retired',
     }),
   );
 
-  render(<ReflectScreen />);
+  await render(<ReflectScreen />);
 
   await waitFor(() => {
     expect(screen.getByText('Drilled today')).toBeTruthy();
@@ -432,18 +432,18 @@ it('shows no learning-state badge on a drilled row whose technique was retired',
  */
 describe('N468/#792: search does not clear itself on selection', () => {
   it('adds a second matching technique from the same search, with no retyping', async () => {
-    render(<ReflectScreen />);
+    await render(<ReflectScreen />);
     await waitFor(() => {
       expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
     });
 
-    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'knee shield');
+    await fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'knee shield');
     await waitFor(() => {
       expect(screen.getByTestId('bjj-drilled-add-knee-shield-guard')).toBeTruthy();
       expect(screen.getByTestId('bjj-drilled-add-knee-shield-recovery')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-guard'));
+    await fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-guard'));
 
     // The query survives the selection — the whole point of this ticket.
     expect(screen.getByTestId('bjj-drilled-search').props.value).toBe('knee shield');
@@ -453,7 +453,7 @@ describe('N468/#792: search does not clear itself on selection', () => {
     await waitFor(() => {
       expect(screen.getByTestId('bjj-drilled-add-knee-shield-recovery')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-recovery'));
+    await fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-recovery'));
 
     await waitFor(() => {
       expect(screen.getByTestId('bjj-drilled-chip-knee-shield-guard')).toBeTruthy();
@@ -462,17 +462,17 @@ describe('N468/#792: search does not clear itself on selection', () => {
   });
 
   it('a technique already added does not reappear in the results for the same query', async () => {
-    render(<ReflectScreen />);
+    await render(<ReflectScreen />);
     await waitFor(() => {
       expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
     });
 
-    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'knee shield');
+    await fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'knee shield');
     await waitFor(() => {
       expect(screen.getByTestId('bjj-drilled-add-knee-shield-guard')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-guard'));
+    await fireEvent.press(screen.getByTestId('bjj-drilled-add-knee-shield-guard'));
 
     // It visibly disappears from the results — no retyping happened, so
     // this is the filter, not a cleared search.
@@ -484,30 +484,30 @@ describe('N468/#792: search does not clear itself on selection', () => {
   });
 
   it('tapping the search input resets the query, ready for new text', async () => {
-    render(<ReflectScreen />);
+    await render(<ReflectScreen />);
     await waitFor(() => {
       expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
     });
 
     const search = screen.getByTestId('bjj-drilled-search');
-    fireEvent.changeText(search, 'knee shield');
+    await fireEvent.changeText(search, 'knee shield');
     expect(search.props.value).toBe('knee shield');
 
-    fireEvent(search, 'focus');
+    await fireEvent(search, 'focus');
     expect(search.props.value).toBe('');
   });
 
   it('reads as "already added everything that matches", never as "no match", once every result is already drilled', async () => {
-    render(<ReflectScreen />);
+    await render(<ReflectScreen />);
     await waitFor(() => {
       expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
     });
 
-    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'armbar');
+    await fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'armbar');
     await waitFor(() => {
       expect(screen.getByTestId('bjj-drilled-add-armbar-closed-guard')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('bjj-drilled-add-armbar-closed-guard'));
+    await fireEvent.press(screen.getByTestId('bjj-drilled-add-armbar-closed-guard'));
 
     // "armbar" now matches exactly one technique in this fixture, and it is
     // already added — a real match, not a lookup miss, so the copy must say
@@ -526,12 +526,12 @@ describe('N468/#792: search does not clear itself on selection', () => {
    * assertion inside the "already added" test above did. This is that pin.
    */
   it('still reads as "no match" — never "already added" — for a query nothing in the library matches', async () => {
-    render(<ReflectScreen />);
+    await render(<ReflectScreen />);
     await waitFor(() => {
       expect(screen.getByTestId('bjj-reflect-screen')).toBeTruthy();
     });
 
-    fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'zzznonexistenttechniquezzz');
+    await fireEvent.changeText(screen.getByTestId('bjj-drilled-search'), 'zzznonexistenttechniquezzz');
 
     await waitFor(() => {
       expect(screen.getByTestId('bjj-drilled-empty')).toBeTruthy();

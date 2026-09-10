@@ -35,16 +35,16 @@ function base() {
  * every cold open of Goals, for as long as the network took. A claim about the
  * athlete, caused by a request that had simply not answered.
  */
-test('renders nothing at all while the first load is in flight', () => {
+test('renders nothing at all while the first load is in flight', async () => {
   useWeightTrend.mockReturnValue(state({ loading: true }));
-  render(<WeightTrendCard projection={null} />);
+  await render(<WeightTrendCard projection={null} />);
   expect(screen.queryByTestId('weight-trend-card')).toBeNull();
   expect(screen.queryByTestId('trend-card-empty')).toBeNull();
 });
 
-test('once it has answered, an empty series may say so', () => {
+test('once it has answered, an empty series may say so', async () => {
   useWeightTrend.mockReturnValue(state({ loading: false }));
-  render(<WeightTrendCard projection={null} />);
+  await render(<WeightTrendCard projection={null} />);
   expect(screen.getByTestId('weight-trend-card')).toBeTruthy();
   expect(screen.getByTestId('trend-card-empty').props.children).toMatch(/record your weight/i);
 });

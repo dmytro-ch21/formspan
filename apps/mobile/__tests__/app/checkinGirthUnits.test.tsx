@@ -88,7 +88,7 @@ beforeEach(() => {
 });
 
 async function open() {
-  render(<CheckinScreen />);
+  await render(<CheckinScreen />);
   await waitFor(() => expect(screen.getByTestId('checkin-girths-toggle')).toBeTruthy());
   // The screen opens the disclosure itself when the day already has girths, so
   // pressing unconditionally would CLOSE it — and every assertion below would
@@ -139,8 +139,8 @@ describe('what is stored is centimetres, whatever was typed', () => {
   it('keeps a metric entry unchanged', async () => {
     mockUnits = 'metric';
     await open();
-    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '85');
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '85');
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     expect((saveCheckin as jest.Mock).mock.calls[0][2].waist_cm).toBe(85);
   });
@@ -148,8 +148,8 @@ describe('what is stored is centimetres, whatever was typed', () => {
   it('converts a typed inches value to centimetres on the way in', async () => {
     mockUnits = 'imperial';
     await open();
-    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '34');
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '34');
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     // 34 in is 86.4 cm. Storing 34 raw would redisplay as 13.4 in next week —
     // a waist that "lost" 20 inches by changing a setting.
@@ -159,8 +159,8 @@ describe('what is stored is centimetres, whatever was typed', () => {
   it('round-trips a typed inches value back to the same digits', async () => {
     mockUnits = 'imperial';
     await open();
-    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '32.5');
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '32.5');
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     const stored = (saveCheckin as jest.Mock).mock.calls[0][2].waist_cm as number;
     // What comes back out of storage is what was typed.
@@ -173,7 +173,7 @@ describe('the derived estimates read the stored centimetres', () => {
     mockUnits = 'metric';
     await open();
     const metric = screen.getByTestId('checkin-whtr').props.children.join('');
-    screen.unmount();
+    await screen.unmount();
 
     mockUnits = 'imperial';
     await open();
@@ -196,7 +196,7 @@ describe('the derived estimates read the stored centimetres', () => {
     // draft is already in inches, so a reader that took it raw would be
     // equally wrong before and after and this would pass. The NUMBER is the
     // guard: a raw read gives 33 / 180.34 = 0.18.
-    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '33');
+    await fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '33');
     const after = screen.getByTestId('checkin-whtr').props.children.join('');
     expect(after).toBe(before);
     expect(after).toContain('0.47');

@@ -62,10 +62,10 @@ beforeEach(() => {
 
 /** Types a target weight and starts the phase; returns what was sent. */
 async function startWithWeight(typed: string): Promise<Record<string, unknown>> {
-  render(<PhaseScreen />);
+  await render(<PhaseScreen />);
   await waitFor(() => expect(screen.getByTestId('phase-weight')).toBeTruthy());
-  fireEvent.changeText(screen.getByTestId('phase-weight'), typed);
-  fireEvent.press(screen.getByTestId('phase-start'));
+  await fireEvent.changeText(screen.getByTestId('phase-weight'), typed);
+  await fireEvent.press(screen.getByTestId('phase-start'));
   await waitFor(() => expect(createPhase).toHaveBeenCalled());
   return (createPhase as jest.Mock).mock.calls[0][1];
 }
@@ -96,13 +96,13 @@ describe('the target weight is stored in kilograms whatever the athlete types', 
 describe('the field says which unit it wants', () => {
   it('asks for kg in metric', async () => {
     mockUnits = 'metric';
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
     await waitFor(() => expect(screen.getByText(/Target weight \(kg\)/)).toBeTruthy());
   });
 
   it('asks for lb in imperial', async () => {
     mockUnits = 'imperial';
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
     await waitFor(() => expect(screen.getByText(/Target weight \(lb\)/)).toBeTruthy());
     // The spoken label matters separately: VoiceOver reads "lb" as two
     // letters, so the accessible name carries the word.
@@ -117,10 +117,10 @@ describe('the write waits for the preference to be known', () => {
     // narrowed to one frame rather than fixed.
     mockUnits = 'imperial';
     mockReady = false;
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
     await waitFor(() => expect(screen.getByTestId('phase-weight')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('phase-weight'), '175');
-    fireEvent.press(screen.getByTestId('phase-start'));
+    await fireEvent.changeText(screen.getByTestId('phase-weight'), '175');
+    await fireEvent.press(screen.getByTestId('phase-start'));
     expect(createPhase).not.toHaveBeenCalled();
   });
 });

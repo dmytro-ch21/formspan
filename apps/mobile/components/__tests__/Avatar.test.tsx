@@ -17,25 +17,25 @@ import { Avatar } from '../Avatar';
  */
 
 describe('Avatar', () => {
-  it('shows the monogram when no url is set', () => {
-    render(<Avatar url={null} handle="dmytro_bjj" />);
+  it('shows the monogram when no url is set', async () => {
+    await render(<Avatar url={null} handle="dmytro_bjj" />);
     expect(screen.getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
     expect(screen.queryByTestId('avatar-photo')).toBeNull();
   });
 
-  it('shows the photo when a url is set', () => {
-    render(<Avatar url="https://example.test/avatar.jpg" handle="dmytro_bjj" />);
+  it('shows the photo when a url is set', async () => {
+    await render(<Avatar url="https://example.test/avatar.jpg" handle="dmytro_bjj" />);
     expect(screen.getByTestId('avatar-photo')).toBeTruthy();
     expect(screen.queryByTestId('avatar-monogram', { includeHiddenElements: true })).toBeNull();
   });
 
   /** The regression this file exists for. */
-  it('falls back to the monogram when the photo fails to load', () => {
-    render(<Avatar url="https://example.test/broken.jpg" handle="dmytro_bjj" />);
+  it('falls back to the monogram when the photo fails to load', async () => {
+    await render(<Avatar url="https://example.test/broken.jpg" handle="dmytro_bjj" />);
     expect(screen.getByTestId('avatar-photo')).toBeTruthy();
 
-    act(() => {
-      fireEvent(screen.getByTestId('avatar-photo'), 'onError');
+    await act(async () => {
+      await fireEvent(screen.getByTestId('avatar-photo'), 'onError');
     });
 
     expect(screen.queryByTestId('avatar-photo')).toBeNull();
@@ -49,23 +49,23 @@ describe('Avatar', () => {
    * boolean would keep the monogram showing forever after one failure, even
    * once the athlete uploaded a photo that works fine.
    */
-  it('retries a new url after a previous one failed', () => {
-    const { rerender } = render(<Avatar url="https://example.test/broken.jpg" handle="d" />);
-    act(() => {
-      fireEvent(screen.getByTestId('avatar-photo'), 'onError');
+  it('retries a new url after a previous one failed', async () => {
+    const { rerender } = await render(<Avatar url="https://example.test/broken.jpg" handle="d" />);
+    await act(async () => {
+      await fireEvent(screen.getByTestId('avatar-photo'), 'onError');
     });
     expect(screen.getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
 
-    rerender(<Avatar url="https://example.test/replacement.jpg" handle="d" />);
+    await rerender(<Avatar url="https://example.test/replacement.jpg" handle="d" />);
     expect(screen.getByTestId('avatar-photo')).toBeTruthy();
     expect(screen.queryByTestId('avatar-monogram', { includeHiddenElements: true })).toBeNull();
   });
 
-  it('derives the fallback initials from the handle, never the display name', () => {
+  it('derives the fallback initials from the handle, never the display name', async () => {
     // monogramFor is already covered in lib/__tests__/monogram.test.ts; this
     // just confirms Avatar actually passes the handle through rather than
     // some other prop.
-    render(<Avatar url={null} handle="mat_rat" />);
+    await render(<Avatar url={null} handle="mat_rat" />);
     expect(screen.getByText('MR', { includeHiddenElements: true })).toBeTruthy();
   });
 });

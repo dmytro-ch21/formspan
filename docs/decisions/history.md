@@ -68810,6 +68810,174 @@ chart, exactly as before. Wiring them is a few lines each and a separate
 ticket — the running screen in particular has no test harness today (it mounts
 MapView and GPS tracking), so it is not a change to make in passing.
 
+## 2026-09-10 — N550: `@testing-library/react-native` 13 → 14, and `react-test-renderer` dropped rather than bumped (#1002)
+
+Two Dependabot PRs sat behind this one: #930 (bump `react-test-renderer`) and
+#931 (bump RNTL). They could not land separately, because RNTL's peer range is
+what decides which renderer the app may have — so #1002 asked for one combined
+PR, and asked as its fifth criterion whether RNTL 14 still needs
+`react-test-renderer` as a direct devDependency at all.
+
+**It does not, and the answer inverts #930.** RNTL 14 peers on `test-renderer`
+`^1.0.0` — a different package, not a newer `react-test-renderer`. So the right
+change was to DELETE the dependency Dependabot proposed to upgrade. #930 was not
+a small bump held up by a bigger one; it was a bump in the wrong direction, and
+merging it would have pinned a package RNTL 14 never reads. The version is
+`test-renderer@^1.2.0`, taken from RNTL's own compatibility table rather than
+picked: React 19.2 (what this app is on) maps to Test Renderer 1.2.
+
+### The migration is much wider than the ticket, and `tsc` cannot see the wide part
+
+The ticket estimated 5 files and 18 `renderHook` call sites. The real change is
+**120 files**: `render` became async as well as `renderHook`, `rerender` /
+`unmount` too, `UNSAFE_root` became `root`, `findAllByType` and `findAll` were
+removed outright (replaced here by `lib/__tests__/support/tree.ts`) — and the
+bulk of it, **`fireEvent` and all three of its members became async**: 657
+`fireEvent.press`, 161 `fireEvent.changeText` and 32 bare `fireEvent`.
+
+**The typechecker is structurally blind to almost all of it.** A dropped promise
+is not a type error: `fireEvent.press(button);` as a bare statement type-checks
+identically whether `press` returns `void` or `Promise<void>`. So
+`pnpm exec tsc --noEmit` reached **0 errors while 1,058 call sites were still
+firing events nobody waited for** — and a suite in that state does not fail
+honestly either. It fails as assertions running before the state they assert on
+is committed, which reads as a broken feature rather than an unfinished
+migration.
+
+What actually measured it was a throwaway pass over the TypeScript AST: every
+call in a test file whose type is a `Promise` and whose parent is an
+`ExpressionStatement`. That is the floating-promise rule asked directly of the
+compiler, rather than through a lint config this repo does not carry, and it is
+the number the migration was steered by — 1,058 to 0.
+
+**A blunt version of that pass is WRONG, and it shipped a hang before being
+caught.** Awaiting every floating promise in a test file also awaits the app's
+own functions, and `lib/__tests__/shareCard.test.ts` deliberately leaves one
+pending — `shareCard` against a `shareAsync` mocked never to settle. Awaiting it
+hung the test. The pass was re-scoped to await only calls whose callee is
+declared inside `@testing-library/react-native`, plus local helpers that THIS
+migration made async (a helper already async beforehand was left alone: its call
+sites were already awaited wherever the author meant them to be). That scoping
+needs alias resolution to work at all — an imported name's own declaration is
+the `ImportSpecifier`, which lives in the importing file, so without
+`getAliasedSymbol` every import looks local and `shareCard` reads as a helper we
+had just asyncified.
+
+### `await fireEvent.press(x)` awaits the COMPONENT's handler, not just the re-render
+
+This is the finding that reshaped the rest of the work, and it is not in the
+migration guide. RNTL 14's `fireEvent` **returns the handler's return value**,
+and `fireEvent.press` awaits it. So awaiting a press awaits the screen's own
+`async` press handler through to completion.
+
+Three consequences, all of which appeared as failures:
+
+- **A test that deliberately holds a handler pending DEADLOCKS.** The avatar
+  upload held on a `resolveUpload` the test calls later; the dictation retry
+  held on a `release` the test calls later. Awaiting the press means waiting for
+  a promise only the blocked test can settle. These do not fail — they **time
+  out at 30s**, which reads as a hung screen rather than as a test that now
+  needs its press left unawaited.
+- **A same-tick race stops being a race.** `scanScreen`'s double-tap guard is a
+  `useRef` set synchronously and cleared when the save finishes; awaiting the
+  first press lets it finish, so the second tap legitimately proceeds and the
+  test measures nothing. Both taps have to be fired without awaiting and awaited
+  together — `fireEvent` runs the handler synchronously before its first
+  `await`, so they still land in one tick.
+- **An optimistic-update window closes before it can be observed.**
+  `useDetectedActivity`'s "removed immediately, put back when the write fails"
+  had a pre-rejected write, so the awaited `act` settled the rejection and the
+  item was already back by the next line.
+
+The last one generalises, and is the better outcome of this migration: several
+tests were reading a state that a synchronous `render` happened to leave
+observable, rather than one they created. `foodTargetRow`'s "still in flight"
+frame was the clearest — it asserted before `settle()` and passed only because
+v13 returned before either mock's microtask ran. Those now hold the read open
+with a deferred the test releases. **They assert the same sentence and are
+harder to pass by accident**, because "in flight" is now a state the test
+constructs instead of a race it wins.
+
+### `act` is async in v14 even with a synchronous callback
+
+`act` wraps every callback in an async function (`_act(async () => await
+callback())`), so a sync-callback `act` no longer flushes unless awaited. React
+says so directly — *"You called act(async () => ...) without await"* — and the
+symptom is a state update that simply never lands: `useEntryDrag`'s hook read
+back `null` for state it had just set. Every `act` in the suite is now awaited.
+
+One trap in the other direction: **an empty `await act(async () => {})` used to
+flush a pending commit corrupts the tests that follow it.** Used in the week
+planner's double-submit test it made the two tests after it fail, and only when
+it ran to completion — interleaved act scopes, exactly what React's warning
+names. Waiting on the committed state instead (`toBeDisabled()`) is both cleaner
+and what the assertion actually means.
+
+### Render-count bounds had to be re-measured, not raised
+
+Two tests count `Date.prototype.toLocaleDateString` calls to prove a month grid
+is not built until it is opened — the only technique that works, since `Modal`
+renders no children while hidden. **React 19 commits once where the old renderer
+committed twice**, so those numbers all moved. Both were re-measured by mutation
+in all three directions (gate present, gate removed, gate replaced with
+`false`), as their own comments demand:
+
+- `weekPlanner`: mount 72 gated / 222 ungated (the `< 160` bound still
+  separates); opening now costs 74 either way, so the old `> 100` could no
+  longer pass at all.
+- `foodDayJump`: closed 0 gated / 100 ungated (`< 50` still separates); opening
+  now costs exactly 50, not the 100 it cost under RNTL 13.
+
+Both open-side bounds were **lowered** to `> 40`, which the measurements support
+and which still fails a degenerate grid — and the note in each file forbidding
+the lazy version of that move now records that it was lowered, why, and against
+what measurement. The case those bounds were written for — a grid that stopped
+rendering entirely — turns out to be caught a line earlier anyway: the close
+button lives inside the gated block, so the `waitFor` never resolves without it.
+
+### Two apparatus failures worth recording, both of the kind CLAUDE.md already names
+
+- **A codemod reported a confident zero against 181 real cases.** The pass that
+  adds `async` to a function containing an `await` walked nodes off a
+  `ts.Program` and found nothing, while `tsc` was reporting 181 `TS1308` errors
+  at that same moment. A Program's nodes only get `parent` pointers once
+  something forces the binder to run; the first pass had created a type checker
+  and so had them, the second had not, so every `node.parent` was `undefined`
+  and the walk up to the enclosing function matched nothing. Re-parsing with
+  `setParentNodes: true` found 152 immediately. **A codemod reporting zero edits
+  looks exactly like a codemod with nothing to do.**
+- **Several "failures" were mine, not the migration's.** The suite runs as
+  `TZ=America/Los_Angeles jest`; running a bare `npx jest` puts the clock in the
+  host's zone, and `trackerModel`/`trackerCard` — pure-logic files this branch
+  does not touch — failed on wall-clock assertions. Two rounds of triage were
+  spent on them before the mismatch was noticed. The test command is part of the
+  apparatus.
+
+### One more class the restricted pass missed, and how it was found
+
+Scoping the codemod to "helpers this migration made async" left out helpers that
+were ALREADY async and happen to wrap `render` — `draw`, `show`, `openInfo`,
+`declare` and a `declareReady` nested inside the last of them. Their call sites
+went unawaited, and four suites failed with RNTL's own `render function has not
+been called`, which is at least a loud and specific way to fail. Re-running the
+detector with that exclusion switched off is what confirmed nothing else of the
+shape remained.
+
+### Where it landed
+
+**334 suites, 5,431 tests, all passing — the same test count as before the
+migration.** Checked deliberately rather than noted in passing: a migration that
+silently drops a test file looks exactly like one that fixed it, and this run
+had already shown the count moving (5,412) while 76 suites were failing to load.
+Lint is unchanged at 50 warnings and 0 errors.
+
+Not covered by any of it: nothing here changes what the app does, so there is no
+device check and no functional scenario to add. The risk this leaves behind is
+that a future test written in the old shape — an unawaited `fireEvent`, an
+unawaited `act` — will not fail the typechecker and may not fail the suite
+either. There is no check in `verify` for that today, and the AST pass this
+migration was steered by is the obvious candidate if it recurs.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

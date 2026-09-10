@@ -60,7 +60,7 @@ it('shows only what is editable — never a belt syllabus, never a stranger\'s p
     curriculum({ id: 'belt', name: 'White belt', editable: false, official: true, track: 'belt' }),
     curriculum({ id: 'theirs', name: "Someone else's", editable: false }),
   ]);
-  render(<MyCurriculaScreen />);
+  await render(<MyCurriculaScreen />);
   await waitFor(() => expect(screen.getByText('Mine')).toBeTruthy());
   expect(screen.queryByText('White belt')).toBeNull();
   expect(screen.queryByText("Someone else's")).toBeNull();
@@ -68,7 +68,7 @@ it('shows only what is editable — never a belt syllabus, never a stranger\'s p
 
 it('shows the empty state when there is nothing yet, not a spinner forever', async () => {
   mockListCurricula.mockResolvedValue([]);
-  render(<MyCurriculaScreen />);
+  await render(<MyCurriculaScreen />);
   await waitFor(() => expect(screen.getByTestId('my-curricula-empty')).toBeTruthy());
 });
 
@@ -77,28 +77,28 @@ it('a "reading list" reads as one, a roadmap says what is left to master', async
     curriculum({ id: 'reading', name: 'Reading list', countable_items: 0, item_count: 5 }),
     curriculum({ id: 'roadmap', name: 'Roadmap', countable_items: 2, item_count: 5 }),
   ]);
-  render(<MyCurriculaScreen />);
+  await render(<MyCurriculaScreen />);
   await waitFor(() => expect(screen.getByText(/a reading list/)).toBeTruthy());
   expect(screen.getByText(/2 to master/)).toBeTruthy();
 });
 
 it('New curriculum opens the create screen', async () => {
   mockListCurricula.mockResolvedValue([]);
-  render(<MyCurriculaScreen />);
+  await render(<MyCurriculaScreen />);
   await waitFor(() => expect(screen.getByTestId('my-curricula-new')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('my-curricula-new'));
+  await fireEvent.press(screen.getByTestId('my-curricula-new'));
   expect(mockPush).toHaveBeenCalledWith('/curriculum/new');
 });
 
 it('a row opens the roadmap viewer, not the edit screen directly', async () => {
   mockListCurricula.mockResolvedValue([curriculum({ id: 'c1', name: 'Guard passing for winter' })]);
-  render(<MyCurriculaScreen />);
-  fireEvent.press(await screen.findByTestId('my-curricula-c1'));
+  await render(<MyCurriculaScreen />);
+  await fireEvent.press(await screen.findByTestId('my-curricula-c1'));
   expect(mockPush).toHaveBeenCalledWith('/curriculum/c1');
 });
 
 it('shows the load error rather than a silently empty list', async () => {
   mockListCurricula.mockRejectedValue(new Error('offline'));
-  render(<MyCurriculaScreen />);
+  await render(<MyCurriculaScreen />);
   await waitFor(() => expect(screen.getByTestId('my-curricula-error')).toBeTruthy());
 });

@@ -45,8 +45,8 @@ afterEach(() => {
 });
 
 describe('the reference figures — cited, never invented', () => {
-  it('states the 400 mg reference and a short effects note', () => {
-    render(
+  it('states the 400 mg reference and a short effects note', async () => {
+    await render(
       <CaffeineBanner tracker={tracker} entries={[]} onAdd={() => {}} onRemove={() => {}} onEdit={() => {}} />,
     );
     expect(screen.getByText(/400 mg a day/)).toBeTruthy();
@@ -54,8 +54,8 @@ describe('the reference figures — cited, never invented', () => {
     expect(screen.getByText(/headache/i)).toBeTruthy();
   });
 
-  it("states today's total", () => {
-    render(
+  it("states today's total", async () => {
+    await render(
       <CaffeineBanner
         tracker={tracker}
         entries={[entry({ amount: 95 }), entry({ id: 'e2', amount: 63 })]}
@@ -69,10 +69,10 @@ describe('the reference figures — cited, never invented', () => {
 });
 
 describe('a food-caused entry cannot be removed directly', () => {
-  it('refuses to remove it and explains why, instead of calling onRemove', () => {
+  it('refuses to remove it and explains why, instead of calling onRemove', async () => {
     const onRemove = jest.fn();
     const foodCaffeineId = pairedFoodCaffeineEntryId('food-1', 'tail');
-    render(
+    await render(
       <CaffeineBanner
         tracker={tracker}
         entries={[entry({ id: foodCaffeineId, amount: 95 })]}
@@ -82,7 +82,7 @@ describe('a food-caused entry cannot be removed directly', () => {
       />,
     );
 
-    fireEvent.press(screen.getByTestId(`caffeine-entry-remove-${foodCaffeineId}`));
+    await fireEvent.press(screen.getByTestId(`caffeine-entry-remove-${foodCaffeineId}`));
 
     expect(onRemove).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalledWith(
@@ -91,9 +91,9 @@ describe('a food-caused entry cannot be removed directly', () => {
     );
   });
 
-  it('removes an ordinary manual entry exactly as before, with no alert', () => {
+  it('removes an ordinary manual entry exactly as before, with no alert', async () => {
     const onRemove = jest.fn();
-    render(
+    await render(
       <CaffeineBanner
         tracker={tracker}
         entries={[entry({ id: 'manual-1', amount: 80 })]}
@@ -103,16 +103,16 @@ describe('a food-caused entry cannot be removed directly', () => {
       />,
     );
 
-    fireEvent.press(screen.getByTestId('caffeine-entry-remove-manual-1'));
+    await fireEvent.press(screen.getByTestId('caffeine-entry-remove-manual-1'));
 
     expect(onRemove).toHaveBeenCalledWith('manual-1');
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it('removes a coffee-tap-caused entry exactly as before, with no alert — N431/N432 unaffected', () => {
+  it('removes a coffee-tap-caused entry exactly as before, with no alert — N431/N432 unaffected', async () => {
     const onRemove = jest.fn();
     // coffeeCaffeine.ts's own suffix — deliberately NOT the food infix.
-    render(
+    await render(
       <CaffeineBanner
         tracker={tracker}
         entries={[entry({ id: 'coffee-entry-1-caf', amount: 63 })]}
@@ -122,15 +122,15 @@ describe('a food-caused entry cannot be removed directly', () => {
       />,
     );
 
-    fireEvent.press(screen.getByTestId('caffeine-entry-remove-coffee-entry-1-caf'));
+    await fireEvent.press(screen.getByTestId('caffeine-entry-remove-coffee-entry-1-caf'));
 
     expect(onRemove).toHaveBeenCalledWith('coffee-entry-1-caf');
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it('labels a food-caused entry distinctly, so it reads as locked rather than merely unresponsive', () => {
+  it('labels a food-caused entry distinctly, so it reads as locked rather than merely unresponsive', async () => {
     const foodCaffeineId = pairedFoodCaffeineEntryId('food-1', 'tail');
-    render(
+    await render(
       <CaffeineBanner
         tracker={tracker}
         entries={[entry({ id: foodCaffeineId, amount: 95 })]}
@@ -144,10 +144,10 @@ describe('a food-caused entry cannot be removed directly', () => {
 });
 
 describe('adding', () => {
-  it('fires onAdd from the log button', () => {
+  it('fires onAdd from the log button', async () => {
     const onAdd = jest.fn();
-    render(<CaffeineBanner tracker={tracker} entries={[]} onAdd={onAdd} onRemove={() => {}} onEdit={() => {}} />);
-    fireEvent.press(screen.getByTestId(`caffeine-add-${tracker.id}`));
+    await render(<CaffeineBanner tracker={tracker} entries={[]} onAdd={onAdd} onRemove={() => {}} onEdit={() => {}} />);
+    await fireEvent.press(screen.getByTestId(`caffeine-add-${tracker.id}`));
     expect(onAdd).toHaveBeenCalled();
   });
 });

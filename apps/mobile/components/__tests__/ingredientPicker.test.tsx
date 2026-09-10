@@ -73,7 +73,7 @@ function mount() {
 }
 
 async function type(text: string) {
-  fireEvent.changeText(screen.getByTestId('ingredient-search'), text);
+  await fireEvent.changeText(screen.getByTestId('ingredient-search'), text);
   await act(async () => { jest.advanceTimersByTime(300); });
 }
 
@@ -85,7 +85,7 @@ describe('the five meanings of an empty answer', () => {
    * search box is a confident answer to a question nobody put.
    */
   it('does not report a result before anything has been asked', async () => {
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
 
     expect(screen.getByTestId('ingredient-idle')).toBeTruthy();
@@ -94,7 +94,7 @@ describe('the five meanings of an empty answer', () => {
   });
 
   it('says the catalog does not have it when the catalog says so', async () => {
-    mount();
+    await mount();
     await type('unobtainium');
     await waitFor(() => expect(screen.getByTestId('ingredient-empty')).toBeTruthy());
     expect(screen.queryByTestId('ingredient-idle')).toBeNull();
@@ -107,7 +107,7 @@ describe('the five meanings of an empty answer', () => {
    * sentences must differ.
    */
   it('distinguishes an unseeded catalog from a food it does not have', async () => {
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() => expect(screen.getByTestId('ingredient-empty')).toBeTruthy());
     const noMatch = screen.getByTestId('ingredient-empty').props.children;
@@ -127,7 +127,7 @@ describe('the five meanings of an empty answer', () => {
    */
   it('does not report a network failure as a food the catalog lacks', async () => {
     mockSearchCatalog.mockRejectedValue(new Error('offline'));
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId('ingredient-empty')).toHaveTextContent(/Could not reach/),
@@ -153,7 +153,7 @@ describe('the five meanings of an empty answer', () => {
     ]);
     mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_RICE], total: 1, outcome: 'ok' }));
 
-    mount();
+    await mount();
     await type('rice');
 
     await waitFor(() => expect(screen.getByTestId('ingredient-mine-own-1')).toBeTruthy());
@@ -168,7 +168,7 @@ describe('picking from the catalog', () => {
   });
 
   it('offers the catalog row as a card', async () => {
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`)).toBeTruthy(),
@@ -184,7 +184,7 @@ describe('picking from the catalog', () => {
    * filters nothing"; this is the same rule.
    */
   it('offers no one-tap add, because there is no honest default amount', async () => {
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`)).toBeTruthy(),
@@ -193,17 +193,17 @@ describe('picking from the catalog', () => {
   });
 
   it('asks how much, and hands back what was weighed', async () => {
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`)).toBeTruthy(),
     );
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`));
+      await fireEvent.press(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`));
     });
     await waitFor(() => expect(screen.getByTestId('food-quantity-log')).toBeTruthy());
-    await act(async () => { fireEvent.press(screen.getByTestId('food-quantity-log')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('food-quantity-log')); });
 
     expect(onPick).toHaveBeenCalledTimes(1);
     const item = onPick.mock.calls[0][0];
@@ -220,13 +220,13 @@ describe('picking from the catalog', () => {
    * which is the same class as a card that says "Log X" and opens a sheet.
    */
   it('does not claim to have logged a meal', async () => {
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`)).toBeTruthy(),
     );
     await act(async () => {
-      fireEvent.press(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`));
+      await fireEvent.press(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`));
     });
     await waitFor(() => expect(screen.getByTestId('food-quantity-log')).toBeTruthy());
     expect(screen.getByTestId('food-quantity-log')).toHaveTextContent(/Add to recipe/);
@@ -243,13 +243,13 @@ describe('picking from your own saved foods', () => {
 
   it('keeps the provenance, unlike a catalog row', async () => {
     mockLocalFoods.mockResolvedValue([saved]);
-    mount();
+    await mount();
     await waitFor(() => expect(screen.getByTestId('ingredient-mine-own-2')).toBeTruthy());
 
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-mine-own-2')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-mine-own-2')); });
     await waitFor(() => expect(screen.getByTestId('ingredient-saved-add')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('ingredient-saved-quantity'), '2');
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-saved-add')); });
+    await fireEvent.changeText(screen.getByTestId('ingredient-saved-quantity'), '2');
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-saved-add')); });
 
     const item = onPick.mock.calls[0][0];
     expect(item.source_food_id).toBe('own-2');
@@ -269,20 +269,20 @@ describe('picking from your own saved foods', () => {
       saved,
       { ...saved, id: 'own-3', kind: 'recipe' as const, name: 'Traybake', yield_servings: 4 },
     ]);
-    mount();
+    await mount();
     await waitFor(() => expect(screen.getByTestId('ingredient-mine-own-2')).toBeTruthy());
     expect(screen.queryByTestId('ingredient-mine-own-3')).toBeNull();
   });
 
   it('refuses a quantity of zero rather than adding nothing', async () => {
     mockLocalFoods.mockResolvedValue([saved]);
-    mount();
+    await mount();
     await waitFor(() => expect(screen.getByTestId('ingredient-mine-own-2')).toBeTruthy());
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-mine-own-2')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-mine-own-2')); });
     await waitFor(() => expect(screen.getByTestId('ingredient-saved-add')).toBeTruthy());
 
-    fireEvent.changeText(screen.getByTestId('ingredient-saved-quantity'), '0');
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-saved-add')); });
+    await fireEvent.changeText(screen.getByTestId('ingredient-saved-quantity'), '0');
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-saved-add')); });
     expect(onPick).not.toHaveBeenCalled();
   });
 });
@@ -295,20 +295,20 @@ describe('the search itself', () => {
    */
   it('never renders an answer to a query that is no longer typed', async () => {
     mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_RICE], total: 1, outcome: 'ok' }));
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`)).toBeTruthy(),
     );
 
     // Retype without letting the new answer land.
-    fireEvent.changeText(screen.getByTestId('ingredient-search'), 'chicken');
+    await fireEvent.changeText(screen.getByTestId('ingredient-search'), 'chicken');
     expect(screen.queryByTestId(`ingredient-catalog-row-${CATALOG_RICE.id}`)).toBeNull();
   });
 
   it('is honest about the cap, counting what is actually on screen', async () => {
     mockSearchCatalog.mockResolvedValue(answer({ foods: [CATALOG_RICE], total: 63, outcome: 'ok' }));
-    mount();
+    await mount();
     await type('rice');
     await waitFor(() =>
       expect(screen.getByTestId('ingredient-catalog-more')).toHaveTextContent(/Showing 1 of 63/),
@@ -326,25 +326,25 @@ describe('typing an ingredient in by hand', () => {
    * docblock and the screen.
    */
   it('is offered without having to prove the catalog failed first', async () => {
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
     expect(screen.getByTestId('ingredient-by-hand')).toBeTruthy();
   });
 
   it('hands back an ingredient built from what was typed', async () => {
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
-    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    await fireEvent.press(screen.getByTestId('ingredient-by-hand'));
 
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), "Nan's sauce");
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-quantity'), '2');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-serving_label'), '1 ladle');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), "Nan's sauce");
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-quantity'), '2');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-serving_label'), '1 ladle');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
 
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
 
     expect(onPick).toHaveBeenCalledTimes(1);
     const item = onPick.mock.calls[0][0];
@@ -364,16 +364,16 @@ describe('typing an ingredient in by hand', () => {
    * layer up.
    */
   it('keeps blank fibre as not stated rather than zero', async () => {
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
-    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    await fireEvent.press(screen.getByTestId('ingredient-by-hand'));
 
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
 
     expect(onPick.mock.calls[0][0].fibre_g).toBeNull();
   });
@@ -381,17 +381,17 @@ describe('typing an ingredient in by hand', () => {
   it('records a stated zero fibre as zero, not as unstated', async () => {
     // The other direction, so "blank is null" cannot be satisfied by throwing
     // every fibre value away.
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
-    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    await fireEvent.press(screen.getByTestId('ingredient-by-hand'));
 
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-fibre_g'), '0');
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-fibre_g'), '0');
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
 
     expect(onPick.mock.calls[0][0].fibre_g).toBe(0);
   });
@@ -402,41 +402,41 @@ describe('typing an ingredient in by hand', () => {
    * of this recipe is made from.
    */
   it('refuses a number it cannot read rather than storing a zero', async () => {
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
-    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    await fireEvent.press(screen.getByTestId('ingredient-by-hand'));
 
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '12..5');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-name'), 'Sauce');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '12..5');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
 
     expect(screen.getByTestId('ingredient-manual-add').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: true }),
     );
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
     expect(onPick).not.toHaveBeenCalled();
   });
 
   it('refuses an unnamed ingredient', async () => {
-    mount();
+    await mount();
     await act(async () => { jest.advanceTimersByTime(300); });
-    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
-    fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
+    await fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-kcal'), '90');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-protein_g'), '2');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-carb_g'), '11');
+    await fireEvent.changeText(screen.getByTestId('ingredient-manual-fat_g'), '4');
 
-    await act(async () => { fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
+    await act(async () => { await fireEvent.press(screen.getByTestId('ingredient-manual-add')); });
     expect(onPick).not.toHaveBeenCalled();
   });
 
   it('carries the query across, so a failed search is not retyped', async () => {
-    mount();
+    await mount();
     await type('unobtainium');
     await waitFor(() => expect(screen.getByTestId('ingredient-empty')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('ingredient-by-hand'));
+    await fireEvent.press(screen.getByTestId('ingredient-by-hand'));
     expect(screen.getByTestId('ingredient-manual-name').props.value).toBe('unobtainium');
   });
 });

@@ -81,7 +81,7 @@ beforeEach(() => {
 
 describe('the belt-themed "no rank yet" state', () => {
   it('renders the empty card and invites the first promotion', async () => {
-    render(<BjjRankHeader getToken={mockGetToken} />);
+    await render(<BjjRankHeader getToken={mockGetToken} />);
 
     const card = await screen.findByTestId('bjj-rank-empty');
     expect(card.props.accessibilityLabel).toBe('Add your first promotion');
@@ -89,15 +89,15 @@ describe('the belt-themed "no rank yet" state', () => {
   });
 
   it('still opens /bjj on press — the redesign must not lose the only way in', async () => {
-    render(<BjjRankHeader getToken={mockGetToken} />);
+    await render(<BjjRankHeader getToken={mockGetToken} />);
 
     const card = await screen.findByTestId('bjj-rank-empty');
-    fireEvent.press(card);
+    await fireEvent.press(card);
     expect(mockPush).toHaveBeenCalledWith('/bjj');
   });
 
   it('draws the actual first belt — white, no stripes — not a generic icon', async () => {
-    render(<BjjRankHeader getToken={mockGetToken} />);
+    await render(<BjjRankHeader getToken={mockGetToken} />);
 
     await screen.findByTestId('bjj-rank-empty');
     // Hidden from assistive tech deliberately (the card's own label already

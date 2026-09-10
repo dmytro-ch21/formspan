@@ -37,90 +37,90 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-const hold = (ms: number) => {
-  fireEvent(screen.getByTestId('hold'), 'pressIn');
-  act(() => {
+const hold = async (ms: number) => {
+  await fireEvent(screen.getByTestId('hold'), 'pressIn');
+  await act(() => {
     jest.advanceTimersByTime(ms);
   });
 };
 
 describe('holding to confirm', () => {
-  it('does nothing for a tap', () => {
+  it('does nothing for a tap', async () => {
     // THE assertion. Before this control existed, this exact gesture ended a
     // session — one tap, no confirmation, not undoable from the phone.
-    render(<HoldToConfirm {...props} testID="hold" />);
-    fireEvent(screen.getByTestId('hold'), 'pressIn');
-    fireEvent(screen.getByTestId('hold'), 'pressOut');
-    act(() => {
+    await render(<HoldToConfirm {...props} testID="hold" />);
+    await fireEvent(screen.getByTestId('hold'), 'pressIn');
+    await fireEvent(screen.getByTestId('hold'), 'pressOut');
+    await act(() => {
       jest.advanceTimersByTime(5000);
     });
     expect(props.onConfirm).not.toHaveBeenCalled();
   });
 
-  it('does nothing when released just before the threshold', () => {
-    render(<HoldToConfirm {...props} testID="hold" />);
-    hold(HOLD_MS - 50);
-    fireEvent(screen.getByTestId('hold'), 'pressOut');
-    act(() => {
+  it('does nothing when released just before the threshold', async () => {
+    await render(<HoldToConfirm {...props} testID="hold" />);
+    await hold(HOLD_MS - 50);
+    await fireEvent(screen.getByTestId('hold'), 'pressOut');
+    await act(() => {
       jest.advanceTimersByTime(5000);
     });
     expect(props.onConfirm).not.toHaveBeenCalled();
   });
 
-  it('confirms once the hold completes', () => {
-    render(<HoldToConfirm {...props} testID="hold" />);
-    hold(HOLD_MS);
+  it('confirms once the hold completes', async () => {
+    await render(<HoldToConfirm {...props} testID="hold" />);
+    await hold(HOLD_MS);
     expect(props.onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('confirms exactly once, however long the finger stays down', () => {
+  it('confirms exactly once, however long the finger stays down', async () => {
     // A repeating timer here would finish the session, then finish it again.
-    render(<HoldToConfirm {...props} testID="hold" />);
-    hold(HOLD_MS * 4);
+    await render(<HoldToConfirm {...props} testID="hold" />);
+    await hold(HOLD_MS * 4);
     expect(props.onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('starts over after an abandoned hold rather than accumulating', () => {
+  it('starts over after an abandoned hold rather than accumulating', async () => {
     // Two 500ms holds are not one 1000ms hold. Accumulating would mean a
     // second nervous half-press commits, which is precisely the accident.
-    render(<HoldToConfirm {...props} testID="hold" />);
-    hold(HOLD_MS - 100);
-    fireEvent(screen.getByTestId('hold'), 'pressOut');
-    hold(HOLD_MS - 100);
-    fireEvent(screen.getByTestId('hold'), 'pressOut');
-    act(() => {
+    await render(<HoldToConfirm {...props} testID="hold" />);
+    await hold(HOLD_MS - 100);
+    await fireEvent(screen.getByTestId('hold'), 'pressOut');
+    await hold(HOLD_MS - 100);
+    await fireEvent(screen.getByTestId('hold'), 'pressOut');
+    await act(() => {
       jest.advanceTimersByTime(5000);
     });
     expect(props.onConfirm).not.toHaveBeenCalled();
   });
 
-  it('honours a custom duration', () => {
-    render(<HoldToConfirm {...props} durationMs={2000} testID="hold" />);
-    hold(1500);
+  it('honours a custom duration', async () => {
+    await render(<HoldToConfirm {...props} durationMs={2000} testID="hold" />);
+    await hold(1500);
     expect(props.onConfirm).not.toHaveBeenCalled();
-    act(() => {
+    await act(() => {
       jest.advanceTimersByTime(500);
     });
     expect(props.onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('does not fire after the screen goes away', () => {
+  it('does not fire after the screen goes away', async () => {
     // A hold in flight when the session is closed must not reach into an
     // unmounted tree — and must not happen at all, since nobody is holding
     // anything any more.
-    render(<HoldToConfirm {...props} testID="hold" />);
-    fireEvent(screen.getByTestId('hold'), 'pressIn');
-    screen.unmount();
-    act(() => {
+    await render(<HoldToConfirm {...props} testID="hold" />);
+    await fireEvent(screen.getByTestId('hold'), 'pressIn');
+    await screen.unmount();
+    await act(() => {
       jest.advanceTimersByTime(5000);
     });
     expect(props.onConfirm).not.toHaveBeenCalled();
   });
 
-  it('tells the user it wants a hold', () => {
+  it('tells the user it wants a hold', async () => {
     // A button that ignores taps and says nothing is indistinguishable from a
     // broken one.
-    render(<HoldToConfirm {...props} testID="hold" />);
+    await render(<HoldToConfirm {...props} testID="hold" />);
     expect(screen.getByTestId('hold').props.accessibilityHint).toMatch(/hold/i);
   });
 });
@@ -133,10 +133,10 @@ describe('the screen-reader path', () => {
     // it fails silently: announced, focusable, does nothing.
     jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-    render(<HoldToConfirm {...props} testID="hold" />);
+    await render(<HoldToConfirm {...props} testID="hold" />);
     await act(async () => {});
 
-    fireEvent.press(screen.getByTestId('hold'));
+    await fireEvent.press(screen.getByTestId('hold'));
     expect(alert).toHaveBeenCalled();
     expect(alert.mock.calls[0][0]).toBe('Finish session?');
   });
@@ -147,10 +147,10 @@ describe('the screen-reader path', () => {
     jest.spyOn(Alert, 'alert').mockImplementation(((_t: string, _m: string, b: never) => {
       buttons = b;
     }) as never);
-    render(<HoldToConfirm {...props} testID="hold" />);
+    await render(<HoldToConfirm {...props} testID="hold" />);
     await act(async () => {});
 
-    fireEvent.press(screen.getByTestId('hold'));
+    await fireEvent.press(screen.getByTestId('hold'));
     // The tap alone must not perform it — that would make the accessible path
     // a single tap on a destructive action, which is what all of this exists
     // to prevent.

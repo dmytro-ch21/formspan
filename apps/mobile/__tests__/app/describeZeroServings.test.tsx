@@ -97,10 +97,10 @@ beforeEach(() => {
 
 async function describeOnce(res = response()) {
   mockDescribe.mockResolvedValue(res);
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'two eggs');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'two eggs');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
 }
@@ -110,7 +110,7 @@ describe('a zero the athlete typed', () => {
     await describeOnce(response([item({ name: 'Scrambled eggs' }), item({ name: 'Toast' })]));
     expect(screen.queryByTestId('describe-no-servings-0')).toBeNull();
 
-    fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
+    await fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
 
     expect(screen.getByTestId('describe-no-servings-0')).toHaveTextContent(/more than 0/i);
     expect(screen.queryByTestId('describe-no-servings-1')).toBeNull();
@@ -118,7 +118,7 @@ describe('a zero the athlete typed', () => {
 
   it('makes the Log button inert rather than letting the push be refused', async () => {
     await describeOnce();
-    fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
+    await fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
 
     const log = screen.getByTestId('describe-log');
     // Both props, so VoiceOver never announces an enabled button that
@@ -128,7 +128,7 @@ describe('a zero the athlete typed', () => {
     expect(log.props.accessibilityHint).toMatch(/counted zero times/i);
 
     await act(async () => {
-      fireEvent.press(log);
+      await fireEvent.press(log);
     });
     expect(mockLogFood).not.toHaveBeenCalled();
     expect(mockSaveFood).not.toHaveBeenCalled();
@@ -140,11 +140,11 @@ describe('a zero the athlete typed', () => {
     // meal the athlete had said they ate none of. Silently wrong rather than
     // refused, which is why this case is tested separately.
     await describeOnce(response([item({ name: 'Scrambled eggs' }), item({ name: 'Toast', kcal: 90 })]));
-    fireEvent.press(screen.getByTestId('describe-compile-toggle'));
-    fireEvent.changeText(screen.getByTestId('describe-servings-1'), '0');
+    await fireEvent.press(screen.getByTestId('describe-compile-toggle'));
+    await fireEvent.changeText(screen.getByTestId('describe-servings-1'), '0');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     expect(mockLogFood).not.toHaveBeenCalled();
   });
@@ -153,12 +153,12 @@ describe('a zero the athlete typed', () => {
     // The apparatus check for the three above: if the screen were simply
     // broken they would all pass and mean nothing.
     await describeOnce();
-    fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
-    fireEvent.changeText(screen.getByTestId('describe-servings-0'), '1.5');
+    await fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
+    await fireEvent.changeText(screen.getByTestId('describe-servings-0'), '1.5');
 
     expect(screen.queryByTestId('describe-no-servings-0')).toBeNull();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
     expect(mockLogFood.mock.calls[0][1].servings).toBe(1.5);
@@ -166,12 +166,12 @@ describe('a zero the athlete typed', () => {
 
   it('and by removing the row instead', async () => {
     await describeOnce(response([item({ name: 'Scrambled eggs' }), item({ name: 'Toast' })]));
-    fireEvent.changeText(screen.getByTestId('describe-servings-1'), '0');
+    await fireEvent.changeText(screen.getByTestId('describe-servings-1'), '0');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-remove-1'));
+      await fireEvent.press(screen.getByTestId('describe-remove-1'));
     });
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
   });
@@ -188,7 +188,7 @@ describe('a zero the model sent', () => {
     expect(screen.queryByTestId('describe-no-servings-0')).toBeNull();
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
     const logged = mockLogFood.mock.calls[0][1];
@@ -205,8 +205,8 @@ describe('a zero the model sent', () => {
     // portion, used to resurrect the model's `0` and block the row for a
     // zero the athlete never typed. An empty box means "I have not decided",
     // which is the fitted 1, not the refused 0.
-    return describeOnce(response([item({ servings: 0 })])).then(() => {
-      fireEvent.changeText(screen.getByTestId('describe-servings-0'), '');
+    return describeOnce(response([item({ servings: 0 })])).then(async () => {
+      await fireEvent.changeText(screen.getByTestId('describe-servings-0'), '');
       expect(screen.queryByTestId('describe-no-servings-0')).toBeNull();
       expect(screen.getByTestId('describe-log').props.accessibilityState?.disabled).toBe(false);
     });
@@ -217,7 +217,7 @@ describe('a zero the model sent', () => {
     // control is not reliably announced — `components/ShareToFriend.tsx`
     // already walked this back once and says so in place.
     await describeOnce(response([item(), item({ name: 'Toast' })]));
-    fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
+    await fireEvent.changeText(screen.getByTestId('describe-servings-0'), '0');
     expect(screen.getByTestId('describe-log').props.accessibilityLabel).toMatch(/counted zero times/i);
   });
 });

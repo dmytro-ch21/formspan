@@ -65,12 +65,12 @@ afterEach(() => {
 });
 
 it('the fast path is untouched: no correction opened, ended_at is real now', async () => {
-  render(<LogBjjScreen />);
+  await render(<LogBjjScreen />);
   await screen.findByTestId('bjj-log-screen');
 
   // Default duration (60m), default kind (class) — the three-tap floor:
   // pick nothing, tap "Log it".
-  fireEvent.press(screen.getByTestId('bjj-log-save'));
+  await fireEvent.press(screen.getByTestId('bjj-log-save'));
 
   await waitFor(() => expect(startLocalSession).toHaveBeenCalledTimes(1));
   const [, input] = (startLocalSession as jest.Mock).mock.calls[0];
@@ -79,15 +79,15 @@ it('the fast path is untouched: no correction opened, ended_at is real now', asy
 });
 
 it('a chosen end time overrides "now", and started_at shifts with it', async () => {
-  render(<LogBjjScreen />);
+  await render(<LogBjjScreen />);
   await screen.findByTestId('bjj-log-screen');
 
   // 60m preset is already the default — set a real end time an hour before
   // "now" (the corner case this ticket exists for: logging well after class).
-  fireEvent.press(screen.getByTestId('bjj-log-end-time-row'));
-  fireEvent.press(screen.getByTestId('bjj-log-end-time-offset-60'));
+  await fireEvent.press(screen.getByTestId('bjj-log-end-time-row'));
+  await fireEvent.press(screen.getByTestId('bjj-log-end-time-offset-60'));
 
-  fireEvent.press(screen.getByTestId('bjj-log-save'));
+  await fireEvent.press(screen.getByTestId('bjj-log-save'));
 
   await waitFor(() => expect(startLocalSession).toHaveBeenCalledTimes(1));
   const [, input] = (startLocalSession as jest.Mock).mock.calls[0];
@@ -99,14 +99,14 @@ it('a chosen end time overrides "now", and started_at shifts with it', async () 
 });
 
 it('picking a shorter duration after correcting the end time still anchors on the corrected end', async () => {
-  render(<LogBjjScreen />);
+  await render(<LogBjjScreen />);
   await screen.findByTestId('bjj-log-screen');
 
-  fireEvent.press(screen.getByTestId('bjj-log-end-time-row'));
-  fireEvent.press(screen.getByTestId('bjj-log-end-time-offset-120'));
-  fireEvent.press(screen.getByTestId('bjj-duration-30'));
+  await fireEvent.press(screen.getByTestId('bjj-log-end-time-row'));
+  await fireEvent.press(screen.getByTestId('bjj-log-end-time-offset-120'));
+  await fireEvent.press(screen.getByTestId('bjj-duration-30'));
 
-  fireEvent.press(screen.getByTestId('bjj-log-save'));
+  await fireEvent.press(screen.getByTestId('bjj-log-save'));
 
   await waitFor(() => expect(startLocalSession).toHaveBeenCalledTimes(1));
   const [, input] = (startLocalSession as jest.Mock).mock.calls[0];

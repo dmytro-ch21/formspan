@@ -69,7 +69,7 @@ beforeEach(() => {
 describe('the height field asks in the athlete’s own units', () => {
   it('shows one centimetre box in metric', async () => {
     mockUnits = 'metric';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height')).toBeTruthy());
     expect(screen.getByTestId('profile-height').props.value).toBe('180.3');
     expect(screen.getByText(/Height \(cm\)/)).toBeTruthy();
@@ -78,7 +78,7 @@ describe('the height field asks in the athlete’s own units', () => {
 
   it('shows feet and inches in imperial, not decimal inches', async () => {
     mockUnits = 'imperial';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height-feet')).toBeTruthy());
     // 180.3 cm reads back as 5'11" — NOT "70.9", which would be a faithful
     // conversion nobody says out loud.
@@ -107,17 +107,17 @@ describe('the height field asks in the athlete’s own units', () => {
 describe('what is stored is centimetres, whatever was typed', () => {
   it('keeps a metric entry unchanged', async () => {
     mockUnits = 'metric';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('profile-height'), '175');
+    await fireEvent.changeText(screen.getByTestId('profile-height'), '175');
     expect(screen.getByTestId('profile-height').props.value).toBe('175');
   });
 
   it('round-trips feet and inches through centimetres', async () => {
     mockUnits = 'imperial';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height-feet')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('profile-height-feet'), '6');
+    await fireEvent.changeText(screen.getByTestId('profile-height-feet'), '6');
     // 6'11" is 83 in = 210.8 cm, which reads back as 6'11".
     expect(screen.getByTestId('profile-height-feet').props.value).toBe('6');
     expect(screen.getByTestId('profile-height-inches').props.value).toBe('11');
@@ -125,9 +125,9 @@ describe('what is stored is centimetres, whatever was typed', () => {
 
   it('round-trips a changed inches value too', async () => {
     mockUnits = 'imperial';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height-inches')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('profile-height-inches'), '3');
+    await fireEvent.changeText(screen.getByTestId('profile-height-inches'), '3');
     // 5'3" is 63 in = 160 cm.
     expect(screen.getByTestId('profile-height-feet').props.value).toBe('5');
     expect(screen.getByTestId('profile-height-inches').props.value).toBe('3');
@@ -135,19 +135,19 @@ describe('what is stored is centimetres, whatever was typed', () => {
 
   it('does not store the typed feet number as centimetres', async () => {
     mockUnits = 'imperial';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height-feet')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('profile-height-feet'), '6');
+    await fireEvent.changeText(screen.getByTestId('profile-height-feet'), '6');
     // Storing 6 raw would redisplay as 0 feet 2 inches.
     expect(screen.getByTestId('profile-height-feet').props.value).not.toBe('0');
   });
 
   it('clears the value when both boxes are emptied', async () => {
     mockUnits = 'imperial';
-    render(<EditProfileScreen />);
+    await render(<EditProfileScreen />);
     await waitFor(() => expect(screen.getByTestId('profile-height-feet')).toBeTruthy());
-    fireEvent.changeText(screen.getByTestId('profile-height-inches'), '');
-    fireEvent.changeText(screen.getByTestId('profile-height-feet'), '');
+    await fireEvent.changeText(screen.getByTestId('profile-height-inches'), '');
+    await fireEvent.changeText(screen.getByTestId('profile-height-feet'), '');
     // Not "0 tall" — unsaid. The column rejects 0 anyway.
     expect(screen.getByTestId('profile-height-feet').props.value).toBe('');
     expect(screen.getByTestId('profile-height-inches').props.value).toBe('');

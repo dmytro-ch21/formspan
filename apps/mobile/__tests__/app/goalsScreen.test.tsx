@@ -306,7 +306,7 @@ describe('the Goals tab refetches when it is focused again', () => {
   // the tab was ever opened — including after the athlete changes their phase
   // from a button on this very screen.
   it('asks again on every focus, not only on mount', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
 
     refocus();
@@ -316,9 +316,9 @@ describe('the Goals tab refetches when it is focused again', () => {
 
 describe('the saved receipt', () => {
   it('appears when a target is accepted', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     const accept = await screen.findByTestId('target-accept');
-    fireEvent.press(accept);
+    await fireEvent.press(accept);
 
     expect(await screen.findByTestId('target-saved')).toBeTruthy();
   });
@@ -328,12 +328,12 @@ describe('the saved receipt', () => {
   // attaches a confirmation to something that was never stored — worse than
   // showing nothing, because the athlete has no reason to doubt it.
   it('goes away when the suggestion is replaced by a fresh one', async () => {
-    render(<GoalsScreen />);
-    fireEvent.press(await screen.findByTestId('target-accept'));
+    await render(<GoalsScreen />);
+    await fireEvent.press(await screen.findByTestId('target-accept'));
     expect(await screen.findByTestId('target-saved')).toBeTruthy();
 
     mockSuggested.mockResolvedValue(suggestion(2100));
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
 
     // Sequenced in two steps rather than one, because they fail for different
     // reasons and a single `waitFor` cannot say which happened: the refetch not
@@ -347,8 +347,8 @@ describe('the saved receipt', () => {
   // The same rule through the other door: coming back to the tab re-asks, so
   // whatever is on screen is unsaved again.
   it('goes away when the tab is focused again', async () => {
-    render(<GoalsScreen />);
-    fireEvent.press(await screen.findByTestId('target-accept'));
+    await render(<GoalsScreen />);
+    await fireEvent.press(await screen.findByTestId('target-accept'));
     expect(await screen.findByTestId('target-saved')).toBeTruthy();
 
     refocus();
@@ -369,8 +369,8 @@ describe('accepting the derived target, when the write fails', () => {
     mockSave.mockRejectedValueOnce(
       new ApiError('kcal must be between 800 and 8000', 'invalid_input', 400),
     );
-    render(<GoalsScreen />);
-    fireEvent.press(await screen.findByTestId('target-accept'));
+    await render(<GoalsScreen />);
+    await fireEvent.press(await screen.findByTestId('target-accept'));
 
     const failed = await screen.findByTestId('target-accept-failed');
     expect(failed).toHaveTextContent(/must be between 800 and 8000/);
@@ -383,8 +383,8 @@ describe('accepting the derived target, when the write fails', () => {
     ['a dropped connection', new RequestDroppedError()],
   ] as const)('composes the transport’s own diagnosis for %s', async (_label, err) => {
     mockSave.mockRejectedValueOnce(err);
-    render(<GoalsScreen />);
-    fireEvent.press(await screen.findByTestId('target-accept'));
+    await render(<GoalsScreen />);
+    await fireEvent.press(await screen.findByTestId('target-accept'));
 
     const failed = await screen.findByTestId('target-accept-failed');
     expect(failed).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
@@ -397,8 +397,8 @@ describe('accepting the derived target, when the write fails', () => {
     // network-caused. Pinned separately so a fold-back is caught even if a
     // future diagnosis string happens to overlap.
     mockSave.mockRejectedValueOnce(new TimeoutError());
-    render(<GoalsScreen />);
-    fireEvent.press(await screen.findByTestId('target-accept'));
+    await render(<GoalsScreen />);
+    await fireEvent.press(await screen.findByTestId('target-accept'));
 
     const failed = await screen.findByTestId('target-accept-failed');
     expect(failed).not.toHaveTextContent(/needs a connection/);
@@ -435,25 +435,25 @@ describe('accepting the derived target, when the write fails', () => {
  */
 async function openManualForm() {
   await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
-  fireEvent.press(await screen.findByTestId('target-edit'));
+  await fireEvent.press(await screen.findByTestId('target-edit'));
   return screen.findByTestId('manual-form');
 }
 
 /** Fill the four required fields with a coherent set of numbers. */
-function typeATarget(kcal: string) {
-  fireEvent.changeText(screen.getByTestId('manual-kcal'), kcal);
-  fireEvent.changeText(screen.getByTestId('manual-protein_g'), '170');
-  fireEvent.changeText(screen.getByTestId('manual-carb_g'), '200');
-  fireEvent.changeText(screen.getByTestId('manual-fat_g'), '70');
+async function typeATarget(kcal: string) {
+  await fireEvent.changeText(screen.getByTestId('manual-kcal'), kcal);
+  await fireEvent.changeText(screen.getByTestId('manual-protein_g'), '170');
+  await fireEvent.changeText(screen.getByTestId('manual-carb_g'), '200');
+  await fireEvent.changeText(screen.getByTestId('manual-fat_g'), '70');
 }
 
 describe('typing your own target', () => {
   it('saves it as manual, with no arithmetic attached', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    typeATarget('2000');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await typeATarget('2000');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1));
     const body = mockSave.mock.calls[0][2];
@@ -471,28 +471,28 @@ describe('typing your own target', () => {
   });
 
   it('sends an unstated fibre as null rather than as a confident zero', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    typeATarget('2000');
+    await typeATarget('2000');
     // Cleared, not left at the seed — a target that does not state fibre is
     // not a zero-fibre target, and `Number('')` is a perfectly finite 0.
-    fireEvent.changeText(screen.getByTestId('manual-fibre_g'), '');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await fireEvent.changeText(screen.getByTestId('manual-fibre_g'), '');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1));
     expect(mockSave.mock.calls[0][2].fibre_g).toBeNull();
   });
 
   it('refuses to save an incomplete form, and says why', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    fireEvent.changeText(screen.getByTestId('manual-kcal'), '2000');
+    await fireEvent.changeText(screen.getByTestId('manual-kcal'), '2000');
     // Emptied deliberately. `Number('')` is a finite 0, so without the parse
     // guard this would store 0 g of protein as though somebody chose it.
-    fireEvent.changeText(screen.getByTestId('manual-protein_g'), '');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await fireEvent.changeText(screen.getByTestId('manual-protein_g'), '');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     expect(await screen.findByTestId('manual-problem')).toBeTruthy();
     expect(mockSave).not.toHaveBeenCalled();
@@ -502,11 +502,11 @@ describe('typing your own target', () => {
     // Offline is this app's ordinary weather, and a button that simply
     // un-dims reads as a successful save.
     mockSave.mockRejectedValueOnce(new OfflineError());
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    typeATarget('2000');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await typeATarget('2000');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     const failed = await screen.findByTestId('manual-failed');
     expect(failed).toHaveTextContent(new RegExp(escapeRe(new OfflineError().diagnosis)));
@@ -520,11 +520,11 @@ describe('typing your own target', () => {
     mockSave.mockRejectedValueOnce(
       new ApiError('kcal must be between 800 and 8000', 'invalid_input', 400),
     );
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    typeATarget('2000');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await typeATarget('2000');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     const failed = await screen.findByTestId('manual-failed');
     expect(failed).toHaveTextContent(/must be between 800 and 8000/);
@@ -545,11 +545,11 @@ describe('typing your own target', () => {
     ['a dropped connection', new RequestDroppedError()],
   ] as const)('never blames a bad connection for %s', async (_label, err) => {
     mockSave.mockRejectedValueOnce(err);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    typeATarget('2000');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await typeATarget('2000');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     const failed = await screen.findByTestId('manual-failed');
     expect(failed).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
@@ -562,11 +562,11 @@ describe('typing your own target', () => {
     // digit — is refused locally with the limit named, and `saveTarget` is
     // never called. A client rail WIDER than the server's is worse than none:
     // it guarantees the confusing remote failure above.
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await openManualForm();
 
-    typeATarget('700');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await typeATarget('700');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     expect(await screen.findByTestId('manual-problem')).toHaveTextContent(/between 800 and 8000/);
     expect(mockSave).not.toHaveBeenCalled();
@@ -576,7 +576,7 @@ describe('typing your own target', () => {
     // The point of the prefill: five fields on a number pad is authoring a
     // target from scratch, which is not something anybody does standing up.
     mockList.mockResolvedValue([target({ kcal: 2700 })]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await screen.findByTestId('target-card');
     await openManualForm();
 
@@ -587,13 +587,13 @@ describe('typing your own target', () => {
     // Without this the athlete types 2,000, saves, and the heading still says
     // 2,700 — which reads as the save not having worked.
     mockList.mockResolvedValue([target({ kcal: 2700 })]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await screen.findByTestId('target-card');
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
     await openManualForm();
 
-    typeATarget('2000');
-    fireEvent.press(screen.getByTestId('manual-save'));
+    await typeATarget('2000');
+    await fireEvent.press(screen.getByTestId('manual-save'));
 
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
   });
@@ -606,7 +606,7 @@ describe('typing your own target', () => {
       suggestion: null,
       missing: ['height_cm'],
     } as unknown as Awaited<ReturnType<typeof suggestedTarget>>);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(await screen.findByTestId('target-edit')).toBeTruthy();
     await openManualForm();
@@ -617,7 +617,7 @@ describe('typing your own target', () => {
 describe('what you are eating to', () => {
   it('names the source, so the ladder is not read as its working', async () => {
     mockList.mockResolvedValue([target({ source: 'manual', kcal: 2000 })]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(await screen.findByTestId('target-card')).toBeTruthy();
     expect(screen.getByText(/you typed this one/)).toBeTruthy();
@@ -627,7 +627,7 @@ describe('what you are eating to', () => {
     // Both are zero rows. Reporting the first as the second tells an athlete
     // who set a target last week to go and set it again.
     mockList.mockRejectedValue(new Error('offline'));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(await screen.findByTestId('target-provenance-unknown')).toBeTruthy();
     expect(screen.queryByTestId('target-provenance-none')).toBeNull();
@@ -635,7 +635,7 @@ describe('what you are eating to', () => {
 
   it('says none when the read succeeded and there genuinely is none', async () => {
     mockList.mockResolvedValue([]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(await screen.findByTestId('target-provenance-none')).toBeTruthy();
   });
@@ -652,7 +652,7 @@ describe('why today’s number could not be worked out', () => {
     mockSuggested.mockRejectedValue(
       new ApiError('could not derive a target', 'internal', 500),
     );
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     const failed = await screen.findByTestId('target-derivation-failed');
     expect(failed).not.toHaveTextContent(/reach the server/i);
@@ -667,7 +667,7 @@ describe('why today’s number could not be worked out', () => {
     ['a dropped connection', new RequestDroppedError()],
   ] as const)('composes the transport’s own diagnosis for %s', async (_label, err) => {
     mockSuggested.mockRejectedValue(err);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     const failed = await screen.findByTestId('target-derivation-failed');
     expect(failed).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
@@ -683,7 +683,7 @@ describe('the weekly adjustment', () => {
       adjustment: null,
       blocked_by: ['not_weighing', 'too_soon'],
     } as unknown as Awaited<ReturnType<typeof fetchAdjustment>>);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(await screen.findByTestId('adjustment-blocked-not_weighing')).toBeTruthy();
     expect(screen.getByTestId('adjustment-blocked-too_soon')).toBeTruthy();
@@ -696,9 +696,9 @@ describe('the weekly adjustment', () => {
     // the athlete's thumb. Substituting today's date is the one-character
     // version of that bug, and it would look completely correct.
     mockAdjust.mockResolvedValue(proposal({ effective_on: '2030-06-02' }));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
-    fireEvent.press(await screen.findByTestId('adjustment-accept'));
+    await fireEvent.press(await screen.findByTestId('adjustment-accept'));
 
     await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1));
     const [, date, body] = mockSave.mock.calls[0];
@@ -713,9 +713,9 @@ describe('the weekly adjustment', () => {
   it('says so when accepting could not reach the server', async () => {
     mockAdjust.mockResolvedValue(proposal());
     mockSave.mockRejectedValueOnce(new Error('offline'));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
-    fireEvent.press(await screen.findByTestId('adjustment-accept'));
+    await fireEvent.press(await screen.findByTestId('adjustment-accept'));
     expect(await screen.findByTestId('adjustment-failed')).toBeTruthy();
   });
 
@@ -753,12 +753,12 @@ describe('the weekly adjustment', () => {
       // six-row derivation ladder, and opening a second above it pushes the
       // thing you came for off the first screenful.
       mockAdjust.mockResolvedValue(withBasis());
-      render(<GoalsScreen />);
+      await render(<GoalsScreen />);
 
       await screen.findByTestId('adjustment-proposal');
       expect(screen.queryByTestId('adjustment-arithmetic')).toBeNull();
 
-      fireEvent.press(screen.getByTestId('adjustment-toggle'));
+      await fireEvent.press(screen.getByTestId('adjustment-toggle'));
       expect(await screen.findByTestId('adjustment-arithmetic')).toBeTruthy();
     });
 
@@ -767,8 +767,8 @@ describe('the weekly adjustment', () => {
       // like the arithmetic's answer when it deliberately is not — the last
       // line would simply not follow from the one above it.
       mockAdjust.mockResolvedValue(withBasis());
-      render(<GoalsScreen />);
-      fireEvent.press(await screen.findByTestId('adjustment-toggle'));
+      await render(<GoalsScreen />);
+      await fireEvent.press(await screen.findByTestId('adjustment-toggle'));
 
       const ladder = await screen.findByTestId('adjustment-arithmetic');
       expect(ladder).toHaveTextContent(/−330 kcal/);
@@ -779,8 +779,8 @@ describe('the weekly adjustment', () => {
       // The proposal is only as good as the fortnight behind it, and the
       // fortnight is not visible in the number.
       mockAdjust.mockResolvedValue(withBasis());
-      render(<GoalsScreen />);
-      fireEvent.press(await screen.findByTestId('adjustment-toggle'));
+      await render(<GoalsScreen />);
+      await fireEvent.press(await screen.findByTestId('adjustment-toggle'));
 
       expect(await screen.findByTestId('adjustment-arithmetic')).toHaveTextContent(
         /Based on 12 of 14 days logged, and 21 days on your current target/,
@@ -789,8 +789,8 @@ describe('the weekly adjustment', () => {
 
     it('signs a rate rather than leaving the direction to be inferred', async () => {
       mockAdjust.mockResolvedValue(withBasis());
-      render(<GoalsScreen />);
-      fireEvent.press(await screen.findByTestId('adjustment-toggle'));
+      await render(<GoalsScreen />);
+      await fireEvent.press(await screen.findByTestId('adjustment-toggle'));
 
       // −0.30% observed against −0.75% asked for. Both signs rendered, so a
       // formatter that dropped them — or emitted a "−0.00%" rounding artefact
@@ -809,11 +809,11 @@ describe('the activity pills move the derivation and nothing else', () => {
   // for an answer that cannot have moved. Web made exactly this mistake and
   // its review caught it.
   it('does not refetch the targets or the proposal on a pill press', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(1));
 
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
 
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
     expect(mockList).toHaveBeenCalledTimes(1);
@@ -836,7 +836,7 @@ describe('the activity pills move the derivation and nothing else', () => {
  */
 describe('the activity level is remembered', () => {
   it('is read back on every focus, not only on mount', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1));
 
     refocus();
@@ -857,7 +857,7 @@ describe('the activity level is remembered', () => {
       activity: 'active',
       activity_chosen: true,
     } as never);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(selectedState('target-activity-active')).toBe(true));
     expect(selectedState('target-activity-light')).toBe(false);
@@ -870,7 +870,7 @@ describe('the activity level is remembered', () => {
     // have, which is the same two-surfaces-disagreeing failure in the other
     // direction. It reverts to the assumption rather than to a filled pill.
     mockRead.mockResolvedValue({ level: 'active', owed: false });
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(selectedState('target-activity-active')).toBe(false));
     expect(await screen.findByTestId('target-activity-assumed')).toBeTruthy();
@@ -881,7 +881,7 @@ describe('the activity level is remembered', () => {
     // stored level's number. A screen that highlighted the right pill and
     // still derived at `light` would look completely fixed.
     mockRead.mockResolvedValue({ level: 'active', owed: true });
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
     expect(mockSuggested.mock.calls[0][2]).toBe('active');
@@ -893,7 +893,7 @@ describe('the activity level is remembered', () => {
     // the two surfaces derive different targets for the same athlete, which is
     // the failure the whole server-side decision exists to prevent.
     mockRead.mockResolvedValue({ level: 'active', owed: false });
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
     expect(mockSuggested.mock.calls[0][2]).toBeUndefined();
@@ -906,7 +906,7 @@ describe('the activity level is remembered', () => {
         release = resolve;
       }),
     );
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     // Nothing yet. Asking first would send no parameter, take the server's
     // answer, and overwrite a choice made offline a moment before the read
@@ -926,10 +926,10 @@ describe('the activity level is remembered', () => {
     // Recording the debt only when the push fails loses the change to a crash
     // between the two.
     mockPushLevel.mockRejectedValue(new Error('offline'));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
 
     await waitFor(() => expect(mockRemember).toHaveBeenCalledWith('u1', 'active'));
     await waitFor(() => expect(mockPushLevel).toHaveBeenCalled());
@@ -939,10 +939,10 @@ describe('the activity level is remembered', () => {
 
   it('says when a choice is on the phone only', async () => {
     mockPushLevel.mockRejectedValue(new Error('offline'));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
 
     // "Changed" and "changed on this phone only" are different outcomes. A
     // pill that simply moves reads as a successful save.
@@ -950,10 +950,10 @@ describe('the activity level is remembered', () => {
   });
 
   it('settles the debt and drops the notice once the account has it', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
 
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
 
     await waitFor(() => expect(mockSettle).toHaveBeenCalledWith('u1', 'active'));
     await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
@@ -971,7 +971,7 @@ describe('the activity level is remembered', () => {
     // copy promised it; nothing implemented it, and every other test here
     // passed.
     mockRead.mockResolvedValue({ level: 'active', owed: true });
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(mockPushLevel).toHaveBeenCalledWith(expect.anything(), 'active'));
     await waitFor(() => expect(mockSettle).toHaveBeenCalledWith('u1', 'active'));
@@ -982,7 +982,7 @@ describe('the activity level is remembered', () => {
   it('leaves the debt standing when the retry cannot reach the server either', async () => {
     mockRead.mockResolvedValue({ level: 'active', owed: true });
     mockPushLevel.mockRejectedValue(new Error('still offline'));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(mockPushLevel).toHaveBeenCalled());
     // Not settled — settling on a failed push marks the change as sent and it
@@ -993,7 +993,7 @@ describe('the activity level is remembered', () => {
 
   it('does not retry when there is nothing owed', async () => {
     mockRead.mockResolvedValue({ level: 'active', owed: false });
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
     // A PATCH on every focus would write the athlete's own value back to the
@@ -1010,13 +1010,13 @@ describe('the activity level is remembered', () => {
           release = resolve;
         }),
       );
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
 
     // A second focus starts a read; the athlete taps before it resolves.
     refocus();
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
     await waitFor(() => expect(selectedState('target-activity-active')).toBe(true));
 
     // The read now resolves with its PRE-TAP snapshot. Applying it would put
@@ -1032,10 +1032,10 @@ describe('the activity level is remembered', () => {
     // parameter off the sync flag instead of a separate pin does exactly that:
     // the parameter disappears the instant the push lands, and the whole
     // ladder is fetched a second time for an answer that cannot have moved.
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
 
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
 
     await waitFor(() => expect(mockSettle).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
@@ -1045,7 +1045,7 @@ describe('the activity level is remembered', () => {
 
 describe('an assumed level is not shown as a chosen one', () => {
   it('selects no pill when the athlete has never chosen', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
 
     // `activity_chosen: false` is in the contract precisely so a client can
@@ -1058,7 +1058,7 @@ describe('an assumed level is not shown as a chosen one', () => {
   });
 
   it('names the level it assumed rather than leaving it to be guessed', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     // The pills show no selection, so without this the screen says nothing at
     // all about which of the three the number was worked out at.
     const note = await screen.findByTestId('target-activity-assumed');
@@ -1072,7 +1072,7 @@ describe('an assumed level is not shown as a chosen one', () => {
       activity: 'sedentary',
       activity_chosen: true,
     } as never);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId('target-activity-assumed')).toBeNull());
@@ -1088,7 +1088,7 @@ describe('an assumed level is not shown as a chosen one', () => {
       activity: 'sedentary',
       activity_chosen: false,
     } as never);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     const note = await screen.findByTestId('target-activity-assumed');
     expect(note).toHaveTextContent(/Desk job/);
@@ -1134,9 +1134,9 @@ describe('with nutrition turned off', () => {
     },
   };
 
-  it('says which module is off instead of deriving a target', () => {
+  it('says which module is off instead of deriving a target', async () => {
     withModules([nutritionOff]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(screen.getByTestId('goals-disabled')).toBeTruthy();
     expect(screen.getByText('Nutrition is turned off')).toBeTruthy();
@@ -1149,7 +1149,7 @@ describe('with nutrition turned off', () => {
   // render identically.
   it('asks the server for nothing', async () => {
     withModules([nutritionOff]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     // **Wait for the activity cache read to LAND before asserting**, and this
     // is the whole difference between a test and a decoration. `load` also
@@ -1182,7 +1182,7 @@ describe('with nutrition turned off', () => {
         capabilities: { ...nutritionOff.capabilities, has_food_log: false },
       },
     ]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(screen.queryByTestId('goals-disabled')).toBeNull();
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
@@ -1252,7 +1252,7 @@ describe('the roadmap offer (N107)', () => {
   it('offers a roadmap once the read confirms the athlete is on none', async () => {
     withModules([bjjWithCatalog]);
     mockListWorkingCurricula.mockResolvedValue([]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     expect(await screen.findByTestId('mock-roadmap-offer')).toBeTruthy();
   });
@@ -1260,7 +1260,7 @@ describe('the roadmap offer (N107)', () => {
   it('does not offer once enrolled in even one roadmap', async () => {
     withModules([bjjWithCatalog]);
     mockListWorkingCurricula.mockResolvedValue([{ id: 'r1' }]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     // Waited on something ELSE that only settles after the same tick the
     // roadmap read would have landed on, so this is not a vacuous pass that
@@ -1273,7 +1273,7 @@ describe('the roadmap offer (N107)', () => {
   it('neither offers nor asks the server, with no roadmap catalog to offer from', async () => {
     // The screen's own default — no BJJ, no techniques catalog at all.
     withModules([]);
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
     expect(screen.queryByTestId('mock-roadmap-offer')).toBeNull();
@@ -1287,7 +1287,7 @@ describe('the roadmap offer (N107)', () => {
     // itself guards against, moved one level up to the screen that gates it.
     withModules([bjjWithCatalog]);
     mockListWorkingCurricula.mockReturnValue(new Promise(() => {}));
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     await act(async () => {});
     expect(screen.queryByTestId('mock-roadmap-offer')).toBeNull();
@@ -1305,7 +1305,7 @@ describe('the roadmap offer (N107)', () => {
  */
 describe('nothing is written before the button', () => {
   it('derives, renders the whole ladder, and writes no target', async () => {
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
 
     // Wait for the derivation to have actually landed, or this asserts on a
     // screen that has not done anything yet — the vacuous-pass shape.
@@ -1319,18 +1319,18 @@ describe('nothing is written before the button', () => {
   it('still writes nothing after moving a movement card, which recomputes it', async () => {
     // The one action that changes the number without accepting it. A screen
     // that saved on recompute would look identical.
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     await waitFor(() => expect(screen.queryByText('Working it out…')).toBeNull());
 
-    fireEvent.press(screen.getByTestId('target-activity-active'));
+    await fireEvent.press(screen.getByTestId('target-activity-active'));
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
 
     expect(mockSave).not.toHaveBeenCalled();
   });
 
   it('writes exactly once, and only when the button is pressed', async () => {
-    render(<GoalsScreen />);
-    fireEvent.press(await screen.findByTestId('target-accept'));
+    await render(<GoalsScreen />);
+    await fireEvent.press(await screen.findByTestId('target-accept'));
 
     await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1));
     // `derived`, with the workings attached — the frozen arithmetic that lets
@@ -1344,7 +1344,7 @@ describe('nothing is written before the button', () => {
     // here: a movement card writes the level to the device and to the account,
     // and the screen says so itself a few rows up. Two lines contradicting each
     // other about whether anything saved is worse than a longer sentence.
-    render(<GoalsScreen />);
+    await render(<GoalsScreen />);
     // `findByText` rather than reading `props.children`: a JSX text node with no
     // interpolation in it is a STRING, not an array, so the first version of
     // this threw `join is not a function` — an assertion that fails for a

@@ -10,7 +10,7 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
-function renderSheet(over: Partial<React.ComponentProps<typeof EntryMenuSheet>> = {}) {
+async function renderSheet(over: Partial<React.ComponentProps<typeof EntryMenuSheet>> = {}) {
   const props = {
     open: true,
     entryName: 'Greek yoghurt',
@@ -21,13 +21,13 @@ function renderSheet(over: Partial<React.ComponentProps<typeof EntryMenuSheet>> 
     onClose: jest.fn(),
     ...over,
   };
-  render(<EntryMenuSheet {...props} />);
+  await render(<EntryMenuSheet {...props} />);
   return props;
 }
 
 describe('the three actions, and nothing else', () => {
-  it('offers Duplicate, Remove and Share — no fourth row', () => {
-    renderSheet();
+  it('offers Duplicate, Remove and Share — no fourth row', async () => {
+    await renderSheet();
     const buttons = screen
       .getAllByRole('button')
       .map((b) => b.props.testID as string)
@@ -35,8 +35,8 @@ describe('the three actions, and nothing else', () => {
     expect(buttons).toEqual(['entry-menu-duplicate', 'entry-menu-remove', 'entry-menu-share']);
   });
 
-  it('names the entry it was opened for', () => {
-    renderSheet();
+  it('names the entry it was opened for', async () => {
+    await renderSheet();
     expect(screen.getByText('Greek yoghurt')).toBeTruthy();
     expect(screen.getByTestId('entry-menu-duplicate').props.accessibilityLabel).toBe(
       'Duplicate Greek yoghurt',
@@ -46,26 +46,26 @@ describe('the three actions, and nothing else', () => {
     );
   });
 
-  it('Duplicate and Remove call back', () => {
-    const p = renderSheet();
-    fireEvent.press(screen.getByTestId('entry-menu-duplicate'));
+  it('Duplicate and Remove call back', async () => {
+    const p = await renderSheet();
+    await fireEvent.press(screen.getByTestId('entry-menu-duplicate'));
     expect(p.onDuplicate).toHaveBeenCalledTimes(1);
-    fireEvent.press(screen.getByTestId('entry-menu-remove'));
+    await fireEvent.press(screen.getByTestId('entry-menu-remove'));
     expect(p.onRemove).toHaveBeenCalledTimes(1);
     expect(p.onShare).not.toHaveBeenCalled();
   });
 
-  it('Done and the backdrop both close', () => {
-    const p = renderSheet();
-    fireEvent.press(screen.getByTestId('entry-menu-close'));
+  it('Done and the backdrop both close', async () => {
+    const p = await renderSheet();
+    await fireEvent.press(screen.getByTestId('entry-menu-close'));
     // Hidden from assistive tech on purpose (see the component), so ask for
     // hidden elements too.
-    fireEvent.press(screen.getByTestId('entry-menu-backdrop', { includeHiddenElements: true }));
+    await fireEvent.press(screen.getByTestId('entry-menu-backdrop', { includeHiddenElements: true }));
     expect(p.onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('renders nothing while closed', () => {
-    renderSheet({ open: false });
+  it('renders nothing while closed', async () => {
+    await renderSheet({ open: false });
     expect(screen.queryByTestId('entry-menu-duplicate')).toBeNull();
   });
 });
@@ -77,19 +77,19 @@ describe('the three actions, and nothing else', () => {
  * the row.
  */
 describe('Share is gated on sync state', () => {
-  it('is enabled and calls back when nothing blocks it', () => {
-    const p = renderSheet({ shareBlocked: null });
+  it('is enabled and calls back when nothing blocks it', async () => {
+    const p = await renderSheet({ shareBlocked: null });
     const share = screen.getByTestId('entry-menu-share');
     expect(share.props.accessibilityState).toEqual({ disabled: false });
     expect(share.props.accessibilityLabel).toBe('Share Greek yoghurt');
     expect(screen.queryByTestId('entry-menu-share-reason')).toBeNull();
-    fireEvent.press(share);
+    await fireEvent.press(share);
     expect(p.onShare).toHaveBeenCalledTimes(1);
   });
 
-  it('is disabled with the reason when the entry has not synced', () => {
+  it('is disabled with the reason when the entry has not synced', async () => {
     const reason = 'Not synced yet — this becomes shareable once it reaches the server.';
-    const p = renderSheet({ shareBlocked: reason });
+    const p = await renderSheet({ shareBlocked: reason });
     const share = screen.getByTestId('entry-menu-share');
     expect(share.props.accessibilityState).toEqual({ disabled: true });
     // The reason is IN THE LABEL — a hint on a disabled control is not
@@ -98,16 +98,16 @@ describe('Share is gated on sync state', () => {
     expect(
       screen.getByTestId('entry-menu-share-reason', { includeHiddenElements: true }).props.children,
     ).toBe(reason);
-    fireEvent.press(share);
+    await fireEvent.press(share);
     expect(p.onShare).not.toHaveBeenCalled();
   });
 
-  it('reads as blocked while the sync state is still being read — never permitted by default', () => {
-    const p = renderSheet({ shareBlocked: undefined });
+  it('reads as blocked while the sync state is still being read — never permitted by default', async () => {
+    const p = await renderSheet({ shareBlocked: undefined });
     const share = screen.getByTestId('entry-menu-share');
     expect(share.props.accessibilityState).toEqual({ disabled: true });
     expect(share.props.accessibilityLabel).toBe('Share. Loading…');
-    fireEvent.press(share);
+    await fireEvent.press(share);
     expect(p.onShare).not.toHaveBeenCalled();
   });
 });

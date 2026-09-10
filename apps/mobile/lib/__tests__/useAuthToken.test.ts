@@ -33,12 +33,12 @@ import { useAuthToken } from '@/lib/useAuthToken';
  * hook's behaviour against a Clerk that rebuilds its getter, which is what the
  * setup mock already simulates.
  */
-test('returns the same getter across renders', () => {
-  const { result, rerender } = renderHook(() => useAuthToken());
+test('returns the same getter across renders', async () => {
+  const { result, rerender } = await renderHook(() => useAuthToken());
   const first = result.current;
 
-  rerender({});
-  rerender({});
+  await rerender({});
+  await rerender({});
 
   expect(result.current).toBe(first);
 });

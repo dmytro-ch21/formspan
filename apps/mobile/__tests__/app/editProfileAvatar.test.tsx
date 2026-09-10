@@ -119,7 +119,7 @@ beforeEach(() => {
 });
 
 it('shows the monogram (no photo) before any avatar is uploaded', async () => {
-  render(<EditProfileScreen />);
+  await render(<EditProfileScreen />);
   await screen.findByTestId('profile-avatar-row');
   expect(
     screen.getByTestId('avatar-monogram', { includeHiddenElements: true }),
@@ -129,11 +129,11 @@ it('shows the monogram (no photo) before any avatar is uploaded', async () => {
 
 it('picking a photo from the library uploads it and shows the result', async () => {
   mockUploadAvatar.mockResolvedValue({ ...PROFILE, avatar_url: 'https://cdn.test/new.jpg' });
-  render(<EditProfileScreen />);
+  await render(<EditProfileScreen />);
   await screen.findByTestId('profile-avatar-row');
 
   await act(async () => {
-    fireEvent.press(screen.getByTestId('profile-avatar-library'));
+    await fireEvent.press(screen.getByTestId('profile-avatar-library'));
   });
 
   await waitFor(() => expect(screen.getByTestId('avatar-photo')).toBeTruthy());
@@ -163,16 +163,22 @@ it('disables Save while an avatar upload is in flight, and re-enables it after',
       resolveUpload = resolve;
     }),
   );
-  render(<EditProfileScreen />);
+  await render(<EditProfileScreen />);
   await screen.findByTestId('profile-avatar-row');
 
-  fireEvent.press(screen.getByTestId('profile-avatar-library'));
+  // Not awaited here. RNTL 14 resolves a press with the HANDLER's own return
+  // value, and this handler is deliberately held pending on `resolveUpload`
+  // below — awaiting the press first deadlocks the test into a 30s timeout
+  // instead of failing it. The `waitFor` on the committed disabled state is
+  // what the press was being awaited for anyway.
+  const pressed = fireEvent.press(screen.getByTestId('profile-avatar-library'));
 
   await waitFor(() => expect(screen.getByTestId('profile-save').props.accessibilityState?.disabled).toBe(true));
 
   await act(async () => {
     resolveUpload({ ...PROFILE, avatar_url: 'https://cdn.test/new.jpg' });
   });
+  await pressed;
 
   await waitFor(() => expect(screen.getByTestId('profile-save').props.accessibilityState?.disabled).toBe(false));
 });
@@ -186,11 +192,11 @@ it('disables Save while an avatar upload is in flight, and re-enables it after',
 it('a failed upload leaves the previous avatar showing, with an error', async () => {
   mockGetProfile.mockResolvedValue({ ...PROFILE, avatar_url: 'https://cdn.test/existing.jpg' });
   mockUploadAvatar.mockRejectedValue(new Error('storage is down'));
-  render(<EditProfileScreen />);
+  await render(<EditProfileScreen />);
   await screen.findByTestId('avatar-photo');
 
   await act(async () => {
-    fireEvent.press(screen.getByTestId('profile-avatar-library'));
+    await fireEvent.press(screen.getByTestId('profile-avatar-library'));
   });
 
   await waitFor(() => expect(screen.getByText('storage is down')).toBeTruthy());
@@ -201,11 +207,11 @@ it('a failed upload leaves the previous avatar showing, with an error', async ()
 it('removing the avatar returns to the monogram', async () => {
   mockGetProfile.mockResolvedValue({ ...PROFILE, avatar_url: 'https://cdn.test/existing.jpg' });
   mockRemoveAvatar.mockResolvedValue(undefined);
-  render(<EditProfileScreen />);
+  await render(<EditProfileScreen />);
   await screen.findByTestId('avatar-photo');
 
   await act(async () => {
-    fireEvent.press(screen.getByTestId('profile-avatar-remove'));
+    await fireEvent.press(screen.getByTestId('profile-avatar-remove'));
   });
 
   await waitFor(() =>
@@ -218,11 +224,11 @@ it('removing the avatar returns to the monogram', async () => {
 
 it('declines to upload when camera permission is refused, without touching uploadAvatar', async () => {
   mockRequestCamera.mockResolvedValue({ granted: false });
-  render(<EditProfileScreen />);
+  await render(<EditProfileScreen />);
   await screen.findByTestId('profile-avatar-row');
 
   await act(async () => {
-    fireEvent.press(screen.getByTestId('profile-avatar-camera'));
+    await fireEvent.press(screen.getByTestId('profile-avatar-camera'));
   });
 
   await waitFor(() => expect(screen.getByText(/needs camera access/i)).toBeTruthy());

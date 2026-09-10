@@ -102,8 +102,8 @@ const plan = (day: string, sport: string): PlannedSession => ({
 });
 
 /** Renders and opens the week — the day rows are behind the collapse. */
-function show(sessions: Session[], planned: PlannedSession[]) {
-  render(
+async function show(sessions: Session[], planned: PlannedSession[]) {
+  await render(
     <TrainingCalendar
       now={NOW}
       userId="u1"
@@ -114,37 +114,37 @@ function show(sessions: Session[], planned: PlannedSession[]) {
       onOpenSession={() => {}}
     />,
   );
-  fireEvent.press(screen.getByLabelText('Show the week'));
+  await fireEvent.press(screen.getByLabelText('Show the week'));
 }
 
 describe('the week list', () => {
-  it('drops a plan that its own day already met', () => {
-    show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
+  it('drops a plan that its own day already met', async () => {
+    await show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
     expect(screen.getByText('Maestro Push Day')).toBeTruthy();
     // The reported bug: this row sat beside the session as a second entry.
     expect(screen.queryByText('Planned')).toBeNull();
   });
 
-  it('keeps a plan the day did not meet', () => {
-    show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-06', 'strength')]);
+  it('keeps a plan the day did not meet', async () => {
+    await show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-06', 'strength')]);
     expect(screen.getByText('Planned')).toBeTruthy();
   });
 
-  it('keeps a plan met by nothing but a different sport', () => {
-    show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'bjj')]);
+  it('keeps a plan met by nothing but a different sport', async () => {
+    await show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'bjj')]);
     expect(screen.getByText('Planned')).toBeTruthy();
   });
 
-  it('marks the session that met a plan, so the intention is not simply lost', () => {
-    show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
+  it('marks the session that met a plan, so the intention is not simply lost', async () => {
+    await show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
     expect(screen.getByLabelText(/Maestro Push Day.*planned/)).toBeTruthy();
   });
 
-  it('still tells a screen reader the day was planned, even once it is met', () => {
+  it('still tells a screen reader the day was planned, even once it is met', async () => {
     // The dot collapses to "trained" because done outranks planned, and the
     // pending row is gone — so the spoken label is the ONLY place left saying
     // this day was intended. Two comments in the component require it.
-    show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
+    await show([session('2026-08-05', 'strength', 'Maestro Push Day')], [plan('2026-08-05', 'strength')]);
     expect(screen.getByLabelText(/Wednesday.*trained.*planned/)).toBeTruthy();
   });
 });
@@ -158,23 +158,23 @@ describe('the week list', () => {
  * to the screen.
  */
 describe('a running entry', () => {
-  it('shows distance and pace, not a sets/tonnage line', () => {
+  it('shows distance and pace, not a sets/tonnage line', async () => {
     // 5km in 1800s (30 minutes) is a 6:00/km pace.
-    show([runSession('2026-08-05', 'Morning Run', 5000, 1800)], []);
+    await show([runSession('2026-08-05', 'Morning Run', 5000, 1800)], []);
     expect(screen.getByText('Morning Run')).toBeTruthy();
     expect(screen.getByText('30m · 5 km · 6:00/km')).toBeTruthy();
     expect(screen.queryByText(/set/)).toBeNull();
     expect(screen.queryByText(/kg/)).toBeNull();
   });
 
-  it('omits distance and pace for a manual run with no recorded distance', () => {
+  it('omits distance and pace for a manual run with no recorded distance', async () => {
     // No GPS distance is not a confident "0m" — the meta line falls back to
     // duration alone, same fabricated-zero rule every other guard here follows.
-    show([runSession('2026-08-05', 'Treadmill', 0, 1800)], []);
+    await show([runSession('2026-08-05', 'Treadmill', 0, 1800)], []);
     expect(screen.getByText('30m')).toBeTruthy();
   });
 
-  it('paces off ACTIVE time, not the wall-clock span a pause stretches', () => {
+  it('paces off ACTIVE time, not the wall-clock span a pause stretches', async () => {
     // 5km in 1500s (25 minutes) of active time is a 5:00/km pace. The
     // session's wall-clock span is 1800s (30 minutes) — five minutes longer,
     // because the run was paused — and the duration chip correctly still
@@ -182,7 +182,7 @@ describe('a running entry', () => {
     // wall-clock span too, so this identical session would have read
     // 6:00/km here while the live tracking screen (which uses active time
     // throughout) showed 5:00/km for the same run.
-    show([runSession('2026-08-05', 'Paused Run', 5000, 1500, 1800)], []);
+    await show([runSession('2026-08-05', 'Paused Run', 5000, 1500, 1800)], []);
     expect(screen.getByText('30m · 5 km · 5:00/km')).toBeTruthy();
     expect(screen.queryByText(/6:00\/km/)).toBeNull();
   });

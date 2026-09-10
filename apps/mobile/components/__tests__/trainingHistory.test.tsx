@@ -80,7 +80,7 @@ const pending = <T,>() => new Promise<T>(() => {});
 
 it('draws nothing at all while the session read is in flight', async () => {
   mockListLocalSessions.mockReturnValue(pending<Session[]>());
-  render(<TrainingHistory />);
+  await render(<TrainingHistory />);
 
   await waitFor(() => expect(mockListPlannedBetween).toHaveBeenCalled());
   expect(screen.queryByTestId('progress-training-calendar')).toBeNull();
@@ -93,7 +93,7 @@ it('draws nothing at all while the PLAN read is in flight', async () => {
   // renders a week with its plans silently missing — an athlete who planned
   // nothing.
   mockListPlannedBetween.mockReturnValue(pending<PlannedSession[]>());
-  render(<TrainingHistory />);
+  await render(<TrainingHistory />);
 
   await waitFor(() => expect(mockListLocalSessions).toHaveBeenCalled());
   expect(screen.queryByTestId('training-calendar')).toBeNull();
@@ -102,7 +102,7 @@ it('draws nothing at all while the PLAN read is in flight', async () => {
 
 it('says the read failed rather than drawing an empty calendar', async () => {
   mockListLocalSessions.mockRejectedValue(new Error('disk'));
-  render(<TrainingHistory />);
+  await render(<TrainingHistory />);
 
   expect(await screen.findByTestId('progress-calendar-unavailable')).toBeTruthy();
   expect(screen.queryByTestId('training-calendar')).toBeNull();
@@ -110,7 +110,7 @@ it('says the read failed rather than drawing an empty calendar', async () => {
 
 it('says the same when the plan read is what failed', async () => {
   mockListPlannedBetween.mockRejectedValue(new Error('disk'));
-  render(<TrainingHistory />);
+  await render(<TrainingHistory />);
 
   expect(await screen.findByTestId('progress-calendar-unavailable')).toBeTruthy();
 });
@@ -118,7 +118,7 @@ it('says the same when the plan read is what failed', async () => {
 it('draws the calendar once both reads answer, including an empty one', async () => {
   // The mirror of the four above — without it they could all pass by the
   // component simply never rendering a calendar at all.
-  render(<TrainingHistory />);
+  await render(<TrainingHistory />);
 
   expect(await screen.findByTestId('progress-training-calendar')).toBeTruthy();
   expect(screen.getByTestId('training-calendar')).toBeTruthy();

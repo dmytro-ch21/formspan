@@ -100,8 +100,8 @@ afterEach(() => {
 
 /** Type, then let the 250ms debounce fire and the promise settle. */
 async function search(text: string) {
-  render(<AddFoodScreen />);
-  fireEvent.changeText(screen.getByTestId('add-search'), text);
+  await render(<AddFoodScreen />);
+  await fireEvent.changeText(screen.getByTestId('add-search'), text);
   await act(async () => {
     jest.advanceTimersByTime(300);
   });
@@ -127,11 +127,11 @@ async function search(text: string) {
  */
 async function logCatalogRow(testID: string) {
   await act(async () => {
-    fireEvent.press(screen.getByTestId(testID));
+    await fireEvent.press(screen.getByTestId(testID));
   });
   await waitFor(() => expect(screen.getByTestId('food-quantity-log')).toBeTruthy());
   await act(async () => {
-    fireEvent.press(screen.getByTestId('food-quantity-log'));
+    await fireEvent.press(screen.getByTestId('food-quantity-log'));
   });
 }
 
@@ -143,7 +143,7 @@ it('searches the catalog, not only the athlete’s saved foods', async () => {
 });
 
 it('does not search the catalog until something is typed', async () => {
-  render(<AddFoodScreen />);
+  await render(<AddFoodScreen />);
   await act(async () => {
     jest.advanceTimersByTime(300);
   });
@@ -180,7 +180,7 @@ it('logs a saved food and lands on the food log for the date being logged', asyn
   await search('oats');
   await waitFor(() => expect(screen.getByTestId('add-food-mine-1')).toBeTruthy());
   await act(async () => {
-    fireEvent.press(screen.getByTestId('add-food-mine-1'));
+    await fireEvent.press(screen.getByTestId('add-food-mine-1'));
   });
   await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
   const entry = mockLogFood.mock.calls[0][1];
@@ -280,7 +280,7 @@ it('shows both name and brand, and logs their composition', async () => {
   expect(screen.getByText('Greek Yogurt')).toBeTruthy();
   expect(screen.getByText('Fage')).toBeTruthy();
   await act(async () => {
-    fireEvent.press(screen.getByTestId('add-catalog-usda-9'));
+    await fireEvent.press(screen.getByTestId('add-catalog-usda-9'));
   });
   // And the diary gets exactly what the card showed, composed.
   expect(mockLogFood.mock.calls[0][1].name).toBe('Fage Greek Yogurt');
@@ -374,16 +374,16 @@ it('logs the quantity the athlete chose, scaled', async () => {
   await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
 
   await act(async () => {
-    fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+    await fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
   });
   // The portion arrives from the follow-up fetch, so it is not on screen at the
   // moment of the tap.
   await waitFor(() => expect(screen.getByTestId('food-portion-81')).toBeTruthy());
   await act(async () => {
-    fireEvent.press(screen.getByTestId('food-portion-81'));
+    await fireEvent.press(screen.getByTestId('food-portion-81'));
   });
   await act(async () => {
-    fireEvent.press(screen.getByTestId('food-quantity-log'));
+    await fireEvent.press(screen.getByTestId('food-quantity-log'));
   });
 
   const entry = mockLogFood.mock.calls[0][1];
@@ -444,8 +444,8 @@ describe('an empty result says which kind of empty', () => {
  */
 it('never renders an answer to a query that is no longer typed', async () => {
   mockSearchCatalog.mockResolvedValue(answer({ outcome: 'no_match' }));
-  render(<AddFoodScreen />);
-  fireEvent.changeText(screen.getByTestId('add-search'), 'chick');
+  await render(<AddFoodScreen />);
+  await fireEvent.changeText(screen.getByTestId('add-search'), 'chick');
   await act(async () => {
     jest.advanceTimersByTime(300);
   });
@@ -454,7 +454,7 @@ it('never renders an answer to a query that is no longer typed', async () => {
 
   // Inside the debounce: nothing has been asked yet, and the old answer must
   // already be gone rather than lingering under the new text.
-  fireEvent.changeText(screen.getByTestId('add-search'), 'chicken');
+  await fireEvent.changeText(screen.getByTestId('add-search'), 'chicken');
   await act(async () => {
     jest.advanceTimersByTime(100);
   });
@@ -497,7 +497,7 @@ describe('the scope row', () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('add-scope-mine'));
+      await fireEvent.press(screen.getByTestId('add-scope-mine'));
     });
     expect(screen.queryByTestId('add-catalog-usda-1')).toBeNull();
     expect(screen.getByTestId('add-food-mine-food')).toBeTruthy();
@@ -519,13 +519,13 @@ describe('the scope row', () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-food-edit-mine-recipe')).toBeTruthy());
 
-    fireEvent.press(screen.getByTestId('add-food-edit-mine-recipe'));
+    await fireEvent.press(screen.getByTestId('add-food-edit-mine-recipe'));
     expect(mockPush).toHaveBeenLastCalledWith({
       pathname: '/food/recipe/[id]',
       params: { id: 'mine-recipe' },
     });
 
-    fireEvent.press(screen.getByTestId('add-food-edit-mine-food'));
+    await fireEvent.press(screen.getByTestId('add-food-edit-mine-food'));
     expect(mockPush).toHaveBeenLastCalledWith({
       pathname: '/food/saved/[id]',
       params: { id: 'mine-food' },
@@ -544,11 +544,11 @@ describe('the scope row', () => {
     expect(screen.queryByTestId('add-new-recipe')).toBeNull();
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('add-scope-recipes'));
+      await fireEvent.press(screen.getByTestId('add-scope-recipes'));
     });
     expect(screen.getByTestId('add-new-recipe')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('add-new-recipe'));
+    await fireEvent.press(screen.getByTestId('add-new-recipe'));
     const [target] = mockPush.mock.calls[mockPush.mock.calls.length - 1];
     expect(target.pathname).toBe('/food/recipe/[id]');
     // `fresh` is explicit rather than inferred from "not found", which is how a
@@ -564,7 +564,7 @@ describe('the scope row', () => {
     await search('o');
     await waitFor(() => expect(screen.getByTestId('add-food-mine-food')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('add-scope-recipes'));
+      await fireEvent.press(screen.getByTestId('add-scope-recipes'));
     });
     expect(screen.getByTestId('add-food-mine-recipe')).toBeTruthy();
     expect(screen.queryByTestId('add-food-mine-food')).toBeNull();
@@ -582,7 +582,7 @@ describe('the scope row', () => {
    * a quiet completion of the mockup.
    */
   it('offers no chip that nothing backs', async () => {
-    render(<AddFoodScreen />);
+    await render(<AddFoodScreen />);
     expect(screen.queryByTestId('add-scope-meals')).toBeNull();
     expect(screen.queryByTestId('add-scope-verified')).toBeNull();
   });
@@ -594,27 +594,27 @@ describe('the scope row', () => {
  */
 describe('the grouped add-food choice', () => {
   it('offers all three ways in, together', async () => {
-    render(<AddFoodScreen />);
+    await render(<AddFoodScreen />);
     expect(screen.getByTestId('add-scan')).toBeTruthy();
     expect(screen.getByTestId('add-photograph')).toBeTruthy();
     expect(screen.getByTestId('add-describe')).toBeTruthy();
   });
 
   it('sends scan to the barcode screen', async () => {
-    render(<AddFoodScreen />);
-    fireEvent.press(screen.getByTestId('add-scan'));
+    await render(<AddFoodScreen />);
+    await fireEvent.press(screen.getByTestId('add-scan'));
     expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('/food/scan'));
   });
 
   it('sends photograph to the describe screen with photo=1, so the camera opens immediately', async () => {
-    render(<AddFoodScreen />);
-    fireEvent.press(screen.getByTestId('add-photograph'));
+    await render(<AddFoodScreen />);
+    await fireEvent.press(screen.getByTestId('add-photograph'));
     expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('/food/describe?photo=1'));
   });
 
   it('sends describe to the describe screen WITHOUT photo=1', async () => {
-    render(<AddFoodScreen />);
-    fireEvent.press(screen.getByTestId('add-describe'));
+    await render(<AddFoodScreen />);
+    await fireEvent.press(screen.getByTestId('add-describe'));
     const dest = mockPush.mock.calls[0][0] as string;
     expect(dest).toContain('/food/describe?meal=');
     expect(dest).not.toContain('photo=1');
@@ -632,7 +632,7 @@ describe('the picking view', () => {
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+      await fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
     });
 
     // Default quantity for a food with no portions loaded yet is 100 g — the
@@ -647,7 +647,7 @@ describe('the picking view', () => {
     await search('oats');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+      await fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
     });
     await waitFor(() => expect(screen.getByTestId('food-quantity-meal-breakfast')).toBeTruthy());
     expect(screen.getByTestId('food-quantity-meal-dinner')).toBeTruthy();
@@ -658,7 +658,7 @@ describe('the picking view', () => {
     await search('oats');
     await waitFor(() => expect(screen.getByTestId('add-catalog-usda-1')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
+      await fireEvent.press(screen.getByTestId('add-catalog-row-usda-1'));
     });
     // `FoodQuantity`'s own inline Log button is suppressed (`hideBuiltInFooter`)
     // — there must be exactly one confirm button, the sticky one.

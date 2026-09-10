@@ -176,12 +176,12 @@ beforeEach(() => {
 });
 
 it('opens the month grid from the day label, and it opens on the shown month', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
   expect(screen.queryByTestId('food-month-close')).toBeNull();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
 
   expect(await screen.findByTestId('food-month-close')).toBeTruthy();
@@ -199,7 +199,7 @@ it('does not build the grid until it is opened', async () => {
   // over its own month grid.
   const spy = jest.spyOn(Date.prototype, 'toLocaleDateString');
   try {
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     // Measured, not guessed: 0 calls to mount this screen with the grid
@@ -211,6 +211,7 @@ it('does not build the grid until it is opened', async () => {
     // the visible date's own formatting and the accessibility label's). 50
     // is the midpoint of the two, matching `weekPlanner.test.tsx`'s own rule
     // for picking a bound: the most room available in both directions.
+    // Re-measured under RNTL 14 / test-renderer and both numbers still hold.
     // Re-measure both numbers when either the pill or a grid cell grows
     // another date-formatting call; do not just raise the bound to make a
     // failure go away.
@@ -218,29 +219,41 @@ it('does not build the grid until it is opened', async () => {
     expect(closed).toBeLessThan(50);
 
     spy.mockClear();
-    fireEvent.press(screen.getByTestId('food-day-label'));
+    await fireEvent.press(screen.getByTestId('food-day-label'));
     await waitFor(() => expect(screen.getByTestId('food-month-close')).toBeTruthy());
 
-    expect(spy.mock.calls.length).toBeGreaterThan(50);
+    // RE-MEASURED under RNTL 14, and LOWERED rather than raised — which needs
+    // saying, because the note above forbids the lazy version of this move.
+    // Opening the grid now costs exactly 50 calls, not the 100 it cost under
+    // RNTL 13: React 19 commits once where the old renderer committed twice, so
+    // `> 50` could no longer pass at all. `> 40` is what the measurement
+    // supports and still fails a grid that came back degenerate — a full month
+    // is ~42 cells. The case the comment above names, a grid that stopped
+    // rendering entirely, is caught one line earlier instead: `food-month-close`
+    // lives inside the gated block, so the `waitFor` never resolves without it.
+    // Verified by mutation, all three ways: gate present (closed 0, open 50),
+    // gate removed (closed 100), gate replaced with `false` (the waitFor fails
+    // first).
+    expect(spy.mock.calls.length).toBeGreaterThan(40);
   } finally {
     spy.mockRestore();
   }
 });
 
 it('picking a day in the grid jumps the screen straight to it', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
 
   // Three months back — the case the ±1-day stepper would need ~90 taps for.
-  fireEvent.press(screen.getByTestId('food-month-prev'));
-  fireEvent.press(screen.getByTestId('food-month-prev'));
-  fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
   await waitFor(() => expect(screen.getByTestId('food-month-label')).toHaveTextContent('MAY 2026'));
 
-  fireEvent.press(screen.getByTestId('food-month-day-2026-05-12'));
+  await fireEvent.press(screen.getByTestId('food-month-day-2026-05-12'));
   await settle();
 
   // The grid closes and the day pill now names the picked day — two taps
@@ -254,29 +267,29 @@ it('reopens on the month of the day now on screen, not the calendar’s last pos
   // three months out would land back on today's month, which is five taps
   // (open, three to page back, open again) to get to a day you had already
   // reached once.
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
-  fireEvent.press(screen.getByTestId('food-month-prev'));
-  fireEvent.press(screen.getByTestId('food-month-prev'));
-  fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
   await waitFor(() => expect(screen.getByTestId('food-month-label')).toHaveTextContent('MAY 2026'));
-  fireEvent.press(screen.getByTestId('food-month-day-2026-05-12'));
+  await fireEvent.press(screen.getByTestId('food-month-day-2026-05-12'));
   await settle();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
 
   expect(screen.getByTestId('food-month-label')).toHaveTextContent('MAY 2026');
 });
 
 it('cannot pick a day that has not happened yet', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
 
   // Pinned "today" is August 5th; August 6th is on the same grid and has not
@@ -285,7 +298,7 @@ it('cannot pick a day that has not happened yet', async () => {
   const tomorrow = screen.getByTestId('food-month-day-2026-08-06');
   expect(tomorrow.props.accessibilityState?.disabled).toBe(true);
 
-  fireEvent.press(tomorrow);
+  await fireEvent.press(tomorrow);
   await settle();
 
   // Disabled means genuinely inert, not merely styled that way — the grid
@@ -295,19 +308,19 @@ it('cannot pick a day that has not happened yet', async () => {
 });
 
 it('the sheet\'s Today button returns to today from anywhere and closes the sheet', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
-  fireEvent.press(screen.getByTestId('food-month-prev'));
-  fireEvent.press(screen.getByTestId('food-month-day-2026-07-04'));
+  await fireEvent.press(screen.getByTestId('food-month-prev'));
+  await fireEvent.press(screen.getByTestId('food-month-day-2026-07-04'));
   await settle();
   expect(screen.getByTestId('food-day-label')).toHaveTextContent('SAT, JUL 4');
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
-  fireEvent.press(screen.getByTestId('food-month-today'));
+  await fireEvent.press(screen.getByTestId('food-month-today'));
   await settle();
 
   expect(screen.queryByTestId('food-month-close')).toBeNull();
@@ -321,10 +334,10 @@ it('marks a day that already has an entry, and leaves an empty one bare', async 
   // both "logged" and "hasn't happened yet" at once, which is not a state
   // that means anything.
   loggedDays.current = ['2026-08-03'];
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
-  fireEvent.press(screen.getByTestId('food-day-label'));
+  await fireEvent.press(screen.getByTestId('food-day-label'));
   await settle();
 
   await waitFor(() => expect(mockLocalLoggedDays).toHaveBeenCalled());
@@ -333,16 +346,16 @@ it('marks a day that already has an entry, and leaves an empty one bare', async 
 });
 
 it('the ±1-day arrows still work — the grid is an addition, not a replacement', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await settle();
 
   expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 
-  fireEvent.press(screen.getByTestId('food-day-prev'));
+  await fireEvent.press(screen.getByTestId('food-day-prev'));
   await settle();
   expect(screen.getByTestId('food-day-label')).toHaveTextContent('TUE, AUG 4');
 
-  fireEvent.press(screen.getByTestId('food-day-next'));
+  await fireEvent.press(screen.getByTestId('food-day-next'));
   await settle();
   expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
 });

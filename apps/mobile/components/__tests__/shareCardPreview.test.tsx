@@ -109,13 +109,13 @@ beforeEach(() => {
 });
 
 it('opens the preview instead of posting, and captures nothing yet', async () => {
-  render(<Harness />);
+  await render(<Harness />);
 
   // Not open until asked. The off-screen capture card is always mounted, so
   // asserting on the preview's own testID is what distinguishes them.
   expect(screen.queryByTestId('share-preview')).toBeNull();
 
-  fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(screen.getByTestId('share-button'));
 
   expect(await screen.findByTestId('share-preview')).toBeTruthy();
   // THE ASSERTION. Showing the card and posting it anyway would satisfy every
@@ -135,9 +135,9 @@ it('captures the off-screen card, not the one on screen', async () => {
     out inside a `Modal` reopens the "is it genuinely laid out" question that
     hands the athlete a blank image and fails without a word.
   */
-  render(<Harness />);
-  fireEvent.press(screen.getByTestId('share-button'));
-  fireEvent.press(await screen.findByTestId('share-preview-confirm'));
+  await render(<Harness />);
+  await fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(await screen.findByTestId('share-preview-confirm'));
 
   await waitFor(() => expect(mockShareCard).toHaveBeenCalledTimes(1));
 
@@ -156,18 +156,18 @@ it('captures the off-screen card, not the one on screen', async () => {
 });
 
 it('backs out without posting', async () => {
-  render(<Harness />);
-  fireEvent.press(screen.getByTestId('share-button'));
-  fireEvent.press(await screen.findByTestId('share-preview-cancel'));
+  await render(<Harness />);
+  await fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(await screen.findByTestId('share-preview-cancel'));
 
   await waitFor(() => expect(screen.queryByTestId('share-preview')).toBeNull());
   expect(mockShareCard).not.toHaveBeenCalled();
 });
 
 it('posts only from inside the preview', async () => {
-  render(<Harness />);
-  fireEvent.press(screen.getByTestId('share-button'));
-  fireEvent.press(await screen.findByTestId('share-preview-confirm'));
+  await render(<Harness />);
+  await fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(await screen.findByTestId('share-preview-confirm'));
 
   await waitFor(() => expect(mockShareCard).toHaveBeenCalledTimes(1));
   // Closed on success — the athlete is back where they were, having posted.
@@ -179,9 +179,9 @@ it('keeps the preview up when the capture fails, with the reason on it', async (
   // the session screen would hide both the message and the card it is about.
   mockShareCard.mockResolvedValue({ ok: false, reason: 'capture', message: 'No image was produced.' });
 
-  render(<Harness />);
-  fireEvent.press(screen.getByTestId('share-button'));
-  fireEvent.press(await screen.findByTestId('share-preview-confirm'));
+  await render(<Harness />);
+  await fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(await screen.findByTestId('share-preview-confirm'));
 
   expect(await screen.findByText('No image was produced.')).toBeTruthy();
   expect(screen.getByTestId('share-preview')).toBeTruthy();
@@ -193,9 +193,9 @@ it('stays quiet when the share sheet is merely dismissed', async () => {
   // their mind — and the preview stays up, so they can simply try again.
   mockShareCard.mockResolvedValue({ ok: false, reason: 'failed', message: 'User dismissed' });
 
-  render(<Harness />);
-  fireEvent.press(screen.getByTestId('share-button'));
-  fireEvent.press(await screen.findByTestId('share-preview-confirm'));
+  await render(<Harness />);
+  await fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(await screen.findByTestId('share-preview-confirm'));
 
   await waitFor(() => expect(mockShareCard).toHaveBeenCalled());
   expect(screen.queryByText('User dismissed')).toBeNull();
@@ -210,14 +210,14 @@ it('does not show a stale error when the preview is reopened', async () => {
   // else here fails a share and then reopens, so `setError(null)` in `preview()`
   // was unpinned.
   mockShareCard.mockResolvedValue({ ok: false, reason: 'capture', message: 'No image was produced.' });
-  render(<Harness />);
-  fireEvent.press(screen.getByTestId('share-button'));
-  fireEvent.press(await screen.findByTestId('share-preview-confirm'));
+  await render(<Harness />);
+  await fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(await screen.findByTestId('share-preview-confirm'));
   expect(await screen.findByText('No image was produced.')).toBeTruthy();
 
-  fireEvent.press(screen.getByTestId('share-preview-cancel'));
+  await fireEvent.press(screen.getByTestId('share-preview-cancel'));
   await waitFor(() => expect(screen.queryByTestId('share-preview')).toBeNull());
-  fireEvent.press(screen.getByTestId('share-button'));
+  await fireEvent.press(screen.getByTestId('share-button'));
 
   expect(await screen.findByTestId('share-preview')).toBeTruthy();
   expect(screen.queryByText('No image was produced.')).toBeNull();
@@ -253,19 +253,19 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
   }
 
   it('starts on the deterministic mountain, before any photo is picked', async () => {
-    render(<Harness />);
+    await render(<Harness />);
     // The off-screen host is mounted unconditionally, before the preview is
     // ever opened — see ShareCardHost's file comment.
     expect(photoSources()).toEqual([MOUNTAINS[mountainFor('s1')]]);
   });
 
   it('threads a library photo onto every mount of the card, including the off-screen one captureRef reads', async () => {
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
 
     await waitFor(() =>
@@ -280,12 +280,12 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
       canceled: false,
       assets: [{ uri: 'file:///camera/IMG_1.heic' }],
     });
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-camera'));
+      await fireEvent.press(screen.getByTestId('share-photo-camera'));
     });
 
     await waitFor(() =>
@@ -297,12 +297,12 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
   });
 
   it('resizes the picked frame to the export width rather than rendering the raw camera frame', async () => {
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
 
     await waitFor(() => expect(mockManipulate).toHaveBeenCalled());
@@ -316,17 +316,17 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
   });
 
   it('lets the athlete go back to the mountain after picking a photo', async () => {
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
     await waitFor(() =>
       expect(photoSources().every((s) => s?.uri === 'file:///cache/resized-1080.jpg')).toBe(true),
     );
 
-    fireEvent.press(screen.getByTestId('share-photo-clear'));
+    await fireEvent.press(screen.getByTestId('share-photo-clear'));
 
     await waitFor(() =>
       expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s1')])).toBe(true),
@@ -335,12 +335,12 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
 
   it('declines the library picker when photo-library permission is refused, and leaves the mountain in place', async () => {
     mockRequestLibrary.mockResolvedValue({ granted: false });
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
 
     expect(await screen.findByText(/needs access to your photos/i)).toBeTruthy();
@@ -351,12 +351,12 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
 
   it('declines the camera when camera permission is refused, and does not crash', async () => {
     mockRequestCamera.mockResolvedValue({ granted: false });
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-camera'));
+      await fireEvent.press(screen.getByTestId('share-photo-camera'));
     });
 
     expect(await screen.findByText(/needs camera access/i)).toBeTruthy();
@@ -372,20 +372,20 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
     // `Pressable`, so an unguarded throw here would be a silent no-op, not a
     // visible error.
     mockRequestLibrary.mockRejectedValue(new Error('picker unavailable'));
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
 
     expect(await screen.findByText('picker unavailable')).toBeTruthy();
   });
 
   it('the "Replace photo" label only appears once a photo has actually been picked', async () => {
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     expect(screen.getByText('Choose photo')).toBeTruthy();
@@ -393,7 +393,7 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
     expect(screen.queryByTestId('share-photo-clear')).toBeNull();
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
 
     await waitFor(() => expect(screen.getByText('Replace photo')).toBeTruthy());
@@ -411,11 +411,11 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
    * for the SAME session.
    */
   it('does not carry a picked photo onto a different session', async () => {
-    const { rerender } = render(<Harness sessionID="s1" />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    const { rerender } = await render(<Harness sessionID="s1" />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
     await waitFor(() =>
       expect(photoSources().every((s) => s?.uri === 'file:///cache/resized-1080.jpg')).toBe(true),
@@ -423,7 +423,7 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
 
     // A different session, same mounted hook instance — the shape a
     // `router.replace` onto the same route produces.
-    rerender(<Harness sessionID="s2" />);
+    await rerender(<Harness sessionID="s2" />);
 
     expect(photoSources().every((s) => s === MOUNTAINS[mountainFor('s2')])).toBe(true);
   });
@@ -447,12 +447,12 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
       canceled: true,
       assets: [{ uri: 'file:///should-not-be-used.jpg' }],
     });
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('share-photo-library'));
+      await fireEvent.press(screen.getByTestId('share-photo-library'));
     });
 
     // No manipulator call — there was never an asset to resize.
@@ -480,11 +480,11 @@ describe('replacing the mountain with a photo (N449/#747)', () => {
         resolveManipulate = resolve;
       }),
     );
-    render(<Harness />);
-    fireEvent.press(screen.getByTestId('share-button'));
+    await render(<Harness />);
+    await fireEvent.press(screen.getByTestId('share-button'));
     await screen.findByTestId('share-preview');
 
-    fireEvent.press(screen.getByTestId('share-photo-library'));
+    await fireEvent.press(screen.getByTestId('share-photo-library'));
 
     // Mid-resize: the picker and permission prompt have both already
     // resolved (they're separately-mocked immediate promises), the resize

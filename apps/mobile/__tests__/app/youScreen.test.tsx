@@ -233,7 +233,7 @@ describe('what a count renders as', () => {
     // own slot. Sighted users gained those lines when the controls became
     // rows; without this the trade would have been silent.
     mockCounts.mockResolvedValue({});
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     const row = await screen.findByTestId('you-shared');
     expect(row.props.accessibilityHint).toBe('What partners sent you, and what you sent them');
@@ -275,11 +275,11 @@ describe('what the Phase row says', () => {
 
   it('renders the live phase on the row, and opens the phase screen', async () => {
     mockPhases.mockResolvedValue([livePhase('lean_bulk')]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     const row = await screen.findByTestId('you-phase');
     await waitFor(() => expect(row.props.accessibilityValue?.text).toBe('Lean bulk'));
-    fireEvent.press(row);
+    await fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledWith('/phase');
   });
 
@@ -289,7 +289,7 @@ describe('what the Phase row says', () => {
     // screen reads is a HISTORY, and taking its first entry would show a cut
     // that finished in March as live.
     mockPhases.mockResolvedValue([{ ...livePhase('cut'), ended_on: '2026-03-01' }]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     const row = await screen.findByTestId('you-phase');
     await waitFor(() => expect(row.props.accessibilityValue?.text).toBe('None'));
@@ -300,7 +300,7 @@ describe('what the Phase row says', () => {
     // re-read a fact about the athlete is not evidence that it changed. Zeroing
     // it here would render "None" — an assertion, from a dead-spot.
     mockPhases.mockResolvedValue([livePhase('cut')]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
     const row = await screen.findByTestId('you-phase');
     await waitFor(() => expect(row.props.accessibilityValue?.text).toBe('Cut'));
 
@@ -316,7 +316,7 @@ describe('what the Phase row says', () => {
     // `NavValueRow` hard-coded "Opens your sport toggles" while it had one call
     // site. Harmless then, and silently wrong the moment a second row used it —
     // which is this one.
-    render(<YouScreen />);
+    await render(<YouScreen />);
     const phase = await screen.findByTestId('you-phase');
     const sports = screen.getByTestId('you-sports');
     expect(phase.props.accessibilityHint).not.toBe(sports.props.accessibilityHint);
@@ -355,11 +355,11 @@ describe('the friends entry point', () => {
       { username: 'a', display_name: null, since: '2026-01-01' },
       { username: 'b', display_name: null, since: '2026-01-02' },
     ]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     const chip = await screen.findByTestId('you-friends');
     await waitFor(() => expect(chip.props.accessibilityValue?.text).toBe('2 Friends'));
-    fireEvent.press(chip);
+    await fireEvent.press(chip);
     expect(mockPush).toHaveBeenCalledWith('/friends');
   });
 
@@ -367,7 +367,7 @@ describe('the friends entry point', () => {
     // The same rule the phase and waiting-counts chains already carry: a dead
     // spot must not tell an athlete their friend list emptied.
     mockListFriends.mockResolvedValue([{ username: 'a', display_name: null, since: '2026-01-01' }]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
     const chip = await screen.findByTestId('you-friends');
     await waitFor(() => expect(chip.props.accessibilityValue?.text).toBe('1 Friend'));
 
@@ -394,7 +394,7 @@ describe('the masthead avatar', () => {
     // name is read right beside it), so — same as the belt render and every
     // badge in this file — the query needs `includeHiddenElements`.
     mockGetProfile.mockResolvedValue({ display_name: 'Rhonda', username: 'rhonda', unit_system: 'metric' });
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     expect(
       await screen.findByTestId('avatar-monogram', { includeHiddenElements: true }),
@@ -409,7 +409,7 @@ describe('the masthead avatar', () => {
       unit_system: 'metric',
       avatar_url: 'https://example.com/rhonda.jpg',
     });
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     expect(
       await screen.findByTestId('avatar-photo', { includeHiddenElements: true }),
@@ -418,10 +418,10 @@ describe('the masthead avatar', () => {
 });
 
 describe('the People rows', () => {
-  it('badges friend requests and shares from their own keys', () => {
+  it('badges friend requests and shares from their own keys', async () => {
     // Crossed keys would be invisible to a test using one number for both.
     mockCounts.mockResolvedValue({ friend_requests: 2, shares: 5 });
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     return waitFor(() => {
       expect(screen.getByTestId('you-social-badge', { includeHiddenElements: true })).toBeTruthy();
@@ -430,13 +430,13 @@ describe('the People rows', () => {
     });
   });
 
-  it('badges shares at all, which is the gap this closes', () => {
+  it('badges shares at all, which is the gap this closes', async () => {
     // The counts shipped with shares deliberately unbadged on mobile: there
     // was no sharing surface, so it would have been a number you could not
     // open. `app/shared/` closed that, and this is the assertion that the
     // badge actually arrived rather than the comment merely being deleted.
     mockCounts.mockResolvedValue({ friend_requests: 0, shares: 1 });
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     return waitFor(() => {
       expect(screen.getByTestId('you-shared-badge', { includeHiddenElements: true })).toBeTruthy();
@@ -460,14 +460,14 @@ describe('the People rows', () => {
       throw new Error('audio is broken');
     });
     mockCounts.mockResolvedValue({ friend_requests: 0, shares: 0 });
-    const { rerender } = render(<YouScreen />);
+    const { rerender } = await render(<YouScreen />);
     await waitFor(() => expect(mockCounts).toHaveBeenCalled());
 
     // A rise, so the cue actually fires and actually throws.
     mockCounts.mockResolvedValue({ friend_requests: 2, shares: 0 });
     await act(async () => {
       refocus();
-      rerender(<YouScreen />);
+      await rerender(<YouScreen />);
     });
 
     await waitFor(() => {
@@ -481,7 +481,7 @@ describe('the People rows', () => {
     // badge asserts nothing is waiting — so a dead-spot would quietly tell an
     // athlete their inbox is clear.
     mockCounts.mockResolvedValue({ friend_requests: 3, shares: 0 });
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-social-badge', { includeHiddenElements: true });
 
     mockCounts.mockRejectedValue(new Error('Network request failed'));
@@ -497,7 +497,7 @@ describe('the People rows', () => {
     // The arm that makes the previous test mean something: a SUCCESSFUL read
     // of 0 must clear it, or the badge would be permanent once lit.
     mockCounts.mockResolvedValue({ friend_requests: 3, shares: 0 });
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-social-badge', { includeHiddenElements: true });
 
     mockCounts.mockResolvedValue({ friend_requests: 0, shares: 0 });
@@ -510,7 +510,7 @@ describe('the People rows', () => {
 });
 
 describe('the header', () => {
-  it('leaves the header row empty, and moves every destination to a row', () => {
+  it('leaves the header row empty, and moves every destination to a row', async () => {
     // The fix: three text controls here (~173pt) overlapped the centred
     // wordmark, and `ScreenHeader` now drops a wordmark it cannot fit — so
     // leaving them would have cost this tab its wordmark permanently.
@@ -525,7 +525,7 @@ describe('the header', () => {
     // Sync is online and clean in this file's mock, so `SyncChip` renders
     // null and the cluster should hold nothing at all.
     mockCounts.mockResolvedValue({});
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     return waitFor(() => {
       // No TEXT in the header's action area. Counting `children` was tried and
@@ -555,10 +555,10 @@ describe('the Library row (N70)', () => {
   it('is present, and goes to the catalog', async () => {
     mockPush.mockClear();
     mockCounts.mockResolvedValue({});
-    render(<YouScreen />);
+    await render(<YouScreen />);
 
     const row = await screen.findByTestId('you-library');
-    fireEvent.press(row);
+    await fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledWith('/library');
   });
 
@@ -569,7 +569,7 @@ describe('the Library row (N70)', () => {
   // athlete with a bare account.
   it('does not hide itself when nothing is enabled', async () => {
     mockCounts.mockResolvedValue({});
-    render(<YouScreen />);
+    await render(<YouScreen />);
     expect(await screen.findByTestId('you-library')).toBeTruthy();
   });
 });
@@ -590,7 +590,7 @@ describe('what N181 moved off You', () => {
     // construction, which is the vacuous-test shape this file already carries a
     // note about for the N178 move.
     mockModules = [{ key: 'bjj', enabled: true }];
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-sports');
 
     expect(screen.queryByTestId('you-sequences')).toBeNull();
@@ -605,7 +605,7 @@ describe('what N181 moved off You', () => {
     // row whose own detail line names units. Settings › Preferences › Units is
     // the single home now, and the Settings row here says so.
     mockGetProfile.mockResolvedValue({ display_name: 'Rhonda', unit_system: 'metric' });
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-sports');
 
     expect(screen.queryByText('Units')).toBeNull();
@@ -627,7 +627,7 @@ describe('what N181 moved off You', () => {
 describe('the order of the sections', () => {
   it('leads with the athlete and puts the app last', async () => {
     mockModules = [{ key: 'bjj', enabled: true }];
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-section-identity');
 
     const order = ['you-section-identity', 'you-section-people', 'you-section-app'];
@@ -642,7 +642,7 @@ describe('the order of the sections', () => {
     // seen". A section list alone does not pin that, because the identity
     // section could be first and empty.
     mockModules = [{ key: 'bjj', enabled: true }];
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-section-identity');
 
     const ids = screen
@@ -666,7 +666,7 @@ describe('the order of the sections', () => {
    */
   it("puts the athlete's name above the belt card", async () => {
     mockModules = [{ key: 'bjj', enabled: true }];
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-section-identity');
 
     const ids = screen
@@ -693,7 +693,7 @@ it('does not let a blurred count land on top of a newer one', async () => {
         resolveFirst = res;
       }),
   );
-  render(<YouScreen />);
+  await render(<YouScreen />);
 
   // Blur and return. The second read answers immediately with the truth.
   mockCounts.mockResolvedValue({ friend_requests: 1, shares: 0 });
@@ -723,9 +723,9 @@ it('does not let a blurred count land on top of a newer one', async () => {
  */
 describe('the Sports row', () => {
   it('leads to the toggles rather than only naming them', async () => {
-    render(<YouScreen />);
+    await render(<YouScreen />);
     const row = await screen.findByTestId('you-sports');
-    fireEvent.press(row);
+    await fireEvent.press(row);
     // The destination screens explain themselves ("BJJ tracking is off, turn
     // it back on under What you train" — N471/#471). Nothing linked to them
     // while they were off, which is why the athlete never reached the screen
@@ -754,7 +754,7 @@ describe('what N178 moved to Progress', () => {
     // row was ever drawn here — asserting its absence on a strength-only
     // account would be true by construction.
     mockModules = [{ key: 'bjj', enabled: true }];
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await screen.findByTestId('you-sports');
 
     expect(screen.queryByTestId('training-span-1m')).toBeNull();
@@ -790,13 +790,13 @@ describe('the VO2max row shows on the strength of readings alone', () => {
     mockListVo2.mockResolvedValue([
       { id: 'hk:vo2:1', metric_type: 'vo2_max', value: 44.1, unit: 'ml/kg/min', measured_at: '2026-09-01T07:00:00Z' },
     ]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
     expect(await screen.findByTestId('you-vo2max')).toBeTruthy();
   });
 
   it('is absent when the account has no readings and the device no source', async () => {
     mockListVo2.mockResolvedValue([]);
-    render(<YouScreen />);
+    await render(<YouScreen />);
     // Let the focus fetches settle, then assert the absence — a `queryBy`
     // before they resolve would pass vacuously.
     await screen.findByTestId('you-shared');
@@ -809,7 +809,7 @@ describe('the VO2max row shows on the strength of readings alone', () => {
     // parsed with `time.Parse(time.RFC3339, …)` and refused past 400 days;
     // a date-only bound or a three-year window is a 400 the screen's catch
     // hides. Pinned at the call site, where the bug was.
-    render(<YouScreen />);
+    await render(<YouScreen />);
     await waitFor(() => expect(mockListVo2).toHaveBeenCalled());
     const [, metric, from, to] = mockListVo2.mock.calls[0] as [unknown, string, string, string];
     const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;

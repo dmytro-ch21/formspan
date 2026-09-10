@@ -112,7 +112,7 @@ beforeEach(() => {
 });
 
 async function open() {
-  render(<CheckinScreen />);
+  await render(<CheckinScreen />);
   await waitFor(() => expect(screen.getByTestId('checkin-girths-toggle')).toBeTruthy());
   await waitFor(() => expect(screen.getByTestId('checkin-waist_cm')).toBeTruthy());
 }
@@ -125,7 +125,7 @@ describe('an untouched Save leaves every stored value byte-identical', () => {
   it('in metric, pressing Save with no changeText at all', async () => {
     mockUnits = 'metric';
     await open();
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     expect(payload().weight_kg).toBe(CHECKIN.weight_kg);
     expect(payload().waist_cm).toBe(CHECKIN.waist_cm);
@@ -139,7 +139,7 @@ describe('an untouched Save leaves every stored value byte-identical', () => {
     // Confirms the draft really did round-trip through inches, so this test
     // could actually fail against the bug.
     expect(screen.getByTestId('checkin-waist_cm').props.value).toBe('33');
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     // The bug: 33 in converts back to 83.8 cm, not the stored 83.82.
     expect(payload().weight_kg).toBe(CHECKIN.weight_kg);
@@ -155,7 +155,7 @@ describe('an untouched Save leaves every stored value byte-identical', () => {
     (listCheckins as jest.Mock).mockResolvedValue([notFixedPoint]);
     mockUnits = 'imperial';
     await open();
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     expect(payload().weight_kg).toBe(notFixedPoint.weight_kg);
   });
@@ -163,8 +163,8 @@ describe('an untouched Save leaves every stored value byte-identical', () => {
   it('editing only the notes still leaves every girth untouched — the exact scenario in the ticket', async () => {
     mockUnits = 'imperial';
     await open();
-    fireEvent.changeText(screen.getByTestId('checkin-notes'), 'fixed a typo');
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.changeText(screen.getByTestId('checkin-notes'), 'fixed a typo');
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     expect(payload().notes).toBe('fixed a typo');
     expect(payload().weight_kg).toBe(CHECKIN.weight_kg);
@@ -176,8 +176,8 @@ describe('an untouched Save leaves every stored value byte-identical', () => {
   it('a field the athlete DOES edit is still converted from what was typed', async () => {
     mockUnits = 'imperial';
     await open();
-    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '34');
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '34');
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     // 34 in is 86.4 cm — a real edit still round-trips normally.
     expect(payload().waist_cm).toBe(86.4);
@@ -191,7 +191,7 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
   it('on a day with no check-in yet', async () => {
     mockUnits = 'imperial';
     (listCheckins as jest.Mock).mockResolvedValue([]);
-    const { rerender } = render(<CheckinScreen />);
+    const { rerender } = await render(<CheckinScreen />);
     await waitFor(() => expect(screen.getByTestId('checkin-weight')).toBeTruthy());
 
     // Open the girths section too — the ticket's own bug-2 narrative is a
@@ -199,24 +199,24 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
     // weight here left the girth-discard loop (a separate line in `load()`)
     // unpinned: a targeted mutation that no-ops just that loop still left
     // every test in this file green.
-    fireEvent.press(screen.getByTestId('checkin-girths-toggle'));
+    await fireEvent.press(screen.getByTestId('checkin-girths-toggle'));
     await waitFor(() => expect(screen.getByTestId('checkin-waist_cm')).toBeTruthy());
 
-    fireEvent.changeText(screen.getByTestId('checkin-weight'), '33');
+    await fireEvent.changeText(screen.getByTestId('checkin-weight'), '33');
     expect(screen.getByTestId('checkin-weight').props.value).toBe('33');
-    fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '33');
+    await fireEvent.changeText(screen.getByTestId('checkin-waist_cm'), '33');
     expect(screen.getByTestId('checkin-waist_cm').props.value).toBe('33');
 
     mockUnits = 'metric';
     await act(async () => {
-      rerender(<CheckinScreen />);
+      await rerender(<CheckinScreen />);
     });
 
     // Discarded, not silently kept — an untouched field means nothing typed.
     await waitFor(() => expect(screen.getByTestId('checkin-weight').props.value).toBe(''));
     expect(screen.getByTestId('checkin-waist_cm').props.value).toBe('');
 
-    fireEvent.press(screen.getByTestId('checkin-save'));
+    await fireEvent.press(screen.getByTestId('checkin-save'));
     await waitFor(() => expect(saveCheckin).toHaveBeenCalled());
     // The bug: 33 (meant as pounds, or inches) stored as 33 kilograms/cm.
     expect(payload().weight_kg).toBeUndefined();
@@ -234,16 +234,16 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
     // cannot be skipped by the fetch failing.
     mockUnits = 'imperial';
     (listCheckins as jest.Mock).mockResolvedValueOnce([]);
-    const { rerender } = render(<CheckinScreen />);
+    const { rerender } = await render(<CheckinScreen />);
     await waitFor(() => expect(screen.getByTestId('checkin-weight')).toBeTruthy());
 
-    fireEvent.changeText(screen.getByTestId('checkin-weight'), '33');
+    await fireEvent.changeText(screen.getByTestId('checkin-weight'), '33');
     expect(screen.getByTestId('checkin-weight').props.value).toBe('33');
 
     mockUnits = 'metric';
     (listCheckins as jest.Mock).mockRejectedValueOnce(new Error('offline'));
     await act(async () => {
-      rerender(<CheckinScreen />);
+      await rerender(<CheckinScreen />);
     });
 
     // Discarded despite the reload failing — never left at '33' under the
@@ -261,17 +261,17 @@ describe('a unit flip discards an unsaved draft rather than reinterpreting it', 
     // the one that actually breaks if the discard is removed or gutted —
     // mutate that code path and confirm THAT test red, not this one.
     mockUnits = 'imperial';
-    const { rerender } = render(<CheckinScreen />);
+    const { rerender } = await render(<CheckinScreen />);
     await waitFor(() => expect(screen.getByTestId('checkin-weight')).toBeTruthy());
     // 80 kg loads as 176.4 lb.
     await waitFor(() => expect(screen.getByTestId('checkin-weight').props.value).toBe('176.4'));
 
-    fireEvent.changeText(screen.getByTestId('checkin-weight'), '999');
+    await fireEvent.changeText(screen.getByTestId('checkin-weight'), '999');
     expect(screen.getByTestId('checkin-weight').props.value).toBe('999');
 
     mockUnits = 'metric';
     await act(async () => {
-      rerender(<CheckinScreen />);
+      await rerender(<CheckinScreen />);
     });
 
     // Discarded the unsaved "999" and refilled from the stored 80 kg —

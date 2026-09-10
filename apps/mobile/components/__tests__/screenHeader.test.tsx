@@ -61,11 +61,11 @@ jest.mock('expo-router', () => ({
   useFocusEffect: () => {},
 }));
 
-it('carries the share bell in its trailing cluster, on every screen (N529)', () => {
+it('carries the share bell in its trailing cluster, on every screen (N529)', async () => {
   // The bell is how an athlete learns where shares arrive, so it is not a
   // per-screen opt-in like `action` — it is here, or it is nowhere. Inside
   // the measured cluster, so `wordmarkFits` sees its width.
-  render(<ScreenHeader title="Today" />);
+  await render(<ScreenHeader title="Today" />);
   const actions = screen.getByTestId('screen-header-actions');
   expect(within(actions).getByTestId('share-bell')).toBeTruthy();
 });
@@ -137,39 +137,39 @@ describe('whether the wordmark fits', () => {
 });
 
 /** `onLayout` never fires under jest, so the test plays it. */
-function layout(node: Parameters<typeof fireEvent>[0], width: number) {
-  fireEvent(node, 'layout', { nativeEvent: { layout: { x: 0, y: 0, width, height: 28 } } });
+async function layout(node: Parameters<typeof fireEvent>[0], width: number) {
+  await fireEvent(node, 'layout', { nativeEvent: { layout: { x: 0, y: 0, width, height: 28 } } });
 }
 
 describe('the header itself', () => {
-  it('shows the wordmark before anything has been measured', () => {
+  it('shows the wordmark before anything has been measured', async () => {
     // Optimistic on purpose: the three tabs that have always fitted must not
     // blink the mark out and back on every mount. The pre-measurement state is
     // exactly the old behaviour.
-    render(<ScreenHeader title="Today" />);
+    await render(<ScreenHeader title="Today" />);
     expect(screen.getByLabelText('VOLA')).toBeTruthy();
   });
 
-  it('withdraws the wordmark once the widths prove it does not fit', () => {
-    render(<ScreenHeader title="You" action={null} />);
-    layout(screen.getByTestId('screen-header-row'), 353);
-    layout(screen.getByTestId('screen-header-actions'), 173);
+  it('withdraws the wordmark once the widths prove it does not fit', async () => {
+    await render(<ScreenHeader title="You" action={null} />);
+    await layout(screen.getByTestId('screen-header-row'), 353);
+    await layout(screen.getByTestId('screen-header-actions'), 173);
     // The title is measured last, so this is also the frame where `measured`
     // first becomes true.
-    layout(screen.getByTestId('screen-header-row').children[0] as never, 53);
+    await layout(screen.getByTestId('screen-header-row').children[0] as never, 53);
     expect(screen.queryByLabelText('VOLA')).toBeNull();
   });
 
-  it('keeps it when the widths leave room', () => {
+  it('keeps it when the widths leave room', async () => {
     // Without this arm, "hides after any layout at all" passes the test above.
-    render(<ScreenHeader title="Today" />);
-    layout(screen.getByTestId('screen-header-row'), 353);
-    layout(screen.getByTestId('screen-header-actions'), 88);
-    layout(screen.getByTestId('screen-header-row').children[0] as never, 68);
+    await render(<ScreenHeader title="Today" />);
+    await layout(screen.getByTestId('screen-header-row'), 353);
+    await layout(screen.getByTestId('screen-header-actions'), 88);
+    await layout(screen.getByTestId('screen-header-row').children[0] as never, 68);
     expect(screen.getByLabelText('VOLA')).toBeTruthy();
   });
 
-  it('keeps the chip and the action in ONE flow child', () => {
+  it('keeps the chip and the action in ONE flow child', async () => {
     // The subtle half of the fix. As siblings they made three flow children,
     // and `space-between` then places the middle one — the chip — inside the
     // wordmark's band. Containment is the meaningful assertion; asserting
@@ -181,7 +181,7 @@ describe('the header itself', () => {
     // the chip in the cluster and rendered `{action}` as a third row child
     // passes while resurrecting half the bug.
     mockSyncState.online = false;
-    render(<ScreenHeader title="You" action={<RNView testID="probe-action" />} />);
+    await render(<ScreenHeader title="You" action={<RNView testID="probe-action" />} />);
     const cluster = within(screen.getByTestId('screen-header-actions'));
     expect(cluster.getByTestId('sync-chip')).toBeTruthy();
     expect(cluster.getByTestId('probe-action')).toBeTruthy();
@@ -197,13 +197,13 @@ describe('the header itself', () => {
  * VoiceOver announces.
  */
 describe('the screen name is shown again (N503, reverses part of N493)', () => {
-  it('renders the title as visible text', () => {
-    render(<ScreenHeader title="Library" />);
+  it('renders the title as visible text', async () => {
+    await render(<ScreenHeader title="Library" />);
     expect(screen.getByText('Library')).toBeTruthy();
   });
 
-  it('tells VoiceOver which screen this is via the visible text itself, not a separate marker', () => {
-    render(<ScreenHeader title="Library" />);
+  it('tells VoiceOver which screen this is via the visible text itself, not a separate marker', async () => {
+    await render(<ScreenHeader title="Library" />);
     const label = screen.getByLabelText('Library');
     expect(label).toBeTruthy();
     // Not just a label — the "header" role is what makes VoiceOver treat this
@@ -215,12 +215,12 @@ describe('the screen name is shown again (N503, reverses part of N493)', () => {
     expect(screen.getAllByLabelText('Library')).toHaveLength(1);
   });
 
-  it("leading's own control is announced separately, not swallowed into the header label", () => {
+  it("leading's own control is announced separately, not swallowed into the header label", async () => {
     // Library's back button (N484/#835) is a real, interactive `leading`
     // child — if it landed INSIDE the accessible header node instead of
     // beside it, VoiceOver would announce one "Library, header" blob and
     // the button itself would stop being independently focusable/tappable.
-    render(
+    await render(
       <ScreenHeader
         title="Library"
         leading={<RNView testID="probe-back" accessibilityLabel="Back" accessibilityRole="button" />}
@@ -278,9 +278,9 @@ describe('the screen name is shown again (N503, reverses part of N493)', () => {
  * draws" passes while leaving the reported bug exactly as it was.
  */
 describe('the edge at the top of the scrolling region', () => {
-  it('draws a rule when content scrolls under the header itself', () => {
+  it('draws a rule when content scrolls under the header itself', async () => {
     // `goals`, `phase`, `progress`: the header's bottom edge IS the scroll view's top.
-    render(<ScreenHeader title="Your target" />);
+    await render(<ScreenHeader title="Your target" />);
     expect(screen.getByTestId('screen-header')).toHaveStyle({
       borderBottomWidth: StyleSheet.hairlineWidth,
       // LITERAL, per this file's convention — `vola.lineBoundary`. A
@@ -294,12 +294,12 @@ describe('the edge at the top of the scrolling region', () => {
     });
   });
 
-  it('draws none when nothing scrolls under the header', () => {
+  it('draws none when nothing scrolls under the header', async () => {
     // Two different reasons, one flag: the header scrolls away (`index`,
     // `food`, `you`, `progress`, `workouts` — the last two as of N498/#869),
     // or fixed chrome below owns the boundary (`library`). A rule in either
     // case is a seam across nothing.
-    render(<ScreenHeader title="Today" contentScrollsUnder={false} />);
+    await render(<ScreenHeader title="Today" contentScrollsUnder={false} />);
     const header = screen.getByTestId('screen-header');
     expect(header).not.toHaveStyle({ borderBottomWidth: StyleSheet.hairlineWidth });
     expect(StyleSheet.flatten(header.props.style).borderBottomWidth).toBeUndefined();

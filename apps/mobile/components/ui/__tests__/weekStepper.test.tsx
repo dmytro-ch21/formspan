@@ -20,29 +20,29 @@ const DAYS: WeekStepperDay[] = [
 ];
 
 describe('WeekStepper', () => {
-  it('renders one marker per day, each reachable by its own testID', () => {
-    render(<WeekStepper days={DAYS} testID="stepper" />);
+  it('renders one marker per day, each reachable by its own testID', async () => {
+    await render(<WeekStepper days={DAYS} testID="stepper" />);
     for (const d of DAYS) {
       expect(screen.getByTestId(`week-stepper-day-${d.key}`)).toBeTruthy();
     }
   });
 
-  it('draws the day number for done, current and upcoming days', () => {
-    render(<WeekStepper days={DAYS} testID="stepper" />);
+  it('draws the day number for done, current and upcoming days', async () => {
+    await render(<WeekStepper days={DAYS} testID="stepper" />);
     expect(screen.getByText('3')).toBeTruthy();
     expect(screen.getByText('4')).toBeTruthy();
     expect(screen.getByText('6')).toBeTruthy();
   });
 
-  it('draws no number for a rest day — the moon glyph stands in for it', () => {
-    render(<WeekStepper days={DAYS} testID="stepper" />);
+  it('draws no number for a rest day — the moon glyph stands in for it', async () => {
+    await render(<WeekStepper days={DAYS} testID="stepper" />);
     // "5" would collide with nothing else here, so its absence is a direct
     // assertion that the rest day did not fall back to rendering its number.
     expect(screen.queryByText('5')).toBeNull();
   });
 
-  it('speaks each day’s own state to a screen reader, not a shared label', () => {
-    render(<WeekStepper days={DAYS} testID="stepper" />);
+  it('speaks each day’s own state to a screen reader, not a shared label', async () => {
+    await render(<WeekStepper days={DAYS} testID="stepper" />);
     expect(screen.getByTestId('week-stepper-day-2026-08-03').props.accessibilityLabel).toBe(
       'Monday, 3 August, past',
     );
@@ -57,17 +57,17 @@ describe('WeekStepper', () => {
     );
   });
 
-  it('renders no week label when none is given — the caller decides', () => {
-    render(<WeekStepper days={DAYS} testID="stepper" />);
+  it('renders no week label when none is given — the caller decides', async () => {
+    await render(<WeekStepper days={DAYS} testID="stepper" />);
     expect(screen.queryByText('W1')).toBeNull();
   });
 
-  it('renders the week label when given', () => {
-    render(<WeekStepper days={DAYS} weekLabel="W1" testID="stepper" />);
+  it('renders the week label when given', async () => {
+    await render(<WeekStepper days={DAYS} weekLabel="W1" testID="stepper" />);
     expect(screen.getByText('W1')).toBeTruthy();
   });
 
-  it('takes plain day-state data — nothing here is hardcoded to one screen’s shape', () => {
+  it('takes plain day-state data — nothing here is hardcoded to one screen’s shape', async () => {
     // A second, differently-shaped week (a 3-day program stub, non-calendar
     // keys) renders exactly the same way. This is the "not hardcoded to one
     // screen's data shape" acceptance criterion, pinned directly.
@@ -76,7 +76,7 @@ describe('WeekStepper', () => {
       { key: 'd2', number: 2, state: 'current', label: 'Day 2' },
       { key: 'd3', number: 3, state: 'rest', label: 'Day 3' },
     ];
-    render(<WeekStepper days={program} testID="program" />);
+    await render(<WeekStepper days={program} testID="program" />);
     expect(screen.getByTestId('week-stepper-day-d2').props.accessibilityLabel).toBe(
       'Day 2, today',
     );

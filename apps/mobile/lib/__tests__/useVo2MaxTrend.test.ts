@@ -31,7 +31,7 @@ beforeEach(() => {
 
 describe('useVo2MaxTrend — the request the server will accept', () => {
   it('sends RFC3339 bounds spanning less than the 400-day cap, for the default window', async () => {
-    renderHook(() => useVo2MaxTrend(getToken, '6M', VO2MAX_FETCH_DAYS));
+    await renderHook(() => useVo2MaxTrend(getToken, '6M', VO2MAX_FETCH_DAYS));
     await waitFor(() => expect(mockList).toHaveBeenCalled());
     const [, metric, from, to] = mockList.mock.calls[0] as [unknown, string, string, string];
     expect(metric).toBe('vo2_max');
@@ -44,7 +44,7 @@ describe('useVo2MaxTrend — the request the server will accept', () => {
     // The screen used to pass `365 * 3`. The helper clamps; the hook must not
     // route around it. (`1Y`, not `All`: F34/#955 took `All` off this screen
     // because a capped fetch cannot honour an unbounded label.)
-    renderHook(() => useVo2MaxTrend(getToken, '1Y', 365 * 3));
+    await renderHook(() => useVo2MaxTrend(getToken, '1Y', 365 * 3));
     await waitFor(() => expect(mockList).toHaveBeenCalled());
     const [, , from, to] = mockList.mock.calls[0] as [unknown, string, string, string];
     expect((Date.parse(to) - Date.parse(from)) / 86_400_000).toBeLessThan(SERVER_MAX_LIST_RANGE_DAYS);
@@ -59,7 +59,7 @@ describe('useVo2MaxTrend — the request the server will accept', () => {
     // preset on screen is entirely inside what was actually requested — and it
     // goes red if either the offered set widens or the fetch narrows.
     const widest = vo2MaxRanges().at(-1)!.key as keyof typeof RANGE_DAYS;
-    renderHook(() => useVo2MaxTrend(getToken, widest, VO2MAX_FETCH_DAYS));
+    await renderHook(() => useVo2MaxTrend(getToken, widest, VO2MAX_FETCH_DAYS));
     await waitFor(() => expect(mockList).toHaveBeenCalled());
     const [, , from, to] = mockList.mock.calls[0] as [unknown, string, string, string];
     const fetchedDays = (Date.parse(to) - Date.parse(from)) / 86_400_000;
@@ -73,7 +73,7 @@ describe('useVo2MaxTrend — the request the server will accept', () => {
     mockList.mockResolvedValue([
       { id: 'hc:vo2:1', metric_type: 'vo2_max', value: 44.1, unit: 'ml/kg/min', measured_at: '2026-09-01T07:00:00Z' },
     ]);
-    const { result } = renderHook(() => useVo2MaxTrend(getToken, '6M', VO2MAX_FETCH_DAYS));
+    const { result } = await renderHook(() => useVo2MaxTrend(getToken, '6M', VO2MAX_FETCH_DAYS));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.samples).toHaveLength(1);
   });

@@ -16,6 +16,7 @@ import { StyleSheet } from 'react-native';
 
 import { MealCard } from '../MealCard';
 import type { Entry, Macros } from '@/lib/nutrition';
+import { collectNodes } from '@/lib/__tests__/support/tree';
 
 jest.mock('@/lib/useUnits', () => ({ useUnits: () => ({ foodUnit: 'g' }) }));
 
@@ -78,8 +79,8 @@ function renderCard(over: Partial<React.ComponentProps<typeof MealCard>> = {}) {
 }
 
 describe('populated vs. empty — a different sentence, never the same one at zero', () => {
-  it('a populated section states what was eaten, in the header', () => {
-    renderCard({
+  it('a populated section states what was eaten, in the header', async () => {
+    await renderCard({
       entries: [entry()],
       totals: { ...zeroMacros, kcal: 145, protein_g: 11, carb_g: 0, fat_g: 11 },
     });
@@ -88,8 +89,8 @@ describe('populated vs. empty — a different sentence, never the same one at ze
     expect(screen.queryByTestId('meal-breakfast-available')).toBeNull();
   });
 
-  it('an empty section with a target states what is still AVAILABLE, never a zero row', () => {
-    renderCard({
+  it('an empty section with a target states what is still AVAILABLE, never a zero row', async () => {
+    await renderCard({
       entries: [],
       available: { ...zeroMacros, kcal: 938, protein_g: 41, carb_g: 74, fat_g: 16 },
     });
@@ -98,8 +99,8 @@ describe('populated vs. empty — a different sentence, never the same one at ze
     expect(screen.queryByText(/^0 kcal/)).toBeNull();
   });
 
-  it('an empty section with NO target shows neither an eaten line nor an available one', () => {
-    renderCard({ entries: [], available: null });
+  it('an empty section with NO target shows neither an eaten line nor an available one', async () => {
+    await renderCard({ entries: [], available: null });
     expect(screen.queryByTestId('meal-breakfast-macros')).toBeNull();
     expect(screen.queryByTestId('meal-breakfast-available')).toBeNull();
   });
@@ -115,31 +116,31 @@ describe('populated vs. empty — a different sentence, never the same one at ze
  * per-meal card agree on how they count.
  */
 describe('the header counts entries — N484', () => {
-  it('pluralises for more than one entry', () => {
-    renderCard({
+  it('pluralises for more than one entry', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       totals: { ...zeroMacros, kcal: 290 },
     });
     expect(screen.getByText('Breakfast · 2 items · 290 kcal')).toBeTruthy();
   });
 
-  it('stays singular for exactly one entry', () => {
-    renderCard({ entries: [entry()], totals: { ...zeroMacros, kcal: 145 } });
+  it('stays singular for exactly one entry', async () => {
+    await renderCard({ entries: [entry()], totals: { ...zeroMacros, kcal: 145 } });
     expect(screen.getByText('Breakfast · 1 item · 145 kcal')).toBeTruthy();
   });
 
-  it('an empty section states no count at all — nothing to count yet', () => {
-    renderCard({ entries: [], available: null });
+  it('an empty section states no count at all — nothing to count yet', async () => {
+    await renderCard({ entries: [], available: null });
     expect(screen.queryByText(/item/)).toBeNull();
     expect(screen.getByTestId('meal-breakfast-header').props.children).toBe('Breakfast');
   });
 
-  it('the count stays visible when the section is collapsed — it is the whole point', () => {
-    renderCard({
+  it('the count stays visible when the section is collapsed — it is the whole point', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       totals: { ...zeroMacros, kcal: 290 },
     });
-    fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
+    await fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
     expect(screen.getByText('Breakfast · 2 items · 290 kcal')).toBeTruthy();
   });
 
@@ -152,8 +153,8 @@ describe('the header counts entries — N484', () => {
    * carries no STATE). Sighted-only progress is exactly what this feature
    * exists to fix, so the label has to carry the same content as the text.
    */
-  it('announces the count and total to VoiceOver too, not only sighted athletes', () => {
-    renderCard({
+  it('announces the count and total to VoiceOver too, not only sighted athletes', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       totals: { ...zeroMacros, kcal: 290 },
     });
@@ -162,24 +163,24 @@ describe('the header counts entries — N484', () => {
     );
   });
 
-  it('an empty section\'s label stays the bare name — nothing to announce a count of', () => {
-    renderCard({ entries: [], available: null });
+  it('an empty section\'s label stays the bare name — nothing to announce a count of', async () => {
+    await renderCard({ entries: [], available: null });
     expect(screen.getByTestId('meal-breakfast-toggle').props.accessibilityLabel).toBe('Breakfast');
   });
 });
 
 describe('collapsible sections — N468/#792', () => {
-  it('defaults expanded regardless of whether the slot has entries', () => {
-    renderCard({ entries: [entry()], totals: { ...zeroMacros, kcal: 145 } });
+  it('defaults expanded regardless of whether the slot has entries', async () => {
+    await renderCard({ entries: [entry()], totals: { ...zeroMacros, kcal: 145 } });
     expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
 
-    renderCard({ entries: [], available: { ...zeroMacros, kcal: 938 } });
+    await renderCard({ entries: [], available: { ...zeroMacros, kcal: 938 } });
     expect(screen.getByTestId('meal-breakfast-available')).toBeTruthy();
   });
 
-  it('collapsing hides the macro line and the logged rows, without losing or resetting anything', () => {
+  it('collapsing hides the macro line and the logged rows, without losing or resetting anything', async () => {
     const e = entry();
-    renderCard({
+    await renderCard({
       entries: [e],
       totals: { ...zeroMacros, kcal: 145, protein_g: 11, carb_g: 0, fat_g: 11 },
     });
@@ -188,7 +189,7 @@ describe('collapsible sections — N468/#792', () => {
     expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
     expect(screen.getByText('Oats')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
+    await fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
 
     // Collapsed: gone from the tree — but the header (which already states
     // the slot's own total) and the Add button both stay reachable.
@@ -199,29 +200,29 @@ describe('collapsible sections — N468/#792', () => {
 
     // Expanding again shows the SAME entry, unaffected by the toggle —
     // collapsing is purely a display state, never a data mutation.
-    fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
+    await fireEvent.press(screen.getByTestId('meal-breakfast-toggle'));
     expect(screen.getByTestId('meal-breakfast-macros')).toBeTruthy();
     expect(screen.getByText('Oats')).toBeTruthy();
   });
 
-  it('reflects its state in accessibility so a collapsed section reads as collapsed', () => {
-    renderCard({ entries: [entry()] });
+  it('reflects its state in accessibility so a collapsed section reads as collapsed', async () => {
+    await renderCard({ entries: [entry()] });
     const toggle = screen.getByTestId('meal-breakfast-toggle');
     expect(toggle.props.accessibilityState).toEqual(expect.objectContaining({ expanded: true }));
 
-    fireEvent.press(toggle);
+    await fireEvent.press(toggle);
     expect(toggle.props.accessibilityState).toEqual(expect.objectContaining({ expanded: false }));
   });
 });
 
 describe('food row amounts are unit-aware (#483)', () => {
-  it('a gram-basis entry converts through the athlete\'s chosen unit', () => {
-    renderCard({ entries: [entry({ servings: 1.5, serving_label: '100 g' })] });
+  it('a gram-basis entry converts through the athlete\'s chosen unit', async () => {
+    await renderCard({ entries: [entry({ servings: 1.5, serving_label: '100 g' })] });
     expect(screen.getByText('150g')).toBeTruthy();
   });
 
-  it('a non-gram label is shown as logged, not relabelled as a weight', () => {
-    renderCard({ entries: [entry({ servings: 2, serving_label: '1 Each' })] });
+  it('a non-gram label is shown as logged, not relabelled as a weight', async () => {
+    await renderCard({ entries: [entry({ servings: 2, serving_label: '1 Each' })] });
     expect(screen.getByText('2 × 1 Each')).toBeTruthy();
   });
 });
@@ -233,45 +234,45 @@ describe('food row amounts are unit-aware (#483)', () => {
  * are about what a caller sees, not how the gesture conflict is avoided.
  */
 describe('combine-select mode (N115)', () => {
-  it('offers "Combine" once a section has two or more entries', () => {
-    renderCard({ entries: [entry({ id: 'a' }), entry({ id: 'b' })], onStartCombine: () => {} });
+  it('offers "Combine" once a section has two or more entries', async () => {
+    await renderCard({ entries: [entry({ id: 'a' }), entry({ id: 'b' })], onStartCombine: () => {} });
     expect(screen.getByTestId('meal-breakfast-combine-start')).toBeTruthy();
   });
 
-  it('does not offer it for a single entry — nothing to combine with', () => {
-    renderCard({ entries: [entry({ id: 'a' })], onStartCombine: () => {} });
+  it('does not offer it for a single entry — nothing to combine with', async () => {
+    await renderCard({ entries: [entry({ id: 'a' })], onStartCombine: () => {} });
     expect(screen.queryByTestId('meal-breakfast-combine-start')).toBeNull();
   });
 
-  it('does not offer it when the caller has no combine handler at all', () => {
-    renderCard({ entries: [entry({ id: 'a' }), entry({ id: 'b' })] });
+  it('does not offer it when the caller has no combine handler at all', async () => {
+    await renderCard({ entries: [entry({ id: 'a' }), entry({ id: 'b' })] });
     expect(screen.queryByTestId('meal-breakfast-combine-start')).toBeNull();
   });
 
-  it('tapping "Combine" tells the caller to start selecting', () => {
+  it('tapping "Combine" tells the caller to start selecting', async () => {
     const onStartCombine = jest.fn();
-    renderCard({ entries: [entry({ id: 'a' }), entry({ id: 'b' })], onStartCombine });
-    fireEvent.press(screen.getByTestId('meal-breakfast-combine-start'));
+    await renderCard({ entries: [entry({ id: 'a' }), entry({ id: 'b' })], onStartCombine });
+    await fireEvent.press(screen.getByTestId('meal-breakfast-combine-start'));
     expect(onStartCombine).toHaveBeenCalledTimes(1);
   });
 
-  it('while selecting, tapping a row toggles selection instead of opening it', () => {
+  it('while selecting, tapping a row toggles selection instead of opening it', async () => {
     const onToggleSelect = jest.fn();
     const onEntryPress = jest.fn();
-    renderCard({
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       selecting: true,
       selectedIds: new Set(),
       onToggleSelect,
       onEntryPress,
     });
-    fireEvent.press(screen.getByTestId('food-entry-a-select'));
+    await fireEvent.press(screen.getByTestId('food-entry-a-select'));
     expect(onToggleSelect).toHaveBeenCalledWith('a');
     expect(onEntryPress).not.toHaveBeenCalled();
   });
 
-  it('marks a selected row as a checked checkbox for assistive tech', () => {
-    renderCard({
+  it('marks a selected row as a checked checkbox for assistive tech', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       selecting: true,
       selectedIds: new Set(['a']),
@@ -285,8 +286,8 @@ describe('combine-select mode (N115)', () => {
     });
   });
 
-  it('the confirm button is disabled with fewer than two selected', () => {
-    renderCard({
+  it('the confirm button is disabled with fewer than two selected', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' }), entry({ id: 'c' })],
       selecting: true,
       selectedIds: new Set(['a']),
@@ -296,9 +297,9 @@ describe('combine-select mode (N115)', () => {
     ).toBe(true);
   });
 
-  it('confirming with two or more selected calls back with nothing else required', () => {
+  it('confirming with two or more selected calls back with nothing else required', async () => {
     const onConfirmCombine = jest.fn();
-    renderCard({
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' }), entry({ id: 'c' })],
       selecting: true,
       selectedIds: new Set(['a', 'b']),
@@ -306,24 +307,24 @@ describe('combine-select mode (N115)', () => {
     });
     const confirm = screen.getByTestId('meal-breakfast-combine-confirm');
     expect(confirm.props.accessibilityState.disabled).toBe(false);
-    fireEvent.press(confirm);
+    await fireEvent.press(confirm);
     expect(onConfirmCombine).toHaveBeenCalledTimes(1);
   });
 
-  it('cancelling tells the caller to leave selecting mode', () => {
+  it('cancelling tells the caller to leave selecting mode', async () => {
     const onCancelCombine = jest.fn();
-    renderCard({
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       selecting: true,
       selectedIds: new Set(),
       onCancelCombine,
     });
-    fireEvent.press(screen.getByTestId('meal-breakfast-combine-cancel'));
+    await fireEvent.press(screen.getByTestId('meal-breakfast-combine-cancel'));
     expect(onCancelCombine).toHaveBeenCalledTimes(1);
   });
 
-  it('hides "Add Food" while selecting — the combine bar replaces it', () => {
-    renderCard({
+  it('hides "Add Food" while selecting — the combine bar replaces it', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       selecting: true,
       selectedIds: new Set(),
@@ -340,27 +341,27 @@ describe('combine-select mode (N115)', () => {
  * sees — the drop decision itself is `useEntryDrag.test.ts`.
  */
 describe('the per-row 3-dot menu (N531)', () => {
-  it('every row gets a labelled control that calls back with its id', () => {
+  it('every row gets a labelled control that calls back with its id', async () => {
     const onEntryMenu = jest.fn();
-    renderCard({
+    await renderCard({
       entries: [entry({ id: 'a', name: 'Oats' }), entry({ id: 'b', name: 'Greek yoghurt' })],
       onEntryMenu,
     });
     const more = screen.getByTestId('food-entry-b-more');
     expect(more.props.accessibilityLabel).toBe('More for Greek yoghurt');
     expect(more.props.accessibilityRole).toBe('button');
-    fireEvent.press(more);
+    await fireEvent.press(more);
     expect(onEntryMenu).toHaveBeenCalledWith('b');
     expect(screen.getByTestId('food-entry-a-more').props.accessibilityLabel).toBe('More for Oats');
   });
 
-  it('renders no control at all without a handler', () => {
-    renderCard({ entries: [entry({ id: 'a' })] });
+  it('renders no control at all without a handler', async () => {
+    await renderCard({ entries: [entry({ id: 'a' })] });
     expect(screen.queryByTestId('food-entry-a-more')).toBeNull();
   });
 
-  it('is hidden while selecting — the row is a checkbox then', () => {
-    renderCard({
+  it('is hidden while selecting — the row is a checkbox then', async () => {
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       onEntryMenu: () => {},
       selecting: true,
@@ -370,11 +371,11 @@ describe('the per-row 3-dot menu (N531)', () => {
     expect(screen.getByTestId('food-entry-a-select')).toBeTruthy();
   });
 
-  it('tapping the row still opens the entry — the control is a sibling, not a nested press', () => {
+  it('tapping the row still opens the entry — the control is a sibling, not a nested press', async () => {
     const onEntryPress = jest.fn();
     const onEntryMenu = jest.fn();
-    renderCard({ entries: [entry({ id: 'a' })], onEntryPress, onEntryMenu });
-    fireEvent.press(screen.getByTestId('food-entry-a-open'));
+    await renderCard({ entries: [entry({ id: 'a' })], onEntryPress, onEntryMenu });
+    await fireEvent.press(screen.getByTestId('food-entry-a-open'));
     expect(onEntryPress).toHaveBeenCalledWith('a');
     expect(onEntryMenu).not.toHaveBeenCalled();
   });
@@ -395,10 +396,10 @@ describe('long-press lifts a row for the drag (N531)', () => {
     };
   }
 
-  it('a long-press tells the coordinator which entry lifted, and from which meal', () => {
+  it('a long-press tells the coordinator which entry lifted, and from which meal', async () => {
     const drag = dragHandlers();
-    renderCard({ entries: [entry({ id: 'a', meal: 'breakfast' })], drag });
-    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    await renderCard({ entries: [entry({ id: 'a', meal: 'breakfast' })], drag });
+    await fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
     expect(drag.onStart).toHaveBeenCalledWith('a', 'breakfast');
   });
 
@@ -406,64 +407,64 @@ describe('long-press lifts a row for the drag (N531)', () => {
   // AND puts the meal into edit mode, which is what survives the finger
   // lifting. Both, from one gesture; see `EntryRow`'s doc comment for why
   // that is one meaning rather than two.
-  it('a long-press also puts the meal into edit mode', () => {
+  it('a long-press also puts the meal into edit mode', async () => {
     const drag = dragHandlers();
-    renderCard({ entries: [entry({ id: 'a', meal: 'dinner' })], drag, meal: 'dinner' });
-    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    await renderCard({ entries: [entry({ id: 'a', meal: 'dinner' })], drag, meal: 'dinner' });
+    await fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
     expect(drag.onEnterEdit).toHaveBeenCalledWith('dinner');
   });
 
-  it('is inert while selecting, even with drag enabled — a checkbox does not lift', () => {
+  it('is inert while selecting, even with drag enabled — a checkbox does not lift', async () => {
     const drag = dragHandlers();
-    renderCard({
+    await renderCard({
       entries: [entry({ id: 'a' }), entry({ id: 'b' })],
       drag,
       selecting: true,
       selectedIds: new Set(),
     });
-    fireEvent(screen.getByTestId('food-entry-a-select'), 'longPress');
+    await fireEvent(screen.getByTestId('food-entry-a-select'), 'longPress');
     expect(drag.onStart).not.toHaveBeenCalled();
   });
 
-  it('is inert when the coordinator says disabled', () => {
+  it('is inert when the coordinator says disabled', async () => {
     const drag = dragHandlers({ enabled: false });
-    renderCard({ entries: [entry({ id: 'a' })], drag });
-    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    await renderCard({ entries: [entry({ id: 'a' })], drag });
+    await fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
     expect(drag.onStart).not.toHaveBeenCalled();
   });
 
-  it('does nothing without a coordinator at all', () => {
+  it('does nothing without a coordinator at all', async () => {
     const onEntryPress = jest.fn();
-    renderCard({ entries: [entry({ id: 'a' })], onEntryPress });
-    fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
+    await renderCard({ entries: [entry({ id: 'a' })], onEntryPress });
+    await fireEvent(screen.getByTestId('food-entry-a-open'), 'longPress');
     expect(onEntryPress).not.toHaveBeenCalled();
   });
 
-  it('a lift released without moving is cancelled, so the day view can unlock its scroll', () => {
+  it('a lift released without moving is cancelled, so the day view can unlock its scroll', async () => {
     const drag = dragHandlers();
-    renderCard({ entries: [entry({ id: 'a' })], drag });
+    await renderCard({ entries: [entry({ id: 'a' })], drag });
     const row = screen.getByTestId('food-entry-a-open');
-    fireEvent(row, 'pressIn');
-    fireEvent(row, 'longPress');
-    fireEvent(row, 'pressOut');
+    await fireEvent(row, 'pressIn');
+    await fireEvent(row, 'longPress');
+    await fireEvent(row, 'pressOut');
     expect(drag.onStart).toHaveBeenCalledTimes(1);
     expect(drag.onCancel).toHaveBeenCalledTimes(1);
     expect(drag.onEnd).not.toHaveBeenCalled();
   });
 
-  it('a plain tap released never cancels — nothing was lifted', () => {
+  it('a plain tap released never cancels — nothing was lifted', async () => {
     const drag = dragHandlers();
-    renderCard({ entries: [entry({ id: 'a' })], drag });
+    await renderCard({ entries: [entry({ id: 'a' })], drag });
     const row = screen.getByTestId('food-entry-a-open');
-    fireEvent(row, 'pressIn');
-    fireEvent(row, 'pressOut');
+    await fireEvent(row, 'pressIn');
+    await fireEvent(row, 'pressOut');
     expect(drag.onCancel).not.toHaveBeenCalled();
   });
 
-  it('the section under the finger says so to assistive tech', () => {
-    renderCard({ entries: [entry({ id: 'a' })], isDropTarget: true });
+  it('the section under the finger says so to assistive tech', async () => {
+    await renderCard({ entries: [entry({ id: 'a' })], isDropTarget: true });
     expect(screen.getByTestId('meal-breakfast').props.accessibilityState).toEqual({ selected: true });
-    renderCard({ entries: [entry({ id: 'b' })], isDropTarget: false, testID: 'meal-lunch' });
+    await renderCard({ entries: [entry({ id: 'b' })], isDropTarget: false, testID: 'meal-lunch' });
     expect(screen.getByTestId('meal-lunch').props.accessibilityState).toBeUndefined();
   });
 });
@@ -501,8 +502,8 @@ describe('the row under the finger stays mounted (N553)', () => {
     entry({ id: 'c', name: 'Banana' }),
   ];
 
-  it('the lifted row is still rendered, with its pan handlers still on it', () => {
-    renderCard({ entries: three, drag: dragging('b') });
+  it('the lifted row is still rendered, with its pan handlers still on it', async () => {
+    await renderCard({ entries: three, drag: dragging('b') });
     const row = screen.getByTestId('food-entry-b-row');
     // The handlers `EntryRow` spreads onto this view ARE the drag. A row that
     // has been unmounted cannot hold them — which is the bug — and a row
@@ -512,21 +513,21 @@ describe('the row under the finger stays mounted (N553)', () => {
     expect(typeof row.props.onResponderRelease).toBe('function');
   });
 
-  it('leaves the other rows exactly where they were', () => {
-    renderCard({ entries: three, drag: dragging('b') });
+  it('leaves the other rows exactly where they were', async () => {
+    await renderCard({ entries: three, drag: dragging('b') });
     expect(screen.getByTestId('food-entry-a-row')).toBeTruthy();
     expect(screen.getByTestId('food-entry-c-row')).toBeTruthy();
   });
 
-  it('the lifted row is still the interactive one — a press still reaches it', () => {
+  it('the lifted row is still the interactive one — a press still reaches it', async () => {
     const onEntryPress = jest.fn();
-    renderCard({ entries: three, drag: dragging('b'), onEntryPress });
-    fireEvent.press(screen.getByTestId('food-entry-b-open'));
+    await renderCard({ entries: three, drag: dragging('b'), onEntryPress });
+    await fireEvent.press(screen.getByTestId('food-entry-b-open'));
     expect(onEntryPress).toHaveBeenCalledWith('b');
   });
 
-  it('keeps the lifted row GRIP mounted in edit mode — it owns the touch-down responder', () => {
-    renderCard({ entries: three, drag: dragging('b'), editing: true });
+  it('keeps the lifted row GRIP mounted in edit mode — it owns the touch-down responder', async () => {
+    await renderCard({ entries: three, drag: dragging('b'), editing: true });
     const grip = screen.getByTestId('food-entry-b-grip');
     expect(typeof grip.props.onStartShouldSetResponder).toBe('function');
     expect(typeof grip.props.onResponderMove).toBe('function');
@@ -568,8 +569,8 @@ describe('the drag grip is a real 44 × 44 (N553)', () => {
     });
   }
 
-  it('measures 44 across and 44 down in padding alone', () => {
-    editingCard();
+  it('measures 44 across and 44 down in padding alone', async () => {
+    await editingCard();
     const style = StyleSheet.flatten(screen.getByTestId('food-entry-a-grip').props.style) as {
       paddingLeft: number;
       paddingRight: number;
@@ -579,11 +580,11 @@ describe('the drag grip is a real 44 × 44 (N553)', () => {
     expect(style.paddingVertical * 2 + ICON).toBe(APPLE_MINIMUM);
   });
 
-  it('the 3-dot it replaces reaches the same 44 across, its last 14 from hitSlop', () => {
+  it('the 3-dot it replaces reaches the same 44 across, its last 14 from hitSlop', async () => {
     // Not in this ticket's criteria, but it is the same control in the other
     // mode and it was 42 — near-misses are what this block exists to stop
     // being invisible.
-    renderCard({ entries: [entry({ id: 'a' })], onEntryMenu: () => {} });
+    await renderCard({ entries: [entry({ id: 'a' })], onEntryMenu: () => {} });
     const more = screen.getByTestId('food-entry-a-more');
     const style = StyleSheet.flatten(more.props.style) as {
       paddingLeft: number;
@@ -635,15 +636,17 @@ describe('the drop gap counts slots without the lifted row (N553)', () => {
   function testIdOrder(): string[] {
     const root = screen.root;
     if (!root) return [];
-    return root
-      .findAll((n) => typeof n.props.testID === 'string')
-      .map((n) => n.props.testID as string);
+    // `root.findAll(predicate)` was react-test-renderer's; RNTL 14's node has
+    // no query API at all, so the walk is explicit now.
+    return collectNodes(root).
+      filter((n) => typeof n.props.testID === 'string').
+      map((n) => n.props.testID as string);
   }
 
-  it('opens exactly one gap, immediately above the row the drop would push down', () => {
+  it('opens exactly one gap, immediately above the row the drop would push down', async () => {
     // Lifting the FIRST row leaves [b, c]; slot 1 is "between b and c", which
     // is the seam above c and nowhere else.
-    dragCard('a', 1);
+    await dragCard('a', 1);
     expect(screen.getAllByTestId('meal-breakfast-drop-gap')).toHaveLength(1);
     const order = testIdOrder();
     expect(order).toContain('food-entry-b-row');
@@ -653,12 +656,12 @@ describe('the drop gap counts slots without the lifted row (N553)', () => {
     expect(gap).toBeLessThan(order.indexOf('food-entry-c-row'));
   });
 
-  it('a drop at the END of the meal opens the seam below the last row', () => {
+  it('a drop at the END of the meal opens the seam below the last row', async () => {
     // Lifting `a` leaves [b, c], which has two slots — so slot 2 is the end of
     // the meal, and the seam belongs BELOW c. Asserting the position and not
     // merely the count is what makes this fail on an untranslated index, which
     // would put a single seam above c and look identical to a bare count.
-    dragCard('a', 2);
+    await dragCard('a', 2);
     expect(screen.getAllByTestId('meal-breakfast-drop-gap')).toHaveLength(1);
     const order = testIdOrder();
     expect(order).toContain('food-entry-c-row');

@@ -8,25 +8,25 @@ import { Pill } from '../Pill';
  * a chip with it.
  */
 describe('Pill — radius is always the full-pill token (999)', () => {
-  it('a badge (no onPress) is borderRadius 999', () => {
-    render(<Pill label="Public" testID="pill" />);
+  it('a badge (no onPress) is borderRadius 999', async () => {
+    await render(<Pill label="Public" testID="pill" />);
     const style = StyleSheet.flatten(screen.getByTestId('pill').props.style);
     expect(style.borderRadius).toBe(999);
   });
 
-  it('a chip (with onPress), active or not, is also borderRadius 999', () => {
-    const inactive = render(<Pill label="Strength" onPress={() => {}} testID="pill" />);
+  it('a chip (with onPress), active or not, is also borderRadius 999', async () => {
+    const inactive = await render(<Pill label="Strength" onPress={async () => {}} testID="pill" />);
     expect(StyleSheet.flatten(inactive.getByTestId('pill').props.style).borderRadius).toBe(999);
-    inactive.unmount();
+    await inactive.unmount();
 
-    const active = render(<Pill label="Strength" onPress={() => {}} active testID="pill" />);
+    const active = await render(<Pill label="Strength" onPress={async () => {}} active testID="pill" />);
     expect(StyleSheet.flatten(active.getByTestId('pill').props.style).borderRadius).toBe(999);
   });
 });
 
 describe('Pill — onPress is what decides chip vs badge, exhaustively', () => {
-  it('without onPress: a plain label, no button role, and pressing it is a no-op', () => {
-    render(<Pill label="Public" testID="pill" />);
+  it('without onPress: a plain label, no button role, and pressing it is a no-op', async () => {
+    await render(<Pill label="Public" testID="pill" />);
     const pill = screen.getByTestId('pill');
     expect(pill.props.accessibilityRole).not.toBe('button');
     // `Pressable`'s `onPress` prop is what `fireEvent.press` invokes — the
@@ -40,46 +40,46 @@ describe('Pill — onPress is what decides chip vs badge, exhaustively', () => {
     expect(() => fireEvent.press(pill)).not.toThrow();
   });
 
-  it('with onPress: a real button that fires and announces its selected state', () => {
+  it('with onPress: a real button that fires and announces its selected state', async () => {
     const onPress = jest.fn();
-    render(<Pill label="Strength" onPress={onPress} active testID="pill" />);
+    await render(<Pill label="Strength" onPress={onPress} active testID="pill" />);
     const pill = screen.getByTestId('pill');
     expect(pill.props.accessibilityRole).toBe('button');
     expect(pill.props.accessibilityState.selected).toBe(true);
-    fireEvent.press(pill);
+    await fireEvent.press(pill);
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it('an inactive chip reports selected: false, not undefined', () => {
-    render(<Pill label="Strength" onPress={() => {}} testID="pill" />);
+  it('an inactive chip reports selected: false, not undefined', async () => {
+    await render(<Pill label="Strength" onPress={() => {}} testID="pill" />);
     expect(screen.getByTestId('pill').props.accessibilityState.selected).toBe(false);
   });
 });
 
 describe('Pill — active tints toward the accent, not a hardcoded colour', () => {
-  it('active uses the accent (DEFAULT_ACCENT green with no <AccentProvider>), inactive does not', () => {
-    const active = render(<Pill label="Strength" onPress={() => {}} active testID="pill" />);
+  it('active uses the accent (DEFAULT_ACCENT green with no <AccentProvider>), inactive does not', async () => {
+    const active = await render(<Pill label="Strength" onPress={async () => {}} active testID="pill" />);
     const activeStyle = StyleSheet.flatten(active.getByTestId('pill').props.style);
     // withAlpha('#D3EC52', 0.22) — the same derivation Button's primary
     // fill uses, at a lower opacity since this sits BEHIND label text of
     // its own rather than carrying a button's whole fill.
     expect(activeStyle.backgroundColor).toBe('rgba(211,236,82,0.22)');
-    active.unmount();
+    await active.unmount();
 
-    const inactive = render(<Pill label="Strength" onPress={() => {}} testID="pill" />);
+    const inactive = await render(<Pill label="Strength" onPress={async () => {}} testID="pill" />);
     const inactiveStyle = StyleSheet.flatten(inactive.getByTestId('pill').props.style);
     expect(inactiveStyle.backgroundColor).not.toBe('rgba(211,236,82,0.22)');
   });
 });
 
 describe('Pill — accessibilityLabel overrides the visible label when given', () => {
-  it('a badge with a count uses the fuller accessible name', () => {
-    render(<Pill label="3" accessibilityLabel="3 friends waiting" testID="pill" />);
+  it('a badge with a count uses the fuller accessible name', async () => {
+    await render(<Pill label="3" accessibilityLabel="3 friends waiting" testID="pill" />);
     expect(screen.getByTestId('pill').props.accessibilityLabel).toBe('3 friends waiting');
   });
 
-  it('a chip with no override speaks its own label', () => {
-    render(<Pill label="Strength" onPress={() => {}} testID="pill" />);
+  it('a chip with no override speaks its own label', async () => {
+    await render(<Pill label="Strength" onPress={() => {}} testID="pill" />);
     expect(screen.getByTestId('pill').props.accessibilityLabel).toBe('Strength');
   });
 });

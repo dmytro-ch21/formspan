@@ -62,17 +62,31 @@ jest.mock('expo-router', () => ({
  * A rejection means the ask itself failed, which is what produces `unknown`.
  */
 const serverTarget: { current: unknown[] | 'fails' } = { current: [] };
+/**
+ * Holds BOTH reads pending when set, so "still in flight" is a state the test
+ * actually creates rather than one it catches by being quick.
+ *
+ * Under RNTL 13 a synchronous `render` returned before either mock's microtask
+ * ran, so the first frame was observable for free. RNTL 14 awaits render and
+ * flushes them, so the frame is gone by the first assertion — and a test that
+ * depended on the old timing was asserting on a race it did not control.
+ */
+const holdReads: { current: Promise<void> | null } = { current: null };
 const localTarget: { current: { state: string; target?: unknown } } = { current: { state: 'unknown' } };
 
 jest.mock('@/lib/foodLog', () => ({
   localEntries: jest.fn(async () => []),
-  localTargetView: jest.fn(async () => localTarget.current),
+  localTargetView: jest.fn(async () => {
+    await holdReads.current;
+    return localTarget.current;
+  }),
   cacheTargets: jest.fn(async () => {}),
   removeEntry: jest.fn(async () => {}),
 }));
 
 jest.mock('@/lib/nutritionApi', () => ({
   listTargets: jest.fn(async () => {
+    await holdReads.current;
     if (serverTarget.current === 'fails') throw new Error('offline');
     return serverTarget.current;
   }),
@@ -192,7 +206,7 @@ describe('tap one — Food is a bar slot', () => {
 describe('tap two — the target row', () => {
   it('shows the number without opening anything', async () => {
     serverTarget.current = [target(2700)];
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     // The grouped form, because that is what an athlete reads on the screen —
@@ -203,7 +217,7 @@ describe('tap two — the target row', () => {
 
   it('reaches the derivation in one tap from there', async () => {
     serverTarget.current = [target(2700)];
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     const row = screen.getByTestId('food-target');
@@ -214,7 +228,7 @@ describe('tap two — the target row', () => {
     expect(row.props.accessibilityHint).toBe(
       'Opens your target, how it was worked out, and past targets',
     );
-    fireEvent.press(row);
+    await fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledWith('/goals');
   });
 
@@ -225,12 +239,12 @@ describe('tap two — the target row', () => {
   // with no way to the target.
   it('is gone, and unreachable, if the row is removed', async () => {
     serverTarget.current = [target(2700)];
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     const row = screen.getByTestId('food-target');
     expect(row).toBeTruthy();
-    fireEvent.press(row);
+    await fireEvent.press(row);
     expect(mockPush).toHaveBeenCalledTimes(1);
     expect(mockPush).toHaveBeenCalledWith('/goals');
   });
@@ -241,7 +255,7 @@ describe('tap two — the target row', () => {
     // they cannot disagree — they can only be redundant, which reads as a bug
     // in the figure rather than in the layout.
     serverTarget.current = [target(2700)];
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     expect(screen.queryByTestId('fuel-target')).toBeNull();
@@ -267,18 +281,24 @@ describe('every state it renders is one the screen can actually reach', () => {
     // resolves, which is what the screen initialises `dated` to and returns to
     // on every day step.
     serverTarget.current = [target(2700)];
-    render(<FoodScreen />);
+    let release!: () => void;
+    holdReads.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await render(<FoodScreen />);
 
     expect(screen.getByTestId('food-target-value')).toHaveTextContent('Checking…');
 
     // Settled afterwards anyway, or the in-flight reads land after teardown as
     // un-acted updates — console noise that reads like a defect in the screen.
+    release();
+    holdReads.current = null;
     await settle();
   });
 
   it('offers to set one when the server says there is none', async () => {
     serverTarget.current = [];
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     expect(screen.getByTestId('food-target-value')).toHaveTextContent('Not set');
@@ -291,7 +311,7 @@ describe('every state it renders is one the screen can actually reach', () => {
     // to redo work they have already done.
     serverTarget.current = 'fails';
     localTarget.current = { state: 'unknown' };
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     const value = screen.getByTestId('food-target-value');
@@ -308,7 +328,7 @@ describe('every state it renders is one the screen can actually reach', () => {
     // "offline": a cached target is a real answer, so the row states it.
     serverTarget.current = 'fails';
     localTarget.current = { state: 'set', target: target(2450) };
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
     await settle();
 
     expect(screen.getByTestId('food-target-value')).toHaveTextContent('2,450 kcal');
@@ -359,13 +379,13 @@ describe('the target caption', () => {
     },
   };
 
-  it('is on by default, so the prop cannot degenerate into a constant', () => {
-    render(<RemainingBlock eaten={eaten} view={view} />);
+  it('is on by default, so the prop cannot degenerate into a constant', async () => {
+    await render(<RemainingBlock eaten={eaten} view={view} />);
     expect(screen.getByTestId('fuel-target')).toHaveTextContent('2,700 target');
   });
 
-  it('is off where the caller has already said it', () => {
-    render(<RemainingBlock eaten={eaten} view={view} showTarget={false} />);
+  it('is off where the caller has already said it', async () => {
+    await render(<RemainingBlock eaten={eaten} view={view} showTarget={false} />);
     expect(screen.queryByTestId('fuel-target')).toBeNull();
     // The figures are untouched — this suppresses one caption, not the block.
     expect(screen.getByTestId('fuel-remaining-kcal')).toBeTruthy();
@@ -384,7 +404,7 @@ describe('the target caption', () => {
 describe('with nutrition turned off', () => {
   it('renders the explanation and no target row at all', async () => {
     withModules([nutrition(false)]);
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
 
     expect(screen.getByTestId('food-disabled')).toBeTruthy();
     expect(screen.queryByTestId('food-target')).toBeNull();
@@ -395,7 +415,7 @@ describe('with nutrition turned off', () => {
     // An unread list is an unanswered question, not a "no" — and the row must
     // not assert "Not set" from it either.
     withModules([], false);
-    render(<FoodScreen />);
+    await render(<FoodScreen />);
 
     expect(screen.queryByTestId('food-disabled')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('food-target')).toBeTruthy());

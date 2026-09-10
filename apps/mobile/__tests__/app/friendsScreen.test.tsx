@@ -58,8 +58,8 @@ beforeEach(() => {
 });
 
 it('confirms accepting a friend request', async () => {
-  render(<FriendsScreen />);
-  fireEvent.press(await screen.findByTestId('friends-accept-rhonda'));
+  await render(<FriendsScreen />);
+  await fireEvent.press(await screen.findByTestId('friends-accept-rhonda'));
 
   await waitFor(() => expect(mockAcceptRequest).toHaveBeenCalled());
   expect(mockPlay).toHaveBeenCalledWith('success');
@@ -69,8 +69,8 @@ it('stays SILENT when declining a request', async () => {
   // The one that matters. Declining runs through the same `act()` helper as
   // accepting and calls `removeFriend` — so anything that confirms on "the
   // action succeeded" rather than on an explicit opt-in chimes here too.
-  render(<FriendsScreen />);
-  fireEvent.press(await screen.findByTestId('friends-decline-rhonda'));
+  await render(<FriendsScreen />);
+  await fireEvent.press(await screen.findByTestId('friends-decline-rhonda'));
 
   await waitFor(() => expect(mockRemoveFriend).toHaveBeenCalled());
   expect(mockPlay).not.toHaveBeenCalled();
@@ -80,8 +80,8 @@ it('stays silent when a request genuinely fails', async () => {
   // A confirmation that also plays on failure is not a confirmation.
   mockAcceptRequest.mockRejectedValue(new Error('offline'));
 
-  render(<FriendsScreen />);
-  fireEvent.press(await screen.findByTestId('friends-accept-rhonda'));
+  await render(<FriendsScreen />);
+  await fireEvent.press(await screen.findByTestId('friends-accept-rhonda'));
 
   await waitFor(() => expect(mockAcceptRequest).toHaveBeenCalled());
   expect(mockPlay).not.toHaveBeenCalled();
@@ -92,10 +92,10 @@ it('confirms SENDING a friend request', async () => {
   // call site reddens nothing and the chime silently disappears.
   mockLookupUser.mockResolvedValue({ username: 'kai', display_name: null });
 
-  render(<FriendsScreen />);
-  fireEvent.changeText(await screen.findByTestId('friends-search'), 'kai');
-  fireEvent.press(screen.getByTestId('friends-search-go'));
-  fireEvent.press(await screen.findByTestId('friends-add'));
+  await render(<FriendsScreen />);
+  await fireEvent.changeText(await screen.findByTestId('friends-search'), 'kai');
+  await fireEvent.press(screen.getByTestId('friends-search-go'));
+  await fireEvent.press(await screen.findByTestId('friends-add'));
 
   await waitFor(() => expect(mockSendFriendRequest).toHaveBeenCalled());
   expect(mockPlay).toHaveBeenCalledWith('success');
@@ -112,7 +112,7 @@ describe('avatars (N205)', () => {
   it('renders the uploaded avatar for a friend who has one', async () => {
     mockListFriends.mockResolvedValue([card('gina', { avatar_url: 'https://example.test/gina.jpg' })]);
 
-    render(<FriendsScreen />);
+    await render(<FriendsScreen />);
 
     const row = await screen.findByTestId('friends-row-gina');
     expect(within(row).getByTestId('avatar-photo')).toBeTruthy();
@@ -122,7 +122,7 @@ describe('avatars (N205)', () => {
   it('falls back to the monogram for a friend with no avatar', async () => {
     mockListFriends.mockResolvedValue([card('hank')]);
 
-    render(<FriendsScreen />);
+    await render(<FriendsScreen />);
 
     const row = await screen.findByTestId('friends-row-hank');
     expect(within(row).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();
@@ -135,7 +135,7 @@ describe('avatars (N205)', () => {
       outgoing: [card('sam')],
     });
 
-    render(<FriendsScreen />);
+    await render(<FriendsScreen />);
 
     const incoming = await screen.findByTestId('friends-incoming-rhonda');
     expect(within(incoming).getByTestId('avatar-photo')).toBeTruthy();
@@ -154,9 +154,9 @@ describe('avatars (N205)', () => {
       avatar_url: 'https://example.test/kai.jpg',
     });
 
-    render(<FriendsScreen />);
-    fireEvent.changeText(await screen.findByTestId('friends-search'), 'kai');
-    fireEvent.press(screen.getByTestId('friends-search-go'));
+    await render(<FriendsScreen />);
+    await fireEvent.changeText(await screen.findByTestId('friends-search'), 'kai');
+    await fireEvent.press(screen.getByTestId('friends-search-go'));
 
     const result = await screen.findByTestId('friends-result');
     expect(within(result).getByTestId('avatar-photo')).toBeTruthy();
@@ -166,9 +166,9 @@ describe('avatars (N205)', () => {
   it('falls back to the monogram on the search-result card for someone with no avatar', async () => {
     mockLookupUser.mockResolvedValue({ username: 'leo', display_name: null });
 
-    render(<FriendsScreen />);
-    fireEvent.changeText(await screen.findByTestId('friends-search'), 'leo');
-    fireEvent.press(screen.getByTestId('friends-search-go'));
+    await render(<FriendsScreen />);
+    await fireEvent.changeText(await screen.findByTestId('friends-search'), 'leo');
+    await fireEvent.press(screen.getByTestId('friends-search-go'));
 
     const result = await screen.findByTestId('friends-result');
     expect(within(result).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();

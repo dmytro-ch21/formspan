@@ -142,7 +142,7 @@ afterEach(() => {
 
 it('lists a saved food with its per-serving macros on one line', async () => {
   mockLocalFoods.mockResolvedValue([food({ name: 'Chicken thigh', kcal: 250, protein_g: 22 })]);
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByText('Chicken thigh')).toBeTruthy());
   expect(screen.getByText(/250 kcal · 22P\/0C\/18F/)).toBeTruthy();
   // No second line for an unbranded, unshared food — the row stays one line.
@@ -167,7 +167,7 @@ it('says when a food was refused by the server, and which way', async () => {
       ['held', { reason: 'name must be between 1 and 120 characters', onServer: true }],
     ]),
   );
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-foods-problem-ghost')).toBeTruthy());
 
   const ghost = String(screen.getByTestId('saved-foods-problem-ghost').props.children);
@@ -183,24 +183,24 @@ it('marks a recipe distinctly from a plain food', async () => {
   mockLocalFoods.mockResolvedValue([
     food({ id: 'r1', kind: 'recipe', name: 'Sunday traybake', yield_servings: 4, items: [] }),
   ]);
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByText('Sunday traybake')).toBeTruthy());
   expect(screen.getByText('Recipe')).toBeTruthy();
 });
 
 it('shows the empty state when nothing is saved, not a spinner forever', async () => {
   mockLocalFoods.mockResolvedValue([]);
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-foods-empty')).toBeTruthy());
 });
 
 it('searches by re-reading the local list within the chosen sort, rather than filtering in memory', async () => {
   mockLocalFoods.mockResolvedValue([]);
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'recent'));
 
   mockLocalFoods.mockClear();
-  fireEvent.changeText(screen.getByTestId('saved-foods-search'), 'chick');
+  await fireEvent.changeText(screen.getByTestId('saved-foods-search'), 'chick');
   await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', 'chick', 'recent'));
 });
 
@@ -216,23 +216,23 @@ it('opens the plain-food editor for a food and the recipe editor for a recipe', 
     food({ id: 'plain', name: 'Oats', kind: 'food' }),
     food({ id: 'rec', name: 'Traybake', kind: 'recipe', yield_servings: 4 }),
   ]);
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-foods-edit-plain')).toBeTruthy());
 
-  fireEvent.press(screen.getByTestId('saved-foods-edit-plain'));
+  await fireEvent.press(screen.getByTestId('saved-foods-edit-plain'));
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/food/saved/[id]', params: { id: 'plain' } });
 
-  fireEvent.press(screen.getByTestId('saved-foods-edit-rec'));
+  await fireEvent.press(screen.getByTestId('saved-foods-edit-rec'));
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/food/recipe/[id]', params: { id: 'rec' } });
 });
 
 describe('deleting', () => {
   it('long-press asks first, and Cancel deletes nothing', async () => {
     mockLocalFoods.mockResolvedValue([food({ id: 'f1', name: 'Chicken thigh' })]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-edit-f1')).toBeTruthy());
 
-    fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'longPress');
+    await fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'longPress');
     expect(Alert.alert).toHaveBeenCalledWith('Delete Chicken thigh?', expect.any(String), expect.any(Array));
     await act(async () => {
       lastAlertButton('Cancel').onPress?.();
@@ -243,11 +243,11 @@ describe('deleting', () => {
 
   it('confirming deletes through removeFood, requests a sync, and reloads the list', async () => {
     mockLocalFoods.mockResolvedValueOnce([food({ id: 'f1', name: 'Chicken thigh' })]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-edit-f1')).toBeTruthy());
 
     mockLocalFoods.mockResolvedValueOnce([]);
-    fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'longPress');
+    await fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'longPress');
     await act(async () => {
       lastAlertButton('Delete').onPress?.();
     });
@@ -262,10 +262,10 @@ describe('deleting', () => {
   // accessibility action is the path that reaches them.
   it('is reachable through the delete accessibility action', async () => {
     mockLocalFoods.mockResolvedValue([food({ id: 'f1', name: 'Chicken thigh' })]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-edit-f1')).toBeTruthy());
 
-    fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'accessibilityAction', {
+    await fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'accessibilityAction', {
       nativeEvent: { actionName: 'delete' },
     });
     expect(Alert.alert).toHaveBeenCalledWith('Delete Chicken thigh?', expect.any(String), expect.any(Array));
@@ -277,9 +277,9 @@ describe('deleting', () => {
 
   it('is reachable from the swiped-open Delete button', async () => {
     mockLocalFoods.mockResolvedValue([food({ id: 'f1', name: 'Chicken thigh' })]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-row-f1')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('saved-foods-row-f1-delete'));
+    await fireEvent.press(screen.getByTestId('saved-foods-row-f1-delete'));
     expect(Alert.alert).toHaveBeenCalledWith('Delete Chicken thigh?', expect.any(String), expect.any(Array));
     expect(mockRemoveFood).not.toHaveBeenCalled();
     await act(async () => {
@@ -291,10 +291,10 @@ describe('deleting', () => {
   it('shows an error and keeps the row when the delete fails, rather than pretending it worked', async () => {
     mockLocalFoods.mockResolvedValue([food({ id: 'f1', name: 'Chicken thigh' })]);
     mockRemoveFood.mockRejectedValue(new Error('offline'));
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-edit-f1')).toBeTruthy());
 
-    fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'longPress');
+    await fireEvent(screen.getByTestId('saved-foods-edit-f1'), 'longPress');
     await act(async () => {
       lastAlertButton('Delete').onPress?.();
     });
@@ -306,7 +306,7 @@ describe('deleting', () => {
 
 it('shows the load error rather than a silently empty list', async () => {
   mockLocalFoods.mockRejectedValue(new Error('could not read the database'));
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-foods-error')).toBeTruthy());
 });
 
@@ -321,7 +321,7 @@ describe('Recently shared', () => {
   it('is not rendered at all when nothing was shared recently', async () => {
     mockLocalFoods.mockResolvedValue([food()]);
     mockRecentlyShared.mockResolvedValue([]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByText('Chicken thigh')).toBeTruthy());
     expect(screen.queryByTestId('saved-foods-recently-shared')).toBeNull();
     expect(screen.queryByText('Recently shared')).toBeNull();
@@ -330,14 +330,14 @@ describe('Recently shared', () => {
   it('spotlights a recent share with the sender’s handle, above the full list', async () => {
     mockLocalFoods.mockResolvedValue([food(), shared]);
     mockRecentlyShared.mockResolvedValue([shared]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-recently-shared')).toBeTruthy());
     expect(screen.getByText('Recently shared')).toBeTruthy();
     // In the spotlight AND in the full list, each with the from-line.
     expect(screen.getByTestId('recent-saved-foods-from-s1')).toHaveTextContent('from @ana_bjj · 5 Sep');
     expect(screen.getByTestId('saved-foods-from-s1')).toHaveTextContent('from @ana_bjj · 5 Sep');
     // The spotlight's row edits the same food.
-    fireEvent.press(screen.getByTestId('recent-saved-foods-edit-s1'));
+    await fireEvent.press(screen.getByTestId('recent-saved-foods-edit-s1'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/food/saved/[id]', params: { id: 's1' } });
   });
 
@@ -345,19 +345,19 @@ describe('Recently shared', () => {
     const anon = food({ id: 'a1', name: 'Bowl', shared_by: null, shared_at: '2026-09-05T10:00:00Z' });
     mockLocalFoods.mockResolvedValue([anon]);
     mockRecentlyShared.mockResolvedValue([anon]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-from-a1')).toHaveTextContent('Shared with you · 5 Sep'));
   });
 
   it('is hidden while searching, and the search result still says who sent it', async () => {
     mockLocalFoods.mockResolvedValue([food(), shared]);
     mockRecentlyShared.mockResolvedValue([shared]);
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(screen.getByTestId('saved-foods-recently-shared')).toBeTruthy());
 
     mockLocalFoods.mockResolvedValue([shared]);
     mockRecentlyShared.mockClear();
-    fireEvent.changeText(screen.getByTestId('saved-foods-search'), 'açaí');
+    await fireEvent.changeText(screen.getByTestId('saved-foods-search'), 'açaí');
     await waitFor(() => expect(screen.queryByTestId('saved-foods-recently-shared')).toBeNull());
     expect(screen.getByTestId('saved-foods-from-s1')).toHaveTextContent(/from @ana_bjj/);
     // And the spotlight was not even read for a search.
@@ -365,14 +365,14 @@ describe('Recently shared', () => {
 
     // Clearing the search brings it back.
     mockLocalFoods.mockResolvedValue([food(), shared]);
-    fireEvent.changeText(screen.getByTestId('saved-foods-search'), '');
+    await fireEvent.changeText(screen.getByTestId('saved-foods-search'), '');
     await waitFor(() => expect(screen.getByTestId('saved-foods-recently-shared')).toBeTruthy());
   });
 });
 
 describe('sort', () => {
   it('defaults to Recent and reads the list in that order', async () => {
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'recent'));
     expect(screen.getByTestId('saved-foods-sort-recent').props.accessibilityState.selected).toBe(true);
     expect(screen.getByTestId('saved-foods-sort-name').props.accessibilityState.selected).toBe(false);
@@ -380,7 +380,7 @@ describe('sort', () => {
 
   it('opens on the remembered sort, and re-reads the list in it', async () => {
     mockReadPref.mockResolvedValue('name');
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'name'));
     expect(mockReadPref).toHaveBeenCalledWith('u1', PREF_SAVED_FOODS_SORT);
     await waitFor(() =>
@@ -390,18 +390,18 @@ describe('sort', () => {
 
   it('falls back to Recent on a stored value it does not know', async () => {
     mockReadPref.mockResolvedValue('alphabetical');
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'recent'));
     expect(mockLocalFoods).not.toHaveBeenCalledWith('u1', '', 'alphabetical');
   });
 
   it('tapping a chip remembers it and re-reads the list, keeping the search', async () => {
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'recent'));
-    fireEvent.changeText(screen.getByTestId('saved-foods-search'), 'rice');
+    await fireEvent.changeText(screen.getByTestId('saved-foods-search'), 'rice');
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', 'rice', 'recent'));
 
-    fireEvent.press(screen.getByTestId('saved-foods-sort-used'));
+    await fireEvent.press(screen.getByTestId('saved-foods-sort-used'));
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', 'rice', 'used'));
     expect(mockWritePref).toHaveBeenCalledWith('u1', PREF_SAVED_FOODS_SORT, 'used');
     expect(screen.getByTestId('saved-foods-sort-used').props.accessibilityState.selected).toBe(true);
@@ -428,7 +428,7 @@ describe('sort', () => {
         new Promise<Food[]>((resolve) => pending.push({ order, resolve })),
     );
 
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
 
     // The focus effect's default-sort read, then the remembered-sort read.
     await waitFor(() => expect(pending.length).toBe(2));
@@ -452,10 +452,10 @@ describe('sort', () => {
   });
 
   it('tapping the chip already selected does nothing', async () => {
-    render(<SavedFoodsScreen />);
+    await render(<SavedFoodsScreen />);
     await waitFor(() => expect(mockLocalFoods).toHaveBeenCalledWith('u1', '', 'recent'));
     mockLocalFoods.mockClear();
-    fireEvent.press(screen.getByTestId('saved-foods-sort-recent'));
+    await fireEvent.press(screen.getByTestId('saved-foods-sort-recent'));
     expect(mockWritePref).not.toHaveBeenCalled();
     expect(mockLocalFoods).not.toHaveBeenCalled();
   });
@@ -476,7 +476,7 @@ it('puts the refusal in the row label, where a screen reader will reach it', asy
   mockProblems.mockResolvedValue(
     new Map([['ghost', { reason: 'serving_label must be between 1 and 40 characters', onServer: false }]]),
   );
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-foods-edit-ghost')).toBeTruthy());
 
   const label = String(screen.getByTestId('saved-foods-edit-ghost').props.accessibilityLabel);
@@ -495,7 +495,7 @@ it('puts the refusal in the row label, where a screen reader will reach it', asy
 it('still lists the foods when the refusal read fails', async () => {
   mockLocalFoods.mockResolvedValue([food({ name: 'Chicken thigh' })]);
   mockProblems.mockRejectedValue(new Error('could not read the outbox'));
-  render(<SavedFoodsScreen />);
+  await render(<SavedFoodsScreen />);
 
   await waitFor(() => expect(screen.getByText('Chicken thigh')).toBeTruthy());
   expect(screen.queryByTestId('saved-foods-error')).toBeNull();

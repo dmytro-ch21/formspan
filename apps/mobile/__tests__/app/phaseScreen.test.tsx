@@ -66,7 +66,7 @@ function escapeRe(s: string): string {
 describe('why the read failed', () => {
   it('never says "could not reach the server" for a failure the server answered', async () => {
     mockList.mockRejectedValue(new ApiError('could not list phases', 'internal', 500));
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
 
     const problem = await screen.findByTestId('phase-problem');
     expect(problem).not.toHaveTextContent(/reach the server/i);
@@ -78,7 +78,7 @@ describe('why the read failed', () => {
     ['a dropped connection', new RequestDroppedError()],
   ] as const)('composes the transport’s own diagnosis for %s', async (_label, err) => {
     mockList.mockRejectedValue(err);
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
 
     const problem = await screen.findByTestId('phase-problem');
     expect(problem).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
@@ -92,10 +92,10 @@ describe('why the read failed', () => {
     const renders: string[] = [];
     for (const err of [new OfflineError(), new TimeoutError(), new RequestDroppedError()]) {
       mockList.mockRejectedValue(err);
-      const { unmount } = render(<PhaseScreen />);
+      const { unmount } = await render(<PhaseScreen />);
       const problem = await screen.findByTestId('phase-problem');
       renders.push(problem.props.children);
-      unmount();
+      await unmount();
     }
     expect(new Set(renders).size).toBe(3);
   });
@@ -105,7 +105,7 @@ describe('why the read failed', () => {
     // distinction a failed read would fall through to "no live phase, show
     // the start form" — a false negative about a phase that may well exist.
     mockList.mockRejectedValue(new OfflineError());
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
 
     await screen.findByTestId('phase-problem');
     expect(screen.queryByTestId('phase-start')).toBeNull();
@@ -127,10 +127,10 @@ describe('why start/stop failed', () => {
 
   it('start: never says "could not reach the server" for a failure the server answered', async () => {
     mockCreate.mockRejectedValue(new ApiError('could not create phase', 'internal', 500));
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
 
     await waitFor(() => expect(screen.getByTestId('phase-start')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('phase-start'));
+    await fireEvent.press(screen.getByTestId('phase-start'));
 
     const problem = await screen.findByTestId('phase-problem');
     expect(problem).not.toHaveTextContent(/reach the server/i);
@@ -150,10 +150,10 @@ describe('why start/stop failed', () => {
       },
     ]);
     mockEnd.mockRejectedValue(new ApiError('could not end phase', 'internal', 500));
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
 
     await waitFor(() => expect(screen.getByTestId('phase-end')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('phase-end'));
+    await fireEvent.press(screen.getByTestId('phase-end'));
 
     const problem = await screen.findByTestId('phase-problem');
     expect(problem).not.toHaveTextContent(/reach the server/i);
@@ -165,10 +165,10 @@ describe('why start/stop failed', () => {
     ['a dropped connection', new RequestDroppedError()],
   ] as const)('start composes the transport’s own diagnosis for %s', async (_label, err) => {
     mockCreate.mockRejectedValue(err);
-    render(<PhaseScreen />);
+    await render(<PhaseScreen />);
 
     await waitFor(() => expect(screen.getByTestId('phase-start')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('phase-start'));
+    await fireEvent.press(screen.getByTestId('phase-start'));
 
     const problem = await screen.findByTestId('phase-problem');
     expect(problem).toHaveTextContent(new RegExp(escapeRe(err.diagnosis)));
@@ -178,12 +178,12 @@ describe('why start/stop failed', () => {
     const renders: string[] = [];
     for (const err of [new OfflineError(), new TimeoutError(), new RequestDroppedError()]) {
       mockCreate.mockRejectedValue(err);
-      const { unmount } = render(<PhaseScreen />);
+      const { unmount } = await render(<PhaseScreen />);
       await waitFor(() => expect(screen.getByTestId('phase-start')).toBeTruthy());
-      fireEvent.press(screen.getByTestId('phase-start'));
+      await fireEvent.press(screen.getByTestId('phase-start'));
       const problem = await screen.findByTestId('phase-problem');
       renders.push(problem.props.children);
-      unmount();
+      await unmount();
     }
     expect(new Set(renders).size).toBe(3);
   });

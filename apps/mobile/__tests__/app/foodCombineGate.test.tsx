@@ -134,7 +134,7 @@ beforeEach(() => {
 });
 
 it('offers "Combine" on TODAY, once a section has two or more entries', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   await waitFor(() => expect(screen.getByTestId('food-meal-breakfast-combine-start')).toBeTruthy());
 });
 
@@ -144,7 +144,7 @@ it('does NOT offer "Combine" on a day the athlete has stepped back to', async ()
   // stop being in the past.
   const pastDate = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
   mockParams = { date: pastDate };
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   // Give the day-seeding focus effect and the entries reload a turn to settle.
   await waitFor(() => expect(mockLocalEntries).toHaveBeenCalled());
   await waitFor(() => expect(screen.getByTestId('food-meal-breakfast-header')).toBeTruthy());

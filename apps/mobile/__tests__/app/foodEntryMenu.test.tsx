@@ -141,14 +141,14 @@ beforeEach(() => {
 });
 
 async function openMenuFor(id: string) {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   const more = await screen.findByTestId(`food-entry-${id}-more`);
-  fireEvent.press(more);
+  await fireEvent.press(more);
   await screen.findByTestId('entry-menu-duplicate');
 }
 
 it('every row carries the 3-dot control, in every section', async () => {
-  render(<FoodScreen />);
+  await render(<FoodScreen />);
   expect((await screen.findByTestId('food-entry-e1-more')).props.accessibilityLabel).toBe(
     'More for Greek yoghurt',
   );
@@ -166,7 +166,7 @@ it('opens a sheet naming the row, with exactly Duplicate / Remove / Share', asyn
 it('Duplicate writes through the outbox for THAT entry, asks for a push, and re-reads the day', async () => {
   await openMenuFor('e1');
   mockLocalEntries.mockClear();
-  fireEvent.press(screen.getByTestId('entry-menu-duplicate'));
+  await fireEvent.press(screen.getByTestId('entry-menu-duplicate'));
 
   await waitFor(() => expect(mockDuplicateEntry).toHaveBeenCalledWith('user_1', 'e1'));
   await waitFor(() => expect(mockRequestSync).toHaveBeenCalledWith('food duplicated'));
@@ -178,7 +178,7 @@ it('Duplicate writes through the outbox for THAT entry, asks for a push, and re-
 
 it('Remove uses the same removal the swipe does, and asks for a push', async () => {
   await openMenuFor('e2');
-  fireEvent.press(screen.getByTestId('entry-menu-remove'));
+  await fireEvent.press(screen.getByTestId('entry-menu-remove'));
   await waitFor(() => expect(mockRemoveEntry).toHaveBeenCalledWith('user_1', 'e2'));
   await waitFor(() => expect(mockRequestSync).toHaveBeenCalledWith('food deleted'));
 });
@@ -191,7 +191,7 @@ it('Share is refused with the reason while the entry has not reached the server'
     expect(share.props.accessibilityLabel).toMatch(/^Share\. Not synced yet/),
   );
   expect(share.props.accessibilityState).toEqual({ disabled: true });
-  fireEvent.press(share);
+  await fireEvent.press(share);
   expect(screen.queryByTestId('share-sheet')).toBeNull();
   expect(mockEntrySyncState).toHaveBeenCalledWith('user_1', 'e1');
 });
@@ -208,7 +208,7 @@ it('Share on a synced entry closes the menu and opens the friend picker for THAT
   await openMenuFor('e2');
   const share = screen.getByTestId('entry-menu-share');
   await waitFor(() => expect(share.props.accessibilityState).toEqual({ disabled: false }));
-  fireEvent.press(share);
+  await fireEvent.press(share);
 
   await screen.findByTestId('share-sheet');
   await waitFor(() => expect(mockListFriends).toHaveBeenCalled());

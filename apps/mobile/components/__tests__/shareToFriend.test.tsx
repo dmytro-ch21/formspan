@@ -56,18 +56,18 @@ beforeEach(() => {
 });
 
 async function openSheet() {
-  render(<ShareToFriend resourceType="workout" resourceId="w1" />);
-  fireEvent.press(screen.getByTestId('share-open'));
+  await render(<ShareToFriend resourceType="workout" resourceId="w1" />);
+  await fireEvent.press(screen.getByTestId('share-open'));
   return screen.findByTestId('share-sheet');
 }
 
 it('does not fetch the friends list until the sheet is opened', async () => {
   // Most visits to a plan are not visits to share it, and the friends list is
   // somebody else's data — fetched when it is about to be shown, not on mount.
-  render(<ShareToFriend resourceType="workout" resourceId="w1" />);
+  await render(<ShareToFriend resourceType="workout" resourceId="w1" />);
   expect(mockListFriends).not.toHaveBeenCalled();
 
-  fireEvent.press(screen.getByTestId('share-open'));
+  await fireEvent.press(screen.getByTestId('share-open'));
   await waitFor(() => expect(mockListFriends).toHaveBeenCalled());
 });
 
@@ -80,7 +80,7 @@ it('treats "already sent" as sent, not as a failure', async () => {
   );
 
   await openSheet();
-  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+  await fireEvent.press(await screen.findByTestId('share-to-rhonda'));
 
   expect(await screen.findByText('Sent ✓')).toBeTruthy();
   expect(screen.queryByText(/already sent them this/)).toBeNull();
@@ -95,7 +95,7 @@ it('reports a real failure rather than claiming it sent', async () => {
   );
 
   await openSheet();
-  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+  await fireEvent.press(await screen.findByTestId('share-to-rhonda'));
 
   expect(await screen.findByText(/nothing to share it with/)).toBeTruthy();
   expect(screen.queryByText('Sent ✓')).toBeNull();
@@ -127,7 +127,7 @@ it('does show the empty state when the list really is empty', async () => {
 
 it('sends the resource it was given, not one it inferred', async () => {
   await openSheet();
-  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+  await fireEvent.press(await screen.findByTestId('share-to-rhonda'));
 
   await waitFor(() =>
     expect(mockShareResource).toHaveBeenCalledWith(
@@ -141,7 +141,7 @@ it('sends the resource it was given, not one it inferred', async () => {
 
 it('confirms a send out loud — there is no toast, only a row changing to "Sent ✓"', async () => {
   await openSheet();
-  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+  await fireEvent.press(await screen.findByTestId('share-to-rhonda'));
 
   expect(await screen.findByText('Sent ✓')).toBeTruthy();
   expect(mockPlay).toHaveBeenCalledWith('success');
@@ -156,7 +156,7 @@ it('confirms an "already sent" the same way, because the outcome is the same', a
   );
 
   await openSheet();
-  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+  await fireEvent.press(await screen.findByTestId('share-to-rhonda'));
 
   expect(await screen.findByText('Sent ✓')).toBeTruthy();
   expect(mockPlay).toHaveBeenCalledWith('success');
@@ -168,7 +168,7 @@ it('stays silent when the send really failed', async () => {
   mockShareResource.mockRejectedValue(new ApiError('the server fell over', 'internal', 500));
 
   await openSheet();
-  fireEvent.press(await screen.findByTestId('share-to-rhonda'));
+  await fireEvent.press(await screen.findByTestId('share-to-rhonda'));
 
   await waitFor(() => expect(screen.getByText(/fell over/)).toBeTruthy());
   expect(mockPlay).not.toHaveBeenCalled();

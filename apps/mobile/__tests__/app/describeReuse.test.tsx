@@ -101,10 +101,10 @@ function reused(over: Record<string, unknown> = {}) {
 }
 
 async function draft() {
-  render(<DescribeMealScreen />);
-  fireEvent.changeText(screen.getByTestId('describe-input'), 'Pork Shashlik');
+  await render(<DescribeMealScreen />);
+  await fireEvent.changeText(screen.getByTestId('describe-input'), 'Pork Shashlik');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-submit'));
+    await fireEvent.press(screen.getByTestId('describe-submit'));
   });
   await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
 }
@@ -122,7 +122,7 @@ describe('confirming a generated draft', () => {
     mockDescribe.mockResolvedValue(generated());
     await draft();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     // THE WRITE N114 WAS REPORTED FOR MISSING.
@@ -145,7 +145,7 @@ describe('confirming a generated draft', () => {
     mockDescribe.mockResolvedValue(generated([item(), item({ name: 'Flatbread' })]));
     await draft();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
     await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(2));
     expect(mockSaveFood.mock.calls.map((c) => c[1].name)).toEqual(['Pork Shashlik', 'Flatbread']);
@@ -162,7 +162,7 @@ describe('confirming a generated draft', () => {
     mockSaveFood.mockResolvedValueOnce('food-1').mockRejectedValueOnce(new Error('disk full'));
     await draft();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(screen.getByTestId('describe-error')).toBeTruthy());
@@ -217,9 +217,9 @@ describe('a reused draft', () => {
     expect(String(Array.isArray(scope) ? scope.join('') : scope)).toContain('today');
     expect(String(Array.isArray(scope) ? scope.join('') : scope)).toContain('Fix these numbers for next time');
 
-    fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '400');
+    await fireEvent.changeText(screen.getByTestId('describe-kcal-0'), '400');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
@@ -232,7 +232,7 @@ describe('a reused draft', () => {
     mockDescribe.mockResolvedValue(reused());
     await draft();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(1));
@@ -249,7 +249,7 @@ describe('a reused draft', () => {
 
     mockDescribe.mockResolvedValue(generated());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-regenerate'));
+      await fireEvent.press(screen.getByTestId('describe-regenerate'));
     });
 
     // Without this the athlete can never escape a saved food whose numbers are
@@ -261,7 +261,7 @@ describe('a reused draft', () => {
   it('offers to correct the stored numbers for next time', async () => {
     mockDescribe.mockResolvedValue(reused());
     await draft();
-    fireEvent.press(screen.getByTestId('describe-edit-saved'));
+    await fireEvent.press(screen.getByTestId('describe-edit-saved'));
     expect(mockPush).toHaveBeenCalledWith({
       pathname: '/food/saved/[id]',
       params: { id: 'food-abc' },
@@ -277,11 +277,11 @@ describe('a reused draft', () => {
 
     mockDescribe.mockResolvedValue(generated());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-regenerate'));
+      await fireEvent.press(screen.getByTestId('describe-regenerate'));
     });
     await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(1));
@@ -296,16 +296,16 @@ describe('a reused draft', () => {
 
     mockDescribe.mockResolvedValue(generated());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-regenerate'));
+      await fireEvent.press(screen.getByTestId('describe-regenerate'));
     });
     // A fresh, ordinary description — reuse on, nothing being replaced.
-    fireEvent.changeText(screen.getByTestId('describe-input'), 'Flatbread');
+    await fireEvent.changeText(screen.getByTestId('describe-input'), 'Flatbread');
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-submit'));
+      await fireEvent.press(screen.getByTestId('describe-submit'));
     });
     await waitFor(() => expect(screen.getByTestId('describe-log')).toBeTruthy());
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(1));
@@ -325,7 +325,7 @@ describe('a reused draft', () => {
     });
     await draft();
     await act(async () => {
-      fireEvent.press(screen.getByTestId('describe-log'));
+      await fireEvent.press(screen.getByTestId('describe-log'));
     });
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalledTimes(2));
@@ -353,13 +353,13 @@ it('cannot log a stale draft while a fresh estimate is in flight', async () => {
   let release: (v: unknown) => void = () => {};
   mockDescribe.mockReturnValue(new Promise((r) => { release = r; }));
   await act(async () => {
-    fireEvent.press(screen.getByTestId('describe-regenerate'));
+    await fireEvent.press(screen.getByTestId('describe-regenerate'));
   });
 
   const log = screen.getByTestId('describe-log');
   expect(log.props.accessibilityState).toEqual({ disabled: true });
   await act(async () => {
-    fireEvent.press(log);
+    await fireEvent.press(log);
   });
   expect(mockLogFood).not.toHaveBeenCalled();
 

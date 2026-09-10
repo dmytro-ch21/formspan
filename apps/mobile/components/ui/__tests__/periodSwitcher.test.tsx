@@ -18,8 +18,8 @@ import { PeriodSwitcher } from '../PeriodSwitcher';
 describe('PeriodSwitcher — subLabel', () => {
   const noop = () => {};
 
-  it('renders nothing extra when subLabel is omitted — Plan and any other caller is unaffected', () => {
-    render(
+  it('renders nothing extra when subLabel is omitted — Plan and any other caller is unaffected', async () => {
+    await render(
       <PeriodSwitcher
         label="THIS WEEK"
         onPrev={noop}
@@ -35,8 +35,8 @@ describe('PeriodSwitcher — subLabel', () => {
     expect(screen.getByTestId('switcher-label').props.accessibilityLabel).toBe('THIS WEEK');
   });
 
-  it('renders subLabel as a second line, smaller, under the main label', () => {
-    render(
+  it('renders subLabel as a second line, smaller, under the main label', async () => {
+    await render(
       <PeriodSwitcher
         label="TODAY"
         subLabel="Wednesday, 26 August"
@@ -51,10 +51,10 @@ describe('PeriodSwitcher — subLabel', () => {
     expect(screen.getByText('Wednesday, 26 August')).toBeTruthy();
   });
 
-  it('speaks both lines together, not just the main label', () => {
+  it('speaks both lines together, not just the main label', async () => {
     // A screen reader has to say the date too — it is not decoration, it is
     // the fact the standalone `<Text>` used to carry on its own.
-    render(
+    await render(
       <PeriodSwitcher
         label="TODAY"
         subLabel="Wednesday, 26 August"
@@ -70,11 +70,11 @@ describe('PeriodSwitcher — subLabel', () => {
     );
   });
 
-  it('still leads the accessible name with the sentence form when both onPress and pressLabel are given', () => {
+  it('still leads the accessible name with the sentence form when both onPress and pressLabel are given', async () => {
     // WCAG 2.5.3 — the visible text leads, but a pressable readout with a
     // destination still needs to say what pressing it does, and now with the
     // date folded in too.
-    render(
+    await render(
       <PeriodSwitcher
         label="FRI 28 AUG"
         subLabel="Friday, 28 August"

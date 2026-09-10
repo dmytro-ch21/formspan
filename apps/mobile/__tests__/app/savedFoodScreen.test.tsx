@@ -83,7 +83,7 @@ function saved(over: Record<string, unknown> = {}) {
 
 async function open(food = saved()) {
   mockLocalFood.mockResolvedValue(food);
-  render(<EditSavedFoodScreen />);
+  await render(<EditSavedFoodScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-name')).toBeTruthy());
 }
 
@@ -116,7 +116,7 @@ beforeEach(() => {
  */
 it('sends a recipe to the recipe editor instead of editing it here', async () => {
   mockLocalFood.mockResolvedValue(saved({ kind: 'recipe', yield_servings: 4, items: [] }));
-  render(<EditSavedFoodScreen />);
+  await render(<EditSavedFoodScreen />);
 
   await waitFor(() =>
     expect(mockRedirect).toHaveBeenCalledWith({
@@ -143,7 +143,7 @@ it('sends a recipe to the recipe editor instead of editing it here', async () =>
  */
 it('still edits a plain saved food here', async () => {
   mockLocalFood.mockResolvedValue(saved());
-  render(<EditSavedFoodScreen />);
+  await render(<EditSavedFoodScreen />);
 
   await waitFor(() => expect(screen.getByTestId('saved-name')).toBeTruthy());
   expect(mockRedirect).not.toHaveBeenCalled();
@@ -176,7 +176,7 @@ it('says when the server refused this food, with the reason', async () => {
   expect(copy).toContain('serving_label must be between 1 and 40 characters');
   expect(copy).toContain('this phone only');
 
-  screen.unmount();
+  await screen.unmount();
   mockSyncState.mockResolvedValue({ unsynced: false, owed: false, rejected: null });
   await open();
   expect(screen.queryByTestId('saved-rejected')).toBeNull();
@@ -206,7 +206,7 @@ it('SPEAKS the refusal, because iOS has no live regions', async () => {
     expect(spoken).toContain('this phone only');
 
     // A food with nothing wrong says nothing — silence is the correct output.
-    screen.unmount();
+    await screen.unmount();
     announce.mockClear();
     mockSyncState.mockResolvedValue({ unsynced: false, owed: false, rejected: null });
     await open();
@@ -221,16 +221,16 @@ it('says when the numbers were drafted rather than measured', async () => {
   await open();
   expect(screen.getByTestId('saved-provenance')).toBeTruthy();
 
-  screen.unmount();
+  await screen.unmount();
   await open(saved({ source: 'user' }));
   expect(screen.queryByTestId('saved-provenance')).toBeNull();
 });
 
 it('corrects the stored food in place, keeping its id', async () => {
   await open();
-  fireEvent.changeText(screen.getByTestId('saved-kcal'), '415');
+  await fireEvent.changeText(screen.getByTestId('saved-kcal'), '415');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('saved-save'));
+    await fireEvent.press(screen.getByTestId('saved-save'));
   });
 
   await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(1));
@@ -246,9 +246,9 @@ it('corrects the stored food in place, keeping its id', async () => {
 
 it('refuses a number it cannot read rather than storing a zero', async () => {
   await open();
-  fireEvent.changeText(screen.getByTestId('saved-kcal'), '12..5');
+  await fireEvent.changeText(screen.getByTestId('saved-kcal'), '12..5');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('saved-save'));
+    await fireEvent.press(screen.getByTestId('saved-save'));
   });
 
   // A stored 0 kcal comes back with the athlete's authority behind it, on the
@@ -261,9 +261,9 @@ it('refuses a number it cannot read rather than storing a zero', async () => {
 
 it('still lets a number be CLEARED, because unrecorded is a real state', async () => {
   await open();
-  fireEvent.changeText(screen.getByTestId('saved-fibre_g'), '');
+  await fireEvent.changeText(screen.getByTestId('saved-fibre_g'), '');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('saved-save'));
+    await fireEvent.press(screen.getByTestId('saved-save'));
   });
 
   await waitFor(() => expect(mockSaveFood).toHaveBeenCalledTimes(1));
@@ -272,9 +272,9 @@ it('still lets a number be CLEARED, because unrecorded is a real state', async (
 
 it('refuses an empty name, because the name is what a later entry matches on', async () => {
   await open();
-  fireEvent.changeText(screen.getByTestId('saved-name'), '   ');
+  await fireEvent.changeText(screen.getByTestId('saved-name'), '   ');
   await act(async () => {
-    fireEvent.press(screen.getByTestId('saved-save'));
+    await fireEvent.press(screen.getByTestId('saved-save'));
   });
   expect(mockSaveFood).not.toHaveBeenCalled();
   expect(screen.getByTestId('saved-problem')).toBeTruthy();
@@ -282,6 +282,6 @@ it('refuses an empty name, because the name is what a later entry matches on', a
 
 it('says so plainly when the food is not on this device', async () => {
   mockLocalFood.mockResolvedValue(null);
-  render(<EditSavedFoodScreen />);
+  await render(<EditSavedFoodScreen />);
   await waitFor(() => expect(screen.getByTestId('saved-missing')).toBeTruthy());
 });

@@ -54,8 +54,8 @@ beforeEach(() => {
 
 async function seeded(items: DetectedWorkout[]) {
   mockReadRecentDetections.mockResolvedValue(items);
-  const rendered = renderHook(() => useDetectedActivity(USER));
-  act(() => {
+  const rendered = await renderHook(() => useDetectedActivity(USER));
+  await act(() => {
     rendered.result.current.refresh();
   });
   await waitFor(() => expect(rendered.result.current.items).toEqual(items));
@@ -68,7 +68,7 @@ describe('logIt', () => {
     mockLogDetectionAsSession.mockResolvedValue(undefined);
     const { result } = await seeded([w]);
 
-    act(() => {
+    await act(() => {
       result.current.logIt(w);
     });
     expect(result.current.items).toEqual([]);
@@ -81,14 +81,26 @@ describe('logIt', () => {
 
   it('puts the item BACK when the write fails, unlike a failed dismiss', async () => {
     const w = workout();
-    mockLogDetectionAsSession.mockRejectedValue(new Error('sqlite write failed'));
+    // The failure is HELD rather than pre-rejected. RNTL 14's `act` is awaited,
+    // so an already-rejected write settles inside it and the item is back
+    // before the next line runs — the optimistic window this test exists to
+    // pin would never be observed, and the assertion below would be asserting
+    // nothing. Holding the write open makes "removed immediately" a state the
+    // test creates rather than one it races.
+    let failWrite!: (err: Error) => void;
+    mockLogDetectionAsSession.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failWrite = reject;
+      }),
+    );
     const { result } = await seeded([w]);
 
-    act(() => {
+    await act(() => {
       result.current.logIt(w);
     });
     expect(result.current.items).toEqual([]);
 
+    failWrite(new Error('sqlite write failed'));
     await waitFor(() => expect(result.current.items).toEqual([w]));
   });
 });
@@ -99,7 +111,7 @@ describe('dismiss', () => {
     mockDismissDetection.mockRejectedValue(new Error('sqlite write failed'));
     const { result } = await seeded([w]);
 
-    act(() => {
+    await act(() => {
       result.current.dismiss(w);
     });
     expect(result.current.items).toEqual([]);

@@ -56,7 +56,7 @@ function readLabel(testID: string): string {
   return Array.isArray(children) ? children.join('') : String(children);
 }
 
-test("the chart's goal marker follows the fresh projection, not the stale phase fetch", () => {
+test("the chart's goal marker follows the fresh projection, not the stale phase fetch", async () => {
   const stalePhaseGoalKg = 80;
   const freshProjection = fromPlanProjection(
     {
@@ -86,14 +86,14 @@ test("the chart's goal marker follows the fresh projection, not the stale phase 
     checkins: [],
   });
 
-  render(<WeightTrendScreen />);
+  await render(<WeightTrendScreen />);
 
   const marker = readLabel('trend-goal-offscale');
   expect(marker).toContain('75');
   expect(marker).not.toContain('80');
 });
 
-test('the no-goal refusal draws no goal line at all — there is no projection to take a number from', () => {
+test('the no-goal refusal draws no goal line at all — there is no projection to take a number from', async () => {
   useWeightTrend.mockReturnValue({
     loading: false,
     series: series(),
@@ -103,7 +103,7 @@ test('the no-goal refusal draws no goal line at all — there is no projection t
     checkins: [],
   });
 
-  render(<WeightTrendScreen />);
+  await render(<WeightTrendScreen />);
 
   expect(screen.queryByTestId('trend-goal-line')).toBeNull();
   expect(screen.queryByTestId('trend-goal-offscale')).toBeNull();

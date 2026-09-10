@@ -43,16 +43,16 @@ jest.mock('expo-router', () => {
   };
 });
 
-it('sends anything that still links to Train to Today', () => {
-  render(<TrainScreen />);
+it('sends anything that still links to Train to Today', async () => {
+  await render(<TrainScreen />);
   // Today, not Plan: an old `vola://train` link was tapped by somebody who
   // wanted to train, and Today is the screen holding the resume card, the
   // day's planned sessions and New log.
   expect(screen.getByTestId('redirect').props.children).toBe('/(tabs)');
 });
 
-it('renders none of the four blocks it used to', () => {
-  render(<TrainScreen />);
+it('renders none of the four blocks it used to', async () => {
+  await render(<TrainScreen />);
 
   // The schedule — moved to Plan, and the reason this file exists. Asserted by
   // the testIDs the old screen used, so reinstating any of them fails here

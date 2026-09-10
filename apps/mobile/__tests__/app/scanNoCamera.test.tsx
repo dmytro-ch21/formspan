@@ -96,11 +96,11 @@ describe('the scan screen with no native camera', () => {
     expect(CameraView).toBeNull();
   });
 
-  it('renders the explained dead end, and offers the path that still works', () => {
+  it('renders the explained dead end, and offers the path that still works', async () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const ScanBarcodeScreen = require('../../app/food/scan').default;
 
-    render(<ScanBarcodeScreen />);
+    await render(<ScanBarcodeScreen />);
 
     expect(screen.getByTestId('scan-unavailable')).toBeTruthy();
     expect(screen.queryByTestId('scan-camera')).toBeNull();

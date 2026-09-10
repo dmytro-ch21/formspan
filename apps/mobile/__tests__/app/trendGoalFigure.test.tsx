@@ -59,7 +59,7 @@ function readText(): string {
   return Array.isArray(children) ? children.join('') : String(children);
 }
 
-test("the refusal sentence's goal follows the fresh projection, not the stale phase fetch", () => {
+test("the refusal sentence's goal follows the fresh projection, not the stale phase fetch", async () => {
   // The exact shape of the bug: an athlete edits their phase target from 80kg
   // down to 75kg. `useWeightTrend`'s `listPhases` fetch has not caught up —
   // `goalKg` still reports the STALE 80 — while `suggestedTarget`'s own,
@@ -90,14 +90,14 @@ test("the refusal sentence's goal follows the fresh projection, not the stale ph
     checkins: [],
   });
 
-  render(<WeightTrendScreen />);
+  await render(<WeightTrendScreen />);
 
   const rendered = readText();
   expect(rendered).toContain('75');
   expect(rendered).not.toContain('80');
 });
 
-test('the no-goal refusal still renders nothing — there is no projection to take a number from', () => {
+test('the no-goal refusal still renders nothing — there is no projection to take a number from', async () => {
   // `useWeightTrend`'s `goalKg` is non-null here (a real phase target), but
   // `fromPlanProjection(null, ...)` is the one path with genuinely no
   // projection behind it, and the AC requires that stays silent even though a
@@ -111,7 +111,7 @@ test('the no-goal refusal still renders nothing — there is no projection to ta
     checkins: [],
   });
 
-  render(<WeightTrendScreen />);
+  await render(<WeightTrendScreen />);
 
   expect(screen.queryByTestId('trend-projection-text')).toBeNull();
 });

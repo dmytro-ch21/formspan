@@ -352,7 +352,7 @@ describe('the active session outranks everything', () => {
       { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
 
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     await waitFor(() => expect(screen.getByTestId('resume-session')).toBeTruthy());
     // The plan exists and is owed — the derivation would happily return it —
@@ -365,9 +365,9 @@ describe('the active session outranks everything', () => {
 
   it('opens the session it names', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
-    fireEvent.press(await screen.findByTestId('resume-session'));
+    await fireEvent.press(await screen.findByTestId('resume-session'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/session/[id]', params: { id: 'open' } });
   });
 
@@ -379,9 +379,9 @@ describe('the active session outranks everything', () => {
     mockListLocalSessions.mockResolvedValue([
       session({ id: 'roll', sport: 'bjj', name: 'Evening class', ended_at: null }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
-    fireEvent.press(await screen.findByTestId('resume-session'));
+    await fireEvent.press(await screen.findByTestId('resume-session'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/bjj/session/[id]', params: { id: 'roll' } });
   });
 
@@ -389,7 +389,7 @@ describe('the active session outranks everything', () => {
     mockListLocalSessions.mockResolvedValue([
       session({ id: 'roll', sport: 'bjj', name: 'Evening class', ended_at: null }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('resume-session')).toBeTruthy();
     expect(screen.queryByText('0 working sets')).toBeNull();
@@ -403,7 +403,7 @@ describe('the active session outranks everything', () => {
         started_at: new Date(Date.now() - 30 * 60 * 60_000).toISOString(),
       }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByText('UNFINISHED')).toBeTruthy();
     expect(screen.getByText('Finish or discard')).toBeTruthy();
@@ -418,11 +418,11 @@ describe("today's plan", () => {
     ]);
     mockCachedWorkouts.mockResolvedValue([{ id: 'w7', name: 'Push A' } as Workout]);
 
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-plan-p1')).toBeTruthy();
     expect(screen.getByText('Push A')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('up-next-log'));
+    await fireEvent.press(screen.getByTestId('up-next-log'));
     // The template rides along, so the chooser does not reappear for a day
     // whose plan is already decided.
     expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength&workout=w7');
@@ -433,10 +433,10 @@ describe("today's plan", () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-plan-p2')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('up-next-log'));
+    await fireEvent.press(screen.getByTestId('up-next-log'));
     expect(mockPush).toHaveBeenCalledWith('/bjj/log');
   });
 
@@ -444,7 +444,7 @@ describe("today's plan", () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const card = await screen.findByTestId('today-plan-p2');
     expect(card.props.accessibilityLabel).toBe('Log BJJ session, planned for today');
@@ -455,7 +455,7 @@ describe("today's plan", () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: 19 * 60, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const card = await screen.findByTestId('today-plan-p2');
     expect(within(card).getByText('Today • 7:00 PM')).toBeTruthy();
@@ -469,7 +469,7 @@ describe("today's plan", () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p2', day: todayKey(), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const card = await screen.findByTestId('today-plan-p2');
     expect(within(card).getByText('Today')).toBeTruthy();
@@ -484,7 +484,7 @@ describe("today's plan", () => {
     ]);
     mockListLocalSessions.mockResolvedValue([session({ id: 's1', sport: 'strength' })]);
 
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-all-done')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
@@ -494,7 +494,7 @@ describe("today's plan", () => {
 
 describe('a rest day is a real state', () => {
   it('says what is true and offers the plan, without scolding', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const rest = await screen.findByTestId('today-unplanned');
     expect(rest).toBeTruthy();
@@ -506,7 +506,7 @@ describe('a rest day is a real state', () => {
         'Rest counts — or plan something here, or log an unplanned session with New log.',
       ),
     ).toBeTruthy();
-    fireEvent.press(rest);
+    await fireEvent.press(rest);
     expect(mockPush).toHaveBeenCalledWith('/(tabs)/workouts');
   });
 
@@ -514,7 +514,7 @@ describe('a rest day is a real state', () => {
     // Nothing was scheduled AND the athlete trained. Told only "Nothing on the
     // plan", they have been told their session did not count.
     mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByText(/You logged 1 session today anyway/)).toBeTruthy();
   });
@@ -526,7 +526,7 @@ describe('it never claims an absence it has not checked', () => {
 
   it('does not say the day is unplanned while the plan read is in flight', async () => {
     mockListPlannedBetween.mockReturnValue(pending<PlannedSession[]>());
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     // The week strip proves the screen has rendered — so the absence below is
     // a deliberate silence and not a test that asserted before the first paint.
@@ -540,7 +540,7 @@ describe('it never claims an absence it has not checked', () => {
     // Without the session list the screen cannot tell whether a plan has been
     // met, nor whether a session is open — so it may not claim a rest day.
     mockListLocalSessions.mockReturnValue(pending<Session[]>());
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
@@ -548,7 +548,7 @@ describe('it never claims an absence it has not checked', () => {
 
   it('says it could not read the plan rather than showing an unplanned day', async () => {
     mockListPlannedBetween.mockRejectedValue(new Error('disk'));
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-lead-unavailable')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
@@ -563,7 +563,7 @@ describe('it never claims an absence it has not checked', () => {
 
   it('names the unfinished-session check when THAT is what failed', async () => {
     mockListLocalSessions.mockRejectedValue(new Error('disk'));
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-lead-unavailable')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
@@ -580,7 +580,7 @@ describe('it never claims an absence it has not checked', () => {
   it('does claim a rest day once both reads have answered', async () => {
     // The mirror of the three above, and what stops them passing by the screen
     // simply never rendering the rest state at all.
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-unplanned')).toBeTruthy();
   });
 });
@@ -595,7 +595,7 @@ describe('insight', () => {
       session({ id: 'r1', sport: 'bjj' }),
       session({ id: 'r2', sport: 'bjj' }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-offer-detail')).toBeTruthy();
   });
@@ -604,7 +604,7 @@ describe('insight', () => {
     // One is not a habit, and the first log should be uncomplicated. Without a
     // negative case the bound above is unexercised in either direction.
     mockListLocalSessions.mockResolvedValue([session({ id: 'r1', sport: 'bjj' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByTestId('today-offer-detail')).toBeNull();
@@ -647,7 +647,7 @@ describe('insight', () => {
         last_seen: new Date().toISOString(),
       },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const card = await screen.findByTestId('today-suggestion');
     expect(screen.getByText('Try Armbar in a round')).toBeTruthy();
@@ -655,7 +655,7 @@ describe('insight', () => {
   });
 
   it('draws no Insight heading when there is nothing to say', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByText('Insight')).toBeNull();
   });
@@ -666,7 +666,7 @@ describe('later', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p9', day: dayFromNow(2), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-later')).toBeTruthy();
     expect(screen.getByText('BJJ session')).toBeTruthy();
@@ -679,21 +679,21 @@ describe('later', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p9', day: dayFromNow(2), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('resume-session')).toBeTruthy();
     expect(screen.getByTestId('today-later')).toBeTruthy();
   });
 
   it('draws no Later block at all when nothing is planned ahead', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByTestId('today-later')).toBeNull();
   });
 
   it('draws no Later block while the plan read is in flight', async () => {
     mockListPlannedBetween.mockReturnValue(new Promise<PlannedSession[]>(() => {}));
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByTestId('today-later')).toBeNull();
   });
@@ -710,14 +710,14 @@ describe('the day switcher, restored on direct user instruction', () => {
     // resume card replaces entirely and which ignores viewDay by design — a
     // visible switcher here would be a control that does nothing.
     mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('resume-session')).toBeTruthy();
     expect(screen.queryByTestId('today-day')).toBeNull();
   });
 
   it('is shown, reading TODAY, when nothing is open', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-day')).toBeTruthy();
     expect(screen.getByText('TODAY')).toBeTruthy();
   });
@@ -726,11 +726,11 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p9', day: dayFromNow(1), sport: 'strength', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     // Nothing is owed on today itself in this fixture.
     expect(await screen.findByTestId('today-unplanned')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
     expect(await screen.findByTestId('today-plan-p9')).toBeTruthy();
     expect(screen.queryByTestId('today-unplanned')).toBeNull();
@@ -740,11 +740,11 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p9', day: dayFromNow(1), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
-    fireEvent.press(await screen.findByTestId('up-next-log'));
+    await fireEvent.press(await screen.findByTestId('up-next-log'));
     expect(mockPush).toHaveBeenCalledWith('/bjj/log');
   });
 
@@ -752,9 +752,9 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     const card = await screen.findByTestId('today-plan-p1');
     expect(screen.getByText('Not logged')).toBeTruthy();
@@ -772,11 +772,11 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p1', day: dayFromNow(-1), sport: 'strength', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
-    fireEvent.press(await screen.findByTestId('today-plan-p1'));
+    await fireEvent.press(await screen.findByTestId('today-plan-p1'));
     // N434/#721's mechanism, reused rather than reimplemented: `?date=`
     // carries the browsed day, not "now".
     expect(mockPush).toHaveBeenCalledWith(`/session/start?sport=strength&date=${dayFromNow(-1)}`);
@@ -786,27 +786,27 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p1', day: dayFromNow(-1), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
-    fireEvent.press(await screen.findByTestId('today-plan-p1'));
+    await fireEvent.press(await screen.findByTestId('today-plan-p1'));
     expect(mockPush).toHaveBeenCalledWith(`/bjj/log?date=${dayFromNow(-1)}`);
   });
 
   it('a past rest day says nothing was logged, not "rest counts"', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     expect(await screen.findByText('Nothing was planned, and nothing logged.')).toBeTruthy();
     expect(screen.queryByText(/Rest counts/)).toBeNull();
   });
 
   it('a future rest day does not say "rest counts" either — nothing has happened yet', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
     expect(await screen.findByText('Nothing planned yet. Plan something here.')).toBeTruthy();
     expect(screen.queryByText(/Rest counts/)).toBeNull();
@@ -816,9 +816,9 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListLocalSessions.mockResolvedValue([
       session({ id: 's1', started_at: `${dayFromNow(-1)}T09:00:00.000Z` }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     expect(await screen.findByText('You logged 1 session then anyway.')).toBeTruthy();
   });
@@ -830,28 +830,28 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListLocalSessions.mockResolvedValue([
       session({ id: 's1', sport: 'strength', started_at: `${dayFromNow(-1)}T09:00:00.000Z` }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-unplanned');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     expect(await screen.findByText('Everything planned was logged.')).toBeTruthy();
     expect(screen.queryByText('That is everything planned.')).toBeNull();
   });
 
   it('pressing the label returns to today from anywhere', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
-    fireEvent.press(screen.getByTestId('today-day-next'));
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
     // Stepped away: the readout no longer says TODAY.
     expect(screen.queryByText('TODAY')).toBeNull();
 
-    fireEvent.press(screen.getByTestId('today-day-label'));
+    await fireEvent.press(screen.getByTestId('today-day-label'));
     expect(await screen.findByText('TODAY')).toBeTruthy();
   });
 
   it('the label is a plain readout on today — no onPress, so no button role', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     const label = await screen.findByTestId('today-day-label');
     expect(label.props.accessibilityRole).toBe('text');
   });
@@ -860,9 +860,9 @@ describe('the day switcher, restored on direct user instruction', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'later1', day: dayFromNow(3), sport: 'bjj', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-later')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
     expect(await screen.findByTestId('today-later')).toBeTruthy();
   });
 });
@@ -872,13 +872,13 @@ describe('the six blocks', () => {
     // The ticket's third test step: any additional confirmation step is a
     // failure. `onLog` goes straight at the food flow — carrying today's own
     // date (N430/#692: `on` is always threaded through now, even on today).
-    render(<TodayScreen />);
-    fireEvent.press(await screen.findByTestId('today-log-food'));
+    await render(<TodayScreen />);
+    await fireEvent.press(await screen.findByTestId('today-log-food'));
     expect(mockPush).toHaveBeenCalledWith(`/food/add?date=${todayKey()}`);
   });
 
   it('renders the daily-progress and this-week blocks', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     expect(await screen.findByTestId('today-momentum')).toBeTruthy();
     expect(screen.getByTestId('today-trackers-empty')).toBeTruthy();
     expect(screen.getByTestId('today-progress')).toBeTruthy();
@@ -893,7 +893,7 @@ describe('the six blocks', () => {
     // their own testIDs, so re-adding one here goes red rather than merely
     // looking busy.
     mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-week-strip')).toBeTruthy();
     expect(screen.queryByTestId('week-review')).toBeNull();
@@ -905,14 +905,14 @@ describe('the six blocks', () => {
   });
 
   it('sends the week strip to Progress, where the review now lives', async () => {
-    render(<TodayScreen />);
-    fireEvent.press(await screen.findByTestId('week-strip-review'));
+    await render(<TodayScreen />);
+    await fireEvent.press(await screen.findByTestId('week-strip-review'));
     expect(mockPush).toHaveBeenCalledWith('/(tabs)/progress');
   });
 
   it('offers the settings screen when nothing at all is enabled', async () => {
     mockModules = [mod({ key: 'strength', enabled: false })];
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('start-session-none')).toBeTruthy();
     expect(screen.queryByTestId('today-new-log')).toBeNull();
@@ -920,7 +920,7 @@ describe('the six blocks', () => {
 
   it('names a food module that is turned off rather than hiding the slot', async () => {
     mockModules = [strength, mod({ ...nutrition, enabled: false })];
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-fuel-off')).toBeTruthy();
     expect(screen.queryByTestId('today-momentum')).toBeNull();
@@ -935,13 +935,13 @@ describe('the date, folded into the switcher (N179/#584 follow-up)', () => {
   // no longer renders a redundant standalone line.
 
   it('speaks the date as part of the switcher’s own accessible name', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     const label = await screen.findByTestId('today-day-label');
     expect(label.props.accessibilityLabel).toMatch(/^TODAY, [A-Z][a-z]+day, [A-Z][a-z]+ \d{1,2}$/);
   });
 
   it('renders the weekday-and-date string exactly once, not twice', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
     // "Wednesday, 26 August" — the exact shape `todayLabel` produces. Before
     // the fix this matched TWO nodes: the standalone `<Text style={styles
@@ -959,9 +959,9 @@ describe('the date, folded into the switcher (N179/#584 follow-up)', () => {
   // block never covered.
 
   it('omits the sub-line date on a browsed day — the pill’s own label already states it', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
     // No standalone "Friday, 28 August"-shaped line anywhere once browsing —
     // only the pill's own short label (`FRI 28 AUG`), which does not match
@@ -970,9 +970,9 @@ describe('the date, folded into the switcher (N179/#584 follow-up)', () => {
   });
 
   it('the browsed-day pill speaks its label alone — no full-date second fact appended', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
     const label = await screen.findByTestId('today-day-label');
     // `dayLabel` itself is short and all-caps ("FRI, AUG 28"); `subLabel`'s
@@ -993,7 +993,7 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
 
   it('reads real today’s entries with nothing browsed', async () => {
     mockLocalEntries.mockResolvedValue([entry({ id: 'e1' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const momentum = within(await screen.findByTestId('today-momentum'));
     expect(await momentum.findByText('1 entry')).toBeTruthy();
@@ -1006,10 +1006,10 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
       const on = _a[1] as string;
       return Promise.resolve(on === yesterday ? [entry({ id: 'e1' }), entry({ id: 'e2' })] : []);
     });
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-momentum');
 
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     const momentum = within(await screen.findByTestId('today-momentum'));
     expect(await momentum.findByText('2 entries')).toBeTruthy();
@@ -1022,30 +1022,30 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
     // real today made a browsed day impossible to log to at all, which is
     // strictly worse than the "silent retroactive log" this used to guard
     // against. `Log food` must carry the VIEWED day, not default to today.
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
-    fireEvent.press(await screen.findByTestId('today-log-food'));
+    await fireEvent.press(await screen.findByTestId('today-log-food'));
     expect(mockPush).toHaveBeenCalledWith(`/food/add?date=${dayFromNow(-1)}`);
   });
 
   it('N430/#692 — the day link opens Food on the browsed day too', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
-    fireEvent.press(await screen.findByTestId('today-open-food'));
+    await fireEvent.press(await screen.findByTestId('today-open-food'));
     expect(mockPush).toHaveBeenCalledWith(`/food?date=${dayFromNow(-1)}`);
   });
 
   it('N430/#692 — a quick-add chip while browsing writes to the browsed day, not real today', async () => {
     mockFoodQuick.mockResolvedValue([recent(food({ id: 'f1', name: 'Greek yogurt' }))]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-day');
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
-    fireEvent.press(await screen.findByTestId('today-quick-f1'));
+    await fireEvent.press(await screen.findByTestId('today-quick-f1'));
 
     await waitFor(() => expect(mockLogFood).toHaveBeenCalled());
     const [, written] = mockLogFood.mock.calls[mockLogFood.mock.calls.length - 1] as [
@@ -1061,15 +1061,15 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
   // regardless — overstating what a past or future day's numbers are.
 
   it('reads TODAY’S MOMENTUM with nothing browsed', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     const momentum = within(await screen.findByTestId('today-momentum'));
     expect(await momentum.findByText('TODAY’S MOMENTUM')).toBeTruthy();
   });
 
   it('drops the "today" claim once the switcher has stepped away', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-momentum');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
     const momentum = within(await screen.findByTestId('today-momentum'));
     expect(await momentum.findByText('MOMENTUM')).toBeTruthy();
@@ -1077,12 +1077,12 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
   });
 
   it('returns to TODAY’S MOMENTUM when the switcher returns to today', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-momentum');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
     await within(screen.getByTestId('today-momentum')).findByText('MOMENTUM');
 
-    fireEvent.press(screen.getByTestId('today-day-label'));
+    await fireEvent.press(screen.getByTestId('today-day-label'));
 
     const momentum = within(await screen.findByTestId('today-momentum'));
     expect(await momentum.findByText('TODAY’S MOMENTUM')).toBeTruthy();
@@ -1092,16 +1092,16 @@ describe('Momentum follows the browsed day (N179/#584 follow-up)', () => {
     // The ticket's third criterion: the "Open …food log" a11y label must not
     // claim "today's" when the title itself no longer does. Only the WORDING
     // changes here — the link's own navigation is N430's separate scope.
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-momentum');
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
 
     const link = await screen.findByTestId('today-open-food');
     expect(link.props.accessibilityLabel).toBe('Open food log');
   });
 
   it('keeps the "today\'s" accessibility label unchanged on today', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     const link = await screen.findByTestId('today-open-food');
     expect(link.props.accessibilityLabel).toBe("Open today's food log");
   });
@@ -1121,10 +1121,10 @@ describe('offline', () => {
     mockListPlannedBetween.mockResolvedValue([
       { id: 'p1', day: todayKey(), sport: 'strength', workoutId: null, classPlanId: null, timeOfDayMinutes: null, notes: '' },
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('today-plan-p1')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('up-next-log'));
+    await fireEvent.press(screen.getByTestId('up-next-log'));
     expect(mockPush).toHaveBeenCalledWith('/session/start?sport=strength');
   });
 });
@@ -1147,7 +1147,7 @@ describe('offline', () => {
  */
 describe('N548 — the day’s logged sessions are on Today and open', () => {
   it('lists nothing at all when the day logged nothing', async () => {
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     // Waited on rather than asserted immediately: the board's reads are async,
     // so a `queryByTestId` on the first frame is null for every screen state
     // and would pass with the section permanently broken.
@@ -1157,7 +1157,7 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
 
   it('names the sport and the session on the row, without opening it', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 's1', name: 'Leg day' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const row = within(await screen.findByTestId('today-logged-s1'));
     expect(row.getByText('Leg day')).toBeTruthy();
@@ -1166,7 +1166,7 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
 
   it('falls back to the discipline when the session was never named', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 's1', name: '' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const row = within(await screen.findByTestId('today-logged-s1'));
     expect(row.getByText('Strength session')).toBeTruthy();
@@ -1174,9 +1174,9 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
 
   it('opens a strength session on the set logger', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
-    fireEvent.press(await screen.findByTestId('today-logged-s1'));
+    await fireEvent.press(await screen.findByTestId('today-logged-s1'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/session/[id]', params: { id: 's1' } });
   });
 
@@ -1185,9 +1185,9 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
     // logger renders "Sets 0 · Reps 0 · Volume —" over an empty list and
     // throws nothing.
     mockListLocalSessions.mockResolvedValue([session({ id: 'b1', sport: 'bjj', name: 'Gi class' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
-    fireEvent.press(await screen.findByTestId('today-logged-b1'));
+    await fireEvent.press(await screen.findByTestId('today-logged-b1'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/bjj/session/[id]', params: { id: 'b1' } });
   });
 
@@ -1196,9 +1196,9 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
     mockListLocalSessions.mockResolvedValue([
       session({ id: 'r1', sport: 'running', name: 'Easy 5k' }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
-    fireEvent.press(await screen.findByTestId('today-logged-r1'));
+    await fireEvent.press(await screen.findByTestId('today-logged-r1'));
     expect(mockPush).toHaveBeenCalledWith({ pathname: '/running/[id]', params: { id: 'r1' } });
   });
 
@@ -1212,7 +1212,7 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
       session({ id: 'run', sport: 'running', started_at: new Date(noon).toISOString() }),
       session({ id: 'roll', sport: 'bjj', started_at: new Date(noon + 6 * 3_600_000).toISOString() }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     await screen.findByTestId('today-logged-roll');
     // Order, not merely presence: the evening class is what the athlete came
@@ -1227,7 +1227,7 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
       session({ id: 'open', ended_at: null }),
       session({ id: 'earlier' }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     expect(await screen.findByTestId('resume-session')).toBeTruthy();
     expect(screen.queryByTestId('today-logged-open')).toBeNull();
@@ -1265,7 +1265,7 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
         ] as Session['sets'],
       }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     const row = await screen.findByTestId('today-logged-older-open');
     expect(within(row).getByText('In progress')).toBeTruthy();
@@ -1277,13 +1277,13 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
 
   it('the way out goes to the full history, and Progress keeps its own route', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 's1' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
-    fireEvent.press(await screen.findByTestId('today-logged-all'));
+    await fireEvent.press(await screen.findByTestId('today-logged-all'));
     expect(mockPush).toHaveBeenCalledWith('/session/history');
     // Unchanged by this block: the week strip still opens Progress, so the
     // route the ticket describes is added to rather than replaced.
-    fireEvent.press(screen.getByTestId('week-strip-review'));
+    await fireEvent.press(screen.getByTestId('week-strip-review'));
     expect(mockPush).toHaveBeenCalledWith('/(tabs)/progress');
   });
 
@@ -1305,14 +1305,14 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
         ended_at: new Date(noonYesterday.getTime() + 3_600_000).toISOString(),
       }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
 
     // Today first — so an empty list after stepping cannot pass for the wrong
     // reason (a broken section renders nothing on every day).
     expect(await screen.findByTestId('today-logged-today-lift')).toBeTruthy();
     expect(screen.queryByTestId('today-logged-yesterday-roll')).toBeNull();
 
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     expect(await screen.findByTestId('today-logged-yesterday-roll')).toBeTruthy();
     expect(screen.queryByTestId('today-logged-today-lift')).toBeNull();
@@ -1320,15 +1320,15 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
 
   it('drops the section entirely on a browsed day that logged nothing', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 'today-lift' })]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-logged-today-lift');
 
-    fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
 
     await waitFor(() => expect(screen.queryByTestId('today-logged')).toBeNull());
     // And comes back on the way home, so the disappearance is the day and not
     // a section that unmounted for good.
-    fireEvent.press(screen.getByTestId('today-day-next'));
+    await fireEvent.press(screen.getByTestId('today-day-next'));
     expect(await screen.findByTestId('today-logged-today-lift')).toBeTruthy();
   });
 
@@ -1343,11 +1343,11 @@ describe('N548 — the day’s logged sessions are on Today and open', () => {
         ended_at: new Date(noonYesterday.getTime() + 3_600_000).toISOString(),
       }),
     ]);
-    render(<TodayScreen />);
+    await render(<TodayScreen />);
     await screen.findByTestId('today-logged-today-lift');
 
-    fireEvent.press(screen.getByTestId('today-day-prev'));
-    fireEvent.press(await screen.findByTestId('today-logged-yesterday-lift'));
+    await fireEvent.press(screen.getByTestId('today-day-prev'));
+    await fireEvent.press(await screen.findByTestId('today-logged-yesterday-lift'));
 
     expect(mockPush).toHaveBeenCalledWith({
       pathname: '/session/[id]',

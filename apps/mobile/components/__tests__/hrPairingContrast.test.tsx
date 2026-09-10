@@ -77,7 +77,7 @@ beforeEach(() => {
 
 describe('the heart-rate path block is legible', () => {
   it('every line of the path answer clears the body-text floor', async () => {
-    render(<HRMonitorPairing userId="u1" healthSource="healthkit" healthSyncOn />);
+    await render(<HRMonitorPairing userId="u1" healthSource="healthkit" healthSyncOn />);
 
     // The headline only appears once the probe has settled — before that the
     // block is deliberately a spinner rather than a guess.
@@ -95,7 +95,7 @@ describe('the heart-rate path block is legible', () => {
 
   it('the broadcast instructions clear it too — a step nobody can read is no step', async () => {
     const user = userEvent.setup();
-    render(<HRMonitorPairing userId="u1" healthSource="healthkit" healthSyncOn />);
+    await render(<HRMonitorPairing userId="u1" healthSource="healthkit" healthSyncOn />);
     await waitFor(() => expect(screen.getByTestId('settings-hr-monitor-broadcast-toggle')).toBeTruthy());
 
     await user.press(screen.getByTestId('settings-hr-monitor-broadcast-toggle'));
@@ -113,7 +113,7 @@ describe('the heart-rate path block is legible', () => {
 
   it('the no-Bluetooth build says why, readably — it is the only prose that branch has', async () => {
     mockBle.supported = false;
-    render(<HRMonitorPairing userId="u1" healthSource="healthkit" healthSyncOn />);
+    await render(<HRMonitorPairing userId="u1" healthSource="healthkit" healthSyncOn />);
 
     await waitFor(() => expect(screen.getByTestId('settings-hr-monitor-no-bluetooth')).toBeTruthy());
     expectReadable('settings-hr-monitor-no-bluetooth');

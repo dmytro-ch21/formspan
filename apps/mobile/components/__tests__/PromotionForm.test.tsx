@@ -127,13 +127,13 @@ beforeEach(() => {
 
 describe('adding a new promotion', () => {
   it('has no photo yet, and picking one only PREVIEWS it — no upload happens', async () => {
-    render(<PromotionForm />);
+    await render(<PromotionForm />);
     await screen.findByTestId('promotion-form');
 
     expect(screen.queryByTestId('promotion-photo-image')).toBeNull();
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-photo'));
+      await fireEvent.press(screen.getByTestId('promotion-photo'));
     });
 
     await waitFor(() => expect(screen.getByTestId('promotion-photo-image')).toBeTruthy());
@@ -142,16 +142,16 @@ describe('adding a new promotion', () => {
 
   it('save() creates the promotion THEN uploads the held photo to the new id', async () => {
     mockCreatePromotion.mockResolvedValue(asPromotion({ id: 'new-id' }));
-    render(<PromotionForm />);
+    await render(<PromotionForm />);
     await screen.findByTestId('promotion-form');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-photo'));
+      await fireEvent.press(screen.getByTestId('promotion-photo'));
     });
     await waitFor(() => expect(screen.getByTestId('promotion-photo-image')).toBeTruthy());
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-save'));
+      await fireEvent.press(screen.getByTestId('promotion-save'));
     });
 
     await waitFor(() => expect(mockCreatePromotion).toHaveBeenCalled());
@@ -172,16 +172,16 @@ describe('adding a new promotion', () => {
   it('saves the promotion even when the deferred photo upload fails', async () => {
     mockCreatePromotion.mockResolvedValue(asPromotion({ id: 'new-id' }));
     mockUploadPromotionPhoto.mockRejectedValue(new Error('storage unavailable'));
-    render(<PromotionForm />);
+    await render(<PromotionForm />);
     await screen.findByTestId('promotion-form');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-photo'));
+      await fireEvent.press(screen.getByTestId('promotion-photo'));
     });
     await waitFor(() => expect(screen.getByTestId('promotion-photo-image')).toBeTruthy());
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-save'));
+      await fireEvent.press(screen.getByTestId('promotion-save'));
     });
 
     // The rank is what mattered here — a failed photo must not undo it or
@@ -191,11 +191,11 @@ describe('adding a new promotion', () => {
 
   it('never calls uploadPromotionPhoto when no photo was picked', async () => {
     mockCreatePromotion.mockResolvedValue(asPromotion({ id: 'new-id' }));
-    render(<PromotionForm />);
+    await render(<PromotionForm />);
     await screen.findByTestId('promotion-form');
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-save'));
+      await fireEvent.press(screen.getByTestId('promotion-save'));
     });
 
     await waitFor(() => expect(mockBack).toHaveBeenCalled());
@@ -213,13 +213,13 @@ describe('adding a new promotion', () => {
         resolveManipulate = resolve;
       }),
     );
-    render(<PromotionForm />);
+    await render(<PromotionForm />);
     await screen.findByTestId('promotion-form');
 
     // Start the pick — `photoBusy` becomes true once the picker itself
     // resolves, before `manipulateAsync` (held open above) ever settles.
-    act(() => {
-      fireEvent.press(screen.getByTestId('promotion-photo'));
+    await act(async () => {
+      await fireEvent.press(screen.getByTestId('promotion-photo'));
     });
     await waitFor(() =>
       expect(screen.getByTestId('promotion-save').props.accessibilityState?.disabled).toBe(true),
@@ -227,7 +227,7 @@ describe('adding a new promotion', () => {
 
     // A Save tap in this window must be a no-op — the promotion has not
     // been created yet, so `pendingPhoto` will never reach it.
-    fireEvent.press(screen.getByTestId('promotion-save'));
+    await fireEvent.press(screen.getByTestId('promotion-save'));
     expect(mockCreatePromotion).not.toHaveBeenCalled();
 
     // Let the resize finish; Save re-enables and now genuinely holds the
@@ -240,7 +240,7 @@ describe('adding a new promotion', () => {
     );
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-save'));
+      await fireEvent.press(screen.getByTestId('promotion-save'));
     });
     await waitFor(() => expect(mockCreatePromotion).toHaveBeenCalled());
   });
@@ -248,7 +248,7 @@ describe('adding a new promotion', () => {
 
 describe('editing an existing promotion', () => {
   it('starts with no photo shown when the promotion has none', async () => {
-    render(<PromotionForm initial={EXISTING} />);
+    await render(<PromotionForm initial={EXISTING} />);
     await screen.findByTestId('promotion-form');
     await waitFor(() => expect(mockGetStanding).toHaveBeenCalled());
     expect(screen.queryByTestId('promotion-photo-image')).toBeNull();
@@ -261,7 +261,7 @@ describe('editing an existing promotion', () => {
     let resolveStanding!: (s: Standing) => void;
     mockGetStanding.mockReturnValue(new Promise<Standing>((res) => { resolveStanding = res; }));
 
-    render(<PromotionForm initial={{ ...EXISTING, photo_url: 'https://cdn.test/stale.jpg' }} />);
+    await render(<PromotionForm initial={{ ...EXISTING, photo_url: 'https://cdn.test/stale.jpg' }} />);
     await screen.findByTestId('promotion-form');
 
     // First paint: the (possibly stale) route-param hint, before the refresh
@@ -292,12 +292,12 @@ describe('editing an existing promotion', () => {
       time_at_current_days: null,
       promotions: [asPromotion({ photo_url: 'https://cdn.test/after.jpg' })],
     });
-    render(<PromotionForm initial={EXISTING} />);
+    await render(<PromotionForm initial={EXISTING} />);
     await screen.findByTestId('promotion-form');
     await waitFor(() => expect(mockGetStanding).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-photo'));
+      await fireEvent.press(screen.getByTestId('promotion-photo'));
     });
 
     await waitFor(() =>
@@ -315,12 +315,12 @@ describe('editing an existing promotion', () => {
 
   it('a failed pick-upload leaves the form usable and reports the error', async () => {
     mockUploadPromotionPhoto.mockRejectedValue(new Error('network down'));
-    render(<PromotionForm initial={EXISTING} />);
+    await render(<PromotionForm initial={EXISTING} />);
     await screen.findByTestId('promotion-form');
     await waitFor(() => expect(mockGetStanding).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('promotion-photo'));
+      await fireEvent.press(screen.getByTestId('promotion-photo'));
     });
 
     await waitFor(() => expect(screen.getByText('network down')).toBeTruthy());

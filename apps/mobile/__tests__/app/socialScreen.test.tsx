@@ -118,7 +118,7 @@ it('says the load failed rather than claiming nobody has trained', async () => {
   // the absence of something.
   mockFeed.mockRejectedValue(new Error('Network request failed'));
 
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   expect(await screen.findByTestId('social-error')).toBeTruthy();
   expect(screen.queryByTestId('social-empty')).toBeNull();
@@ -127,7 +127,7 @@ it('says the load failed rather than claiming nobody has trained', async () => {
 it('shows the empty state when the feed really is empty', async () => {
   // The arm that makes the previous test mean something.
   mockFriends.mockResolvedValue([{ username: 'rhonda', display_name: null, since: '2026-01-01' }]);
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   expect(await screen.findByTestId('social-empty')).toBeTruthy();
   expect(screen.queryByTestId('social-error')).toBeNull();
@@ -139,7 +139,7 @@ it('still loads for a first-run account with no profile yet', async () => {
   mockProfile.mockRejectedValue(new ApiError('profile not found', 'not_found', 404));
   mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0, window_days: 3 });
 
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   expect(await screen.findByTestId('feed-s1')).toBeTruthy();
   expect(screen.queryByTestId('social-error')).toBeNull();
@@ -149,7 +149,7 @@ it('still loads for a first-run account with no profile yet', async () => {
 
 it('renders who trained, not just what', async () => {
   mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0, window_days: 3 });
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   await screen.findByTestId('feed-s1');
   // One composed label per row: walking who/when/what/chips as separate stops
@@ -165,7 +165,7 @@ it('offers the nudge only to someone who has not opted in', async () => {
   // entirely on the OWNER's opt-in — so this is an offer, and it must not
   // appear to somebody who already accepted it.
   mockProfile.mockResolvedValue({ share_training_with_friends: true });
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   await waitFor(() => expect(screen.queryByTestId('social-empty')).toBeTruthy());
   expect(screen.queryByTestId('social-nudge')).toBeNull();
@@ -180,7 +180,7 @@ it('states the feed window using window_days from the response, not a hardcoded 
   mockFriends.mockResolvedValue([{ username: 'rhonda', display_name: null, since: '2026-01-01' }]);
   mockFeed.mockResolvedValue({ items: [], total: 0, limit: 30, offset: 0, window_days: 7 });
 
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   const empty = await screen.findByTestId('social-empty');
   // A plain string here would be checked for an EXACT match against the
@@ -200,7 +200,7 @@ it('pluralizes a one-day window correctly', async () => {
     window_days: 1,
   });
 
-  render(<SocialScreen />);
+  await render(<SocialScreen />);
 
   await screen.findByTestId('feed-s1');
   const note = await screen.findByText(/Showing the last/);
@@ -231,7 +231,7 @@ describe('avatars (N205)', () => {
       window_days: 3,
     });
 
-    render(<SocialScreen />);
+    await render(<SocialScreen />);
 
     const row = await screen.findByTestId('feed-s1');
     expect(within(row).getByTestId('avatar-photo')).toBeTruthy();
@@ -241,7 +241,7 @@ describe('avatars (N205)', () => {
   it('falls back to the monogram for a friend with no avatar', async () => {
     mockFeed.mockResolvedValue({ items: [session()], total: 1, limit: 30, offset: 0, window_days: 3 });
 
-    render(<SocialScreen />);
+    await render(<SocialScreen />);
 
     const row = await screen.findByTestId('feed-s1');
     expect(within(row).getByTestId('avatar-monogram', { includeHiddenElements: true })).toBeTruthy();

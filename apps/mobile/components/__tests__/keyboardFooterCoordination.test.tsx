@@ -60,8 +60,8 @@ describe('needsPlatformKeyboardInset', () => {
 });
 
 describe('a scroll view sharing a screen with a lifting footer', () => {
-  it('stands down, because the footer already clears the keyboard', () => {
-    render(
+  it('stands down, because the footer already clears the keyboard', async () => {
+    await render(
       <KeyboardAwareScreen>
         <KeyboardAwareScrollView testID="scroller">
           <Text>note</Text>
@@ -75,8 +75,8 @@ describe('a scroll view sharing a screen with a lifting footer', () => {
     expect(platformInsetOn('scroller')).toBe(false);
   });
 
-  it('keeps the inset when the screen has no footer', () => {
-    render(
+  it('keeps the inset when the screen has no footer', async () => {
+    await render(
       <KeyboardAwareScreen>
         <KeyboardAwareScrollView testID="scroller">
           <Text>note</Text>
@@ -94,8 +94,8 @@ describe('a scroll view sharing a screen with a lifting footer', () => {
    * throwing or defaulting the other way: this fix must be invisible to every
    * screen that does not have a footer, and there are twelve of those.
    */
-  it('keeps the inset when rendered outside a KeyboardAwareScreen entirely', () => {
-    render(
+  it('keeps the inset when rendered outside a KeyboardAwareScreen entirely', async () => {
+    await render(
       <KeyboardAwareScrollView testID="scroller">
         <Text>note</Text>
       </KeyboardAwareScrollView>,
@@ -112,7 +112,7 @@ describe('a scroll view sharing a screen with a lifting footer', () => {
    * every earlier step — a silent return of problem 2 on exactly the steps
    * with the most content.
    */
-  it('takes the inset back when the footer unmounts', () => {
+  it('takes the inset back when the footer unmounts', async () => {
     function Wizard({ onLastStep }: { onLastStep: boolean }) {
       return (
         <KeyboardAwareScreen>
@@ -128,10 +128,10 @@ describe('a scroll view sharing a screen with a lifting footer', () => {
       );
     }
 
-    const view = render(<Wizard onLastStep />);
+    const view = await render(<Wizard onLastStep />);
     expect(platformInsetOn('scroller')).toBe(false);
 
-    view.rerender(<Wizard onLastStep={false} />);
+    await view.rerender(<Wizard onLastStep={false} />);
     expect(platformInsetOn('scroller')).toBe(true);
   });
 });
