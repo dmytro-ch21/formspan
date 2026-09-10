@@ -57,10 +57,10 @@ import type { TokenGetter } from './useAuthToken';
  *    field. Both the iOS and Android sync passes were broken, unnoticed,
  *    because nothing here calls the live endpoint in a test. Fixed by
  *    threading an `HRMaxSource` argument through — see `computeSessionMetrics`
- *    below. Every caller today only ever produces the `220 − age` estimate
- *    (`hrMaxFromDateOfBirth`), so both orchestrators pass `'estimated'`;
- *    `'observed'` has no producer yet anywhere in this app (future work, not
- *    this ticket's scope).
+ *    below. **Both orchestrators used to pass the literal `'estimated'`,
+ *    because `hrMaxFromDateOfBirth` was the app's only HRmax producer. N535
+ *    ended that**: they now resolve an `HRMaxResolution` (`lib/hrMax.ts`) and
+ *    pass whichever source it carries, so `'observed'` has a producer.
  *
  * ## One real behavior reconciliation
  *
@@ -126,9 +126,10 @@ export type HRSource = 'workout' | 'window' | 'none';
 
 /** Mirrors `biometric.HRMaxSource` (N483/#833) — whether `hr_max_bpm` is the
  *  `220 − age` estimate or an observed maximum from the athlete's own
- *  history. This app currently only ever produces `'estimated'`;
- *  `'observed'` has no producer yet (design doc §3's second/third steps —
- *  future work). */
+ *  history. **Both are produced as of N535/#966** (design doc §3's second and
+ *  third steps): `lib/hrMax.ts`'s `resolveHRMax` decides which is in force and
+ *  carries the matching source with the number, so the two cannot drift apart.
+ *  Never write this literal at a call site — take it from the resolution. */
 export type HRMaxSource = 'estimated' | 'observed';
 
 /** One raw reading, on the wire — mirrors `biometric.Sample`'s JSON shape. */
@@ -439,11 +440,12 @@ export function ageInYears(dateOfBirth: string, on: Date): number {
 
 /**
  * HRmax, seeded from `220 - age` — design doc §3's first of three steps
- * ("Seed from 220 − age... mark the session's zones as estimated"; the
- * other two — replacing this with the athlete's own observed maximum, and
- * never silently switching between the two — are explicitly future work).
- * The sole producer of `hr_max_source: 'estimated'` in this app today; see
- * `HRMaxSource`'s doc comment.
+ * ("Seed from 220 − age... mark the session's zones as estimated"). Steps two
+ * and three — replacing this with the athlete's own observed maximum, and
+ * never silently switching between the two — were built by N535/#966 and live
+ * in `lib/hrMax.ts`. **Prefer `resolveHRMax` over calling this directly**:
+ * this function knows only about age, so a caller reaching for it is choosing
+ * the estimate over a measurement that may exist.
  *
  * Returns `null` when there is no date of birth to seed from, or when the
  * seeded value falls outside what `ComputeMetrics` will accept — an absent
@@ -926,6 +928,38 @@ export async function getSessionMetrics(
     if (isNotFound(err)) return null;
     throw err;
   }
+}
+
+/**
+ * Mirrors `biometric.ObservedHRMax` (N535/#966) — the athlete's highest
+ * recorded heart-rate sample, the timestamp of THAT sample's own row, and how
+ * many heart-rate samples stand behind it. Wire shape, hence snake_case; see
+ * `lib/hrMax.ts` for what is done with it.
+ */
+export type ObservedHRMax = {
+  bpm: number;
+  measured_at: string;
+  sample_count: number;
+};
+
+/**
+ * The athlete's observed maximum heart rate — `GET /v1/biometric/hr-max`,
+ * N535/#966. `null` when they have no heart-rate samples at all, which the
+ * server returns as a 200 with a null body rather than a 404: "this athlete
+ * has never worn a monitor" is an answer, not a missing resource.
+ *
+ * Derived server-side deliberately (design doc §3: "Derive on the backend,
+ * not the client — so both platforms report identical numbers"). Feed it to
+ * `lib/hrMax.ts`'s `resolveHRMax` rather than using it directly; that is
+ * where the precedence against the age estimate lives, and where the
+ * provenance that must travel with the number is attached.
+ */
+export async function getObservedHRMax(getToken: TokenGetter): Promise<ObservedHRMax | null> {
+  const res = await apiRequest<{ observed_hr_max: ObservedHRMax | null }>(
+    getToken,
+    '/biometric/hr-max',
+  );
+  return res.observed_hr_max ?? null;
 }
 
 /**

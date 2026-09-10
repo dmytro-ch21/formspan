@@ -236,6 +236,17 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title="Preferences">
+        {/* N535. The one place an athlete can find out what a "zone" is for
+            them, in beats, and which maximum heart rate it was worked out
+            from. Sits here rather than under Integrations because it is true
+            with no watch connected at all — an age-estimated maximum still
+            produces zones, and saying so is the point. */}
+        <Row
+          label="Heart-rate zones"
+          hint="Your zones in bpm, and where the maximum came from"
+          onPress={() => router.push('/hr-zones')}
+          testID="settings-hr-zones"
+        />
         <Row
           label="Units"
           hint="Kilograms or pounds"

@@ -21532,9 +21532,13 @@ being honest about what it does not yet know.
 - **Strides and sprints** carry an explicit section saying heart rate will not
   tell you much for these, because the effort ends before the heart responds.
   That section must NOT appear on longer runs.
-- **No bpm anywhere.** The screens say "Zones 3-4", never "152-171 bpm" — the
-  athlete's own maximum heart rate is not derived yet (N535). A bpm range
-  appearing here before N535 lands means something invented one.
+- **Beats per minute — SUPERSEDED by N535.** This used to read "no bpm
+  anywhere: a bpm range appearing here means something invented one". N535
+  derives the maximum honestly, so the run-type detail now DOES show a bpm
+  range under its zone band — but only when there is a maximum worth quoting
+  one from. With neither a measured maximum nor a date of birth on file, the
+  screen falls back to exactly what it said before: the zone words alone. A bpm
+  range on an athlete with no HRmax is still something inventing one.
 
 ### Needs a device
 
@@ -22369,3 +22373,71 @@ its convergence rule.
   open the same day on web and confirm it matches. Nothing short of a device can
   answer this — and the gap indicator under a moving finger is the specific
   thing a simulator does not settle.
+
+## Heart-rate zones — the athlete's own maximum (N535 / #966)
+
+`app/hr-zones.tsx`, reached from Settings → Preferences → "Heart-rate zones"
+and from the bpm line on any run-type detail screen. Also
+`GET /v1/biometric/hr-max`.
+
+### Happy path
+
+- **An athlete with heart-rate history** opens the zones screen: the maximum
+  shown is their own highest recorded reading, the badge says "Measured from
+  your own sessions", and the derivation names when it was recorded and how
+  many samples stand behind it.
+- **An athlete with a date of birth and no history** sees the same screen with
+  "Estimated from your age", the arithmetic (`220 − 34 = 186`) spelled out, and
+  a line saying a monitor will replace it.
+- **Five zones, in beats, contiguous.** Z1's ceiling is one below Z2's floor,
+  and so on; Z5 is open-ended (`171+ bpm`), never capped at the maximum.
+- **The same numbers everywhere.** The bpm range on a run-type detail screen,
+  the boundaries on the zones screen, and the zone a live heart rate is
+  coloured as during a session all agree — and agree with the zone breakdown
+  the session report shows afterwards.
+- **A session report names the maximum it was scored against**, in beats, and
+  says whether it was measured or estimated. A session computed against an
+  observed maximum must never describe itself as estimated.
+
+### Edge cases and errors
+
+- **No date of birth and no heart-rate samples.** "We cannot work out your
+  zones yet", naming both routes out (record a date of birth, or wear a
+  monitor). **No number of any kind on the screen** — not a population average,
+  not 100 bpm. A bpm rendered here is the failure this screen exists to avoid.
+- **A date of birth that is a typo** (an athlete recorded as 130 years old):
+  a different sentence, telling them to correct the date rather than to record
+  one.
+- **A junk observed sample** (a strap reporting 14 bpm, or 300): discarded, and
+  the age estimate used instead — with the badge honestly saying "estimated".
+  Never clamped to 100 or 250.
+- **The `hr-max` endpoint unreachable** (offline, or an older API): the athlete
+  still gets their age-estimated zones rather than losing the screen. Only a
+  failed *profile* read produces the "could not load" state.
+- **A first observed maximum arriving.** An athlete whose zones said "estimated
+  from your age" wears a monitor for a hard session; afterwards the screen says
+  "measured from your own sessions" and the numbers move. The switch must be
+  visible — that is the whole of design doc §3 step 3.
+- **An athlete with a single heart-rate sample.** It is used (one reading about
+  you beats a formula about nobody), and the screen says "1 heart-rate sample"
+  so they can judge it themselves.
+
+### Auth and security
+
+- `GET /v1/biometric/hr-max` returns 401 unauthenticated, and never another
+  athlete's peak: two accounts with heart-rate history on the same device (sign
+  out, sign in) must see their own maximum each time.
+- **An athlete with a large history does not pay for everyone else's.** The
+  peak lookup is served by `biometric_samples_user_metric_value_idx`; if that
+  index is ever dropped or its column order changed, this endpoint silently
+  reverts to scanning the whole table and gets slower as OTHER users' data
+  grows. There is no functional symptom — the answer stays correct — so this
+  is a scenario for a load check, not a correctness one.
+
+### Needs a device
+
+- **The zones in bpm checked against the athlete's own watch's zones.** A 5-10
+  bpm disagreement is expected and fine — watches use their own formulas and
+  their own maximum. A 30 bpm gap means the derivation is misapplied.
+- **An athlete with a real observed maximum sees their zones say so**, in the
+  session report as well as on the zones screen.

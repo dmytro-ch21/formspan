@@ -8,7 +8,6 @@ import {
   parseHeartRateMeasurement,
   reconnectDelayMs,
   reduceLiveHR,
-  zoneForBPM,
   type LiveHRState,
 } from '../hrMonitor/heartRateProfile';
 
@@ -62,23 +61,6 @@ describe('decodeBase64', () => {
   });
   it('tolerates missing padding', () => {
     expect(Array.from(decodeBase64('AI4'))).toEqual([0x00, 0x8e]);
-  });
-});
-
-describe('zoneForBPM — same floors as the backend', () => {
-  it('50/60/70/80/90 % of HRmax, inclusive floors', () => {
-    expect(zoneForBPM(99, 200)).toBe(0);
-    expect(zoneForBPM(100, 200)).toBe(1);
-    expect(zoneForBPM(120, 200)).toBe(2);
-    expect(zoneForBPM(140, 200)).toBe(3);
-    expect(zoneForBPM(160, 200)).toBe(4);
-    expect(zoneForBPM(180, 200)).toBe(5);
-    expect(zoneForBPM(210, 200)).toBe(5);
-  });
-  it('no HRmax, or nothing to classify, is zone 0 — the number renders without a colour', () => {
-    expect(zoneForBPM(150, null)).toBe(0);
-    expect(zoneForBPM(150, 0)).toBe(0);
-    expect(zoneForBPM(0, 200)).toBe(0);
   });
 });
 

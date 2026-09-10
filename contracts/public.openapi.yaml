@@ -2038,6 +2038,35 @@ components:
             measured_at.
         created_at: { type: string, format: date-time, readOnly: true }
 
+    ObservedHRMax:
+      type: object
+      # Null when the athlete has no heart-rate samples at all - a normal
+      # state for someone who has never worn a monitor, and the reason the
+      # endpoint answers 200 rather than 404.
+      nullable: true
+      required: [bpm, measured_at, sample_count]
+      properties:
+        bpm:
+          type: number
+          format: double
+          description: The highest heart rate recorded for this athlete.
+          example: 191
+        measured_at:
+          type: string
+          format: date-time
+          description: >
+            When the peak itself was recorded, not when it was synced. A
+            maximum from three years ago is a different claim from one from
+            Tuesday, and only the athlete can judge which still describes them.
+        sample_count:
+          type: integer
+          description: >
+            How many heart-rate samples exist in total, not how many equal the
+            maximum. One reading is a spike rather than a maximum - a slipped
+            strap or a cold contact can produce a single implausible beat - so
+            this is what lets a caller judge whether there is enough history
+            behind the figure to trust it.
+          example: 41822
     SessionMetrics:
       type: object
       required:
@@ -10015,6 +10044,40 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /biometric/hr-max:
+    get:
+      operationId: getObservedHRMax
+      summary: The athlete's own highest recorded heart rate
+      description: >
+        The observed maximum across this athlete's stored `heart_rate`
+        samples — design doc §3 step 2's input, and what lets zones stop being
+        quoted from the `220 - age` estimate once a real peak exists.
+
+        Returns `200` with `observed_hr_max: null` when the athlete has no
+        heart-rate samples at all. That is a normal state for someone who has
+        never worn a monitor, not a missing resource, so it is not a `404`.
+
+        Deliberately not windowed by date: a maximum is a maximum, and ageing
+        one out would silently downgrade an athlete back to the estimate,
+        which is the silent switch design doc §3 step 3 forbids.
+      tags: [biometric]
+      responses:
+        '200':
+          description: The observed maximum, or null when there are no samples.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [observed_hr_max]
+                properties:
+                  observed_hr_max:
+                    $ref: '#/components/schemas/ObservedHRMax'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /biometric/sessions/load:
     get:
       summary: List the caller's own sessions with a computed training load in a date range

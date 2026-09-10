@@ -3,7 +3,6 @@ import { AppState, type AppStateStatus } from 'react-native';
 import {
   computeSessionMetrics,
   coverageFromLedger,
-  hrMaxFromDateOfBirth,
   hrSampleCoverage,
   needsEnrichmentAttempt,
   planHRSync,
@@ -15,6 +14,7 @@ import {
 } from './biometric';
 import { getDb } from './db';
 import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
+import { fetchHRMax, type HRMaxResolution } from './hrMax';
 import { fitHRWindow, wideHRQueryWindow } from './hrWindowFit';
 import { paddedHRSearchWindow, selectWorkoutWindow, workoutSearchWindow } from './hrWorkoutWindow';
 import {
@@ -24,7 +24,6 @@ import {
   queryWorkoutWindows,
 } from './healthkit';
 import { readHealthKitImportEnabled } from './healthkitSync';
-import { getProfile } from './profile';
 import {
   PREF_BIOMETRIC_SYNC_FAILURE_COUNT,
   PREF_VO2MAX_LAST_SYNCED_AT,
@@ -360,30 +359,32 @@ async function syncSessionWindows(userID: string, getToken: TokenGetter): Promis
   );
   if (toEnrich.length === 0) return;
 
-  // Fetched once per pass, not once per session — a session's own HRmax
-  // seed (design doc §3) is a fact about the ATHLETE, not about any one
-  // session. `null` — no date of birth, or a seed outside the range
-  // ComputeMetrics accepts — means this pass computes NOTHING: see
-  // `hrMaxFromDateOfBirth`'s doc comment for why leaving `session_metrics`
-  // uncomputed is the honest answer rather than guessing an HRmax. Left
-  // exactly as it was pre-N511 (bail the whole pass, write no ledger rows
-  // at all) rather than matched to Android's per-session "'none' but still
-  // upload samples" branch — out of this ticket's scope, and every session
-  // this skips is already correctly retryable next pass with no ledger row
-  // written for it either way.
-  let hrMaxBPM: number | null = null;
+  // Fetched once per pass, not once per session — the athlete's HRmax
+  // (design doc §3) is a fact about the ATHLETE, not about any one session.
+  // `unresolved` — no observed maximum AND no usable date of birth — means
+  // this pass computes NOTHING: see `hrMax.ts` for why leaving
+  // `session_metrics` uncomputed is the honest answer rather than guessing.
+  // Left exactly as it was pre-N511 (bail the whole pass, write no ledger
+  // rows at all) rather than matched to Android's per-session "'none' but
+  // still upload samples" branch — out of this ticket's scope, and every
+  // session this skips is already correctly retryable next pass with no
+  // ledger row written for it either way.
+  //
+  // N535: this is where `hr_max_source: 'observed'` gets its first producer.
+  // The resolution carries its own provenance, so the value and the label
+  // cannot drift apart on the way to `computeSessionMetrics`.
+  let hrMax: HRMaxResolution = { kind: 'unresolved', reason: 'nothing-to-go-on' };
   try {
-    const profile = await getProfile(getToken);
-    hrMaxBPM = hrMaxFromDateOfBirth(profile.date_of_birth, now);
+    hrMax = await fetchHRMax(getToken, now);
   } catch {
     // Offline, or no profile yet — same "nothing here is computable this
     // pass" outcome as a missing date of birth.
   }
-  if (hrMaxBPM == null) return;
+  if (hrMax.kind === 'unresolved') return;
 
   for (const session of toEnrich) {
     try {
-      await enrichSessionWindow(userID, getToken, session, hrMaxBPM, now);
+      await enrichSessionWindow(userID, getToken, session, hrMax, now);
     } catch {
       // Leave this session's ledger row exactly as it was (absent, or its
       // previous attempt) — the next pass's `needsEnrichmentAttempt` decides
@@ -414,7 +415,7 @@ async function enrichSessionWindow(
   userID: string,
   getToken: TokenGetter,
   session: EnrichableSession,
-  hrMaxBPM: number,
+  hrMax: Exclude<HRMaxResolution, { kind: 'unresolved' }>,
   now: Date,
 ): Promise<{ hrSource: 'window' | 'none'; sampleCount: number }> {
   const window = sessionHRWindow(session.started_at, session.ended_at);
@@ -431,10 +432,11 @@ async function enrichSessionWindow(
   if (plan.kind === 'upload-and-compute') {
     await putBiometricSamples(getToken, plan.samples);
   }
-  // 'estimated' — hrMaxBPM above only ever comes from
-  // hrMaxFromDateOfBirth (the 220 - age seed); see biometric.ts's
-  // HRMaxSource doc comment for why nothing in this app produces
-  // 'observed' yet. `plan.hrSource` is always the CLAIM 'window' (see
+  // `hrMax.source` travels with `hrMax.bpm` out of a single `resolveHRMax`
+  // (N535), so a session is labelled with the maximum it was actually scored
+  // against. This used to be the literal 'estimated', which was true only
+  // because nothing in the app could produce anything else.
+  // `plan.hrSource` is always the CLAIM 'window' (see
   // `planHRSync`'s own doc comment) — the backend is authoritative on
   // the actual RESULT, downgrading to `hr_source: 'none'` itself once
   // it sees zero heart_rate samples for the window. N511/#893's fix is
@@ -445,8 +447,8 @@ async function enrichSessionWindow(
   const metrics = await computeSessionMetrics(
     getToken,
     session.id,
-    hrMaxBPM,
-    'estimated',
+    hrMax.bpm,
+    hrMax.source,
     plan.hrSource,
     windowOverride,
   );
@@ -601,17 +603,16 @@ export async function enrichSessionNow(
   if (!session.ended_at) return { status: 'error' };
 
   const now = new Date();
-  let hrMaxBPM: number | null = null;
+  let hrMax: HRMaxResolution;
   try {
-    const profile = await getProfile(getToken);
-    hrMaxBPM = hrMaxFromDateOfBirth(profile.date_of_birth, now);
+    hrMax = await fetchHRMax(getToken, now);
   } catch {
     return { status: 'error' };
   }
-  if (hrMaxBPM == null) return { status: 'no_hrmax' };
+  if (hrMax.kind === 'unresolved') return { status: 'no_hrmax' };
 
   try {
-    const result = await enrichSessionWindow(userID, getToken, session, hrMaxBPM, now);
+    const result = await enrichSessionWindow(userID, getToken, session, hrMax, now);
     return result.hrSource === 'window'
       ? { status: 'found', sampleCount: result.sampleCount }
       : { status: 'none' };

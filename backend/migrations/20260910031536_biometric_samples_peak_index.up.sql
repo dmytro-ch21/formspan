@@ -1,0 +1,23 @@
+-- N535/#966: serve "this athlete's highest heart-rate sample" without reading
+-- the whole table.
+--
+-- `biometric_samples_user_metric_measured_idx (user_id, metric_type,
+-- measured_at)` — migration 000089's only index — cannot serve
+-- `ORDER BY value DESC` because it does not contain `value`. Measured on a
+-- real Postgres with 2.5M rows (500K for the querying athlete, the rest
+-- spread over ~5,000 others): the planner chose a Parallel Seq Scan over the
+-- ENTIRE table, discarding 2M rows by filter and spilling a 500K-row sort to
+-- disk, at 596ms. That cost grew with the whole platform's data, not with the
+-- asking athlete's own — every new user made every other user's zones screen
+-- slower.
+--
+-- `value DESC, measured_at DESC` matches the query's ORDER BY exactly, so the
+-- peak is the index's first entry for that (user, metric) prefix: an Index
+-- Only Scan with LIMIT 1, measured at 0.08ms with a single heap fetch.
+--
+-- Deliberately a SECOND index rather than an extension of the existing one.
+-- Putting `value` before `measured_at` there would break the window read
+-- ("every heart_rate sample between started_at and ended_at"), which is by far
+-- the hotter query and the reason 000089 chose its column order.
+CREATE INDEX IF NOT EXISTS biometric_samples_user_metric_value_idx
+    ON biometric_samples (user_id, metric_type, value DESC, measured_at DESC);

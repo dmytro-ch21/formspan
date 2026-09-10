@@ -50,7 +50,7 @@ import { formatDistance, formatPace } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { LiveHRIndicator } from '@/components/LiveHRIndicator';
 import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
-import { useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { hrMaxBpmOf, useHRMax } from '@/lib/hrMonitor/useHRMax';
 import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
@@ -626,7 +626,7 @@ export default function RunningSessionScreen() {
   // LIVE number by zone, and an athlete who has never paired one must not
   // pay a profile fetch on every session start (review finding: "a session
   // without a monitor is unchanged" is a stated constraint of this ticket).
-  const liveHRMax = useHRMax(getToken, liveHRActive && liveHROn);
+  const liveHRMax = hrMaxBpmOf(useHRMax(getToken, liveHRActive && liveHROn));
   useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
   const [hrLoaded, setHrLoaded] = useState(false);

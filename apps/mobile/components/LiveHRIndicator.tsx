@@ -4,13 +4,13 @@ import { Animated, Pressable, StyleSheet, View as RNView } from 'react-native';
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
-import { liveHRStatusLabel, zoneForBPM, type LiveHRState } from '@/lib/hrMonitor/heartRateProfile';
+import { liveHRStatusLabel, type LiveHRState } from '@/lib/hrMonitor/heartRateProfile';
 import { retryLiveHR } from '@/lib/hrMonitor/liveHR';
 import { useLiveHR, useLiveHRFresh } from '@/lib/hrMonitor/useLiveHR';
 // N534 moved the zone vocabulary to `lib/hrZones.ts` so the run library,
 // the zone derivation and the live trainer could share one answer with the
 // post-session report instead of four copies. Same function, new home.
-import { zoneColor } from '@/lib/hrZones';
+import { zoneColor, zoneForBPM } from '@/lib/hrZones';
 
 /**
  * N528/#958 — the live heart rate, wherever a session runs and on Today.

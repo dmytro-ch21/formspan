@@ -234,6 +234,59 @@ type pgxQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// ObservedHRMax returns the highest heart rate this user has ever recorded,
+// with the moment it happened and how much history stands behind it.
+//
+// One query, three aggregates, no window: see Repository.ObservedHRMax for
+// why a maximum is deliberately not aged out. `ORDER BY value DESC LIMIT 1`
+// rather than MAX(value) because the row's own measured_at is wanted too,
+// and taking MAX of each column independently would pair the highest value
+// with the latest timestamp — two different rows, reported as one reading.
+// That is the shape of bug that reads as plausible forever.
+func (r *PostgresRepository) ObservedHRMax(ctx context.Context, userID string) (*ObservedHRMax, error) {
+	var out ObservedHRMax
+	// The peak stays ONE ordered row — `ORDER BY value DESC, measured_at DESC
+	// LIMIT 1`, never independent `MAX(value)`/`MAX(measured_at)` aggregates,
+	// which are free to come from two different rows and would report a March
+	// peak as having been recorded yesterday.
+	// `TestObservedHRMax_MeasuredAtComesFromThePeakRow` is built so that swap
+	// passes every other assertion in the file and fails only that one.
+	//
+	// The COUNT is a separate scalar subquery rather than `COUNT(*) OVER ()`
+	// beside those columns, and that is a performance fix rather than a
+	// stylistic one (backend review, measured on 2.5M real rows). A window
+	// aggregate with no partition and no frame must materialise and count the
+	// entire matching set before it can emit the LIMIT 1 row — so the LIMIT
+	// bought nothing, and even a perfect covering index could not help while
+	// the two were fused. Split, the peak is an Index Only Scan against
+	// `biometric_samples_user_metric_value_idx` (0.08ms) and only the count
+	// walks the athlete's rows.
+	err := r.pool.QueryRow(ctx, `
+		WITH peak AS (
+			SELECT value, measured_at
+			FROM biometric_samples
+			WHERE user_id = $1 AND metric_type = $2
+			ORDER BY value DESC, measured_at DESC
+			LIMIT 1
+		)
+		SELECT peak.value,
+		       peak.measured_at,
+		       (SELECT COUNT(*) FROM biometric_samples
+		         WHERE user_id = $1 AND metric_type = $2)
+		FROM peak`,
+		userID, string(MetricHeartRate)).Scan(&out.BPM, &out.MeasuredAt, &out.SampleCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No samples at all. Not an error: an athlete who has never worn a
+		// monitor has no observed maximum, and the caller falls back to the
+		// age estimate.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("biometric: observed hr max: %w", err)
+	}
+	return &out, nil
+}
+
 // queryHRSamples reads heart_rate samples in [from, to] — the one query
 // ComputeSessionMetrics and ListExerciseHR both need, factored out for
 // N490/#851 so the per-exercise read reuses this rather than duplicating

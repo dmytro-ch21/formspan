@@ -568,6 +568,38 @@ type ExerciseHR struct {
 }
 
 // Repository is the persistence port for this module.
+// ObservedHRMax is the highest heart rate this athlete has actually
+// recorded, with enough context for a screen to show WHERE it came from
+// rather than asserting a bare number.
+//
+// Design doc §3 step 2: "Replace it with the observed maximum across the
+// athlete's own history as soon as there is one — with a strap sampling
+// every second, a few hard sessions produce a better number than the
+// formula ever will." `220 − age` carries a standard deviation of ±10–12
+// bpm, which is routinely enough to move two zone boundaries; a number the
+// athlete's own chest actually reached is not an estimate at all.
+//
+// SampleCount is carried because ONE reading is not a maximum, it is a
+// spike. A strap slipping, a cold contact or a car ignition can all produce
+// a single implausible beat, and a zone table built on it would be wrong in
+// the direction that makes every session look easy. The count lets a caller
+// — and the athlete reading the screen — judge how much history is behind
+// the figure.
+type ObservedHRMax struct {
+	BPM float64 `json:"bpm"`
+
+	// MeasuredAt is when the peak itself was recorded, not when it was
+	// synced. A maximum from three years ago is a different claim from one
+	// from Tuesday, and only the athlete can judge which still describes
+	// them.
+	MeasuredAt time.Time `json:"measured_at"`
+
+	// SampleCount is how many heart-rate samples exist in total, not how
+	// many equal the maximum — the question it answers is "is there enough
+	// history here to trust a peak at all".
+	SampleCount int `json:"sample_count"`
+}
+
 type Repository interface {
 	// PutSamples stores a batch of raw readings, idempotently — a retried
 	// sync re-sending the same ids converges rather than duplicating or
@@ -580,6 +612,19 @@ type Repository interface {
 	// query ComputeSessionMetrics runs internally scoped to a session's
 	// window.
 	ListSamples(ctx context.Context, userID string, metricType MetricType, from, to time.Time) ([]Sample, error)
+
+	// ObservedHRMax returns the caller's own highest recorded heart rate,
+	// or nil when they have no heart-rate samples at all — which is a
+	// normal state for a new athlete, not an error (design doc §6.4's
+	// posture, the same one GetSessionMetrics takes).
+	//
+	// Deliberately unfiltered by date: a maximum is a maximum. Ageing it
+	// out on a fixed window would silently downgrade an athlete to the
+	// 220−age estimate after a quiet few months, which is exactly the
+	// silent switch §3 step 3 forbids. If a stale peak ever needs
+	// retiring, that is a decision the athlete makes on a screen showing
+	// them the date, not one this query makes for them.
+	ObservedHRMax(ctx context.Context, userID string) (*ObservedHRMax, error)
 
 	// ComputeSessionMetrics derives and stores session_metrics for a
 	// session the caller owns, from whatever biometric_samples already fall

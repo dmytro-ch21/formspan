@@ -94,21 +94,10 @@ export function reconnectDelayMs(attempt: number): number {
   return RECONNECT_DELAYS_MS[i];
 }
 
-/**
- * Same zone floors as the backend's `ZoneForHR` (`trimp.go`): 50/60/70/80/90%
- * of HRmax. 0 = below zone 1. Kept identical on purpose — a live "zone 4"
- * on screen has to be the same zone 4 the report counts minutes in.
- */
-export function zoneForBPM(bpm: number, hrMaxBPM: number | null): number {
-  if (hrMaxBPM == null || hrMaxBPM <= 0 || bpm <= 0) return 0;
-  const pct = bpm / hrMaxBPM;
-  if (pct >= 0.9) return 5;
-  if (pct >= 0.8) return 4;
-  if (pct >= 0.7) return 3;
-  if (pct >= 0.6) return 2;
-  if (pct >= 0.5) return 1;
-  return 0;
-}
+// `zoneForBPM` used to live here as a hardcoded 50/60/70/80/90 ladder, a
+// second copy of `lib/hrZones.ts`'s `ZONE_FLOORS`. N535 consolidated the two;
+// import it from `@/lib/hrZones` (this file deliberately does not re-export
+// it, so there is exactly one place to look).
 
 /** What every screen reads. `off` = no monitor remembered or nothing
  *  started; `unsupported` = this binary/device has no Bluetooth LE. */

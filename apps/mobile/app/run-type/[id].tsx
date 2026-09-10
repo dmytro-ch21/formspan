@@ -1,10 +1,12 @@
-import { useLocalSearchParams } from 'expo-router';
+import { Link, useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
-import { ZONE_LABELS, zoneBandLabel, zoneColor } from '@/lib/hrZones';
+import { hrMaxBpmOf, useHRMax } from '@/lib/hrMonitor/useHRMax';
+import { ZONE_LABELS, zoneBandBpmLabel, zoneBandLabel, zoneColor } from '@/lib/hrZones';
 import { focusCode, RUN_GOALS, runTypeById } from '@/lib/runTypes';
+import { useAuthToken } from '@/lib/useAuthToken';
 
 /**
  * One run type, read before you go out and do it — N534.
@@ -26,12 +28,14 @@ import { focusCode, RUN_GOALS, runTypeById } from '@/lib/runTypes';
  *
  * ## What is deliberately NOT here yet
  *
- * **Beats per minute.** This screen says "Zones 3-4" and what that should feel
- * like; it does not say "152-171 bpm", because turning a zone into a number
- * needs the athlete's own HRmax, and deriving that honestly is N535's whole
- * job. Printing a bpm range from a guessed maximum would be the confident-and-
- * wrong failure this repo keeps naming — so the screen says the thing it can
- * defend and leaves a gap N535 fills.
+ * **Beats per minute — FILLED by N535/#966.** This screen used to say
+ * "Zones 3-4" and stop, because turning a zone into a number needs the
+ * athlete's own HRmax and deriving that honestly was N535's whole job. It now
+ * says "152-171 bpm" underneath, whenever there is a maximum worth quoting
+ * one from, and links to `app/hr-zones.tsx` for where that maximum came from.
+ * When there is not — no measured maximum and no usable date of birth — it
+ * falls back to exactly what it said before rather than printing a range off
+ * a guess, which is the confident-and-wrong failure this repo keeps naming.
  *
  * **A "start this run" button.** The run types are a reference today, not a
  * plan: N536 is what connects a goal to a week, and until it exists a button
@@ -42,6 +46,11 @@ import { focusCode, RUN_GOALS, runTypeById } from '@/lib/runTypes';
 export default function RunTypeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const run = runTypeById(String(id));
+  // Enabled unconditionally: this screen is read BEFORE a run, which is
+  // exactly when knowing the beats is worth a round trip. Null while it is in
+  // flight or when there is no usable maximum, and the band renders without a
+  // bpm line in both cases — the zone words never wait on the network.
+  const hrMaxBPM = hrMaxBpmOf(useHRMax(useAuthToken(), true));
 
   if (!run) {
     return (
@@ -71,6 +80,11 @@ export default function RunTypeScreen() {
         <Text style={[styles.heroBand, { color: accent }]}>
           {band} · {bandLabel}
         </Text>
+        {hrMaxBPM != null && (
+          <Link href="/hr-zones" style={styles.heroBpm} testID="run-type-bpm">
+            {zoneBandBpmLabel(run.zones[0], run.zones[1], hrMaxBPM)}
+          </Link>
+        )}
       </RNView>
 
       <Section title="What it trains">
@@ -155,6 +169,16 @@ const styles = StyleSheet.create({
   },
   heroCode: { fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
   heroName: { fontSize: 26, fontWeight: '800' },
+  heroBpm: {
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+    color: vola.textMuted,
+    textDecorationLine: 'underline',
+    // Vertical padding rather than `paddingTop: 2` — this is a tappable link
+    // in a hero block, and at 13pt the text's own box is a tap target barely
+    // taller than a fingertip is precise. Matches `hr-zones.tsx`'s own link.
+    paddingVertical: 8,
+  },
   heroBand: { fontSize: 13, fontWeight: '700' },
 
   section: { gap: 6 },

@@ -343,6 +343,26 @@ func (h *Handler) ListSessionLoad(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": loads})
 }
 
+// GetObservedHRMax serves the athlete's own highest recorded heart rate —
+// design doc §3 step 2's input, and the thing that lets a client stop
+// quoting `220 − age`.
+//
+// 200 with a null body field rather than 404 when there is none. The two
+// are different questions and the client asks only one of them: "which
+// maximum should I use". "You have no samples yet" is a complete answer to
+// that, not a missing resource — and a 404 would make every athlete who has
+// never worn a monitor look like an error in the logs.
+func (h *Handler) GetObservedHRMax(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.ClaimsFromContext(r.Context())
+
+	observed, err := h.repo.ObservedHRMax(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, map[string]any{"observed_hr_max": observed})
+}
+
 // GetMetrics reads back a previously computed row. 404 when none exists yet
 // — a normal state (design doc §6.4), not a fault.
 func (h *Handler) GetMetrics(w http.ResponseWriter, r *http.Request) {
