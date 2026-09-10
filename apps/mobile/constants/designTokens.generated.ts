@@ -2,10 +2,12 @@
 // Source: assets/brand/design-tokens.json. Run `node scripts/generate_design_tokens.mjs`
 // after changing the scale; `verify` fails if this file is stale.
 //
-// Raw numbers only — `constants/Spacing.ts` and `constants/Typography.ts` are
-// where these get names and doc comments. Nothing outside those two files
-// should import this module directly.
+// Raw numbers only — `constants/Spacing.ts`, `constants/Typography.ts` and
+// `constants/Motion.ts` are where these get names and doc comments. Nothing
+// outside those three files should import this module directly.
 
 export const SPACING_SCALE = [2,4,6,8,10,12,14,16,20,24,32,48,64] as const;
 export const RADIUS_SCALE = [8,12,14,16,24] as const;
 export const PILL_RADIUS = 999;
+export const DURATION = {"press":120,"control":180,"surface":240,"sheet":320} as const;
+export const EASING_BEZIER = {"out":[0.23,1,0.32,1],"inOut":[0.77,0,0.175,1],"sheet":[0.32,0.72,0,1]} as const;

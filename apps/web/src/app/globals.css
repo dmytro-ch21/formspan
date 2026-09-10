@@ -1,3 +1,11 @@
+@import "./motion.generated.css";
+/* ^ N556's motion scale, first so it is unambiguously an @import: the rule is
+   that @import must precede every rule other than @charset and @layer
+   statements. It declares :root custom properties and nothing else, so it does
+   not participate in the cascade fight the layer order below exists to settle,
+   and the @layer statement that follows is still the FIRST one — which is the
+   property that actually matters here. */
+
 /* Layer order, declared before the Tailwind import because the FIRST @layer
    statement fixes the order and Tailwind's own import declares one too.
    `clerk` sits below `components`/`utilities` deliberately: Clerk injects its
