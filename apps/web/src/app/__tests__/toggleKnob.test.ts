@@ -47,10 +47,16 @@ describe("the discipline toggle's knob (F39)", () => {
   });
 
   it("references the motion tokens with the syntax that actually compiles", () => {
-    // Measured, not assumed: Tailwind v4's bracket form `duration-[--x]` emits
-    // `transition-duration: --x` — invalid CSS, silently ignored, falling back
-    // to the 150ms default. The parenthesis form emits `var(--x)`. Both look
-    // equally correct in a diff, which is why this is asserted.
+    // Measured, not assumed: written with SQUARE brackets, the same token
+    // reference emits a bare `transition-duration: --duration-control` —
+    // invalid CSS, silently ignored, falling back to the 150ms default. The
+    // parenthesis form emits `var(...)`. Both look equally correct in a diff,
+    // which is why this is asserted.
+    //
+    // The broken form is described rather than written out on purpose:
+    // Tailwind v4's scanner extracts class candidates from raw file text,
+    // comments included, so spelling it here would emit that invalid rule into
+    // the production bundle. It did, until this comment was reworded.
     const knob = knobClasses(source);
     expect(knob).toContain("duration-(--duration-control)");
     expect(knob).toContain("ease-(--ease-out)");
