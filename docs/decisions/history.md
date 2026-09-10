@@ -69081,9 +69081,17 @@ declaration beats every layered one regardless of specificity.
 The generated file is `:root` custom properties and no rules, so it cannot win
 or lose a cascade fight — but that is an argument, and the repo's own rule is
 to measure. **Built both ways and compared**: `main`'s `globals.css` and this
-one produce the byte-identical first layer statement in the built CSS
-(`@layer clerk,components;`), and the tokens do reach the output
-(`--duration-press:.12s`, `--ease-out:cubic-bezier(.23, 1, .32, 1)`).
+one produce a byte-identical ordering of the app's five named layers in the
+built CSS, and the tokens do reach the output (`--duration-press:.12s`,
+`--ease-out:cubic-bezier(.23, 1, .32, 1)`).
+
+Precisely, because the obvious grep gives the wrong answer: the LITERAL first
+`@layer` in the bundle is Tailwind's own internal `@layer properties{…}`
+(its `@property` fallback), which precedes `theme`, `base` and only then
+`clerk,components`. That block is an unrelated layer name and does not reorder
+the five, so the safety property holds — but anyone re-verifying this by
+grepping for the first `@layer` will land on Tailwind's block, not the app's.
+Compare the order of the app's own five names, not the first match.
 
 ### What this leaves open
 
