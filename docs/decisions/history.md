@@ -68697,6 +68697,119 @@ path, the entry and account path including the app's very first tap, and every
 remaining surface. Nothing here has been felt on a device; #1037's three
 device criteria still stand.
 
+## 2026-09-10 — N545: the session heart-rate chart gets a time axis, a bpm ladder and a marked peak
+
+The athlete's words: *"the graph with hr data should be timestamped correctly
+with more details where it peaked and etc"*. The comparison that produced the
+ticket is a Zepp chart of the same class — a real time axis (`00:00 · 21:55 ·
+43:50 · 01:05:45 · 01:27:43`), a labelled avg and max, a readable bpm ladder.
+VOLA's showed a curve, the first and last bpm, and two x labels: `0:00` and
+the total duration. A peak was visible as a bump and locatable at nothing
+more precise than "somewhere in the middle".
+
+That is exactly the chart CLAUDE.md's 2026-08-19 amendment to the mobile-chart
+carve-out was written about — the amendment that struck "no axes to read
+values off" after `trend.tsx` was judged "pretty much useless" for the same
+reason. A chart you cannot read a number off answers no question and sends the
+athlete to a desk.
+
+**The axis describes the window the NUMBERS came from, not the window the
+athlete typed.** This is the part that would have been a fresh bug rather than
+a missing feature. W19/#985 merged the day before and moved a session's
+heart-rate window off the logged start/end and onto the watch's own workout,
+because a 90-minute class was being scored almost entirely from pre-class
+background readings. The BJJ screen still fetched the timeline over
+`session.started_at/ended_at` — harmless while the chart was an unlabelled
+shape, and the moment it carries a time axis it becomes a real curve, with
+real timestamps, underneath an avg/max/TRIMP measured from a different stretch
+of time. The fetch and the build now both take
+`SessionMetrics.hr_window_start/end`, gated on there being a metrics row at
+all, so the curve and every number above it describe one window by
+construction. `hrReportWiring.test.ts` pins that at the source level, where
+the other cross-file HR invariants already live.
+
+**And when the two windows differ, the axis says so rather than
+renumbering.** `timelineCaption` reads the same `hrWindowDiffersFromSession`
+threshold N522/#934's diagnostic line uses — the ordinary session gets "Heart
+rate across the session", and a session whose readings came from elsewhere
+gets "Heart rate across the recording — 0m is 6:12 PM, when the readings
+start", with N522's fuller both-windows footnote still underneath. Silently
+labelling somebody else's window `0m` is the shape of the bug W19 fixed, not
+a smaller version of it.
+
+**Elapsed time, not clock time**, decided for three reasons that are this
+app's rather than Zepp's: the question is *when in the session did this
+happen*, and "38 minutes in" answers it where "6:47 PM" makes the athlete
+subtract; every other duration on the same card is already elapsed and already
+formatted `21m` / `1h 28m` (the zone rows), so a clock axis would be the one
+place on the card measuring time differently; and a clock axis renders in the
+READER's timezone, so a class trained abroad comes back reading hours off.
+Elapsed minutes have no timezone. The single clock time on the whole chart is
+the caption's, and only when `0m` is not the session's own start.
+
+**Tick selection has two constraints because either alone crowds one end of
+the range**, and both are pinned by their own test:
+
+- A COUNT cap of five. Ten one-minute labels genuinely fit the plot's width
+  on a nine-minute session; they are also unreadable.
+- A measured WIDTH fit. A two-hour session's labels are three times wider
+  than a twenty-minute session's (`1h 30m` against `15m`), so a count cap
+  alone lets five of them overlap on a narrow plot.
+
+The end is always labelled, and a regular multiple landing within half an
+interval of it is the one that goes — a peak at minute 84 of an 87-minute
+session is unlocatable against an unlabelled right edge. Measured at both ends
+of the range the ticket asked about: 20 minutes → `0m 5m 10m 15m 20m`; two
+hours → `0m 30m 1h 1h 30m 2h`; Zepp's own 1:27:43 class → `0m 20m 40m 1h 1h
+28m`.
+
+**The peak is a dot, a dashed dropline to the time axis, and the label `185
+bpm at 47m`** — the beats and the time in one string, anchored start/middle/end
+by where it falls so a peak in the first minute is not half off the left edge
+of the phone. Ties go to the EARLIEST occurrence: an athlete who hit 185 twice
+is asking when it first got that hard.
+
+**One change in `hrTimeline.ts` earned its own thought: the bucket holding the
+session's highest reading is no longer averaged.** Averaging it in was
+harmless while the chart was a shape. It stops being harmless the moment the
+chart MARKS the peak, because the marker would then sit on a bucket average —
+say 172 — directly under a "Max HR 185" stat the backend computed from the
+same window, at a time that is the bucket's centre rather than the moment it
+happened. One point is kept honest; every other bucket still smooths, which a
+test pins separately so the fix cannot quietly become "stop downsampling".
+
+**Zone colouring is the same ramp as the bars underneath it, attributed the
+same way the backend attributes minutes.** Each drawn segment takes the zone
+of the reading it STARTS from, which is exactly `trimp.go`'s `ZoneBreakdown`
+rule — colouring by the end reading instead would draw a chart that disagrees
+with the bar chart below it about which zone a stretch of minutes belonged to.
+`zoneForBPM`/`zoneColor` from `lib/hrZones.ts`, so the floors are still the
+server's. No HRmax means no zone claimed: one plain line rather than a grey
+one implying zone 1.
+
+**Every decision is pure and lives in `lib/hrTimelineAxis.ts`; the component
+turns answers into SVG and nothing else.** 50 tests there, plus the peak
+preservation and wiring tests, and **12 mutations, 12 killed** — the tick cap,
+the end-tick drop fraction, the width constant, the bpm span floor, the ladder
+cap, the peak tie-break, the zone attribution direction, the label anchor
+threshold, the domain snapping, the caption's differing-window branch, the
+peak preservation, and the shared boundary point that keeps the line
+continuous. Every fixture is a literal rather than derived from the constant
+under test, which is the mistake W19's own entry records: its first coverage
+tests derived their fixtures from the thresholds they were pinning, and all
+three constants survived mutation at a green 166/166.
+
+**Still inside the carve-out, and it does not move toward the edge.** One
+metric, no picker; the axis is the session's own duration, which is not a
+choice anybody makes. There is no start-and-end control, which is the thing
+the rule actually forbids.
+
+**What this does not do:** the timeline is still wired on the BJJ screen only.
+Strength and running pass no `hrTimeline`, so they get the report without a
+chart, exactly as before. Wiring them is a few lines each and a separate
+ticket — the running screen in particular has no test harness today (it mounts
+MapView and GPS tracking), so it is not a change to make in passing.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -22441,3 +22441,65 @@ and from the bpm line on any run-type detail screen. Also
   their own maximum. A 30 bpm gap means the derivation is misapplied.
 - **An athlete with a real observed maximum sees their zones say so**, in the
   session report as well as on the zones screen.
+
+## N545 — the session HR chart's time axis, bpm ladder and marked peak (`apps/mobile/lib/hrTimelineAxis.ts`, `apps/mobile/components/ui/HRTimelineChart.tsx`, `apps/mobile/lib/hrTimeline.ts`, `apps/mobile/app/bjj/session/[id].tsx`)
+
+The chart N491 shipped drew a curve with two x labels (`0:00` and the total
+duration) and no way to locate anything in time. N545 gives it a real elapsed
+time axis, a round-numbered bpm ladder, an average reference line and a marked,
+labelled peak. **Read the N545 history entry before writing tests here** — in
+particular why the axis is measured from `SessionMetrics.hr_window_start`
+rather than from the session's own logged start.
+
+### Happy path
+
+- A finished BJJ session with dense heart rate renders the chart with: at least
+  three time ticks, bpm values down the left, a dashed average line, and a dot
+  with a label of the form `185 bpm at 47m` on the highest reading.
+- The peak's label matches the "Max HR" stat above the chart. They are computed
+  by different code (client series vs. backend metrics row) over the same
+  window, so a disagreement is a real signal, not rounding.
+- The x axis ends at the session's own duration, always labelled — never at an
+  unlabelled right edge.
+- Zone colouring: the line's colour changes where the reading crosses a zone
+  floor, using the same colours as the zone bars directly below it.
+
+### Edge cases and errors
+
+- **A 20-minute session and a two-hour one** both come back readable: five
+  five-minute ticks for the short one, five half-hour ticks for the long one.
+  Neither crowds; neither leaves the peak unlocatable.
+- **A session whose HR window differs from its logged window** (the W19/#985
+  shape — the watch's workout started later than the athlete typed): the caption
+  reads "Heart rate across the recording — 0m is H:MM, when the readings start",
+  and N522's both-windows footnote is still underneath. The axis must NOT be
+  labelled with the logged times.
+- **A session with no metrics row yet**: no chart at all (the report's
+  `unavailable` state), never a chart drawn over the logged window as a guess.
+- **A flat session** (every reading within a beat or two): the y-axis still has
+  a readable span rather than collapsing.
+- **A peak in the first or last minute**: its label stays fully on screen.
+- **Two equal maxima**: the earlier one is marked.
+- **No date of birth on the profile** (no HRmax): the chart still draws, in one
+  plain colour, with no zone claimed — the report's `limited` state means no
+  chart at all today, so this is reachable only if that gate ever moves.
+- **A sparse session** (below the sample threshold): no chart, same as before —
+  a labelled axis over four readings would assert precision the evidence does
+  not support.
+
+### Auth and security
+
+- Nothing new: the chart reads `GET /v1/biometric/samples` and
+  `GET /v1/biometric/sessions/{id}/metrics`, both already scoped to the calling
+  athlete. Two accounts on one device (sign out, sign in) must never show the
+  first athlete's curve on the second's session.
+
+### Needs a device
+
+- **On a real session, a peak can be located in time by looking at it** — the
+  ticket's own human-evidence criterion. Read the peak's time off the chart,
+  then check it against what the athlete remembers of the class (the hardest
+  roll, the last round). A chart that is legible in a screenshot and unreadable
+  at arm's length in a gym has not passed.
+- The tick labels and the peak label are legible at the real font size on a real
+  phone, in both light and dark, without overlapping the curve.

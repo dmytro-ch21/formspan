@@ -148,6 +148,17 @@ test('a custom testID namespaces every sub-element, so the same component on thr
   expect(screen.getByTestId('running-hr-zone-1')).toBeTruthy();
 });
 
+/**
+ * `react-native-svg`'s `Text` renders its content inside a `TSpan`, which
+ * `getByText` does not reach — so an SVG label is read through its own
+ * testID rather than by searching for the string.
+ */
+function svgTextOf(testID: string): unknown {
+  const node = screen.getByTestId(testID);
+  const child = node.props.children as { props?: { children?: unknown } } | string;
+  return typeof child === 'string' ? child : child?.props?.children;
+}
+
 // N491/#852 — the raw HR timeline. `lib/__tests__/hrTimeline.test.ts` already
 // proves `buildHRTimeline`'s own arithmetic; these prove the component wires
 // an already-built timeline in (or correctly doesn't) without inventing any
@@ -197,6 +208,97 @@ describe('the HR timeline (N491/#852)', () => {
       />,
     );
     expect(screen.queryByTestId('hr-session-report-timeline')).toBeNull();
+  });
+
+  // N545/#988 — the chart's own arithmetic lives in
+  // `lib/__tests__/hrTimelineAxis.test.ts`; these prove the report hands it
+  // the right inputs and says the right thing above it.
+  test('the caption says 0m is the session start when the windows agree', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics({ hr_window_start: '2026-09-01T11:00:00Z', hr_window_end: '2026-09-01T12:00:00Z' })}
+        sessionStartedAt="2026-09-01T11:00:00Z"
+        sessionEndedAt="2026-09-01T12:00:00Z"
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 120 },
+          { minutesElapsed: 30, bpm: 165 },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('hr-session-report-timeline-caption').props.children).toBe(
+      'Heart rate across the session',
+    );
+  });
+
+  test('a window that differs says so, rather than silently renumbering the axis', () => {
+    // W19/#985's own shape: the watch's workout started well after the
+    // session was logged, so 0m is NOT when the athlete says they started.
+    render(
+      <HRSessionReport
+        metrics={metrics({ hr_window_start: '2026-09-01T11:40:00Z', hr_window_end: '2026-09-01T12:40:00Z' })}
+        sessionStartedAt="2026-09-01T11:00:00Z"
+        sessionEndedAt="2026-09-01T12:00:00Z"
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 120 },
+          { minutesElapsed: 30, bpm: 165 },
+        ]}
+      />,
+    );
+    const caption = screen.getByTestId('hr-session-report-timeline-caption').props.children as string;
+    expect(caption).toContain('Heart rate across the recording');
+    expect(caption).toContain('when the readings start');
+    // And the fuller both-windows diagnostic is still there underneath it.
+    expect(screen.getByTestId('hr-session-report-window-note')).toBeTruthy();
+  });
+
+  test('the chart is given the session’s own HRmax and average, not left to re-derive them', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics({ hr_max_bpm: 190, avg_hr_bpm: 142 })}
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 120 },
+          { minutesElapsed: 30, bpm: 165 },
+        ]}
+      />,
+    );
+    // The avg reference line only renders when an average was passed down.
+    expect(screen.getByTestId('hr-session-report-timeline-chart-avg')).toBeTruthy();
+    // Zone colouring only happens when an HRmax came with it: 120 of 190 is
+    // zone 2, so the first run is a zone-2 run rather than an unzoned one.
+    expect(screen.getByTestId('hr-session-report-timeline-chart-run-0-zone-2')).toBeTruthy();
+  });
+
+  test('the peak is marked, dropped to the axis and labelled with its time', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics()}
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 120 },
+          { minutesElapsed: 18, bpm: 181 },
+          { minutesElapsed: 40, bpm: 140 },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('hr-session-report-timeline-chart-peak-dot')).toBeTruthy();
+    expect(screen.getByTestId('hr-session-report-timeline-chart-peak-drop')).toBeTruthy();
+    expect(svgTextOf('hr-session-report-timeline-chart-peak-label')).toBe('181 bpm at 18m');
+  });
+
+  test('the time axis carries more than two ticks — the whole point of the ticket', () => {
+    render(
+      <HRSessionReport
+        metrics={metrics()}
+        hrTimeline={[
+          { minutesElapsed: 0, bpm: 120 },
+          { minutesElapsed: 45, bpm: 181 },
+          { minutesElapsed: 88, bpm: 140 },
+        ]}
+      />,
+    );
+    // A 1h28m session: 0m / 20m / 40m / 1h / 1h 28m.
+    expect(svgTextOf('hr-session-report-timeline-chart-xtick-0')).toBe('0m');
+    expect(svgTextOf('hr-session-report-timeline-chart-xtick-2')).toBe('40m');
+    expect(svgTextOf('hr-session-report-timeline-chart-xtick-4')).toBe('1h 28m');
   });
 
   test('the custom-testID namespace covers the timeline too', () => {

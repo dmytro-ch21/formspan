@@ -47,8 +47,9 @@
  * `useVo2MaxTrend.ts`'s own doc comment warns against.
  */
 
-/** One point on the timeline: minutes elapsed since the session started, and
- *  the real reading at that moment. Never a classification. */
+/** One point on the timeline: minutes elapsed since the start of the window
+ *  the readings were queried from (see `buildHRTimeline`), and the real
+ *  reading at that moment. Never a classification. */
 export type HRTimelinePoint = {
   minutesElapsed: number;
   bpm: number;
@@ -76,11 +77,21 @@ export type RawHRReading = {
 };
 
 /**
- * Builds the timeline from whatever real HR samples fell in the session's
- * own `[startedAt, endedAt]` window — clipped defensively even though the
- * caller's own fetch is already scoped to that window (`GET
+ * Builds the timeline from whatever real HR samples fell in the given
+ * `[windowStart, windowEnd]` — clipped defensively even though the caller's
+ * own fetch is already scoped to that window (`GET
  * /v1/biometric/samples?from=&to=`), mirroring `heartRateSamplesInWindow`'s
  * own belt-and-suspenders stance on a window boundary.
+ *
+ * **That window is `SessionMetrics.hr_window_start/end`, not the session's
+ * own logged started_at/ended_at — N545/#988.** The two are usually the
+ * same, and when they are not it is because W19/#985 preferred the watch's
+ * own workout window (or N522/#934 fitted one) precisely BECAUSE the logged
+ * window was scoring the session off the wrong samples. `minutesElapsed` is
+ * therefore measured from the start of the window every number on the card
+ * was computed from, so the curve and the avg/max/TRIMP above it describe
+ * one stretch of time rather than two. `lib/hrTimelineAxis.ts`'s
+ * `timelineCaption` is what says so on screen when they differ.
  *
  * Returns `[]` for a malformed window or no samples in it — never throws, so
  * a caller can render "nothing to show" without a try/catch of its own,
@@ -88,11 +99,11 @@ export type RawHRReading = {
  */
 export function buildHRTimeline(
   samples: readonly RawHRReading[],
-  sessionStartedAt: string,
-  sessionEndedAt: string,
+  windowStart: string,
+  windowEnd: string,
 ): HRTimelinePoint[] {
-  const startMs = new Date(sessionStartedAt).getTime();
-  const endMs = new Date(sessionEndedAt).getTime();
+  const startMs = new Date(windowStart).getTime();
+  const endMs = new Date(windowEnd).getTime();
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return [];
 
   const points: HRTimelinePoint[] = [];
@@ -112,9 +123,23 @@ export function buildHRTimeline(
  * than simply dropping every Nth one — a stride-based drop can silently
  * skip past exactly the few-minute spike this chart exists to make visible,
  * where an average of the bucket it falls in still shows it, just smoothed.
+ *
+ * **The one bucket holding the session's highest reading keeps that reading
+ * unaveraged, at its own real time — N545/#988.** Averaging it in was
+ * harmless while the chart was an unlabelled shape; it stopped being
+ * harmless the moment the chart began MARKING the peak, because the marker
+ * would then have sat on a bucket average (say 172) directly under a "Max
+ * HR 185" stat computed from the same window by the backend, at a time that
+ * is the bucket's centre rather than the moment it happened. One point is
+ * kept honest; every other bucket still smooths.
  */
 function downsample(points: HRTimelinePoint[], maxPoints: number): HRTimelinePoint[] {
   if (points.length <= maxPoints || maxPoints <= 0) return points;
+
+  let peakIndex = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].bpm > points[peakIndex].bpm) peakIndex = i;
+  }
 
   const bucketSize = points.length / maxPoints;
   const out: HRTimelinePoint[] = [];
@@ -123,6 +148,10 @@ function downsample(points: HRTimelinePoint[], maxPoints: number): HRTimelinePoi
     const end = i === maxPoints - 1 ? points.length : Math.max(start + 1, Math.floor((i + 1) * bucketSize));
     const bucket = points.slice(start, end);
     if (bucket.length === 0) continue;
+    if (peakIndex >= start && peakIndex < end) {
+      out.push(points[peakIndex]);
+      continue;
+    }
     const n = bucket.length;
     let minutesSum = 0;
     let bpmSum = 0;
