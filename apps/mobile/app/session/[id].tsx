@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { request as requestSync } from '@/lib/sync';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, TextInput } from 'react-native';
 
 import {
   KeyboardAwareScreen,
@@ -80,6 +80,7 @@ import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
 import { cacheSessionHR } from '@/lib/sessionHR';
+import { PressableScale } from '@/components/ui/PressableScale';
 import {
   distanceInputUnit,
   formatEstimate,
@@ -1746,7 +1747,7 @@ export default function SessionScreen() {
               <Text style={styles.warmupFlagPrompt}>{WARMUP_FATIGUE_PROMPT}</Text>
             </View>
             <View style={styles.warmupFlagActions}>
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   const { index, exerciseID } = warmupFlag;
                   setWarmupFlag(null);
@@ -1776,8 +1777,8 @@ export default function SessionScreen() {
                 testID="warmup-fatigue-count-as-work"
               >
                 <Text style={styles.warmupFlagButtonText}>Count as work</Text>
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 onPress={() => setWarmupFlag(null)}
                 hitSlop={12}
                 accessibilityRole="button"
@@ -1785,7 +1786,7 @@ export default function SessionScreen() {
                 testID="warmup-fatigue-dismiss"
               >
                 <Text style={styles.warmupFlagDismiss}>×</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           </View>
         )}
@@ -1841,7 +1842,7 @@ export default function SessionScreen() {
           timer.
         */}
         {guidable && (
-          <Pressable
+          <PressableScale
             onPress={() => void runSession()}
             style={[styles.guided, { borderColor: accent.accent }]}
             accessibilityRole="button"
@@ -1858,7 +1859,7 @@ export default function SessionScreen() {
                 {formatElapsed(guidedSeconds)} · counts you in and calls each set
               </Text>
             </View>
-          </Pressable>
+          </PressableScale>
         )}
 
         {groups.map((g, gi) => {
@@ -1901,7 +1902,7 @@ export default function SessionScreen() {
             );
             return (
               <View key={g.exerciseID + g.indices[0]} style={styles.group}>
-                <Pressable
+                <PressableScale
                   onPress={() => toggleCollapsed(key)}
                   style={styles.collapsedHead}
                   accessibilityRole="button"
@@ -1918,7 +1919,7 @@ export default function SessionScreen() {
                     </Text>
                   </View>
                   <Icon name="chevron-down" size={16} color={vola.textMuted} strokeWidth={2} />
-                </Pressable>
+                </PressableScale>
               </View>
             );
           }
@@ -1934,7 +1935,7 @@ export default function SessionScreen() {
                     group folded before Finish stays folded and its header
                     still opens it. */}
                 {!finished && (
-                  <Pressable
+                  <PressableScale
                     onPress={() => toggleCollapsed(key)}
                     hitSlop={10}
                     style={styles.restChip}
@@ -1946,10 +1947,10 @@ export default function SessionScreen() {
                     testID={`done-${g.exerciseID}`}
                   >
                     <Text style={styles.restChipText}>Done</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
                 {!finished && (
-                  <Pressable
+                  <PressableScale
                     onPress={() => startRest(g.exerciseID)}
                     hitSlop={10}
                     style={styles.restChip}
@@ -1958,14 +1959,14 @@ export default function SessionScreen() {
                     testID={`rest-${g.exerciseID}`}
                   >
                     <Text style={styles.restChipText}>Rest</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
                 {/* Reps or time, for the movements that are honestly both.
                     On the header rather than on each row because nobody does
                     set 1 of burpees in reps and set 2 in seconds — see
                     lib/setMode.ts. */}
                 {!finished && dual && (
-                  <Pressable
+                  <PressableScale
                     onPress={() => setGroupMode(g, mode === 'time' ? 'reps' : 'time')}
                     hitSlop={10}
                     style={[
@@ -1984,14 +1985,14 @@ export default function SessionScreen() {
                     >
                       {mode === 'time' ? 'Time' : 'Reps'}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
                 {/* Seconds or minutes — the duration counterpart of the kg/lb
                     chip beside it. Only on an exercise actually measured in
                     time; on a set of squats it would be a control for a field
                     that is not there. */}
                 {!finished && timed && (
-                  <Pressable
+                  <PressableScale
                     onPress={() => toggleDurationFor(g.exerciseID, durationUnit)}
                     hitSlop={10}
                     style={styles.unitChip}
@@ -2002,14 +2003,14 @@ export default function SessionScreen() {
                     testID={`duration-${g.exerciseID}`}
                   >
                     <Text style={styles.unitChipText}>{durationInputUnit(durationUnit)}</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
                 {/* Every remaining set, back to back, counted in and rested
                     between. Only when all of them are timed — a run that
                     skipped the untimed ones would stop guiding halfway
                     through without saying so. */}
                 {runnable && (
-                  <Pressable
+                  <PressableScale
                     onPress={() => void runExercise(g)}
                     hitSlop={10}
                     style={[styles.runChip, { borderColor: accent.accent }]}
@@ -2021,10 +2022,10 @@ export default function SessionScreen() {
                   >
                     <Icon name="play" size={11} color={accent.ink} strokeWidth={2.2} />
                     <Text style={[styles.runChipText, { color: accent.ink }]}>Run all</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
                 {!finished && weighted && (
-                  <Pressable
+                  <PressableScale
                     onPress={() => toggleUnitFor(g.exerciseID)}
                     hitSlop={10}
                     style={styles.unitChip}
@@ -2035,7 +2036,7 @@ export default function SessionScreen() {
                     testID={`unit-${g.exerciseID}`}
                   >
                     <Text style={styles.unitChipText}>{weightUnit(unitFor(g.exerciseID))}</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </View>
               {/* Reorder, swap, remove — structural moves on the EXERCISE,
@@ -2065,7 +2066,7 @@ export default function SessionScreen() {
                       so there is no dead target to aim at between sets and a
                       screen reader still gets to announce "unavailable"
                       rather than losing the control outright. */}
-                  <Pressable
+                  <PressableScale
                     disabled={gi === 0}
                     onPress={() => moveGroup(gi, -1)}
                     hitSlop={10}
@@ -2076,8 +2077,8 @@ export default function SessionScreen() {
                     testID={`up-${g.exerciseID}`}
                   >
                     <Text style={styles.moveChipText}>↑</Text>
-                  </Pressable>
-                  <Pressable
+                  </PressableScale>
+                  <PressableScale
                     disabled={gi === groups.length - 1}
                     onPress={() => moveGroup(gi, 1)}
                     hitSlop={10}
@@ -2088,8 +2089,8 @@ export default function SessionScreen() {
                     testID={`down-${g.exerciseID}`}
                   >
                     <Text style={styles.moveChipText}>↓</Text>
-                  </Pressable>
-                  <Pressable
+                  </PressableScale>
+                  <PressableScale
                     // openPicker flushes first — the swap screen reads the
                     // session back, so an unsaved edit still in flight would
                     // be overwritten.
@@ -2102,8 +2103,8 @@ export default function SessionScreen() {
                     testID={`swap-${g.exerciseID}`}
                   >
                     <Text style={styles.swapText}>Swap</Text>
-                  </Pressable>
-                  <Pressable
+                  </PressableScale>
+                  <PressableScale
                     onPress={() => removeGroup(gi)}
                     hitSlop={10}
                     accessibilityRole="button"
@@ -2111,7 +2112,7 @@ export default function SessionScreen() {
                     testID={`remove-group-${g.exerciseID}`}
                   >
                     <Text style={styles.removeGroupText}>Remove</Text>
-                  </Pressable>
+                  </PressableScale>
                 </View>
               )}
               {/* A drop does not get a set number. "225x3 then 185x8" is ONE
@@ -2365,7 +2366,7 @@ export default function SessionScreen() {
                       )}
                     </View>
                     {canApply && (
-                      <Pressable
+                      <PressableScale
                         onPress={() => {
                           commit(
                             sets.map((st, i) =>
@@ -2407,7 +2408,7 @@ export default function SessionScreen() {
                         testID={`apply-suggestion-${g.exerciseID}`}
                       >
                         <Text style={styles.hintApplyText}>Use</Text>
-                      </Pressable>
+                      </PressableScale>
                     )}
                   </View>
                 );
@@ -2415,7 +2416,7 @@ export default function SessionScreen() {
 
               {sessionEditable && (
                 <View style={styles.addRow}>
-                  <Pressable
+                  <PressableScale
                     style={styles.addSet}
                     onPress={() => addSet(g.exerciseID, g.indices[g.indices.length - 1])}
                     accessibilityRole="button"
@@ -2423,13 +2424,13 @@ export default function SessionScreen() {
                     testID={`add-set-${g.exerciseID}`}
                   >
                     <Text style={[styles.addSetText, { color: accent.ink }]}>+ Set</Text>
-                  </Pressable>
+                  </PressableScale>
                   {/* Only where a drop means anything. A drop set is "same
                       movement, less weight", so it is offered on a set that HAS
                       a weight — offering it on a plank or a run would be a
                       control that cannot do anything. */}
                   {sets[g.indices[g.indices.length - 1]]?.weight_kg != null && (
-                    <Pressable
+                    <PressableScale
                       style={styles.addSet}
                       onPress={() => addDropSet(g.indices[g.indices.length - 1])}
                       accessibilityRole="button"
@@ -2439,7 +2440,7 @@ export default function SessionScreen() {
                       testID={`add-drop-${g.exerciseID}`}
                     >
                       <Text style={[styles.addSetText, { color: accent.ink }]}>+ Drop</Text>
-                    </Pressable>
+                    </PressableScale>
                   )}
                 </View>
               )}
@@ -2455,7 +2456,7 @@ export default function SessionScreen() {
         )}
 
         {!finished && (
-          <Pressable
+          <PressableScale
             style={styles.primary}
             // openPicker flushes; the picker reads the session back out of
             // SQLite (not the server, as this comment used to say).
@@ -2464,7 +2465,7 @@ export default function SessionScreen() {
             testID="session-add-exercise"
           >
             <Text style={styles.primaryText}>+ Add exercise</Text>
-          </Pressable>
+          </PressableScale>
         )}
 
         {/* N445 — reverts N184. Finish used to live here, then moved to a
@@ -2579,7 +2580,7 @@ export default function SessionScreen() {
                   Editing a finished session — corrections save the same way a
                   live set does.
                 </Text>
-                <Pressable
+                <PressableScale
                   style={[styles.primary, styles.correctToggle, { borderColor: accent.accent }]}
                   onPress={() => setEditingFinished(false)}
                   accessibilityRole="button"
@@ -2587,13 +2588,13 @@ export default function SessionScreen() {
                   testID="session-done-editing"
                 >
                   <Text style={[styles.primaryText, { color: accent.ink }]}>Done editing</Text>
-                </Pressable>
+                </PressableScale>
               </>
             ) : (
               <>
                 <Text style={styles.muted}>Finished — this session is read-only.</Text>
                 {pastDay && (
-                  <Pressable
+                  <PressableScale
                     style={styles.primary}
                     onPress={() => setEditingFinished(true)}
                     accessibilityRole="button"
@@ -2601,7 +2602,7 @@ export default function SessionScreen() {
                     testID="session-correct"
                   >
                     <Text style={styles.primaryText}>Correct this session</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </>
             )}
@@ -2986,7 +2987,7 @@ function SetRow({
     <View
       style={[styles.setRow, set.completed && styles.setRowDone, isDrop && styles.setRowDrop]}
     >
-      <Pressable
+      <PressableScale
         style={styles.setHead}
         onPress={() => editable && setOpen((v) => !v)}
         accessibilityRole={editable ? 'button' : undefined}
@@ -3034,7 +3035,7 @@ function SetRow({
             exists to save. `hitSlop` matches the tick for the same reason both
             are 10: sweaty thumbs, 20 seconds, one hand.
           */
-          <Pressable
+          <PressableScale
             onPress={() => {
               if (onStartTimer) {
                 onStartTimer();
@@ -3063,11 +3064,11 @@ function SetRow({
                 Dim until the set has a length, so the two states of the one
                 control are distinguishable without reading the row. */}
             <Icon name="timer" size={16} color={onStartTimer ? accent.ink : vola.textDim} />
-          </Pressable>
+          </PressableScale>
         )}
         {editable && (
           // Records the set; starts rest only if "Auto rest timer" is on.
-          <Pressable
+          <PressableScale
             onPress={onToggleDone}
             hitSlop={10}
             style={[styles.tick, set.completed && styles.tickDone]}
@@ -3077,14 +3078,14 @@ function SetRow({
             testID={`done-${index}`}
           >
             <Text style={[styles.tickMark, set.completed && styles.tickMarkDone]}>✓</Text>
-          </Pressable>
+          </PressableScale>
         )}
         {editable && (
           <Text style={[styles.disclosure, set.completed && styles.disclosureDone]}>
             {open ? '⌃' : '⌄'}
           </Text>
         )}
-      </Pressable>
+      </PressableScale>
 
       {open && editable && (
         <View style={styles.setEditor}>
@@ -3360,7 +3361,7 @@ function SetRow({
             )}
           </View>
 
-          <Pressable
+          <PressableScale
             onPress={onRemove}
             style={styles.removeButton}
             accessibilityRole="button"
@@ -3368,7 +3369,7 @@ function SetRow({
             testID={`set-${index}-remove`}
           >
             <Text style={styles.removeText}>Remove set</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       )}
     </View>

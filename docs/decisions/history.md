@@ -68468,6 +68468,53 @@ the duration pushed past the frequency gate.
 ticket ran zero frames, and neither did this branch — the three device
 criteria on #1037 cannot be upgraded by code review.
 
+## 2026-09-10 — F48 tranche one: the set-logging path answers a finger
+
+F38 fixed `components/ui/Button.tsx` and stopped there on purpose. Measured
+after it landed: **81 files still had a `<Pressable>` and no press state
+anywhere in them, holding 346 of the app's 492 pressables.**
+
+`components/ui/PressableScale.tsx` is what they migrate onto — the same
+numbers as `Button`, from the same `constants/Motion.ts`, so the app cannot
+drift back into the four-opacity disagreement F38 just finished
+consolidating. Tranche one is the **set-logging path**: `app/session/[id].tsx`
+(24) and `components/Timer.tsx` (13), the surface an athlete touches twenty to
+forty times a session, standing, one-handed. 81 → 79.
+
+**Why this is not one scripted sweep, even though 345 of 346 sites are
+mechanically convertible.** Two classes must not scale, and a blanket
+conversion would hit both. **Backdrops and scrims** — `library.tsx` (×2),
+`ShareToFriend`, `OptionSelect`'s scrim, `SessionCelebration`'s dismiss target
+— exist to be a big invisible tap target behind a sheet; one that shrinks when
+tapped is visibly wrong and has no affordance to reinforce. **Full-bleed list
+rows** are an open question rather than a default: the platform convention for
+a row is a background highlight, and 0.97 on something the width of the screen
+reads oddly. The blast radius is 346 interactive elements, and two blind
+scripted edits had already gone wrong in a single day of this work.
+
+`app/session/[id].tsx` receives press feedback and still imports no animation
+of its own — F38 exempts press *because* it is 0ms in, and the test asserting
+that screen stays free of `duration`/`Easing`/Reanimated still passes.
+
+**The guard counts rather than asserts completion**, because a test that can
+only pass at the end is one nobody can run in the middle. It pins the
+remaining number so a stalled tranche is visible and a new bare pressable
+cannot hide, and it names every exemption so "we left this alone" is a
+decision on the record rather than a file somebody forgot.
+
+**Two of my own instruments were wrong, both caught by running them.**
+
+1. **`<PressableScale` contains `<Pressable`.** The guard's substring test
+   counted every migrated file as unmigrated and reported 81 where the tranche
+   had just reached 79. It failed loudly — over-reporting, which is the
+   direction a miscount should fail in — and the fix is a negative lookahead.
+2. **A mutation removing `pressRetentionOffset` from the new primitive
+   SURVIVED.** Every test passed without it. The migration would have shipped
+   without the single fix that motivated it, on 346 controls, and nothing
+   would have said so. The primitive now has the same assertions `Button` got.
+
+Nothing here has been felt on a device.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -151,3 +151,120 @@ describe('the live-session screen is out of scope, by rule', () => {
     expect(live).not.toMatch(/withTiming|withSpring/);
   });
 });
+
+/**
+ * F48/#1059 — the migration, measured rather than asserted done.
+ *
+ * F38 fixed the primitive and left 81 files answering a finger with nothing.
+ * This does not assert "all migrated" — it is a tranche at a time, and a test
+ * that can only pass at the end is a test nobody can run in the middle.
+ * Instead it PINS THE COUNT, so a tranche that stalls is visible and a
+ * regression that adds a bare pressable back cannot hide in the noise.
+ */
+
+/** Files whose pressables must NOT scale, and why. */
+const EXEMPT: Record<string, string> = {
+  'app/library.tsx':
+    'two full-screen backdrops behind sheets — a backdrop that shrinks when tapped is visibly wrong',
+  'components/ShareToFriend.tsx': 'sheet backdrop',
+  'components/ui/OptionSelect.tsx': 'scrim behind the option list',
+  'components/SessionCelebration.tsx': 'full-screen dismiss target',
+};
+
+/**
+ * Feedback-less files remaining, as of the tranche that last touched this.
+ *
+ * Lower it when a tranche lands. It may never rise: a new bare `<Pressable>`
+ * in a file that had none is exactly the regression F38 and F48 exist to end.
+ */
+const REMAINING = 79;
+
+describe('the PressableScale primitive', () => {
+  /**
+   * The same assertions `Button` gets, on the component 346 pressables are
+   * migrating onto. A mutation removing its `pressRetentionOffset` survived
+   * the first cut of this file: the migration would have shipped without the
+   * single fix that motivated it, and every test still passed.
+   */
+  const SCALE = readFileSync(join(MOBILE, 'components/ui/PressableScale.tsx'), 'utf8');
+
+  it('carries the retention offset so no call site has to', () => {
+    expect(codeOnly(SCALE)).toMatch(/pressRetentionOffset=\{/);
+    expect(codeOnly(SCALE)).toMatch(/PRESS_RETENTION/);
+  });
+
+  it('reads the shared tokens rather than its own numbers', () => {
+    // Two primitives with two hand-typed durations is how the four-opacity
+    // drift F38 just consolidated started.
+    const code = codeOnly(SCALE);
+    expect(code).toMatch(/PRESS_MS/);
+    expect(code).toMatch(/PRESS_SCALE/);
+    expect(code).toMatch(/PRESS_BEZIER/);
+    expect(code).not.toMatch(/transitionDuration: '\d/);
+  });
+
+  it('animates the release only, like Button', () => {
+    const transition = codeOnly(SCALE).match(/const pressTransition[\s\S]*?\};/);
+    expect(transition).not.toBeNull();
+    expect(transition![0]).toContain('scale: 1');
+    expect(transition![0]).toMatch(/transitionProperty: 'transform'/);
+  });
+
+  it('forwards a caller\'s own press handlers rather than swallowing them', () => {
+    // It owns `onPressIn`/`onPressOut` for the scale, so a call site that also
+    // needs them — a long-press, a haptic — would silently lose them.
+    const code = codeOnly(SCALE);
+    expect(code).toMatch(/rest\.onPressIn\?\.\(/);
+    expect(code).toMatch(/rest\.onPressOut\?\.\(/);
+  });
+});
+
+describe('F48 — the press-feedback migration', () => {
+  function feedbackLessFiles(): string[] {
+    const out: string[] = [];
+    for (const f of tsxFiles(MOBILE)) {
+      const src = codeOnly(readFileSync(f, 'utf8'));
+      // `(?!Scale)` is load-bearing: `<PressableScale` CONTAINS `<Pressable`,
+      // so a plain substring test counts every migrated file as unmigrated.
+      // Caught by this guard failing at 81 when the tranche had just taken it
+      // to 79 — over-reporting, which is the direction a miscount should fail
+      // in.
+      const bare = /<Pressable(?!Scale)\b/.test(src);
+      if (!bare) continue;
+      const responds =
+        /\{\s*pressed\s*\}|pressed &&|PRESS_OPACITY|PRESS_SCALE|pressTransition/.test(src);
+      if (!responds) out.push(f.replace(`${MOBILE}/`, ''));
+    }
+    return out.sort();
+  }
+
+  it('is not going backwards', () => {
+    // A COUNT, not a list: naming all 79 would make this test a changelog that
+    // fails on every unrelated rename. The direction is what matters.
+    expect(feedbackLessFiles().length).toBeLessThanOrEqual(REMAINING);
+  });
+
+  it('has finished the set-logging path — the surface touched most', () => {
+    // Tranche 1: the live session and its timer, 37 pressables between them.
+    // This is the screen an athlete touches twenty to forty times in a
+    // session, standing up, one-handed, which is the whole argument for press
+    // feedback existing at all.
+    const left = feedbackLessFiles();
+    expect(left).not.toContain('app/session/[id].tsx');
+    expect(left).not.toContain('components/Timer.tsx');
+  });
+
+  it('leaves backdrops and scrims alone, on purpose', () => {
+    // Named here so the exemption is a decision on the record rather than a
+    // file somebody forgot. If one of these ever gains a scale, this fails and
+    // asks why.
+    for (const [file, why] of Object.entries(EXEMPT)) {
+      const src = codeOnly(readFileSync(join(MOBILE, file), 'utf8'));
+      expect({ file, why, scales: src.includes('PressableScale') }).toEqual({
+        file,
+        why,
+        scales: false,
+      });
+    }
+  });
+});
