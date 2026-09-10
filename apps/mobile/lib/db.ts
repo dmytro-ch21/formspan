@@ -747,6 +747,49 @@ const CREATE_BIOMETRIC_HR_SYNCED = `
  * once it is `'window'` the row is terminal: real evidence has been found
  * and stored server-side, and there is nothing left to retry for.
  */
+/**
+ * N547/#990 — the heart-rate numbers a session's SUMMARY LINE needs, cached
+ * where the summary is actually rendered from.
+ *
+ * ## Why a cache exists at all, rather than reading the metrics
+ *
+ * `avg_hr_bpm` lives server-side in `SessionMetrics` and arrives only from a
+ * per-session request (`GET /biometric/sessions/{id}/metrics`). Today's
+ * logged rows and the training calendar render offline-first, from THIS
+ * database, as a list — so putting heart rate on those rows by fetching would
+ * mean one request per visible row, and nothing at all in a gym with no
+ * signal. Both are things this app's offline-first rule exists to forbid.
+ *
+ * So the value is written down when it is already in hand. Two callers have
+ * it and neither needs a new request: the enrichment sweep
+ * (`lib/biometricSync.ts`, which computes metrics for sessions the athlete
+ * has not opened) and the three session-detail screens (which read them to
+ * draw the report). A row therefore gains its heart rate the moment anything
+ * in the app has learned it, and keeps it offline.
+ *
+ * ## What is deliberately NOT here
+ *
+ * **VO2max**, which the same ticket asks for. It is not on `SessionMetrics`
+ * at all — it is a separate `vo2_max` biometric SERIES, fetched over its own
+ * range, and it is not a per-session measurement in the first place. Putting
+ * a number from it on a session row would state something this app does not
+ * know. Split out rather than approximated; see the ticket.
+ *
+ * `hr_source` rides along because the summary must distinguish "no heart rate
+ * for this session" from "zero" — the `'none'` discipline `biometric.ts`
+ * already enforces everywhere else.
+ */
+const CREATE_SESSION_HR_SUMMARY = `
+  CREATE TABLE IF NOT EXISTS session_hr_summary (
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    avg_hr_bpm INTEGER,
+    max_hr_bpm INTEGER,
+    hr_source TEXT NOT NULL,
+    PRIMARY KEY (user_id, session_id)
+  );
+`;
+
 const CREATE_HEALTH_CONNECT_ENRICHMENT = `
   CREATE TABLE IF NOT EXISTS health_connect_enrichment (
     user_id TEXT NOT NULL,
@@ -1484,6 +1527,11 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // this is a retry ledger rather than a dedup table like
     // healthkit_imports/biometric_hr_synced above.
     await db.execAsync(CREATE_HEALTH_CONNECT_ENRICHMENT);
+
+    // N547/#990 — heart rate for the SUMMARY line, cached from metrics
+    // already in hand. See CREATE_SESSION_HR_SUMMARY's doc comment for why a
+    // list surface cannot fetch this per row.
+    await db.execAsync(CREATE_SESSION_HR_SUMMARY);
   }
 
   if (current < 36) {

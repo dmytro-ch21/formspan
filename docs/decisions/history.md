@@ -68338,6 +68338,68 @@ by a vendored skill is itself vendored. That property is worth re-checking
 whenever one is added or dropped — a skill telling an agent to "use `X`" when `X`
 is absent fails silently.
 
+## 2026-09-10 — N547 part one: average heart rate on the summary line, and why VO2max is not with it
+
+The athlete: *"In summaries we need to show avg hr as well, vo2 max."* This
+lands the first half and splits the second, for a reason found by looking
+rather than guessed.
+
+**It is a data-plumbing change, not a formatting one.** `avg_hr_bpm` lives
+server-side in `SessionMetrics` and arrives only from a per-session request.
+The surfaces that draw a summary — Today's logged rows, the calendar's day
+detail — are offline-first LISTS. Putting heart rate on them by fetching
+would be one request per visible row and nothing at all in a gym with no
+signal, both of which the offline-first rule exists to forbid.
+
+So the value is written down when it is already in hand: `session_hr_summary`
+is filled by the enrichment sweep (`biometricSync.ts`, which runs for sessions
+the athlete has never opened) and by the three session-detail screens. A row
+gains its heart rate the moment anything in the app has learned it, and keeps
+it offline. `useSessionHRSummaries` reads it in ONE batched query per
+surface — a query per row against SQLite would be the same mistake the cache
+exists to avoid, only quieter.
+
+**VO2max is split out rather than approximated.** It is not on
+`SessionMetrics` at all — it is a separate `vo2_max` biometric SERIES fetched
+over its own range, and it is not a per-session measurement in the first
+place. The ticket's own criterion says it must not read as "your VO2max for
+this session", and a chip on a terse line has nowhere to say otherwise.
+Putting a number there would state something this app does not know. The PR
+says *part of* #990.
+
+**Three things this branch got wrong first, all found by a check rather than
+by review.**
+
+1. **A blind scripted edit wired the wrong component.** Adding `hr={loggedHR}`
+   by pattern match put it on `WeekStrip` — which renders FOOD days, not
+   sessions — as well as on `LoggedBlock`. Caught by reading the call site
+   afterwards, which is the step the pattern match was standing in for.
+2. **Two name collisions, in a repo that already had three.**
+   `lib/biometricSync.ts` and `lib/healthConnectSync.ts` each already define a
+   `readSessionHR` (raw samples for a window) and a `SessionHR` type. A
+   fourth pair a grep apart — one reading a cache, one making network calls —
+   would be a genuinely dangerous thing to confuse, so this module's are
+   `readSessionHRSummaries` and `SessionHRSummary`.
+3. **The cache trusted the server to echo back an id the caller already
+   knew.** `cacheSessionHR` read `metrics.session_id`; the enrichment sweep's
+   own tests stub `computeSessionMetrics` with just the two fields they
+   assert on, so the id was `undefined`, the write threw, and it took the
+   ledger write with it — fourteen tests red. The stub is unrealistic, but
+   the code should not have been asking. The id is now the caller's to
+   supply, and the sweep's call is explicitly non-fatal: a convenience cache
+   must never cost the enrichment it rides along with.
+
+The lint ratchet also caught the new hook setting state synchronously inside
+an effect, which would have pushed `react-hooks/set-state-in-effect` from 14
+to 15. The empty case is answered at render instead. The ratchet only moves
+down, and here it was the design telling on itself rather than a number to
+raise.
+
+Absence stays absent throughout: no cached row, a `'none'` source, or a null
+average all print NOTHING. A "0 bpm avg" would read the way a "0 sets" chip
+reads on a mat session — as a claim about the athlete rather than a gap in
+what we know.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

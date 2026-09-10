@@ -67,6 +67,7 @@ import { stopLiveHR } from '@/lib/hrMonitor/liveHR';
 import { useUnits } from '@/lib/useUnits';
 import { announce } from '@/lib/voice';
 import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
+import { cacheSessionHR } from '@/lib/sessionHR';
 
 /**
  * Live GPS run tracking (N460/#771).
@@ -660,6 +661,7 @@ export default function RunningSessionScreen() {
       .then((m) => {
         if (!cancelled) {
           setHrMetrics(m);
+          if (userId && m) void cacheSessionHR(userId, id, m).catch(() => {});
           setHrLoaded(true);
         }
       })
@@ -672,7 +674,7 @@ export default function RunningSessionScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, status, getToken]);
+  }, [id, status, getToken, userId]);
 
   async function pause() {
     if (status !== 'tracking' || !resumedAtRef.current) return;

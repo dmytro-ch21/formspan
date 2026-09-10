@@ -79,6 +79,7 @@ import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { formatElapsed, readAutoRest, readRestSeconds, writeRestSeconds } from '@/lib/rest';
+import { cacheSessionHR } from '@/lib/sessionHR';
 import {
   distanceInputUnit,
   formatEstimate,
@@ -973,6 +974,7 @@ export default function SessionScreen() {
       .then((m) => {
         if (!cancelled) {
           setHrMetrics(m);
+          if (userId && m) void cacheSessionHR(userId, id, m).catch(() => {});
           setHrLoaded(true);
         }
       })
@@ -985,7 +987,7 @@ export default function SessionScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, session?.ended_at, getToken]);
+  }, [id, session?.ended_at, getToken, userId]);
 
   // Per-exercise HR breakdown (N490/#851) — fetched alongside the
   // whole-session metrics above, behind the same `session.ended_at` gate,

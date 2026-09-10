@@ -32,6 +32,7 @@ import {
 } from './prefs';
 import { sessionsNeedingBiometricSync } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
+import { cacheSessionHR } from './sessionHR';
 
 /**
  * Orchestrates the biometric enrichment pass (N477/#822) — reading a
@@ -453,6 +454,14 @@ async function enrichSessionWindow(
     windowOverride,
   );
   const hrSource = metrics.hr_source === 'window' ? 'window' : 'none';
+  // N547/#990 — the summary line's heart rate, written where it is already in
+  // hand. This is the caller that matters most for a LIST: it runs for
+  // sessions the athlete has never opened, so Today's rows and the calendar
+  // can show a bpm without ever making a request of their own.
+  // Non-fatal, deliberately: this is a convenience cache for a summary line.
+  // A failed write must never cost the enrichment itself — the samples are
+  // uploaded and the ledger below is what makes the result durable.
+  await cacheSessionHR(userID, session.id, metrics).catch(() => {});
   await recordBiometricHRAttempt(userID, session.id, hrSource, coverage, now);
   return { hrSource, sampleCount: metrics.sample_count };
 }

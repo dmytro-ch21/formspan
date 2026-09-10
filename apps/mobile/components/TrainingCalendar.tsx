@@ -21,6 +21,8 @@ import {
   sessionVolumeKg,
 } from '@/lib/sessionSummary';
 import { formatVolume, type UnitSystem } from '@/lib/units';
+import { useSessionHRSummaries } from '@/lib/useSessionHRSummaries';
+import type { SessionHRSummary } from '@/lib/sessionHR';
 
 /**
  * The training calendar: a week you can open, and a month behind it.
@@ -104,6 +106,12 @@ export function TrainingCalendar({
 }) {
   const accent = useAccent();
   const router = useRouter();
+  /**
+   * N547/#990 — heart rate for the day-detail rows, from the local cache in
+   * one batched query. Same rule and same module as Today's logged rows, so
+   * the two surfaces cannot say different things about the same session.
+   */
+  const hr = useSessionHRSummaries(userId, useMemo(() => sessions.map((s) => s.id), [sessions]));
   const [expanded, setExpanded] = useState(false);
   const [monthOpen, setMonthOpen] = useState(false);
   // The month being browsed, which is not always the month `now` is in — the
@@ -379,6 +387,7 @@ export function TrainingCalendar({
         <RNView style={styles.dayList} testID="calendar-week-list">
           {week.map((d) => (
             <DayRow
+              hr={hr}
               key={dayString(d)}
               date={d}
               sessions={byDay.get(dayString(d)) ?? []}
@@ -573,6 +582,7 @@ export function TrainingCalendar({
                     .toUpperCase()}
                 </Text>
                 <DayRow
+                  hr={hr}
                   date={new Date(`${selected}T00:00:00`)}
                   sessions={byDay.get(selected) ?? []}
                   planned={plannedByDay.get(selected) ?? []}
@@ -633,6 +643,7 @@ function DayRow({
   onOpenSession,
   headless,
   metBy,
+  hr,
 }: {
   date: Date;
   sessions: Session[];
@@ -641,6 +652,11 @@ function DayRow({
   modules: Module[];
   units: UnitSystem;
   onOpenSession: (s: Session) => void;
+  /**
+   * N547/#990 — cached heart rate per session id, loaded once by the calendar
+   * rather than per row. Absent entries omit the measure.
+   */
+  hr: Map<string, SessionHRSummary>;
   headless?: boolean;
   /** Session id → the plan it met, so a logged row can say it was planned. */
   metBy?: Map<string, string>;
@@ -669,7 +685,7 @@ function DayRow({
             // `sessionActiveSeconds`, never from wall-clock, so a paused run
             // is not silently slower here than on the tracking screen.
             const meta = [
-              ...sessionMeta(s, units),
+              ...sessionMeta(s, units, hr.get(s.id)),
               // The plan that this session met is no longer drawn as its own
               // row, so the intention would otherwise disappear entirely. It
               // goes last: what was done outranks what was meant. Appended

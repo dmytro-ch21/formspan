@@ -60,6 +60,7 @@ import {
 import { milestoneForSession, type Milestone } from '@/lib/milestones';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
 import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
+import { cacheSessionHR } from '@/lib/sessionHR';
 
 /**
  * Reading a BJJ session back.
@@ -396,6 +397,7 @@ export default function BjjSessionScreen() {
       .then((m) => {
         if (!cancelled) {
           setHrMetrics(m);
+          if (userId && m) void cacheSessionHR(userId, id, m).catch(() => {});
           setHrLoaded(true);
         }
       })
@@ -408,7 +410,7 @@ export default function BjjSessionScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, session?.ended_at, getToken]);
+  }, [id, session?.ended_at, getToken, userId]);
 
   // N491/#852: the raw HR-over-time timeline (see lib/hrTimeline.ts's doc
   // comment for why this is a plain time series rather than a drill/roll

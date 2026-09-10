@@ -10,6 +10,7 @@ import {
   type Session,
 } from './sessions';
 import { formatDistance, formatPace, formatVolume, type UnitSystem } from './units';
+import { hrSummaryEntry, type SessionHRSummary } from './sessionHR';
 
 /**
  * The one-line summary under a logged session's name — "48 min · 14 sets ·
@@ -106,6 +107,18 @@ export function sessionDurationSeconds(
 export function sessionMeta(
   s: Pick<Session, 'sport' | 'sets' | 'started_at' | 'ended_at'>,
   units: UnitSystem,
+  /**
+   * N547/#990 — this session's heart rate, if anything in the app has
+   * learned it yet (`lib/sessionHR.ts`). Optional because the rule predates
+   * it and both surfaces adopt it independently; absent reads as "not known"
+   * and prints nothing, never a zero.
+   *
+   * It goes LAST on the line on purpose. Duration, then what the session was
+   * made of, then how hard it was: the first two identify the session and the
+   * third qualifies it, so a reader scanning a list is not made to step over
+   * a bpm to find the distance.
+   */
+  hr?: SessionHRSummary,
 ): string[] {
   const secs = sessionDurationSeconds(s);
   const isRunning = s.sport === 'running';
@@ -134,5 +147,6 @@ export function sessionMeta(
       : kg > 0
         ? formatVolume(kg, units)
         : null,
+    hrSummaryEntry(hr),
   ].filter((x): x is string => x !== null);
 }
