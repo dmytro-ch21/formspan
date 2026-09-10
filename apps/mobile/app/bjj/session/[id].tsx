@@ -12,6 +12,7 @@ import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components
 import { Icon } from '@/components/ui/Icon';
 import { CardGlass } from '@/components/ui/CardGlass';
 import { worthCelebrating, type SessionSummary } from '@/lib/celebration';
+import { useSessionVo2Max } from '@/lib/useSessionVo2Max';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -348,6 +349,15 @@ export default function BjjSessionScreen() {
   // (components/HRSessionReport.tsx, backed by lib/hrSessionReport.ts) is
   // what decides whether — and how much of — any of this reaches the screen.
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  // N547/#990 part two — the VO₂max estimate as it stood on THIS
+  // session's day, not today's. Rendered under the stats rather than in
+  // them: it is a slow-moving estimate, not something this session
+  // measured. See `lib/sessionVo2Max.ts`.
+  const vo2MaxLine = useSessionVo2Max(
+    getToken,
+    session?.started_at ? dayString(new Date(session?.started_at)) : null,
+  );
+
   // Separate from `hrMetrics` itself: `null` is BOTH "haven't asked yet" and
   // "asked, and there is genuinely nothing" (a 404), and `<HRSessionReport>`
   // reads `metrics === null` as the latter — an honest "no HR data" card. Not
@@ -814,6 +824,7 @@ export default function BjjSessionScreen() {
           sourceLabel={hrSync.sourceLabel}
           onSyncNow={hrSync.syncNow}
           hrSourceLine={hrSourceSentence(hrMetrics, hrSync.monitorName, hrSync.sourceLabel)}
+          vo2MaxLine={vo2MaxLine}
           hrTimeline={hrTimeline}
           // N522/#934: lets the report show a diagnostic line when the
           // heart-rate window it actually queried differs meaningfully

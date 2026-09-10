@@ -13,6 +13,8 @@ import { Icon } from '@/components/ui/Icon';
 import { CardGlass } from '@/components/ui/CardGlass';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
+import { dayString } from '@/lib/calendar';
+import { useSessionVo2Max } from '@/lib/useSessionVo2Max';
 import { vola } from '@/constants/Colors';
 import { Card } from '@/constants/Card';
 import { Radius, Spacing } from '@/constants/Spacing';
@@ -631,6 +633,15 @@ export default function RunningSessionScreen() {
   const liveHRMax = hrMaxBpmOf(useHRMax(getToken, liveHRActive && liveHROn));
   useHRRecording({ userId, getToken, sessionID: id, active: liveHRActive });
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  // N547/#990 part two — the VO₂max estimate as it stood on THIS
+  // session's day, not today's. Rendered under the stats rather than in
+  // them: it is a slow-moving estimate, not something this session
+  // measured. See `lib/sessionVo2Max.ts`.
+  const vo2MaxLine = useSessionVo2Max(
+    getToken,
+    sessionTimes?.startedAt ? dayString(new Date(sessionTimes?.startedAt)) : null,
+  );
+
   const [hrLoaded, setHrLoaded] = useState(false);
   // W18/#957 + N528/#958 — which kind of "no HR" this is, the on-demand
   // attempt, and the monitor's name for the report's source line. This
@@ -858,6 +869,7 @@ export default function RunningSessionScreen() {
               render; see `lib/hrSessionReport.ts`'s doc comment. */}
           {hrLoaded && (
             <HRSessionReport
+              vo2MaxLine={vo2MaxLine}
               metrics={hrMetrics}
               sessionRPE={null}
               absence={hrSync.absence}

@@ -418,7 +418,13 @@ async function holdToFinish(element: Parameters<typeof fireEvent.press>[0]) {
 describe('the HR timeline (N491/#852)', () => {
   afterEach(() => {
     (getSessionMetrics as jest.Mock).mockClear();
-    (listBiometricSamples as jest.Mock).mockClear();
+    // `mockReset`, not `mockClear`: `answerSamples` installs an
+    // implementation, and `mockClear` only forgets the CALLS — the
+    // implementation would survive into the next test and answer its fetches
+    // from the previous one's fixtures. The module-level default is restored
+    // below so tests that never call `answerSamples` still get `[]`.
+    (listBiometricSamples as jest.Mock).mockReset();
+    (listBiometricSamples as jest.Mock).mockImplementation(async () => []);
   });
 
   function fullMetrics(overrides: Partial<SessionMetrics> = {}): SessionMetrics {
@@ -441,6 +447,28 @@ describe('the HR timeline (N491/#852)', () => {
     };
   }
 
+
+/**
+ * Answer the raw-sample fetch BY METRIC TYPE rather than by call order.
+ *
+ * These tests used `mockResolvedValueOnce`, which silently assumed the screen
+ * makes exactly one `listBiometricSamples` call. N547/#990 part two added a
+ * second (`vo2_max`, for the estimate-as-of-this-session line), and the
+ * single-use mock was then consumed by whichever fired first — so the heart
+ * rate fetch got the default `[]` and the timeline vanished, with nothing in
+ * the failure naming the real cause.
+ *
+ * Keyed on the argument the screen actually passes, the mock says what these
+ * tests mean — "when the HR samples look like this" — and is indifferent to
+ * how many other metrics the screen reads.
+ */
+function answerSamples(byType: Partial<Record<string, unknown[]>>, opts: { rejectHR?: Error } = {}) {
+  (listBiometricSamples as jest.Mock).mockImplementation(async (_token, metricType: string) => {
+    if (metricType === 'heart_rate' && opts.rejectHR) throw opts.rejectHR;
+    return byType[metricType] ?? [];
+  });
+}
+
   it('fetches heart_rate samples for exactly the session window and renders a timeline once there are enough', async () => {
     (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
     const samples = Array.from({ length: 40 }, (_, i) => ({
@@ -452,7 +480,7 @@ describe('the HR timeline (N491/#852)', () => {
       unit: 'count/min',
       measured_at: new Date(new Date(mockSession.started_at).getTime() + i * 60_000).toISOString(),
     }));
-    (listBiometricSamples as jest.Mock).mockResolvedValueOnce(samples);
+    answerSamples({ heart_rate: samples });
 
     await render(<BjjSessionScreen />);
 
@@ -469,17 +497,19 @@ describe('the HR timeline (N491/#852)', () => {
 
   it('renders no timeline when the raw-sample fetch comes back too sparse, even though metrics were full', async () => {
     (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
-    (listBiometricSamples as jest.Mock).mockResolvedValueOnce([
-      {
-        id: 'hr-1',
-        metric_type: 'heart_rate',
-        source: 'apple_watch',
-        source_platform: 'healthkit',
-        value: 130,
-        unit: 'count/min',
-        measured_at: mockSession.started_at,
-      },
-    ]);
+    answerSamples({
+      heart_rate: [
+        {
+          id: 'hr-1',
+          metric_type: 'heart_rate',
+          source: 'apple_watch',
+          source_platform: 'healthkit',
+          value: 130,
+          unit: 'count/min',
+          measured_at: mockSession.started_at,
+        },
+      ],
+    });
 
     await render(<BjjSessionScreen />);
 
@@ -491,7 +521,7 @@ describe('the HR timeline (N491/#852)', () => {
 
   it('renders no timeline when the raw-sample fetch fails, without breaking the rest of the report', async () => {
     (getSessionMetrics as jest.Mock).mockResolvedValueOnce(fullMetrics());
-    (listBiometricSamples as jest.Mock).mockRejectedValueOnce(new Error('network'));
+    answerSamples({}, { rejectHR: new Error('network') });
 
     await render(<BjjSessionScreen />);
 

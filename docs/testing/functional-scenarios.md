@@ -22609,3 +22609,54 @@ half-finished rather than broken.
   two channels start together, all need a browser — and the "before" observation
   (that it jumped) needed one too, which is why the ticket made it a human
   criterion.
+
+## N547 part two — VO₂max beside a session, as a dated estimate (`apps/mobile/lib/sessionVo2Max.ts`, `lib/useSessionVo2Max.ts`, `components/HRSessionReport.tsx`, #990)
+
+The athlete asked for average HR and VO₂max "in summaries". Part one put avg HR
+on the summary surfaces. VO₂max is not a session statistic — it is a slow-moving
+estimate from a separate series — so it appears as one dated line under the
+session's stats, never inside them and never on a list row.
+
+### Happy path
+
+- Open a finished session whose athlete has VO₂max readings. Under the HR stats:
+  `VO₂max 47.8 · estimate from 1 Sep`. The date is the READING's, not the
+  session's.
+- Open an **older** session. The number shown is the estimate that stood on that
+  session's day — not today's. Log a newer reading, reopen the old session, and
+  the old session's number must not have moved.
+- Open a session on the same day as a reading. The line still names the date; it
+  never silently becomes "this session's VO₂max".
+
+### Edge cases & errors
+
+- An athlete with **no** VO₂max readings at all: no line, no zero, no "—"
+  placeholder, and no empty row where it would have been.
+- A session **older than the athlete's first reading**: no line. Borrowing the
+  earliest later reading would be inventing a number for a day it did not cover.
+- **Offline**: no line. There is no local VO₂max cache, so this shows nothing
+  rather than a stale figure — deliberate, and the reason a cache was not added
+  is that it would require deciding how stale an estimate may be before it stops
+  being true.
+- The fetch failing (server error, refused range): identical to offline — no
+  line, and the rest of the HR report renders normally.
+- All three session sports — BJJ, running, strength — show it identically; they
+  share `HRSessionReport`.
+
+### Auth/security
+
+- Nothing new. It reads `GET /v1/biometric/samples` for `vo2_max`, already
+  scoped to the calling athlete, over a window ending at the session's day and
+  bounded by the same 400-day cap the trend screen uses.
+
+### What a test can and cannot reach
+
+- **Automated** (`lib/__tests__/sessionVo2Max.test.ts`): the on-or-before rule,
+  the never-reach-forward rule, absence as `null` rather than zero, independence
+  from the order the server returned, day-level comparison, and that the line
+  always names its date — including when the reading falls on the session's own
+  day. All mutation-verified.
+- **Not reachable**: whether the line reads as an estimate rather than a
+  measurement to an actual athlete. That is a judgement about wording on a real
+  screen, and it is the one thing worth checking by eye — if it reads as "your
+  VO₂max for this session", the shape is wrong however the tests behave.

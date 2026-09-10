@@ -69289,6 +69289,92 @@ A source test rather than a rendered one, deliberately — this bug's whole natu
 is that the rendered page looks plausible either way, and the source is where
 the mistake is legible.
 
+## 2026-09-10 — N547 part two: VO₂max beside a session, without claiming the session produced it (#990)
+
+Part one (#1056) put average heart rate on the summary surfaces and said *part
+of* #990 rather than *closes*, deliberately: the athlete asked for two numbers
+and only one of them is a session statistic. This is the other half.
+
+### The whole ticket was the shape, and part one had already framed it
+
+`avg_hr_bpm` is measured during a session and belongs to it. **VO₂max is not on
+`SessionMetrics` at all** — it is a separate `vo2_max` biometric series, written
+by HealthKit/Health Connect syncs days apart and moving over weeks. Nothing
+about a Tuesday roll produces a VO₂max reading.
+
+So two placements are refused, and naming them is most of the design:
+
+- **In the session's stat row**, beside average and max heart rate. Sitting
+  there it reads as *"your VO₂max for this session"* — the exact sentence the
+  ticket's second criterion forbids.
+- **On a session LIST row.** The same estimate would repeat down a week of
+  sessions as though each had earned it: a number that does not vary per row,
+  rendered per row.
+
+What it does instead is one line under the stats, naming the reading's own date
+— `VO₂max 47.8 · estimate from 1 Sep` — showing the latest reading taken **on
+or before that session's day**.
+
+Both properties are about not overstating. *On or before* means a session from
+three weeks ago shows the estimate that stood then; the current figure beside an
+old session would silently change every time a new reading synced, and the
+athlete would have no way to see that happening. *Its own date, always* — even
+when the reading falls on the session's day — is what stops the line ever being
+read as a per-session measurement.
+
+`lib/sessionVo2Max.ts` is pure and holds both rules; `lib/useSessionVo2Max.ts`
+is the impure edge that fetches and formats. The hook returns the finished LINE
+rather than the reading, so the three session screens cannot word or date it
+three different ways — the wording is what carries the honesty, so it is decided
+once.
+
+### Fetched, where part one cached, and the consequence is admitted
+
+Part one caches into SQLite because its surfaces are offline-first LISTS and a
+list cannot make a request per row. This is the opposite case: VO₂max is shown
+only on a session DETAIL screen, which already pays a per-session fetch, so one
+more bounded request is the same order of cost. The window ends at the
+*session's* day, and reuses `vo2MaxFetchWindow` rather than reimplementing it,
+so W16/#945's 400-day server cap keeps applying — the cap whose absence once
+meant every VO₂max request 400'd for months.
+
+**Offline, this shows nothing.** There is no VO₂max cache, and adding one means
+deciding how stale an estimate may be before it stops being true — a question
+this ticket does not need to answer in order to put a real number on screen.
+Absent reads as absent, no zero and no placeholder, the same discipline as
+`hr_source: 'none'`.
+
+### A second fetch made a test's hidden assumption visible
+
+`bjjSessionScreen.test.tsx` mocked the raw-sample fetch with
+`mockResolvedValueOnce`, which silently assumed the screen makes exactly ONE
+`listBiometricSamples` call. Adding the `vo2_max` read broke that: whichever
+call fired first consumed the single-use mock, the heart-rate fetch got the
+default `[]`, and the timeline vanished — with the failure naming a missing
+`testID` and nothing pointing at the real cause.
+
+The mock is now keyed on the metric type the screen actually passes, so it says
+what the tests mean — "when the HR samples look like this" — and is indifferent
+to how many other metrics the screen reads. Its implementation is also reset
+between tests rather than merely cleared: `mockClear` forgets the calls and
+keeps the implementation, which would answer the next test's fetches from the
+previous one's fixtures. **That reset is defensive rather than a fix** — the
+suite passes either way today, because the tests that install an implementation
+happen to be ordered harmlessly.
+
+### Two apparatus notes, both the same lesson
+
+A mutation **appeared to survive**: removing the date from the rendered line
+failed nothing. The escaping in the replacement had not matched, so the file was
+never modified. Re-run with a match-count assertion before the edit, the same
+mutation fails two tests. A mutation that did not apply is indistinguishable
+from a guard that does not work.
+
+And a blind multi-indentation replace added the new JSX prop **twice** in two of
+the three screens. Typecheck caught it (`TS17001`); both files were reverted and
+rewired with a single anchored insertion rather than patching the duplicates —
+the same rule as undoing from a file copy rather than from git.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
