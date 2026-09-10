@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
 import { gramsBasisFromLabel } from "@/lib/foodQuantity";
-import { saveFood, type Food, type Macros, type RecipeItemInput } from "@/lib/nutritionApi";
+import {
+  saveFood,
+  NO_LABEL_MACROS,
+  type Food,
+  type Macros,
+  type RecipeItemInput,
+} from "@/lib/nutritionApi";
 import { FoodQuantityInput } from "../FoodQuantityInput";
 
 /**
@@ -68,6 +74,19 @@ type ItemDraft = {
   carb_g: string;
   fat_g: string;
   fibre_g: string;
+  /**
+   * The five LABEL macros, CARRIED rather than edited — F37.
+   *
+   * Not strings, because nothing on this form types them: they ride through
+   * untouched from whatever authored the ingredient (a barcode scan, usually).
+   * They have to be here all the same, because a recipe's item list is
+   * REPLACED wholesale on every save and items are deliberately two-state on
+   * the wire — an item that omits `sodium_mg` is stating that nothing states
+   * it, not asking the server to keep a previous value. So a draft that
+   * dropped them would clear them on the first web edit, and take the recipe's
+   * own derived label figures with it.
+   */
+  labels: Pick<Macros, "saturated_fat_g" | "sugar_g" | "added_sugar_g" | "sodium_mg" | "cholesterol_mg">;
 };
 
 function emptyItem(): ItemDraft {
@@ -80,6 +99,8 @@ function emptyItem(): ItemDraft {
     protein_g: "",
     carb_g: "",
     fat_g: "",
+    // A hand-typed ingredient states no label figures. F37.
+    labels: NO_LABEL_MACROS,
     fibre_g: "",
   };
 }
@@ -115,6 +136,17 @@ export function perServing(items: ItemDraft[], yieldServings: number): Macros {
   let fat = 0;
   let fibre = 0;
   let anyFibre = false;
+  // The five label macros accumulate under exactly the rule fibre already
+  // follows, and it is the server's rule too (`Food.PerServing`): sum only what
+  // an item STATED, and stay null when none did. A recipe whose ingredients
+  // never mention sodium is not a sodium-free recipe. F37.
+  const labelKeys = ["saturated_fat_g", "sugar_g", "added_sugar_g", "sodium_mg", "cholesterol_mg"] as const;
+  const sums: Record<(typeof labelKeys)[number], number> = {
+    saturated_fat_g: 0, sugar_g: 0, added_sugar_g: 0, sodium_mg: 0, cholesterol_mg: 0,
+  };
+  const stated: Record<(typeof labelKeys)[number], boolean> = {
+    saturated_fat_g: false, sugar_g: false, added_sugar_g: false, sodium_mg: false, cholesterol_mg: false,
+  };
   for (const it of items) {
     const q = num(it.quantity);
     kcal += num(it.kcal) * q;
@@ -125,13 +157,25 @@ export function perServing(items: ItemDraft[], yieldServings: number): Macros {
       fibre += num(it.fibre_g) * q;
       anyFibre = true;
     }
+    for (const k of labelKeys) {
+      const v = it.labels[k];
+      if (v == null) continue;
+      sums[k] += v * q;
+      stated[k] = true;
+    }
   }
+  const per = (k: (typeof labelKeys)[number]) => (stated[k] ? sums[k] / y : null);
   return {
     kcal: kcal / y,
     protein_g: protein / y,
     carb_g: carb / y,
     fat_g: fat / y,
     fibre_g: anyFibre ? fibre / y : null,
+    saturated_fat_g: per("saturated_fat_g"),
+    sugar_g: per("sugar_g"),
+    added_sugar_g: per("added_sugar_g"),
+    sodium_mg: per("sodium_mg"),
+    cholesterol_mg: per("cholesterol_mg"),
   };
 }
 
@@ -146,6 +190,13 @@ function toDraft(food: Food): ItemDraft[] {
     carb_g: String(it.carb_g),
     fat_g: String(it.fat_g),
     fibre_g: it.fibre_g == null ? "" : String(it.fibre_g),
+    labels: {
+      saturated_fat_g: it.saturated_fat_g,
+      sugar_g: it.sugar_g,
+      added_sugar_g: it.added_sugar_g,
+      sodium_mg: it.sodium_mg,
+      cholesterol_mg: it.cholesterol_mg,
+    },
   }));
 }
 
@@ -195,6 +246,8 @@ export function RecipeEditor({ existing }: { existing?: Food }) {
         // claiming zero, and the recipe's own fibre figure depends on the
         // difference.
         fibre_g: it.fibre_g.trim() === "" ? null : num(it.fibre_g),
+        // Straight back out, unmodified — see ItemDraft.labels. F37.
+        ...it.labels,
       }));
       // A recipe's ID is client-generated, same contract as everywhere else,
       // so a re-sent save is the same save rather than a second recipe.

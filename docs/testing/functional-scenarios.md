@@ -8820,6 +8820,41 @@ this section.
   recipe built from it last month.
 - **Deleting a saved food leaves its entries intact**, losing only the
   provenance link. `source_food_id` becomes null; the numbers do not move.
+- **A write must never change a figure the request did not mention (F37).** The
+  companion to the rule above, and the one that was actually broken: correcting
+  a scanned entry or food used to null all five LABEL macros
+  (`saturated_fat_g`, `sugar_g`, `added_sugar_g`, `sodium_mg`,
+  `cholesterol_mg`), because the wire shape had no field for them and the
+  upsert wrote the nils anyway. Same invisibility as the rule above — the
+  response came back 200 carrying the nulls and agreeing with itself.
+
+  Three states, and each needs its own assertion, because a two-state
+  implementation passes the first and silently fails the second:
+
+  - **key ABSENT** → the stored value is KEPT. `PUT` a body with no
+    `sodium_mg` key at all and assert the row still has it. This is what every
+    web write and every pre-N52 phone build sends.
+  - **key present as `null`** → the value is CLEARED. This is a statement,
+    not an omission: the phone sends all five on every push as `number | null`,
+    so a re-scan that corrects a figure to unknown has to be able to take the
+    stale number off the row. A `COALESCE`-based fix passes the absent case and
+    fails this one.
+  - **key present with a number** → the value is SET.
+
+  Assert against the stored row (or a fresh `GET`), never the save's own
+  response.
+- **A recipe ITEM is deliberately two-state, and that is not the same bug.** An
+  item list is replaced wholesale on every write, so an item that omits
+  `sodium_mg` states that nothing states it — there is no previous item to keep
+  a value from. Send a recipe whose items carry the five and assert they are
+  stored; send the same recipe with an item that omits them and assert they are
+  now null.
+- **A recipe's OWN label macros are derived and have no "keep" state (F37).**
+  Save a recipe with one sodium-carrying ingredient and one plain one, assert
+  the recipe's `sodium_mg` is the sum; then remove the sodium-carrying
+  ingredient and assert the recipe's `sodium_mg` is now **null**, not the old
+  total. A recipe holding a figure no ingredient stands behind is the direction
+  a naive "absent means keep" gets wrong.
 
 ### Logging
 
@@ -10609,6 +10644,25 @@ average with no denominator looks fine.
 - An entry with no fibre keeps `fibre_g: null` through a correction — a save
   must not turn silence into a measured zero.
 - `source_food_id` survives a correction, so provenance is not lost by editing.
+- **A scanned entry keeps its five label macros through a rename (F37).** Log a
+  barcode product carrying `sodium_mg` and `saturated_fat_g`, change only its
+  NAME here, and assert both figures are still on the stored row. This is the
+  bug the ticket exists for: web sends no label macros at all, so before F37 the
+  server wrote nils over them and the response came back 200 carrying the nulls,
+  agreeing with itself. Assert against the STORED row or a fresh read, never the
+  save's own response — the half that was broken assembled that response too.
+- **Halving a scanned entry halves its sodium as well as its calories (F37).**
+  The one case where "leave it alone" is the wrong answer: an entry at 210 mg
+  halved to 105 kcal-worth of food but still reading 210 mg is not stale, it
+  contradicts the calories printed beside it. Assert `sodium_mg` is 105 after ½
+  and back to 210 after the following ×2.
+- **Changing only the SERVINGS scales the label macros by the same ratio
+  (F37).** They are not on the edit form, so they follow the quantity. 1 serving
+  at 210 mg edited to 2 servings is 420 mg.
+- **A correction that changes neither the quantity nor the name leaves the label
+  figures byte-identical.** The ratio is 1 and the scaling arithmetic must be the
+  identity — a rounding step introduced here would drift a scanned figure a
+  little on every edit, which is far harder to notice than losing it outright.
 - A day with no entries shows the gap wording, and the Add form still works.
 - `/days/not-a-date` 404s rather than rendering an empty day.
 - A day whose entries were logged on the phone edits identically here.

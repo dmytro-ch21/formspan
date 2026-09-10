@@ -32,7 +32,63 @@ export type Macros = {
   carb_g: number;
   fat_g: number;
   fibre_g: number | null;
+  /**
+   * The five LABEL macros — F37.
+   *
+   * Web had no field for any of these, which is most of why the server could
+   * blank them and nobody noticed here: this app could not read them, so it
+   * could not show that they had gone. Nullable for the reason `fibre_g`
+   * already is and more sharply — **absence is a fact about what we know,
+   * never a fact about the food.** Render `n/a`, never `0`. `sodium_mg` is
+   * MILLIGRAMS; see the server's own note on why the unit is in the name.
+   *
+   * Being on `Macros` puts them on `EntryInput`, `FoodInput` and
+   * `RecipeItemInput` too, so every write site has to say what it means by
+   * them rather than silently omitting them. That is deliberate: the server
+   * now treats an omitted key as "keep", which is the right default for an old
+   * client and the WRONG one for `scale`, whose whole job is to multiply an
+   * entry's figures and which would otherwise leave a halved entry carrying
+   * full-strength sodium.
+   */
+  saturated_fat_g: number | null;
+  sugar_g: number | null;
+  added_sugar_g: number | null;
+  sodium_mg: number | null;
+  cholesterol_mg: number | null;
 };
+
+/**
+ * The five, multiplied — `null` stays `null`, because scaling something nobody
+ * stated still states nothing (F37).
+ *
+ * Used by every web write that changes HOW MUCH of an entry there was without
+ * touching what it is: the halve/double control, and a correction that edits
+ * the servings count. The label figures are not on those forms, so scaling the
+ * stored ones is the only answer that stays consistent with the macros beside
+ * them.
+ */
+export function scaleLabelMacros(
+  m: Pick<Macros, "saturated_fat_g" | "sugar_g" | "added_sugar_g" | "sodium_mg" | "cholesterol_mg">,
+  factor: number,
+): Pick<Macros, "saturated_fat_g" | "sugar_g" | "added_sugar_g" | "sodium_mg" | "cholesterol_mg"> {
+  const x = (v: number | null) => (v == null ? null : v * factor);
+  return {
+    saturated_fat_g: x(m.saturated_fat_g),
+    sugar_g: x(m.sugar_g),
+    added_sugar_g: x(m.added_sugar_g),
+    sodium_mg: x(m.sodium_mg),
+    cholesterol_mg: x(m.cholesterol_mg),
+  };
+}
+
+/** The five, all unstated. What a hand-typed entry or recipe knows about them. */
+export const NO_LABEL_MACROS = {
+  saturated_fat_g: null,
+  sugar_g: null,
+  added_sugar_g: null,
+  sodium_mg: null,
+  cholesterol_mg: null,
+} as const;
 
 export type Entry = Macros & {
   id: string;

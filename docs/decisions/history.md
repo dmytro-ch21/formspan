@@ -71064,6 +71064,97 @@ not decoration — the newly-added app's gate can fail, which is the half of
   it after the checker rather than beside it; filed here rather than as a ticket
   because it is a property of how `/pre-merge` is invoked, not of any file.
 
+## 2026-09-09 — F37 (#1027): a PUT that never mentioned the five label macros was wiping them
+
+**The fourth instance of the class CLAUDE.md records under `exercise.updateWithin`**, and the first one caught before it reached anybody's phone rather than after. `load_mode` (000052), `implements` (000057) and `note` (000061) each added a column to a SET clause and blanked authored data; this is the same shape in `nutrition`, arrived at from the other end — the columns were always in the SET clause, and the wire shape that fed them never had the fields.
+
+### What was broken
+
+`Macros` carries ten figures. `entryBody`, `foodBody` and `recipeItemBody` — the three wire shapes — declared five. So every handler built
+
+```go
+Macros{Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG}
+```
+
+and left `SaturatedFatG`, `SugarG`, `AddedSugarG`, `SodiumMG` and `CholesterolMG` at their nil zero value. `SaveEntry` and `SaveFood` then wrote those nils over whatever was stored, unconditionally:
+
+```sql
+saturated_fat_g = EXCLUDED.saturated_fat_g,
+```
+
+**Renaming an entry was enough to lose its whole label.** So was correcting its servings, moving it to another meal, or tapping halve/double. The response came back 200 carrying the now-null values, so the write looked successful and self-consistent — the row agreed with itself, and there was nothing to compare it against.
+
+The damage lands exactly where the data is real. A USDA-seeded generic food carries no `added_sugar_g` anyway, so nothing changes for it. The five exist because of the barcode scanner and Open Food Facts, so the rows that lost something were **scanned products** — the ones that had genuine sodium, sugar and saturated fat on them.
+
+Three sites, confirmed independently rather than inferred from one: entries, saved foods, and recipe items. The third compounds, because `Food.PerServing` derives a recipe's own label macros by summing its items — five dropped items make a recipe that reports "not stated" for a label its ingredients carry.
+
+### The shape, and why it is neither of the two the ticket proposed
+
+The ticket offered `COALESCE($n, column)` — the idiom N553 had just used for `position` — or stopping the overwrite. **Neither is enough, because `COALESCE` cannot tell an omitted key from an explicit null, and both are live in the two clients today:**
+
+- **web omits all five.** Its `Macros` type had only the first five fields, so they were never on the wire at all. Absent therefore has to mean *keep*, or every web correction wipes a scan — the reported bug.
+- **the phone sends all five on every push**, as `number | null` (`apps/mobile/lib/foodLog.ts`). Its null is a **statement** — "no source gave us a sodium figure" — not an omission. Under `COALESCE` that null reads as *keep*, so a re-scan that corrected a figure to unknown could never take the stale number back off the row.
+
+So three states, not two. This repo already had the type for it: `tracker.Field[T]`, written for a tracker target that can be cleared or left alone, with the reasoning already in its doc comment. It moved to `internal/platform/apihttp` and is **aliased** back into `tracker` (Go 1.26 generic aliases), so every existing caller and `patch_test.go`'s reflection over `Set` keep working, and there is one definition of what "absent" means rather than two that can drift.
+
+`LabelWanted` carries the three states to the repository the way `PositionWanted` already carries a position — a separate field, `json:"-"`, because what a caller *asked for* is a different question from what the row *is*. The SET clauses became `CASE WHEN $stated THEN $value ELSE table.column END`.
+
+### Two asymmetries, both deliberate, both pinned by a test
+
+**Recipe items are two-state, not three.** A three-state field answers "was this column named, so the row can be left alone?" — but an item list has no row to leave alone. The server replaces it wholesale, so *the value this item had before* is not a question with an answer: item 2 of the new list is a different ingredient, not a continuation of item 2 of the old one. The bug there needed no restore path at all; it was simply that values the client **did** send were dropped.
+
+**A recipe's parent has no "keep" state either**, and this is the one that is easy to get wrong. Its macros were computed from the items a line earlier, and a computation is an opinion — the authoritative one. Deriving a real figure works either way, because a non-nil `Macros` already resolves as stated. **Deriving nothing does not:** drop the only sodium-carrying ingredient out of a recipe and the derivation correctly says "nothing states sodium now", and without an override the row would hold on to the total from back when something did — a number no ingredient stands behind, on a recipe that no longer contains the thing that produced it.
+
+`Food.DerivesMacros()` was factored out of `PerServing` so `SaveFood` asks the same three-clause question rather than keeping a second copy of it in step.
+
+### The one thing that could have reintroduced the bug one layer down
+
+A Go caller that fills in `Macros` and never touches `LabelWanted` **still writes**. Without that, the importers, the share copiers and this package's own repository tests would have silently lost writes to a field they have never heard of — which is precisely this same bug, relocated. The cost is that such a caller cannot *clear* by leaving `Macros` nil; it has to say so with `apihttp.Null[float64]()`. That asymmetry is the right way round: "I did not mention it" is the overwhelmingly common case and must be the safe one.
+
+### The clients
+
+**Web could not read these figures**, which is most of why nobody noticed the server was eating them — the app that was destroying them had no way to display them. Its `Macros` gained all five, which put them on `EntryInput`, `FoodInput` and `RecipeItemInput` too, and the type checker then named every write site in the app. That was the point of doing it that way.
+
+Two of those writes must **not** rely on the new "keep" default:
+
+- **halve/double** multiplies every figure by a factor. Omitting the five would leave a halved entry carrying full-strength sodium — not merely stale, but contradicted by the calories printed beside it.
+- **a correction that changes the servings count** has the same problem in a subtler form, so the five follow the quantity there too, at ratio `servings / entry.servings`. A correction that only changes a name leaves that ratio at 1.
+
+Hand-typed entries and hand-typed recipe ingredients send explicit nulls (`NO_LABEL_MACROS`) rather than omitting: on a new row the two are identical to the server, and saying it out loud is what stops it becoming a silent omission if those forms ever grow the fields.
+
+**Web's recipe editor carries the five through untouched** (`ItemDraft.labels`) rather than editing them. It has to, because items are two-state: a draft that dropped them would clear them on the first web edit and take the recipe's derived figures with it. Its own `perServing` now sums them under the same "only what was stated" rule the server uses.
+
+**The phone needed no change.** It has sent all five, on all three paths, since N52 — the server was discarding them on decode. Which is worth stating plainly: the client that was correct throughout is the one whose data was being destroyed.
+
+### `NutritionMacros` already documented all ten
+
+The contract was right and the code was wrong, which is the failure mode a hand-maintained spec is *supposed* to make visible and did not, because nothing compares them. `NutritionFoodInput` declares its macros inline rather than inheriting them (a recipe's are ignored, and required-but-ignored is unsatisfiable) — and it was missing the five entirely, matching a server that discarded them. They are declared now, and the absent/null/value semantics are written on both input schemas, with the recipe-item exception written on `NutritionRecipeItem`.
+
+### What made this findable, and what did not
+
+Found by `ac-verifier` in passing while reviewing #1019, and **the neighbouring ticket is why**: N553 was careful about exactly this class for its own new `position` column, wrote the restore-path test, and left a doc comment explaining the trap — sitting three lines above five columns quietly doing the thing it warned about.
+
+The restore-path test was written first and confirmed red, per CLAUDE.md's rule. **The detail worth keeping is where it had to go.** The repository is not the buggy half — `SaveEntry` faithfully writes whatever `Macros` it is handed — so a test written against it would have **passed against the broken code**, because it would set the five itself and never exercise the decode step that drops them. That is *verify that a check can fail* in its most inviting form: the obvious place to test this is the place where the test cannot see the bug. The tests drive `httptest` with raw JSON bodies, which is also the only way to express the distinction the whole fix turns on — omitting a key is not something a typed Go struct can say.
+
+Five mutations, all caught, each restored and the package re-run green:
+
+| mutation | test that went red |
+|---|---|
+| entry SET back to `EXCLUDED` | entry-keep |
+| food SET back to `EXCLUDED` | food-keep |
+| explicit null read as "not stated" | explicit-null |
+| drop the five from `recipeItemBody` | recipe-items |
+| delete the `derived` override | derived-clears |
+
+The third is the one that matters: it is the only evidence that three states are load-bearing rather than decoration, and it is the mutation that turns the fix into the `COALESCE` version the ticket proposed.
+
+### What this leaves open
+
+**Nothing structural prevents a fifth instance**, and this fix does not add a guard that would catch one — it fixes three sites and writes down why. The generalisable check would be something that compares a domain struct's fields against the wire struct that feeds it and fails on a silent gap; that is a real piece of work and is not this ticket. What is available cheaply, and is what this entry is for, is that the class now has four dated instances in one file.
+
+**Rows already blanked are not recovered.** There is no history to restore them from — `nutrition_entries` keeps no revision trail the way `exercise` does, which is the one respect in which the `updateWithin` instances were luckier. An athlete who scanned a product and later corrected its name has lost that label, permanently, and the only way back is to scan it again.
+
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
