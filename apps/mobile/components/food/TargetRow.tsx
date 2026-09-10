@@ -52,13 +52,14 @@
  * is promised that is not known.
  */
 
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fmtAmount, type TargetView } from '@/lib/nutrition';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * What the row shows, per state.
@@ -111,7 +112,7 @@ export function TargetRow({
   const { value, note, muted } = describe(view);
 
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       style={styles.row}
       accessibilityRole="button"
@@ -140,7 +141,7 @@ export function TargetRow({
           it sets `accessible={false}` internally — so the row announces its own
           label and hint and nothing trails them. */}
       <Icon name="chevron" size={14} color={accent.ink} />
-    </Pressable>
+    </PressableScale>
   );
 }
 

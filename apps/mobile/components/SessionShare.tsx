@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
-  Pressable,
   StyleSheet,
   useWindowDimensions,
   View as RNView,
@@ -22,6 +21,7 @@ import { cardFromSummary, type CardData } from '@/lib/sessionCard';
 import { getSessionCard, type SessionCardNumbers } from '@/lib/sessionCardApi';
 import { CARD_EXPORT_WIDTH, shareCard } from '@/lib/shareCard';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Sharing a session's card, from wherever that session is on screen.
@@ -342,7 +342,7 @@ export function ShareSessionButton({
 }) {
   if (!share.card) return null;
   return (
-    <Pressable
+    <PressableScale
       // Opens the preview; the capture happens from inside it. One line, and
       // it is what makes every caller of this component inherit F2 — the
       // celebration modal, the finished strength session and the BJJ class all
@@ -356,7 +356,7 @@ export function ShareSessionButton({
       testID={testID}
     >
       <Text style={[styles.buttonText, textStyle]}>{share.sharing ? 'Preparing…' : label}</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -483,7 +483,7 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
               <ActivityIndicator accessibilityLabel="Preparing your photo" />
             ) : (
               <>
-                <Pressable
+                <PressableScale
                   onPress={() => void pickBackgroundPhoto(true)}
                   disabled={sharing}
                   hitSlop={8}
@@ -493,8 +493,8 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
                   accessibilityState={{ disabled: sharing }}
                 >
                   <Text style={[styles.photoAction, { color: accent.ink }]}>Take photo</Text>
-                </Pressable>
-                <Pressable
+                </PressableScale>
+                <PressableScale
                   onPress={() => void pickBackgroundPhoto(false)}
                   disabled={sharing}
                   hitSlop={8}
@@ -506,9 +506,9 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
                   <Text style={[styles.photoAction, { color: accent.ink }]}>
                     {backgroundUri ? 'Replace photo' : 'Choose photo'}
                   </Text>
-                </Pressable>
+                </PressableScale>
                 {!!backgroundUri && (
-                  <Pressable
+                  <PressableScale
                     onPress={clearBackgroundPhoto}
                     disabled={sharing}
                     hitSlop={8}
@@ -518,7 +518,7 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
                     accessibilityState={{ disabled: sharing }}
                   >
                     <Text style={[styles.photoAction, styles.photoClear]}>Use default</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </>
             )}
@@ -531,7 +531,7 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
           )}
 
           <RNView style={styles.previewActions}>
-            <Pressable
+            <PressableScale
               onPress={cancel}
               // Disabled mid-capture, AND mid-pick (N449, #747): a Share tap
               // that lands while `pickBackgroundPhoto` is still awaiting the
@@ -549,8 +549,8 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
               testID="share-preview-cancel"
             >
               <Text style={styles.previewCancelText}>Not now</Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
               onPress={share.share}
               disabled={sharing || pickingPhoto}
               style={[styles.previewShare, { backgroundColor: accent.accent }]}
@@ -562,7 +562,7 @@ export function ShareCardHost({ share }: { share: SessionShare }) {
               <Text style={[styles.previewShareText, { color: accent.on }]}>
                 {sharing ? 'Preparing…' : 'Share'}
               </Text>
-            </Pressable>
+            </PressableScale>
           </RNView>
         </View>
       </Modal>

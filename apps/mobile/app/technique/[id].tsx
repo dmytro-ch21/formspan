@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { categoryBadge } from '@/components/LibraryTile';
 import { Text, View } from '@/components/Themed';
@@ -18,6 +18,7 @@ import {
 } from '@/lib/techniques';
 import { buildEdgeIndex, buildTechniqueGraph, follows, resolveEdge } from '@/lib/techniqueGraph';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * One technique, built to be *read* rather than skimmed past.
@@ -158,9 +159,9 @@ export default function TechniqueScreen() {
         <Text style={styles.error} testID="technique-error">
           {error ?? 'Technique not found.'}
         </Text>
-        <Pressable onPress={() => void load()} hitSlop={10} accessibilityRole="button">
+        <PressableScale onPress={() => void load()} hitSlop={10} accessibilityRole="button">
           <Text style={[styles.retry, { color: ui.ink }]}>Try again</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   }
@@ -230,7 +231,7 @@ export default function TechniqueScreen() {
             </Text>
             {leadsTo.map((n) => (
               <Link key={n.id} href={{ pathname: '/technique/[id]', params: { id: n.id } }} asChild>
-                <Pressable
+                <PressableScale
                   style={styles.leadRow}
                   // "button", matching every other navigate-to-a-technique
                   // control in the app. On iOS "link" announces as leaving
@@ -241,7 +242,7 @@ export default function TechniqueScreen() {
                 >
                   <Text style={styles.leadName}>{n.name}</Text>
                   <Text style={styles.leadMeta}>{n.category}</Text>
-                </Pressable>
+                </PressableScale>
               </Link>
             ))}
           </RNView>
@@ -482,7 +483,7 @@ function Edges({
             // screen showed on the 22 rows where a reference is an alias — the
             // accessible name has to contain the visible label.
             <Link key={raw} href={`/technique/${hit.id}`} asChild>
-              <Pressable
+              <PressableScale
                 style={styles.edgeLink}
                 accessibilityRole="link"
                 accessibilityLabel={`${hit.name}, open technique`}
@@ -494,7 +495,7 @@ function Edges({
                     echoing what was typed. */}
                 <Text style={styles.edgeLinkText}>{hit.name}</Text>
                 <Text style={styles.edgeChevron}>›</Text>
-              </Pressable>
+              </PressableScale>
             </Link>
           );
         })}

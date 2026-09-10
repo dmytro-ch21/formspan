@@ -1,10 +1,11 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { dayString } from '@/lib/calendar';
 import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The week strip: Mon–Sun, with each day's state as a ring beneath its date.
@@ -130,7 +131,7 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
                 ? ''
                 : `${loggedCount} of ${elapsed} ${elapsed === 1 ? 'day' : 'days'} logged`}
         </Text>
-        <Pressable
+        <PressableScale
           onPress={onWeekInReview}
           accessibilityRole="button"
           accessibilityLabel="Week in review"
@@ -139,7 +140,7 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
         >
           <Text style={styles.reviewLabel}>Week in review</Text>
           <Icon name="chevron" size={13} color={vola.textMuted} />
-        </Pressable>
+        </PressableScale>
       </RNView>
     </View>
   );

@@ -1,7 +1,7 @@
 import { Stack, useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -13,6 +13,7 @@ import { sessionHref } from '@/lib/startSession';
 import { syncNow, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { fallbackModules, type Module } from '@/lib/modules';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * What is stuck, why, and one button per row to do something about it.
@@ -116,7 +117,7 @@ export default function SyncScreen() {
           )}
         </View>
 
-        <Pressable
+        <PressableScale
           onPress={() => {
             void syncNow().then(load);
             // N522/#934: this was previously the offline-outbox push ONLY —
@@ -141,7 +142,7 @@ export default function SyncScreen() {
           <Text style={styles.syncButtonText}>
             {state.syncing ? 'Syncing…' : 'Sync now'}
           </Text>
-        </Pressable>
+        </PressableScale>
 
         {rows === null ? (
           <ActivityIndicator accessibilityLabel="Loading" style={styles.spinner} />
@@ -186,7 +187,7 @@ export default function SyncScreen() {
                       next thing an athlete wants is to be standing in front of
                       it. Try again keeps its place for the rows whose obstacle
                       really has cleared on its own. */}
-                  <Pressable
+                  <PressableScale
                     onPress={() => router.push(destinationOf(row, modules))}
                     style={styles.rowAction}
                     accessibilityRole="button"
@@ -196,8 +197,8 @@ export default function SyncScreen() {
                     <Text style={[styles.retryText, { color: accent.ink }]}>
                       {row.kind === 'workout' ? 'Open the plan' : 'Open the session'}
                     </Text>
-                  </Pressable>
-                  <Pressable
+                  </PressableScale>
+                  <PressableScale
                     onPress={() => void retry(row)}
                     disabled={busy === row.id}
                     style={styles.rowAction}
@@ -209,7 +210,7 @@ export default function SyncScreen() {
                     <Text style={styles.retryMuted}>
                       {busy === row.id ? 'Trying…' : 'Try again'}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 </View>
               </View>
             ))}

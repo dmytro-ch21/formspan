@@ -74,7 +74,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   StyleSheet,
   TextInput,
   View as RNView,
@@ -98,6 +97,7 @@ import {
   type SavedFoodsSort,
 } from '@/lib/savedFoodsSort';
 import { request as requestSync } from '@/lib/sync';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 const DELETE_ACTIONS = [{ name: 'delete', label: 'Delete' }] as const;
 
@@ -299,7 +299,7 @@ export default function SavedFoodsScreen() {
         onDelete={() => confirmDelete(f)}
         testID={`${keyPrefix}saved-foods-row-${f.id}`}
       >
-        <Pressable
+        <PressableScale
           onPress={() => edit(f)}
           onLongPress={() => confirmDelete(f)}
           style={styles.row}
@@ -345,7 +345,7 @@ export default function SavedFoodsScreen() {
               {savedFoodProblemCopy(problems.get(f.id)!)}
             </Text>
           ) : null}
-        </Pressable>
+        </PressableScale>
       </SwipeToDelete>
     );
   }
@@ -398,7 +398,7 @@ export default function SavedFoodsScreen() {
           {SAVED_FOODS_SORTS.map((s) => {
             const active = s === sort;
             return (
-              <Pressable
+              <PressableScale
                 key={s}
                 onPress={() => setSort(s)}
                 style={[styles.chip, active && { backgroundColor: accent.accent, borderColor: accent.accent }]}
@@ -411,7 +411,7 @@ export default function SavedFoodsScreen() {
                 <Text style={[styles.chipText, active && { color: accent.on }]}>
                   {SAVED_FOODS_SORT_LABELS[s]}
                 </Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </RNView>

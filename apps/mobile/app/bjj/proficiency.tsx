@@ -1,6 +1,6 @@
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View as RNView } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View as RNView } from 'react-native';
 
 import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
@@ -16,6 +16,7 @@ import {
   type ProficiencySummary,
 } from '@/lib/proficiency';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The technique funnel, browsable on the phone — N84, row 10 of the
@@ -202,7 +203,7 @@ export default function ProficiencyScreen() {
                 {BUCKETS.map((b) => {
                   const active = bucket === b.key;
                   return (
-                    <Pressable
+                    <PressableScale
                       key={b.key}
                       onPress={() => setBucket(b.key)}
                       accessibilityRole="button"
@@ -213,7 +214,7 @@ export default function ProficiencyScreen() {
                       <Text style={[styles.chipText, active && { color: accent.on }]}>
                         {b.label} {counts[b.key]}
                       </Text>
-                    </Pressable>
+                    </PressableScale>
                   );
                 })}
               </RNView>
@@ -287,7 +288,7 @@ function FocusPanel({ focus, onDrop }: { focus: Focus[]; onDrop: (id: string) =>
           <Text style={styles.focusName} numberOfLines={1}>
             {f.name}
           </Text>
-          <Pressable
+          <PressableScale
             onPress={() => onDrop(f.technique_id)}
             accessibilityRole="button"
             accessibilityLabel={`Done with ${f.name}`}
@@ -295,7 +296,7 @@ function FocusPanel({ focus, onDrop }: { focus: Focus[]; onDrop: (id: string) =>
             testID={`proficiency-focus-drop-${f.technique_id}`}
           >
             <Text style={styles.focusDone}>Done</Text>
-          </Pressable>
+          </PressableScale>
         </RNView>
       ))}
     </View>
@@ -317,7 +318,7 @@ function TechniqueRow({
 
   return (
     <RNView style={styles.row} testID={`proficiency-row-${p.technique_id}`}>
-      <Pressable
+      <PressableScale
         onPress={onToggleStar}
         accessibilityRole="button"
         accessibilityState={{ selected: starred }}
@@ -327,7 +328,7 @@ function TechniqueRow({
         testID={`proficiency-star-${p.technique_id}`}
       >
         <Text style={[styles.starGlyph, starred && { color: accent.accent }]}>{starred ? '★' : '☆'}</Text>
-      </Pressable>
+      </PressableScale>
       <RNView style={styles.rowBody}>
         <Text style={styles.rowName} numberOfLines={1}>
           {p.name}

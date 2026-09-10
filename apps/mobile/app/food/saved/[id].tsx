@@ -32,7 +32,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ShareToFriend } from '@/components/ShareToFriend';
@@ -43,6 +43,7 @@ import { foodSyncState, localFood, saveFoodLocally } from '@/lib/foodLog';
 import { savedFoodProblemCopy, type Food } from '@/lib/nutrition';
 import { shareBlockedReason } from '@/lib/shares';
 import { request, useSyncState } from '@/lib/sync';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /** The four numbers, in the order a packet prints them. */
 const FIELDS = [
@@ -390,7 +391,7 @@ export default function EditSavedFoodScreen() {
       ) : null}
 
       <View style={styles.actions}>
-        <Pressable
+        <PressableScale
           onPress={() => void save()}
           style={[styles.primary, { backgroundColor: accent.accent }, saving && styles.off]}
           accessibilityRole="button"
@@ -402,7 +403,7 @@ export default function EditSavedFoodScreen() {
           <Text style={[styles.primaryText, { color: accent.on }]}>
             {saving ? 'Saving…' : 'Save'}
           </Text>
-        </Pressable>
+        </PressableScale>
         {/* N116/#505. The receiver gets their own copy of this saved food,
             independently editable — see nutrition/share.go's FoodCopier. */}
         <ShareToFriend

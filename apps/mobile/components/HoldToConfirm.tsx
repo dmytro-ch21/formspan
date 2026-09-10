@@ -5,7 +5,6 @@ import {
   Alert,
   Animated,
   Easing,
-  Pressable,
   StyleSheet,
   View as RNView,
   type StyleProp,
@@ -15,6 +14,7 @@ import {
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * A button you have to hold, for actions a stray tap must not perform.
@@ -196,7 +196,7 @@ export function HoldToConfirm({
 
   if (usesTapFallback(screenReader)) {
     return (
-      <Pressable
+      <PressableScale
         onPress={() =>
           Alert.alert(confirmTitle, confirmBody, [
             { text: 'Cancel', style: 'cancel' },
@@ -210,12 +210,12 @@ export function HoldToConfirm({
         testID={testID}
       >
         <Text style={[styles.label, textStyle]}>{label}</Text>
-      </Pressable>
+      </PressableScale>
     );
   }
 
   return (
-    <Pressable
+    <PressableScale
       onPressIn={start}
       onPressOut={cancel}
       style={[styles.button, style]}
@@ -235,7 +235,7 @@ export function HoldToConfirm({
         />
       </RNView>
       <Text style={[styles.label, textStyle]}>{holding ? (holdingLabel ?? 'Keep holding…') : label}</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

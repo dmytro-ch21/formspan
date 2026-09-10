@@ -3,7 +3,6 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
-  Pressable,
   StyleSheet,
   View as RNView,
   type PressableProps,
@@ -30,6 +29,7 @@ import {
   type TrackerEntry,
 } from '@/lib/trackerModel';
 import type { UnitSystem } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * ONE card for every daily tracker.
@@ -182,7 +182,7 @@ export function TrackerCard({
         <Text style={[styles.eyebrow, { color: fill }]} numberOfLines={1}>
           {tracker.name}
         </Text>
-        <Pressable
+        <PressableScale
           onPress={onEdit}
           // 16pt icon + 14 all round = 44pt, the iOS minimum. It was 12, which
           // is 40 — near enough to look fine and not near enough to be right.
@@ -196,7 +196,7 @@ export function TrackerCard({
           testID={`tracker-menu-${tracker.id}`}
         >
           <Icon name="settings" size={16} color={vola.textMuted} />
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       <Text style={styles.value} testID={`tracker-value-${tracker.id}`}>
@@ -211,7 +211,7 @@ export function TrackerCard({
           strictly worse than the per-glyph labels this design is built on. The
           name and the value are already their own elements above. */}
       <RNView style={styles.row} testID={`tracker-row-${tracker.id}`}>
-        <Pressable
+        <PressableScale
           onPress={handleAdd}
           // 30pt drawn + 7 all round = 44pt. This is the PRIMARY affordance on
           // the card — the one an athlete hits several times a day — so it is
@@ -223,7 +223,7 @@ export function TrackerCard({
           testID={`tracker-add-${tracker.id}`}
         >
           <Icon name="plus" size={16} color={fill} />
-        </Pressable>
+        </PressableScale>
 
         {style === 'bar' ? (
           <Bar tracker={tracker} entries={entries} fill={fill} />
@@ -255,7 +255,7 @@ export function TrackerCard({
           testID={`tracker-choices-${tracker.id}`}
         >
           {addChoices?.map((c) => (
-            <Pressable
+            <PressableScale
               key={c.key}
               onPress={() => handleChoice(c.key)}
               style={styles.choice}
@@ -268,7 +268,7 @@ export function TrackerCard({
               testID={`tracker-choice-${tracker.id}-${c.key}`}
             >
               <Text style={styles.choiceText}>{c.label}</Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </RNView>
       ) : null}
@@ -493,7 +493,7 @@ function Glyph({
   }, [filled, t]);
 
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       hitSlop={hitSlop}
       accessibilityRole="button"
@@ -545,7 +545,7 @@ function Glyph({
           testID={`${testID}-fill`}
         />
       </RNView>
-    </Pressable>
+    </PressableScale>
   );
 }
 

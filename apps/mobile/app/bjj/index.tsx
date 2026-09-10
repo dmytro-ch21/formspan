@@ -1,6 +1,6 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Belt as BeltView, describeBelt } from '@/components/Belt';
 import { Text, View } from '@/components/Themed';
@@ -10,6 +10,7 @@ import { describeTimeAtBelt, getStanding, nextRank, type Promotion, type Standin
 import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The belt, and the whole timeline that produced it.
@@ -111,14 +112,14 @@ export default function BjjStandingScreen() {
         options={{
           title: 'Your rank',
           headerRight: () => (
-            <Pressable
+            <PressableScale
               onPress={addPromotion}
               hitSlop={12}
               accessibilityRole="button"
               testID="bjj-add-promotion"
             >
               <Text style={[styles.headerAction, { color: accent.ink }]}>Add</Text>
-            </Pressable>
+            </PressableScale>
           ),
         }}
       />
@@ -166,7 +167,7 @@ export default function BjjStandingScreen() {
             </View>
           ) : (
             standing.promotions.map((p) => (
-              <Pressable
+              <PressableScale
                 key={p.id}
                 onPress={() => openPromotion(p)}
                 accessibilityRole="button"
@@ -182,7 +183,7 @@ export default function BjjStandingScreen() {
                   </RNView>
                   <Text style={styles.chevron}>›</Text>
                 </View>
-              </Pressable>
+              </PressableScale>
             ))
           )}
         </>

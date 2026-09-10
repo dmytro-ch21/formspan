@@ -37,7 +37,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, TextInput, View } from 'react-native';
 
 import { useEnsureVisible } from '@/components/KeyboardAwareScroll';
 import { formatDayLong } from '@/lib/history';
@@ -51,6 +51,7 @@ import {
   type ManualDraft,
   type ManualTargetInput,
 } from '@/lib/manualTarget';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 const FIELDS: { key: keyof ManualDraft; label: string; suffix: string; optional?: boolean }[] = [
   { key: 'kcal', label: 'Calories', suffix: 'kcal' },
@@ -169,7 +170,7 @@ export function ManualTarget({
         </Text>
       ) : null}
 
-      <Pressable
+      <PressableScale
         onPress={submit}
         disabled={saving}
         style={[styles.primary, { borderColor: accent.accent }, saving && styles.off]}
@@ -185,7 +186,7 @@ export function ManualTarget({
         <Text style={[styles.primaryText, { color: accent.ink }]}>
           {saving ? 'Saving…' : `Use this from ${formatDayLong(on)}`}
         </Text>
-      </Pressable>
+      </PressableScale>
 
       {failed ? (
         <Text style={styles.problem} testID="manual-failed" accessibilityLiveRegion="polite">

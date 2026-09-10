@@ -45,13 +45,14 @@
  * ticket) removes exactly as it always has.
  */
 
-import { Alert, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { Alert, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { trackerFill, vola } from '@/constants/Colors';
 import { isFoodCaffeineEntryId } from '@/lib/foodCaffeine';
 import { cutoffLine, formatClock, lastLoggedAt, loggedAmount, type Tracker, type TrackerEntry } from '@/lib/trackerModel';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export function CaffeineBanner({
   tracker,
@@ -108,7 +109,7 @@ export function CaffeineBanner({
           {tracker.icon || '⚡'}
         </Text>
         <Text style={[styles.eyebrow, { color: fill }]}>Caffeine</Text>
-        <Pressable
+        <PressableScale
           onPress={onEdit}
           hitSlop={14}
           accessibilityRole="button"
@@ -116,7 +117,7 @@ export function CaffeineBanner({
           testID={`caffeine-menu-${tracker.id}`}
         >
           <Icon name="settings" size={16} color={vola.textMuted} />
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       <Text style={styles.total} testID={`caffeine-total-${tracker.id}`}>
@@ -145,7 +146,7 @@ export function CaffeineBanner({
         </Text>
       )}
 
-      <Pressable
+      <PressableScale
         onPress={onAdd}
         style={[styles.add, { borderColor: fill }]}
         accessibilityRole="button"
@@ -154,7 +155,7 @@ export function CaffeineBanner({
       >
         <Icon name="plus" size={14} color={fill} />
         <Text style={[styles.addText, { color: fill }]}>Log caffeine</Text>
-      </Pressable>
+      </PressableScale>
 
       {entries.length > 0 && (
         <RNView style={styles.entries} testID={`caffeine-entries-${tracker.id}`}>
@@ -166,7 +167,7 @@ export function CaffeineBanner({
                   {Math.round(e.amount)} mg
                   {fromFood ? ' · from a logged food' : ''}
                 </Text>
-                <Pressable
+                <PressableScale
                   onPress={() => handleRemove(e.id)}
                   hitSlop={12}
                   accessibilityRole="button"
@@ -180,7 +181,7 @@ export function CaffeineBanner({
                   <Text style={[styles.entryX, fromFood && styles.entryXLocked]}>
                     {fromFood ? '🔒' : '×'}
                   </Text>
-                </Pressable>
+                </PressableScale>
               </RNView>
             );
           })}

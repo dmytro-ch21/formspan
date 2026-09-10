@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Button } from '@/components/ui/Button';
@@ -22,6 +22,7 @@ import {
 } from '@/lib/hrPath';
 import { healthStoreHasRecentHeartRate } from '@/lib/hrPathProbe';
 import { type HealthSource, healthSourceLabel } from '@/lib/vo2MaxSource';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * N528/#958 — Settings → Integrations → "Heart-rate monitor": scan, pick,
@@ -322,9 +323,9 @@ export function HRMonitorPairing({
               {pairedMonitorStatusLabel(live, remembered.id)}
             </Text>
           </RNView>
-          <Pressable onPress={() => void forget()} accessibilityRole="button" accessibilityLabel="Forget this monitor" hitSlop={8} testID={`${testID}-forget`}>
+          <PressableScale onPress={() => void forget()} accessibilityRole="button" accessibilityLabel="Forget this monitor" hitSlop={8} testID={`${testID}-forget`}>
             <Text style={styles.forget}>Forget</Text>
-          </Pressable>
+          </PressableScale>
         </RNView>
       ) : (
         <Text style={styles.muted} testID={`${testID}-none`}>
@@ -347,7 +348,7 @@ export function HRMonitorPairing({
       {found.length > 0 && (
         <RNView style={styles.found} testID={`${testID}-found`}>
           {rows.map((row) => (
-            <Pressable
+            <PressableScale
               key={row.id}
               onPress={() => void pick({ id: row.id, name: row.name })}
               style={styles.foundRow}
@@ -365,7 +366,7 @@ export function HRMonitorPairing({
                 )}
               </RNView>
               <Text style={styles.use}>Use</Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </RNView>
       )}
@@ -381,7 +382,7 @@ export function HRMonitorPairing({
           found nothing, which is exactly when they do. `BROADCAST_RULE`
           leads: the brand rows are examples of one setting under different
           names, not a list of supported devices. */}
-      <Pressable
+      <PressableScale
         onPress={() => setShowBroadcastHelp((v) => !v)}
         accessibilityRole="button"
         accessibilityState={{ expanded: showBroadcastHelp }}
@@ -392,7 +393,7 @@ export function HRMonitorPairing({
         <Text style={styles.disclosure}>
           {showBroadcastHelp ? 'Hide' : 'How do I turn broadcasting on?'}
         </Text>
-      </Pressable>
+      </PressableScale>
       {showBroadcastHelp && (
         <RNView style={styles.help} testID={`${testID}-broadcast-help`}>
           <Text style={styles.bodyCopy} testID={`${testID}-broadcast-rule`}>{BROADCAST_RULE}</Text>

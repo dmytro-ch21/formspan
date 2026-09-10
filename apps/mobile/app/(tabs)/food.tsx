@@ -43,7 +43,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Modal, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { ModuleOffNotice } from '@/components/ModuleOffNotice';
@@ -101,6 +101,7 @@ import { useAuthToken } from '@/lib/useAuthToken';
 import { useTrackerDay } from '@/lib/useTrackerDay';
 import { useUnits } from '@/lib/useUnits';
 import { request as requestSync, useSyncState } from '@/lib/sync';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 const MEAL_LABELS: Record<Meal, string> = {
   breakfast: 'Breakfast',
@@ -845,7 +846,7 @@ export default function FoodScreen() {
               the screen an athlete is on when they think "I should be tracking
               this too". Today deliberately gets no such control: it is a
               decision surface, not a settings screen. */}
-          <Pressable
+          <PressableScale
             onPress={() => router.push('/trackers')}
             style={styles.manageTrackers}
             accessibilityRole="button"
@@ -853,7 +854,7 @@ export default function FoodScreen() {
             testID="food-manage-trackers"
           >
             <Text style={styles.manageTrackersText}>Manage trackers</Text>
-          </Pressable>
+          </PressableScale>
 
           {/* The meal sections render ONLY on a real answer.
               Rendered while loading, or after a failed read, they are four
@@ -993,7 +994,7 @@ export default function FoodScreen() {
                   `openMonth` opens on the day ON SCREEN's month, so from three
                   months out this is the only way back that isn't the sheet's
                   own Close button landing you on a day you didn't mean. */}
-              <Pressable
+              <PressableScale
                 onPress={() => {
                   setDay(0);
                   setMonthOpen(false);
@@ -1005,7 +1006,7 @@ export default function FoodScreen() {
                 testID="food-month-today"
               >
                 <Text style={styles.close}>Today</Text>
-              </Pressable>
+              </PressableScale>
 
               <RNView style={styles.sheetSwitcher}>
                 <PeriodSwitcher
@@ -1019,7 +1020,7 @@ export default function FoodScreen() {
                   testID="food-month"
                 />
               </RNView>
-              <Pressable
+              <PressableScale
                 onPress={() => setMonthOpen(false)}
                 hitSlop={12}
                 style={styles.sheetClose}
@@ -1028,7 +1029,7 @@ export default function FoodScreen() {
                 testID="food-month-close"
               >
                 <Text style={styles.close}>Done</Text>
-              </Pressable>
+              </PressableScale>
             </RNView>
 
             <ScrollView contentContainerStyle={styles.sheetBody}>
@@ -1055,7 +1056,7 @@ export default function FoodScreen() {
                     // grid, which exists for CORRECTING a day, draws the line.
                     const future = offsetFromToday(cell.key) > 0;
                     return (
-                      <Pressable
+                      <PressableScale
                         key={cell.key}
                         disabled={future}
                         style={[styles.gridCell, isShown && styles.gridCellShown]}
@@ -1096,7 +1097,7 @@ export default function FoodScreen() {
                         {/* Always rendered, so a dot appearing never shifts the
                             row's height as you page through months. */}
                         <RNView style={[styles.gridDot, logged && styles.gridDotOn]} />
-                      </Pressable>
+                      </PressableScale>
                     );
                   })}
                 </RNView>

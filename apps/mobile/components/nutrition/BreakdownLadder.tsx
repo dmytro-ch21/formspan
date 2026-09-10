@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The arithmetic — resting rate, movement, training, maintenance, phase, result.
@@ -113,7 +114,7 @@ export function BreakdownLadder({
           </Text>
           <Text style={styles.footNote}>Daily calorie target</Text>
         </RNView>
-        <Pressable
+        <PressableScale
           onPress={onChangePhase}
           style={styles.phase}
           accessibilityRole="button"
@@ -122,7 +123,7 @@ export function BreakdownLadder({
         >
           <Text style={[styles.phaseText, { color: accent.ink }]}>{changePhaseLabel}</Text>
           <Icon name="chevron" size={13} color={accent.ink} />
-        </Pressable>
+        </PressableScale>
       </RNView>
     </RNView>
   );

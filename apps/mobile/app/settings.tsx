@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { accents, vola, type AccentName } from '@/constants/Colors';
@@ -35,6 +35,7 @@ import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { healthSourceFor } from '@/lib/vo2MaxSource';
 import { HRMonitorPairing } from '@/components/settings/HRMonitorPairing';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Settings as grouped rows that drill down, rather than one flat screen of
@@ -596,7 +597,7 @@ function AccentRow() {
           const a = accents[key];
           const on = key === name;
           return (
-            <Pressable
+            <PressableScale
               key={key}
               onPress={() => void choose(key)}
               hitSlop={6}
@@ -611,7 +612,7 @@ function AccentRow() {
               ]}
             >
               {on && <Icon name="check" size={13} color={a.on} strokeWidth={2.6} />}
-            </Pressable>
+            </PressableScale>
           );
         })}
       </RNView>
@@ -651,7 +652,7 @@ function Toggle({
 }) {
   const accent = useAccent();
   return (
-    <Pressable
+    <PressableScale
       style={[styles.row, !last && styles.rowDivided, disabled && styles.rowBusy]}
       onPress={() => onChange(!value)}
       disabled={disabled}
@@ -667,7 +668,7 @@ function Toggle({
       <View style={[styles.switch, value && [styles.switchOn, { backgroundColor: accent.accent }]]}>
         <View style={[styles.knob, value && styles.knobOn]} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -687,7 +688,7 @@ function Row({
   testID?: string;
 }) {
   return (
-    <Pressable
+    <PressableScale
       style={[styles.row, !last && styles.rowDivided]}
       onPress={onPress}
       accessibilityRole="button"
@@ -699,7 +700,7 @@ function Row({
         {hint && <Text style={styles.muted}>{hint}</Text>}
       </View>
       {!danger && <Text style={styles.chevron}>›</Text>}
-    </Pressable>
+    </PressableScale>
   );
 }
 

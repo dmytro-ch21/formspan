@@ -30,13 +30,14 @@
  * this sheet does not have (its content is short enough to need no scrolling)
  * — it measures and pads itself regardless.
  */
-import { Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { Modal, StyleSheet, View as RNView } from 'react-native';
 
 import { KeyboardAwareFooter } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export function AmountSheet({
   visible,
@@ -62,7 +63,7 @@ export function AmountSheet({
       <View style={styles.sheet}>
         <RNView style={styles.head}>
           <Text style={styles.title}>Amount</Text>
-          <Pressable
+          <PressableScale
             onPress={onClose}
             hitSlop={12}
             accessibilityRole="button"
@@ -70,13 +71,13 @@ export function AmountSheet({
             testID="amount-sheet-close"
           >
             <Icon name="close" size={20} color={accent.ink} />
-          </Pressable>
+          </PressableScale>
         </RNView>
         <View style={styles.body}>{children}</View>
         {/* Same shape as `add.tsx`'s `pickingFooter` — padding on the footer
             itself, a hairline separating it from the content above. */}
         <KeyboardAwareFooter style={styles.footer}>
-          <Pressable
+          <PressableScale
             onPress={onClose}
             style={[styles.done, { backgroundColor: accent.accent }]}
             accessibilityRole="button"
@@ -84,7 +85,7 @@ export function AmountSheet({
             testID="amount-sheet-done"
           >
             <Text style={[styles.doneText, { color: accent.on }]}>Done</Text>
-          </Pressable>
+          </PressableScale>
         </KeyboardAwareFooter>
       </View>
     </Modal>

@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, TextInput } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
@@ -36,6 +36,7 @@ import {
 } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * One day's check-in.
@@ -406,7 +407,7 @@ export default function CheckinScreen() {
       </View>
 
       {/* Girths, behind a disclosure: a weekly job, not a daily one. */}
-      <Pressable
+      <PressableScale
         onPress={() => setOpenGirths((v) => !v)}
         style={styles.discloseRow}
         accessibilityRole="button"
@@ -416,7 +417,7 @@ export default function CheckinScreen() {
       >
         <Text style={styles.sectionLabel}>Measurements</Text>
         <Icon name={openGirths ? 'chevron-down' : 'chevron'} size={16} color={vola.textMuted} />
-      </Pressable>
+      </PressableScale>
 
       {openGirths && (
         <View style={styles.block}>
@@ -503,7 +504,7 @@ export default function CheckinScreen() {
             alt="Progress photo for this check-in"
           />
         ) : null}
-        <Pressable
+        <PressableScale
           onPress={() => void addPhoto()}
           disabled={saving}
           style={[styles.secondary, saving && styles.off]}
@@ -514,7 +515,7 @@ export default function CheckinScreen() {
           <Text style={[styles.secondaryText, { color: accent.ink }]}>
             {checkin?.photo_url ? 'Replace photo' : 'Add photo'}
           </Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.how}>
           Private to you. Never shown to friends, never in the feed.
         </Text>
@@ -548,7 +549,7 @@ export default function CheckinScreen() {
         </Text>
       )}
 
-      <Pressable
+      <PressableScale
         onPress={() => void save()}
         disabled={saving}
         style={[styles.primary, { backgroundColor: accent.accent }, saving && styles.off]}
@@ -559,10 +560,10 @@ export default function CheckinScreen() {
         <Text style={[styles.primaryText, { color: accent.on }]}>
           {saving ? 'Saving…' : 'Save'}
         </Text>
-      </Pressable>
+      </PressableScale>
 
       {checkin && (
-        <Pressable
+        <PressableScale
           onPress={confirmDelete}
           style={styles.delete}
           accessibilityRole="button"
@@ -570,7 +571,7 @@ export default function CheckinScreen() {
           testID="checkin-delete"
         >
           <Text style={styles.deleteText}>Delete this check-in</Text>
-        </Pressable>
+        </PressableScale>
       )}
     </KeyboardAwareScrollView>
   );

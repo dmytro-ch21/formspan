@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -6,6 +6,7 @@ import { Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { Icon } from '@/components/ui/Icon';
 import { useAccent } from '@/lib/AccentProvider';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The label above a group of cards, with an optional way out of it.
@@ -60,7 +61,7 @@ export function SectionHeader({
       </RNView>
       {!(action && onAction) && trailing}
       {action && onAction && (
-        <Pressable
+        <PressableScale
           onPress={onAction}
           hitSlop={10}
           accessibilityRole="button"
@@ -70,7 +71,7 @@ export function SectionHeader({
         >
           <Text style={[styles.actionText, { color: accent.ink }]}>{action}</Text>
           <Icon name="chevron" size={12} color={accent.ink} />
-        </Pressable>
+        </PressableScale>
       )}
     </RNView>
   );

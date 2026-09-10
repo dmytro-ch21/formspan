@@ -68,7 +68,7 @@
 
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -107,6 +107,7 @@ import {
   type TargetRead,
 } from '@/lib/targetHistory';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Which row, if any, is open — and for what.
@@ -354,7 +355,7 @@ export default function TargetHistoryScreen() {
             <Text style={styles.undoText}>
               Removed {undoable.kcal} kcal from {formatDayLong(undoable.effective_on)}.
             </Text>
-            <Pressable
+            <PressableScale
               onPress={undo}
               disabled={busy}
               hitSlop={8}
@@ -363,7 +364,7 @@ export default function TargetHistoryScreen() {
               testID="history-undo"
             >
               <Text style={[styles.undoAction, { color: accent.accent }]}>Undo</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         ) : null}
 
@@ -451,9 +452,9 @@ function Body({
           {history.diagnosis ?? 'Could not read your target history.'} It is not gone; we just could
           not ask.
         </Text>
-        <Pressable onPress={onRetry} hitSlop={8} accessibilityRole="button" testID="history-retry">
+        <PressableScale onPress={onRetry} hitSlop={8} accessibilityRole="button" testID="history-retry">
           <Text style={styles.stateAction}>Try again</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     );
   }
@@ -528,7 +529,7 @@ function Row({
 
   return (
     <View style={styles.row} testID={`history-row-${row.from}`}>
-      <Pressable
+      <PressableScale
         onPress={onToggle}
         accessibilityRole="button"
         accessibilityState={{ expanded: editing }}
@@ -553,7 +554,7 @@ function Row({
           {t.fibre_g == null ? '' : ` · ${t.fibre_g}g fibre`}
         </Text>
         <Text style={styles.source}>{sourceLabel(t.source)}</Text>
-      </Pressable>
+      </PressableScale>
 
       {editing ? (
         <View style={styles.actions}>
@@ -664,7 +665,7 @@ function AddEarlier({
 
   return (
     <View style={styles.add}>
-      <Pressable
+      <PressableScale
         onPress={onToggle}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
@@ -674,12 +675,12 @@ function AddEarlier({
         <Text style={[styles.addToggle, { color: accent.accent }]}>
           {open ? 'Cancel' : 'Add a target for an earlier day'}
         </Text>
-      </Pressable>
+      </PressableScale>
 
       {open ? (
         <>
           <View style={styles.strip}>
-            <Pressable
+            <PressableScale
               onPress={() => setAnchor(back)}
               disabled={!canGoBack}
               hitSlop={8}
@@ -689,13 +690,13 @@ function AddEarlier({
               testID="history-week-back"
             >
               <Text style={[styles.arrow, !canGoBack && styles.arrowOff]}>◀</Text>
-            </Pressable>
+            </PressableScale>
 
             {week.map((day) => {
               const allowed = canBackdateTo(day, on, floor);
               const chosen = day === pick;
               return (
-                <Pressable
+                <PressableScale
                   key={day}
                   onPress={() => setPick(day)}
                   disabled={!allowed}
@@ -718,11 +719,11 @@ function AddEarlier({
                   >
                     {day.slice(8)}
                   </Text>
-                </Pressable>
+                </PressableScale>
               );
             })}
 
-            <Pressable
+            <PressableScale
               onPress={() => setAnchor(forward)}
               disabled={!canGoForward}
               hitSlop={8}
@@ -732,7 +733,7 @@ function AddEarlier({
               testID="history-week-forward"
             >
               <Text style={[styles.arrow, !canGoForward && styles.arrowOff]}>▶</Text>
-            </Pressable>
+            </PressableScale>
           </View>
 
           {/* The choice, always visible. The strip may have been paged away

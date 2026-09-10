@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -8,6 +8,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import type { Confidence } from '@/lib/confidence';
 import type { MacroRow } from '@/lib/macroModel';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The authority card — what you are eating to, and how much to trust it.
@@ -105,7 +106,7 @@ export function TargetCard({
           )}
         </RNView>
 
-        <Pressable
+        <PressableScale
           onPress={onEdit}
           style={styles.edit}
           accessibilityRole="button"
@@ -114,7 +115,7 @@ export function TargetCard({
         >
           <Icon name="pencil" size={13} color={accent.ink} />
           <Text style={[styles.editText, { color: accent.ink }]}>Edit target</Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
 
       {/*

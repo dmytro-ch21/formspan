@@ -2,7 +2,6 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   RefreshControl,
   StyleSheet,
   useWindowDimensions,
@@ -33,6 +32,7 @@ import { useUnits } from '@/lib/useUnits';
 import { isNotFound } from '@/lib/apiError';
 import { getProfile, type Profile } from '@/lib/profile';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * "3 days" / "1 day" — the feed window read as copy (N13, #379).
@@ -347,7 +347,7 @@ export default function SocialScreen() {
         {/* The friends pane. A summary and a way through, not the whole
             management screen — adding a partner is occasional, reading the
             feed is why you opened this. */}
-        <Pressable
+        <PressableScale
           onPress={() => router.push('/friends')}
           style={styles.pane}
           accessibilityRole="button"
@@ -391,7 +391,7 @@ export default function SocialScreen() {
             </View>
           )}
           <Text style={[styles.chevron, { color: accent.ink }]}>›</Text>
-        </Pressable>
+        </PressableScale>
 
         {loadError && (
           <Text style={styles.error} accessibilityLiveRegion="polite" testID="social-error">
@@ -450,7 +450,7 @@ export default function SocialScreen() {
         )}
 
         {items !== null && items.length < total && (
-          <Pressable
+          <PressableScale
             onPress={loadMore}
             disabled={loadingMore}
             style={[styles.more, loadingMore && styles.disabled]}
@@ -461,14 +461,14 @@ export default function SocialScreen() {
             <Text style={[styles.moreText, { color: accent.ink }]}>
               {loadingMore ? 'Loading…' : 'Show older'}
             </Text>
-          </Pressable>
+          </PressableScale>
         )}
 
         {/* The nudge. Once, quietly, and only when there is something to nudge
             about — seeing a friend's training does not require sharing your
             own, so this is an offer rather than a condition. */}
         {sharing === false && items !== null && (
-          <Pressable
+          <PressableScale
             onPress={() => router.push('/settings')}
             style={styles.nudge}
             accessibilityRole="button"
@@ -478,7 +478,7 @@ export default function SocialScreen() {
             <Text style={styles.muted}>
               Your own sessions stay private. You can share them with friends in Settings.
             </Text>
-          </Pressable>
+          </PressableScale>
         )}
           </>
         }

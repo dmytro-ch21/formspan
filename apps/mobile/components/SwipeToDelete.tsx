@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { vola } from '@/constants/Colors';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Swipe a row left to reveal Delete.
@@ -199,7 +200,7 @@ export function SwipeToDelete({
         accessibilityElementsHidden={!open}
         importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
       >
-        <Pressable
+        <PressableScale
           onPress={() => {
             close();
             onDelete();
@@ -210,7 +211,7 @@ export function SwipeToDelete({
           testID={testID ? `${testID}-delete` : undefined}
         >
           <Text style={styles.deleteText}>Delete</Text>
-        </Pressable>
+        </PressableScale>
       </View>
 
       <Animated.View

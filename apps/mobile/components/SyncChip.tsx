@@ -1,9 +1,10 @@
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useSyncState, syncNow, type SyncState } from '@/lib/sync';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * A one-glance answer to "is my training safe yet?", on every tab.
@@ -61,7 +62,7 @@ export function SyncChip() {
     chip.tone === 'danger' ? vola.danger : chip.tone === 'warn' ? vola.warn : vola.textMuted;
 
   return (
-    <Pressable
+    <PressableScale
       onPress={() => {
         // A failure needs a place to go, not another attempt: the row is
         // refused permanently and retrying from here would do nothing
@@ -87,7 +88,7 @@ export function SyncChip() {
         <View style={[styles.dot, { backgroundColor: colour }]} />
         <Text style={[styles.label, { color: colour }]}>{chip.label}</Text>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 

@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput } from 'react-native';
 
 import { KeyboardAwareFlatList } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
@@ -10,6 +10,7 @@ import { fetchExercises, type Exercise } from '@/lib/exercises';
 import { fetchPinned, setPinned } from '@/lib/records';
 import { cacheExercises, cachedExercises } from '@/lib/sessionStore';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 const MAX_PINNED = 12;
 
@@ -148,7 +149,7 @@ export default function PinnedRecordsScreen() {
           renderItem={({ item }) => {
             const on = pinned.includes(item.id);
             return (
-              <Pressable
+              <PressableScale
                 onPress={() => toggle(item.id)}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: on }}
@@ -170,7 +171,7 @@ export default function PinnedRecordsScreen() {
                     {item.sport} · {item.movement_pattern.replace(/_/g, ' ')}
                   </Text>
                 </View>
-              </Pressable>
+              </PressableScale>
             );
           }}
         />

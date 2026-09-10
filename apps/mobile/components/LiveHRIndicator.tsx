@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { Animated, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
@@ -11,6 +11,7 @@ import { useLiveHR, useLiveHRFresh } from '@/lib/hrMonitor/useLiveHR';
 // the zone derivation and the live trainer could share one answer with the
 // post-session report instead of four copies. Same function, new home.
 import { zoneColor, zoneForBPM } from '@/lib/hrZones';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * N528/#958 — the live heart rate, wherever a session runs and on Today.
@@ -119,7 +120,7 @@ export function LiveHRIndicator({
 
 function RetryButton({ testID }: { testID: string }) {
   return (
-    <Pressable
+    <PressableScale
       onPress={() => void retryLiveHR()}
       accessibilityRole="button"
       accessibilityLabel="Reconnect heart-rate monitor"
@@ -128,7 +129,7 @@ function RetryButton({ testID }: { testID: string }) {
       testID={`${testID}-retry`}
     >
       <Text style={styles.retryText}>Reconnect</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

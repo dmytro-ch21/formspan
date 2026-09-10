@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
@@ -9,6 +9,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { RANGES, type TrendEmpty, type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useTrainingLoadTrend } from '@/lib/useTrainingLoadTrend';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Training load, in full — the Progress-tab trend N489/#850's acceptance
@@ -93,7 +94,7 @@ export default function TrainingLoadTrendScreen() {
               {TRAINING_LOAD_RANGES.map((r) => {
                 const on = r.key === range;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={r.key}
                     onPress={() => setRange(r.key)}
                     hitSlop={8}
@@ -103,7 +104,7 @@ export default function TrainingLoadTrendScreen() {
                     testID={`training-load-range-${r.key}`}
                   >
                     <Text style={[styles.rangeText, on && { color: accent.on }]}>{r.label}</Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </RNView>

@@ -1,10 +1,11 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import type { Projection, TrendEmpty, TrendSeries } from '@/lib/trendSeries';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The compact trend card: where you are, which way you are going, and the one
@@ -112,7 +113,7 @@ export function TrendCard({
           {emptyCopy(series.empty, title.toLowerCase())}
         </Text>
       ) : (
-        <Pressable
+        <PressableScale
           onPress={onOpen}
           disabled={!onOpen}
           accessibilityRole={onOpen ? 'button' : undefined}
@@ -129,7 +130,7 @@ export function TrendCard({
             accessibilityLabel={chartLabel(title, series, delta, unit, format, periodLabel)}
             testID="trend-card-chart"
           />
-        </Pressable>
+        </PressableScale>
       )}
 
       <RNView style={styles.foot}>
@@ -145,7 +146,7 @@ export function TrendCard({
           </Text>
           {latest ? <Text style={styles.footWhen}>{latest.on}</Text> : null}
         </RNView>
-        <Pressable
+        <PressableScale
           onPress={onAction}
           hitSlop={8}
           style={[styles.action, { backgroundColor: accent.accent }]}
@@ -158,7 +159,7 @@ export function TrendCard({
           <Text style={[styles.actionText, { color: accent.on }]} testID="trend-card-action-label">
             {actionLabel}
           </Text>
-        </Pressable>
+        </PressableScale>
       </RNView>
     </View>
   );

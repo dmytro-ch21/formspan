@@ -1,6 +1,6 @@
 import { Stack, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, StyleSheet } from 'react-native';
+import { ActivityIndicator, RefreshControl, StyleSheet } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
@@ -19,6 +19,7 @@ import {
   type SentShareCard,
   type ShareCard,
 } from '@/lib/shares';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Sharing, both directions of it — the phone's half of `/dashboard/shared`.
@@ -341,7 +342,7 @@ export default function SharedScreen() {
                 button for the same tap. Dismiss-all is deliberately absent —
                 declining is a per-card decision and nobody asked for it. */}
             {inbox.length >= 2 && (
-              <Pressable
+              <PressableScale
                 onPress={() => void acceptAll()}
                 disabled={busy !== null}
                 style={[
@@ -357,7 +358,7 @@ export default function SharedScreen() {
                 <Text style={[styles.acceptText, { color: accent.ink }]}>
                   {busy === ACCEPT_ALL ? 'Accepting…' : `Accept all ${inbox.length}`}
                 </Text>
-              </Pressable>
+              </PressableScale>
             )}
             {inbox.length === 0 ? (
               <Text style={styles.muted} testID="shared-inbox-empty">
@@ -375,7 +376,7 @@ export default function SharedScreen() {
                     </Text>
                   </View>
                   <View style={styles.cardActions}>
-                    <Pressable
+                    <PressableScale
                       onPress={() => accept(card)}
                       disabled={busy !== null}
                       style={[
@@ -393,8 +394,8 @@ export default function SharedScreen() {
                       <Text style={[styles.acceptText, { color: accent.ink }]}>
                         {busy === card.id ? 'Accepting…' : 'Accept'}
                       </Text>
-                    </Pressable>
-                    <Pressable
+                    </PressableScale>
+                    <PressableScale
                       onPress={() => dismiss(card.id)}
                       disabled={busy !== null}
                       style={[styles.decline, busy !== null && styles.disabled]}
@@ -404,7 +405,7 @@ export default function SharedScreen() {
                       testID={`share-decline-${card.id}`}
                     >
                       <Text style={styles.declineText}>Decline</Text>
-                    </Pressable>
+                    </PressableScale>
                   </View>
                   {/* N529: this card's own failure from Accept all, ON the
                       card — the summary line at the top says how many, this
@@ -448,7 +449,7 @@ export default function SharedScreen() {
                         {card.resource_label}
                       </Text>
                     </View>
-                    <Pressable
+                    <PressableScale
                       onPress={() => dismiss(card.id)}
                       disabled={busy !== null}
                       style={[styles.decline, busy !== null && styles.disabled]}
@@ -460,7 +461,7 @@ export default function SharedScreen() {
                       <Text style={styles.declineText}>
                         {busy === card.id ? 'Cancelling…' : 'Cancel'}
                       </Text>
-                    </Pressable>
+                    </PressableScale>
                   </View>
                 ))}
                 <Text style={styles.muted}>

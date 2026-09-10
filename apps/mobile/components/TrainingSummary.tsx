@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { TokenGetter } from '@/lib/useAuthToken';
-import { ActivityIndicator, Dimensions, Pressable, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, Dimensions, StyleSheet, View as RNView } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import { Text, View } from '@/components/Themed';
@@ -24,6 +24,7 @@ import {
   type SpanKey,
 } from '@/lib/history';
 import { formatVolume, type UnitSystem } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Training history on a phone — the small version, on purpose.
@@ -132,7 +133,7 @@ function SummaryBody({
         <Text style={styles.sectionLabel}>Training</Text>
         <RNView style={styles.segmented}>
           {SPANS.map((s) => (
-            <Pressable
+            <PressableScale
               key={s.key}
               onPress={() => onSpan(s.key)}
               // Four options in one row leaves each segment ~42pt wide, just
@@ -155,7 +156,7 @@ function SummaryBody({
               >
                 {s.label}
               </Text>
-            </Pressable>
+            </PressableScale>
           ))}
         </RNView>
       </RNView>

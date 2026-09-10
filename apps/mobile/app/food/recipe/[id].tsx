@@ -46,7 +46,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, TextInput, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { ShareToFriend } from '@/components/ShareToFriend';
@@ -69,6 +69,7 @@ import { savedFoodProblemCopy } from '@/lib/nutrition';
 import { shareBlockedReason } from '@/lib/shares';
 import { request, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * What we know about the recipe being edited.
@@ -350,7 +351,7 @@ export default function RecipeScreen() {
         ))
       )}
 
-      <Pressable
+      <PressableScale
         onPress={() => setPicking(true)}
         accessibilityRole="button"
         accessibilityLabel="Add an ingredient"
@@ -358,7 +359,7 @@ export default function RecipeScreen() {
         testID="recipe-add-item"
       >
         <Text style={[styles.addItemText, { color: accent.ink }]}>+ Add an ingredient</Text>
-      </Pressable>
+      </PressableScale>
 
       <SectionHeader label="One portion" />
       <View style={styles.perRow}>
@@ -387,7 +388,7 @@ export default function RecipeScreen() {
         </Text>
       ) : null}
 
-      <Pressable
+      <PressableScale
         onPress={() => void save()}
         disabled={!!problem || saving}
         accessibilityRole="button"
@@ -398,7 +399,7 @@ export default function RecipeScreen() {
         <Text style={[styles.saveText, { color: accent.on }]}>
           {load.status === 'fresh' ? 'Save recipe' : 'Save changes'}
         </Text>
-      </Pressable>
+      </PressableScale>
 
       {/* N116/#505. Only once there is a saved row to send — a `fresh`
           recipe has nothing on the server yet. Accepting stores this as the

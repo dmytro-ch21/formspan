@@ -1,6 +1,6 @@
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
@@ -14,6 +14,7 @@ import { RANGES, type TrendRangeKey } from '@/lib/trendSeries';
 import { toDisplayWeight, weightUnit } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * One lift's top set, over time — N84, row 11 of the phone-impossible audit.
@@ -83,7 +84,7 @@ export default function LoadTrendScreen() {
               {RANGES.filter((r) => r.key !== 'Plan').map((r) => {
                 const on = r.key === range;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={r.key}
                     onPress={() => setRange(r.key)}
                     hitSlop={8}
@@ -94,7 +95,7 @@ export default function LoadTrendScreen() {
                     testID={`load-trend-range-${r.key}`}
                   >
                     <Text style={[styles.rangeText, on && { color: accent.on }]}>{r.label}</Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </RNView>

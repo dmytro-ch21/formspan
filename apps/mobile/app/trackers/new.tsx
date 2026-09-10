@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
 import { Text } from '@/components/Themed';
@@ -19,6 +19,7 @@ import { cacheTracker, createTrackerLocally, MAX_LIVE_TRACKERS } from '@/lib/tra
 import * as api from '@/lib/trackersApi';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Name a thing and start tracking it, ON THE PHONE.
@@ -131,7 +132,7 @@ export default function NewTrackerScreen() {
           <View style={styles.presets}>
             <Text style={styles.sectionLabel}>Ready to go</Text>
             {presets.map((p) => (
-              <Pressable
+              <PressableScale
                 key={p.preset}
                 onPress={() => void turnOn(p)}
                 style={styles.preset}
@@ -144,7 +145,7 @@ export default function NewTrackerScreen() {
                   {p.icon ? `${p.icon}  ` : ''}
                   {p.name}
                 </Text>
-              </Pressable>
+              </PressableScale>
             ))}
             <Text style={styles.sectionLabel}>Or describe your own</Text>
           </View>
@@ -167,7 +168,7 @@ export default function NewTrackerScreen() {
           </Text>
         ) : null}
 
-        <Pressable
+        <PressableScale
           onPress={() => void create()}
           disabled={saving || !unitsReady}
           style={[styles.save, { backgroundColor: accent.accent }, saving && styles.saving]}
@@ -176,7 +177,7 @@ export default function NewTrackerScreen() {
           testID="tracker-new-save"
         >
           <Text style={[styles.saveText, { color: accent.on }]}>Start tracking it</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.hint}>
           {`You can track ${MAX_LIVE_TRACKERS} things at once. Stopping one keeps everything it recorded.`}
         </Text>

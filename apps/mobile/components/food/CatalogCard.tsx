@@ -28,13 +28,14 @@
  * row that says "Log X" and then opens a sheet is lying to a screen reader.
  */
 
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import type { CatalogFood } from '@/lib/catalogApi';
 import { glyphFor } from '@/lib/foodGlyph';
 import { servingBasisGrams } from '@/lib/foodQuantity';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export type CatalogCardProps = {
   food: CatalogFood;
@@ -107,7 +108,7 @@ export function CatalogCard({
   accentText,
 }: CatalogCardProps) {
   return (
-    <Pressable
+    <PressableScale
       style={styles.card}
       onPress={onOpen}
       accessibilityRole="button"
@@ -127,7 +128,7 @@ export function CatalogCard({
       </View>
 
       {onQuickAdd ? (
-        <Pressable
+        <PressableScale
           onPress={onQuickAdd}
           style={[styles.cardAdd, { borderColor: accentBorder }]}
           accessibilityRole="button"
@@ -138,9 +139,9 @@ export function CatalogCard({
           testID={`${testIDPrefix}-${food.id}`}
         >
           <Text style={[styles.cardAddText, { color: accentText }]}>+</Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
-    </Pressable>
+    </PressableScale>
   );
 }
 

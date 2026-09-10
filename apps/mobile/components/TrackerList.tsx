@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { CaffeineBanner } from '@/components/CaffeineBanner';
 import { Text } from '@/components/Themed';
@@ -9,6 +9,7 @@ import { COFFEE_ADD_CHOICES, caffeineMgFor } from '@/lib/coffeeCaffeine';
 import { targetCount } from '@/lib/trackerModel';
 import type { TrackerDay } from '@/lib/useTrackerDay';
 import type { UnitSystem } from '@/lib/units';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Every tracker's card, for one day.
@@ -220,7 +221,7 @@ export function TrackerList({
         );
       })}
       {collapsed ? (
-        <Pressable
+        <PressableScale
           onPress={() => setOpenFor(collapseKey ?? '')}
           style={styles.more}
           accessibilityRole="button"
@@ -232,7 +233,7 @@ export function TrackerList({
               identity, made in passing, for a disclosure row. The label already
               says what tapping does. */}
           <Text style={styles.moreText}>{moreLabel(hidden.length, outstanding)}</Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
     </>
   );

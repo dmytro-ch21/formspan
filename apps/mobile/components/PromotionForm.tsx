@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, TextInput } from 'react-native';
 
 import { Belt as BeltView, describeBelt } from '@/components/Belt';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -26,6 +26,7 @@ import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
 import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 export type EditablePromotion = PromotionInput & { id: string; photo_url?: string };
 
@@ -241,7 +242,7 @@ export function PromotionForm({
         options={{
           title: initial ? 'Edit promotion' : 'Add promotion',
           headerRight: () => (
-            <Pressable
+            <PressableScale
               onPress={save}
               // Also disabled while a just-picked photo is still being
               // resized (N456 follow-up, frontend-reviewer): saving during
@@ -254,7 +255,7 @@ export function PromotionForm({
               <Text style={[styles.headerAction, { color: accent.ink }]}>
                 {saving ? 'Saving…' : 'Save'}
               </Text>
-            </Pressable>
+            </PressableScale>
           ),
         }}
       />
@@ -282,7 +283,7 @@ export function PromotionForm({
           {BELTS.map((b) => {
             const selected = belt === b;
             return (
-              <Pressable
+              <PressableScale
                 key={b}
                 onPress={() => {
                   setBelt(b);
@@ -309,7 +310,7 @@ export function PromotionForm({
                 <Text style={[styles.chipText, selected && styles.chipTextActive]}>
                   {b.charAt(0).toUpperCase() + b.slice(1)}
                 </Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </View>
@@ -384,7 +385,7 @@ export function PromotionForm({
               testID="promotion-photo-image"
             />
           ) : null}
-          <Pressable
+          <PressableScale
             onPress={() => void pickPhoto()}
             disabled={saving || photoBusy}
             style={[styles.photoButton, (saving || photoBusy) && styles.off]}
@@ -399,7 +400,7 @@ export function PromotionForm({
                 {photoUrl ? 'Replace photo' : 'Add photo'}
               </Text>
             )}
-          </Pressable>
+          </PressableScale>
           <Text style={styles.how}>
             {initial
               ? 'Private to you. Attached right away — no need to hit Save.'
@@ -408,7 +409,7 @@ export function PromotionForm({
         </View>
 
         {initial && (
-          <Pressable
+          <PressableScale
             onPress={confirmDelete}
             disabled={saving}
             style={styles.deleteRow}
@@ -416,7 +417,7 @@ export function PromotionForm({
             testID="promotion-delete"
           >
             <Text style={styles.deleteText}>Delete this promotion</Text>
-          </Pressable>
+          </PressableScale>
         )}
       </KeyboardAwareScrollView>
     </View>
@@ -444,7 +445,7 @@ function Stepper({
         {Array.from({ length: max + 1 }, (_, n) => n).map((n) => {
           const selected = value === n;
           return (
-            <Pressable
+            <PressableScale
               key={n}
               onPress={() => onChange(n)}
               style={[
@@ -460,7 +461,7 @@ function Stepper({
               testID={`${testID}-${n}`}
             >
               <Text style={[styles.stepperText, selected && styles.stepperTextActive]}>{n}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>

@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useAuth } from '@clerk/clerk-expo';
@@ -21,6 +21,7 @@ import { emptySet, swapExercise } from '@/lib/sessions';
 import { readLocalSession, saveLocalSets } from '@/lib/sessionStore';
 import { fetchExercise, type Exercise } from '@/lib/exercises';
 import { request as requestSync } from '@/lib/sync';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Point the camera at a machine you cannot name (N44).
@@ -287,7 +288,7 @@ export default function IdentifyMachineScreen() {
           The photo is sent to VOLA to identify the machine and is not stored.
         </Text>
 
-        <Pressable
+        <PressableScale
           onPress={() => void photograph()}
           disabled={busy}
           accessibilityRole="button"
@@ -295,7 +296,7 @@ export default function IdentifyMachineScreen() {
           style={[styles.shoot, { backgroundColor: accent.accent }, busy && styles.shootBusy]}
         >
           {busy ? <ActivityIndicator /> : <Text style={[styles.shootText, { color: accent.on }]}>Take a photo</Text>}
-        </Pressable>
+        </PressableScale>
 
         {/* Announced, and coloured. It rendered in the same weight as the lead
             copy while both sibling screens use `vola.danger`, and a VoiceOver
@@ -348,7 +349,7 @@ export default function IdentifyMachineScreen() {
                 badge. Every candidate is an equal tap — see the note at the top
                 of this file for why that is load-bearing rather than styling. */}
             {result.candidates.map((c) => (
-              <Pressable
+              <PressableScale
                 key={c.exercise_id}
                 onPress={() => void choose(c.exercise_id)}
                 disabled={committing !== null}
@@ -358,7 +359,7 @@ export default function IdentifyMachineScreen() {
               >
                 <Text style={styles.candidateName}>{c.name}</Text>
                 {committing === c.exercise_id ? <ActivityIndicator /> : null}
-              </Pressable>
+              </PressableScale>
             ))}
             <Text style={styles.none}>
               None of these? Go back and search for it by name.

@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * A section whose header folds it away.
@@ -67,7 +68,7 @@ export function CollapsibleSection({
   return (
     <RNView style={styles.wrap}>
       <RNView style={styles.head}>
-        <Pressable
+        <PressableScale
           onPress={onToggle}
           hitSlop={{ top: 8, bottom: 8 }}
           style={styles.toggle}
@@ -79,7 +80,7 @@ export function CollapsibleSection({
         >
           <Text style={styles.label}>{label.toUpperCase()}</Text>
           <Icon name={open ? 'chevron-down' : 'chevron'} size={12} color={vola.textDim} />
-        </Pressable>
+        </PressableScale>
         {info}
         <RNView style={styles.trailing}>{trailing}</RNView>
       </RNView>
