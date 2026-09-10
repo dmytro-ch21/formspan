@@ -67926,6 +67926,48 @@ mutation was applied, run, reverted, and the green re-established by
   desk activity, web needs the same midpoint arithmetic — not a number lifted off
   a rendered row.
 
+## 2026-09-09 — W25: the overtake red belongs to the calorie ring alone
+
+N554 shipped the overtake gradient tinted red on all four macros, with the
+concern already written into its own ticket and PR: the `vola-athlete-ux`
+no-shame rule forbids guilt framing in **mechanics**, and red-as-warning
+judges going over as bad — untrue for protein or fibre, where over is usually
+the point. The athlete's correction came back immediately: *"only apply the
+red to calories, not the other macros."*
+
+Every ring still darkens, so the gradient still says how far past target it
+went. Only the calorie ring says it in a warning colour. Untinted ends, all
+clearing 3.2:1: protein `#3E68A8` (ΔE 19.80), fat `#7F6515` (22.97), carbs
+`#537314` (39.26), fibre `#A54383` (12.80 — the tightest, and the number the
+test's bound is set by).
+
+**Three test metrics were wrong before any code was, all the same mistake.**
+Each conflated lightness with hue:
+
+1. N554's first attempt asserted "ends red-shifted" as a red/blue channel
+   RATIO. Fat `#CAA021` has r/b 6.12, HIGHER than the red anchor's own 5.92,
+   so mixing it toward red lowers the ratio while plainly moving it red.
+2. This ticket's first attempt asserted the macros end "no nearer red" by
+   ΔE to the anchor. **Darkening alone moves a colour nearer a DARK red** —
+   measured, every macro drops 7–29 ΔE purely by losing light. Distance to
+   red cannot tell a tint from a dim.
+3. The one that holds: an untinted end is a pure channel SCALE, so its
+   channel ratios are unchanged and only its lightness moved. That is the
+   property, stated directly.
+
+The pattern is worth keeping: reaching for a scalar proxy (a ratio, a
+distance) when the claim is about one dimension of a colour, and picking a
+proxy that moves with both.
+
+**And a mutation survived, which found the real gap.** The library tests prove
+`overtakeEnd(hex, surface, tint)` behaves for either value of `tint`, and say
+nothing about which ring the screen passes `true` for — swapping `kcal` for
+`protein` in `MacroRings` left all 35 green. Same shape as W21's prune landing
+on the wrong branch of a mount effect: a correct function, called wrongly,
+with a suite blind to the call site. A source-level guard now asserts the
+component asks for the tint on `kcal` and no other, the way
+`hrReportWiring.test.ts` does for the HR screens.
+
 ## Open items / known gaps as of this entry
 
 
