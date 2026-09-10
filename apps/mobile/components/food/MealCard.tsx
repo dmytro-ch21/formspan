@@ -102,7 +102,7 @@
  */
 
 import { useState, type Ref } from 'react';
-import { Pressable, StyleSheet, View as RNView } from 'react-native';
+import { StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
@@ -113,6 +113,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { macroColor } from '@/lib/macroModel';
 import { fmtAmount, type Entry, type Macros, type Meal } from '@/lib/nutrition';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * The three-macro-dot line — shared with {@link FoodSummaryCard}, which
@@ -284,7 +285,7 @@ export function MealCard({
       accessibilityState={isDropTarget ? { selected: true } : undefined}
     >
       <RNView style={styles.headerRow}>
-        <Pressable
+        <PressableScale
           style={styles.headerToggle}
           onPress={() => {
             if (!selecting) setExpanded((e) => !e);
@@ -326,14 +327,14 @@ export function MealCard({
               : label}
           </Text>
           <Icon name={effectiveExpanded ? 'chevron-down' : 'chevron'} size={13} color={vola.textDim} />
-        </Pressable>
+        </PressableScale>
         {/* N553 — the way OUT of edit mode, in the slot Combine occupies, and
             never both at once: a card in edit mode is not a card you start a
             selection from. A visible exit is not optional — edit mode is
             entered by a gesture, and a mode with no stated way out is one the
             athlete escapes by leaving the screen. */}
         {editing && onDoneEditing ? (
-          <Pressable
+          <PressableScale
             onPress={onDoneEditing}
             hitSlop={10}
             accessibilityRole="button"
@@ -341,21 +342,21 @@ export function MealCard({
             testID={testID ? `${testID}-reorder-done` : undefined}
           >
             <Text style={[styles.combineLink, { color: addColor }]}>Done</Text>
-          </Pressable>
+          </PressableScale>
         ) : null}
         {/* Two or more rows only — combining one thing with nothing is not a
             meal, it is the entry that is already there. Offered only while
             expanded: starting a selection on rows the section is currently
             hiding makes no sense. */}
         {effectiveExpanded && !selecting && !editing && entries.length >= 2 && onStartCombine ? (
-          <Pressable
+          <PressableScale
             onPress={onStartCombine}
             accessibilityRole="button"
             accessibilityLabel={`Combine entries in ${label}`}
             testID={testID ? `${testID}-combine-start` : undefined}
           >
             <Text style={[styles.combineLink, { color: addColor }]}>Combine</Text>
-          </Pressable>
+          </PressableScale>
         ) : null}
       </RNView>
 
@@ -446,7 +447,7 @@ export function MealCard({
 
       {selecting ? (
         <RNView style={styles.combineBar} testID={testID ? `${testID}-combine-bar` : undefined}>
-          <Pressable
+          <PressableScale
             onPress={onCancelCombine}
             style={styles.combineCancel}
             hitSlop={12}
@@ -455,8 +456,8 @@ export function MealCard({
             testID={testID ? `${testID}-combine-cancel` : undefined}
           >
             <Text style={styles.combineCancelText}>Cancel</Text>
-          </Pressable>
-          <Pressable
+          </PressableScale>
+          <PressableScale
             onPress={onConfirmCombine}
             disabled={selectedCount < 2}
             accessibilityRole="button"
@@ -476,10 +477,10 @@ export function MealCard({
             <Text style={[styles.combineConfirmText, { color: accent.on }]}>
               {selectedCount < 2 ? 'Combine into a meal' : `Combine ${selectedCount} into a meal`}
             </Text>
-          </Pressable>
+          </PressableScale>
         </RNView>
       ) : (
-        <Pressable
+        <PressableScale
           style={styles.add}
           onPress={onAdd}
           accessibilityRole="button"
@@ -488,7 +489,7 @@ export function MealCard({
         >
           <Icon name="plus" size={13} color={addColor} />
           <Text style={[styles.addText, { color: addColor }]}>Add Food</Text>
-        </Pressable>
+        </PressableScale>
       )}
     </RNView>
   );

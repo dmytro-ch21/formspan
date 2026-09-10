@@ -45,7 +45,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { randomUUID } from 'expo-crypto';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import {
   KeyboardAwareFooter,
@@ -84,6 +84,7 @@ import {
 import { request } from '@/lib/sync';
 import { momentumOpenFoodHref } from '@/lib/todayBoard';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * A catalog answer, tied to the query it answers.
@@ -432,14 +433,14 @@ export default function AddFoodScreen() {
         <View style={styles.pickingScreen}>
           <Stack.Screen options={{ title: 'How much?' }} />
           <KeyboardAwareScrollView contentContainerStyle={styles.scroll}>
-            <Pressable
+            <PressableScale
               onPress={() => setPicking(null)}
               accessibilityRole="button"
               accessibilityLabel="Back to search results"
               testID="food-quantity-cancel"
             >
               <Text style={styles.rowServing}>← Back</Text>
-            </Pressable>
+            </PressableScale>
             <FoodQuantity
               food={picking}
               busy={pickBusy}
@@ -475,7 +476,7 @@ export default function AddFoodScreen() {
               {MEALS.map((m) => {
                 const on = m === meal;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={m}
                     onPress={() => setMeal(m)}
                     style={[styles.slotPill, on && { backgroundColor: accent.accent }]}
@@ -487,14 +488,14 @@ export default function AddFoodScreen() {
                     <Text style={[styles.slotText, on && { color: accent.on }]}>
                       {mealLabel(m)}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </View>
           </KeyboardAwareScrollView>
 
           <KeyboardAwareFooter style={styles.pickingFooter}>
-            <Pressable
+            <PressableScale
               onPress={() => canConfirm && void logCatalog(picking, grams)}
               disabled={!canConfirm}
               accessibilityRole="button"
@@ -507,7 +508,7 @@ export default function AddFoodScreen() {
                   ? `Log · ${Math.round(quantityState.macros.kcal)} kcal`
                   : 'Log'}
               </Text>
-            </Pressable>
+            </PressableScale>
           </KeyboardAwareFooter>
         </View>
       </KeyboardAwareScreen>
@@ -545,7 +546,7 @@ export default function AddFoodScreen() {
         {MEALS.map((m) => {
           const on = m === meal;
           return (
-            <Pressable
+            <PressableScale
               key={m}
               onPress={() => setMeal(m)}
               style={[styles.slotPill, on && { backgroundColor: accent.accent }]}
@@ -555,7 +556,7 @@ export default function AddFoodScreen() {
               testID={`add-slot-${m}`}
             >
               <Text style={[styles.slotText, on && { color: accent.on }]}>{mealLabel(m)}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -575,7 +576,7 @@ export default function AddFoodScreen() {
         {SCOPES.map((sc) => {
           const on = sc.key === scope;
           return (
-            <Pressable
+            <PressableScale
               key={sc.key}
               onPress={() => setScope(sc.key)}
               style={[styles.scopePill, on && { backgroundColor: accent.accent }]}
@@ -585,7 +586,7 @@ export default function AddFoodScreen() {
               testID={`add-scope-${sc.key}`}
             >
               <Text style={[styles.scopeText, on && { color: accent.on }]}>{sc.label}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -594,7 +595,7 @@ export default function AddFoodScreen() {
 
       {shown.map((f) => (
         <View key={f.id} style={styles.savedRow}>
-          <Pressable
+          <PressableScale
             style={[styles.row, styles.savedTap]}
             onPress={() => void log(f)}
             accessibilityRole="button"
@@ -608,14 +609,14 @@ export default function AddFoodScreen() {
               <Text style={styles.rowServing}>{f.serving_label}</Text>
             </View>
             <Text style={styles.rowKcal}>{Math.round(f.kcal)}</Text>
-          </Pressable>
+          </PressableScale>
           {/* A SEPARATE control, not a long-press or a swipe. Tapping the row
               still logs — that two-tap repeat is the whole point of this list,
               and a screen that sometimes navigates instead of logging would
               break the muscle memory it depends on. N114 makes these rows
               correctable, which is what stops a stored wrong number coming
               back forever, so the affordance has to be visible. */}
-          <Pressable
+          <PressableScale
             onPress={() =>
               // **A recipe must NOT open the saved-food editor (N87).** That
               // screen edits per-serving macros and knows nothing about a yield
@@ -634,12 +635,12 @@ export default function AddFoodScreen() {
             testID={`add-food-edit-${f.id}`}
           >
             <Text style={styles.rowEdit}>Edit</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       ))}
 
       {scope === 'recipes' ? (
-        <Pressable
+        <PressableScale
           onPress={() =>
             // A client-generated UUID, which is what makes the save idempotent
             // — the same id sent twice is the same row. `fresh` is explicit so
@@ -658,7 +659,7 @@ export default function AddFoodScreen() {
           <Text style={[styles.newRecipeText, { color: accent.ink }]}>
             + Build a recipe
           </Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
 
       {shown.length === 0 && (
@@ -676,7 +677,7 @@ export default function AddFoodScreen() {
           list's rows exist to be tapped for the two-tap repeat, and a Delete
           button beside each one is exactly the affordance N114's own comment
           warned against turning into a second, riskier way to hit this list. */}
-      <Pressable
+      <PressableScale
         onPress={() => router.push('/food/saved')}
         style={styles.manageLink}
         accessibilityRole="button"
@@ -684,7 +685,7 @@ export default function AddFoodScreen() {
         testID="add-manage-saved"
       >
         <Text style={styles.manageLinkText}>Manage your saved foods</Text>
-      </Pressable>
+      </PressableScale>
 
       {/* The catalog, as a SECOND section rather than merged into the first.
           The athlete's own foods are theirs and carry their own serving sizes;
@@ -769,7 +770,7 @@ export default function AddFoodScreen() {
           exactly leads the group. */}
       <SectionHeader label="Can't find it?" />
       <View style={styles.groupedChoice}>
-        <Pressable
+        <PressableScale
           style={styles.choiceOption}
           onPress={() => router.push(`/food/scan?meal=${meal}&date=${date}`)}
           accessibilityRole="button"
@@ -778,9 +779,9 @@ export default function AddFoodScreen() {
         >
           <Icon name="plus" size={16} color={accent.ink} />
           <Text style={[styles.choiceText, { color: accent.ink }]}>Scan a barcode</Text>
-        </Pressable>
+        </PressableScale>
         <View style={styles.choiceDivider} />
-        <Pressable
+        <PressableScale
           style={styles.choiceOption}
           onPress={() =>
             router.push(
@@ -793,9 +794,9 @@ export default function AddFoodScreen() {
         >
           <Icon name="plus" size={16} color={accent.ink} />
           <Text style={[styles.choiceText, { color: accent.ink }]}>Photograph it</Text>
-        </Pressable>
+        </PressableScale>
         <View style={styles.choiceDivider} />
-        <Pressable
+        <PressableScale
           style={styles.choiceOption}
           onPress={() =>
             router.push(
@@ -808,11 +809,11 @@ export default function AddFoodScreen() {
         >
           <Icon name="plus" size={16} color={accent.ink} />
           <Text style={[styles.choiceText, { color: accent.ink }]}>Describe it</Text>
-        </Pressable>
+        </PressableScale>
       </View>
 
       {q.trim().length > 0 && !exact && (
-        <Pressable
+        <PressableScale
           style={styles.newRow}
           onPress={() => setCreating(true)}
           accessibilityRole="button"
@@ -821,7 +822,7 @@ export default function AddFoodScreen() {
         >
           <Icon name="plus" size={14} color={accent.ink} />
           <Text style={[styles.newText, { color: accent.ink }]}>Add “{q.trim()}”</Text>
-        </Pressable>
+        </PressableScale>
       )}
     </KeyboardAwareScrollView>
   );
@@ -915,7 +916,7 @@ function NewFood({
         </Text>
       )}
 
-      <Pressable
+      <PressableScale
         onPress={() => setOpenFibre((v) => !v)}
         style={styles.disclose}
         accessibilityRole="button"
@@ -924,7 +925,7 @@ function NewFood({
       >
         <Text style={styles.fieldLabel}>Fibre</Text>
         <Icon name={openFibre ? 'chevron-down' : 'chevron'} size={16} color={vola.textMuted} />
-      </Pressable>
+      </PressableScale>
       {openFibre && (
         <TextInput
           style={styles.input}
@@ -940,7 +941,7 @@ function NewFood({
       )}
 
       <View style={styles.actions}>
-        <Pressable
+        <PressableScale
           onPress={async () => {
             if (!name.trim() || saving) return;
             setSaving(true);
@@ -979,10 +980,10 @@ function NewFood({
           <Text style={[styles.primaryText, { color: accent.on }]}>
             {saving ? 'Saving…' : 'Save and log'}
           </Text>
-        </Pressable>
-        <Pressable onPress={onCancel} style={styles.secondary} accessibilityRole="button">
+        </PressableScale>
+        <PressableScale onPress={onCancel} style={styles.secondary} accessibilityRole="button">
           <Text style={styles.secondaryText}>Back</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </KeyboardAwareScrollView>
   );

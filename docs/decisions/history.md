@@ -68558,6 +68558,38 @@ drift, and asserts nothing in the app reaches for `Heavy`. Mutation-checked
 both ways: reverting the start impact to `Light`, and softening the rest-end
 alert to an impact.
 
+## 2026-09-10 — F48 tranche two: the food-logging path
+
+59 pressables across the six screens that make up describing, scanning,
+picking and correcting a meal: `food/add`, `food/scan`, `food/describe`,
+`food/entry/[id]`, `IngredientPicker`, `MealCard`. **79 → 73 files, 309 → 250
+pressables.**
+
+Chosen next because `vola-athlete-ux` calls nutrition the highest-frequency
+logging in the app — 3–6× a day, more often than training. Tranche one took
+the surface touched hardest *within* a session; this takes the one touched
+most *across* a day.
+
+Checked before converting, not after: no render-prop styles or children
+anywhere in the six, and the only `absoluteFill` match was a `CameraView` in
+`food/scan.tsx` rather than a dismiss target. Both classes F48 exempts —
+backdrops and full-bleed rows — are absent here, which is why this tranche
+could be swept rather than argued file by file.
+
+**I repeated tranche one's own recorded mistake, exactly.** Undoing a mutation
+with `git checkout components/food/MealCard.tsx` reverts to HEAD, which threw
+away that file's real conversion — the same error, on the same kind of file,
+one tranche after writing it down. The RESTORED re-run caught it again, which
+is the whole reason the rule is to confirm a restore by re-running rather than
+by assuming. Writing a lesson down is not the same as learning it; the
+re-run is what actually holds. **In a dirty worktree, a mutation is undone
+from a file copy, never from git.**
+
+The scripted conversion also failed on `MealCard` first time round — its
+imports sit past line 100 and the script only scanned the first 100 lines, so
+it threw before writing. It threw rather than silently skipping, which is the
+right failure, and the five files already written were unaffected.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
