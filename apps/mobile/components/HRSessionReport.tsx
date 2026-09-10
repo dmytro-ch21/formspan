@@ -16,6 +16,7 @@ import {
 } from '@/lib/hrSessionReport';
 import { zoneBpmLabel, zoneBpmRanges } from '@/lib/hrZones';
 import type { HRTimelinePoint } from '@/lib/hrTimeline';
+import { timelineCaption } from '@/lib/hrTimelineAxis';
 import type { ExerciseHR, SessionMetrics } from '@/lib/biometric';
 import { useEffect, useRef, useState } from 'react';
 
@@ -53,6 +54,13 @@ import {
  * case, so it is additive exactly the way `sessionRPE` was. See
  * `lib/hrTimeline.ts`'s doc comment for why this renders the raw shape
  * rather than a classified drill/roll boundary.
+ *
+ * **Build it from `metrics.hr_window_start/end`, never from the session's own
+ * logged times (N545/#988).** Those two differ exactly when W19/#985
+ * preferred the watch's own workout window, or N522/#934 fitted one, because
+ * the logged window was the wrong place to look — so a timeline built over
+ * the logged window would draw a real curve under numbers computed from a
+ * different stretch of time. The caption says which origin `0m` is.
  *
  * `exerciseHR`/`exerciseNames` (N490/#851) are optional, strength-only
  * additions: BJJ and running have no per-exercise concept, so their call
@@ -266,9 +274,26 @@ export function HRSessionReport({
         // see lib/hrTimeline.ts's doc comment for why. `styles.zones`'s card
         // treatment reused verbatim so this reads as one more piece of real
         // evidence, not a different kind of thing from the zone bars below it.
+        //
+        // N545/#988 gave it a time axis, a bpm ladder and a marked peak — and
+        // the caption is where the axis admits its own origin. `0m` is the
+        // start of the window the numbers above were computed from, which is
+        // the session's own start unless W19/#985 preferred the watch's
+        // workout window; when those differ the caption names the clock time
+        // rather than silently renumbering the athlete's session.
         <RNView style={styles.zones} testID={`${testID}-timeline`}>
-          <Text style={styles.timelineCaption}>Heart rate across the session</Text>
-          <HRTimelineChart points={hrTimeline} testID={`${testID}-timeline-chart`} />
+          <Text style={styles.timelineCaption} testID={`${testID}-timeline-caption`}>
+            {timelineCaption(
+              timelineWindowDiffers(report.hrWindow, sessionStartedAt, sessionEndedAt),
+              formatClockTime(report.hrWindow.start),
+            )}
+          </Text>
+          <HRTimelineChart
+            points={hrTimeline}
+            hrMaxBPM={metrics?.hr_max_bpm ?? null}
+            avgBPM={report.avgHR}
+            testID={`${testID}-timeline-chart`}
+          />
         </RNView>
       )}
 
@@ -327,6 +352,22 @@ function formatClockTime(iso: string): string {
 }
 
 /**
+ * The same "is this mismatch worth saying out loud" test `HRWindowMismatchNote`
+ * applies, reused by the timeline caption so the two cannot disagree about
+ * whether this session's heart rate came from somewhere other than its logged
+ * window. `false` when the caller passed no session times — nothing to compare
+ * against is not the same as a difference.
+ */
+function timelineWindowDiffers(
+  hrWindow: HRQueriedWindow,
+  sessionStartedAt: string | undefined,
+  sessionEndedAt: string | undefined,
+): boolean {
+  if (!sessionStartedAt || !sessionEndedAt) return false;
+  return hrWindowDiffersFromSession(hrWindow, sessionStartedAt, sessionEndedAt);
+}
+
+/**
  * N522/#934's diagnostic line — see this component's own doc comment on
  * `sessionStartedAt`/`sessionEndedAt` for the full reasoning. Renders
  * nothing unless BOTH session times were passed AND
@@ -343,8 +384,8 @@ function HRWindowMismatchNote({
   sessionEndedAt: string | undefined;
   testID: string;
 }) {
+  if (!timelineWindowDiffers(hrWindow, sessionStartedAt, sessionEndedAt)) return null;
   if (!sessionStartedAt || !sessionEndedAt) return null;
-  if (!hrWindowDiffersFromSession(hrWindow, sessionStartedAt, sessionEndedAt)) return null;
   return (
     <Text style={styles.windowNote} testID={testID}>
       Heart rate found {formatClockTime(hrWindow.start)}–{formatClockTime(hrWindow.end)} (session logged{' '}

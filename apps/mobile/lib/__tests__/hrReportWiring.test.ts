@@ -205,3 +205,38 @@ describe('finishing a session kicks enrichment whichever path it was on', () => 
     expect(src).toContain('triggerHealthConnectSyncNow');
   });
 });
+
+/**
+ * N545/#988 — the chart's window must be the window the NUMBERS came from.
+ *
+ * W19/#985 moved a session's heart rate off the athlete's typed start/end and
+ * onto the watch's own workout window, because a 90-minute class was being
+ * scored almost entirely from pre-class background readings. A timeline built
+ * over the logged window would draw a real curve, with a real time axis and a
+ * marked peak, underneath an avg/max/TRIMP measured from a different stretch
+ * of time — the same bug W19 fixed, re-entered through the chart.
+ *
+ * Checked at the source level for the same reason as everything else in this
+ * file: the invariant spans a fetch, a pure builder and a component, and no
+ * unit test can see all three at once. `hrTimelineAxis.test.ts` covers what
+ * the chart does with the window; this covers which window it is handed.
+ */
+describe('the session HR timeline is built from the metrics window, not the logged one', () => {
+  const SCREEN = 'app/bjj/session/[id].tsx';
+
+  it('fetches the samples over the metrics window', () => {
+    const src = screenSource(SCREEN);
+    expect(src).toContain('hrMetrics?.hr_window_start');
+    expect(src).toContain('hrMetrics?.hr_window_end');
+    expect(src).toContain("listBiometricSamples(getToken, 'heart_rate', hrWindowStart, hrWindowEnd)");
+  });
+
+  it('builds the timeline over that same window', () => {
+    expect(screenSource(SCREEN)).toContain('buildHRTimeline(samples, hrWindowStart, hrWindowEnd)');
+  });
+
+  it('no longer builds it over the session’s own logged times', () => {
+    const src = screenSource(SCREEN);
+    expect(src).not.toContain('buildHRTimeline(samples, startedAt, endedAt)');
+  });
+});

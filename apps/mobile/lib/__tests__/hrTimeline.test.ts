@@ -102,3 +102,60 @@ test('a real single-minute spike survives averaging as a visible bump, not disap
   const peak = Math.max(...points.map((p) => p.bpm));
   expect(peak).toBeGreaterThan(120); // averaged, but the bump still reads as elevated
 });
+
+/**
+ * N545/#988 — the peak has to survive downsampling, at its own real time,
+ * because the chart now MARKS it and labels it with that time. A bucket
+ * average under a "Max HR 185" stat computed by the backend from the same
+ * window would be the app disagreeing with itself about the hardest moment
+ * of the session.
+ */
+test('the true peak survives downsampling — the exact reading, at the exact minute', () => {
+  // 600 one-second samples across 10 minutes, flat at 120 except a single
+  // reading of 191 at 6 minutes 30 seconds in.
+  const samples: RawHRReading[] = [];
+  for (let sec = 0; sec < 600; sec++) {
+    samples.push(reading(sec / 60, sec === 390 ? 191 : 120));
+  }
+  const points = buildHRTimeline(
+    samples,
+    START,
+    new Date(new Date(START).getTime() + 10 * 60000).toISOString(),
+  );
+  expect(points.length).toBeLessThanOrEqual(MAX_TIMELINE_POINTS);
+  const peak = points.reduce((best, p) => (p.bpm > best.bpm ? p : best), points[0]);
+  expect(peak.bpm).toBe(191);
+  expect(peak.minutesElapsed).toBeCloseTo(6.5, 6);
+});
+
+test('preserving the peak does not reorder the series', () => {
+  const samples: RawHRReading[] = [];
+  for (let sec = 0; sec < 600; sec++) {
+    samples.push(reading(sec / 60, sec === 390 ? 191 : 120));
+  }
+  const points = buildHRTimeline(
+    samples,
+    START,
+    new Date(new Date(START).getTime() + 10 * 60000).toISOString(),
+  );
+  for (let i = 1; i < points.length; i++) {
+    expect(points[i].minutesElapsed).toBeGreaterThanOrEqual(points[i - 1].minutesElapsed);
+  }
+});
+
+test('every other bucket is still averaged, not passed through', () => {
+  // A sawtooth with one true peak: away from the peak's own bucket the
+  // output must sit strictly between the extremes it was built from.
+  const samples: RawHRReading[] = [];
+  for (let sec = 0; sec < 600; sec++) {
+    samples.push(reading(sec / 60, sec === 390 ? 191 : sec % 2 === 0 ? 100 : 140));
+  }
+  const points = buildHRTimeline(
+    samples,
+    START,
+    new Date(new Date(START).getTime() + 10 * 60000).toISOString(),
+  );
+  const firstBucket = points[0];
+  expect(firstBucket.bpm).toBeGreaterThan(100);
+  expect(firstBucket.bpm).toBeLessThan(140);
+});

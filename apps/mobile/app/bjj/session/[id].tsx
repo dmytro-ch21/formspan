@@ -421,15 +421,25 @@ export default function BjjSessionScreen() {
   // slow on its own without holding up the report's other numbers. Best-
   // effort and non-blocking, same posture as the fetch above: a failure here
   // just means no timeline renders, never an error surfaced to the athlete.
+  //
+  // N545/#988: the window is the METRICS' own `hr_window_start/end`, not the
+  // session's logged started_at/ended_at. W19/#985 moved a session's heart
+  // rate onto the watch's own workout window precisely because the logged
+  // one was scoring a 90-minute class off pre-class background readings — so
+  // a chart drawn over the logged window would put a real curve underneath
+  // an avg/max/TRIMP measured from somewhere else, which is a fresh instance
+  // of the bug W19 fixed. Gated on `hrMetrics` for the same reason: with no
+  // metrics row there is no window to be right about, and the report renders
+  // its 'unavailable' state rather than a timeline anyway.
   const [hrTimeline, setHrTimeline] = useState<HRTimelinePoint[]>([]);
+  const hrWindowStart = hrMetrics?.hr_window_start;
+  const hrWindowEnd = hrMetrics?.hr_window_end;
   useEffect(() => {
-    const startedAt = session?.started_at;
-    const endedAt = session?.ended_at;
-    if (!id || !startedAt || !endedAt) return;
+    if (!id || !hrWindowStart || !hrWindowEnd) return;
     let cancelled = false;
-    listBiometricSamples(getToken, 'heart_rate', startedAt, endedAt)
+    listBiometricSamples(getToken, 'heart_rate', hrWindowStart, hrWindowEnd)
       .then((samples) => {
-        if (!cancelled) setHrTimeline(buildHRTimeline(samples, startedAt, endedAt));
+        if (!cancelled) setHrTimeline(buildHRTimeline(samples, hrWindowStart, hrWindowEnd));
       })
       .catch(() => {
         if (!cancelled) setHrTimeline([]);
@@ -437,7 +447,7 @@ export default function BjjSessionScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, session?.started_at, session?.ended_at, getToken]);
+  }, [id, hrWindowStart, hrWindowEnd, getToken]);
 
   /**
    * Delete and Finish, which live here because nothing else offers them.
