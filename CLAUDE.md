@@ -984,6 +984,50 @@ of those had a green check suite.
 Give the reviewers the design intent along with the diff — they find far
 more when they know which properties are load-bearing.
 
+## The interface bar: motion and Apple's design principles
+
+Seven skills vendored from [emilkowalski/skills](https://github.com/emilkowalski/skills)
+(MIT) live in `.claude/skills/` and carry the bar for anything an athlete
+looks at. `.claude/skills/ATTRIBUTION.md` records what each is and the upstream
+commit. They **complement** `vola-design-system` and `vola-athlete-ux` rather
+than replacing them: those two say what VOLA's interface must be, these say
+what a good interface is generally. **Where they disagree, the `vola-*` skills
+win** — the no-glow ruling, the no-streak mechanics and the mobile-chart
+carve-out are this product's decisions and are not up for re-litigation by a
+general rubric.
+
+| Use | Skill |
+|---|---|
+| Building or reviewing any screen's feel, depth, typography, gestures | `apple-design` |
+| Writing animation in `apps/mobile` | `animate-expo` |
+| Reviewing a motion diff (**`/review-animations`**, user-invoked) | `review-animations` |
+| Auditing motion across an app and planning fixes | `improve-animations` |
+| Asking whether something *should* animate | `find-animation-opportunities` |
+| Naming an effect precisely before asking for it | `animation-vocabulary` |
+| Choosing a frontend library (**`/pick-ui-library`**, user-invoked) | `pick-ui-library` |
+
+**Two of them never fire on their own.** `review-animations` and
+`pick-ui-library` are `disable-model-invocation: true` upstream, preserved
+deliberately. `/pre-merge` step 4 is the one place `review-animations` is
+required, and it will not trigger itself — see that skill for why a motion diff
+that skipped it still looks fully reviewed.
+
+**The bar these encode was measured against this repo on 2026-09-09**, and the
+result is in `docs/design/motion-audit-2026-09/`: three independent audits,
+~50 findings collapsing to 16 units of work, filed as N556–N561, F38–F46, L14
+and H22. Read the merged document's **"Do NOT do these"** section before adding
+motion anywhere — it is the part a later enthusiasm pass will otherwise undo.
+Two lines from it are load-bearing enough to restate here:
+
+- **Nothing on the set-logging path may grow a duration.**
+  `apps/mobile/app/session/[id].tsx` contains no animation at all, and that is
+  the feature, not an omission. Press *feedback* is the single exemption, and
+  only because it is 0ms on the way in.
+- **No motion that rewards frequency.** A pulsing sync chip, a throb on a
+  logged day, a glow that intensifies with a run — each is streak pressure
+  moved into the motion channel, and each would pass a copy review while
+  violating `vola-athlete-ux` in mechanics.
+
 ## Keep the README current (hard rule)
 
 [README.md](README.md) is the first thing anyone (human or AI) sees — it drifted stale once already (still described a two-app, four-endpoint repo well after `apps/mobile`/`apps/admin` and several backend modules existed) because, unlike the two rules above, nothing required it to be updated. Whenever a new app, a new top-level backend route, or a new "how do I run this locally" step lands, **update README.md's "Current state" and "Run it locally" sections** as part of finishing that work. It should always be accurate enough that "how do I start X" never needs to be answered from outside it.
@@ -1187,6 +1231,7 @@ every spawn. The entries below are the ones general enough to stay here.
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
+- [docs/design/motion-audit-2026-09/](docs/design/motion-audit-2026-09/) — three independent audits of the interface against `apple-design` / `improve-animations` / `find-animation-opportunities`, merged into 16 units of work. Start at `00-merged.md`; its **"Do NOT do these"** list is the part worth reading before adding motion anywhere.
 - [docs/testing/device-checks.md](docs/testing/device-checks.md) — the ranked script for what **no test can reach**: camera, microphone, keyboard, speaker, permission prompts, safe areas, a gym with no signal. Measured, not guessed — 44 of 93 mobile screens/components execute zero statements under the suite, and 0 of 40 web/admin pages have a test that renders them.
 - **The open list — GitHub Issues on the [`VOLA` board](https://github.com/users/dmytro-ch21/projects/2)**: every known gap, fix and queued feature
 - [docs/TASKS.md](docs/TASKS.md) — the archive of that list up to 2026-08-20, and the live home of the `T` traps

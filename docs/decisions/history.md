@@ -68262,6 +68262,80 @@ told **no**, three times, in the file that owns the type. Found by
 `frontend-reviewer`; worth recording because the class is general: **the
 comments a change falsifies are rarely the ones it edits.**
 
+### 2026-09-09 — H22: the interface bar becomes the repo's, and three audits say where it stands
+
+**What.** Seven skills from [emilkowalski/skills](https://github.com/emilkowalski/skills)
+(MIT, upstream `d23d7f8`) are vendored into `.claude/skills/`: `apple-design`,
+`animate-expo`, `review-animations`, `improve-animations`,
+`find-animation-opportunities`, `animation-vocabulary`, `pick-ui-library`.
+`/pre-merge` gains a fourth gate — `review-animations` on any diff containing
+motion — and CLAUDE.md gains a section saying which skill answers which
+question, and that `vola-design-system` / `vola-athlete-ux` win where they
+disagree.
+
+**Why vendored rather than referenced from `~/.claude/skills`.** The same reason
+every other fact here lives in one file: a skill in a personal directory is
+invisible to every other session, to CI, and to every subagent spawned
+elsewhere. Installed personally first, and the registry did not see them until
+mid-session — which is precisely the failure mode. A bar that only one machine
+can read is not the repo's bar.
+
+**What the audits found.** Three read-only audits ran on Opus, independently,
+with no knowledge of each other, each required to cite `file:line` with quoted
+evidence or drop the finding. Full documents in
+`docs/design/motion-audit-2026-09/`; the merged view is `00-merged.md`.
+~50 raw findings collapse to 16 units of work, filed as N556–N561, F38–F46 and
+L14.
+
+Three findings landed in all three audits independently, which is the strongest
+signal the exercise produced:
+
+- **411 of 493 mobile `Pressable`s give no press feedback** — including all 24
+  controls on `app/session/[id].tsx` and all 8 in `components/Timer.tsx`. On the
+  set-done tick, the *only* acknowledgement is a haptic, which `animate-expo`
+  forbids as sole feedback because System Haptics is off for many users. An
+  athlete with it off currently gets nothing from the control they touch 20–40
+  times a session.
+- **No motion token exists anywhere.** `design-tokens.json` has
+  `brand, icon, spacing, radius, pillRadius` and nothing temporal — in a design
+  system rigorous enough to argue ΔE under deuteranopia in a CSS comment.
+- **Reanimated 4.5.1 and worklets are installed and used in zero files** — one
+  bare side-effect import at `app/_layout.tsx:29` — while eight components
+  hand-roll JS-thread `Animated`. `CADisableMinimumFrameDurationOnPhone` is set,
+  so the budget those eight are spending is 8ms, not 16.
+
+**One verified defect worth its own line.** `apps/web`'s discipline toggle
+(`dashboard/settings/page.tsx:109`) moves its knob with `ml-0 ↔ ml-4` under a
+`transition` class. Tailwind v4.3.3's transition-property list — extracted from
+the installed `dist/lib.js`, not assumed — is `color, background-color,
+border-color, outline-color, text-decoration-color, fill, stroke` and the
+gradient variables. **`margin` is not in it.** That knob has never animated.
+Filed as F39.
+
+**Where the audits disagreed, and the call taken.** `apple-design` recommended
+installing `react-native-gesture-handler` and `react-native-keyboard-controller`;
+`find-animation-opportunities` explicitly forbade the first and declined the
+second; `improve-animations` recorded both as decisions to surface rather than
+planning them, and did not re-litigate `SwipeToDelete.tsx:24-30`'s own documented
+refusal of RNGH. **Neither is being adopted yet** — filed as one decision ticket,
+N560. Every other unit needs zero new dependencies, because Reanimated is already
+installed and linked.
+
+**Two corrections to the briefing the agents were given, recorded because both
+were mine.** I told them 13 mobile files use core `Animated`; the verified count
+is **8** — the other five were two test files and three comment-only mentions.
+And I framed the codebase as under-animated, which was too crude: 13 components
+already animate deliberately and several are exemplary. The real deficit is
+**continuity, not personality** — content the athlete is reaching for moves under
+their thumb with no explanation.
+
+**What this does not do.** Nothing was verified on a device; every claim about
+feel is derived from source. No source file was changed by any audit — all three
+ran read-only and the tree was clean at the end of each. The `animate` skill
+(upstream's web counterpart to `animate-expo`) is **not** vendored, so
+`animate-expo`'s "for web animation use `animate`" is a dangling reference,
+recorded in `ATTRIBUTION.md`; vendor it if the web motion work in N559 picks up.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -14,6 +14,21 @@ three**. Run them in the same turn, in parallel:
    - any `backend/**` or `contracts/**` change → **`backend-reviewer`**
    - any `apps/**` change → **`frontend-reviewer`**
    - a change spanning both → **both, launched together**
+4. **The motion gate, when the diff contains motion.** If the diff touches an
+   animation, a transition, a gesture or a haptic — grep the diff for
+   `Animated`, `Reanimated`, `useSharedValue`, `withTiming`, `withSpring`,
+   `Easing`, `PanResponder`, `transition`, `animate-`, `duration-`, `Haptics`
+   — invoke the **`review-animations`** skill on it, and hold its findings to
+   the same bar as a reviewer's: resolve or justify every one before the PR
+   goes ready.
+
+   It is a **skill, not a subagent**, so it does not fail the way the three
+   above do — but it is also `disable-model-invocation: true` upstream, which
+   means *nothing will trigger it for you*. That is the whole risk: a motion
+   diff reviewed by `frontend-reviewer` alone reads as fully reviewed, because
+   two gates ran and nobody counts three. If the diff has motion in it and you
+   did not invoke this, the gate did not run — say so rather than letting the
+   green from the other two stand in for it.
 
 ## A gate that fails to launch is not a gate that passed
 
