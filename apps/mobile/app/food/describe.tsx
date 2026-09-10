@@ -41,6 +41,7 @@ import { rememberBarcode } from '@/lib/barcodeCache';
 import { parseOr } from '@/lib/draftNumber';
 import {
   describeMeal,
+  emptyEstimateMessage,
   estimateErrorMessage,
   fitServings,
   isQuotaExhausted,
@@ -104,6 +105,16 @@ export default function DescribeMealScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<MealEstimate | null>(null);
+  /**
+   * WHICH way this estimate was asked for — W22/#1018.
+   *
+   * The screen used to keep no record of it, so the empty-state message was
+   * one string for both paths: *"Nothing recognisable came back. Try
+   * describing it instead."* Written for the camera, where it names the OTHER
+   * input. On the text path it advised the athlete to do the thing they had
+   * just done, which is what they reported.
+   */
+  const [askedBy, setAskedBy] = useState<'text' | 'photo'>('text');
   const [quota, setQuota] = useState<EstimateQuota | null>(null);
   // Drafted rows the athlete can edit before logging. Held separately from the
   // estimate so the original stays readable — the assumption beside a number
@@ -172,7 +183,12 @@ export default function DescribeMealScreen() {
   const compiledFoodId = useRef<string | null>(null);
 
   const receive = useCallback(
-    (res: { estimate: MealEstimate; quota: EstimateQuota }, replaces?: string | null) => {
+    (
+      res: { estimate: MealEstimate; quota: EstimateQuota },
+      from: 'text' | 'photo',
+      replaces?: string | null,
+    ) => {
+      setAskedBy(from);
       setEstimate(res.estimate);
       setRows(res.estimate.items.map(toDraft));
       setSingleFood(res.estimate.items.length === 1);
@@ -234,6 +250,7 @@ export default function DescribeMealScreen() {
     try {
       receive(
         await describeMeal(getToken, { description: description.trim(), meal, reuse }),
+        'text',
         replaces,
       );
     } catch (err) {
@@ -342,6 +359,7 @@ export default function DescribeMealScreen() {
             description: description.trim() || undefined,
             meal,
           }),
+          'photo',
         );
       } catch (err) {
         setError(messageFor(err));
@@ -765,7 +783,7 @@ export default function DescribeMealScreen() {
           see, which is the useful half. */}
       {estimate && rows.length === 0 ? (
         <Text style={styles.note} testID="describe-empty">
-          {estimate.note || 'Nothing recognisable came back. Try describing it instead.'}
+          {emptyEstimateMessage(estimate.note, askedBy)}
         </Text>
       ) : null}
 

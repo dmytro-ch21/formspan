@@ -9,9 +9,14 @@
  * own history).
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import {
   DEFAULT_SERVINGS,
   describeMeal,
+  emptyEstimateAdvice,
+  emptyEstimateMessage,
   fitServings,
   isQuotaExhausted,
   itemToEntry,
@@ -338,5 +343,74 @@ describe('fitServings', () => {
     // And the macros are untouched: they are the total for the quantity, so
     // restating the count changes nothing the athlete reads.
     expect(itemToEntry(item).kcal).toBe(180);
+  });
+});
+
+describe('emptyEstimateMessage — W22/#1018', () => {
+  /**
+   * The athlete described a boiled egg, got nothing back, and was told to
+   * "try describing it instead". One string served both input paths because
+   * the screen kept no record of which one had been used.
+   */
+  it('never tells someone who described their food to describe it', () => {
+    // The whole complaint, as an assertion. "describe"/"describing" must not
+    // appear as the SUGGESTION on the text path.
+    expect(emptyEstimateAdvice('text')).not.toMatch(/describ/i);
+  });
+
+  it('names the other way in, on each path', () => {
+    // The advice is only useful if it points somewhere the athlete has not
+    // just been.
+    expect(emptyEstimateAdvice('text')).toMatch(/photo/i);
+    expect(emptyEstimateAdvice('photo')).toMatch(/describ/i);
+  });
+
+  it('gives different advice for the two paths', () => {
+    expect(emptyEstimateAdvice('text')).not.toBe(emptyEstimateAdvice('photo'));
+  });
+
+  it("keeps the model's note AND still says what to do", () => {
+    // The old expression was `note || advice`, so a model with something to
+    // say replaced the advice entirely — the athlete got a diagnosis and no
+    // next step. The note is the useful half; it is not an alternative to
+    // being told what to try.
+    const msg = emptyEstimateMessage('Could not read that as a meal.', 'text');
+    expect(msg).toContain('Could not read that as a meal.');
+    expect(msg).toContain(emptyEstimateAdvice('text'));
+  });
+
+  it('reads as one sentence pair when the note has no note', () => {
+    expect(emptyEstimateMessage(undefined, 'photo')).toBe(emptyEstimateAdvice('photo'));
+    expect(emptyEstimateMessage('   ', 'photo')).toBe(emptyEstimateAdvice('photo'));
+  });
+});
+
+describe('the describe screen asks for the right advice', () => {
+  /**
+   * The library test above proves the copy is right for a given path. It says
+   * nothing about whether the SCREEN passes the right path — and that is
+   * where this bug lived: the copy was fine for the camera, and the camera's
+   * string was being shown to someone who had typed.
+   *
+   * Asserted at the source, because `apps/mobile/lib/__tests__` is
+   * deliberately logic-only and there is no component test for this screen —
+   * the same instrument `hrReportWiring.test.ts` uses for the HR screens, and
+   * the one that caught W25's call site.
+   */
+  const src = readFileSync(join(__dirname, '..', '..', 'app/food/describe.tsx'), 'utf8');
+
+  it('tags the text path as text and the photo path as photo', () => {
+    // Non-greedy across the whole call: `describeMeal(getToken, { … .trim() … })`
+    // contains its own parentheses, so a `[^)]*` between them matches nothing.
+    expect(src).toMatch(/describeMeal\([\s\S]*?\),\s*'text'/);
+    expect(src).toMatch(/photographMeal\([\s\S]*?\),\s*'photo'/);
+  });
+
+  it('renders the path-aware message rather than a literal', () => {
+    // Deliberately NOT "the old string is absent from the file". It is still
+    // here, in the doc comment that explains what it got wrong — an absence
+    // check on a file that documents its own history fails for the one reason
+    // that is not a defect. What matters is what the SCREEN renders.
+    expect(src).toMatch(/testID="describe-empty"[\s\S]{0,120}emptyEstimateMessage\(/);
   });
 });
