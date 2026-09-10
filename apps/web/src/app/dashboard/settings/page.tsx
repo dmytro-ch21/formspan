@@ -105,8 +105,8 @@ export default function SettingsPage() {
                   }`}
                 >
                   <span
-                    className={`block h-5 w-5 rounded-pill transition ${
-                      on ? "ml-4 bg-lime" : "ml-0 bg-text-dim"
+                    className={`block h-5 w-5 rounded-pill transition-[translate,background-color] duration-(--duration-control) ease-(--ease-out) ${
+                      on ? "translate-x-4 bg-lime" : "translate-x-0 bg-text-dim"
                     }`}
                   />
                 </span>
