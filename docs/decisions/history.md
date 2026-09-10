@@ -68515,6 +68515,49 @@ decision on the record rather than a file somebody forgot.
 
 Nothing here has been felt on a device.
 
+## 2026-09-10 — F49: haptics one step gentler where a step exists, and the floor stated where it does not
+
+The athlete, after testing F48's press feedback on device: *"maybe we can do
+just 10-20% more subtle i mean the vibration feedback but overall i like it."*
+
+**iOS haptics are discrete styles, not a dial.** `expo-haptics` has no
+intensity parameter, so "10–20%" has no direct expression — the honest reading
+is "one step down where a step exists". Twelve calls in the app: five
+`selectionAsync()`, five `notificationAsync(Success)`, two
+`impactAsync(Light)`.
+
+**What changed**: both `impactAsync(Light)` calls became `Soft`. They fire at
+*start* moments — a countdown beginning, a hold-to-confirm starting. Those are
+acknowledgements, and nothing depends on either being felt from a pocket.
+
+**Two things deliberately did not change, and both are worth recording because
+they are the answer to "can we go subtler still".**
+
+`selectionAsync()` is the FLOOR. The set-done tick and the group toggles use
+it, and there is nothing lighter in `expo-haptics`. The control the athlete
+presses forty times a session is already as quiet as the platform allows;
+making it quieter needs Core Haptics with a custom intensity curve, which is a
+native module and out of all proportion to the ask.
+
+`notificationAsync(Success)` at rest-end and timed-set-end stays strong, and
+`Countdown.tsx` already says why in place: *"You should not have to be looking
+at the phone to know a rest is over or a plank is done — that is the entire
+point in a gym. The haptic covers the phone being in a pocket."* Softening it
+trades against missing the end of a rest, which is a product decision rather
+than a tuning pass, so it was surfaced to the athlete rather than assumed
+either way.
+
+The investigation also found something worth knowing on its own: **the rest
+`Timer` fires no haptics at all.** So the timer buttons in F48's tranche were
+silent, and what the athlete actually felt while testing was the tick's
+`selectionAsync` — the one thing that cannot be reduced.
+
+`lib/__tests__/haptics.test.ts` pins which style belongs to which moment, so
+the acknowledgement/alert distinction is changed deliberately rather than by
+drift, and asserts nothing in the app reaches for `Heavy`. Mutation-checked
+both ways: reverting the start impact to `Light`, and softening the rest-end
+alert to an impact.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
