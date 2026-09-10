@@ -172,6 +172,10 @@ var positionStepSQL = strconv.Itoa(PositionStep)
 // exists to somebody enumerating UUIDs, which is the oracle these bugs keep
 // handing out.
 func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, error) {
+	// The five label macros in their three states — see nutrition.go's
+	// LabelWanted. Resolved once here so the SET clause and the arg list
+	// cannot disagree about what "stated" means.
+	label := e.LabelWanted.resolve(e.Macros)
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO nutrition_entries (
 			id, user_id, eaten_on, meal,
@@ -193,11 +197,27 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 			carb_g = EXCLUDED.carb_g,
 			fat_g = EXCLUDED.fat_g,
 			fibre_g = EXCLUDED.fibre_g,
-			saturated_fat_g = EXCLUDED.saturated_fat_g,
-			sugar_g = EXCLUDED.sugar_g,
-			added_sugar_g = EXCLUDED.added_sugar_g,
-			sodium_mg = EXCLUDED.sodium_mg,
-			cholesterol_mg = EXCLUDED.cholesterol_mg,
+			-- **THE FIVE LABEL MACROS ARE CONDITIONAL, NOT "EXCLUDED" (F37).**
+			--
+			-- "$NN::boolean" is "did the caller state this column at all?", and
+			-- only a stated column is written. It is the same guard "source"
+			-- above and "position" below already carry, for the same reason and
+			-- against the same failure: an unconditional
+			-- "saturated_fat_g = EXCLUDED.saturated_fat_g" is what made every
+			-- PUT from a client that has never heard of these columns wipe them.
+			-- Web is exactly such a client today.
+			--
+			-- NOT "COALESCE($13, nutrition_entries.saturated_fat_g)", which is the obvious
+			-- one-liner and is wrong here: it cannot tell an OMITTED key from an
+			-- explicit null, and the phone sends all five on every push as
+			-- "number | null". Under COALESCE its null would read as "keep", so
+			-- a re-scan that corrected a figure to unknown could never take the
+			-- stale number back off the row. See nutrition.go's LabelWanted.
+			saturated_fat_g = CASE WHEN $22::boolean THEN $13::numeric ELSE nutrition_entries.saturated_fat_g END,
+			sugar_g = CASE WHEN $23::boolean THEN $14::numeric ELSE nutrition_entries.sugar_g END,
+			added_sugar_g = CASE WHEN $24::boolean THEN $15::numeric ELSE nutrition_entries.added_sugar_g END,
+			sodium_mg = CASE WHEN $25::boolean THEN $16::numeric ELSE nutrition_entries.sodium_mg END,
+			cholesterol_mg = CASE WHEN $26::boolean THEN $17::numeric ELSE nutrition_entries.cholesterol_mg END,
 			source_food_id = EXCLUDED.source_food_id,
 			category = EXCLUDED.category,
 			notes = EXCLUDED.notes,
@@ -213,8 +233,9 @@ func (r *PostgresRepository) SaveEntry(ctx context.Context, e Entry) (Entry, err
 		e.ID, e.UserID, e.EatenOn, e.Meal,
 		e.Name, e.Servings, e.ServingLabel,
 		e.Kcal, e.ProteinG, e.CarbG, e.FatG, e.FibreG,
-		e.SaturatedFatG, e.SugarG, e.AddedSugarG, e.SodiumMG, e.CholesterolMG,
-		e.SourceFoodID, e.Category, e.Notes, e.PositionWanted)
+		label[0].Value, label[1].Value, label[2].Value, label[3].Value, label[4].Value,
+		e.SourceFoodID, e.Category, e.Notes, e.PositionWanted,
+		label[0].Stated, label[1].Stated, label[2].Stated, label[3].Stated, label[4].Stated)
 
 	out, err := scanEntry(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -567,7 +588,31 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 	// Derived here rather than by the caller so there is exactly one place that
 	// decides what a portion of a recipe contains, and so it cannot be skipped
 	// by a second write path later.
+	derived := f.DerivesMacros()
 	f.Macros = f.PerServing()
+
+	// The five label macros in their three states — see nutrition.go's
+	// LabelWanted. Resolved once so the SET clause and the arg list cannot
+	// disagree about what "stated" means.
+	label := f.LabelWanted.resolve(f.Macros)
+
+	// **A RECIPE HAS NO "KEEP" STATE, AND THAT IS NOT AN EXCEPTION TO THE RULE
+	// ABOVE — IT IS THE RULE (F37).** "Keep" exists because a client that never
+	// mentioned a column has no opinion about it. For a recipe, the column was
+	// not left unmentioned: it was COMPUTED, a line ago, by summing the items
+	// the client just sent. That is an opinion, and it is the authoritative one.
+	//
+	// It matters in the direction that is easy to miss. Deriving a real figure
+	// works either way, because a non-nil Macros already resolves as stated.
+	// Deriving NOTHING does not: drop the one sodium-carrying ingredient out of
+	// a recipe and the derivation correctly says "nobody states sodium now" —
+	// and without this the row would quietly hold on to the total from back when
+	// something did, a number no ingredient stands behind any more.
+	if derived {
+		for i := range label {
+			label[i].Stated = true
+		}
+	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -596,11 +641,27 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 			carb_g = EXCLUDED.carb_g,
 			fat_g = EXCLUDED.fat_g,
 			fibre_g = EXCLUDED.fibre_g,
-			saturated_fat_g = EXCLUDED.saturated_fat_g,
-			sugar_g = EXCLUDED.sugar_g,
-			added_sugar_g = EXCLUDED.added_sugar_g,
-			sodium_mg = EXCLUDED.sodium_mg,
-			cholesterol_mg = EXCLUDED.cholesterol_mg,
+			-- **THE FIVE LABEL MACROS ARE CONDITIONAL, NOT "EXCLUDED" (F37).**
+			--
+			-- "$NN::boolean" is "did the caller state this column at all?", and
+			-- only a stated column is written. It is the same guard "source"
+			-- above and "position" below already carry, for the same reason and
+			-- against the same failure: an unconditional
+			-- "saturated_fat_g = EXCLUDED.saturated_fat_g" is what made every
+			-- PUT from a client that has never heard of these columns wipe them.
+			-- Web is exactly such a client today.
+			--
+			-- NOT "COALESCE($13, nutrition_foods.saturated_fat_g)", which is the obvious
+			-- one-liner and is wrong here: it cannot tell an OMITTED key from an
+			-- explicit null, and the phone sends all five on every push as
+			-- "number | null". Under COALESCE its null would read as "keep", so
+			-- a re-scan that corrected a figure to unknown could never take the
+			-- stale number back off the row. See nutrition.go's LabelWanted.
+			saturated_fat_g = CASE WHEN $22::boolean THEN $13::numeric ELSE nutrition_foods.saturated_fat_g END,
+			sugar_g = CASE WHEN $23::boolean THEN $14::numeric ELSE nutrition_foods.sugar_g END,
+			added_sugar_g = CASE WHEN $24::boolean THEN $15::numeric ELSE nutrition_foods.added_sugar_g END,
+			sodium_mg = CASE WHEN $25::boolean THEN $16::numeric ELSE nutrition_foods.sodium_mg END,
+			cholesterol_mg = CASE WHEN $26::boolean THEN $17::numeric ELSE nutrition_foods.cholesterol_mg END,
 			yield_servings = EXCLUDED.yield_servings,
 			-- **NOT "EXCLUDED.source", and this is the whole of N114's
 			-- restore-path guard.**
@@ -637,8 +698,9 @@ func (r *PostgresRepository) SaveFood(ctx context.Context, f Food) (Food, error)
 		f.ID, f.UserID, f.Kind, f.Name, f.Brand,
 		f.ServingLabel, f.ServingGrams,
 		f.Kcal, f.ProteinG, f.CarbG, f.FatG, f.FibreG,
-		f.SaturatedFatG, f.SugarG, f.AddedSugarG, f.SodiumMG, f.CholesterolMG,
-		f.YieldServings, f.Source, f.ExternalID, f.Barcode)
+		label[0].Value, label[1].Value, label[2].Value, label[3].Value, label[4].Value,
+		f.YieldServings, f.Source, f.ExternalID, f.Barcode,
+		label[0].Stated, label[1].Stated, label[2].Stated, label[3].Stated, label[4].Stated)
 
 	saved, err := scanFood(row)
 	if errors.Is(err, pgx.ErrNoRows) {

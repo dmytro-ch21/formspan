@@ -21,7 +21,6 @@ package tracker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -29,6 +28,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 )
 
 var (
@@ -199,47 +200,22 @@ type Entry struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Field distinguishes the three states a JSON key can be in, which `*T` cannot.
+// Field, Of and Null moved to `internal/platform/apihttp` (F37), where
+// nutrition's five label macros needed exactly the same three states for
+// exactly the same reason. They are ALIASED rather than re-declared so every
+// caller in this package — and `patch_test.go`'s reflection over `Set` — keeps
+// working unchanged, and so there is one definition of what "absent" means
+// rather than two that can drift.
 //
-//	absent from the body   -> Set == false            -> column not touched
-//	present and null       -> Set == true, Value nil  -> column set to NULL
-//	present with a value   -> Set == true, Value set  -> column set to it
-//
-// The middle case is not academic: `target` is nullable because coffee is a
-// count with no ceiling, so "clear my target" and "do not touch my target" are
-// both things a PATCH has to be able to say. With `*float64` they are the same
-// wire shape, and one of them silently wins.
-type Field[T any] struct {
-	Set   bool
-	Value *T
-}
-
-// UnmarshalJSON runs only when the key is PRESENT in the object — that is the
-// whole mechanism. encoding/json never calls it for an absent key, so `Set`
-// stays false and the column stays out of the statement.
-func (f *Field[T]) UnmarshalJSON(b []byte) error {
-	f.Set = true
-	if string(b) == "null" {
-		f.Value = nil
-		return nil
-	}
-	var v T
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	f.Value = &v
-	return nil
-}
-
-// MarshalJSON exists so a Patch can round-trip in tests and logs; an unset
-// field marshals as null, which is lossy, and nothing depends on it.
-func (f Field[T]) MarshalJSON() ([]byte, error) { return json.Marshal(f.Value) }
+// See `apihttp.Field` for the mechanism and for both witnesses to why the
+// present-and-null case is not academic.
+type Field[T any] = apihttp.Field[T]
 
 // Of builds a set field. For tests and for callers assembling a patch in Go.
-func Of[T any](v T) Field[T] { return Field[T]{Set: true, Value: &v} }
+func Of[T any](v T) Field[T] { return apihttp.Of(v) }
 
 // Null builds a field explicitly set to null.
-func Null[T any]() Field[T] { return Field[T]{Set: true} }
+func Null[T any]() Field[T] { return apihttp.Null[T]() }
 
 // Patch is a partial update. See the package doc.
 type Patch struct {

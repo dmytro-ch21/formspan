@@ -238,3 +238,57 @@ func TestPutRecipeStoresTheLabelMacrosItsItemsState(t *testing.T) {
 		}
 	}
 }
+
+// The direction the "keep" rule would get wrong if a recipe were allowed to
+// have one (F37) — and the only test that fails if SaveFood's `if derived`
+// branch is deleted.
+//
+// Drop the one sodium-carrying ingredient out of a recipe and the derivation
+// correctly reports that nothing states sodium any more. A recipe treated like
+// a plain food would read that nil as "the client did not mention sodium" and
+// hold on to the total from back when something did — a figure no ingredient
+// stands behind, on a recipe that no longer contains the thing that produced it.
+func TestEditingARecipeDownToItemsThatStateNothingClearsTheDerivedLabel(t *testing.T) {
+	repo := repoFor(t, uid)
+	h := NewHandler(repo)
+
+	const withSalt = `{
+		"kind": "recipe", "name": "Shake", "serving_label": "1 shake",
+		"yield_servings": 1,
+		"kcal": 0, "protein_g": 0, "carb_g": 0, "fat_g": 0,
+		"items": [
+			{"name": "Salted bar", "quantity": 1, "serving_label": "1 bar",
+			 "kcal": 240, "protein_g": 9, "carb_g": 27, "fat_g": 11,
+			 "saturated_fat_g": 4.5, "sugar_g": 18, "added_sugar_g": 15,
+			 "sodium_mg": 210, "cholesterol_mg": 5},
+			{"name": "Water", "quantity": 1, "serving_label": "1 cup",
+			 "kcal": 0, "protein_g": 0, "carb_g": 0, "fat_g": 0}
+		]
+	}`
+	if w := putFood(t, h, uid, recipeID, withSalt); w.Code != http.StatusOK {
+		t.Fatalf("seed PUT: %d %s", w.Code, w.Body)
+	}
+	wantLabelMacros(t, labelMacros(t, repo, "nutrition_foods", "id", recipeID),
+		[5]float64{4.5, 18, 15, 210, 5})
+
+	// The athlete removes the bar. Water states nothing, so the recipe now
+	// states nothing.
+	const waterOnly = `{
+		"kind": "recipe", "name": "Shake", "serving_label": "1 shake",
+		"yield_servings": 1,
+		"kcal": 0, "protein_g": 0, "carb_g": 0, "fat_g": 0,
+		"items": [
+			{"name": "Water", "quantity": 1, "serving_label": "1 cup",
+			 "kcal": 0, "protein_g": 0, "carb_g": 0, "fat_g": 0}
+		]
+	}`
+	if w := putFood(t, h, uid, recipeID, waterOnly); w.Code != http.StatusOK {
+		t.Fatalf("edit PUT: %d %s", w.Code, w.Body)
+	}
+	for i, v := range labelMacros(t, repo, "nutrition_foods", "id", recipeID) {
+		if v != nil {
+			t.Errorf("derived %s = %v; no ingredient states it any more, so it must be NULL",
+				labelNames[i], *v)
+		}
+	}
+}
