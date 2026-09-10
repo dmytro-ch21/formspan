@@ -254,12 +254,16 @@ describe('ringCap', () => {
  * the floor at which it stops being visible on the card.
  */
 const SURFACE = vola.surface;
-const ALL_RINGS = [...Object.values(macroColors), kcalRingColor];
+/** Each ring with the tint it is actually drawn with — only kcal is red. */
+const RAMPS: [string, boolean][] = [
+  ...Object.values(macroColors).map((h): [string, boolean] => [h, false]),
+  [kcalRingColor, true],
+];
 
 describe('overtakeRamp — the colour carries how far past target', () => {
-  it('darkens monotonically from start to end', () => {
-    for (const hex of ALL_RINGS) {
-      const ramp = overtakeRamp(hex, SURFACE);
+  it('darkens monotonically from start to end, tinted or not', () => {
+    for (const [hex, tint] of RAMPS) {
+      const ramp = overtakeRamp(hex, SURFACE, tint);
       const contrasts = ramp.map((c) => contrastRatio(c, SURFACE));
       // Against a DARK card, less light means less contrast — so a ramp that
       // genuinely darkens has strictly falling contrast along its length.
@@ -272,8 +276,8 @@ describe('overtakeRamp — the colour carries how far past target', () => {
     // At 12 o'clock the second lap sits directly on the first. A ramp that
     // began at the base hue would be invisible exactly where the overtake
     // begins, which is the moment it most needs to register.
-    for (const hex of ALL_RINGS) {
-      expect(overtakeRamp(hex, SURFACE)[0]).not.toBe(hex);
+    for (const [hex, tint] of RAMPS) {
+      expect(overtakeRamp(hex, SURFACE, tint)[0]).not.toBe(hex);
     }
   });
 
@@ -283,15 +287,44 @@ describe('overtakeRamp — the colour carries how far past target', () => {
     // anchor's own 5.92, so mixing toward red LOWERS its ratio while plainly
     // moving it toward red. Perceptual distance to the anchor is the claim
     // actually being made, and it holds for warm and cool hues alike.
-    for (const hex of ALL_RINGS) {
-      const end = overtakeEnd(hex, SURFACE);
-      expect(deltaE2000(end, OVERTAKE_RED)).toBeLessThan(deltaE2000(hex, OVERTAKE_RED));
+    expect(deltaE2000(overtakeEnd(kcalRingColor, SURFACE, true), OVERTAKE_RED)).toBeLessThan(
+      deltaE2000(kcalRingColor, OVERTAKE_RED),
+    );
+  });
+
+  it('W25 — the macros darken WITHOUT the red', () => {
+    // The athlete's correction after the first cut tinted all four: "only
+    // apply the red to calories, not the other macros." Red is a judgement
+    // that going over is bad — true of a calorie budget, false of protein and
+    // fibre, where over is usually the point. Colouring a good day as a
+    // problem is the guilt-in-mechanics the no-shame rule forbids.
+    //
+    // The test is HUE, not distance-to-red, and the difference caught a bad
+    // assertion twice. Darkening alone moves a colour NEARER the deep red
+    // anchor in ΔE — measured, every macro drops 7–29 just by losing light,
+    // because the anchor is itself dark. Distance to red therefore cannot
+    // tell a tint from a dim. An untinted end is a pure channel scale, so its
+    // channel RATIOS are unchanged; only its lightness moved.
+    const ratios = (h: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+      return [r / Math.max(1, g), g / Math.max(1, b)];
+    };
+    for (const hex of Object.values(macroColors)) {
+      const end = overtakeEnd(hex, SURFACE, false);
+      const [before, after] = [ratios(hex), ratios(end)];
+      expect(after[0]).toBeCloseTo(before[0], 1);
+      expect(after[1]).toBeCloseTo(before[1], 1);
+      // …and it did genuinely darken, so the gradient still carries magnitude.
+      expect(contrastRatio(end, SURFACE)).toBeLessThan(contrastRatio(hex, SURFACE));
     }
+    // The calorie ring is the one that DOES shift hue.
+    const kcalEnd = overtakeEnd(kcalRingColor, SURFACE, true);
+    expect(ratios(kcalEnd)[0]).not.toBeCloseTo(ratios(kcalRingColor)[0], 1);
   });
 
   it('keeps even the darkest step above the visibility floor', () => {
-    for (const hex of ALL_RINGS) {
-      const ramp = overtakeRamp(hex, SURFACE);
+    for (const [hex, tint] of RAMPS) {
+      const ramp = overtakeRamp(hex, SURFACE, tint);
       const darkest = Math.min(...ramp.map((c) => contrastRatio(c, SURFACE)));
       expect({ hex, ok: darkest >= OVERTAKE_CONTRAST_FLOOR }).toEqual({ hex, ok: true });
     }
@@ -301,13 +334,17 @@ describe('overtakeRamp — the colour carries how far past target', () => {
     // ΔE 15 is validate_palette.mjs's floor for "these are different
     // colours". Fibre is the tightest at 15.90; every other ring clears it by
     // a wide margin.
-    for (const hex of ALL_RINGS) {
-      expect(deltaE2000(hex, overtakeEnd(hex, SURFACE))).toBeGreaterThanOrEqual(15);
+    // Fibre is the tightest at 12.80 untinted — it runs out of room against
+    // the visibility floor before the others do, and is the number this bound
+    // is set by. Every other ring clears it by a wide margin.
+    for (const [hex, tint] of RAMPS) {
+      expect(deltaE2000(hex, overtakeEnd(hex, SURFACE, tint))).toBeGreaterThanOrEqual(12);
     }
+    expect(deltaE2000(kcalRingColor, overtakeEnd(kcalRingColor, SURFACE, true))).toBeGreaterThan(15);
   });
 
   it('has the step count the ring is drawn with', () => {
-    expect(overtakeRamp(macroColors.carbs, SURFACE)).toHaveLength(OVERTAKE_RAMP_STEPS);
+    expect(overtakeRamp(macroColors.carbs, SURFACE, false)).toHaveLength(OVERTAKE_RAMP_STEPS);
   });
 });
 
@@ -332,5 +369,22 @@ describe('the rings draw no border', () => {
   it('never strokes with the card ground', () => {
     const src = readFileSync(join(__dirname, '..', '..', 'components/today/MacroRings.tsx'), 'utf8');
     expect(src).not.toMatch(/stroke=\{vola\.surface\}/);
+  });
+
+  it('W25 — asks for the red tint on the CALORIE ring and no other', () => {
+    // The library tests above prove `overtakeEnd(hex, surface, tint)` does the
+    // right thing for either value of `tint`. They say nothing about which
+    // ring the screen passes `true` for — and a mutation swapping `kcal` for
+    // `protein` left every one of them green. That is the same shape as W21's
+    // prune landing on the wrong branch of a mount effect: a correct function,
+    // called wrongly, with a suite that cannot see the call site.
+    //
+    // Asserted at the source because there is no component test for this card
+    // (`apps/mobile/lib/__tests__` is deliberately logic-only), same as
+    // `hrReportWiring.test.ts` does for the HR screens.
+    const src = readFileSync(join(__dirname, '..', '..', 'components/today/MacroRings.tsx'), 'utf8');
+    const call = src.match(/overtakeRamp\([^)]*\)/);
+    expect(call).not.toBeNull();
+    expect(call![0]).toContain("reading.key === 'kcal'");
   });
 });

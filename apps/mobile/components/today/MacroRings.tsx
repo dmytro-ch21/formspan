@@ -208,10 +208,16 @@ function Ring({
     Reversed on purpose: index 0 must be the darkest, because it is painted
     FIRST and reaches furthest. `overtakeRamp` returns lightest-first, which is
     the order the gradient reads in; this is the order it has to be drawn in.
+
+    W25 — the red tint is the CALORIE ring's alone. Every ring still darkens,
+    so the gradient still says how far past target it went; only the calorie
+    ring says it in a warning colour. Over on protein or fibre is usually the
+    point, and colouring a good day as a problem is the guilt-in-mechanics the
+    no-shame rule forbids.
   */
   const ramp = useMemo(
-    () => (colour ? [...overtakeRamp(colour, vola.surface)].reverse() : []),
-    [colour],
+    () => (colour ? [...overtakeRamp(colour, vola.surface, reading.key === 'kcal')].reverse() : []),
+    [colour, reading.key],
   );
 
   return (

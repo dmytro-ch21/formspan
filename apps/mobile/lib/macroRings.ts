@@ -431,12 +431,26 @@ function mixHex(a: string, b: string, t: number): string {
   return toHex(A.map((v, i) => v + (B[i] - v) * t) as [number, number, number]);
 }
 
-/** The darkest, reddest the ring is allowed to get. */
-export function overtakeEnd(hex: string, surface: string): string {
-  const tinted = mixHex(hex, OVERTAKE_RED, 0.45);
-  let end = tinted;
+/**
+ * The darkest the ring is allowed to get — red-tinted only where going over
+ * actually means something.
+ *
+ * **The red is the calorie ring's alone (W25).** It shipped on all four
+ * macros first, and the athlete's correction was immediate: *"only apply the
+ * red to calories, not the other macros."* That is the right call and it is
+ * the `vola-athlete-ux` no-shame rule doing its job — red is a judgement that
+ * going over is bad, which is true of a calorie budget and false of protein
+ * and fibre, where over is usually the point. Flagging a good day in warning
+ * colours is exactly the guilt-in-mechanics that rule forbids.
+ *
+ * The macros still darken, so the gradient still reads how far past target
+ * the ring went; only the accusation is dropped.
+ */
+export function overtakeEnd(hex: string, surface: string, tint: boolean): string {
+  const target = tint ? mixHex(hex, OVERTAKE_RED, 0.45) : hex;
+  let end = target;
   for (let step = 100; step >= 20; step--) {
-    const candidate = darken(tinted, step / 100);
+    const candidate = darken(target, step / 100);
     if (contrastRatio(candidate, surface) < OVERTAKE_CONTRAST_FLOOR) break;
     end = candidate;
   }
@@ -454,9 +468,10 @@ export function overtakeEnd(hex: string, surface: string): string {
 export function overtakeRamp(
   hex: string,
   surface: string,
+  tint: boolean,
   steps: number = OVERTAKE_RAMP_STEPS,
 ): string[] {
-  const end = overtakeEnd(hex, surface);
+  const end = overtakeEnd(hex, surface, tint);
   return Array.from({ length: steps }, (_, i) => {
     const t = OVERTAKE_RAMP_ONSET + (1 - OVERTAKE_RAMP_ONSET) * (i / Math.max(1, steps - 1));
     return mixHex(hex, end, t);
