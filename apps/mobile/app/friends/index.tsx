@@ -2,7 +2,6 @@ import { Stack } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   RefreshControl,
   StyleSheet,
   TextInput,
@@ -29,6 +28,7 @@ import {
   type PublicProfile,
 } from '@/lib/friends';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Friends: search a handle, ask, answer, and see who said yes.
@@ -201,7 +201,7 @@ export default function FriendsScreen() {
             accessibilityLabel="Search by username"
             testID="friends-search"
           />
-          <Pressable
+          <PressableScale
             onPress={() => void search()}
             disabled={searchState === 'searching' || !query.trim()}
             accessibilityRole="button"
@@ -211,7 +211,7 @@ export default function FriendsScreen() {
             <Text style={[styles.action, { color: accent.ink }, !query.trim() && styles.dim]}>
               {searchState === 'searching' ? '…' : 'Find'}
             </Text>
-          </Pressable>
+          </PressableScale>
         </RNView>
         {searchMessage && (
           <Text style={searchState === 'error' ? styles.error : styles.muted}>{searchMessage}</Text>
@@ -231,7 +231,7 @@ export default function FriendsScreen() {
             ) : alreadyLinked(result.username) ? (
               <Text style={styles.muted}>already in your lists</Text>
             ) : (
-              <Pressable
+              <PressableScale
                 onPress={() =>
                   void act(`add-${result.username}`, () => sendFriendRequest(getToken, result.username), {
                     confirms: true,
@@ -244,7 +244,7 @@ export default function FriendsScreen() {
                 <Text style={[styles.action, { color: accent.ink }]}>
                   {busy === `add-${result.username}` ? 'Sending…' : 'Add friend'}
                 </Text>
-              </Pressable>
+              </PressableScale>
             )}
           </RNView>
         )}
@@ -266,7 +266,7 @@ export default function FriendsScreen() {
                   <Text style={styles.cardName}>@{c.username}</Text>
                   {c.display_name && <Text style={styles.muted}>{c.display_name}</Text>}
                 </RNView>
-                <Pressable
+                <PressableScale
                   onPress={() =>
                     void act(`accept-${c.username}`, () => acceptRequest(getToken, c.username), {
                       confirms: true,
@@ -280,8 +280,8 @@ export default function FriendsScreen() {
                   <Text style={[styles.action, { color: accent.ink }]}>
                     {busy === `accept-${c.username}` ? '…' : 'Accept'}
                   </Text>
-                </Pressable>
-                <Pressable
+                </PressableScale>
+                <PressableScale
                   onPress={() => void act(`decline-${c.username}`, () => removeFriend(getToken, c.username))}
                   disabled={busy !== null}
                   accessibilityRole="button"
@@ -290,7 +290,7 @@ export default function FriendsScreen() {
                   testID={`friends-decline-${c.username}`}
                 >
                   <Text style={styles.declineText}>Decline</Text>
-                </Pressable>
+                </PressableScale>
               </RNView>
             ))}
           </>
@@ -305,7 +305,7 @@ export default function FriendsScreen() {
                 <RNView style={styles.cardBody}>
                   <Text style={styles.cardName}>@{c.username}</Text>
                 </RNView>
-                <Pressable
+                <PressableScale
                   onPress={() => void act(`cancel-${c.username}`, () => removeFriend(getToken, c.username))}
                   disabled={busy !== null}
                   accessibilityRole="button"
@@ -313,7 +313,7 @@ export default function FriendsScreen() {
                   testID={`friends-cancel-${c.username}`}
                 >
                   <Text style={styles.declineText}>Cancel</Text>
-                </Pressable>
+                </PressableScale>
               </RNView>
             ))}
           </>
@@ -334,7 +334,7 @@ export default function FriendsScreen() {
                     <Text style={styles.cardName}>@{c.username}</Text>
                     {c.display_name && <Text style={styles.muted}>{c.display_name}</Text>}
                   </RNView>
-                  <Pressable
+                  <PressableScale
                     onPress={() =>
                       confirmingRemove === c.username
                         ? void act(`remove-${c.username}`, () => removeFriend(getToken, c.username))
@@ -356,7 +356,7 @@ export default function FriendsScreen() {
                           ? 'Really remove?'
                           : 'Remove'}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 </RNView>
               ))
             )}

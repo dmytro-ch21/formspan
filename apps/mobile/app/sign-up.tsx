@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   TextInput,
 } from 'react-native';
@@ -15,6 +14,7 @@ import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { AuthFieldErrors, AuthFieldKey, hasClerkCode, toFieldErrors } from '@/lib/clerkErrors';
 import { useGoogleSignIn } from '@/lib/useGoogleSignIn';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Email + password sign-up, then the emailed verification code.
@@ -406,14 +406,14 @@ export default function SignUpScreen() {
               </Text>
             )}
             {emailTaken && (
-              <Pressable
+              <PressableScale
                 onPress={goToSignIn}
                 hitSlop={12}
                 accessibilityRole="link"
                 testID="sign-up-existing"
               >
                 <Text style={styles.inlineLink}>Sign in to that account instead</Text>
-              </Pressable>
+              </PressableScale>
             )}
           </View>
 
@@ -444,7 +444,7 @@ export default function SignUpScreen() {
               />
               {/* Typing a strong password blind on a phone keyboard is the
                     single biggest source of sign-up abandonment. */}
-              <Pressable
+              <PressableScale
                 style={styles.reveal}
                 onPress={() => setShowPassword((v) => !v)}
                 hitSlop={8}
@@ -453,7 +453,7 @@ export default function SignUpScreen() {
                 testID="sign-up-reveal"
               >
                 <Text style={styles.revealText}>{showPassword ? 'Hide' : 'Show'}</Text>
-              </Pressable>
+              </PressableScale>
             </View>
             {/* The rule is on screen before the first keystroke, so it is
                   never news delivered as a rejection. */}
@@ -513,7 +513,7 @@ export default function SignUpScreen() {
                 Resend in {resendIn}s
               </Text>
             ) : (
-              <Pressable
+              <PressableScale
                 onPress={onResend}
                 disabled={busy}
                 hitSlop={12}
@@ -523,9 +523,9 @@ export default function SignUpScreen() {
                 testID="sign-up-resend"
               >
                 <Text style={[styles.inlineLink, busy && styles.dimmed]}>Resend code</Text>
-              </Pressable>
+              </PressableScale>
             )}
-            <Pressable
+            <PressableScale
               onPress={() => {
                 setStep('details');
                 setCode('');
@@ -541,7 +541,7 @@ export default function SignUpScreen() {
               testID="sign-up-change-email"
             >
               <Text style={[styles.mutedLink, busy && styles.dimmed]}>Use a different email</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
       )}
@@ -557,7 +557,7 @@ export default function SignUpScreen() {
         </Text>
       )}
 
-      <Pressable
+      <PressableScale
         style={[styles.button, submitting && styles.buttonDisabled]}
         onPress={submitAction}
         disabled={submitting}
@@ -571,10 +571,10 @@ export default function SignUpScreen() {
         ) : (
           <Text style={styles.buttonText}>{submitLabel}</Text>
         )}
-      </Pressable>
+      </PressableScale>
 
       {step === 'details' && (
-        <Pressable
+        <PressableScale
           style={styles.footer}
           onPress={goToSignIn}
           accessibilityRole="link"
@@ -584,7 +584,7 @@ export default function SignUpScreen() {
           <Text style={styles.footerText}>
             Already have an account? <Text style={styles.footerLink}>Sign in</Text>
           </Text>
-        </Pressable>
+        </PressableScale>
       )}
     </KeyboardAwareScrollView>
   );

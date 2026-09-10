@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   TextInput,
 } from 'react-native';
@@ -21,6 +20,7 @@ import {
   SecondFactorStrategy,
 } from '@/lib/secondFactor';
 import { useGoogleSignIn } from '@/lib/useGoogleSignIn';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Minimal email + password sign-in, plus the second-factor step Clerk
@@ -230,7 +230,7 @@ export default function SignInScreen() {
         </Text>
       )}
 
-      <Pressable
+      <PressableScale
         style={[styles.button, busy && styles.buttonDisabled]}
         onPress={secondFactor === null ? onSubmitPassword : onSubmitCode}
         disabled={busy || googleBusy || !isLoaded}
@@ -244,7 +244,7 @@ export default function SignInScreen() {
         ) : (
           <Text style={styles.buttonText}>{secondFactor === null ? 'Sign in' : 'Verify'}</Text>
         )}
-      </Pressable>
+      </PressableScale>
 
       {/* Only on the first step: partway through a second factor there is an
           account already and its password already worked, so neither of these
@@ -253,7 +253,7 @@ export default function SignInScreen() {
         <>
           {/* Above "create an account", because a wrong password is the more
               likely reason someone is stuck on this screen than no account. */}
-          <Pressable
+          <PressableScale
             style={styles.footer}
             onPress={() =>
               router.replace(
@@ -268,9 +268,9 @@ export default function SignInScreen() {
             testID="sign-in-to-forgot"
           >
             <Text style={styles.footerLink}>Forgot your password?</Text>
-          </Pressable>
+          </PressableScale>
 
-          <Pressable
+          <PressableScale
             style={styles.footer}
             onPress={() =>
               router.replace(
@@ -287,7 +287,7 @@ export default function SignInScreen() {
             <Text style={styles.footerText}>
               New to VOLA? <Text style={styles.footerLink}>Create an account</Text>
             </Text>
-          </Pressable>
+          </PressableScale>
         </>
       )}
     </KeyboardAwareScrollView>

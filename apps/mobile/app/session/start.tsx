@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { request as requestSync } from '@/lib/sync';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
@@ -25,6 +25,7 @@ import {
 import { cachedExercises, cachedWorkouts, cacheWorkouts, startLocalSession } from '@/lib/sessionStore';
 import { sessionHref } from '@/lib/startSession';
 import { listWorkouts, summariseTargets, type Sport, type Workout } from '@/lib/workouts';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Choosing what to train, before anything is created.
@@ -271,7 +272,7 @@ export default function StartSessionScreen() {
               {SESSION_INTENTS.map((i) => {
                 const active = intent === i.key;
                 return (
-                  <Pressable
+                  <PressableScale
                     key={i.key}
                     style={[
                       styles.intentPill,
@@ -287,7 +288,7 @@ export default function StartSessionScreen() {
                     >
                       {i.label}
                     </Text>
-                  </Pressable>
+                  </PressableScale>
                 );
               })}
             </View>
@@ -309,14 +310,14 @@ export default function StartSessionScreen() {
             <Text style={styles.muted}>
               Build one once and every session after this starts from it, already filled in.
             </Text>
-            <Pressable
+            <PressableScale
               style={styles.secondary}
               onPress={() => router.replace('/(tabs)/workouts')}
               accessibilityRole="button"
               testID="start-create-workout"
             >
               <Text style={styles.secondaryText}>Create a workout</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         ) : sport === 'strength' && plannedWorkout ? (
           // N499/#870: Plan already named this template — asking again by
@@ -334,7 +335,7 @@ export default function StartSessionScreen() {
           // and navigates away.
           <>
             <Text style={styles.sectionLabel}>{"Today's plan"}</Text>
-            <Pressable
+            <PressableScale
               style={[
                 styles.plannedCard,
                 { borderColor: accent.accent },
@@ -388,13 +389,13 @@ export default function StartSessionScreen() {
                   <Text style={[styles.startPillText, { color: accent.on }]}>Start</Text>
                 </View>
               )}
-            </Pressable>
+            </PressableScale>
           </>
         ) : (
           <>
             <Text style={styles.sectionLabel}>From a workout</Text>
             {workouts.map((w) => (
-              <Pressable
+              <PressableScale
                 key={w.id}
                 style={[styles.card, starting && styles.disabled]}
                 onPress={() => begin(w)}
@@ -436,7 +437,7 @@ export default function StartSessionScreen() {
                   </Text>
                 </View>
                 <Icon name="chevron" size={15} color={vola.textDim} />
-              </Pressable>
+              </PressableScale>
             ))}
           </>
         )}
@@ -444,7 +445,7 @@ export default function StartSessionScreen() {
         {!loading && (
           <>
             <Text style={styles.sectionLabel}>Or</Text>
-            <Pressable
+            <PressableScale
               style={[styles.secondary, starting && styles.disabled]}
               onPress={() => begin(null)}
               disabled={starting}
@@ -458,7 +459,7 @@ export default function StartSessionScreen() {
               ) : (
                 <Text style={styles.secondaryText}>Start an empty session</Text>
               )}
-            </Pressable>
+            </PressableScale>
           </>
         )}
       </ScrollView>

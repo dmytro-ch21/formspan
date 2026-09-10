@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -22,6 +22,7 @@ import {
 import { fromFeetInches, heightUnit, toFeetInches, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
  * Editing who you are — as distinct from how the app behaves, which is
@@ -302,7 +303,7 @@ export default function EditProfileScreen() {
         options={{
           title: 'Edit profile',
           headerRight: () => (
-            <Pressable
+            <PressableScale
               onPress={save}
               disabled={saving || avatarBusy}
               hitSlop={12}
@@ -311,7 +312,7 @@ export default function EditProfileScreen() {
               <Text style={[styles.headerAction, { color: accent.ink }]}>
                 {saving ? 'Saving…' : 'Save'}
               </Text>
-            </Pressable>
+            </PressableScale>
           ),
         }}
       />
@@ -334,7 +335,7 @@ export default function EditProfileScreen() {
               <ActivityIndicator accessibilityLabel="Updating your photo" />
             ) : (
               <>
-                <Pressable
+                <PressableScale
                   onPress={pickAvatarFromCamera}
                   hitSlop={8}
                   testID="profile-avatar-camera"
@@ -342,8 +343,8 @@ export default function EditProfileScreen() {
                   accessibilityLabel="Take a photo"
                 >
                   <Text style={[styles.avatarAction, { color: accent.ink }]}>Take photo</Text>
-                </Pressable>
-                <Pressable
+                </PressableScale>
+                <PressableScale
                   onPress={pickAvatarFromLibrary}
                   hitSlop={8}
                   testID="profile-avatar-library"
@@ -353,9 +354,9 @@ export default function EditProfileScreen() {
                   <Text style={[styles.avatarAction, { color: accent.ink }]}>
                     {avatarUrl ? 'Replace' : 'Choose photo'}
                   </Text>
-                </Pressable>
+                </PressableScale>
                 {avatarUrl && (
-                  <Pressable
+                  <PressableScale
                     onPress={removeMyAvatar}
                     hitSlop={8}
                     testID="profile-avatar-remove"
@@ -363,7 +364,7 @@ export default function EditProfileScreen() {
                     accessibilityLabel="Remove photo"
                   >
                     <Text style={[styles.avatarAction, styles.avatarRemove]}>Remove</Text>
-                  </Pressable>
+                  </PressableScale>
                 )}
               </>
             )}
@@ -422,7 +423,7 @@ export default function EditProfileScreen() {
           {['male', 'female'].map((s) => {
             const selected = patch.sex === s;
             return (
-              <Pressable
+              <PressableScale
                 key={s}
                 // Tapping the selected one clears it — this feeds calorie
                 // maths and "unset" has to stay reachable.
@@ -441,7 +442,7 @@ export default function EditProfileScreen() {
                 <Text style={[styles.chipText, selected && styles.chipTextActive]}>
                   {s === 'male' ? 'Male' : 'Female'}
                 </Text>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </View>
@@ -457,7 +458,7 @@ export default function EditProfileScreen() {
           {modules.map((s) => {
             const on = moduleChanges[s.key] ?? s.enabled;
             return (
-              <Pressable
+              <PressableScale
                 key={s.key}
                 onPress={() => setModuleChanges((c) => ({ ...c, [s.key]: !on }))}
                 style={styles.toggleRow}
@@ -472,7 +473,7 @@ export default function EditProfileScreen() {
                 >
                   <View style={[styles.knob, on && styles.knobOn]} />
                 </View>
-              </Pressable>
+              </PressableScale>
             );
           })}
         </View>
