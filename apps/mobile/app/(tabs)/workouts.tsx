@@ -54,6 +54,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { Card } from '@/constants/Card';
 import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * "1 exercise", not "1 exercises".
@@ -1043,7 +1044,7 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  curriculaOffPressed: { opacity: 0.6 },
+  curriculaOffPressed: { opacity: PRESS_OPACITY },
   curriculaOffTitle: { ...Typography.body, fontWeight: '600', color: vola.text },
   // textMuted, not textDim: at 12pt this is small text and textDim measures
   // 3.96:1 on the card, below AA.
@@ -1247,7 +1248,7 @@ const styles = StyleSheet.create({
     // left this one at a static 16 — under the native bar — while this very
     // comment went on claiming they matched. Caught in review.
   },
-  fabPressed: { opacity: 0.85 },
+  fabPressed: { opacity: PRESS_OPACITY },
   // No `color` here: the call site always sets it from `accent.on`, and a
   // default that is never used is a wrong-colour bug waiting for the first
   // caller who renders this without one.

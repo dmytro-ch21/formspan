@@ -68400,6 +68400,74 @@ average all print NOTHING. A "0 bpm avg" would read the way a "0 sets" chip
 reads on a mat session — as a claim about the athlete rather than a gap in
 what we know.
 
+## 2026-09-10 — F38: a finger that lands gets an answer
+
+411 of 493 pressables answered a press with nothing, and the 82 that responded
+disagreed across four opacity values. There is no hover on a phone: press IS
+the feedback channel.
+
+Three parts, exactly as `docs/design/motion-audit-2026-09/02` scoped them.
+**A**: `components/ui/Button.tsx` scales to 0.97 on press via a Reanimated CSS
+transition, **0ms in and 120ms out** — the shrink is a press STATE, not an
+animation, which is the only reason feedback is affordable on a control tapped
+forty times a session. **B**: `TrackerCard`'s glyph interpolates from 0.9
+rather than binding `scaleY` raw at 0, and its `friction: 7` spring becomes a
+140ms ease-out — a boolean flip carries no velocity, and overshoot on a
+control the file's own comment says is "tapped four times in a second" is
+motion becoming latency. **C**: 26 hand-typed press opacities in the 0.6–0.85
+band become one `PRESS_OPACITY`. The three low outliers (0.5, 0.55) are left
+alone: at half strength they are almost certainly saying "disabled", and
+reclassifying them is a visual decision this ticket had no mandate for.
+
+`pressRetentionOffset` was set on **zero** controls in the whole app before
+this; it is now baked into the primitive, because "remember it per site" is a
+rule every screen re-forgets.
+
+**The unbudgeted part was jest.** Giving the shared Button a Reanimated import
+broke every component test that renders one — `Cannot read properties of
+undefined (reading 'loadUnpackers')`, taking whole SUITES down, so the failure
+read as unrelated screens breaking. And **the package's own
+`react-native-reanimated/mock` does not fix it**: measured, not assumed, it
+re-imports the real package and dies at the identical frame. `jest.setup.js`
+now carries a factory mock that never touches the package. It is deliberately
+minimal — the app has exactly ONE Reanimated import site — because a broad
+stub would let a real API mistake pass in jest and fail on device.
+
+**Four instrument mistakes, all mine, all caught by running things.**
+
+1. A regex insert put an import INSIDE a multi-line import block in
+   `TrackerCard.tsx`, producing `type PressableProps,, Easing } from`.
+2. `constants/Motion.ts` first imported `cubicBezier` from Reanimated, which
+   dragged the native runtime into a constants file no test could then read.
+   The module now imports nothing and states the four bezier numbers; the
+   consumer builds the curve.
+3. **An absence check tripped on documentation for the third time today.**
+   `expect(TRACKER).not.toMatch(/friction:/)` failed on the comment explaining
+   why `friction: 7` was removed — after W22 and W23 hit the same trap. The
+   fix this time is an instrument rather than a reword: `codeOnly()` strips
+   comments before every absence assertion, because "this code is absent" is
+   the claim and comments are not code.
+4. **A restore silently discarded real work, and only the re-run caught it.**
+   Mutation M5 was undone with `git checkout components/ui/Pill.tsx`, which
+   reverts to HEAD — throwing away that file's actual `PRESS_OPACITY` change.
+   The suite went green on nine of ten and RESTORED came back red. This is
+   precisely why CLAUDE.md says a restore is confirmed by re-running rather
+   than by assuming.
+
+Out of scope and deliberately untouched: `app/session/[id].tsx`, which
+contains no animation at all — and that is the feature. A test now asserts it
+stays that way, so the next enthusiasm pass has to argue with something rather
+than with nobody.
+
+Six mutations checked, restores re-run: the transition moved onto the pressed
+style (animating the press IN), the retention offset dropped, the spring
+restored, the glyph growing from zero, a hand-typed opacity creeping back, and
+the duration pushed past the frequency gate.
+
+**Nothing here has been felt on a device.** The audit that produced this
+ticket ran zero frames, and neither did this branch — the three device
+criteria on #1037 cannot be upgraded by code review.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -13,6 +13,7 @@ import { cachedExercises } from '@/lib/sessionStore';
 import { formatEstimate, formatWeight } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * One exercise, with what you last did on it.
@@ -325,7 +326,7 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  trendRowPressed: { opacity: 0.85 },
+  trendRowPressed: { opacity: PRESS_OPACITY },
   trendRowText: { flex: 1, gap: 2 },
   trendRowTitle: { fontSize: 15, fontWeight: '700' },
   trendRowNote: { color: vola.textMuted, fontSize: 13 },

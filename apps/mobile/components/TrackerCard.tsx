@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  Easing,
   Pressable,
   StyleSheet,
   View as RNView,
@@ -335,6 +336,9 @@ const GLYPH_SLOP = { top: 9, bottom: 9, left: GLYPH_GAP / 2, right: GLYPH_GAP / 
  * VoiceOver even though every one of them is technically labelled, because
  * somebody swiping through cannot tell where they are.
  */
+/** F38/#1037 — the tracker glyph's fill, inside the 100–150ms press band. */
+const FILL_MS = 140;
+
 function Glyphs({
   tracker,
   entries,
@@ -467,11 +471,24 @@ function Glyph({
   // which is all the animation needs.
   const [t] = useState(() => new Animated.Value(filled ? 1 : 0));
   useEffect(() => {
-    Animated.spring(t, {
+    /*
+      F38/#1037 — a TIMING curve, not a spring.
+
+      This was `Animated.spring({ friction: 7, tension: 90 })`. `friction: 7`
+      is bouncy, and this file's own comment records that the glyph "can be
+      tapped four times in a second": overshoot on a control logged that fast
+      is motion becoming latency, and the second tap arrives while the first
+      is still wobbling.
+
+      A spring is right when a finger carried velocity into the change. This
+      is a boolean flipping, so nothing has any velocity to carry, and 140ms
+      of ease-out is the whole answer.
+    */
+    Animated.timing(t, {
       toValue: filled ? 1 : 0,
+      duration: FILL_MS,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
       useNativeDriver: true,
-      friction: 7,
-      tension: 90,
     }).start();
   }, [filled, t]);
 
@@ -514,7 +531,15 @@ function Glyph({
               margin: inset,
               borderRadius: Math.max(1, size / 3 - inset),
               opacity: t,
-              transform: [{ scaleY: t }],
+              /*
+                Interpolated from 0.9, never from 0. `scaleY: t` bound raw
+                means the fill grows out of a zero-height sliver — nothing in
+                the real world appears from nothing, and at four taps a second
+                the first visible frame is the only one the athlete sees.
+                Opacity still carries the 0→1, so the fill still arrives; it
+                just arrives as something rather than as a line.
+              */
+              transform: [{ scaleY: t.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }],
             },
           ]}
           testID={`${testID}-fill`}

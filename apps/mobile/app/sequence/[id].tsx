@@ -11,6 +11,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { getSequence, stepMeta, stepName, type Sequence } from '@/lib/sequences';
 import { fetchTechniques } from '@/lib/techniques';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * One chain, read back — the screen `shared/index.tsx` used to lie about.
@@ -273,7 +274,7 @@ const styles = StyleSheet.create({
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   disc: {
     width: 26,
     height: 26,

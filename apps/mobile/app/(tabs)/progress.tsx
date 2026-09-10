@@ -45,6 +45,7 @@ import { formatWeight } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
 import { reviewWeek, type WeekReview } from '@/lib/weekReview';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * Progress — "am I getting better?"
@@ -608,7 +609,7 @@ const styles = StyleSheet.create({
     ...Card.base,
     overflow: 'hidden',
   },
-  rowPressed: { opacity: 0.85 },
+  rowPressed: { opacity: PRESS_OPACITY },
   rowText: { flex: 1, gap: 3, backgroundColor: 'transparent' },
   rowTitle: { ...Typography.emphasis, fontWeight: '700' },
   // textMuted, not textDim — textDim is 3.96:1 on `bg`, under AA at this size.

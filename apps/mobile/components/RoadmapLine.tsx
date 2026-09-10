@@ -6,6 +6,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { nextStep, type Curriculum } from '@/lib/curriculum';
 import { roadmapMilestone } from '@/lib/roadmapEntry';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * The roadmap, on Today — as a REMINDER OF INTENT, not as a suggestion.
@@ -130,7 +131,7 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   main: { gap: 2 },
   eyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   title: { color: vola.text, fontSize: 15, fontWeight: '700', lineHeight: 20 },

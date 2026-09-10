@@ -13,6 +13,7 @@ import {
 import { formatElapsed } from '@/lib/rest';
 import { formatDistance } from '@/lib/units';
 import type { UnitSystem } from '@/lib/units';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * N479/#824 — a walk or hike the platform health store noticed that has no
@@ -147,8 +148,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  logPressed: { opacity: 0.85 },
+  logPressed: { opacity: PRESS_OPACITY },
   logLabel: { fontSize: 14, fontWeight: '700', color: vola.bg },
   dismiss: { padding: 4 },
-  dismissPressed: { opacity: 0.6 },
+  dismissPressed: { opacity: PRESS_OPACITY },
 });

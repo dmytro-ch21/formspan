@@ -9,6 +9,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { canAdvance, canGoBack, currentBlock, upcomingBlock } from '@/lib/classPlanRun';
 import { getClassPlan, type ClassPlan, type ClassPlanBlock } from '@/lib/classplans';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /** Mirrors `apps/web/src/app/dashboard/classplans/[id]/page.tsx`'s
  *  `BLOCK_LABEL` exactly — the same words either surface, since a coach
@@ -313,7 +314,7 @@ const styles = StyleSheet.create({
   },
   controlButtonPrimary: { borderWidth: 0, flex: 2 },
   controlButtonDisabled: { opacity: 0.35 },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   controlText: { fontSize: 17, fontWeight: '800', color: vola.text },
   doneTitle: { fontSize: 24, fontWeight: '800', color: vola.text },
   primaryButton: {

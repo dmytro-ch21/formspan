@@ -12,6 +12,7 @@ import {
   type Food,
   type TargetView,
 } from '@/lib/nutrition';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * The nutrition centrepiece — `TODAY'S MOMENTUM` on today, `MOMENTUM` on any
@@ -533,7 +534,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     maxWidth: 150,
   },
-  chipPressed: { opacity: 0.8 },
+  chipPressed: { opacity: PRESS_OPACITY },
   chipLabel: { fontSize: 12, color: vola.textMuted },
   primary: {
     backgroundColor: vola.lime,

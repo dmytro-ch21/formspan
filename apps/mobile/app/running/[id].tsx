@@ -68,6 +68,7 @@ import { useUnits } from '@/lib/useUnits';
 import { announce } from '@/lib/voice';
 import { newSplitIndices, spokenSplitAnnouncement } from '@/lib/runningVoice';
 import { cacheSessionHR } from '@/lib/sessionHR';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * Live GPS run tracking (N460/#771).
@@ -1115,7 +1116,7 @@ const styles = StyleSheet.create({
     ...Card.base,
     overflow: 'hidden',
   },
-  trendRowPressed: { opacity: 0.85 },
+  trendRowPressed: { opacity: PRESS_OPACITY },
   trendRowText: { flex: 1, gap: Spacing.xxs },
   trendRowTitle: { ...Typography.emphasis, fontWeight: '700' },
   trendRowNote: { ...Typography.meta, color: vola.textMuted },

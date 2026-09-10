@@ -78,6 +78,7 @@
 
 import { useAuth } from '@clerk/clerk-expo';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { PRESS_OPACITY } from '@/constants/Motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1538,7 +1539,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backButtonPressed: { opacity: 0.6 },
+  backButtonPressed: { opacity: PRESS_OPACITY },
   // N504 — bottom padding no longer `TAB_BAR_CLEARANCE`. This screen moved
   // out of `(tabs)/` and is pushed over the tab bar rather than sitting
   // inside it, so it runs to the physical bottom of the display now — the

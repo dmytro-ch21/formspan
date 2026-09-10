@@ -4,6 +4,7 @@ import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * `UP NEXT` — the scheduled session, as one row.
@@ -185,7 +186,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
   },
-  logPressed: { opacity: 0.85 },
+  logPressed: { opacity: PRESS_OPACITY },
   logLabel: { fontSize: 14, fontWeight: '700', color: vola.bg },
   missed: { fontSize: 13, color: vola.warn },
 });

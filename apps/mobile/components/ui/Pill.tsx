@@ -5,6 +5,7 @@ import { Icon, type IconName } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { withAlpha } from '@/lib/palette';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * The one rounded-label shape — a chip you can select, or a badge you can't.
@@ -120,6 +121,6 @@ const styles = StyleSheet.create({
   // on a card already has the card's own edge; a second outline around a
   // static label reads as a control that isn't one.
   chip: { borderWidth: 1, borderColor: 'transparent' },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   label: { fontSize: 12, color: vola.textMuted },
 });

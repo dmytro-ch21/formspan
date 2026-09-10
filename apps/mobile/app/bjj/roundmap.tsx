@@ -15,6 +15,7 @@ import {
 import { fetchTechniques, type TechniqueSummary } from '@/lib/techniques';
 import { ladderRows } from '@/lib/roundMapLadder';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * How a round goes — the map, as a ladder.
@@ -275,7 +276,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 13,
   },
-  pressed: { opacity: 0.6 },
+  pressed: { opacity: PRESS_OPACITY },
   rowLabel: { color: vola.text, fontSize: 15, fontWeight: '700' },
   chevron: { color: vola.textMuted, fontSize: 18 },
   body: { gap: 12, paddingBottom: 14, paddingHorizontal: 14 },

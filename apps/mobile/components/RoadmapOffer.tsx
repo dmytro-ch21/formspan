@@ -9,6 +9,7 @@ import { useAccent } from '@/lib/AccentProvider';
 import { listCurricula, type Curriculum } from '@/lib/curriculum';
 import { roadmapToOffer } from '@/lib/roadmapEntry';
 import { useAuthToken } from '@/lib/useAuthToken';
+import { PRESS_OPACITY } from '@/constants/Motion';
 
 /**
  * The offer, for an athlete who is on no roadmap.
@@ -157,7 +158,7 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 4,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: PRESS_OPACITY },
   head: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   eyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   title: { color: vola.text, fontSize: 15, fontWeight: '700' },
