@@ -1,7 +1,7 @@
 import { configure, render, screen, fireEvent } from '@testing-library/react-native';
 
 import SettingsScreen from '../../app/settings';
-import { collectNodes, findAllByType } from '@/lib/__tests__/support/tree';
+import { findAllByType, switchWrappers } from '@/lib/__tests__/support/tree';
 
 /**
  * The Settings toggles are the PLATFORM's switch (F43/#1042).
@@ -91,19 +91,12 @@ jest.mock('@/lib/session', () => ({ clearSessionToken: async () => {} }));
 const switches = () => findAllByType(screen.root, 'RCTSwitch');
 
 /**
- * The view wrapping each switch — found by looking for a node that HAS a
- * switch as a direct child, rather than by walking up from the switch, because
- * RNTL 14's tree node carries no `parent` pointer (see `support/tree.ts` on
- * what the `test-renderer` swap removed).
- *
- * Every assertion below also checks this count equals the switch count, which
- * is what catches a switch rendered with no wrapper at all — the case a
- * per-wrapper loop would silently pass by iterating nothing.
+ * The wrapper query lives in `support/tree.ts` because the same invariant holds
+ * at three call sites. Every assertion below also checks this count equals the
+ * switch count, which is what catches a switch rendered with no wrapper at all
+ * — the case a per-wrapper loop would silently pass by iterating nothing.
  */
-const switchWrappers = () =>
-  collectNodes(screen.root).filter((n) =>
-    (n.children ?? []).some((c) => typeof c !== 'string' && c.type === 'RCTSwitch'),
-  );
+const wrappers = () => switchWrappers(screen.root);
 
 it('renders the platform switch, not a hand-rolled knob', async () => {
   await render(<SettingsScreen />);
@@ -133,12 +126,12 @@ it('the switch is touch-inert, so one tap on it cannot toggle twice', async () =
   await render(<SettingsScreen />);
   await screen.findByTestId('settings-sounds');
 
-  const wrappers = switchWrappers();
-  expect(wrappers.length).toBeGreaterThan(0);
+  const found = wrappers();
+  expect(found.length).toBeGreaterThan(0);
   // Every switch is wrapped — not just "the wrapped ones are correct".
-  expect(wrappers.length).toBe(switches().length);
+  expect(found.length).toBe(switches().length);
 
-  for (const w of wrappers) {
+  for (const w of found) {
     // `pointerEvents: 'none'` is the whole protection: the row above owns the
     // press, and a switch that could also be touched would fire both handlers
     // and land back where it started.
@@ -150,11 +143,11 @@ it('the switch is hidden from the accessibility tree, so the row announces once'
   await render(<SettingsScreen />);
   await screen.findByTestId('settings-sounds');
 
-  const wrappers = switchWrappers();
-  expect(wrappers.length).toBeGreaterThan(0);
-  expect(wrappers.length).toBe(switches().length);
+  const found = wrappers();
+  expect(found.length).toBeGreaterThan(0);
+  expect(found.length).toBe(switches().length);
 
-  for (const w of wrappers) {
+  for (const w of found) {
     // The native switch carries an `accessibilityRole` of its own — confirmed
     // on the rendered host node — so without both of these VoiceOver reads
     // the control twice: once for the row, once for the switch inside it.

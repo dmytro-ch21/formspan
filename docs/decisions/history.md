@@ -70441,6 +70441,31 @@ toggle exactly once, and that VoiceOver announces each row once as a switch
 rather than "button, switch". The dark-then-light check on the off-state
 track (`vola.line` against the row background) is likewise unverified.
 
+**The pattern is not new here, which review established and this entry did not
+originally say.** `components/SwipeToDelete.tsx:184-193` records the prior
+incident and lands on the identical two-part fix: `pointerEvents` maps to
+`userInteractionEnabled` and gates **hit-testing only** — the accessibility
+tree is walked independently, and on Android TalkBack activation goes through
+`performClick()`, which `pointerEvents` does not gate at all. So hiding the
+switch from the accessibility tree is not belt-and-braces on top of the
+pointer-inertness; it is the half that covers a route the other half cannot
+reach.
+
+**The invariant is tested at two of its three sites.** `settings.tsx` and
+`profile/edit.tsx` both have it; `(tabs)/workouts.tsx`'s "Share publicly"
+switch lives inside the new-workout modal and no existing test opens that
+sheet, which is scaffolding disproportionate to a non-blocking review
+suggestion. Filed as **L16 (#1089)** rather than left as an unrecorded gap.
+The wrapper query lives in `lib/__tests__/support/tree.ts` as `switchWrappers`
+so the third site is four lines when somebody takes it.
+
+One trap worth recording for whoever does: the profile/edit case reads zero
+switches unless the test supplies modules, because the shared mock returns
+none and the sport rows never render — and a `mockReturnValueOnce` is not
+enough either, since the screen calls `useModules()` once per render and
+re-renders several times before it settles. Both were measured, not guessed;
+the first version of that test iterated an empty list and passed.
+
 `settings/suggestions.tsx` and `components/curriculum/CurriculumEditor.tsx`
 are untouched — they are the reference, not the work.
 
