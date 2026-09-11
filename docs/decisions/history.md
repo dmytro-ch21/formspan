@@ -70367,6 +70367,83 @@ is F38's. Worth noting that the ticket's claim that `WeekStrip`'s review row
 "has no `pressed` state either" is also now stale — it is a `PressableScale`
 and has had press feedback since F38 landed.
 
+## 2026-09-11 — F43: three toggles stop hand-rolling the platform's switch, and two guards that did not guard (#1042)
+
+Three toggles — `app/settings.tsx`, `app/(tabs)/workouts.tsx` and
+`app/profile/edit.tsx` — moved their knob across the track by flipping
+`alignSelf: 'flex-end'`. That is a **layout** property, changed with no
+transition, so the knob teleported. Two screens away, `settings/suggestions.tsx`
+had been using React Native's own `<Switch>`, correctly themed, where the knob
+glides with the platform's physics and announces itself properly to VoiceOver.
+
+**The fix was never to animate the hand-rolled ones.** A settings toggle is
+flipped constantly and sits in the audit's "100+/day → platform default or
+nothing" tier. This app got the no-animation half right and the
+platform-default half wrong. So all three become `<Switch>`, copying the
+exemplar's prop set, and roughly forty lines of dead `switch`/`switchOn`/
+`knob`/`knobOn` styles are deleted.
+
+### The one real decision, and it is the same at all three sites
+
+Each toggle sits inside a pressable whose `onPress` flips the value, and
+`<Switch>` handles its own press. Leave both live and one tap toggles **twice**,
+landing back where it started — which reads as "the toggle does nothing".
+
+All three keep the pressable, because the whole row being tappable is the
+Settings pattern and #1042's own device criterion checks that tapping the
+*label* toggles. So the switch is made inert two ways:
+
+- **`pointerEvents="none"`** on a wrapping view. This is the whole protection.
+  No `onValueChange` is passed either — the switch can never be touched, and
+  that also means a later edit removing `pointerEvents` degrades to an *inert*
+  switch rather than a silent double-toggle, which is the better of the two
+  failures and the one the new test catches.
+- **hidden from the accessibility tree** (`accessibilityElementsHidden` plus
+  `importantForAccessibility="no-hide-descendants"`). All three rows already
+  carried `accessibilityRole="switch"` and `accessibilityState={{ checked }}`,
+  and the rendered native switch carries an `accessibilityRole` of its own —
+  verified on the host node, not assumed — so without this VoiceOver reads the
+  control twice.
+
+### Two guards that did not guard, caught by mutating them
+
+The new `__tests__/app/settingsSwitch.test.tsx` renders the real Settings
+screen. Its first draft had four tests, all green, and **two of them were
+worthless** — found only because each was mutated:
+
+- *"the switch cannot be pressed"* asserted `onValueChange` was undefined on
+  the switch. **React Native never puts `onValueChange` on the host node**: it
+  maps to `onChange`, which is always a function because the component attaches
+  its own internal handler regardless. So the assertion read a prop that is
+  undefined either way, and wiring `onValueChange={onChange}` straight back in
+  left the suite green.
+- *"the switch is hidden from the accessibility tree"* only ever looked at the
+  **row's** role and state. Deleting `accessibilityElementsHidden` from the
+  switch — precisely the double-announce this change risks — also left it
+  green.
+
+Both now assert on the **wrapper**, which is the thing that actually makes the
+switch inert, and both redden when it is removed. This is the third time in
+this repo a test has been written against a prop that does not exist where the
+author expected it, and the pattern is the same each time: the assertion was
+about a composite component's API while the tree only carries the host's.
+
+Restated because it is the whole reason this was caught: **a green test is not
+evidence until you have watched it go red.**
+
+### What is not settled
+
+Nothing here was run on a device or in the Simulator. Three things are
+structural predictions, and #1042 carries all three as device criteria: that
+the knob now **glides** (jest renders `RCTSwitch` as a host node with no
+animation to observe), that tapping the label and tapping the switch each
+toggle exactly once, and that VoiceOver announces each row once as a switch
+rather than "button, switch". The dark-then-light check on the off-state
+track (`vola.line` against the row background) is likewise unverified.
+
+`settings/suggestions.tsx` and `components/curriculum/CurriculumEditor.tsx`
+are untouched — they are the reference, not the work.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

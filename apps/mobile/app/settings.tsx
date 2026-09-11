@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { clearSessionToken } from '@/lib/session';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Switch, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { accents, vola, type AccentName } from '@/constants/Colors';
@@ -665,9 +665,44 @@ function Toggle({
         <Text style={styles.rowLabel}>{label}</Text>
         {hint && <Text style={styles.muted}>{hint}</Text>}
       </View>
-      <View style={[styles.switch, value && [styles.switchOn, { backgroundColor: accent.accent }]]}>
-        <View style={[styles.knob, value && styles.knobOn]} />
-      </View>
+      {/*
+        F43/#1042 — the platform's own switch, not a hand-rolled one. The
+        knob used to move by flipping `alignSelf`, which is a LAYOUT property
+        with no transition, so it teleported; `<Switch>` glides with the
+        platform's physics for free. A settings toggle is in the
+        "100+/day → platform default or nothing" tier, so the fix is to stop
+        hand-rolling it rather than to animate it.
+
+        **The row owns the interaction, so the switch must not.** Two things
+        enforce that, and both are load-bearing:
+
+        - `pointerEvents="none"` — this is the whole protection. Without
+          it the switch consumes the touch, and what the athlete gets is a
+          control that visibly does nothing. No `onValueChange` is passed
+          because the switch can never be touched; that also means removing
+          this prop degrades to an inert switch rather than to a silent
+          double-toggle, which is the better of the two failures and the one
+          `settingsSwitch.test.tsx` catches.
+        - hidden from the accessibility tree — the `PressableScale` above
+          already announces as a switch carrying `checked`, and a nested
+          native `<Switch>` reports `role="switch"` of its own, so VoiceOver
+          would read the control twice.
+      */}
+      <RNView
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        <Switch
+          value={value}
+          disabled={disabled}
+          trackColor={{ true: accent.accent, false: vola.line }}
+          // The knob stays light on both, so the track carries the state —
+          // matching `settings/suggestions.tsx`, which is the exemplar this
+          // swap copies rather than reinventing.
+          thumbColor={vola.text}
+        />
+      </RNView>
     </PressableScale>
   );
 }
@@ -759,16 +794,5 @@ const styles = StyleSheet.create({
   danger: { color: vola.danger },
   muted: { color: vola.textMuted, fontSize: 13 },
   chevron: { color: vola.textDim, fontSize: 22 },
-  switch: {
-    width: 50,
-    height: 30,
-    borderRadius: 999,
-    backgroundColor: vola.line,
-    padding: 3,
-    justifyContent: 'center',
-  },
-  switchOn: {},
-  knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
-  knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
   note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
 });
