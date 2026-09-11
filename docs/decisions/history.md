@@ -69812,6 +69812,23 @@ that check noticing, which is the failure it exists for.
 
 ### What this does not do
 
+It runs in CI as well as `verify`, and that was nearly missed. The ticket asks
+for "ideally a `verify` link", and a `verify` link is what the first version
+was. The pre-merge check suite pointed out what that leaves open:
+`check:release-age-exemptions` appeared in **no GitHub workflow**, so a branch
+whose author never ran `verify` locally would land an `expo install --fix`
+exemption and show a full set of green CI checks — the guard binding the local
+chain rather than the thing that actually gates commits, while the script's own
+docstring says that block "was one commit from landing as an unexamined side
+effect". It is now a step in `ci.yml`'s `Scripts (Python)` job; a step rather
+than a job, so `EXPECTED_CHECK_RUNS` stays 8 and `ci:checks` keeps its meaning.
+
+Worth knowing it has company: `check:palette`, `check:icons` and
+`check:design-tokens` are also `verify`-only, which `check-verify-chain.py`
+permits — it requires CI coverage only for gates ABSENT from the chain. That
+asymmetry is pre-existing and not fixed here, but it means a green CI run is not
+evidence those three passed.
+
 It does not stop `expo install --fix` writing the block — nothing in this repo
 can. It makes the write impossible to COMMIT unnoticed, which is the reachable
 half. The skill's instruction to check `git status` after running that command
