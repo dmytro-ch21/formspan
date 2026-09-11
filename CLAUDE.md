@@ -403,14 +403,17 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 pnpm run ci:checks          # the current branch's PR; --pr <n> or --sha <sha> also work
 ```
 
-It must report 6 and exit 0 — 6 being however many jobs the workflows declare
+It must report **8** and exit 0 — 8 being however many jobs the workflows declare
 today, which the script derives rather than assumes: it cross-checks the derived
 set against `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py` and **fails
 loudly if the two disagree**, so adding a CI job means changing that constant in
 the same commit rather than discovering later that the bar quietly moved. (This
-number has already drifted once — see the 2026-08-20 probe-PR #401 correction
-below — so read it from `EXPECTED_CHECK_RUNS` itself if you ever suspect this
-sentence is behind the code again, rather than trusting the numeral here.)
+number has now drifted **twice** — 5 to 6 at the 2026-08-20 probe-PR #401
+correction below, and 6 to 8 by N166 (#543), which this sentence did not follow
+until H18 noticed the gap on 2026-09-11. So read it from `EXPECTED_CHECK_RUNS`
+itself if you ever suspect this sentence is behind the code again, rather than
+trusting the numeral here — that instruction has now been load-bearing twice,
+which is the argument for keeping it rather than for believing the number.)
 A count of **0** satisfies "no failures"
 trivially: `gh pr view` shows nothing red because there is nothing at all,
 `statusCheckRollup` is an empty list, and `mergeStateStatus` does not
@@ -867,7 +870,7 @@ the entry describing the trap.
 
 Skip the entry only for truly trivial changes (typo fixes, formatting) that don't represent a decision anyone would need to know about later.
 
-### Appending no longer conflicts with every other open PR (N63)
+### Appending conflicts less than it did — LOCALLY ONLY (N63, corrected by H18)
 
 **This file used to guarantee a conflict between any two open PRs.** 17 of 20
 commits on 20 Aug touched it, 9 of 10 on 26 Aug — so a PR open across one merge
@@ -888,6 +891,52 @@ definition lives in `.git/config`, which is not versioned, and `postinstall`
 writes it. If it was never installed, git falls back to the built-in merge —
 you get today's conflict, never a wrong resolution. One install covers every
 worktree.
+
+**And that unversioned `.git/config` is exactly why this fixes only HALF the
+problem — H18 (#983).** GitHub never sees `.git/config`, so **the server-side
+merge cannot run the driver at all** and falls back to the built-in one. The
+consequence is the thing this section's old heading denied: **a PR that appends
+to `history.md` still goes `CONFLICTING` the moment another appending PR merges
+first, and a conflicting PR gets ZERO CHECK RUNS** — the trap the whole "CI can
+run ZERO checks" section above exists for.
+
+So the honest statement is: **the driver fixes your `git rebase`; it does not
+fix the `refs/pull/N/merge` commit GitHub builds, and that is the one that
+decides whether CI runs.** Your rebase prints `append-only merge: … kept both`
+and succeeds; GitHub had no such option and was never wrong to refuse.
+
+**Measured twice, and the second time is worse than the first.** 2026-09-08 on
+#982: three forced rebases in one afternoon. 2026-09-11, across one session
+landing six PRs: **#1081 (H17) needed FOUR rebase cycles** — N170, H23 and F41
+each landed underneath it mid-CI — and #1085 (F46) and #1086 (F42) needed one
+each. Every one was `mergeable=CONFLICTING`, `mergeStateStatus=DIRTY`, 0 check
+runs, and every one resolved locally on the first try. The cost is one rebase
+plus one full `verify` plus one full CI cycle **per concurrent merge**, and at
+eight parallel agents the busiest windows cost more than the work.
+
+**The decision, recorded rather than left implicit: this is ACCEPTED, not
+fixed.** Three alternatives were considered and rejected:
+
+- *Per-entry files under `docs/decisions/entries/`, assembled on read.* Kills
+  the one property the file is for — this file's own first line sends every
+  new reader to `history.md` for "full context", and a `grep` across one
+  narrative is how the traps in it are actually found. It also breaks every
+  `history.md:NNNNN` line anchor in the issue corpus.
+- *An entries directory for NEW entries only, freezing the existing file.*
+  Genuinely closes the conflict, and is the option to take if the cost grows.
+  Rejected for now because it splits the narrative in two permanently to solve
+  a problem that costs minutes, and `check:doc-merge`'s invariants would need
+  rewriting for a shape nobody has read yet.
+- *A merge queue.* Would serialise the rebases rather than remove them, and is
+  a repository-settings change — the board owner's call, not a session's.
+
+**The trigger for revisiting is written down so it is not a vibe:** if a single
+PR needs **four or more** rebase cycles again, or a week's PRs average more than
+one, take the entries-directory option. #1081 already hit that number once.
+
+**What did improve**: `pnpm run ci:checks` now names this cause in its
+zero-run message, so the next session reads the explanation instead of
+re-deriving it.
 
 **Do not swap it for `merge=union`.** That is the obvious answer for an
 append-only file and it silently keeps both sides of an edit to the same line,

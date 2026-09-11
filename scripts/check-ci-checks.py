@@ -315,7 +315,18 @@ def evaluate(expected: list[str], runs: list[dict]) -> tuple[int, list[str]]:
             "",
             REMEDY,
             "",
-            "See docs/decisions/history.md (N65) and issue #368.",
+            "And the usual cause of THAT, in this repo, is `docs/decisions/history.md`. "
+            "Every ticket appends to it by hard rule, so two PRs open across one "
+            "merge cycle append at the same anchor and conflict. `.gitattributes` "
+            "routes it through `scripts/append-only-merge.py`, which resolves that "
+            "case cleanly — but the driver is DEFINED in `.git/config`, which is not "
+            "versioned and never reaches GitHub, so the server-side merge cannot run "
+            "it and falls back to the built-in one. Your rebase will say "
+            "`append-only merge: ... kept both` and succeed; GitHub had no such "
+            "option. Nothing is wrong with the branch. Rebase and push, and expect "
+            "to repeat it once per concurrent merge.",
+            "",
+            "See docs/decisions/history.md (N65, H18) and issues #368 and #983.",
         ]
         return EXIT_NOT_CHECKED, out
 
@@ -561,6 +572,21 @@ def self_test() -> int:
         ("five green", FIVE, [_run(n) for n in FIVE], EXIT_OK, "passed"),
         # The N65 case itself, and the reason this file exists.
         ("zero runs", FIVE, [], EXIT_NOT_CHECKED, "ZERO CHECK RUNS"),
+        # H18 (#983): the zero-run message must NAME the cause that actually
+        # produces this in this repo — a concurrent append to history.md, whose
+        # merge driver GitHub cannot run because `.git/config` is not versioned.
+        #
+        # The needles are phrases that occur ONLY in that diagnosis, which the
+        # first draft of these two vectors got wrong: they matched on
+        # "history.md" and on ".git/config", both of which also appear in the
+        # message's closing "See docs/decisions/history.md (N65, H18)" line and
+        # in the remedy above it. Deleting the entire diagnosis therefore left
+        # them green — measured, not supposed. A vector whose needle survives
+        # the deletion it exists to detect is not a vector.
+        ("zero runs explains the driver", FIVE, [], EXIT_NOT_CHECKED,
+         "the server-side merge cannot run"),
+        ("zero runs states the recurrence", FIVE, [], EXIT_NOT_CHECKED,
+         "once per concurrent merge"),
         ("four of five", FIVE, [_run(n) for n in FIVE[:-1]], EXIT_NOT_CHECKED, "MISSING"),
         (
             "one failed",

@@ -41580,6 +41580,19 @@ which is the same staleness lesson applied to memory files.
 
 ## 2026-08-26 — N63: the conflict every open PR gets is an ORDERING question, and a 40-line rule answers it
 
+> **AMENDED 2026-09-11 by H18 (#983), and the correction is load-bearing: this
+> entry describes a fix that works on ONE of the two sides that matter.** The
+> driver's definition lives in `.git/config`, which is not versioned, so GitHub
+> never sees it and the **server-side** merge cannot run it. Your `git rebase`
+> resolves cleanly and prints `append-only merge: … kept both`; the
+> `refs/pull/N/merge` commit GitHub builds still conflicts, and a conflicting
+> PR still gets **zero check runs**. Everything below about the rule, the
+> rejections and the A/B is correct and unchanged — what is wrong is any
+> reading of it as "appending no longer conflicts". It conflicts exactly as
+> often as before on the one surface that decides whether CI runs. See H18's
+> entry for the measurements and for the decision to accept rather than
+> restructure.
+
 Two independent counts, six days apart, of commits landing on `main`:
 
 ```
@@ -70468,6 +70481,140 @@ the first version of that test iterated an empty list and passed.
 
 `settings/suggestions.tsx` and `components/curriculum/CurriculumEditor.tsx`
 are untouched — they are the reference, not the work.
+
+## 2026-09-11 — H18: the append-only merge driver fixes your rebase, not GitHub's merge — and the decision is to accept that (#983)
+
+N63 routed `docs/decisions/history.md` and `docs/testing/functional-scenarios.md`
+through `scripts/append-only-merge.py` via `.gitattributes`, and the rule it
+implements is correct: when git's diff3 base region is empty, both sides only
+appended, and concatenation is the unique loss-free resolution.
+
+**It fixes one of the two sides that matter.** The driver's *definition* lives
+in `.git/config`, written by `postinstall`. `.git/config` is not versioned and
+never reaches GitHub, so the **server-side** merge cannot run the driver at all
+and falls back to the built-in one. Your `git rebase` prints
+`append-only merge: … kept both` and succeeds. The `refs/pull/N/merge` commit
+GitHub builds still conflicts — and a conflicting PR gets **zero check runs**,
+which is the trap CLAUDE.md devotes a section to because it is indistinguishable
+from passing on every GitHub surface.
+
+So N63's claim, and the section heading in CLAUDE.md that carried it —
+*"Appending no longer conflicts with every other open PR"* — was true of a
+developer's machine and false of the thing that decides whether CI runs.
+
+### Measured twice, and the second time is worse
+
+2026-09-08 on #982: three forced rebases in one afternoon (#976, #978, #980
+each landing underneath it).
+
+2026-09-11, one session landing six PRs, which is the sharper dataset because
+it shows the distribution rather than a single bad case:
+
+| PR | Rebase cycles forced | What landed underneath |
+|---|---|---|
+| #1081 (H17) | **4** | N170, H23, F41 |
+| #1085 (F46) | 1 | F44 |
+| #1086 (F42) | 1 | N493 tranche 1 |
+
+Every one: `mergeable=CONFLICTING`, `mergeStateStatus=DIRTY`, **0 check runs**,
+and every one resolved locally on the first attempt with the driver reporting
+`kept both` and `check:doc-merge` green afterwards. The branches were never
+broken. Only GitHub thought so, and it was not wrong to — it genuinely could
+not build the merge.
+
+The cost is one rebase **plus one full `verify` plus one full CI cycle** per
+concurrent merge. At eight parallel agents, a busy window costs more than the
+work being merged.
+
+### The decision: accepted, not fixed — and the trigger for revisiting is written down
+
+Three alternatives were considered. None is obviously right, which is why this
+is recorded rather than left to whoever hits it next:
+
+- **Per-entry files under `docs/decisions/entries/`, assembled on read.**
+  Rejected. It kills the property the file exists for: `CLAUDE.md`'s own first
+  line sends every new reader here for "full context", and a single `grep`
+  across one narrative is how the traps in it actually get found. It would also
+  break every `history.md:NNNNN` line anchor in the issue corpus — this entry
+  cites two of its own.
+- **An entries directory for NEW entries only, freezing the existing file.**
+  This genuinely closes the conflict, and it is the option to take if the cost
+  grows. Rejected *for now* because it splits the narrative permanently to
+  solve a problem that costs minutes, and `check:doc-merge`'s invariants
+  (exactly one `## Open items` heading, last `##` in the file, no unterminated
+  fence) would need rewriting for a shape nobody has read yet.
+- **A merge queue.** It would serialise the rebases rather than remove them,
+  and it is a repository-settings change — the board owner's call, not a
+  session's.
+
+**The trigger, so this is not re-decided by mood:** if a single PR needs **four
+or more** rebase cycles again, or a week's PRs average more than one, take the
+entries-directory option. #1081 hit that number the day this was written, so
+the threshold is one observation from being met rather than hypothetical.
+
+### What actually changed
+
+`pnpm run ci:checks`'s zero-run message now names this cause, so the next
+session reads the explanation instead of re-deriving it from scratch — which
+is what three separate sessions have now done.
+
+Two self-test vectors guard that text. **Their first draft was worthless and
+mutation testing is the only reason that is not still true:** they matched on
+`"history.md"` and `".git/config"`, and both strings also appear in the
+message's closing `See docs/decisions/history.md (N65, H18)` line and in the
+remedy above it — so deleting the entire diagnosis paragraph left both green.
+They now match phrases that occur nowhere else, and deleting the paragraph, or
+merely weakening the sentence that states the recurrence, each turns the
+self-test red.
+
+That is the **fourth** instance in one session of a test asserting on something
+that is present for a reason unrelated to what the test is about. The other
+three were a `slopFor` loop that a control below the floor satisfied trivially
+(F42), a Reanimated mock whose shared values never re-rendered so every arc read
+as unswept (F46), and an `onValueChange` assertion against a prop React Native
+never puts on the host node (F43). The shape is always the same: **the needle
+was present for a reason that had nothing to do with the thing under test.**
+
+### One more stale numeral, found by the same gate
+
+`pre-merge-checker` noticed while running this branch that **CLAUDE.md and the
+`/pre-merge` skill both still said `ci:checks` must report `6`**, while
+`EXPECTED_CHECK_RUNS` has been `8` since N166 (#543). Corrected in both, and
+the parenthetical now records that the number has drifted **twice** rather than
+once.
+
+Folded in rather than filed separately, which is a judgement call worth
+stating: it is one numeral, demonstrably wrong against a constant in the same
+repo, in the adjacent section of a file this branch is already editing for
+accuracy — and it is the same defect class as H18 itself, documentation
+asserting something the code contradicts. The checker suggested a separate
+ticket; that would have been the right call if the fix were larger than the
+ticket describing it.
+
+Worth noting what actually caught it: **the instruction in that very sentence
+to read the number from `EXPECTED_CHECK_RUNS` rather than trust the prose.**
+That instruction has now been load-bearing twice, which is the argument for
+keeping it rather than for believing the numeral next to it.
+
+### The trigger is honour-system, and that is now its own ticket
+
+Nothing computes either number. The threshold above fires only if somebody
+rereads this section at the moment it is breached — which is the same shape as
+the defect N456 found, where **0 of 415 acceptance-criteria checkboxes had ever
+been ticked** and a latch depending on one would have deadlocked every device
+ticket. A revisit threshold nobody evaluates is a threshold that never fires.
+
+Raised by `ac-verifier` on this branch, which correctly noted #983 asked only
+that a trigger be *stated*. Filed as **L17 (#1091)** rather than expanded into
+this ticket: the decision to accept H18's cost is defensible only while the
+cost stays where it was measured, and right now there is no way to know it has.
+
+### What is not settled
+
+Whether accepting this is right at a larger fleet. The measurement is one busy
+day at eight agents; the entries-directory option becomes correct at some
+throughput and nobody knows which. The trigger above is a proxy for that number,
+not the number itself.
 
 ## Open items / known gaps as of this entry
 
