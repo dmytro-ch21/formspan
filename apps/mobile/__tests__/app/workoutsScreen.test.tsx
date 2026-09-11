@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import WorkoutsScreen from '../../app/(tabs)/workouts';
+import { findAllByType, switchWrappers } from '@/lib/__tests__/support/tree';
 import type { Workout } from '@/lib/workouts';
 
 /**
@@ -361,4 +362,49 @@ it('renders the error banner below the header, not flush against the safe area',
   const errorIndex = order.indexOf('workouts-error');
   expect(headerIndex).toBeGreaterThanOrEqual(0);
   expect(errorIndex).toBeGreaterThan(headerIndex);
+});
+
+/**
+ * L16/#1089 — "Share publicly" is an inert platform switch (F43/#1042).
+ *
+ * The third and last site of F43's invariant, and the one that had no coverage
+ * when that ticket merged: the switch lives inside the new-workout sheet, and
+ * no test opened it. One press on the FAB turns out to be the whole cost, which
+ * is worth recording — the gap was assumed expensive and was not.
+ *
+ * The invariant: the ROW owns the press and already announces as a switch, so
+ * the native switch inside it must be **touch-inert** (or one tap fires both
+ * handlers and toggles twice, landing back where it started — which reads as
+ * "the toggle does nothing") and **hidden from the accessibility tree** (or
+ * VoiceOver reads the control twice, once for the row and once for the switch).
+ *
+ * Neither half substitutes for the other: `components/SwipeToDelete.tsx:184-193`
+ * records the incident this pattern comes from — `pointerEvents` maps to
+ * `userInteractionEnabled` and gates hit-testing only, and on Android TalkBack
+ * activation goes through `performClick()`, which it does not gate at all.
+ */
+it('the "Share publicly" switch is inert and hidden from the accessibility tree', async () => {
+  await render(<WorkoutsScreen />);
+
+  // The composer is a Modal behind the FAB; nothing below exists until it opens.
+  await fireEvent.press(await screen.findByTestId('workouts-new'));
+  const row = await screen.findByTestId('new-workout-public');
+
+  const switches = findAllByType(screen.root, 'RCTSwitch');
+  const wrappers = switchWrappers(screen.root);
+
+  // Asserted before the loop: a loop over zero wrappers passes while testing
+  // nothing, which is the exact shape of the two assertions F43 had to rewrite.
+  expect(switches.length).toBeGreaterThan(0);
+  expect(wrappers.length).toBe(switches.length);
+
+  for (const w of wrappers) {
+    expect(w.props.pointerEvents).toBe('none');
+    expect(w.props.accessibilityElementsHidden).toBe(true);
+    expect(w.props.importantForAccessibility).toBe('no-hide-descendants');
+  }
+
+  // The row is the accessible control, and it carries the state.
+  expect(row.props.accessibilityRole).toBe('switch');
+  expect(row.props.accessibilityState).toMatchObject({ checked: false });
 });
