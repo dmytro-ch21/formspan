@@ -1,3 +1,9 @@
+@import "./motion.generated.css";
+/* ^ The motion scale (N556), generated per app (L14), and FIRST on purpose. Every
+   @import must precede all other rules, and one that lands after a rule is not
+   an error — the browser drops it silently. `var(--ease-out)` would then be
+   undefined and every transition using it would quietly fall back, with nothing
+   anywhere reporting it. A test asserts this is the first statement. */
 @import "tailwindcss";
 
 /*
@@ -109,5 +115,32 @@ body {
      skeletons, kept identical so the two files do not drift. */
   .animate-pulse {
     animation-iteration-count: 1;
+  }
+}
+
+/*
+  L14 — press acknowledgement for the console's three irreversible writes
+  (PublishButton, RetireButton, ReactivateButton), and nothing else. The
+  console's restraint is deliberate; this is a narrow carve-out for the one place
+  an operator otherwise cannot tell whether a click registered.
+
+  LAYERED, and that is the whole point. F40's Reduce Motion block is unlayered
+  and narrows `transition-property` with a universal selector, specificity
+  0,0,0. An unlayered class rule would be 0,1,0 and win, so this scale would keep
+  animating for someone who asked for stillness. Inside a layer it loses to the
+  unlayered block regardless of specificity — the rule that block's own comment
+  relies on. Under Reduce Motion the press still registers; it arrives rather
+  than animates.
+
+  `:not(:disabled)` because each button is disabled while its server action is
+  in flight, and a button that cannot be pressed should not look pressed.
+*/
+@layer components {
+  .pressable {
+    transition: transform var(--duration-press) var(--ease-out);
+  }
+
+  .pressable:active:not(:disabled) {
+    transform: scale(0.97);
   }
 }

@@ -96,3 +96,79 @@ describe("Reduce Motion (F40)", () => {
     expect(nestingDepthAt(css, index)).toBe(0);
   });
 });
+
+/**
+ * The innermost block header enclosing `index` — the text before its `{`.
+ *
+ * Walks braces rather than comparing `lastIndexOf("@layer")` with
+ * `lastIndexOf("@media")`, which any comment mentioning either word would
+ * silently fool. Shares `nestingDepthAt`'s one assumption: no braces in comments.
+ */
+function enclosingHeaderAt(source: string, index: number): string {
+  let depth = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    if (source[i] === "}") depth++;
+    else if (source[i] === "{") {
+      if (depth === 0) {
+        const cut = Math.max(
+          source.lastIndexOf("}", i - 1),
+          source.lastIndexOf(";", i - 1),
+          source.lastIndexOf("*/", i - 1) + 1,
+        );
+        return source.slice(cut + 1, i).trim();
+      }
+      depth--;
+    }
+  }
+  return "";
+}
+
+describe("Press feedback (L14)", () => {
+  // Anchored on the RULE, not the class name. A comment naming `.pressable`
+  // would otherwise become the anchor — the first-match trap this file already
+  // guards against for the Reduce Motion marker.
+  const RULE = ".pressable {";
+
+  it("declares the rule exactly once", () => {
+    expect(css.indexOf(RULE)).not.toBe(-1);
+    expect(css.indexOf(RULE)).toBe(css.lastIndexOf(RULE));
+  });
+
+  it("is LAYERED, so the unlayered Reduce Motion rule above beats it", () => {
+    // The assertion this ticket exists for. Unlayered, `.pressable` (0,1,0)
+    // outranks the universal (0,0,0) Reduce Motion narrowing and its scale
+    // keeps animating — parses fine, ships fine, ignores the setting.
+    const index = css.indexOf(RULE);
+    expect(nestingDepthAt(css, index)).toBeGreaterThan(0);
+    expect(enclosingHeaderAt(css, index)).toMatch(/^@layer\b/);
+  });
+
+  it("does not look pressed while disabled (the action is in flight)", () => {
+    expect(css).toMatch(/\.pressable:active:not\(:disabled\)\s*\{[^}]*transform:\s*scale\(0\.97\)/);
+  });
+
+  it("takes its timing from the generated motion scale, not from literals", () => {
+    const start = css.indexOf(RULE);
+    const rule = css.slice(start, css.indexOf("}", start));
+    expect(rule).toContain("var(--duration-press)");
+    expect(rule).toContain("var(--ease-out)");
+    expect(rule).not.toMatch(/\d+ms/);
+    expect(rule).not.toContain("cubic-bezier");
+  });
+
+  it("imports the motion scale as the FIRST statement, where the browser cannot drop it", () => {
+    // An @import after any other rule is not an error; it is ignored. The vars
+    // would be undefined and the transition would degrade with no signal.
+    const first = css.replace(/\/\*[\s\S]*?\*\//g, "").trimStart();
+    expect(first.startsWith('@import "./motion.generated.css";')).toBe(true);
+  });
+
+  it("the generated sheet defines both variables the rule uses", () => {
+    const generated = readFileSync(
+      fileURLToPath(new URL("../motion.generated.css", import.meta.url)),
+      "utf8",
+    );
+    expect(generated).toMatch(/--duration-press:\s*\d+ms/);
+    expect(generated).toMatch(/--ease-out:\s*cubic-bezier\(/);
+  });
+});
