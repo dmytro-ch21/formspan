@@ -273,7 +273,9 @@ describe('rows open the screen that owns them', () => {
     await render(<DayScreen />);
     await waitFor(() => expect(screen.getByTestId(`day-fact-planned:${plan.id}`)).toBeTruthy());
 
-    fireEvent.press(screen.getByTestId(`day-fact-planned:${plan.id}`));
+    // Awaited: unawaited, the press's `act` was still open when the test ended
+    // and overlapped the suite's `afterEach` flush (F47, #1057).
+    await fireEvent.press(screen.getByTestId(`day-fact-planned:${plan.id}`));
     expect(mockPush).toHaveBeenCalledWith(startSessionHref(plan, mockModules));
   });
 });

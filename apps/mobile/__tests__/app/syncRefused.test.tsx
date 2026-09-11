@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import SyncScreen from '../../app/sync';
 
@@ -81,25 +81,34 @@ beforeEach(() => {
   mockBlockedRows.mockResolvedValue([]);
 });
 
+/*
+ * Every `render` here is AWAITED, and that is F47 (#1057), not style. RNTL 14's
+ * `render` is async: it returns with its `act` still open, so an unawaited one
+ * overlapped the `waitFor` that followed — `waitFor` switches React's act
+ * environment off while it polls, and the screen's focus `load()` then set
+ * `rows`/`refused` inside an `act` React had been told was not there. That
+ * printed "The current testing environment is not configured to support
+ * act(...)" out of all nine tests, in every measured run.
+ */
 describe('a refused row is on the repair screen', () => {
   it('NEVER says nothing is stuck while a row sits refused', async () => {
     // The whole ticket, in one assertion.
     mockRejected.mockResolvedValue([ENTRY]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('sync-refused')).toBeTruthy());
     expect(screen.queryByTestId('sync-nothing-stuck')).toBeNull();
   });
 
   it('names the row and quotes the server rather than paraphrasing it', async () => {
     mockRejected.mockResolvedValue([ENTRY]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByText('Porridge')).toBeTruthy());
     expect(screen.getByText('source_food_id does not name a saved food')).toBeTruthy();
   });
 
   it('shows refused rows from both domains at once', async () => {
     mockRejected.mockResolvedValue([ENTRY, SEQ]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('refused-e1')).toBeTruthy());
     expect(screen.getByTestId('refused-s1')).toBeTruthy();
   });
@@ -109,16 +118,20 @@ describe('a refused row is on the repair screen', () => {
     // become a 2xx, so a retry button here would promise something that
     // cannot happen.
     mockRejected.mockResolvedValue([ENTRY]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('discard-e1')).toBeTruthy());
     expect(screen.queryByTestId('retry-e1')).toBeNull();
   });
 
   it('discarding removes it and re-reads the list', async () => {
     mockRejected.mockResolvedValueOnce([ENTRY]).mockResolvedValue([]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('discard-e1')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('discard-e1'));
+    // Held inside `act` until `discard` settles: it awaits the discard and then
+    // `load()`, and `fireEvent` alone closes its `act` before either lands.
+    await act(async () => {
+      await fireEvent.press(screen.getByTestId('discard-e1'));
+    });
     await waitFor(() => expect(mockDiscard).toHaveBeenCalledWith('u1', ENTRY));
     await waitFor(() => expect(screen.queryByTestId('sync-refused')).toBeNull());
   });
@@ -127,7 +140,7 @@ describe('a refused row is on the repair screen', () => {
     // The other half of "verify a check can PASS". Without this, every
     // assertion above would hold if the empty state had simply been deleted.
     mockRejected.mockResolvedValue([]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('sync-nothing-stuck')).toBeTruthy());
   });
 
@@ -140,7 +153,7 @@ describe('a refused row is on the repair screen', () => {
       { kind: 'session', id: 'sess1', name: 'Push day', lastError: 'set 10: weight must be > 0', href: '' },
     ] as never);
     mockRejected.mockRejectedValue(new Error('table is gone'));
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByText('Push day')).toBeTruthy());
     // And the screen is not stuck loading.
     expect(screen.queryByLabelText('Loading')).toBeNull();
@@ -150,7 +163,7 @@ describe('a refused row is on the repair screen', () => {
     // The mirror. Neither read may be load-bearing for the other.
     mockBlockedRows.mockRejectedValue(new Error('nope'));
     mockRejected.mockResolvedValue([ENTRY]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('sync-refused')).toBeTruthy());
     expect(screen.getByText('Porridge')).toBeTruthy();
   });
@@ -162,7 +175,7 @@ describe('a refused row is on the repair screen', () => {
       { kind: 'session', id: 'sess1', name: 'Push day', lastError: 'set 10: weight must be > 0', href: '' },
     ] as never);
     mockRejected.mockResolvedValue([ENTRY]);
-    render(<SyncScreen />);
+    await render(<SyncScreen />);
     await waitFor(() => expect(screen.getByTestId('sync-refused')).toBeTruthy());
     expect(screen.getByText('Push day')).toBeTruthy();
     expect(screen.getByText('Porridge')).toBeTruthy();

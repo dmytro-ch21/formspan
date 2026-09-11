@@ -924,7 +924,12 @@ describe('the overflow menu: applying focus when a technique is already there (N
     );
     expect(apply).toBeTruthy();
 
-    apply!.onPress?.();
+    // Inside `act` (F47, #1057). Called bare, `applyFocus`'s synchronous
+    // `setBusy(true)` is a state update outside `act` — an "update to
+    // CurriculumScreen ... not wrapped in act(...)" on every run.
+    await act(async () => {
+      apply!.onPress?.();
+    });
     await waitFor(() => expect(mockSetFocus).toHaveBeenCalled());
     const [, ids, roadmap] = mockSetFocus.mock.calls[0] as [unknown, string[], unknown];
     // The list is unchanged in membership — every technique was already

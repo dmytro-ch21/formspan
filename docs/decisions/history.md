@@ -72791,6 +72791,207 @@ screen.
 - The NEEDS HUMAN EVIDENCE criterion (a real device whose wearable does not
   write VO₂max) is outstanding. No test renders either VO₂max screen.
 
+## 2026-09-11 — F47 (#1057): the mobile suite's leaked act() updates, fixed in the tests that left work running
+
+**The ticket said 76 unwrapped updates across 11 components. On current `main` that table no longer reproduces, and the number was never stable.** The census is a race outcome, not a count. What is stable is the set of **mechanisms**, and each one is fixed here in the test that triggered it. No production source file or console handling was touched. `jest.setup.js` changed once, last, for a leak no test could fix: see *The leak no test could fix* below.
+
+### The census on `main`, before any change
+
+Both runs were on `b342a9b6` with `CI=1` (jest's 2-worker cap), on this host shared with other sessions:
+
+| run | how | load | `not wrapped in act` | `not configured to support act` | result |
+|---|---|---|---|---|---|
+| A | `pnpm run test:mobile` | 120–187 | **105** | 42 | exit 1: 2 failures, both jest timeouts |
+| B | same suite, plus a diagnostic setup file naming the test each warning fired in | 155–177 | **69** | 25 | exit 0 |
+
+Run A's two failures were `goalsScreen` › `asks again on every focus, not only on mount` (the 15s budget) and `todayScreen` › `is a header link that opens /day` (the file's 30s budget). Both are the missing-element-under-load signature, so they are classified as load, not as leaks.
+
+**None of `Ring`, `AddFoodScreen`, `HoldToConfirm`, `PickSessionSheet`, `TodayScreen`, `WeekPlanner` or `IngredientPicker` appeared in either run.** F47 was filed at 04:25Z on 2026-09-10. Later that day N550 (#1069) moved the suite to RNTL 14, where `render` is async and flushes inside `act`, and F46 (#1085) rewrote the ring tests. Their resolved-mock updates now land inside `render`'s `act`. What remained was a different set, dominated by `DictateReflectionScreen` (65 in run A) and `BjjSessionScreen` (35).
+
+**The ticket's follow-up comment called 76 "deterministic and measurable on every run". It is not.** `dictateScreen` alone produced seven updates from each of 13 tests in one run, and from 5 in the next, with no code change in between. A census taken once is one sample of a race.
+
+**The diagnostic file is not committed, and neither is anything like it.** It wrapped `console.error` only to append `expect.getState().currentTestName` to a tagged stderr line, and then called the original. Attributing a warning to a **test** rather than a file is what made this tractable. Jest prints a file's console output under that file's header, but a leaked update from one file can be printed under another's: run A showed `profile/edit.tsx`'s setters inside `runningSessionScreen`'s block.
+
+### One mechanism does most of it: RNTL 14's `fireEvent` closes `act` before the handler finishes
+
+`fireEvent` is implemented as `await act(() => { returnValue = handler(...) }); return returnValue;`. The `act` covers the **synchronous** call only. The handler's promise is then awaited outside `act`. So `await fireEvent.press(x)` on an `async` handler runs everything past the handler's first `await` outside `act`. Whether React notices depends on whether that continuation lands before or after `act`'s own exit tick. A mock that resolves on a `setTimeout` usually lands after, which is exactly what `dictateScreen`'s and `bjjSessionScreen`'s `deferred` helpers do.
+
+The fix is an outer `act` held open until the press settles (`await act(async () => { await fireEvent.press(x); })`). It is the same shape `editProfileAvatar`, `savedFoodsScreen` and `scanScreen` already used for their handlers.
+
+**The second warning is a different overlap.** "The current testing environment is not configured to support act(...)" means a state update happened inside an `act` scope while React's act environment was switched **off**. RNTL's `waitFor` switches it off while it polls. An **unawaited** `render` or `fireEvent` leaves its `act` open across that `waitFor`, and the screen's updates then land inside a scope React has been told does not exist.
+
+### Per file: cause, then fix
+
+- **`dictateScreen`**: `speak()` and every Save awaited `fireEvent.press` on `read`/`save`, which are async. Now a local `press()` holds `act` open. **A second, separate leak came to light only once that was fixed.** Any draft starts `fetchTechniques`, resolved on a `setTimeout` after the press settles, so a test ending on a synchronous assertion ended with `setCatalog` still out. `speak()` now awaits the library the draft asked for (`catalogLanded()`). The one test that holds that fetch open on purpose opts out, and resolves it inside `act`. The first version put that wait in an `afterEach`, **and it still leaked**: jest yields between a test body and its hooks, and a `setTimeout` can land in the gap. The retry test's release-and-await moved inside `act` too.
+- **`bjjSessionScreen`**: `holdToFinish` stepped the fake clock with `jest.advanceTimersByTimeAsync` outside any `act`, and awaited the press outside it. `finishNow`'s `load()` and the celebration it opens printed seven warnings from each of five tests in every measured run. The whole helper now runs inside one `act`.
+  - **This surfaced a latent fixture bug.** In the three finish tests that never set a history, `fetchHistory` is a bare `jest.fn()`, so the celebration's `fetchHistory(...).then` **threw**. Measured on `main`: all three green, each logging `Uncaught error: TypeError: Cannot read properties of undefined (reading 'then')`, because the throw happened after `act` had closed. Inside `act` it failed the test it had always been happening in. A file-level `beforeEach` now resolves an empty history; tests that are about a streak still set their own.
+- **`goalsScreen`**: `refocus()` called the focus callbacks bare, and the first thing each does is `setOn(todayString())`, which leaked one warning per refocus. The helper is now `async` and runs the callbacks inside `act`, so a new refocus test cannot forget. **The recovered N505 (#878) fix is also ported here**, and the next section covers it.
+- **`syncRefused`**: all nine tests called `render(...)` without `await`, and the discard press was unawaited. That produced "not configured to support act" out of every test. Renders are awaited now, and the discard is held in `act`.
+- **`runningSessionScreen`** › `finishes a run in order`: the finish press was unawaited, overlapping `findByTestId`, which gave five "not configured" per run. It is now held in `act`. Awaiting it bare would only have moved the updates outside `act`.
+- **`editProfileAvatar`** › `disables Save while an avatar upload is in flight`: the press cannot be awaited to completion here (it deadlocks on the held upload), and it overlapped the `waitFor`, giving two "not configured" per run. It is now held in `act` until the upload has been **called**, which comes after the handler's `setAvatarBusy(true)` and before the upload the test is holding. A promise the mock resolves on invocation marks that point.
+- **`roadmapScreen`**: `apply.onPress()` was called bare, and its synchronous `setBusy(true)` leaked. It is now inside `act`.
+- **`scanScreen`** › `offers a way out of the spinner`: the held lookup was released **after** the test's last assertion, so its `setPhase` landed after the body. It is now released inside `act`. **It is released, not asserted on**, and the next section explains why.
+- **`todayScreen`, `dayScreen`**: a bare `fireEvent.press` on a synchronous `router.push` left its `act` open past the end of the test. Both are now awaited.
+
+### The recovered `TargetScreen` fix (N505, #878)
+
+It was found uncommitted in a stale worktree whose HEAD was already on `main`, and recovered read-only as a patch. The coordinator's `git apply --check` failed at `goalsScreen.test.tsx:1010`, because the RNTL 14 migration had rewritten the file around it (`await render`, `await fireEvent.press`). **It was ported by hand, and the mechanism it names was re-checked on current `main` rather than assumed.** On RNTL 14 it could have gone away: `await fireEvent.press` awaits whatever the handler returns. It had not. The pill's `onChoose` is `(level) => void chooseActivity(level)`, which returns nothing, so the press still does not wait for remember → push → settle.
+
+**Its claim that the extra waits do not change what the test checks was verified by mutation**, not by reading. Removing `|| seq !== choiceSeq.current` from the focus read's guard in `app/goals.tsx`, with the ported waits in place, turns `does not let a slow cache read revert a pill pressed while it was in flight` red: the pill is expected selected and is not. Restored, it is green again. The filter matched exactly that one test both times (1 failed / 63 skipped, then 1 passed / 63 skipped). **So the claim holds on current `main`**: the guard is still what the test measures, and waiting for the push does not disarm it.
+
+### A production bug found on the way, and filed rather than fixed
+
+**F52 (#1114): cancelling a barcode lookup does not cancel it.** `resolve` in `app/food/scan.tsx` has no tie to the phase it started in. When a cancelled lookup answers late, `setPhase` moves the athlete, now back at the camera, to a result for a barcode they walked away from. This was demonstrated with a throwaway probe of the `scanScreen` test, deleted afterwards. The test's own `waitFor` found `scan-hint` after Cancel (the positive control), and it was gone once the late answer landed inside `act`. F47's criteria keep this out of a test-only change. The `scanScreen` comment names F52 as the place its assertion belongs.
+
+### After the per-test fixes, before the teardown
+
+One full run with every fix applied, `CI=1` and the same diagnostic file, at load 70–99: **0** `not wrapped in act`, **0** `not configured to support act`, **0** `Uncaught error`. All 352 suites and 5689 tests passed (exit 0, 133s). `goalsScreen` standalone: 5 runs, 64/64 each, 0 warnings. `dictateScreen` standalone: 3 runs, 29/29 each, 0 warnings.
+
+**Mutation checks.** Each mutation was confirmed on disk, run, restored, and confirmed restored **by re-running**:
+
+| # | mutation | result | restored, re-run |
+|---|---|---|---|
+| M1 | `dictateScreen`'s `press()` without its outer `act` | **70** `DictateReflectionScreen` warnings, 29/29 still pass | 0 |
+| M7 | `speak()` defaulting to `waitForCatalog: false` | **1** `setCatalog` warning in each of two runs, from a different test each time | 0 |
+| M2 | `holdToFinish` without `act` | **35** `BjjSessionScreen` warnings: 7 from each of the five fake-clock finish tests | 0 |
+| M3 | the `fetchHistory` default disabled | **3 tests red**, `TypeError: Cannot read properties of undefined (reading 'then')` | 16/16 green |
+| M4 | `goalsScreen`'s `refocus()` calling the callbacks bare | **25** `TargetScreen` warnings across four tests | 0 |
+| M5 | `goals.tsx`'s `choiceSeq` guard removed (production source, restored) | slow-read test **red** | green |
+| M6 | `syncRefused`'s nine renders unawaited | **16** `not configured to support act` | 0 |
+
+**Two of these say something beyond "the fix is load-bearing".**
+
+- **M1, M2 and M4 pass every test while leaking.** That is why none of this ever failed on its own, and why a green run was never evidence of a clean one.
+- **M7 is the only timing-dependent one**: one warning a run, from a different test each time. That is the same signature the original census had at scale.
+
+**Consecutive full runs before the teardown change.** `CI=1 pnpm run test:mobile` on `50b5e797`, the per-test fixes alone, in a separate worktree pinned to that commit. Every run exited 0 with 5689/5689 passing, and the loop's own streak read **11**. **By this ticket's definition only 3 of the 11 were clean.** An act warning never fails a test, and the loop counted its streak on the exit code alone: `loop.sh` line 25, while line 28 of the same script already defined a clean run as exit 0 with all three counters at zero. That is a check that could not fail on the thing it existed to catch, and the coordinator caught it by reading the per-row columns, not the `DONE` line.
+
+| run | secs | 1-min load, start → end | `not wrapped in act` | components |
+|---|---|---|---|---|
+| 1 | 167 | 125.7 → 101.8 | 1 | `VirtualizedList` (`workoutsScreen`) |
+| 2 | 85 | 101.8 → 87.4 | 0 | |
+| 3 | 93 | 87.4 → 84.9 | 1 | `VirtualizedList` (`workoutsScreen`) |
+| 4 | 144 | 84.9 → 105.7 | 6 | `LibraryScreen` 5 (`libraryBjjEntries`), `VirtualizedList` 1 (`sessionHistoryScreen`) |
+| 5 | 72 | 105.7 → 82.2 | 0 | |
+| 6 | 60 | 82.2 → 72.4 | 1 | `VirtualizedList` (`sessionHistoryScreen`) |
+| 7 | 63 | 72.4 → 69.6 | 0 | |
+| 8 | 92 | 69.6 → 103.8 | 2 | `VirtualizedList` 2 (`libraryRunTypes`, `workoutsScreen`) |
+| 9 | 113 | 103.8 → 96.4 | 1 | `VirtualizedList` (`libraryRunTypes`) |
+| 10 | 310 | 96.4 → 99.6 | 12 | `LibraryScreen` 10 (`libraryControlsBoundary` 5, `libraryBjjEntries` 5), `VirtualizedList` 2 (`sessionHistoryScreen`, `socialScreen`) |
+| 11 | 146 | 99.6 → 107.8 | 1 | `VirtualizedList` (`workoutsScreen`) |
+
+Files are the nearest preceding `PASS` header in the log. Jest interleaves worker output, so that is the likeliest source, not proof. Six test files in eleven runs, never the same set twice. `not configured to support act` and `Uncaught error` were 0 in every run. A twelfth run was killed by `SIGTERM` when that session was stopped. It has no row and is not counted.
+
+**So the single clean full run under "After" was one sample, not a property of the suite**, which is the ticket's own point about the original 76 turned on the fix.
+
+### The leak no test could fix: RNTL's own teardown, and the one shared-setup change
+
+**Two sources remained, and neither is a chain a test can await.**
+
+- **React Native's own `VirtualizedList`.** Its `componentDidUpdate` calls `_scheduleCellsToRenderUpdate`, which arms a `setTimeout` of `updateCellsBatchingPeriod ?? 50` ms on every re-render. The stack has no app frame at all, which is why the file-by-file pass never saw it.
+- **`app/library.tsx`'s 250ms search debounce** (`LibraryScreen`). It is cleared on unmount, so this is not a production bug. The leaked `setError(null)` runs synchronously inside the timer callback, which means the timer fired outside `act` against a screen that was still mounted.
+
+**Both come down to where RNTL 14 unmounts.** Its automatic cleanup is `afterEach(async () => { await flushMicroTasks(); await cleanup(); })`, and `flushMicroTasks` is one real `setImmediate`. That yield runs **outside `act`** and **before** the unmount, so a timer due when the body returns fires in it, whatever the test did. The window is milliseconds wide: neither leak reproduced in 4 standalone runs of the files it came from, and run 10, the slowest, was also the worst.
+
+**`jest.setup.js` already had a hook meant for exactly this, and it was inert.** `afterEach(async () => { await act(async () => {}); })` was documented as letting "each screen's trailing async work settle inside `act`". jest-circus runs a block's `afterEach` hooks in declaration order (`getEachHooksForTest` in `jest-circus/build/utils.js`). RNTL registers its cleanup the moment `jest.setup.js` requires it, so the "settle" always ran after RNTL had already yielded and unmounted.
+
+**The change**, in `jest.setup.js`, committed on its own:
+
+- `RNTL_SKIP_AUTO_CLEANUP` is set before RNTL is required.
+- The inert flush is replaced by **one** root `afterEach` that yields one real `setImmediate` and then runs `cleanup()`, **both inside `act`**. These are RNTL's own two steps, in the same order.
+- `IS_REACT_ACT_ENVIRONMENT` is set in a `beforeAll` and restored in an `afterAll`, as RNTL's skipped hooks did. Without that, React emits no act warnings at all, and the census would read zero for the wrong reason.
+
+The pending work still **runs**, inside `act`. Anything not yet due is cleared by the unmount.
+
+**Measured against three controls before anything shared changed.** Each control is a throwaway test in a scratch directory outside both worktrees. Each was run 3 times against `main`'s `jest.setup.js` (RNTL's cleanup) and 3 times against the committed one:
+
+| control | RNTL's automatic cleanup | teardown inside `act` |
+|---|---|---|
+| 1. a component arms a 5ms timer; the test returns after it is due | warns, 3 of 3 | **0 of 3** |
+| 2. a bare, synchronous state update outside `act` in the test body | warns, 3 of 3 | **warns, 3 of 3** |
+| 3a. N505's shape: the handler sets state before its first `await`, `waitFor` returns on that, and one timer hop is left unawaited, due at teardown | warns, 1 of 3 | **0 of 3** |
+| 3b. the same, with two hops; the first is due at teardown | warns, 3 of 3 | **0 of 3** |
+| 3c. the same, with the tail not due until 50ms after the body returns | 0 of 3 | 0 of 3 |
+
+`IS_REACT_ACT_ENVIRONMENT` was `true` in every test in both arms.
+
+- **Control 2 is what shows warnings were not switched off.** A real unwrapped update still prints, exactly as before.
+- **Control 3 is the cost, and it is the one the coordinator asked for.** Control 2 is synchronous, so it cannot say what happens to an **unawaited async chain** whose next step lands in the teardown window. The answer is that this teardown absorbs it: the step runs inside `act`, and nothing prints. A census of 0 after this change therefore **cannot prove a test awaited its chain**.
+- **Control 3c prints in neither arm.** A tail that lands after unmount is invisible to the census under either cleanup, because React does not warn about an update to an unmounted component. That was already true before this change.
+
+**The probe apparatus failed twice before it measured anything,** and both failures are recorded because either would have been believed:
+
+- The scratch test resolved a second copy of React: `Cannot read properties of null (reading 'useState')`. Both arms "failed", and a grep counted printed code frames as warnings.
+- A syntax check for the re-mutation script could not load `@babel/parser` under pnpm, and reported every mutation as unparseable. It was replaced with `typescript`'s transpiler and controlled in both directions: an unmodified file parses, and a deliberately broken one is refused.
+
+**PR #1105** (the rest timer, open at the time of writing) also edits `jest.setup.js`, inside the `react-native-reanimated` mock. This change is at the top of the file, so the two do not overlap textually. Whichever merges second should re-run the suite against the merged file.
+
+### Which per-test fixes the census can still see, after the teardown
+
+Every mutation from "After" that is measured by the census was re-run on the committed teardown. Two were also run in the other arm, against `main`'s `jest.setup.js`, in the same session. That arm was given a positive control first: in the same config, control 1 warned. The method was the same each time: confirm the mutation is on disk, confirm it parses, run it, restore it from backup, **re-run** the restored file, then `cmp` it against the backup. Before any mutation, all four files ran clean on the new teardown (29/29, 16/16, 64/64, 9/9, 0 warnings).
+
+| # | mutation | RNTL's cleanup | teardown inside `act` | census still sees it? |
+|---|---|---|---|---|
+| M1 | `dictateScreen`'s `press()` without its outer `act` | 70 (earlier run) | **49** | yes |
+| M2 | `holdToFinish` without `act` | 35 (earlier run) | **35** | yes |
+| M4 | `goalsScreen`'s `refocus()` calling the callbacks bare | 25 (earlier run) | **25** | yes |
+| M6 | `syncRefused`'s nine renders unawaited | 16 not-configured (earlier run) | **16** not-configured | yes |
+| M7 | `speak()` not waiting for the library | 0, 2, 1 | **0, 0, 0** | **no, absorbed by the teardown** |
+| M8 | **N505's two ported waits removed** (`goalsScreen` › *does not let a slow cache read revert a pill pressed while it was in flight*) | 0 in 5 of 5 | 0 in 5 of 5 | **no, in either arm** |
+
+All restores re-ran at 0, and every restored file was byte-identical to its backup. Every mutated run still passed every test, which is the ticket's point again: a leak is not a failure.
+
+M3 and M5 were not re-run. They are detected by a test failing, not by the census, and the teardown does not touch what they exercise.
+
+**What M7 and M8 mean, stated plainly:**
+
+- **M7 was census-visible before the teardown and is not after.** Its fix, `speak()` awaiting the library the draft asked for, is still correct: the fetch really is left in flight without it. But it is now justified by reading the code and by its pre-teardown measurement, and the census no longer guards it.
+- **M8, the recovered N505 fix, was never visible to a standalone census**, under either cleanup, in 10 runs at load 100–200. The test releases its held slow read inside `act` right after the removed lines, and in isolation the chain's tail lands inside that `act`. The sightings N505 recorded were all full-suite, under contention, where the chain outruns that `act`. So the census was never the instrument for this fix. It rests on the mechanism N505 diagnosed, on the `choiceSeq` mutation (M5), and on its standalone runs. Control 3 adds that where such a chain's next step is due at teardown, the new teardown now absorbs it too.
+- **So after this change a census of 0 means:** no unwrapped update from synchronous work, from a render or press left unawaited over a `waitFor`, or from a `fireEvent` whose handler outlives its `act` (M1, M2, M4, M6). It does **not** mean every async chain was awaited. F47's criterion 2 asks for a census whose 0 means something, and for the unawaited-chain class this one cannot see it.
+
+### After the teardown: consecutive full runs
+
+**20 consecutive clean runs, in 20 attempts**, on `f8b8cc64`, the teardown commit. Each was `CI=1 pnpm run test:mobile` in a separate worktree pinned to that commit. A run counted only if it exited 0 **and** `not wrapped in act`, `not configured to support act` and `Uncaught error` were all 0. The loop script's streak was corrected to that definition before it started, and the count here was read back from the per-row columns, not from its `DONE` line.
+
+Every row also shows `Tests: 5689 passed, 5689 total`, which was checked for a reason. Runs 15–20 took about a minute where earlier ones took two to eight, and a short run could have been one that ran nothing. None was.
+
+| run | secs | 1-min load, start → end | exit | `not wrapped` / `not configured` / `Uncaught error` | tests |
+|---|---|---|---|---|---|
+| 1 | 134 | 101.9 → 159.8 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 2 | 98 | 159.8 → 159.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 3 | 175 | 159.5 → 210.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 4 | 107 | 210.5 → 176.0 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 5 | 96 | 176.0 → 156.6 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 6 | 232 | 156.6 → 200.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 7 | 96 | 200.5 → 128.0 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 8 | 173 | 128.0 → 130.3 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 9 | 143 | 130.3 → 191.4 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 10 | 265 | 191.4 → 239.7 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 11 | 154 | 239.7 → 260.0 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 12 | 208 | 260.0 → 289.4 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 13 | 460 | 289.4 → 234.2 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 14 | 122 | 234.2 → 224.7 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 15 | 65 | 224.7 → 324.8 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 16 | 61 | 324.8 → 368.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 17 | 55 | 368.5 → 358.6 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 18 | 58 | 358.6 → 252.6 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 19 | 59 | 252.6 → 202.4 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 20 | 56 | 202.4 → 234.3 | 0 | 0 / 0 / 0 | 5689/5689 |
+
+**No run failed, leaked or timed out, so there was nothing to classify.** One-minute load ranged 102–368 on 10 CPUs, well above the 70–126 the pre-teardown loop ran under.
+
+**What this does and does not show.**
+- **It shows** the census stayed at 0 through 20 full runs under heavy contention, where the per-test fixes alone leaked in 8 of 11.
+- **It does not show** that every async chain is awaited. Control 3 and M8 above are why.
+- **It was measured on `f8b8cc64`.** The PR head is that commit rebased onto a later `main`, and the loop was not re-run there.
+
+### Open questions
+
+- **A census that can see an unawaited chain does not exist yet.** One design would be a diagnostic in the teardown that records any state update landing inside the teardown's `act`: the class control 3 shows is now absorbed. That would be an instrument, not a fix, and it needs its own controls. **So #1057 is left open** (`part of #1057` in the PR, not `closes`): its criterion 2 asks for a census whose 0 means something, and for this class the current census cannot see a leak.
+- **The ticket's census command counts only one of the two act warnings.** `grep -c "not wrapped in act"` misses "not configured to support act", which is the same class of leak: work still running when a scope closes. It was counted separately throughout, and the loop counted both. A future census should count both.
+- **F52 (#1114)** is open and unowned.
+- **Nothing here stops the `fireEvent` mechanism coming back.** A new `await fireEvent.press` on an async handler will leak exactly as before. The census will print it (M1 still shows 49), but nothing in the suite goes red. Failing the suite on act warnings from `jest.setup.js` would enforce it, and it is a separate decision about console handling that this ticket did not take.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -9,11 +9,64 @@
  * the behaviour under test.
  */
 
+/*
+  F47 (#1057) — RNTL's automatic cleanup is switched off, and done below instead,
+  INSIDE `act`.
+
+  RNTL 14 registers `afterEach(async () => { await flushMicroTasks(); await
+  cleanup(); })` the moment it is required. `flushMicroTasks` yields one real
+  `setImmediate`, outside any `act`, and only then unmounts. So any timer that
+  is DUE when a test body returns fires in that yield against a screen that is
+  still mounted, and prints "An update to X inside a test was not wrapped in
+  act(...)", whatever the test itself did. Measured causes, in a loop of full
+  runs: `VirtualizedList`'s batched cell update, a `setTimeout` its
+  `componentDidUpdate` re-arms every render (`workoutsScreen`,
+  `sessionHistoryScreen`, `libraryRunTypes`, `socialScreen`), and
+  `app/library.tsx`'s 250ms search debounce (`libraryBjjEntries`,
+  `libraryControlsBoundary`) — six files in ten runs, never the same set
+  twice. None of those is a chain a test can await, and all of them are
+  cleared by unmount.
+
+  Measured against three controls, not argued. Each is a throwaway test, run
+  3 times under RNTL's own cleanup and 3 times under this one:
+
+  1. A component arms a 5ms timer and the test returns after it is due.
+     RNTL's cleanup: warned 3 of 3. This one: 0 of 3.
+  2. A bare, SYNCHRONOUS state update outside `act` in the test body. Warned
+     3 of 3 in BOTH arms, with `IS_REACT_ACT_ENVIRONMENT` true in every test.
+     So act warnings are not switched off: a real unwrapped update still
+     prints exactly as before.
+  3. N505's shape (#878): a press whose handler sets state before its first
+     `await`, a `waitFor` that returns on that, and the rest of the async
+     chain left unawaited with its next step DUE when the body returns.
+     RNTL's cleanup: warned (one hop 1 of 3, two hops 3 of 3). This one:
+     0 of 3 for both.
+
+  Control 3 is the cost, and it is stated here so nobody reads a zero census
+  as more than it is. This teardown ALSO absorbs an unawaited async chain
+  whose next step lands in the teardown yield: it runs inside `act` and
+  prints nothing. So a census of 0 cannot prove a test awaited its chain;
+  awaiting the chain's terminal effect is still the fix, and the census no
+  longer enforces it. (A tail not yet due at teardown, a 50ms hop, printed
+  nothing in EITHER arm: it lands after unmount, where React does not warn.)
+  The pending work still RUNS, inside `act`; nothing is swallowed.
+
+  Set before the require below, because RNTL reads it at require time.
+*/
+process.env.RNTL_SKIP_AUTO_CLEANUP = 'true';
+
 // Required at module scope, NOT inside the hook below. Importing RNTL
 // registers its own cleanup hooks, and doing that from inside a running test
 // throws "Hooks cannot be defined inside tests" — which failed every
 // pure-logic suite in the project, not just the component ones.
-const { act } = require('@testing-library/react-native');
+const { act, cleanup } = require('@testing-library/react-native');
+
+/*
+  Captured before any test can install fake timers. RNTL's own teardown yields
+  on a REAL `setImmediate` for the same reason: a faked one would never fire,
+  and the hook would time out instead of cleaning up.
+*/
+const realSetImmediate = globalThis.setImmediate;
 
 // Everything a mock factory needs is `require`d INSIDE it. Jest hoists
 // `jest.mock` above the imports, so a module-scope binding referenced in a
@@ -198,18 +251,46 @@ jest.mock('react-native-safe-area-context', () => {
 });
 
 /**
- * Let each screen's trailing async work settle inside `act`.
+ * Tear each test down inside `act`: settle, then unmount (F47, #1057).
  *
- * The screens load cache-first and then refresh from the network, so a test
- * that asserts on the cached paint finishes while the refresh is still in
- * flight — and its `setState` lands after the test body, producing "an update
- * was not wrapped in act(...)".
+ * The screens load cache-first and then refresh from the network, and several
+ * hold timers (a list's cell batch, a search debounce). A test that asserts on
+ * the cached paint can finish with that work still due, and its `setState`
+ * lands after the body.
+ *
+ * **This hook used to be `await act(async () => {})` on its own, and it could
+ * not do its job.** jest-circus runs a block's `afterEach` hooks in the order
+ * they were declared, and RNTL's automatic cleanup was declared first, the
+ * moment this file required it. So the "settle" ran against a tree RNTL had
+ * already unmounted, after RNTL's own yield had let the due work land outside
+ * `act`. Doing both steps here, in one `act`, is what the old comment described.
+ *
+ * One yield, then cleanup: the same two steps RNTL performs, in the same order.
+ * Anything not due by then is cleared by the unmount.
  *
  * Flushed rather than silenced. The warning is noise here, but suppressing it
  * would also swallow the next one, which might not be.
  */
 afterEach(async () => {
-  await act(async () => {});
+  await act(async () => {
+    await new Promise((resolve) => realSetImmediate(resolve));
+    await cleanup();
+  });
+});
+
+/*
+  What RNTL's automatic setup would also have done, and does not now that it
+  is switched off: declare this a React act environment for the whole file,
+  and put back whatever was there before. Without it React stops emitting act
+  warnings entirely, which would read as the census going to zero.
+*/
+let previousActEnvironment;
+beforeAll(() => {
+  previousActEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+});
+afterAll(() => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
 });
 
 // Measured, not assumed: extra flush rounds here do NOT help. Work that a
