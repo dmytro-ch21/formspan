@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { isOffline, retryAfterOf } from './apiError';
-import { countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
+import { countBlockedRows, countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
 import { countPendingPlans, syncPlans } from './plan';
 import { pendingFoodCount, syncFood } from './foodLog';
 import { pendingSequenceCount, syncSequences } from './sequences';
+import { countRejectedRows } from './rejectedRows';
 import { pendingTrackerCount, syncTrackers } from './trackers';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
@@ -45,7 +46,15 @@ import type { TokenGetter } from './useAuthToken';
 export type SyncState = {
   /** A run is in progress right now. */
   syncing: boolean;
-  /** Sessions holding local edits the server hasn't got. */
+  /**
+   * Rows holding local edits the server hasn't got and that WILL go out on
+   * their own — queued, or retrying.
+   *
+   * Excludes rows waiting on a person (N167/#544): a row the server refused
+   * permanently used to count here forever, so the badge could never reach
+   * zero and the foreground trigger re-sent a request that would be refused
+   * identically on every app open. Those rows are `needsAttention` now.
+   */
   pending: number;
   /**
    * Rows held back this run because something they depend on hasn't synced.
@@ -55,6 +64,21 @@ export type SyncState = {
    * alarm the athlete and misdescribe a state that resolves itself.
    */
   deferred: number;
+  /**
+   * Rows that will not sync until a person acts — N167/#544.
+   *
+   * Sessions and workouts the server refused but the phone still owes
+   * (`countBlockedRows`), plus food entries and sequences it refused and has
+   * stopped sending (`countRejectedRows`). Separate from `pending` because
+   * they answer opposite questions: pending is "this resolves itself",
+   * needsAttention is "this never will".
+   *
+   * It exists so a refused row stays DISCOVERABLE once it leaves `pending`.
+   * `lastError` alone cannot do that job: it lives in memory, so a cold start
+   * has none, and the chip — the only route to the repair screen — would
+   * render nothing while a refused session sat on that screen.
+   */
+  needsAttention: number;
   /** When a run last completed with nothing failing. */
   lastSyncAt: number | null;
   /**
@@ -96,6 +120,7 @@ let state: SyncState = {
   syncing: false,
   pending: 0,
   deferred: 0,
+  needsAttention: 0,
   lastSyncAt: null,
   lastError: null,
   online: true,
@@ -158,7 +183,7 @@ export function setSyncIdentity(userID: string | null, getToken: TokenGetter | n
     // Not a "synced" state — an unknown one. Reporting 0 pending for a
     // signed-out app would let the UI claim everything is safely on the
     // server when we simply have no one to ask about.
-    emit({ syncing: false, pending: 0, deferred: 0, lastError: null, lastSyncAt: null });
+    emit({ syncing: false, pending: 0, deferred: 0, needsAttention: 0, lastError: null, lastSyncAt: null });
     return;
   }
   creds = { userID, getToken };
@@ -205,6 +230,59 @@ export async function refreshPending(): Promise<void> {
     emit({ pending: sessions + workouts + plans + sequences + food + trackers });
   } catch {
     // A failed count must not break anything; the number is advisory.
+  }
+  // Its own step, after `pending` and outside its try: N167's first slice
+  // shipped — and review caught — a `Promise.all` that let a failing new read
+  // blank an existing one. A failing attention count must never cost the
+  // pending count, which gates the retry machinery — and that guarantee lives
+  // in `refreshNeedsAttention` being unable to reject, not in this call site.
+  await refreshNeedsAttention();
+}
+
+/**
+ * Recount the rows that need a person — N167/#544.
+ *
+ * Emitted only when BOTH halves were read. Half a count is not a smaller
+ * truth, it is a wrong one: if the half that failed held the only refused row,
+ * emitting the other half would paint `0` and the chip would say nothing is
+ * wrong. So a failed read leaves the last known value standing — the
+ * conservative direction for a number whose job is to keep a problem visible.
+ * This is the opposite of the sync screen's two lists, which render
+ * independently, and deliberately so: there each list is complete in itself,
+ * here one number is the sum.
+ */
+async function refreshNeedsAttention(): Promise<void> {
+  // TOTAL: this function cannot reject, and the first version could.
+  //
+  // It was written with `Promise.allSettled` and a comment promising that a
+  // failing attention count could never cost the retry machinery. Both were
+  // true only for an ASYNC failure. `allSettled` settles promises; it does not
+  // catch a SYNCHRONOUS throw while its input array is being built — so
+  // `countBlockedRows(userID)` throwing before returning a promise escaped it,
+  // and because `refreshPending` awaits this outside its own try, the throw
+  // rejected `refreshPending` itself and took the backoff ladder and the
+  // foreground trigger with it. `sync.test.ts` caught it: 32 tests, one
+  // error. That file's own comments record the same shape three times over,
+  // each time an outbox joined the count — this was the fourth, and the first
+  // to escape the swallowing catch rather than land in it.
+  //
+  // The try/catch is what makes the call-site comment in `refreshPending`
+  // true. `allSettled` stays for what it is actually good at: one half
+  // failing asynchronously must not be read as the other half's answer.
+  try {
+    if (!creds) return;
+    const userID = creds.userID;
+    const [blocked, refused] = await Promise.allSettled([
+      countBlockedRows(userID),
+      countRejectedRows(userID),
+    ]);
+    // An account switch mid-await must not paint the previous athlete's count.
+    if (creds?.userID !== userID) return;
+    if (blocked.status !== 'fulfilled' || refused.status !== 'fulfilled') return;
+    emit({ needsAttention: blocked.value + refused.value });
+  } catch {
+    // Advisory, like `pending`. The last known value stands — the conservative
+    // direction for a number whose job is to keep a problem visible.
   }
 }
 

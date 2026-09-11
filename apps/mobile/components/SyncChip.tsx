@@ -39,8 +39,25 @@ export function chipFor(s: SyncState): { label: string; tone: 'warn' | 'danger' 
       tone: 'muted',
     };
   }
-  // Online and something genuinely went wrong. This is the only alarming
-  // state and the only one worth `danger`.
+  // Online and a row is waiting on a PERSON (N167/#544): refused by the
+  // server, and nothing automatic will ever move it. Ahead of `lastError`
+  // because it is the more specific and more actionable truth — the same rule
+  // the sync screen applies ("a permanent row still wins over the
+  // transient-error copy") — and because it is the one that survives a cold
+  // start: `lastError` lives in memory, this is recounted from disk.
+  //
+  // Offline still outranks it, deliberately and unchanged. A refused row is not
+  // caused by being offline, but "1 needs attention" beside no signal invites
+  // the question "is it failing because I'm offline?", and the answer to that
+  // is visible the moment signal returns.
+  if (s.needsAttention > 0) {
+    return {
+      label: `${s.needsAttention} ${s.needsAttention === 1 ? 'needs' : 'need'} attention`,
+      tone: 'danger',
+    };
+  }
+  // Online and the last run failed. With the branch above, these two are the
+  // only alarming states and the only ones worth `danger`.
   if (s.lastError) return { label: 'Sync failed', tone: 'danger' };
   if (s.syncing) return { label: 'Syncing…', tone: 'muted' };
   // Deferred rows are counted inside `pending`, so this is checked first to
@@ -50,6 +67,20 @@ export function chipFor(s: SyncState): { label: string; tone: 'warn' | 'danger' 
   if (s.pending > 0) return { label: `${s.pending} to sync`, tone: 'warn' };
   // Synced, online, nothing owed. Say nothing.
   return null;
+}
+
+/**
+ * Whether tapping the chip opens the repair screen rather than retrying.
+ *
+ * One function, read by both the tap and its announced label, so the two cannot
+ * disagree — they used to each test `lastError` inline. That inline test is
+ * also exactly what broke N167: a cold start with a refused row has
+ * `needsAttention > 0` and no `lastError`, so the chip would have said
+ * "N needs attention", announced "Tap to sync now", and retried a request the
+ * server refuses forever instead of opening the screen that can fix it.
+ */
+export function chipOpensRepair(s: SyncState): boolean {
+  return Boolean(s.lastError) || s.needsAttention > 0;
 }
 
 export function SyncChip() {
@@ -70,7 +101,7 @@ export function SyncChip() {
         // even offline, because `online` is inferred from the LAST request,
         // so disabling it would refuse the one tap that happens right after
         // signal returns, which is the tap people actually make.
-        if (state.lastError) router.push('/sync');
+        if (chipOpensRepair(state)) router.push('/sync');
         else void syncNow();
       }}
       hitSlop={10}
@@ -78,7 +109,7 @@ export function SyncChip() {
       // Announced as a status with an action, not as a bare label: a screen
       // reader user gets what it means and what tapping does.
       accessibilityLabel={
-        state.lastError
+        chipOpensRepair(state)
           ? `${chip.label}. Tap to see what went wrong.`
           : `${chip.label}. Tap to sync now.`
       }

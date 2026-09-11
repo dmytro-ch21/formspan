@@ -72457,7 +72457,135 @@ history, if the trade-off is ever revisited.
 - **Past the last delay, a stale green still reads UNKNOWN.** That is exit 0 with
   a note to re-run, which is H27's behaviour, now reached only after the retries.
 
+## 2026-09-11 — N167 (#544), slice 2: a refused session stopped counting as "waiting", and a fix to it stopped being stranded
+
+**What changed.** A session or workout the server refused permanently used to
+count toward `pending` forever: sessions never clear `dirty` on a permanent
+refusal, and `countPendingSessions` was `COUNT(*) WHERE dirty = 1` with no
+error filter. The badge could never reach zero, and because `pending > 0`
+fires the foreground trigger, every app open re-sent a request the server
+would refuse identically. That is criterion 2 of #544, which slice 1 left
+deliberately.
+
+Now `pending` counts only rows that will go out on their own. Refused rows are
+counted as `SyncState.needsAttention` instead, and the chip reads "N needs
+attention" and routes to the repair screen.
+
+### The obvious fix was a trap, and reading found it before any code did
+
+The one-line version — add `AND last_error IS NULL` to the counter — ships two
+defects, both invisible in a diff:
+
+1. **The chip goes silent on a cold start.** `lastError` lives in memory. After
+   a relaunch with one refused session the old code read `pending: 0`, no
+   `lastError`, and the chip rendered nothing — while the row sat on the
+   repair screen with no route to it. Worse, the chip's tap and its announced
+   label each tested `lastError` inline, so even with a new count feeding the
+   label, a tap would have RETRIED instead of opening the fix.
+   `chipOpensRepair` is now the one decision both read.
+2. **A fix to a refused row is stranded.** Every edit path — sets, finish,
+   BJJ, running, rename, reschedule, workout items, workout rename —
+   re-dirtied the row and LEFT the old refusal in place; only the two delete
+   paths cleared it. So an athlete opens a refused session, fixes set 10, and
+   the fix is still classed as blocked, excluded from pending, and — because
+   the foreground and backoff triggers are gated on `pending > 0` — never sent.
+   `sync.ts`'s `refreshPending` comment already records that exact failure once
+   ("could sit on the device indefinitely"), and `deleteLocalSession`'s comment
+   already stated the right rule — the refusal "described the PREVIOUS
+   operation". The edit paths had simply never been given it.
+
+Every edit now clears `last_error`. An edit to an unrelated field of a
+still-doomed row costs one retry — pending, pushed, refused, reason written
+back — which is self-correcting and far cheaper than a fix that never sends.
+
+### One predicate, so the answers partition
+
+`BLOCKED_ROW` (`last_error IS NOT NULL AND dirty = 1 AND deleted_at IS NULL`)
+is interpolated into `blockedRows`, `countBlockedRows`, `countPendingSessions`
+and `countPendingWorkouts`. Pending is "owed AND NOT blocked", so every owed
+row lands in exactly one answer. Four hand-written copies of a predicate is how
+a row ends up in both — or in neither, which means uncounted AND invisible.
+
+Two edges are placed deliberately rather than by accident: a refused
+**tombstone** stays in pending (`blockedRows` excludes tombstones, and its own
+comment says a failing delete "still counts toward the pending badge"), and a
+workout refused on a **rename alone** (`name_dirty = 1`, `dirty = 0`) stays in
+pending, because `blockedRows` has always required `dirty = 1` — so excluding
+it from pending too would have counted it nowhere and shown it nowhere.
+
+### The regression this slice introduced, and the suite caught
+
+`refreshNeedsAttention` was first written with `Promise.allSettled` under a
+comment promising that a failing attention count could never cost the retry
+machinery. That was true only for an ASYNC failure. `allSettled` settles
+promises; it does not catch a synchronous throw while its input array is being
+built. And `refreshPending` awaited the new step outside its own `try` — so a
+throw rejected `refreshPending` itself, and at the end of a run (`await
+refreshPending(); if (retry) schedule();`) that meant `schedule()` was never
+reached. **32 tests red, one error.**
+
+`sync.test.ts`'s own comments record this shape three times — each time an
+outbox joined the count, a missing mock threw and silently stopped the ladder.
+This was the fourth, and the first to ESCAPE the swallowing catch rather than
+land in it. `refreshNeedsAttention` is now total, and a test makes the count
+throw synchronously and requires the ladder to keep retrying.
+
+### A mutation survived a test written in this slice
+
+The identity recheck — an account switch mid-await must not paint the previous
+athlete's count — got a test, and deleting the recheck left that test green.
+The test asserted only the final state. Switching accounts while `user_1`'s
+count was held open queued a follow-up run, and its recount repainted
+`user_2`'s correct 0 before the assertion. The mutated run's recorded emissions:
+
+    [0, 0, 0, 7, 7, 7, 7, 7, 7, 0]
+
+The previous athlete's number was on screen for six consecutive emissions, and
+the assertion saw only the last. **A later correct write masked a wrong one.**
+The test now subscribes to every emission and requires that 7 never appears,
+and the same mutation turns it red. Worth stating generally: a final-state
+assertion over state that something else will overwrite measures the
+overwriter, not the code under test.
+
+### Verification
+
+**18 mutations, all caught, 0 invalid**, each restored in a `finally` and the
+restore confirmed by re-running rather than grepping, against a baseline proven
+green in the same run: each counter's `NOT BLOCKED_ROW` removed; each half of
+`BLOCKED_ROW` removed; each of the eight edit sites' `last_error = NULL`
+removed, one at a time; `refreshNeedsAttention` made able to reject again; the
+sign-out reset removed; a partial count painted; the identity recheck removed;
+the chip's attention branch removed; and `chipOpensRepair` narrowed back to
+`lastError`. The runner labels a mutation that stops the suite running as
+INVALID rather than caught, since a suite that failed to run proves nothing.
+
+The partition and edit tests run against a real SQLite database through
+`migratedFixture()`.
+
+One failure along the way was classified as load rather than code, and only
+after proving it: `syncRefused.test.tsx`'s first test failed once while running
+beside a type-check and nine other suites, then passed 9/9 alone on unchanged
+code — 486 ms against `waitFor`'s one-second default. Subsequent runs put tests
+after the type-check instead of beside it.
+
+### What is left
+
+- **Plans.** `plan.ts` carries both of #544's defects at once — a refused plan
+  counts as pending forever AND nothing anywhere reads its `last_error`. Split
+  into its own ticket rather than absorbed, per the delivery pipeline.
+- **No telemetry** yet for blocked-row count and age by domain and error code.
+
 ## Open items / known gaps as of this entry
+
+- **N167: a plan the server refuses is counted as pending forever, and shown
+  nowhere.** `plan.ts`'s push loop never clears `dirty` on a permanent
+  refusal, so `countPendingPlans` counts it permanently and the foreground
+  trigger re-sends it on every open; and no file but `plan.ts` reads
+  `planned_sessions` at all, so its `last_error` reaches no screen. The same two
+  defects #544 fixed for food entries, sequences, sessions and workouts, split
+  into its own ticket. The fix is the pattern slice 2 established: a shared
+  blocked predicate, a place in `needsAttention`, a surface, and edits that
+  clear the stale refusal.
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
   owns, and that count is inherently linear.** The blocking half — a scan of

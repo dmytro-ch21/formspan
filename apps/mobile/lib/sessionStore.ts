@@ -39,6 +39,35 @@ import { putDetail as pushRunningDetail, type SessionDetail as RunningDetail } f
 import { addDays, localDayDelta } from './calendar';
 
 /**
+ * What makes a session or workout row BLOCKED: refused permanently by the
+ * server, still owed, and not a tombstone — N167/#544.
+ *
+ * ONE definition, interpolated into `blockedRows`, `countBlockedRows`,
+ * `countPendingSessions` and `countPendingWorkouts`, and the sharing is the
+ * point. Those four answer halves of one question — is this owed row waiting,
+ * or waiting on a person — and four hand-written copies of a predicate is how
+ * a row ends up in both answers or in neither.
+ *
+ * Pending is "owed AND NOT blocked", so pending + blocked covers every owed row
+ * exactly once:
+ *
+ * - A refused TOMBSTONE stays in pending. `blockedRows` excludes tombstones
+ *   (F5: a deleted row offered an "Open the session" button that led nowhere),
+ *   and its own comment says a failing delete "still counts toward the pending
+ *   badge, which deliberately does not filter tombstones". Unchanged.
+ * - A workout refused on a RENAME alone (`name_dirty = 1`, `dirty = 0`) is not
+ *   blocked here (`dirty = 1` is required, as `blockedRows` always required)
+ *   and so stays in pending. Not ideal — it retries — but it is never both
+ *   uncounted and invisible, which is the failure this constant exists to
+ *   rule out.
+ *
+ * `last_error` is only ever written for a PERMANENT rejection: `noteRowError`
+ * returns early for anything else. So on these two tables `last_error IS NOT
+ * NULL` means refused, not "a request failed once".
+ */
+const BLOCKED_ROW = 'last_error IS NOT NULL AND dirty = 1 AND deleted_at IS NULL';
+
+/**
  * Offline-first session storage.
  *
  * Logging is the one thing in this app that must work with no signal at all.
@@ -650,7 +679,26 @@ export async function saveCollapsedGroups(
   );
 }
 
-/** Every local edit lands here: write, mark dirty, return. */
+/**
+ * Every local edit lands here: write, mark dirty, return.
+ *
+ * **Every edit also clears `last_error` (N167/#544), and so does every other
+ * edit path in this file.** The recorded refusal described the PREVIOUS
+ * payload — the same reason `deleteLocalSession` already gave for clearing it.
+ * Until N167 only the two delete paths did, and that was harmless while
+ * `countPendingSessions` counted every dirty row. Once pending stopped counting
+ * blocked rows it became a trap: an athlete opens a refused session, fixes set
+ * 10, and the fix keeps the stale error, so it is still classed as blocked,
+ * still excluded from pending, and — because the foreground and backoff
+ * triggers are gated on `pending > 0` — never sent. `sync.ts`'s
+ * `refreshPending` comment records that exact failure once already: a row that
+ * "could sit on the device indefinitely".
+ *
+ * An edit to an unrelated field of a still-doomed row therefore costs one
+ * retry: pending again, pushed, refused, `noteRowError` writes the reason back.
+ * That is self-correcting and user-initiated, and far cheaper than a fix that
+ * silently never syncs.
+ */
 export async function saveLocalSets(
   userID: string,
   id: string,
@@ -658,7 +706,7 @@ export async function saveLocalSets(
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `UPDATE local_sessions SET sets_json = ?, dirty = 1, updated_at = ?
+    `UPDATE local_sessions SET sets_json = ?, dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ?`,
     JSON.stringify(sets),
     new Date().toISOString(),
@@ -681,7 +729,7 @@ export async function finishLocalSession(userID: string, id: string, endedAt?: s
   const db = await getDb();
   const ended = endedAt ?? new Date().toISOString();
   await db.runAsync(
-    `UPDATE local_sessions SET ended_at = ?, dirty = 1, updated_at = ?
+    `UPDATE local_sessions SET ended_at = ?, dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ?`,
     ended,
     new Date().toISOString(),
@@ -706,7 +754,7 @@ export async function saveLocalBjjDetail(
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `UPDATE local_sessions SET bjj_json = ?, dirty = 1, updated_at = ?
+    `UPDATE local_sessions SET bjj_json = ?, dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ?`,
     JSON.stringify(detail),
     new Date().toISOString(),
@@ -732,7 +780,7 @@ export async function saveLocalRunningDetail(
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `UPDATE local_sessions SET running_json = ?, dirty = 1, updated_at = ?
+    `UPDATE local_sessions SET running_json = ?, dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ?`,
     JSON.stringify(detail),
     new Date().toISOString(),
@@ -784,7 +832,7 @@ export async function renameLocalSession(
   if (!trimmed) return false;
   const db = await getDb();
   await db.runAsync(
-    `UPDATE local_sessions SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?
+    `UPDATE local_sessions SET name = ?, dirty = 1, name_dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     trimmed,
     new Date().toISOString(),
@@ -845,7 +893,7 @@ export async function rescheduleLocalSession(
   const ended_at = row.ended_at ? addDays(new Date(row.ended_at), delta).toISOString() : null;
   await db.runAsync(
     `UPDATE local_sessions
-        SET started_at = ?, ended_at = ?, dirty = 1, started_at_dirty = 1, updated_at = ?
+        SET started_at = ?, ended_at = ?, dirty = 1, started_at_dirty = 1, updated_at = ?, last_error = NULL
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     started_at,
     ended_at,
@@ -964,7 +1012,8 @@ export async function tombstonedIDs(userID: string): Promise<Set<string>> {
 export async function countPendingSessions(userID: string): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM local_sessions WHERE user_id = ? AND dirty = 1`,
+    `SELECT COUNT(*) AS n FROM local_sessions
+      WHERE user_id = ? AND dirty = 1 AND NOT (${BLOCKED_ROW})`,
     userID,
   );
   return row?.n ?? 0;
@@ -1629,15 +1678,13 @@ export async function blockedRows(userID: string): Promise<BlockedRow[]> {
     sport: string;
   }>(
     `SELECT id, name, last_error, sport FROM local_sessions
-      WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
-        AND deleted_at IS NULL
+      WHERE user_id = ? AND ${BLOCKED_ROW}
       ORDER BY started_at DESC`,
     userID,
   );
   const workouts = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
     `SELECT id, name, last_error FROM workout_cache
-      WHERE user_id = ? AND last_error IS NOT NULL AND dirty = 1
-        AND deleted_at IS NULL
+      WHERE user_id = ? AND ${BLOCKED_ROW}
       ORDER BY name`,
     userID,
   );
@@ -1653,6 +1700,29 @@ export async function blockedRows(userID: string): Promise<BlockedRow[]> {
       kind: 'workout' as const, id: r.id, name: r.name, lastError: r.last_error, sport: '',
     })),
   ];
+}
+
+/**
+ * How many rows `blockedRows` would list, without reading every message —
+ * N167/#544.
+ *
+ * Feeds `SyncState.needsAttention`, which is what keeps a blocked row
+ * discoverable once it stops inflating `pending`. Without it a cold start with
+ * one refused session reads `pending: 0` and no `lastError` (that lives only in
+ * memory), the chip renders nothing, and the repair screen holding the row has
+ * no route to it.
+ *
+ * Built on `BLOCKED_ROW` so it cannot disagree with the list it summarises.
+ */
+export async function countBlockedRows(userID: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT (SELECT COUNT(*) FROM local_sessions WHERE user_id = ? AND ${BLOCKED_ROW})
+          + (SELECT COUNT(*) FROM workout_cache  WHERE user_id = ? AND ${BLOCKED_ROW}) AS n`,
+    userID,
+    userID,
+  );
+  return row?.n ?? 0;
 }
 
 /**
@@ -2265,7 +2335,7 @@ export async function saveLocalWorkoutItems(
   const db = await getDb();
   const now = new Date().toISOString();
   const r = await db.runAsync(
-    `UPDATE workout_cache SET items_json = ?, dirty = 1, updated_at = ?
+    `UPDATE workout_cache SET items_json = ?, dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     JSON.stringify(items), now, id, userID,
   );
@@ -2320,7 +2390,7 @@ export async function renameLocalWorkout(
     //
     // Every "is this row owed anything" query therefore has to test BOTH flags;
     // they are listed at `workoutOwed` below.
-    `UPDATE workout_cache SET name = ?, name_dirty = 1, updated_at = ?
+    `UPDATE workout_cache SET name = ?, name_dirty = 1, updated_at = ?, last_error = NULL
      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
     trimmed, now, id, userID,
   );
@@ -2413,7 +2483,8 @@ export async function unsyncedWorkoutIDs(userID: string): Promise<Set<string>> {
 export async function countPendingWorkouts(userID: string): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM workout_cache WHERE user_id = ? AND ${workoutOwed}`,
+    `SELECT COUNT(*) AS n FROM workout_cache
+      WHERE user_id = ? AND ${workoutOwed} AND NOT (${BLOCKED_ROW})`,
     userID,
   );
   return row?.n ?? 0;

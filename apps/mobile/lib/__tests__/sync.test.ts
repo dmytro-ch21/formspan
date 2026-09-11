@@ -12,6 +12,7 @@ import {
   request,
   setSyncIdentity,
   startSyncOrchestrator,
+  subscribeSync,
   syncNow,
   syncState,
 } from '../sync';
@@ -36,6 +37,18 @@ jest.mock('../sessionStore', () => ({
   // foreground sync silently stopped, which is what the two tests below
   // caught when workouts joined the count.
   countPendingWorkouts: jest.fn(async () => 0),
+  // N167/#544: the attention count joined the refresh — a fourth time for the
+  // shape the notes above record, and the first whose throw ESCAPED the
+  // swallowing catch instead of landing in it (32 tests, one error).
+  // `refreshNeedsAttention` is total now, so a missing export here would no
+  // longer break the ladder; it would silently skip the count under test.
+  countBlockedRows: jest.fn(async () => 0),
+}));
+
+// N167/#544: the other half of `needsAttention`. Mocked for the reason every
+// module below is: the real one opens SQLite, which jest-expo stubs out.
+jest.mock('../rejectedRows', () => ({
+  countRejectedRows: jest.fn(async () => 0),
 }));
 
 // The third outbox, and the third time this mock has had to grow.
@@ -132,6 +145,8 @@ beforeEach(async () => {
   mockCount.mockReset();
   mockCount.mockResolvedValue(0);
   mockSync.mockResolvedValue(ok());
+  (jest.requireMock('../sessionStore').countBlockedRows as jest.Mock).mockReset().mockResolvedValue(0);
+  (jest.requireMock('../rejectedRows').countRejectedRows as jest.Mock).mockReset().mockResolvedValue(0);
 });
 
 it('coalesces a burst into the run in flight plus one', async () => {
@@ -726,5 +741,102 @@ describe('sequences in the three-way merge', () => {
 
     expect(syncState().lastError).toBe('chain refused');
     expect(syncState().online).toBe(true);
+  });
+});
+
+describe('needsAttention — rows waiting on a person (N167/#544)', () => {
+  const blockedCount = () => jest.requireMock('../sessionStore').countBlockedRows as jest.Mock;
+  const refusedCount = () => jest.requireMock('../rejectedRows').countRejectedRows as jest.Mock;
+
+  it('is the sum of blocked sessions/workouts and refused entries/sequences', async () => {
+    blockedCount().mockResolvedValue(2);
+    refusedCount().mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await settle();
+    expect(syncState().needsAttention).toBe(3);
+  });
+
+  it('a count that THROWS SYNCHRONOUSLY does not stop the retry ladder', async () => {
+    // The regression this slice introduced and these tests caught.
+    // `Promise.allSettled` settles promises; it does not catch a throw while
+    // its input array is being built. `refreshPending` awaited the attention
+    // step outside its own try, so the throw rejected `refreshPending` and
+    // took the backoff ladder with it. Mirrors 'retries a transient failure'
+    // exactly, with only the attention count made to throw.
+    blockedCount().mockImplementation(() => {
+      throw new Error('boom');
+    });
+    mockCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await resetLadder();
+    mockSync.mockResolvedValue(failed('transient'));
+    await syncNow();
+
+    const before = mockSync.mock.calls.length;
+    await settle(5_300); // past BACKOFF_MS[0]
+    expect(mockSync.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('never paints a partial count: a failed half leaves the last value standing', async () => {
+    // Half a count is not a smaller truth, it is a wrong one — if the failed
+    // half held the only refused row, emitting the other half would paint 0
+    // and the chip would say nothing is wrong.
+    blockedCount().mockResolvedValue(2);
+    refusedCount().mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await settle();
+    expect(syncState().needsAttention).toBe(3);
+
+    refusedCount().mockRejectedValue(new Error('read failed'));
+    setSyncIdentity('user_1', token); // same athlete: re-runs the refresh
+    await settle();
+    expect(syncState().needsAttention).toBe(3);
+  });
+
+  it('is reset on sign-out, so the next athlete never sees the last one’s count', async () => {
+    blockedCount().mockResolvedValue(4);
+    setSyncIdentity('user_1', token);
+    await settle();
+    expect(syncState().needsAttention).toBe(4);
+
+    setSyncIdentity(null, null);
+    expect(syncState().needsAttention).toBe(0);
+  });
+
+  it('an account switch mid-count never paints the previous athlete’s number', async () => {
+    // One line guards this — `if (creds?.userID !== userID) return;` after the
+    // awaited counts. The FIRST version of this test asserted only the final
+    // state, and the mutation deleting that line SURVIVED it: switching to
+    // user_2 while user_1's run is held open queues a follow-up run, and that
+    // run's recount repaints user_2's correct 0 before the assertion — hiding
+    // exactly the window in which user_1's 7 is on screen, which IS the defect.
+    // A later correct write masking a wrong one. So this records every emitted
+    // value and requires that 7 never appears after the switch.
+    let release: ((n: number) => void) | undefined;
+    blockedCount().mockImplementation((id: string) =>
+      id === 'user_1'
+        ? new Promise<number>((r) => {
+            release = r;
+          })
+        : Promise.resolve(0),
+    );
+    setSyncIdentity('user_1', token);
+    await settle();
+    // Apparatus check: the held-open read really started, or everything below
+    // would assert over a race that never happened.
+    expect(release).toBeDefined();
+
+    const seen: number[] = [];
+    const unsubscribe = subscribeSync((st) => seen.push(st.needsAttention));
+    try {
+      setSyncIdentity('user_2', token);
+      await settle();
+      release!(7);
+      await settle();
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).not.toContain(7);
+    expect(syncState().needsAttention).toBe(0);
   });
 });
