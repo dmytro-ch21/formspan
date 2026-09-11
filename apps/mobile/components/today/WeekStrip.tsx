@@ -6,6 +6,7 @@ import { vola } from '@/constants/Colors';
 import { dayString } from '@/lib/calendar';
 import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { slopFor } from '@/constants/Spacing';
 
 /**
  * The week strip: Mon–Sun, with each day's state as a ring beneath its date.
@@ -133,6 +134,7 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
         </Text>
         <PressableScale
           onPress={onWeekInReview}
+          hitSlop={slopFor(REVIEW_HEIGHT)}
           accessibilityRole="button"
           accessibilityLabel="Week in review"
           style={styles.review}
@@ -187,6 +189,21 @@ function Mark({
   );
 }
 
+/**
+ * The "Week in review" row's painted height after F42's `paddingVertical: 8`:
+ * 8 above and below a 13pt chevron, which is the tallest thing in the row
+ * (the label is 12pt). 29pt asks {@link slopFor} for 8, giving 45pt.
+ *
+ * **This is the one control in F42 whose VISUAL grew**, and deliberately: it
+ * had no padding at all, so its height was the 12pt label's line box —
+ * roughly 16pt, on the first screen of the app. Slop alone would have reached
+ * 44 while leaving a control that still looked like a caption, and the
+ * neighbouring week strip sits directly below it, so a 14pt slop reaching up
+ * and down from a 16pt row is exactly the overlap {@link slopFor}'s own note
+ * warns about. Padding first, then slop on what remains.
+ */
+const REVIEW_HEIGHT = 8 + 13 + 8;
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: vola.surface,
@@ -226,6 +243,6 @@ const styles = StyleSheet.create({
 
   foot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   summary: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
-  review: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  review: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8 },
   reviewLabel: { fontSize: 12, color: vola.textMuted },
 });

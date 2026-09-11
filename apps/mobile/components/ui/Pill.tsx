@@ -6,6 +6,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { withAlpha } from '@/lib/palette';
 import { PRESS_OPACITY } from '@/constants/Motion';
+import { slopFor } from '@/constants/Spacing';
 
 /**
  * The one rounded-label shape — a chip you can select, or a badge you can't.
@@ -85,7 +86,7 @@ export function Pill({ label, onPress, active, icon, accessibilityLabel, testID 
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={6}
+      hitSlop={slopFor(CHIP_HEIGHT)}
       style={({ pressed }) => [
         styles.base,
         styles.chip,
@@ -106,6 +107,20 @@ export function Pill({ label, onPress, active, icon, accessibilityLabel, testID 
     </Pressable>
   );
 }
+
+/**
+ * The chip's painted height: `paddingVertical` 6 top and bottom around a
+ * 12pt label, whose line box rounds to 15. Stated here rather than measured
+ * at runtime because `hitSlop` is a static prop and the padding below is a
+ * literal — if either changes, this has to change with it, which is why they
+ * sit adjacent.
+ *
+ * 27pt asks {@link slopFor} for 9, giving 27 + 18 = 45pt of touch target
+ * against a 44pt floor. Before F42 this was `hitSlop={6}` — an effective
+ * 39pt, under the floor, on the one component N444 consolidated ~15
+ * hand-rolled chip variants into.
+ */
+const CHIP_HEIGHT = 6 + 15 + 6;
 
 const styles = StyleSheet.create({
   base: {
