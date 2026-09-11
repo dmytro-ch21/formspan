@@ -7,6 +7,7 @@
  * A drop now names TWO things — the meal, and the SLOT inside it — so every
  * case below asserts both.
  */
+import * as Haptics from 'expo-haptics';
 import { act, renderHook } from '@testing-library/react-native';
 
 import {
@@ -247,5 +248,148 @@ describe('useEntryDrag', () => {
     expect(result.current.target).toBeNull();
     await act(() => result.current.end(250));
     expect(onDrop).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F44 — the drag's three haptic moments, and the one that must never fire.
+ *
+ * `move` is called from `onPanResponderMove`, which runs 60-120 times a second.
+ * React bails out of an unchanged `setSlot`, so the RE-RENDER cost is per
+ * crossing — but a haptic has no such bail-out. Fired unguarded there it is a
+ * buzz per frame, and that is the single worst thing this change could ship.
+ * These tests exist because "it felt fine when I dragged it once" cannot tell
+ * the difference between one tap per crossing and one tap per frame on a
+ * simulator with no haptics at all.
+ */
+describe('F44 — haptics', () => {
+  // `jest.setup.js` mocks `expo-haptics` with plain arrows (there is no native
+  // module under jest), so there is nothing to assert on until we spy. Spying
+  // locally rather than making the global mock a `jest.fn()`: that file is
+  // shared by every suite, and widening it for one test is how shared setup
+  // accumulates.
+  let impactSpy: jest.SpyInstance;
+  let selectionSpy: jest.SpyInstance;
+
+  const impact = () => impactSpy.mock.calls.length;
+  const selection = () => selectionSpy.mock.calls.length;
+
+  beforeEach(() => {
+    impactSpy = jest.spyOn(Haptics, 'impactAsync').mockResolvedValue(undefined);
+    selectionSpy = jest.spyOn(Haptics, 'selectionAsync').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('the lift is felt once, when the hold arms', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    expect(impact()).toBe(1);
+  });
+
+  it('pickup is ONE tap: the first move does not announce the slot the row is already in', async () => {
+    // The defect `frontend-reviewer` found, and the one the other five cases
+    // were structurally blind to — every one of them clears the spy AFTER
+    // `settle()`, which discards exactly this tick.
+    //
+    // `feltAt` used to start null, so the first pixel of movement "entered" the
+    // row's own slot and ticked. On hardware that is the lift impact followed
+    // tens of milliseconds later by a selection tick: a double-buzz at pickup,
+    // announcing a move that has not happened.
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    // Deliberately NOT cleared: this asserts across the whole pickup.
+    await act(() => result.current.move(115)); // e1's own position
+
+    expect(selection()).toBe(0);
+    expect(impact()).toBe(1); // the lift, and only the lift
+  });
+
+  it('a real crossing after pickup still ticks — the seed must not silence everything', async () => {
+    // The control for the test above. A guard seeded too broadly would pass it
+    // by never ticking at all.
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    selectionSpy.mockClear();
+
+    await act(() => result.current.move(165)); // past e2 and e3's midpoints
+    expect(selection()).toBe(1);
+  });
+
+  it('dragging within one slot is felt ONCE, not once per frame', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    selectionSpy.mockClear();
+
+    // Twenty frames of a finger that has not left the slot. A real drag sends
+    // far more than twenty; this is the shape, not the volume.
+    await act(() => {
+      for (let i = 0; i < 20; i++) result.current.move(155);
+    });
+    expect(selection()).toBe(1);
+  });
+
+  it('each crossing is felt, and only on the crossing', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    selectionSpy.mockClear();
+
+    await act(() => {
+      result.current.move(115); // e1's OWN slot — the seed, so silent
+      result.current.move(115); // same — silent
+      result.current.move(165); // past e2 and e3: a real crossing
+      result.current.move(250); // lunch: another
+      result.current.move(250); // same — silent
+    });
+    // Two, not three. `move(115)` puts the row back where it started, and the
+    // guard is seeded with that slot at pickup — announcing it would be the
+    // double-buzz the test above forbids. This expectation was 3 before that
+    // seed existed, and the 3 was the bug.
+    expect(selection()).toBe(2);
+  });
+
+  it('a completed drop is felt', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    impactSpy.mockClear();
+
+    await act(() => result.current.end(250));
+    expect(impact()).toBe(1);
+  });
+
+  it('a CANCELLED drag is felt exactly nothing', async () => {
+    // The asymmetry that matters. `cancel` is also what `onPanResponderTerminate`
+    // calls, and confirming a move that did not happen is worse than silence —
+    // the athlete would feel the same tap for "moved" and "gave up".
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    impactSpy.mockClear();
+
+    await act(() => result.current.cancel());
+    expect(impact()).toBe(0);
+  });
+
+  it('a release with no frames is a cancel, and is silent', async () => {
+    // The frames never arrived, so there is no honest drop target. `end` takes
+    // the cancel path, and must feel like one.
+    const measure = jest.fn(() => new Promise<Frames>(() => {}));
+    const onDrop = jest.fn();
+    const { result } = await renderHook(() =>
+      useEntryDrag({ enabled: true, measure, onDrop }),
+    );
+    await act(() => result.current.start('e1', 'breakfast'));
+    impactSpy.mockClear();
+
+    await act(() => result.current.end(250));
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(impact()).toBe(0);
   });
 });

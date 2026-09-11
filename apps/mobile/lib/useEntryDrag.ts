@@ -41,6 +41,7 @@
  * view.
  */
 
+import * as Haptics from 'expo-haptics';
 import { useCallback, useRef, useState } from 'react';
 
 import type { Meal } from '@/lib/nutrition';
@@ -159,9 +160,20 @@ export function useEntryDrag({
   // A measurement that resolves after the drag it was started for has
   // already ended must not arm the NEXT drag with the previous one's frames.
   const dragSeq = useRef(0);
+  /**
+   * The last (section, slot) this drag announced, so a crossing is felt ONCE.
+   *
+   * `move` runs from `onPanResponderMove` — 60-120 times a second. React bails
+   * out of an unchanged `setSlot`, which is why the re-render cost is per
+   * crossing rather than per frame, but a haptic has no such bail-out: fired
+   * unguarded here it is a buzz per frame, which is the single worst thing this
+   * change could ship.
+   */
+  const feltAt = useRef<string | null>(null);
 
   const clear = useCallback(() => {
     activeRef.current = null;
+    feltAt.current = null;
     framesRef.current = { sections: [], rows: [] };
     setActive(null);
     setTarget(null);
@@ -182,10 +194,36 @@ export function useEntryDrag({
       // open a gap under a finger that has not moved.
       setTarget(meal);
       setSlot(null);
+      // The lift. A ~300ms hold with no confirmation means the athlete does not
+      // know it registered until they move — which is exactly when it is too
+      // late to find out it didn't. A row that rises under the finger in
+      // silence reads as lag rather than as a lift.
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       measure()
         .then((frames) => {
           if (seq !== dragSeq.current || !activeRef.current) return;
           framesRef.current = frames;
+          // Seed the crossing guard with the slot the row is ALREADY in, so
+          // the first movement is not announced as a crossing.
+          //
+          // Without this, `feltAt` is null when the finger first moves, the
+          // row "enters" its own position, and the athlete feels the lift
+          // impact followed a few tens of milliseconds later by a selection
+          // tick — a double-buzz at pickup, announcing a move that has not
+          // happened. The ticket's own device criterion forbids exactly that
+          // ("a single light tap at the moment it lifts").
+          //
+          // `slotFor` excludes the dragged row, so removing it at index i and
+          // reinserting at i is the identity — that index IS the origin slot.
+          const originRows = frames.rows
+            .filter((r) => r.meal === meal && r.id !== id)
+            .sort((a, b) => a.top - b.top);
+          const self = frames.rows.find((r) => r.id === id);
+          const origin =
+            self === undefined
+              ? null
+              : originRows.filter((r) => r.top < self.top).length;
+          feltAt.current = origin === null ? null : `${meal}:${origin}`;
         })
         .catch(() => {
           // Unmeasurable cards mean no drop target can be found, so the
@@ -199,8 +237,19 @@ export function useEntryDrag({
     const a = activeRef.current;
     if (!a) return;
     const to = dropTargetFor(pageY, framesRef.current.sections);
+    const nextSlot = to === null ? null : slotFor(pageY, to, framesRef.current.rows, a.id);
     setTarget(to);
-    setSlot(to === null ? null : slotFor(pageY, to, framesRef.current.rows, a.id));
+    setSlot(nextSlot);
+    // One tap per crossing, and nothing in between — this is what lets an
+    // athlete feel where the row will land without watching the screen, which
+    // is the whole point on a phone held one-handed between sets. `selection`
+    // rather than `impact`: it is a lighter tick, and iOS uses it for exactly
+    // this in its own reorder lists.
+    const key = to === null ? null : `${to}:${nextSlot}`;
+    if (key !== feltAt.current) {
+      feltAt.current = key;
+      if (key !== null) Haptics.selectionAsync().catch(() => {});
+    }
   }, []);
 
   const end = useCallback(
@@ -211,7 +260,13 @@ export function useEntryDrag({
       // The frames may not have arrived yet (a lift-and-release faster than
       // a measure round trip) — then `to` is null and this is a cancel,
       // which is the right answer for a gesture that never really began.
-      if (to) onDrop(a.id, a.meal, to, slotFor(pageY, to, framesRef.current.rows, a.id));
+      if (to) {
+        onDrop(a.id, a.meal, to, slotFor(pageY, to, framesRef.current.rows, a.id));
+        // The commit, and ONLY the commit. A release with no `to` is a cancel
+        // — the frames never arrived — and a cancel must feel like nothing,
+        // because confirming a move that did not happen is worse than silence.
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
       clear();
     },
     [onDrop, clear],
