@@ -400,6 +400,14 @@ input[type="number"] {
 }
 
 .popover-in {
+  /*
+    The keyframe animates `transform: scale()`. Tailwind v4's `scale-*`
+    utilities set the standalone `scale` PROPERTY instead, and per Transforms
+    Level 2 those two channels COMPOSE multiplicatively rather than one
+    overriding the other — so adding a `scale-*` utility to an element carrying
+    this class would multiply with the keyframe, not replace it. Nothing does
+    today; this is here so the first person who tries knows why it looks wrong.
+  */
   animation: scale-in var(--duration-surface) var(--ease-out);
   /* Both popovers are `right-0`-anchored under their trigger, so the corner
      they grow from is the corner the trigger is in. Without this they inflate

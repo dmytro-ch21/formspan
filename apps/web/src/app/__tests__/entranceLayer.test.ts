@@ -29,10 +29,27 @@ const heatmap = read("../dashboard/sessions/TrainingCalendar.tsx");
  * satisfying a text match several times; assert against code.
  */
 function rule(selector: string): string | null {
-  const at = css.indexOf(`${selector} {`);
-  if (at === -1) return null;
-  return css.slice(at, css.indexOf("}", at)).replace(/\/\*[\s\S]*?\*\//g, "");
+  // Find the selector at TOP LEVEL — not nested inside an at-rule.
+  //
+  // `.popover-in` and `.dialog-in` each appear a second time inside the
+  // `prefers-reduced-motion` block as part of a combined selector, so a plain
+  // `indexOf` can match the override instead of the base rule. Bounding the
+  // search by file position would fix that only while the definitions happen
+  // to come first; depth is the property that actually distinguishes them, and
+  // it survives the file being reordered. Raised in review — the same
+  // first-match hazard this helper's comment-stripping already escapes once.
+  let depth = 0;
+  for (let i = 0; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}") depth--;
+    else if (depth === 0 && css.startsWith(`${selector} {`, i)) {
+      const body = css.slice(i, css.indexOf("}", i));
+      return body.replace(/\/\*[\s\S]*?\*\//g, "");
+    }
+  }
+  return null;
 }
+
 
 describe("the entrance layer (N559)", () => {
   it("gives both trigger-anchored popovers the same entrance", () => {
