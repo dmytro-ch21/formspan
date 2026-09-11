@@ -69748,6 +69748,75 @@ setting being ignored at runtime — the ticket carries three device criteria,
 including toggling the setting while backgrounded to prove the hook's
 subscription actually re-renders.
 
+## 2026-09-10 — H17: the 24h release-age guard stays, and a tool can no longer reverse that quietly (#952)
+
+Two guards this repo relies on could not both be satisfied for ~24 hours after
+any Expo patch release. `check:expo-compat` wanted the newest published patch
+the minute it appeared; pnpm 11.17's `minimumReleaseAge` — ON by default at 24
+hours, set nowhere in this repo and invisible to `pnpm config get` — refused to
+install anything published inside that window.
+
+They point at opposite failures, and both are real: N133's guard exists because
+a STALE dependency crashed devices, the release-age guard because a too-FRESH
+one can be compromised or broken and unpublished within a day.
+
+### The decision, which is the part that was missing
+
+**The board owner chose, on 2026-09-10: keep the 24h guard, and make
+`check:expo-compat` tolerate a version it cannot yet install.**
+
+That is worth recording as a decision rather than as behaviour, because the
+mechanism already existed and the choice did not. H15 (#953, `cf399c2d`) had
+already taught `check:expo-compat` to warn while every outdated target is inside
+the window and to fail the moment any one of them is installable — so a
+same-day Expo release never needs an exemption, and a genuinely stale
+dependency still goes red. What nothing recorded was that this is the policy, as
+opposed to a tolerance somebody added. Until now the choice between the two
+risks was effectively made by whichever agent hit the red check first.
+
+### What was still missing: nothing stopped the policy being reversed
+
+`expo install --fix` resolves the contradiction by writing a
+`minimumReleaseAgeExclude:` block into `pnpm-workspace.yaml` — no prompt, no
+output. On 2026-09-08 that was nine packages, and it was one commit from
+landing as an unexamined side effect of making a red check green.
+
+The only thing guarding against that was a paragraph in the `vola-mobile-build`
+skill, which catches a human who reads it rather than a commit.
+`scripts/check-release-age-exemptions.py` now fails `verify` if
+`minimumReleaseAgeExclude` names a package that is not in
+`.vola-agent/release-age-exemptions.json` **with a reason**.
+
+**The reason is the load-bearing part, not the allowlist.** A list of bare
+package names could be satisfied by the same tool run that created the problem —
+`expo install --fix` could write both files if the second were only a list. A
+prose reason cannot be produced by a tool that does not know why it is exempting
+anything, and that is exactly the distinction between a decision and an
+artefact. Placeholders (`TODO`, `temporary`) and anything under 20 characters are
+refused for the same reason.
+
+### Mutation-checked against the incident itself, including the part that hid
+
+Baseline green first, then the real 2026-09-08 block replayed verbatim — the
+exact nine packages the tool wrote. All nine are caught, **including
+`@expo/cli`, `@expo/metro-file-map` and `@expo/ui`**, which are the three the
+original extraction missed that day: scoped names must be quoted in YAML, and a
+naive line scanner that strips `- ` without handling quotes silently drops them.
+Those three are a self-test case for that reason, alongside single-quoted
+spelling. A recorded reason passes; a `TODO` reason stays red; restored, green
+again by re-running.
+
+Nine self-test cases in all, and `check:verify-chain` now counts 54 gates with
+49 in the chain — so the new link cannot be dropped in a `verify` merge without
+that check noticing, which is the failure it exists for.
+
+### What this does not do
+
+It does not stop `expo install --fix` writing the block — nothing in this repo
+can. It makes the write impossible to COMMIT unnoticed, which is the reachable
+half. The skill's instruction to check `git status` after running that command
+is still the earlier and cheaper catch.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

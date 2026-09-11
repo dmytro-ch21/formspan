@@ -1,0 +1,25 @@
+{
+  "notes": [
+    "Packages exempted from pnpm's 24-hour `minimumReleaseAge` guard, each with the",
+    "reason it was exempted. Read by scripts/check-release-age-exemptions.py, which",
+    "fails `verify` if pnpm-workspace.yaml's `minimumReleaseAgeExclude` names a",
+    "package that is not here with a real reason.",
+    "",
+    "POLICY, decided by the board owner 2026-09-10 (H17/#952): keep the 24h guard.",
+    "It exists for a too-FRESH dependency that turns out to be compromised or broken",
+    "and is unpublished within a day. `check:expo-compat` already tolerates a version",
+    "pnpm will not yet install (H15/#953) \u2014 it warns while every outdated target is",
+    "inside the window and fails the moment one is installable \u2014 so a same-day Expo",
+    "patch needs NO exemption at all. The bump lands the next day, untouched.",
+    "",
+    "So this file is expected to stay empty. An entry here is a deliberate decision to",
+    "accept an unaged package, not a way to make a red check green: `expo install",
+    "--fix` writes the pnpm-workspace.yaml block silently, and the whole point of the",
+    "check is that it cannot also write a reason.",
+    "",
+    "If you add one: name the package exactly as pnpm-workspace.yaml does (scoped",
+    "names are quoted there), say who decided and when, and delete it once the",
+    "package has aged out."
+  ],
+  "exemptions": {}
+}
