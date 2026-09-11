@@ -886,7 +886,7 @@ function ThemeRow({
         // Invisible until hovered: an empty week is the common case, and a
         // permanent "+ Add theme" on every row would be more chrome than
         // calendar.
-        <span className="text-xs text-text-dim opacity-0 transition group-hover:opacity-100">
+        <span className="text-xs text-text-dim opacity-0 transition duration-(--duration-control) ease-(--ease-out) group-hover:opacity-100">
           + Theme
         </span>
       )}

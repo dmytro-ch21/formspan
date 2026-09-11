@@ -317,7 +317,7 @@ function NewWorkoutDialog({
       this is being fixed for.
     */
     <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/70"
+      className="scrim-in fixed inset-0 z-50 overflow-y-auto bg-black/70"
       /*
         `pointerdown` on the element itself, not `click` anywhere inside it.
 
@@ -354,7 +354,7 @@ function NewWorkoutDialog({
           role="dialog"
           aria-modal="true"
           aria-labelledby="new-workout-title"
-          className="flex w-full max-w-md flex-col gap-5 rounded-card border border-line bg-surface p-6"
+          className="dialog-in flex w-full max-w-md flex-col gap-5 rounded-card border border-line bg-surface p-6"
         >
           <h2 id="new-workout-title" className="font-display text-2xl font-bold">
             New workout

@@ -179,7 +179,7 @@ export function ShareToFriend({
           ref={panel}
           role="dialog"
           aria-label="Share with a friend"
-          className="absolute right-0 z-10 mt-2 w-72 rounded-card border border-line bg-surface p-3 shadow-lg"
+          className="popover-in absolute right-0 z-10 mt-2 w-72 rounded-card border border-line bg-surface p-3 shadow-lg"
         >
           <p className="eyebrow mb-2">Send a copy to</p>
 

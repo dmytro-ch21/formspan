@@ -69406,6 +69406,88 @@ the three screens. Typecheck caught it (`TS17001`); both files were reverted and
 rewired with a single anchored insertion rather than patching the duplicates —
 the same rule as undoing from a file copy rather than from git.
 
+## 2026-09-10 — N559: the web app's entrance layer, and the one moment it used to animate was the wait (#1048)
+
+Every conditionally-mounted surface in `apps/web` hard-mounted. Two
+trigger-anchored popovers appeared from nowhere rather than from the button
+that opened them; the app's only modal dropped a 70%-black scrim over the page
+with no motion at all. Meanwhile eleven `animate-pulse` skeletons pulsed away
+happily — **the one moment the page animated was the wait, and the payoff
+teleported.**
+
+This is P4 parts A–D. Part E, the reduced-motion floor, shipped separately as
+F40 so it would not wait on tokens.
+
+### Two of the ticket's premises had already drifted, in hours
+
+The audit measured at `f00c6a82` and asserted *"all 100 `transition` utilities
+are bare"* with zero `ease-*` hits. Re-measured on `main` before starting:
+**103 occurrences, 101 of them bare** — because F39 had landed an hour earlier
+and given the toggle knob `duration-(--duration-control) ease-(--ease-out)`.
+The criterion "exactly two gain `ease-out`, the other ~98 untouched" is
+therefore checked here as **101 → 99**, counted rather than eyeballed.
+
+`transform-origin` being absent from both apps still held, which is the premise
+part A actually rests on.
+
+### What each part does, and the one place an origin is deliberately absent
+
+- **A — popovers.** A `popover-in` class, `opacity 0→1` with `scale(0.96)→1`
+  over `--duration-surface` on `--ease-out`, and `transform-origin: top right`.
+  Both popovers are `right-0`-anchored under their trigger, so the corner they
+  grow from is the corner the trigger is in. Without it a panel inflates
+  symmetrically from its own centre, which reads as *appeared* rather than
+  *opened from there*. Never `scale(0)`: 0.96 sits inside the sanctioned band.
+- **B — the modal.** `scrim-in` (fade) on the backdrop and `dialog-in`
+  (fade + scale) on the panel, both on `--duration-sheet` so they start and
+  finish together; a scrim that lands first reads as two events. **The dialog
+  gets no `transform-origin`, and that absence is the decision** — a modal is
+  anchored to nothing, so it scales from its own centre. Setting an origin here
+  would be the mistake part A exists to fix, applied where it does not belong.
+- **C — two curves, not a sweep.** The two entrance-shaped transitions
+  (`opacity-0 → group-hover:opacity-100`) get `ease-out` and a duration. The
+  other 99 are colour hovers that the default curve serves correctly, and a
+  100-site diff is unreviewable.
+- **D — the heatmap.** `hover:scale-125` → `fine-hover:hover:scale-110`, behind
+  a `@custom-variant fine-hover` of `(hover: hover) and (pointer: fine)`. The
+  old rule was the largest transform in either web app, on a 12px cell rendered
+  ~365 times a view, and ungated — so a **tap** fired a synthetic hover and left
+  the cell inflated.
+
+**The optional skeleton cross-fade was NOT included.** It is a real improvement
+and it is also the only part of P4 that needs a component to hold state across
+the swap; keeping it out leaves this diff four class additions and one CSS
+block, which is the size at which the origin decisions above are actually
+reviewable.
+
+### The interaction with F40, which F40's own ticket predicted
+
+F40 narrows `transition-property` under Reduce Motion. **It does not touch
+`animation`** — so these entrances, which are animations, would have kept
+scaling straight through it. F40's ticket said as much in advance: *"If N559
+lands first or alongside, its `.popover-in` / `.dialog-in` /
+`.fine-hover:hover:scale-110` selectors get their own overrides inside the same
+media block."*
+
+They now do: `.popover-in, .dialog-in { animation-name: fade-in; }` keeps the
+entrance while dropping the movement, and `.fine-hover…scale-110:hover { scale:
+1 }` stops the heatmap growing at all — because the narrowing alone makes the
+growth *instant*, and instant growth is still growth.
+
+### A guard that failed against correct code, for the oldest reason in this repo
+
+The first version of the "dialog has no origin" test asserted that the
+`.dialog-in` rule does not CONTAIN `transform-origin`. It failed — because the
+rule's body carries a comment explaining that it deliberately sets no
+`transform-origin`. The prose satisfied the match.
+
+That is the same trap this repo has now hit repeatedly: a comment standing in
+for code. The helper strips comments before asserting, and says why.
+
+All the guards were mutation-verified: giving the dialog an origin, dropping the
+reduced-motion override, and ungating the heatmap each turn exactly one test
+red, and the suite goes green again on a re-run rather than on inspection.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
