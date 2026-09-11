@@ -72568,6 +72568,29 @@ beside a type-check and nine other suites, then passed 9/9 alone on unchanged
 code — 486 ms against `waitFor`'s one-second default. Subsequent runs put tests
 after the type-check instead of beside it.
 
+### Review round
+
+`frontend-reviewer` found no blocking issues. Asked specifically to hunt for a
+ninth edit path that re-dirties a session or workout without clearing
+`last_error` — the one gap that would re-create the stranded-fix trap — it read
+every write to `local_sessions` and `workout_cache` across seven files and found
+none: every other write is a fresh `INSERT` or a path documented as not an
+edit. It confirmed the partition holds, and that `needsAttention` cannot
+disagree with what the repair screen lists.
+
+**Its one real finding was a comment this change falsified in a file it did not
+touch.** `rejectedRows.ts` (slice 1) described a blocked row as "a transient
+failure wearing an error" that "SHOULD count as pending, because it is" — and
+`refreshNeedsAttention` depends on that file. Both halves were wrong by now:
+`noteRowError` only records permanent refusals, and this slice stopped counting
+them. Corrected in place, with the correction stated. It is the lesson N535
+recorded, recurring one ticket later: the comments a change falsifies are rarely
+the ones it edits.
+
+Recorded rather than changed: offline plus a row needing attention shows
+"Offline" while the accessibility label says "Tap to see what went wrong" —
+accurate about the tap, and the same shape offline plus `lastError` already had.
+
 ### What is left
 
 - **Plans.** `plan.ts` carries both of #544's defects at once — a refused plan
