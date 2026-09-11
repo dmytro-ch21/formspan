@@ -353,7 +353,9 @@ describe('the way into the day panel (N541 tranche 1, #972)', () => {
     await render(<TodayScreen />);
 
     await waitFor(() => expect(screen.getByTestId('today-open-day')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('today-open-day'));
+    // Awaited: unawaited, the press's `act` was still open when the test ended
+    // and overlapped the suite's `afterEach` flush (F47, #1057).
+    await fireEvent.press(screen.getByTestId('today-open-day'));
     expect(mockPush).toHaveBeenCalledWith('/day');
   });
 });

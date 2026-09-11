@@ -164,6 +164,31 @@ jest.mock('@/lib/history', () => ({
   fetchHistory: jest.fn(),
 }));
 
+/*
+ * A history that exists, for every test that does not set its own (F47, #1057).
+ *
+ * Finishing a class opens the celebration card, and the card asks for the
+ * streak with `fetchHistory(...).then(...)`. A bare `jest.fn()` returns
+ * `undefined`, so in the three finish tests that never set a history that
+ * `.then` THREW — and nothing failed. Measured on `main` before this: all three
+ * green, each logging "Uncaught error: TypeError: Cannot read properties of
+ * undefined (reading 'then')", because the card's effect ran after
+ * `holdToFinish`'s `act` had closed, where the throw had nowhere to go. Once
+ * the press is held inside `act` (see `holdToFinish`) the card commits inside
+ * it, and the throw fails the test it was always happening in. No streak here:
+ * the tests that are about a streak set their own, and still win.
+ */
+beforeEach(() => {
+  (fetchHistory as jest.Mock).mockResolvedValue({
+    from: today(),
+    to: today(),
+    totals: emptyTotals(),
+    previous: emptyTotals(),
+    days: [],
+    sports: [],
+  });
+});
+
 // Sound and haptics reach native modules the celebration fires on mount.
 jest.mock('@/lib/sounds', () => ({ playSound: jest.fn(), primeSounds: jest.fn() }));
 
@@ -398,21 +423,31 @@ it('offers no share card while the class is still open', async () => {
  * `ended_at` would be, so read this before adding one.
  */
 async function holdToFinish(element: Parameters<typeof fireEvent.press>[0]) {
-  let settled = false;
-  const pressed = fireEvent.press(element).then(() => {
-    settled = true;
-  });
-  for (let step = 0; step < 20 && !settled; step++) {
-    try {
-      await jest.advanceTimersByTimeAsync(100);
-    } catch {
-      // Real timers in this test — there is no frozen clock to step, and the
-      // press settles on its own. `finishTheClass` below is shared by tests on
-      // both kinds of clock, which is why this is caught rather than avoided.
-      break;
+  // All of it inside ONE `act` (F47, #1057). `fireEvent` closes its own `act`
+  // as soon as the handler has been CALLED, and the clock steps below were
+  // never in one — so `finishNow`'s `load()` and the celebration it opens
+  // (`setSession`, `setLoading`, `setCelebrating`, ...) landed outside `act`
+  // on every fake-clock test in this file: seven "An update to
+  // BjjSessionScreen ... not wrapped in act(...)" each, from five tests, in
+  // every measured run. Holding the scope open until the press settles is
+  // what makes those updates part of the press.
+  await act(async () => {
+    let settled = false;
+    const pressed = fireEvent.press(element).then(() => {
+      settled = true;
+    });
+    for (let step = 0; step < 20 && !settled; step++) {
+      try {
+        await jest.advanceTimersByTimeAsync(100);
+      } catch {
+        // Real timers in this test — there is no frozen clock to step, and the
+        // press settles on its own. `finishTheClass` below is shared by tests on
+        // both kinds of clock, which is why this is caught rather than avoided.
+        break;
+      }
     }
-  }
-  await pressed;
+    await pressed;
+  });
 }
 
 describe('the HR timeline (N491/#852)', () => {

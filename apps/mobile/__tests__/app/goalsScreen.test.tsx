@@ -189,10 +189,18 @@ jest.mock('expo-router', () => ({
   },
 }));
 
-function refocus() {
-  // Copied before iterating: a callback re-registering during the loop would
-  // otherwise be run twice, or skipped, depending on where it landed.
-  for (const cb of [...mockFocusCbs]) cb();
+async function refocus() {
+  // Inside `act`, and awaited (F47, #1057). A focus callback starts with a
+  // synchronous `setOn(todayString())`, so calling them bare is a state update
+  // outside `act` — the census caught "An update to TargetScreen ... not
+  // wrapped in act(...)" coming out of three tests here, one per refocus.
+  // Wrapped in the helper rather than at each call site so a new refocus test
+  // cannot forget it.
+  await act(async () => {
+    // Copied before iterating: a callback re-registering during the loop would
+    // otherwise be run twice, or skipped, depending on where it landed.
+    for (const cb of [...mockFocusCbs]) cb();
+  });
 }
 
 const mockSuggested = suggestedTarget as jest.MockedFunction<typeof suggestedTarget>;
@@ -309,7 +317,7 @@ describe('the Goals tab refetches when it is focused again', () => {
     await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
 
-    refocus();
+    await refocus();
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
   });
 });
@@ -351,7 +359,7 @@ describe('the saved receipt', () => {
     await fireEvent.press(await screen.findByTestId('target-accept'));
     expect(await screen.findByTestId('target-saved')).toBeTruthy();
 
-    refocus();
+    await refocus();
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByTestId('target-saved')).toBeNull());
   });
@@ -839,7 +847,7 @@ describe('the activity level is remembered', () => {
     await render(<GoalsScreen />);
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1));
 
-    refocus();
+    await refocus();
 
     // The mount-effect version of this passed every other test in this file
     // and failed exactly here. It is the whole ticket.
@@ -1014,10 +1022,28 @@ describe('the activity level is remembered', () => {
     await waitFor(() => expect(mockSuggested).toHaveBeenCalled());
 
     // A second focus starts a read; the athlete taps before it resolves.
-    refocus();
+    await refocus();
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
     await fireEvent.press(screen.getByTestId('target-activity-active'));
     await waitFor(() => expect(selectedState('target-activity-active')).toBe(true));
+
+    // The tap's own chain — remember, push, settle — is not done just because
+    // the pill has moved. The pill's `onChoose` is `(level) => void
+    // chooseActivity(level)`, so the press does not return the chain for RNTL
+    // to await, and `chooseActivity` sets the local state before its first
+    // `await` — the `waitFor` above resolves on the very first tick and leaves
+    // the rest in flight. Left unawaited it kept resolving after this test's
+    // body returned: the "update to TargetScreen ... not wrapped in act(...)"
+    // two separate pre-merge runs caught coming out of this file, occasionally
+    // landing against whatever screen the next file in the same worker had
+    // mounted. Waiting for it to actually land — as `settles the debt and
+    // drops the notice once the account has it` above does — closes that gap
+    // without changing what this test checks: the stale-read guard is keyed
+    // on `choiceSeq`, bumped before `chooseActivity`'s first `await`, not on
+    // whether the push has landed. (Drafted under N505, #878; carried into
+    // F47, #1057.)
+    await waitFor(() => expect(mockSettle).toHaveBeenCalledWith('u1', 'active'));
+    await waitFor(() => expect(screen.queryByTestId('target-activity-unsynced')).toBeNull());
 
     // The read now resolves with its PRE-TAP snapshot. Applying it would put
     // the pill back to `light` under the athlete's thumb and unpin the query.
@@ -1160,7 +1186,7 @@ describe('with nutrition turned off', () => {
     // left this green until these two lines were added.
     await waitFor(() => expect(readActivityChoice).toHaveBeenCalled());
     await act(async () => {});
-    refocus();
+    await refocus();
     await act(async () => {});
 
     expect(mockSuggested).not.toHaveBeenCalled();

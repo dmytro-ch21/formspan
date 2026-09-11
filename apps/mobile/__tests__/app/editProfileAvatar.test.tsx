@@ -159,27 +159,44 @@ it('picking a photo from the library uploads it and shows the result', async () 
  */
 it('disables Save while an avatar upload is in flight, and re-enables it after', async () => {
   let resolveUpload: (p: typeof PROFILE) => void;
-  mockUploadAvatar.mockReturnValue(
-    new Promise((resolve) => {
+  let uploadStarted!: () => void;
+  const started = new Promise<void>((r) => {
+    uploadStarted = r;
+  });
+  mockUploadAvatar.mockImplementation(() => {
+    uploadStarted();
+    return new Promise((resolve) => {
       resolveUpload = resolve;
-    }),
-  );
+    });
+  });
   await render(<EditProfileScreen />);
   await screen.findByTestId('profile-avatar-row');
 
-  // Not awaited here. RNTL 14 resolves a press with the HANDLER's own return
-  // value, and this handler is deliberately held pending on `resolveUpload`
-  // below — awaiting the press first deadlocks the test into a 30s timeout
-  // instead of failing it. The `waitFor` on the committed disabled state is
-  // what the press was being awaited for anyway.
-  const pressed = fireEvent.press(screen.getByTestId('profile-avatar-library'));
+  // Not awaited to completion. RNTL 14 resolves a press with the HANDLER's
+  // own return value, and this handler is deliberately held pending on
+  // `resolveUpload` below — awaiting the press first deadlocks the test into a
+  // 30s timeout instead of failing it.
+  //
+  // But it IS held inside `act` until the upload has been asked for (F47,
+  // #1057). Started bare, the press's `act` was still open when the `waitFor`
+  // below switched React's act environment off, and the handler's
+  // `setAvatarBusy(true)` — which runs after the permission and picker
+  // `await`s — landed inside an `act` React had been told was not there: "not
+  // configured to support act(...)", twice per run. `started` is the moment
+  // the upload is called, which is after that update and before the upload
+  // this test is holding.
+  let pressed!: Promise<void>;
+  await act(async () => {
+    pressed = fireEvent.press(screen.getByTestId('profile-avatar-library'));
+    await started;
+  });
 
   await waitFor(() => expect(screen.getByTestId('profile-save').props.accessibilityState?.disabled).toBe(true));
 
   await act(async () => {
     resolveUpload({ ...PROFILE, avatar_url: 'https://cdn.test/new.jpg' });
+    await pressed;
   });
-  await pressed;
 
   await waitFor(() => expect(screen.getByTestId('profile-save').props.accessibilityState?.disabled).toBe(false));
 });

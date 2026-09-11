@@ -677,7 +677,19 @@ describe('a lookup that is taking too long', () => {
     await fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
     await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
     expect(screen.queryByTestId('scan-looking-up')).toBeNull();
-    release({ status: 'unknown', code: CODE });
+    // Released inside `act` (F47, #1057). Bare, the cancelled lookup's
+    // `setPhase` landed after this test's body — outside `act`, and sometimes
+    // against the next test's screen.
+    //
+    // It is released, not asserted on, and that is deliberate: once it lands
+    // the screen LEAVES the camera for an "unknown" result the athlete
+    // cancelled, because `resolve` does not know it was cancelled. That is a
+    // real bug in `app/food/scan.tsx`, filed as F52 (#1114), and a test-only
+    // change is not the place to fix it. When F52 lands, this is where its
+    // assertion goes.
+    await act(async () => {
+      release({ status: 'unknown', code: CODE });
+    });
   });
 });
 

@@ -10,7 +10,7 @@ import {
   RUNNING_BRANCH,
   USER_ID,
 } from './support/runningScreen';
-import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native';
 
 /**
  * The running session screen, rendered (N563/#1068).
@@ -131,7 +131,15 @@ describe('the running screen, rendered', () => {
     const m = await renderRunningScreen({ session: openRun() });
     await screen.findByTestId(RUNNING_BRANCH.live, {}, WAIT);
 
-    fireEvent.press(screen.getByTestId('running-finish'));
+    // Held inside `act` until the finish settles (F47, #1057). Unawaited, the
+    // press's `act` overlapped the `findByTestId` below, which switches React's
+    // act environment off while it polls — so the finish chain's updates
+    // printed "not configured to support act(...)" five times per run. Awaited
+    // bare, `fireEvent` would close its `act` before the chain's first `await`
+    // and the same updates would land outside `act` instead.
+    await act(async () => {
+      await fireEvent.press(screen.getByTestId('running-finish'));
+    });
 
     await screen.findByTestId(RUNNING_BRANCH.finished, {}, WAIT);
     // FIRST invocations, not last: a queue cleared early and again at the end
