@@ -72639,6 +72639,26 @@ high-water mark is sample-based, the pass ran, and HealthKit returned zero
 rows. The account has one `vo2_max` sample ever, dated 2026-08-21, and heart
 rate comes from a strap via its vendor's app, not from a watch.
 
+**The sentence the issue quotes was not reachable, and the first version of
+this fix did not reach it either — review caught that.** `buildTrend` reports
+`too-few` only when a smoother ran and drew no line (`emptinessOf`,
+`trendSeries.ts`). `useVo2MaxTrend` has never passed one, by design (N477:
+VO₂max is drawn as raw dots). Measured with the real `buildTrend` on the
+reporter's account, one reading 21 days old: `empty` is `null` at `1M`, `3M`,
+`6M` (the default) and `1Y`, and `none-in-range` only at `1W`. So the screen
+drew **one unexplained dot** and no sentence at all. The first commit on this
+branch rewrote `too-few` and tested it against a hand-built `{ kind: 'too-few'
+}`: 57 green tests that agreed with the copy and proved nothing about the
+screen. That is CLAUDE.md's "a stub built from an assumption cannot falsify
+it", again. `frontend-reviewer` reproduced it with a probe; the author then
+reproduced it independently before changing anything. The fix is
+`vo2MaxTrendEmpty(series)` in `vo2MaxSource.ts`: `series.empty`, or `too-few`
+when fewer than `VO2MAX_MIN_TREND_READINGS` (2) readings fall in range. It is
+decided per screen rather than in `buildTrend`, which weight and training load
+share. The chart is replaced by the sentence, and the reading stays listed
+under READINGS. The suite now runs real `buildTrend` output for the reporter's
+shape at every range, through to the rendered string.
+
 **Which of the issue's code anchors still held, and which F34 (#955) had moved.**
 Still held: the `too-few` branch was the bare count (unchanged by F34), the
 `none` branch was already causal, and nothing else on the sync side needed
@@ -72665,17 +72685,21 @@ stop that. The new `vo2MaxReadingOrigin(source)` says only what the app knows:
 - Many other wearables and chest straps never write one, and with those no new
   reading will arrive. That is a statement about the class, true by
   definition, not about this athlete.
-- For a device that should write one, check VOLA can read Cardio Fitness (iOS
-  Settings' name for the grant, as the reporter found it) or VO2max (Health
-  Connect).
+- For a device that should write one, check VOLA can read Cardio Fitness from
+  Apple Health (iOS Settings' name for the grant, as the reporter found it). On
+  Health Connect it says "check VOLA can read it from Health Connect". That
+  label was never read off a device, so it is deliberately not named. Review
+  flagged the first version for naming it.
 
 The athlete supplies the one fact the app lacks, what they wear, and draws the
 conclusion. `none` now leads with "VOLA has no VO2max reading from the past
 year." ("yet" promised one was coming, and "the past year" is pinned to the
 fetch window reaching ≥365 days). `too-few` leads with "1 VO2max reading in
 this range — a trend line needs 2. The latest is from 21 Aug, 3 weeks ago."
-before the same origin sentence. `none-in-range` gains the age but not the
-origin, because readings exist and the range is the true next step.
+then the origin sentence as its own paragraph. `none-in-range` gains the age
+but not the origin, because readings exist and the range is the true next step.
+The screen's empty text is left-aligned now: review measured the two-state copy
+at 389 and 437 characters, too long for a centred block.
 
 **The age.** `readingAgePhrase` gives a date and an age ("from 21 Aug, 3 weeks
 ago"; today; yesterday; days; weeks; months; "over a year ago"), with the year
@@ -72708,8 +72732,8 @@ year" or "1 reading, from 21 Aug, 3 weeks ago — too few for a trend", instead
 of "Your cardio fitness trend" over an account that never had one. While the
 answer is unknown or the fetch failed, it keeps the feature description.
 
-**Tests and mutation.** `lib/__tests__/vo2MaxSource.test.ts` went from 34 to 57
-tests. The new ones:
+**Tests and mutation.** `lib/__tests__/vo2MaxSource.test.ts` went from 34 to
+63 tests. The new ones:
 
 - the one-reading and zero-readings cases each carry the origin sentence;
 - nothing invites a wait, on any source, with or without an age;
@@ -72720,19 +72744,50 @@ tests. The new ones:
   `TZ=America/Los_Angeles`;
 - the pill's hint.
 
-Baseline green in the same session. Restoring the old count-only `too-few`
-sentence turned **6 tests red**. Restoring the old "No VO2max reading yet…"
-`none` sentence turned **2 red**. Each was restored from a saved copy with a
-matching checksum and confirmed green **by re-running**, 57/57.
+- **new after review:** real-`buildTrend` reachability for the reporter's
+  shape at every range, end to end to the rendered string.
+
+Baseline green in the same session, and every mutation was restored from a
+saved copy with a matching checksum and confirmed green **by re-running**,
+63/63:
+
+- restoring the old count-only `too-few` sentence turned **8 tests red**;
+- restoring the old "No VO2max reading yet…" `none` sentence turned **3 red**;
+- removing `vo2MaxTrendEmpty`'s guard, which is the exact unreachable-state bug
+  review found, turned **2 red**, including the end-to-end test of the
+  reporter's screen.
+
+The first commit's 57-test suite would have stayed green under that third
+mutation: it never called `buildTrend`. The trend screen's own call to
+`vo2MaxTrendEmpty` is still untested, because no test renders either VO₂max
+screen.
+
+**Review.**
+
+- `ac-verifier`: 5 MET, 1 NEEDS HUMAN EVIDENCE, no findings. It reproduced the
+  6-red mutation itself.
+- `frontend-reviewer`: one `[blocking]`, the unreachable `too-few` above, fixed
+  as described. Its suggestions, and what came of them:
+  - the long centred paragraph: fixed, as a paragraph break plus left-align;
+  - the unverified Health Connect permission label: no longer named;
+  - "12 months ago" then "over a year ago": 330–364 days now read "almost a
+    year ago";
+  - the copy tests were true by construction: real-`buildTrend` tests added;
+  - the VoiceOver hint refining once the fetch answers: accepted. It is one
+    transition from a feature description to a data statement, never back,
+    and the first line claims nothing about data.
 
 **Open, and not decided here:**
 
 - Whether the You grid should carry a visible state for an account with no
   usable trend. That is N509's no-caption decision to re-open, not a copy
   ticket's.
-- The Health Connect permission is called "VO2max" in the copy, unverified
-  against a device's permission sheet. The iOS name "Cardio Fitness" rests on
-  the reporter's own Settings screen.
+- The iOS permission name "Cardio Fitness" rests on the reporter's own
+  Settings screen, not on a reading of Apple's documentation. Health Connect's
+  label is not named at all.
+- `TrendCard` and training load share `buildTrend`'s smoother-only `too-few`
+  rule. Whether either has a no-smoother caller with the same unreachable
+  sentence was not audited here.
 - The NEEDS HUMAN EVIDENCE criterion (a real device whose wearable does not
   write VO₂max) is outstanding. No test renders either VO₂max screen.
 

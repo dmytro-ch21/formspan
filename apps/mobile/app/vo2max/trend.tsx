@@ -15,6 +15,7 @@ import {
   healthSourceFor,
   latestReadingOn,
   vo2MaxEmptyCopy,
+  vo2MaxTrendEmpty,
   vo2MaxRanges,
   vo2MaxScreenState,
   vo2MaxStateCopy,
@@ -136,6 +137,10 @@ export default function Vo2MaxTrendScreen() {
   // the selected range, so a no-trend sentence can say how old it is: one
   // reading from yesterday and one from three weeks ago are different news.
   const latestOn = latestReadingOn(samples, today);
+  // N524 review — `series.empty` never says `too-few` for VO2max (no smoother),
+  // so one reading in range used to draw a lone, unexplained dot. This is the
+  // screen's own answer to "is there a trend to draw"; see `vo2MaxTrendEmpty`.
+  const empty = vo2MaxTrendEmpty(series);
   const fmt = (v: number) => v.toFixed(1);
 
   return (
@@ -212,9 +217,9 @@ export default function Vo2MaxTrendScreen() {
               </RNView>
             ) : null}
 
-            {series.empty ? (
+            {empty ? (
               <Text style={styles.empty} testID="vo2max-empty">
-                {vo2MaxEmptyCopy(series.empty, source, range !== WIDEST_RANGE, { on: latestOn, today })}
+                {vo2MaxEmptyCopy(empty, source, range !== WIDEST_RANGE, { on: latestOn, today })}
               </Text>
             ) : (
               <TrendChart
@@ -268,7 +273,9 @@ const styles = StyleSheet.create({
   delta: { fontSize: 22, fontWeight: '700' },
   since: { fontSize: 13, fontWeight: '400', opacity: 0.6 },
   evidence: { fontSize: 12, opacity: 0.55, marginTop: 2 },
-  empty: { fontSize: 14, opacity: 0.7, paddingVertical: 32, textAlign: 'center', lineHeight: 20 },
+  // Left-aligned since N524: the no-trend copy is two paragraphs now, and a
+  // centred block that long loses its scanning edge (review).
+  empty: { fontSize: 14, opacity: 0.7, paddingVertical: 32, lineHeight: 20 },
   note: { fontSize: 13, opacity: 0.65, lineHeight: 19 },
   entries: { gap: 2, marginTop: 6 },
   entriesHead: { fontSize: 11, letterSpacing: 1, opacity: 0.5, marginBottom: 4 },

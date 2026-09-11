@@ -49,7 +49,7 @@
 
 import { daysBetween, shiftDate } from './anthropometry';
 import { dayString, shortDate } from './calendar';
-import { RANGE_DAYS, RANGES, type TrendEmpty, type TrendRangeKey } from './trendSeries';
+import { RANGE_DAYS, RANGES, type TrendEmpty, type TrendRangeKey, type TrendSeries } from './trendSeries';
 
 export type HealthSource = 'healthkit' | 'health_connect';
 
@@ -218,13 +218,6 @@ export function healthSyncSettingLabel(source: HealthSource): string {
  * N552 rule against a reporter's own vendor creeping into copy holds.
  */
 
-/** What the store calls VO₂max on its permission screen — "Cardio Fitness" in
- *  iOS Settings → Health → Data Access (the name the reporter of #939 found the
- *  grant under). Health Connect lists it as VO2 max. */
-function vo2MaxPermissionName(source: HealthSource): string {
-  return source === 'healthkit' ? 'Cardio Fitness' : 'VO2max';
-}
-
 /**
  * The half of every no-trend sentence that says where a reading comes from.
  * Source-specific because the device that writes it differs: an Apple Watch
@@ -239,14 +232,21 @@ export function vo2MaxReadingOrigin(source: HealthSource | null): string {
     );
   }
   const label = healthSourceLabel(source);
+  // The iOS grant is named because the athlete will not find "VO2max" in the
+  // list: iOS Settings → Health → Data Access calls it "Cardio Fitness" — the
+  // name the reporter of #939 found it under. Health Connect's label is NOT
+  // named: it has not been read off a device, and an instruction pointing at
+  // a string the athlete cannot find is the overclaim this ticket ends.
   const writers =
     source === 'healthkit'
       ? 'Apple Watch estimates it on outdoor walks, runs and hikes.'
       : 'Some watches estimate it and write it there.';
+  const permission =
+    source === 'healthkit' ? 'check VOLA can read Cardio Fitness from Apple Health' : `check VOLA can read it from ${label}`;
   return (
     `VOLA can't measure VO2max itself — it reads it from ${label} once a device has written it there. ` +
     `${writers} Many other wearables and chest straps never write one, and with those no new reading will ` +
-    `arrive. If yours does estimate VO2max, check VOLA can read ${vo2MaxPermissionName(source)} from ${label}.`
+    `arrive. If yours does estimate VO2max, ${permission}.`
   );
 }
 
@@ -284,7 +284,9 @@ export function readingAgePhrase(on: string, today: string): string {
   let ago: string;
   if (days < 14) ago = `${days} days ago`;
   else if (days < 60) ago = `${Math.floor(days / 7)} weeks ago`;
-  else if (days < 365) ago = `${Math.floor(days / 30)} months ago`;
+  else if (days < 330) ago = `${Math.floor(days / 30)} months ago`;
+  // Not "12 months ago" the day before "over a year ago" (review).
+  else if (days < 365) ago = 'almost a year ago';
   else ago = 'over a year ago';
   return `from ${date}, ${ago}`;
 }
@@ -333,7 +335,7 @@ export function vo2MaxEmptyCopy(
       // plus slack reaches back further than 365 days (pinned by a test), so
       // an account with no reading in it has none from the past year. The old
       // "yet" is gone — it promised one was coming.
-      return `VOLA has no VO2max reading from the past year. ${vo2MaxReadingOrigin(source)}`;
+      return `VOLA has no VO2max reading from the past year.\n\n${vo2MaxReadingOrigin(source)}`;
     case 'none-in-range': {
       const held = `you have ${empty.totalReadings} ${
         empty.totalReadings === 1 ? 'reading' : 'readings'
@@ -349,9 +351,41 @@ export function vo2MaxEmptyCopy(
       // actually counts (`have` is in-window readings, not the account's).
       const count = `${empty.have} VO2max ${empty.have === 1 ? 'reading' : 'readings'} in this range — a trend line needs ${empty.need}.`;
       const newest = age ? ` The latest is ${age}.` : '';
-      return `${count}${newest} ${vo2MaxReadingOrigin(source)}`;
+      return `${count}${newest}\n\n${vo2MaxReadingOrigin(source)}`;
     }
   }
+}
+
+/** Fewer readings than this in the selected range is not a trend line. */
+export const VO2MAX_MIN_TREND_READINGS = 2;
+
+/**
+ * Why THIS screen has no trend to draw — `series.empty`, plus the one case
+ * `buildTrend` does not report for VO₂max.
+ *
+ * **Review caught the first version of N524 fixing a sentence nobody could
+ * see.** `buildTrend` only returns `too-few` when a smoother was supplied and
+ * produced no line (`emptinessOf` in `trendSeries.ts`), and `useVo2MaxTrend`
+ * deliberately passes none — VO₂max is drawn as raw dots. So for the reporter's
+ * exact account, one reading 21 days old, `series.empty` was `null` at
+ * `1M`/`3M`/`6M`/`1Y` (measured, not read) and the screen drew one
+ * unexplained dot at the default range. `too-few` was unreachable for this
+ * metric since N477, and a suite of copy tests built on a hand-written
+ * `{ kind: 'too-few' }` agreed with the copy perfectly while proving nothing
+ * about the screen.
+ *
+ * Decided here rather than by changing `buildTrend`'s rule: that function is
+ * shared with weight and training load, and giving `minReadings` a meaning
+ * without a smoother would change what those screens report. One reading in
+ * range is still listed under READINGS on this screen; it is the chart that is
+ * replaced by the sentence, because a single dot with no line answers nothing.
+ */
+export function vo2MaxTrendEmpty(series: Pick<TrendSeries, 'empty' | 'readings'>): TrendEmpty | null {
+  if (series.empty) return series.empty;
+  if (series.readings.length < VO2MAX_MIN_TREND_READINGS) {
+    return { kind: 'too-few', have: series.readings.length, need: VO2MAX_MIN_TREND_READINGS };
+  }
+  return null;
 }
 
 /**

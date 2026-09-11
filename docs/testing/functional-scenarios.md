@@ -23468,6 +23468,15 @@ cannot tell the app which devices write the metric.
 
 ### Automated (`lib/__tests__/vo2MaxSource.test.ts`)
 
+- **Reachable from real data (review finding).** Real `buildTrend`, called as
+  `useVo2MaxTrend` calls it (no smoother), on one reading 21 days old:
+  `vo2MaxTrendEmpty` gives `too-few` (1 of 2) at `1M`, `3M`, `6M` and `1Y`;
+  `none-in-range` at `1W`; `none` for no readings; `unavailable` for a failed
+  load; and no empty state at two readings. The end-to-end test goes from the
+  fetched sample to the exact rendered string. A test also pins that
+  `buildTrend` alone reports nothing for one reading, which is why the helper
+  exists.
+
 - **One reading (`too-few`, 1 of 2)**: the sentence keeps the count, scoped to
   the range ("1 VO2max reading in this range — a trend line needs 2."), adds
   the newest reading's date and age, and carries the origin sentence on every
@@ -23483,14 +23492,17 @@ cannot tell the app which devices write the metric.
   named only on the HealthKit source.
 - **No shame or pressure**: no "you need/should/must", "buy", "upgrade", or
   "train more/harder".
-- **The permission named as the store names it**: "Cardio Fitness" for Apple
-  Health, "VO2max" for Health Connect, and no permission instruction when the
-  device has no store at all.
+- **The permission, only where it is known**: "Cardio Fitness" for Apple
+  Health. For Health Connect, "check VOLA can read it from Health Connect",
+  with no unverified label. No permission instruction at all when the device
+  has no store.
+- **The explanation is its own paragraph**, separated from the count or the
+  "no reading" lead.
 - **The age is legible**: 21 days reads "from 21 Aug, 3 weeks ago", yesterday
   reads "from yesterday", and the two sentences differ. With no known newest
   day, the age is dropped rather than invented.
-- **Age buckets**: today, yesterday, 2–13 days, 2–8 weeks, 2–12 months, then
-  "over a year ago". The year is shown only when it is not the current one.
+- **Age buckets**: today, yesterday, 2–13 days, 2–8 weeks, 2–10 months, "almost
+  a year ago" (330–364 days), then "over a year ago". The year is shown only when it is not the current one.
 - **`none-in-range`** gains the age but not the origin sentence (readings
   exist, so the range is the next step). "Try a wider one" is still only
   offered while a wider preset exists (F34).
@@ -23504,8 +23516,11 @@ cannot tell the app which devices write the metric.
 
 ### Device checks (no test renders either VO₂max screen)
 
-- **One old reading, a wearable that does not write VO₂max**: open You →
-  VO2max. The screen explains that VOLA reads VO₂max from Apple Health, which
+- **One old reading, a wearable that does not write VO₂max, at the DEFAULT
+  `6M` range**: open You → VO2max without touching a range chip. Until review
+  this state drew a lone dot with no sentence, so check the default range
+  specifically, not a narrowed one. There is no chart; the reading is listed
+  under READINGS, and the left-aligned text explains that VOLA reads VO₂max from Apple Health, which
   devices write one, that many never do, and the Cardio Fitness permission to
   check. It shows the newest reading's date and age. Nothing implies waiting
   will help, and nothing names the athlete's wearable brand.
@@ -23519,7 +23534,9 @@ cannot tell the app which devices write the metric.
   fitness trend". Visually the pill is unchanged; the grid draws no captions
   (N509).
 - **Android / Health Connect**: the sentence names Health Connect, never Apple
-  or Apple Watch, and says to check VOLA can read VO2max from Health Connect.
+  or Apple Watch, and says to check VOLA can read it from Health Connect.
+- **Two readings in range**: the chart draws as before, with no explanation
+  paragraph.
 
 ### Edge cases and errors
 

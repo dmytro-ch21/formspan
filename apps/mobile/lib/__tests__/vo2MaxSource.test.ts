@@ -1,4 +1,4 @@
-import { RANGE_DAYS } from '@/lib/trendSeries';
+import { RANGE_DAYS, buildTrend } from '@/lib/trendSeries';
 import {
   LOOKBACK_SLACK_DAYS,
   SERVER_MAX_LIST_RANGE_DAYS,
@@ -10,7 +10,9 @@ import {
   readingAgePhrase,
   vo2MaxEmptyCopy,
   vo2MaxReadingOrigin,
+  VO2MAX_MIN_TREND_READINGS,
   vo2MaxRowDetail,
+  vo2MaxTrendEmpty,
   vo2MaxRanges,
   vo2MaxRowVisible,
   vo2MaxScreenState,
@@ -347,6 +349,15 @@ describe('vo2MaxEmptyCopy — no-trend states explain the mechanism, never a wai
     }
   });
 
+  it('sets the explanation apart from the count, as its own paragraph', () => {
+    // Review: one centred 437-character block lost its scanning edge.
+    for (const empty of [none, oneReading]) {
+      const [lead, origin] = vo2MaxEmptyCopy(empty, 'healthkit', true, threeWeeks).split('\n\n');
+      expect(lead).not.toContain("can't measure");
+      expect(origin).toBe(vo2MaxReadingOrigin('healthkit'));
+    }
+  });
+
   it('the one-reading case is no longer the bare count it was', () => {
     // THE regression: restoring W16's count-only sentence must fail here.
     const copy = vo2MaxEmptyCopy(oneReading, 'healthkit', true, threeWeeks);
@@ -416,7 +427,9 @@ describe('vo2MaxEmptyCopy — no-trend states explain the mechanism, never a wai
     // An empty HealthKit read looks identical to a declined grant, so a
     // device that SHOULD write one gets the one check that can explain it.
     expect(vo2MaxReadingOrigin('healthkit')).toContain('check VOLA can read Cardio Fitness from Apple Health');
-    expect(vo2MaxReadingOrigin('health_connect')).toContain('check VOLA can read VO2max from Health Connect');
+    // Health Connect's permission label has not been read off a device, so the
+    // copy names the store and not a string the athlete might not find.
+    expect(vo2MaxReadingOrigin('health_connect')).toContain('check VOLA can read it from Health Connect');
     // No store on this device: there is no permission to check, so no instruction.
     expect(vo2MaxReadingOrigin(null)).not.toMatch(/check VOLA/);
     expect(vo2MaxReadingOrigin(null)).toContain('this device has none VOLA can read from');
@@ -466,7 +479,10 @@ describe('readingAgePhrase — a date and an age, never one without the other', 
     expect(readingAgePhrase('2026-08-28', today)).toMatch(/, 2 weeks ago$/);
     expect(readingAgePhrase('2026-07-14', today)).toMatch(/, 8 weeks ago$/);
     expect(readingAgePhrase('2026-07-13', today)).toMatch(/, 2 months ago$/);
-    expect(readingAgePhrase('2025-09-12', today)).toMatch(/, 12 months ago$/);
+    expect(readingAgePhrase('2025-10-17', today)).toMatch(/, 10 months ago$/);
+    // Review: "12 months ago" the day before "over a year ago" read oddly.
+    expect(readingAgePhrase('2025-10-16', today)).toMatch(/, almost a year ago$/);
+    expect(readingAgePhrase('2025-09-12', today)).toMatch(/, almost a year ago$/);
     expect(readingAgePhrase('2025-09-11', today)).toMatch(/, over a year ago$/);
   });
 
@@ -541,5 +557,62 @@ describe('vo2MaxRowDetail — the You row keeps its place and stops promising a 
         /cardio fitness trend/,
       );
     }
+  });
+});
+
+
+/**
+ * N524 review — the fix above was, at first, a sentence nobody could see.
+ *
+ * Every test above feeds `vo2MaxEmptyCopy` a hand-built `{ kind: 'too-few' }`.
+ * `buildTrend` never produces that for VO₂max, because it only reports
+ * `too-few` when a smoother ran and `useVo2MaxTrend` passes none — so the
+ * reporter's account (one reading, 21 days old) drew one unexplained dot at
+ * the default range, and the copy tests were green about a state the screen
+ * could not reach. These run the REAL `buildTrend` on that account, exactly as
+ * `useVo2MaxTrend` calls it (no `smooth`), and follow it through to the
+ * sentence the screen renders.
+ */
+describe('vo2MaxTrendEmpty — the no-trend state is reachable from real data', () => {
+  const today = '2026-09-11';
+  const reporter = [{ on: '2026-08-21', value: 45.2 }];
+  const series = (readings: { on: string; value: number }[] | null, range: '1W' | '1M' | '3M' | '6M' | '1Y') =>
+    buildTrend({ readings, today, range });
+
+  it('documents WHY this exists: buildTrend alone reports nothing for one VO2max reading', () => {
+    // If `trendSeries.ts` ever starts reporting this itself, this goes red and
+    // the helper can be reconsidered — rather than silently doubling up.
+    expect(series(reporter, '6M').empty).toBeNull();
+    expect(series(reporter, '6M').readings).toHaveLength(1);
+  });
+
+  it("turns the reporter's one reading into too-few at every range that holds it", () => {
+    for (const range of ['1M', '3M', '6M', '1Y'] as const) {
+      expect(vo2MaxTrendEmpty(series(reporter, range))).toEqual({ kind: 'too-few', have: 1, need: 2 });
+    }
+  });
+
+  it('leaves the states buildTrend already reports untouched', () => {
+    expect(vo2MaxTrendEmpty(series(reporter, '1W'))).toEqual({ kind: 'none-in-range', totalReadings: 1 });
+    expect(vo2MaxTrendEmpty(series([], '6M'))).toEqual({ kind: 'none' });
+    expect(vo2MaxTrendEmpty(series(null, '6M'))).toEqual({ kind: 'unavailable' });
+  });
+
+  it('draws the chart once there are two readings in range', () => {
+    const two = [...reporter, { on: '2026-09-01', value: 45.9 }];
+    expect(vo2MaxTrendEmpty(series(two, '6M'))).toBeNull();
+    expect(VO2MAX_MIN_TREND_READINGS).toBe(2);
+  });
+
+  it("renders the reporter's screen as an explanation with the reading's age, end to end", () => {
+    // The trend screen's own composition, from the fetched sample to the text.
+    const samples = [{ measured_at: '2026-08-21T15:00:00Z' }];
+    const empty = vo2MaxTrendEmpty(series(reporter, '6M'));
+    expect(empty).not.toBeNull();
+    const copy = vo2MaxEmptyCopy(empty!, 'healthkit', true, { on: latestReadingOn(samples, today), today });
+    expect(copy).toBe(
+      '1 VO2max reading in this range — a trend line needs 2. The latest is from 21 Aug, 3 weeks ago.\n\n' +
+        vo2MaxReadingOrigin('healthkit'),
+    );
   });
 });
