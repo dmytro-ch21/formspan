@@ -72992,6 +72992,112 @@ Every row also shows `Tests: 5689 passed, 5689 total`, which was checked for a r
 - **F52 (#1114)** is open and unowned.
 - **Nothing here stops the `fireEvent` mechanism coming back.** A new `await fireEvent.press` on an async handler will leak exactly as before. The census will print it (M1 still shows 49), but nothing in the suite goes red. Failing the suite on act warnings from `jest.setup.js` would enforce it, and it is a separate decision about console handling that this ticket did not take.
 
+
+## 2026-09-11 — F53 (#1117): liveHRConnection's serialization test failed under host load, because the cancel bound it raced was wall-clock time
+
+**What failed.** `apps/mobile/lib/__tests__/liveHRConnection.test.ts` →
+`startLiveHR / stopLiveHR are serialized › a background stop and an immediate
+foreground start do NOT overlap` went red inside a full `pnpm run verify` on a
+host at load ~270 on 10 CPUs, with ~120 jest processes from other worktrees:
+`expect(ble.events).toEqual(['cancel-issued:A'])` received
+`['cancel-issued:A', 'connect-issued:A']`. The same suite passed 3/3 in
+isolation on the same tree, and `main`'s CI on `e29a0a29` was green. It read as
+a serialization bug. There was none.
+
+**Mechanism, read from the code.** `beforeEach` installs the fake manager with
+`__setBleManagerForTests(ble.manager, 40)`, so `cancelAckTimeoutMs` is 40ms.
+`stopLiveHRInner` races the cancel acknowledgement against a **real**
+`setTimeout(resolve, cancelAckTimeoutMs)` — deliberately, so an OS that never
+answers cannot wedge every later connect (N528). The test fires
+`void stopLiveHR(); void startLiveHR(A)`, flushes three `setImmediate` turns and
+asserts the reconnect has not been issued. That holds only if three event-loop
+turns take under 40ms of wall time. On a loaded host they did not, the bound
+fired **correctly**, the serialized chain moved on into `startLiveHRInner`, and
+the reconnect appeared exactly as an overlap would. Two independent properties
+both release the same wait, and the test could not tell which one had.
+
+**The fix is test-only.** The `serialized` describe block now runs
+`jest.useFakeTimers({ doNotFake: ['Date', 'setImmediate', 'clearImmediate',
+'nextTick', 'queueMicrotask'] })`, so the bound's `setTimeout` sits on a clock
+that never moves unless a test moves it, while `tick()` keeps flushing on the
+real loop. `afterEach` clears and restores. The first test also asserts
+`jest.getTimerCount()` is 1 right after the cancel is issued — if the fake
+clock ever stops catching the bound, that count is 0 and the test says so
+instead of quietly measuring the host again — and then **starves the thread for
+100ms (2.5x the bound) on every run**, so "cannot be failed by a stall" is
+checked by the suite rather than remembered. The two
+`a disconnect the OS never acknowledges` tests are untouched: they still run the
+real 40ms bound and still wait 80ms of real time.
+
+*Why not the other option, a 10s bound for this block.* It narrows the window
+without closing it, and `Promise.race` never clears the losing timer, so each
+test would leave a real 10s timer armed past its own end. A fake clock closes
+the window and `clearAllTimers` discards the timer.
+
+**The flake was reproduced before it was called fixed — and the first
+reproduction measured nothing.** An untracked copy of the old test with a
+synchronous busy-wait between `void startLiveHR(A)` and `await tick()` stayed
+**green at 200ms**. The stall ran before the bound existed: `stopLiveHRInner`
+arms its timer in a microtask, after the synchronous code yields, and the timer
+started counting after the stall. Moving the stall to after `tick(1)`, with an
+assertion that the cancel had been issued (so the bound is provably armed),
+gave: 0ms control green; **200ms red at the original assertion with
+`+ "connect-issued:A"`** — the observed failure, on demand.
+
+**Mutations, each applied by a script that refuses to proceed unless its target
+matched exactly once, restored with `git checkout`, and confirmed by re-running
+the suite green (8/8) rather than by reading the file:**
+
+- *`startLiveHR`/`stopLiveHR` bypass `serialized`*: the serialization test red
+  as an assertion failure (`+ "connect-issued:A"`, the first post-tick
+  expectation); the racing-starts test and both never-acknowledged tests red too.
+- *The `Promise.race` bound removed*: both never-acknowledged tests red
+  (`no pending connect for B` — B is still queued behind a cancel nobody
+  answers). The new timer-count guard also went red (`Received: 0`).
+- *Fake timers removed from the block, count guard kept*: red at the count guard.
+- *Fake timers AND count guard removed*: red at the original assertion with
+  `+ "connect-issued:A"` — the built-in 100ms stall alone reproduces F53, every
+  run.
+- *Stall raised to 2000ms (50x the bound), fix in place*: green.
+
+**A hang, which is worth knowing about fake timers here.** The first draft
+faked everything but the immediates. Jest's modern fake timers also fake `Date`
+by default, so `Date.now()` froze and the busy-wait never returned — and a
+synchronous loop blocks jest's own per-test timeout too, so the worker sat at
+41% CPU for five minutes reporting nothing. `Date` is now in `doNotFake`, with a
+comment saying why; the mutation runs above were each wrapped in
+`perl -e 'alarm 120; exec @ARGV'` so a repeat could not do that again.
+
+**One mutation result not fully explained, recorded rather than smoothed over.**
+With fake timers removed, `a disconnect the OS never acknowledges › does not
+wedge live HR` — a different describe block — also went red once
+(`no pending connect for B`). It passes alone, and passed when rerun with only
+the serialized block ahead of it. The likely cause is leakage: the aborted first
+test left a real 40ms bound armed and a `startLiveHR(A)` queued behind it, and
+`__setBleManagerForTests(null)` resets `opChain` for the next test but cannot
+recall a continuation already scheduled, which then ran against a later test's
+manager. That is consistent with the error, not proven. It is not a property of
+the fixed file — there, an aborted test's bound is a fake timer that
+`clearAllTimers` discards, so the stalled stop never resumes — but that too is
+reasoning, not a measurement.
+
+**Found in passing and filed, not folded in: F54 (#1118).** `a dropped link › a
+reconnect firing while the app is being backgrounded` has the same shape with a
+wider margin: `dropLink` arms the first reconnect backoff, 1_000ms on a real
+clock, and `stopLiveHR` only clears it after three `tick` turns. A synchronous
+1100ms stall between `dropLink` and `tick()` turned it red with
+`["connect-issued:A", "connect-issued:A"]`; the 0ms control was green. Not yet
+seen failing in the wild. It stayed out because that test also waits 1_200ms of
+real time on purpose, so fixing it means reworking it around
+`jest.advanceTimersByTime`, which is a different change.
+
+**Not verified.** The fix was never run on a host at load ~270: the busy-wait is
+the stand-in, and every run here was at load ~75–110. The never-acknowledged
+tests are not claimed immune either: their 80ms timer and the 40ms bound are
+armed a microtask apart rather than three loop turns apart, so a stall would
+have to land inside a single microtask drain and exceed 40ms. Not observed, and
+not proven impossible.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
