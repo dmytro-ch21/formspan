@@ -115,21 +115,28 @@ from CI, and it is not.
 
 **`-p 1` on the backend tests is load-bearing, not decoration.** `go test ./...` runs packages in parallel against ONE shared database and several tests assert global counts; that measured 3 failures in 6 concurrent runs. `scripts/check-api-tests.py` already passes it. If you run `go test` by hand without `-p 1`, you will produce failures CI would never see.
 
-**The mobile warning budget is its own link, `check:lint-ratchet` — not
-`lint:mobile`.** `lint:mobile` is a plain `eslint .` with no `--max-warnings`, so
-it fails on errors and passes at any warning count. The budget lives in
-`scripts/check-lint-ratchet.mjs` (N153, #557). That script runs ESLint itself
-and holds **one cap per rule** in `RULE_CAPS`, so a change that clears twenty
-warnings of one rule and adds twenty of another still fails, where a flat total
-would not. A green `lint:mobile` tells you nothing about it.
+**The warning budget is its own link, `check:lint-ratchet` — not the `lint:*`
+links.** `lint:mobile`, `lint:web` and `lint:admin` are plain `eslint` runs with no
+`--max-warnings`, so each one fails on errors and passes at any warning count. The
+budget lives in `scripts/check-lint-ratchet.mjs` (N153, #557; widened past
+`apps/mobile` by N555). That script runs ESLint itself in every app it covers and
+holds **one cap per rule, per app**, so a change that clears twenty warnings of
+one rule and adds twenty of another still fails, where a flat total would not. A
+green `lint:*` link tells you nothing about it. In CI it is a step inside the
+`Mobile (Expo)` job, so a warning in web or admin can turn that mobile-named check
+red; the step's own name lists the apps it covers.
 
-**Always report the ratchet's per-rule table, not just pass/fail.** It prints one
-row per rule, `<status> <live> / <cap> <rule>`, with status `ok`, `OVER`,
-`CLEARED` or `UNCAPPED`. Call out any rule whose live count equals its cap: that
-rule has zero headroom, and the next warning of that kind anywhere in the app
-fails the gate. Take the numbers from the run, never from this file or from a
-comment beside `RULE_CAPS`. This paragraph used to say `eslint . --max-warnings=54`
-with "zero headroom" long after both had stopped being true.
+**Always report the ratchet's tables, not just pass/fail.** It prints one table
+per app, headed `Per-rule warning budget — <app dir>`. Each row reads
+`<status> <live> / <cap> <rule>`, with status `ok`, `OVER`, `CLEARED` or
+`UNCAPPED`; an app with no warnings and no caps prints one `0 / 0` row saying so.
+Call out any rule whose live count equals its cap: that rule has zero headroom,
+and the next warning of that kind anywhere in that app fails the gate. Take the
+numbers and the list of apps from the run, never from this file or from the
+script's source. This paragraph used to say `eslint . --max-warnings=54` with
+"zero headroom" long after both had stopped being true. Its first rewrite then
+named the script's cap table, and that name was replaced while the rewrite was
+still in review (H25).
 
 **`typecheck:mobile` boots a Metro server, and its failures are real.** It is
 `pnpm run routes:mobile && tsc --noEmit`, and `routes:mobile` starts a dev

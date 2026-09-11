@@ -72266,7 +72266,8 @@ three parts of it had gone stale in ways the agent acts on. Measured against
 **The decision, same as H24's (#1094, CI check-run numeral): no corrected copy.**
 The brief now tells the agent to read the chain from `package.json` and to quote
 `check-verify-chain.py`'s success line for its size. The lint paragraph points at
-the ratchet's own per-rule `live / cap` table and names no cap. The by-job block
+the per-app, per-rule `live / cap` tables the ratchet prints, and names neither a cap nor the
+script's cap table. The by-job block
 is now a `grep` over `ci.yml`'s step names, plus the short list of what CI runs
 that `verify` does not.
 
@@ -72311,8 +72312,44 @@ enforces this direction.** `check-verify-chain.py` asserts every gate is in
 Every `pnpm run` name the brief still gives exists in `package.json`, and every
 script path it gives exists on disk, checked with a script rather than by
 reading. The `grep` over `ci.yml` step names was run and returns each job's name
-followed by its steps. The ratchet's row format, `<status> <live> / <cap> <rule>`,
-and its four statuses were read from the script's print statement, not assumed.
+followed by its steps. The ratchet's per-app heading, its row format
+(`<status> <live> / <cap> <rule>`) and its four statuses were read from the
+script's print statements, not assumed. They were read again after the rebase
+described below.
+
+### N555 landed underneath this branch, and the hedge against it did not hold
+
+N555 (#1034) merged while this PR's gates were running. The ratchet now covers
+`apps/mobile`, `apps/web` and `apps/admin`, with one cap table per app in
+`APP_BUDGETS`. That left PR #1100 `CONFLICTING` on `history.md` with **zero check
+runs**, which is exactly H18's case. `ci:checks` named the cause; the rebase went
+through cleanly and the append-only driver kept both entries.
+
+The first draft of this entry listed N555 as not settled. It said the brief should
+survive N555 because it described the ratchet by its table and its link name,
+not by the apps it covers. **It did not survive, and naming things was the
+reason.**
+
+- The brief named the table `RULE_CAPS`, and N555 replaced that table.
+- The brief called it "the mobile warning budget" and said a green `lint:mobile`
+  tells you nothing about warnings. That is still true, but it is now equally
+  true of `lint:web` and `lint:admin`, and the ratchet's CI step can fail its
+  mobile-named job over a web or admin warning.
+
+Naming the thing rather than pointing at its output is the same copy-that-rots
+mistake this ticket removes, one level down, and it went stale within the same
+review cycle. The paragraph now points at the tables the run prints, and names no
+table in the source.
+
+Everything else measured above was re-measured on the rebased tree (`e29a0a29`)
+and is unchanged: 48 links, `check:palette` eighth, the same 54/49/5 line, and
+eighteen Scripts steps. The three verify-only links are also the same. The only
+`ci.yml` change N555 made was the ratchet step's name and comment.
+
+**The two gate agents' verdicts predate this paragraph.** Both `ac-verifier` and
+`pre-merge-checker` reported against `afa08c18`. The post-rebase edit was checked
+the same mechanical way (every name the brief gives resolves) and by a fresh
+`verify`, not by another agent run.
 
 ### Not settled
 
@@ -72321,10 +72358,6 @@ and its four statuses were read from the script's print statement, not assumed.
   belong in `check-verify-chain.py`. It was not added here: the three existing
   exceptions would each need a written reason, like `ALLOWED_OUTSIDE` has, and
   deciding whether palette/icons/tokens *should* run in CI is its own question.
-- **N555 (#1034, open) extends the lint ratchet to three apps.** The brief
-  describes the ratchet by its table and its link name rather than by which apps
-  it covers, so that change should not strand it. That is the reason for the
-  wording, not a verified outcome.
 
 ## Open items / known gaps as of this entry
 
