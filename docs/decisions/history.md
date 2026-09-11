@@ -69647,6 +69647,45 @@ CLAUDE.md records the standing gap as *"0 of 40 web/admin pages have a test
 that renders them"*. This is the first, and is deliberately two components and
 not a snapshot of the console.
 
+### 2026-09-10 — H23: the motion gate told the agent to do something agents cannot do
+
+**What.** `/pre-merge`'s step 4, added by H22 the same day, instructed the agent
+to *"invoke the `review-animations` skill"*. An agent cannot: the skill is
+`disable-model-invocation: true`, so the Skill tool refuses the call outright.
+Step 4 now says to stop and hand the user `/review-animations`, states that an
+unrun motion gate is UNMET rather than passed, and explicitly forbids attempting
+the call — because a refusal arriving mid-gate reads like a broken tool rather
+than the expected handoff.
+
+**The instruction contradicted a fact printed two paragraphs beneath it.** The
+same step already said, correctly, that the skill "will not trigger itself". So
+nothing was unknown; the step simply told the actor to do a thing and then
+explained that the thing was impossible.
+
+**Why H22's review did not catch it.** The gate was checked for whether it would
+CATCH a motion diff — grep terms, scope, when it applies — and never for whether
+its exit gesture was one its actor could perform. That is exactly CLAUDE.md's
+*"And verify that it can PASS"* rule, which exists because N456's first design
+would have deadlocked every device ticket in the repo behind a checkbox that 0
+of 415 acceptance criteria had ever received. Same failure, one rule over.
+
+**Found by the first motion diff that reached it** — F41 (#1040), hours later,
+running the gate exactly as written.
+
+**Two smaller H22 slips fixed alongside, both found by checking rather than
+asserting.** The skill still opened "Three things have to happen before a PR"
+after H22 made it four — a list that grew while its own header kept asserting
+the old length. And a `grep -l "disable-model-invocation: true"` had reported
+`pre-merge/SKILL.md` as carrying the flag; it does not. The match was H22's own
+newly-written body text *describing* the flag. That is the same
+mention-versus-use confusion as the `Easing.in` comment in F41, and in both
+cases the grep was right and the reading of it was wrong.
+
+**What this does not fix.** Nothing enforces the handoff. An agent that skips
+step 4 and reports the other three as green still produces a PR that looks
+fully reviewed — the gate is a convention, and the only thing making it real is
+that it is now written as an action somebody can actually take.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

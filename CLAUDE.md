@@ -1010,8 +1010,12 @@ general rubric.
 **Two of them never fire on their own.** `review-animations` and
 `pick-ui-library` are `disable-model-invocation: true` upstream, preserved
 deliberately. `/pre-merge` step 4 is the one place `review-animations` is
-required, and it will not trigger itself — see that skill for why a motion diff
-that skipped it still looks fully reviewed.
+required, and **it is yours to run, not the agent's** — an agent reaching a
+motion diff should stop and hand you the command. It may not call the skill;
+the call is refused by design. An unrun motion gate is **unmet**, not passed:
+see that skill for why a motion diff that skipped it still looks fully
+reviewed, and H23 (#1077) for the wording bug that made step 4 briefly
+instruct an impossible action.
 
 **The bar these encode was measured against this repo on 2026-09-09**, and the
 result is in `docs/design/motion-audit-2026-09/`: three independent audits,

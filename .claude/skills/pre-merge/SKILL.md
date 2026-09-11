@@ -3,8 +3,13 @@ name: pre-merge
 description: Run the full pre-merge gate before pushing or opening a PR — the CI check suite AND the code reviewers. Use whenever the user asks to check everything passes, and before opening or updating any PR.
 ---
 
-Three things have to happen before a PR, and they are **one gate, not
-three**. Run them in the same turn, in parallel:
+Four things have to happen before a PR, and they are **one gate, not four**.
+Run the first three in the same turn, in parallel; the fourth is the user's and
+is handed to them rather than run.
+
+(It said "three" until H23 — H22 added the fourth and did not update the
+count, which is the same class of slip as the gate wording below: the list grew
+and its own header kept asserting the old length.)
 
 1. **`pre-merge-checker`** — the CI-equivalent check suite.
 2. **`ac-verifier`** — the branch against the acceptance criteria of the
@@ -14,21 +19,38 @@ three**. Run them in the same turn, in parallel:
    - any `backend/**` or `contracts/**` change → **`backend-reviewer`**
    - any `apps/**` change → **`frontend-reviewer`**
    - a change spanning both → **both, launched together**
-4. **The motion gate, when the diff contains motion.** If the diff touches an
-   animation, a transition, a gesture or a haptic — grep the diff for
-   `Animated`, `Reanimated`, `useSharedValue`, `withTiming`, `withSpring`,
-   `Easing`, `PanResponder`, `transition`, `animate-`, `duration-`, `Haptics`
-   — invoke the **`review-animations`** skill on it, and hold its findings to
-   the same bar as a reviewer's: resolve or justify every one before the PR
-   goes ready.
+4. **The motion gate, when the diff contains motion — and this one is the
+   USER's to run, not yours.** If the diff touches an animation, a transition,
+   a gesture or a haptic — grep the diff for `Animated`, `Reanimated`,
+   `useSharedValue`, `withTiming`, `withSpring`, `Easing`, `PanResponder`,
+   `transition`, `animate-`, `duration-`, `Haptics` — **stop and ask the user
+   to run `/review-animations`**, giving them the worktree path and the diff
+   scope. Hold its findings to the same bar as a reviewer's: resolve or justify
+   every one before the PR goes ready.
 
-   It is a **skill, not a subagent**, so it does not fail the way the three
-   above do — but it is also `disable-model-invocation: true` upstream, which
-   means *nothing will trigger it for you*. That is the whole risk: a motion
-   diff reviewed by `frontend-reviewer` alone reads as fully reviewed, because
-   two gates ran and nobody counts three. If the diff has motion in it and you
-   did not invoke this, the gate did not run — say so rather than letting the
-   green from the other two stand in for it.
+   **Do not call `Skill(review-animations)`.** It is
+   `disable-model-invocation: true` upstream — deliberately, and preserved on
+   purpose — so the call is refused, and a refusal arriving in the middle of a
+   gate reads like a broken tool rather than the expected handoff it is. The
+   same is true of `pick-ui-library`. Both are user-invocable *because* that
+   flag is set; `/review-animations` is a command the user has, and handing it
+   to them is the gate passing, not the gate failing.
+
+   **An unrun motion gate is UNMET, not passed.** Report it exactly as you
+   would an outstanding `NEEDS HUMAN EVIDENCE` criterion: name it as
+   outstanding in the PR and say the user has not run it yet. That is the whole
+   risk here — a motion diff reviewed by `frontend-reviewer` alone reads as
+   fully reviewed, because two gates ran and nobody counts three. If the user
+   is absent or declines, say so in the PR rather than letting the green from
+   the other gates stand in for it.
+
+   **This step was itself the bug once (H23, #1077).** As first written it told
+   you to *invoke* the skill — an action its only actor cannot perform — and
+   said so two paragraphs below the instruction, contradicting itself in place.
+   It survived review because the gate was checked for whether it would CATCH a
+   motion diff and never for whether its exit gesture was one anybody could
+   make. That is CLAUDE.md's *"And verify that it can PASS"* rule, and it was
+   found by the first motion diff that reached the gate.
 
 ## A gate that fails to launch is not a gate that passed
 
