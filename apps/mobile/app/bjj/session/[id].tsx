@@ -27,8 +27,7 @@ import {
   monthGrid,
   weekDays as calendarWeekDays,
 } from '@/lib/calendar';
-import { getSessionMetrics, listBiometricSamples, type SessionMetrics } from '@/lib/biometric';
-import { buildHRTimeline, type HRTimelinePoint } from '@/lib/hrTimeline';
+import { getSessionMetrics, type SessionMetrics } from '@/lib/biometric';
 import {
   getDetail,
   KINDS,
@@ -60,6 +59,7 @@ import {
 } from '@/lib/accomplishments';
 import { milestoneForSession, type Milestone } from '@/lib/milestones';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
+import { useSessionHRTimeline } from '@/lib/useSessionHRTimeline';
 import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
 import { cacheSessionHR } from '@/lib/sessionHR';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -423,41 +423,13 @@ export default function BjjSessionScreen() {
     };
   }, [id, session?.ended_at, getToken, userId]);
 
-  // N491/#852: the raw HR-over-time timeline (see lib/hrTimeline.ts's doc
-  // comment for why this is a plain time series rather than a drill/roll
-  // classifier). A second, independent fetch rather than piggybacking on
-  // `hrMetrics` above — `GET /v1/biometric/samples` is a different endpoint
-  // (raw readings, not the derived SessionMetrics row) and can fail or be
-  // slow on its own without holding up the report's other numbers. Best-
-  // effort and non-blocking, same posture as the fetch above: a failure here
-  // just means no timeline renders, never an error surfaced to the athlete.
-  //
-  // N545/#988: the window is the METRICS' own `hr_window_start/end`, not the
-  // session's logged started_at/ended_at. W19/#985 moved a session's heart
-  // rate onto the watch's own workout window precisely because the logged
-  // one was scoring a 90-minute class off pre-class background readings — so
-  // a chart drawn over the logged window would put a real curve underneath
-  // an avg/max/TRIMP measured from somewhere else, which is a fresh instance
-  // of the bug W19 fixed. Gated on `hrMetrics` for the same reason: with no
-  // metrics row there is no window to be right about, and the report renders
-  // its 'unavailable' state rather than a timeline anyway.
-  const [hrTimeline, setHrTimeline] = useState<HRTimelinePoint[]>([]);
-  const hrWindowStart = hrMetrics?.hr_window_start;
-  const hrWindowEnd = hrMetrics?.hr_window_end;
-  useEffect(() => {
-    if (!id || !hrWindowStart || !hrWindowEnd) return;
-    let cancelled = false;
-    listBiometricSamples(getToken, 'heart_rate', hrWindowStart, hrWindowEnd)
-      .then((samples) => {
-        if (!cancelled) setHrTimeline(buildHRTimeline(samples, hrWindowStart, hrWindowEnd));
-      })
-      .catch(() => {
-        if (!cancelled) setHrTimeline([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, hrWindowStart, hrWindowEnd, getToken]);
+  // N491/#852 + N545/#988: the raw HR-over-time timeline, over the METRICS'
+  // own `hr_window_start/end` rather than the session's logged times — see
+  // `lib/useSessionHRTimeline.ts`, which N563/#1068 lifted out of this screen
+  // so strength and running draw the same chart from the same one
+  // implementation. It takes the row itself so no call site can choose the
+  // window. No metrics row, no fetch, no chart.
+  const hrTimeline = useSessionHRTimeline(getToken, id, hrMetrics);
 
   /**
    * Delete and Finish, which live here because nothing else offers them.

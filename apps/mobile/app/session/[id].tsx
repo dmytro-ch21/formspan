@@ -156,6 +156,7 @@ import { OptionSelect } from '@/components/ui/OptionSelect';
 import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
+import { useSessionHRTimeline } from '@/lib/useSessionHRTimeline';
 import { hrSourceSentence } from '@/lib/hrMonitor/hrSourceLine';
 
 /**
@@ -1012,6 +1013,14 @@ export default function SessionScreen() {
     };
   }, [id, session?.ended_at, getToken, userId]);
 
+  // N563/#1068: the session's heart-rate timeline — the chart BJJ has drawn
+  // since N545/#988, with its time axis and marked peak. Over the METRICS
+  // window, never `session.started_at/ended_at` (W19/#985: the watch's own
+  // workout window is where the numbers came from). The hook takes the row
+  // itself so this call site cannot choose — see `lib/useSessionHRTimeline.ts`.
+  // No metrics row, no fetch, no chart.
+  const hrTimeline = useSessionHRTimeline(getToken, id, hrMetrics);
+
   // Per-exercise HR breakdown (N490/#851) — fetched alongside the
   // whole-session metrics above, behind the same `session.ended_at` gate,
   // and equally best-effort: `listExerciseHR` already resolves `[]` on any
@@ -1837,6 +1846,12 @@ export default function SessionScreen() {
             sourceLabel={hrSync.sourceLabel}
             onSyncNow={hrSync.syncNow}
             hrSourceLine={hrSourceSentence(hrMetrics, hrSync.monitorName, hrSync.sourceLabel)}
+            hrTimeline={hrTimeline}
+            // N522/#934 + N545/#988: the logged window, so the timeline's
+            // caption and the both-windows footnote fire when the heart rate
+            // came from a different stretch — silent whenever they agree.
+            sessionStartedAt={session.started_at}
+            sessionEndedAt={session.ended_at ?? undefined}
             exerciseHR={exerciseHR}
             exerciseNames={Object.fromEntries(
               exerciseHR.map((e) => [e.exercise_id, catalog.get(e.exercise_id)?.name ?? e.exercise_id]),

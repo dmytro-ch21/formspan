@@ -56,6 +56,7 @@ import { hrMaxBpmOf, useHRMax } from '@/lib/hrMonitor/useHRMax';
 import { useLiveHR } from '@/lib/hrMonitor/useLiveHR';
 import { useHRRecording } from '@/lib/hrMonitor/useHRRecording';
 import { useSessionHRSync } from '@/lib/useSessionHRSync';
+import { useSessionHRTimeline } from '@/lib/useSessionHRTimeline';
 import {
   clearRunFixQueue,
   pruneRunFixesToRestoredTrack,
@@ -688,6 +689,15 @@ export default function RunningSessionScreen() {
     };
   }, [id, status, getToken, userId]);
 
+  // N563/#1068: the session's heart-rate timeline — the chart BJJ has drawn
+  // since N545/#988, with its time axis and marked peak. Over the METRICS
+  // window, never `sessionTimes`: a watch workout that started later than the
+  // run was logged is exactly the case W19/#985 exists for, and a curve drawn
+  // over the logged window would sit under numbers measured from somewhere
+  // else. The hook takes the row itself so this call site cannot choose — see
+  // `lib/useSessionHRTimeline.ts`. No metrics row, no fetch, no chart.
+  const hrTimeline = useSessionHRTimeline(getToken, id, hrMetrics);
+
   async function pause() {
     if (status !== 'tracking' || !resumedAtRef.current) return;
     elapsedMsRef.current += Date.now() - resumedAtRef.current;
@@ -876,6 +886,13 @@ export default function RunningSessionScreen() {
               sourceLabel={hrSync.sourceLabel}
               onSyncNow={hrSync.syncNow}
               hrSourceLine={hrSourceSentence(hrMetrics, hrSync.monitorName, hrSync.sourceLabel)}
+              hrTimeline={hrTimeline}
+              // N522/#934 + N545/#988: the run's own logged window, so the
+              // timeline's caption ("0m is 6:12 PM, when the readings start")
+              // and the both-windows footnote fire when the heart rate came
+              // from a different stretch — silent whenever the two agree.
+              sessionStartedAt={sessionTimes?.startedAt}
+              sessionEndedAt={sessionTimes?.endedAt ?? undefined}
               testID="running-hr"
             />
           )}
