@@ -95,6 +95,14 @@ assumed — see `facts_from_rest`.
 real query was refused with 0. Read the true figure from a request's own
 headers: `gh api graphql -i -f query='{viewer{login}}' | grep -i x-ratelimit`.
 
+**REST's `mergeable: null` window (H29, #1113).** GitHub recomputes mergeability
+when the base moves — exactly when a green set goes stale — and REST reads `null`
+until it has finished. Seconds after a merge to `main` on 2026-09-11, REST read
+`null` for a pull request GraphQL still, correctly, called CONFLICTING: the old
+script exited 5, a single REST read exits 0. So `resolve_pull` re-reads an open
+pull request after 2s, 3s and 5s before `null` is allowed to become UNKNOWN.
+Still REST, still through `gh_rest`, and a closed pull request is never waited on.
+
 ## What it does not promise
 
 - **It cannot tell you a check was meaningful**, only that it ran and concluded.
@@ -125,6 +133,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -637,6 +646,39 @@ def facts_from_rest(pull: dict) -> dict:
     }
 
 
+# REST answers `mergeable: null` while GitHub recomputes mergeability, and it
+# recomputes when the base moves — exactly when a green set goes stale. Measured
+# 2026-09-11: H26 (#1103) merged into `main` at 18:22:09Z, and seconds later REST
+# read `null` for #1100 while GraphQL still, correctly, reported CONFLICTING. The
+# GraphQL-era script exited 5; a single REST read exits 0. Minutes later REST read
+# `false/dirty` on ten polls over 38 seconds. The window is real and short, so an
+# open pull request is re-read before its `null` may become UNKNOWN (H29, #1113).
+#
+# Deliberately no GraphQL fallback for a window longer than this: it would break
+# the REST-only invariant above. Past the last delay a stale green still reads
+# UNKNOWN, which `diagnose` tolerates and tells the reader to re-run.
+MERGEABLE_RETRY_DELAYS = (2, 3, 5)
+
+
+def resolve_pull(fetch, sleep, delays=MERGEABLE_RETRY_DELAYS) -> dict:
+    """A pull request's REST payload, re-read while it is open and `mergeable` is `null`.
+
+    Takes its two effects as arguments so the self-test can drive every path
+    offline, counting reads and sleeps. Stops the moment REST answers, so a
+    healthy run pays nothing. A closed or merged pull request is `null` for good
+    — both APIs say UNKNOWN for #1095 — so it is read once and never waited on.
+    """
+    pull = fetch()
+    if pull.get("state") != "open":
+        return pull
+    for delay in delays:
+        if pull.get("mergeable") is not None:
+            break
+        sleep(delay)
+        pull = fetch()
+    return pull
+
+
 def pr_facts(slug: str, pr: str | None) -> dict:
     if pr is not None:
         if not re.fullmatch(r"\d+", pr):
@@ -653,7 +695,10 @@ def pr_facts(slug: str, pr: str | None) -> dict:
     # Always the single-PR endpoint: the list endpoint does not carry
     # `mergeable` at all, and a missing field would read as UNKNOWN — the one
     # value `diagnose` deliberately lets through.
-    facts = facts_from_rest(gh_rest(f"repos/{slug}/pulls/{number}"))
+    # Re-read while REST is still computing mergeability — see `resolve_pull`.
+    facts = facts_from_rest(
+        resolve_pull(lambda: gh_rest(f"repos/{slug}/pulls/{number}"), time.sleep)
+    )
     if not facts["headRefOid"]:
         raise RuntimeError(f"pull request #{number} came back without a head commit.")
     return facts
@@ -966,6 +1011,80 @@ def self_test() -> int:
             f"  REST-only: expected exactly one `gh` subprocess, `gh api <path>`; found {gh_calls}"
         )
 
+    # H29 (#1113): REST's `mergeable: null` window. Each vector counts the REST
+    # reads and the delays slept as well as the verdict, because the two ways to
+    # get this wrong are opposite: settling on UNKNOWN too early (a stale green
+    # exits 0 again) and waiting on a merged pull request that will never answer.
+    null_window_checks = 0
+
+    def _payload(mergeable, state: str = "open") -> dict:
+        return {"number": 1, "state": state, "head": {"sha": "abc", "ref": "b"},
+                "mergeable": mergeable,
+                "mergeable_state": {True: "clean", False: "dirty", None: "unknown"}[mergeable]}
+
+    delays = MERGEABLE_RETRY_DELAYS
+    for label, answers, want_reads, want_slept, want_exit, want_note in [
+        ("answered first time", [_payload(False)], 1, [], EXIT_STALE, "GREEN, BUT STALE"),
+        # THE MEASURED CASE: REST still computing, then it answers.
+        ("null, null, then false", [_payload(None), _payload(None), _payload(False)],
+         3, list(delays[:2]), EXIT_STALE, "GREEN, BUT STALE"),
+        ("null throughout", [_payload(None)], 1 + len(delays), list(delays), EXIT_OK, "UNKNOWN"),
+        ("merged pull request", [_payload(None, state="closed")], 1, [], EXIT_OK, "UNKNOWN"),
+    ]:
+        null_window_checks += 1
+        reads: list[int] = [0]
+        slept: list[int] = []
+
+        def fetch(answers=answers, reads=reads):
+            answer = answers[min(reads[0], len(answers) - 1)]
+            reads[0] += 1
+            return answer
+
+        try:
+            got_exit, note = diagnose(green, facts_from_rest(resolve_pull(fetch, slept.append)))
+        except Exception as err:  # noqa: BLE001 — a crash here must be a reported failure, not a traceback
+            failures.append(f"  resolve_pull/{label}: raised {type(err).__name__}: {err}")
+            continue
+        if reads[0] != want_reads:
+            failures.append(f"  resolve_pull/{label}: {reads[0]} REST reads, expected {want_reads}")
+        if slept != want_slept:
+            failures.append(f"  resolve_pull/{label}: slept {slept}, expected {want_slept}")
+        if got_exit != want_exit:
+            failures.append(f"  resolve_pull/{label}: green set exits {got_exit}, expected {want_exit}")
+        elif want_note not in note:
+            failures.append(f"  resolve_pull/{label}: {note!r} does not mention {want_note!r}")
+
+    # And the WIRING: `pr_facts` has to go through `resolve_pull`. The vectors
+    # above prove the function; nothing above calls `pr_facts`, so a `pr_facts`
+    # that went back to a single read left every one of them green — measured,
+    # by mutation, before this check existed. Swap the module's `gh_rest` and
+    # `time` for fakes, restore both whatever happens.
+    null_window_checks += 1
+    reads_by_path: list[str] = []
+    fake_slept: list[int] = []
+    answers_by_read = [_payload(None), _payload(False)]
+
+    def fake_gh_rest(path: str):
+        reads_by_path.append(path)
+        return answers_by_read[min(len(reads_by_path) - 1, len(answers_by_read) - 1)]
+
+    real_gh_rest, real_time = globals()["gh_rest"], globals()["time"]
+    globals()["gh_rest"] = fake_gh_rest
+    globals()["time"] = type("FakeTime", (), {"sleep": staticmethod(fake_slept.append)})
+    try:
+        wired = pr_facts("o/r", "7")
+        if (wired["mergeable"], reads_by_path, fake_slept) != (
+            "CONFLICTING", ["repos/o/r/pulls/7", "repos/o/r/pulls/7"], [MERGEABLE_RETRY_DELAYS[0]]
+        ):
+            failures.append(
+                f"  pr_facts wiring: mergeable={wired['mergeable']}, reads={reads_by_path}, "
+                f"slept={fake_slept} — it must re-read a null through resolve_pull"
+            )
+    except Exception as err:  # noqa: BLE001 — a crash here must be a reported failure, not a traceback
+        failures.append(f"  pr_facts wiring: raised {type(err).__name__}: {err}")
+    finally:
+        globals()["gh_rest"], globals()["time"] = real_gh_rest, real_time
+
     # And the workflow parser, against the real files rather than a fixture —
     # the constant it cross-checks is the thing that stops a broken parser
     # silently lowering the bar.
@@ -1019,6 +1138,7 @@ def self_test() -> int:
         f"ci-check detector ok — {len(vectors)} decision vectors, "
         f"{len(diagnoses)} diagnosis vectors, "
         f"{rest_checks} REST-only checks (H27), "
+        f"{null_window_checks} null-window checks (H29), "
         f"{len(names)} check(s) declared by the workflows ({', '.join(names)})"
     )
     return EXIT_OK
