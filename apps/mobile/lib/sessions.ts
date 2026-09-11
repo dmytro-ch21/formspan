@@ -1092,11 +1092,28 @@ export function applySuggestions(
   /**
    * The catalog, so a dual-mode set in time mode is left alone.
    *
-   * Optional, because most callers have no catalog to hand and the rule only
-   * bites on `reps` exercises. Without it a burpee set switched to 40 seconds
-   * would silently acquire a rep target too — and a row holding both numbers is
-   * the one thing `lib/setMode.ts` derives its mode from, so the set would flip
-   * itself back to reps with a duration still attached.
+   * Without it a mountain-climber prescribed as 30 seconds would silently
+   * acquire a rep target too, and the saved row would hold both numbers.
+   * `setModeOf` still reads that row as TIME (`lib/setMode.ts` — a dual-mode
+   * set is time whenever `seconds > 0`), so it does not flip modes; the harm
+   * is the stray rep target, which the backend's `total_reps` counts once the
+   * set is completed. (F36/#1015 corrected this comment: it used to say the set
+   * "would flip itself back to reps", which `setModeOf` does not do.)
+   *
+   * Optional in the signature, but BOTH callers pass it — `session/start.tsx`
+   * from the offline catalog cache, `workout/[id].tsx` from its loaded catalog.
+   * This comment used to say "most callers have no catalog to hand"; measured
+   * during F36, that was no longer true of either. An undefined lookup fails
+   * OPEN — `setModeOf` reads an unknown load type as reps — so a caller that
+   * stops passing it quietly disarms this.
+   *
+   * **Web's twin deliberately has no such guard.** `applySuggestions` in
+   * `apps/web/src/lib/api.ts` explains why at length: the both-numbers row is
+   * unreachable today because both progression engines return no `target_reps`
+   * for any non-`weight_reps` load type, pinned by
+   * `TestProgress_DualModeRepsExerciseGetsNoRepTarget` and its V2 twin. That
+   * makes this guard defence in depth rather than the thing currently
+   * preventing the bug — worth knowing before deleting it "for parity".
    */
   loadTypeOf?: (exerciseID: string) => Exercise['load_type'] | undefined,
 ): LoggedSet[] {

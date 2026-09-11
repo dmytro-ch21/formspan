@@ -1473,6 +1473,46 @@ export async function fetchSuggestions(
  * weight but left reps blank would silently drop the half that moves most
  * often.
  */
+/**
+ * Pre-fills a freshly started session's blank sets from the progression
+ * engine's suggestions.
+ *
+ * ## F36/#1015 — why this has NO time-mode guard, deliberately
+ *
+ * Mobile's twin (`applySuggestions` in `apps/mobile/lib/sessions.ts`) takes a
+ * `loadTypeOf` catalog lookup and refuses to fill `reps` on a dual-mode set
+ * prescribed in seconds, because a row holding both a rep target and a
+ * duration inflates the backend's `total_reps` with reps nobody did. This one
+ * does not, and that difference was MEASURED, not assumed — the next person
+ * tempted to "restore parity" by copying mobile's guard across should read
+ * this first.
+ *
+ * **The bad row is not reachable today.** The shape exists in real data:
+ * `backend/internal/modules/workout/workouts.json` seeds `mountain-climber`
+ * (`load_type: "reps"`, i.e. dual-mode) as `target_seconds: 30`,
+ * `target_reps: null` in two public plans, "Bodyweight Conditioning" and
+ * "Kettlebell Conditioning". `setsFromWorkout` copies that faithfully. But the
+ * fill below only fires when `hit.target_reps != null`, and BOTH progression
+ * engines (`progression.go` and `progression_v2.go`) return
+ * `SuggestNotApplicable` with no `target_reps` for every
+ * `load_type != "weight_reps"` — before any history, protocol or in-session
+ * signal is read. Nothing downstream in `handler.go`'s `Suggestions` adds one.
+ *
+ * **What makes it unreachable is therefore a server gate, not this function —
+ * and that gate is pinned.** `TestProgress_DualModeRepsExerciseGetsNoRepTarget`
+ * and `TestProgressV2_DualModeRepsExerciseGetsNoRepTarget` assert it for
+ * `load_type: "reps"` specifically. Before F36 only `"time"` was pinned, so
+ * teaching the engine to progress bodyweight reps would have silently started
+ * producing both-numbers rows from those two public plans, here, with nothing
+ * going red. If one of those tests ever has to change, THIS is what it arms.
+ *
+ * **Why not add the guard anyway, defensively?** It would be armed at only one
+ * of this function's two callers: `dashboard/workouts/[id]` has the catalog in
+ * scope, `dashboard/sessions` has none, and fetching one there puts a network
+ * lookup in front of starting a session — which mobile's `session/start.tsx`
+ * explicitly refuses to do. An optional parameter left unarmed at half its call
+ * sites is a guard that reads as protection and provides it half the time.
+ */
 export function applySuggestions(
   sets: LoggedSet[],
   suggestions: Map<string, Suggestion>,

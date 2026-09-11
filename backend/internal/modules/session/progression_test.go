@@ -943,3 +943,48 @@ func TestStalledSessionsAt_LightSessionDoesNotCountTowardAStall(t *testing.T) {
 		t.Fatalf("stalled sessions = %d, want 2 — a light session at the same weight must not count", n)
 	}
 }
+
+// F36/#1015 — the gate web's applySuggestions silently depends on.
+//
+// `apps/web/src/lib/api.ts`'s applySuggestions has NO time-mode guard, and that
+// is correct only because this engine never emits a rep target for a
+// non-weight_reps exercise. The shape that guard would catch is already in the
+// seed data: `workouts.json` prescribes `mountain-climber` (load_type "reps",
+// dual-mode on mobile) as 30 seconds with no reps, in two public plans. Web
+// copies that into a fresh session's sets, then fills `reps` from any
+// suggestion carrying `target_reps` — so the day this gate lets "reps" through,
+// those plans start saving rows that hold both a duration and a rep target, and
+// `total_reps` starts counting reps nobody did.
+//
+// Before F36 only LoadType "time" was pinned (TestProgress_NonWeightAndEmptyHistory),
+// so narrowing this condition to "time"/"distance" — the obvious first step
+// toward progressing bodyweight reps — would have passed every test. This pins
+// "reps" specifically, on an athlete who HAS logged the movement, because that
+// is the case a narrowed gate would actually reach.
+//
+// If this has to change, change web's applySuggestions in the same commit.
+func TestProgress_DualModeRepsExerciseGetsNoRepTarget(t *testing.T) {
+	reps := 20
+	logged := Set{
+		ExerciseID: "mountain-climber",
+		SetType:    SetTypeWorking,
+		Completed:  true,
+		Reps:       &reps, // bodyweight: reps and no load, as it is actually logged
+	}
+	in := progIn("hypertrophy", sess(3*24*time.Hour, testNow, logged))
+	in.ExerciseID, in.LoadType = "mountain-climber", "reps"
+
+	p := Progress(in, testNow)
+	if p.Code != SuggestNotApplicable {
+		t.Fatalf("a dual-mode reps exercise with history: got %q (%s), want %q — "+
+			"web's applySuggestions has no time-mode guard and relies on this",
+			p.Code, p.Reason, SuggestNotApplicable)
+	}
+	if p.TargetReps != nil {
+		t.Errorf("got TargetReps=%d, want nil — a rep target here is written into "+
+			"a set prescribed in seconds by web's applySuggestions", *p.TargetReps)
+	}
+	if p.TargetWeightKg != nil {
+		t.Errorf("got TargetWeightKg=%v, want nil for an unweighted movement", *p.TargetWeightKg)
+	}
+}

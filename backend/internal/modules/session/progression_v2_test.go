@@ -742,3 +742,41 @@ func TestProgressV2_GoldenCalves_AthleteConfiguredTenToFifteenOutranksProfileDef
 			"the profile default 10-20", p.RepRange)
 	}
 }
+
+// F36/#1015 — the V2 half of TestProgress_DualModeRepsExerciseGetsNoRepTarget.
+//
+// The two engines are deliberately parallel rather than shared (see
+// progression_v2.go's header), so the gate web depends on exists twice and has
+// to be pinned twice: flipping `new_recommendation_engine` must not be the
+// change that starts sending rep targets for dual-mode exercises. Before F36,
+// TestProgressV2_NotApplicable pinned only LoadType "time". See the v1 test for
+// the full account of what this protects.
+func TestProgressV2_DualModeRepsExerciseGetsNoRepTarget(t *testing.T) {
+	reps := 20
+	logged := Set{
+		ExerciseID: "mountain-climber",
+		SetType:    SetTypeWorking,
+		Completed:  true,
+		Reps:       &reps,
+	}
+	in := ProgressionInput{
+		ExerciseID: "mountain-climber",
+		LoadType:   "reps",
+		Goal:       "hypertrophy",
+		Recent:     []SessionEffort{sess(3*24*time.Hour, testNow, logged)},
+	}
+
+	p := ProgressV2(in, testNow)
+	if p.Code != SuggestNotApplicable {
+		t.Fatalf("a dual-mode reps exercise with history: got %q (%s), want %q — "+
+			"web's applySuggestions has no time-mode guard and relies on this",
+			p.Code, p.Reason, SuggestNotApplicable)
+	}
+	if p.TargetReps != nil {
+		t.Errorf("got TargetReps=%d, want nil — a rep target here is written into "+
+			"a set prescribed in seconds by web's applySuggestions", *p.TargetReps)
+	}
+	if p.TargetWeightKg != nil {
+		t.Errorf("got TargetWeightKg=%v, want nil for an unweighted movement", *p.TargetWeightKg)
+	}
+}
