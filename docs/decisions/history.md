@@ -69686,6 +69686,68 @@ step 4 and reports the other three as green still produces a PR that looks
 fully reviewed — the gate is a convention, and the only thing making it real is
 that it is now written as an action somebody can actually take.
 
+### 2026-09-10 — F41: Reduce Motion reaches the rest of the app, and the splash stops arriving backwards
+
+**What.** `lib/useReducedMotion.ts` went from one consumer to four. The root
+`Stack` cross-fades instead of sliding when Reduce Motion is on
+(`app/_layout.tsx`), `SessionCelebration`'s 850ms flare jumps to its end state
+rather than sweeping, and `LiveHRIndicator`'s heart stops beating. The splash's
+fade-out swapped an accelerating curve for `EASE.out` from N556's scale.
+
+**Why the heart mattered most.** It is the app's most persistent motion — once
+per BLE sample, ~1 Hz, for the length of a workout. A wrong answer there is not
+one stray animation, it is an hour of one, at somebody who asked for stillness.
+Its amplitude also dropped from 1.28 to 1.15: 28% is a lot for the one thing on
+screen that moves continuously, next to a number the athlete is trying to read.
+And the sequence is now cancelled on cleanup, because samples arriving faster
+than its 310ms would otherwise leave two sequences driving one value — real at
+200bpm, or on a strap that bursts after a reconnect.
+
+**The splash was backwards, specifically.** An accelerating curve starts slow,
+so it held the lockup at full opacity through the first third of the fade —
+exactly the moment the user is waiting for the app — then rushed the rest. That
+is the one animation every athlete sees on every cold start.
+
+**Three states, not two, and that is the whole ticket.** `useReducedMotion`
+returns `boolean | null`; `null` means the OS has not answered, and it is the
+value on the first frame of every launch. `MacroRings` already handled it and
+was copied. The `Stack` is the one place that cannot hold — a navigator cannot
+decline to have a transition while it waits — so its pending state falls back to
+the platform default, which is the safe direction.
+
+**A test that could not fail, caught by its own negative control.** The obvious
+assertion — read the scale off the animated view, check it moved — passes
+whether or not the animation ever starts: the beat runs on the native driver, so
+the JS-side `Animated.Value` never ticks under jest and reads `1` in every case.
+The Reduce-Motion-ON test passed for entirely the wrong reason, and only the
+deliberate OFF control exposed it. The suite now counts `Animated.timing` calls,
+which is the decision the component actually makes. All three cases go red when
+the gate is removed, and green again on restore.
+
+**Gating the animation was not enough, and review caught it.** The first
+version of the celebration left the burst RENDERED and only declined to animate
+it. That reads as correct in a diff and is worse than the motion it replaced:
+`t` starts at 0, and at 0 every flare sits at `opacity: 1`, untranslated, scale
+1 — fourteen dots stacked on the medal. So an athlete with Reduce Motion on got
+a coloured blob sitting on their result for as long as the OS took to answer,
+then blinking out. It now returns `null` unless motion is known to be allowed,
+so the fourteen views never mount. The distinction — *absent*, not merely
+*invisible* — is the whole fix, and it is now pinned by three tests that go red
+against the original form.
+
+**Two things stated rather than implied.** `(reduced ?? false) ? 'fade' :
+'default'` is behaviourally identical to `reduced ? ...` — `null` is already
+falsy — so the `?? false` is documentary, making the three-state handling visible
+to a reader, not a guard against anything. And `HoldToConfirm` was deliberately
+left alone: its progress fill is the only signal a hold is registering, and
+Reduce Motion means fewer and gentler, not less comprehensible.
+
+**Not verified.** Nothing here was seen on a device. Reduce Motion in particular
+cannot be confirmed by reading code, because the bug it guards against is the OS
+setting being ignored at runtime — the ticket carries three device criteria,
+including toggling the setting while backgrounded to prove the hook's
+subscription actually re-renders.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native';
 
 import { vola } from '@/constants/Colors';
+import { EASE } from '@/constants/Motion';
 
 /**
  * The opening animation: VOLA writes itself letter by letter, then the mark
@@ -170,7 +171,20 @@ export function AnimatedSplash({ ready, onFinish }: Props) {
       toValue: 0,
       duration: FADE_MS,
       delay: HOLD_MS,
-      easing: Easing.in(Easing.quad),
+      // This used to be an ease-IN (quad), and that was backwards on the one
+      // animation every athlete sees on every cold start: an accelerating curve
+      // starts slow, so it held the splash at full opacity through the first
+      // third of the fade — precisely the moment the user is waiting for the
+      // app — and then rushed the rest. `EASE.out` leaves immediately and
+      // decelerates into the app, which is what "getting out of the way" looks
+      // like. Both rubrics forbid accelerating curves on UI outright.
+      //
+      // The old value is deliberately NOT written here in its literal call
+      // form: F41's acceptance criterion is a plain `grep` for that call across
+      // `app/` and `components/`, and a mention in a comment would fail it
+      // forever. A check that reports a defect which is not there is a check
+      // people stop running.
+      easing: Easing.bezier(...EASE.out),
       useNativeDriver: true,
     });
     anim.start(({ finished }) => {

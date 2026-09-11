@@ -5,6 +5,7 @@ import { initSounds } from '@/lib/sounds';
 import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
 import { useResumeSignOutGuard } from '@/lib/authResume';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 
 import { AccentProvider, useAccent } from '@/lib/AccentProvider';
 import { ModulesProvider } from '@/lib/ModulesProvider';
@@ -343,10 +344,26 @@ function RootLayoutNav() {
 // default near-black — the app has one palette.
 function RootStack() {
   const accent = useAccent();
+  // Three states, not two, and the `?? false` is the whole point: `null` means
+  // the OS has not answered yet, and the first push can easily happen before it
+  // does. Treating `null` as "reduced" would silently replace the platform
+  // transition with a cross-fade on every cold start, for everybody — the
+  // opposite of what this gate is for. Holding (as `MacroRings` does) is not an
+  // option here either: a `Stack` cannot decline to have a transition while it
+  // waits. So the pending state falls back to the platform default, and the
+  // cross-fade applies only once the OS has actually said yes.
+  const reduced = useReducedMotion();
   return (
     <ThemeProvider value={{ ...volaNavTheme, colors: { ...volaNavTheme.colors, primary: accent.accent } }}>
       <Stack
         screenOptions={{
+          // Reduce Motion is a request not to be moved across the screen, not a
+          // request for the navigation to stop being legible — so the push still
+          // happens, it just arrives rather than slides. `animationMatchesGesture`
+          // is deliberately not set: both values here are platform animations,
+          // and that option only matters when overriding with a directional
+          // custom one.
+          animation: (reduced ?? false) ? 'fade' : 'default',
           // One continuous ground on pushed screens too. The default header
           // paints its own surface colour and a hairline rule under it,
           // which on a dark theme reads as a seam splitting the screen into

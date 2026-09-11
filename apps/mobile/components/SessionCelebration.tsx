@@ -7,6 +7,7 @@ import { Medal } from '@/components/ui/Medal';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { celebratesMilestone, type Milestone } from '@/lib/milestones';
 import {
   badgeFor,
@@ -67,18 +68,41 @@ function Flares({ color }: { color: string }) {
     }),
   );
   const [t] = useState(() => new Animated.Value(0));
+  const reduced = useReducedMotion();
 
   useEffect(() => {
-    Animated.timing(t, {
+    // Three states, and only one of them animates. `null` is "the OS has not
+    // answered yet" and is the value on the first frame, so starting here on
+    // `null` would sweep the burst across the screen of somebody who asked not
+    // to be moved, every single time.
+    if (reduced !== false) return;
+
+    const anim = Animated.timing(t, {
       toValue: 1,
       duration: FLARE_MS,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start();
-  }, [t]);
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [t, reduced]);
+
+  // Render nothing at all unless motion is known to be allowed — NOT merely
+  // "nothing visible".
+  //
+  // The distinction is the whole fix. `t` starts at 0, and at 0 every flare is
+  // at `opacity: 1`, untranslated, scale 1 — fourteen dots stacked on the
+  // medal. So a version that gated only the *animation* left the burst sitting
+  // there at full strength for as long as the OS took to answer, and then
+  // blinked it out. For somebody with Reduce Motion on, that swaps a sweep for
+  // a coloured blob appearing and vanishing on top of their result, which is
+  // worse than the motion it replaced.
+  //
+  // Returning null also means the fourteen views never mount in that case.
+  if (reduced !== false) return null;
 
   return (
-    <RNView style={styles.flareLayer} pointerEvents="none">
+    <RNView style={styles.flareLayer} pointerEvents="none" testID="celebration-flares">
       {seeds.map((s, i) => (
         <Animated.View
           key={i}

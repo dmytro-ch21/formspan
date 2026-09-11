@@ -22769,3 +22769,72 @@ driving a real submission.
   Production when pointed at production. A badge that classifies wrongly is
   worse than none: it is a wrong answer to a question the operator has stopped
   asking.
+
+## F41 — Reduce Motion reaches the mobile app (`apps/mobile/app/_layout.tsx`, `components/{AnimatedSplash,SessionCelebration,LiveHRIndicator}.tsx`, #1040)
+
+The mobile counterpart to F40. `lib/useReducedMotion.ts` returns
+`boolean | null` and the `null` — "the OS has not answered yet" — is the value
+on the first frame of every cold start, so every scenario below has to be
+stated three times, not two.
+
+### Happy path
+
+- Reduce Motion **off**: pushing from Today into Settings slides, as it always
+  did. Finishing a session sweeps the celebration flare. The heart icon beats
+  once per reading.
+- Reduce Motion **on**: the same push cross-fades. The celebration appears with
+  its medal, stats and Done intact and **no** flare sweeping across them. The
+  heart icon holds still while the bpm number continues to update.
+- The splash fades out on a decelerating curve — it begins leaving immediately
+  and eases into the app, rather than lingering at full opacity and then
+  rushing.
+
+### Edge cases & errors
+
+- **The OS has not answered yet.** On the very first frame the hook returns
+  `null`. The celebration and the heart must hold rather than guess; the
+  navigator cannot hold, so it takes the platform default. Regression shape: a
+  caller that treats `null` as `false` animates at *everybody*, every launch,
+  in the window before the answer arrives — and it will look correct in every
+  manual test, because the window is short.
+- **The setting changes while the app is running.** The hook subscribes to
+  `reduceMotionChanged`; toggling the setting with the app backgrounded and
+  returning must flip all three behaviours without a relaunch. This is the path
+  that proves the subscription works rather than just the initial read.
+- **`AccessibilityInfo` never answers.** The hook falls back to `false` — show
+  the animation. Showing motion to somebody who never expressed a preference is
+  a far smaller error than showing a blank screen to everybody.
+- **Readings arriving faster than the beat.** At high bpm, or on a strap that
+  bursts after a reconnect, samples can land inside the beat's 310ms. Only one
+  sequence may drive the value; two fight rather than beat.
+
+### What a test can and cannot reach
+
+- **Reachable, and covered** (`components/__tests__/reducedMotionGating.test.tsx`):
+  all three hook states on `LiveHRIndicator`, asserted by counting
+  `Animated.timing` calls, and all three on `SessionCelebration`, asserted on
+  whether the flare layer is **mounted**. All six go red against the forms they
+  replaced.
+- **The celebration's assertion is on presence, not on animation, and that is
+  deliberate.** Gating only the animation leaves the burst rendered at `t === 0`
+  — full opacity, untranslated, stacked on the medal — so a Reduce Motion user
+  gets a blob appearing and vanishing instead of a sweep. *Absent* and
+  *invisible* are different outcomes and only one of them is correct.
+- **NOT reachable, and this is the important half**: whether the OS setting is
+  actually honoured at runtime. The suite mocks `AccessibilityInfo`, so it
+  proves the component reacts correctly to the hook — never that the hook
+  reflects the real setting. Only a device does.
+- **Also not reachable**: that the splash's new curve *reads* as leaving
+  promptly, and that a cross-fade between screens is legible rather than
+  disorienting. Both are judgments about feel.
+- **A trap worth naming**: reading the animated scale off the view and asserting
+  it moved cannot fail. The beat uses the native driver, so the JS-side value
+  never ticks under jest and reads `1` whether or not the animation started.
+  Any future test here must assert the *decision*, not the interpolation.
+
+### Needs a device
+
+- Cold-start a release build and watch the splash leave.
+- With Reduce Motion on: push into Settings and back; finish a session; watch a
+  live heart-rate reading arrive.
+- Toggle Reduce Motion off while backgrounded, return, confirm all three revert.
