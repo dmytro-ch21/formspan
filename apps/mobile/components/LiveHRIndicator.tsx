@@ -12,6 +12,7 @@ import { useLiveHR, useLiveHRFresh } from '@/lib/hrMonitor/useLiveHR';
 // post-session report instead of four copies. Same function, new home.
 import { zoneColor, zoneForBPM } from '@/lib/hrZones';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 
 /**
  * N528/#958 — the live heart rate, wherever a session runs and on Today.
@@ -44,13 +45,33 @@ export function LiveHRIndicator({
   // idiom `MacroRings`' `Ring` uses for its `Animated.Value`s, and the one
   // `react-hooks/refs` accepts.
   const [beat] = useState(() => new Animated.Value(1));
+  const reduced = useReducedMotion();
   useEffect(() => {
     if (!state.at) return;
-    Animated.sequence([
-      Animated.timing(beat, { toValue: 1.28, duration: 90, useNativeDriver: true }),
+    // Three states, and `null` holds. This is the app's most PERSISTENT motion —
+    // once per sample, ~1 Hz, for the length of a workout — so guessing wrong
+    // while the OS is still answering is not one stray animation, it is a pulse
+    // that runs for an hour at somebody who asked for stillness.
+    if (reduced === null) return;
+    if (reduced) {
+      // The number itself is the state indication and it keeps updating; the
+      // beat is the decoration on top of it. Nothing is lost by omitting it.
+      beat.setValue(1);
+      return;
+    }
+    // 1.15, not the 1.28 this used to be. 28% is a large amplitude for the one
+    // thing on screen that moves continuously, and it read as a throb rather
+    // than a beat next to a number the athlete is trying to read.
+    const anim = Animated.sequence([
+      Animated.timing(beat, { toValue: 1.15, duration: 90, useNativeDriver: true }),
       Animated.timing(beat, { toValue: 1, duration: 220, useNativeDriver: true }),
-    ]).start();
-  }, [state.at, beat]);
+    ]);
+    anim.start();
+    // Samples arriving faster than the 310ms this takes would otherwise leave
+    // two sequences driving one value, which fights rather than beats — a real
+    // possibility at 200bpm, or on a strap that bursts after a reconnect.
+    return () => anim.stop();
+  }, [state.at, beat, reduced]);
 
   if (state.status === 'off' || state.status === 'unsupported') return null;
 
@@ -62,7 +83,7 @@ export function LiveHRIndicator({
   if (variant === 'chip') {
     return (
       <RNView style={styles.chip} testID={testID} accessibilityRole="text" accessibilityLabel={liveA11y(state, fresh, zone)}>
-        <Animated.View style={{ transform: [{ scale: beat }] }}>
+        <Animated.View style={{ transform: [{ scale: beat }] }} testID={`${testID}-beat`}>
           <Icon name="heart" size={14} color={color} />
         </Animated.View>
         <Text style={[styles.chipNumber, { color }]} testID={`${testID}-bpm`}>
@@ -91,7 +112,7 @@ export function LiveHRIndicator({
         </Text>
       </RNView>
       <RNView style={styles.cardBody}>
-        <Animated.View style={{ transform: [{ scale: beat }] }}>
+        <Animated.View style={{ transform: [{ scale: beat }] }} testID={`${testID}-beat`}>
           <Icon name="heart" size={28} color={color} />
         </Animated.View>
         <Text style={[styles.cardNumber, { color }]} testID={`${testID}-bpm`}>

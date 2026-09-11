@@ -7,6 +7,7 @@ import { Medal } from '@/components/ui/Medal';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { celebratesMilestone, type Milestone } from '@/lib/milestones';
 import {
   badgeFor,
@@ -67,15 +68,33 @@ function Flares({ color }: { color: string }) {
     }),
   );
   const [t] = useState(() => new Animated.Value(0));
+  const reduced = useReducedMotion();
 
   useEffect(() => {
-    Animated.timing(t, {
+    // Three states, and `null` holds — the same shape `MacroRings` uses. The
+    // first frame always precedes the OS's answer, so starting here on `null`
+    // would sweep the burst across the screen of somebody who asked not to be
+    // moved, every single time.
+    if (reduced === null) return;
+
+    if (reduced) {
+      // Jump to the end state rather than skipping it. At `t === 1` every flare
+      // has interpolated to `opacity: 0`, so the burst is simply absent and the
+      // medal, the stats and Done underneath are untouched. Reduce Motion asks
+      // for less movement, not for less of the report.
+      t.setValue(1);
+      return;
+    }
+
+    const anim = Animated.timing(t, {
       toValue: 1,
       duration: FLARE_MS,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start();
-  }, [t]);
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [t, reduced]);
 
   return (
     <RNView style={styles.flareLayer} pointerEvents="none">
