@@ -71253,6 +71253,173 @@ found no other statement of the current count; `append-only-merge.py`'s quote of
   is unassigned outright. That is the stale-claim pattern the "At most eight at
   once" section predicts, and it is not this ticket's to rewrite.
 
+## 2026-09-11 — F36: web's missing time-mode guard is unreachable, and the reason it is unreachable was unpinned (#1015)
+
+`applySuggestions` pre-fills a freshly started session's blank sets from the
+progression engine. Mobile's copy (`apps/mobile/lib/sessions.ts`) takes a
+`loadTypeOf` catalog lookup and refuses to fill `reps` on a dual-mode set
+prescribed in seconds; web's (`apps/web/src/lib/api.ts`) has no such check.
+#1015 asked for that to be **measured before being fixed**, and specifically
+warned against copying the guard across blind. It was measured, and the answer
+is that web needs no guard — but for a reason nothing enforced.
+
+### The field is `seconds`, not a duration
+
+The ticket framed the bad state as "a row carrying both a rep target and a
+duration". There is no per-set `duration_seconds`: every such hit in web is
+session-level (calendar, dashboard totals, running splits). The per-set field is
+`seconds`, present on both apps' `LoggedSet`, with `target_seconds` on both
+`WorkoutItem`s — and both `setsFromWorkout`s copy `reps` **and** `seconds` from
+the template, byte for byte. So the question is not whether web can represent
+the row; it plainly can.
+
+### The shape is in the seed data
+
+Joining `workout/workouts.json` against `exercise/exercises.json` (17 plans, 45
+items, every `exercise_id` resolved against 762 catalog rows):
+**`mountain-climber` — `load_type: "reps"`, which is exactly what mobile's
+`isDualMode` means — is prescribed as `target_seconds: 30` with `target_reps:
+null` in two public VOLA plans, "Bodyweight Conditioning" and "Kettlebell
+Conditioning".** No seeded item already carries both numbers.
+
+Nothing in the backend would stop the bad row if it were produced: workout-item
+validation never compares seconds with reps; `SQLWorkingSet` is `completed AND
+set_type <> 'warmup'`; `SUM(ss.reps) FILTER (WHERE SQLWorkingSet)` and the Go
+rollup's `TotalReps += *s.Reps` count reps unconditionally. A completed row
+holding both would put reps nobody did into `total_reps`.
+
+### But the fill never fires, because of one line in each engine
+
+```go
+if in.LoadType != "weight_reps" {
+    p.Code = SuggestNotApplicable
+    ...
+    return p
+}
+```
+
+Both `progression.go` and `progression_v2.go` return that — no `TargetReps`, no
+`TargetWeightKg` — before reading history, protocol or in-session evidence.
+Three possible ways back in were checked and closed: `applyInSessionSignal`
+runs in a `defer` after that return but exits immediately on a nil
+`TargetWeightKg` and only ever sets `InSessionSignal`; `handler.go`'s
+`Suggestions` builds `Suggestion{ExerciseID: id, Plan: plan}` and adds no target
+of its own (N494's `workout_id` enrichment feeds a protocol *into* the engine,
+which has already returned); `shadowreplay.go` and `decisionrecord.go` only
+copy `TargetReps` for analysis and persistence. Web's fill requires
+`hit.target_reps != null`, so the seeded row is never touched.
+
+**Unreachable today — by a gate that was pinned only for `"time"`.**
+`TestProgress_NonWeightAndEmptyHistory` and `TestProgressV2_NotApplicable` both
+asserted `load_type: "time"`, and only the `Code`. Nothing covered `"reps"`, the
+exact load type this rests on. Narrowing that condition to
+`time || distance || distance_time` — the obvious first step toward progressing
+bodyweight reps — would have passed every test in the repo.
+
+### What changed
+
+- **Two pins at the source.** `TestProgress_DualModeRepsExerciseGetsNoRepTarget`
+  and its V2 twin assert `SuggestNotApplicable` **and** nil `TargetReps` and
+  `TargetWeightKg` for `load_type: "reps"`, on a bodyweight history. The engines
+  are deliberately parallel rather than shared, so the gate exists twice and is
+  pinned twice. Each failure message names web's dependency.
+- **Web documents why it has no guard**, on `applySuggestions` itself, naming
+  both pins, the two seeded plans and the consequence — so "restore parity" is
+  not the obvious move it would otherwise be.
+- **Mobile's guard gets its first test**, plus a control. It had none: deleting
+  it left the suite green, and web's lack of one makes deleting it for parity the
+  likeliest way it goes.
+- **Mobile's doc comment corrected twice.** It said "most callers have no
+  catalog to hand" — measured, both callers pass one. And it said the both-
+  numbers set "would flip itself back to reps", which `setModeOf` does not do:
+  a dual-mode set is time whenever `seconds > 0` (`lib/setMode.ts`), so the row
+  stays time and the harm is the stray rep target.
+
+### Why not simply add the guard to web as well
+
+The repo has precedent for guarding an invariant that is only true by
+construction — the `set_type` check sitting right above it was added on exactly
+that argument. It was rejected here because it would be armed at one of two
+callers: `dashboard/workouts/[id]` has the catalog in scope, `dashboard/sessions`
+has none, and fetching one there puts a network lookup in front of starting a
+session, which mobile's `session/start.tsx` explicitly refuses to do. An optional
+parameter unarmed at half its call sites reads as protection and provides it half
+the time. (The fail-open concern does not apply on `workouts/[id]`: `load()` sets
+`workout` and `catalog` together, and `start()` returns while `workout` is null.)
+
+**Nor would checking `code !== "not_applicable"`**, which `frontend-reviewer`
+raised as the obvious cheaper alternative: it needs no catalog and would cover
+both callers uniformly. It adds no protection because it is not independent —
+the engines set `SuggestNotApplicable` and leave `target_reps` nil in the same
+early return, so it is exactly equivalent to the `target_reps != null` test web
+already relies on, and a backend regression would flip both at once. Mobile's
+guard differs in kind: it reads load type from the client's own catalog, so it
+survives exactly that change. The web doc comment now says so, and both web
+call sites carry a one-line pointer back to it, matching the pointers mobile
+already had at its own two.
+
+A parity **script** in the style of `check-timeout-parity.py` was also
+considered for criterion 4 and rejected: those assert values that must agree,
+and these two functions are now intentionally different. Cross-referencing
+comments plus server-side pins make the next divergence visible where it would
+be introduced.
+
+### Mutation-checked, each against its own target
+
+- Removing `!timed &&` from mobile's fill turns the guarded case red and leaves
+  the control green — so `loadTypeOf` is what withholds the reps, not something
+  incidental.
+- Narrowing **only** V1's gate fails only the V1 pin (`got
+  "repeat_unknown_effort"`); narrowing **only** V2's fails only the V2 pin (`got
+  "abstain"`, after the fixture fix below). Both reds are the pins'
+  own `Fatalf`, with no panic — a nil-weight panic would also exit non-zero and
+  prove nothing about either test.
+
+All restored and confirmed green by re-running.
+
+**The mutation output is worth keeping, because it is subtler than the argument
+above.** With the gate narrowed, *neither engine emits a rep target yet either*.
+The harm needs two steps — open the gate, then teach the engine to progress
+weightless reps — and the pins fire at the first, which is where the
+conversation about web has to happen.
+
+Two consequences of that, both caught by `backend-reviewer` and both acted on:
+
+- **The `TargetReps`/`TargetWeightKg` assertions do not catch the narrowing; the
+  `Code` assertion does.** The fixture has no weight, so the engine drops it
+  before any target exists whichever way the gate is set. Those two assertions
+  would only fire for a *weighted* reps exercise — a weighted dip, say. Both pins
+  now say so, so they are not mistaken for the guard. It is the same shape as
+  several tests written earlier this session: an assertion present for a reason
+  unrelated to the change it appears to guard.
+- **The first V2 pin broke its own file's documented convention.**
+  `progression_v2_test.go`'s header says every V2 history fixture uses
+  `finishedSess`, because `sess` leaves `Finished` false and V2 refuses that as
+  history. The first draft used `sess`, so a narrowed gate reached `no_history`
+  — "never happened" — rather than modelling an athlete who has logged the
+  movement. Swapped to `finishedSess`; a narrowed V2 gate now lands on
+  `abstain`, one branch deeper, and still fails the pin.
+
+### A correction made during the work
+
+Partway through, I reported that mobile's `workout/[id].tsx` passed no
+`loadTypeOf`, which would have meant mobile had an unguarded path of its own.
+That was wrong: the grep printed eight lines of context from the call, and the
+argument is on line 330. Both mobile callers arm the guard. It is recorded
+because it is the fifth instance in one session of a conclusion drawn from
+truncated tool output, and the correction only happened because the next read
+happened to include the missing lines.
+
+### Not settled
+
+- **A template can carry both numbers directly**, bypassing `applySuggestions`
+  entirely: workout-item validation does not forbid `target_reps` and
+  `target_seconds` together. Whether that is ever legitimate ("12 reps in 30
+  seconds"?) is a product question this ticket did not ask, and it is a
+  different route to the same `total_reps` inflation.
+- No functional scenarios were added: nothing here changes behaviour an athlete
+  can observe. It is documentation, two server-side pins and a client test.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -225,6 +225,50 @@ describe('applySuggestions', () => {
     const [out] = applySuggestions([set('bench-press')], hit);
     expect(out.weight_kg).toBeNull();
   });
+
+  /*
+    F36/#1015 — the time-mode guard, which had no test at all before this.
+
+    It could have been deleted and the suite would have stayed green, which
+    matters more than usual here: web's twin deliberately lacks this guard, so
+    "restore parity" is the obvious and wrong way somebody would remove it. The
+    shape is real — `workouts.json` seeds `mountain-climber` (load_type
+    'reps', dual-mode) as 30 seconds with no reps, in two public plans.
+
+    The server currently sends no `target_reps` for non-weight_reps exercises
+    (pinned by `TestProgress_DualModeRepsExerciseGetsNoRepTarget` and its V2
+    twin), so this guard is defence in depth rather than the thing presently
+    preventing the bug. The suggestion below carries a rep target anyway,
+    deliberately: a guard is only exercised by the input it exists to refuse.
+  */
+  describe('a dual-mode set prescribed in seconds', () => {
+    const climber = new Map([
+      [
+        'mountain-climber',
+        { exercise_id: 'mountain-climber', target_weight_kg: null, target_reps: 12 } as never,
+      ],
+    ]);
+
+    it('is not given a rep target when the catalog says it is dual-mode', () => {
+      const [out] = applySuggestions(
+        [set('mountain-climber', { seconds: 30 })],
+        climber,
+        () => 'reps' as const,
+      );
+      expect(out.reps).toBeNull();
+      expect(out.seconds).toBe(30);
+    });
+
+    // The control. Without it, the case above would also pass if the fill
+    // were simply broken for this exercise — this proves `loadTypeOf` is what
+    // withholds the reps. It also pins the fail-open the doc comment states:
+    // a caller that stops passing the lookup gets the both-numbers row back.
+    it('IS given one when no catalog lookup is passed — the guard fails open', () => {
+      const [out] = applySuggestions([set('mountain-climber', { seconds: 30 })], climber);
+      expect(out.reps).toBe(12);
+      expect(out.seconds).toBe(30);
+    });
+  });
 });
 
 describe('sessionActiveSeconds', () => {
