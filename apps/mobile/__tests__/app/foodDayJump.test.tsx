@@ -202,11 +202,14 @@ it('does not build the grid until it is opened', async () => {
     await render(<FoodScreen />);
     await settle();
 
-    // Measured, not guessed: 0 calls to mount this screen with the grid
-    // closed — the pinned "today" means the day pill's own `dayPillLabel`
-    // short-circuits to the literal 'TODAY' without calling
-    // `toLocaleDateString` at all (it only formats on a NON-today day) —
-    // against exactly 100 once the ~42-cell grid is
+    // Measured, not guessed: **1** call to mount this screen with the grid
+    // closed. It was 0 until N493 part 3 (#858 item 5) — `dayPillLabel`
+    // short-circuits to the literal 'TODAY' on today without formatting
+    // anything, and that is still true, but the shared `DayPill` now also
+    // renders the long date underneath it (`longDayLabel`), exactly as
+    // Today's pill always has, which is one format call. RE-MEASURED rather
+    // than raised, as the note below insists — against exactly 100 once the
+    // ~42-cell grid is
     // built for the pinned August 2026 (7 head cells plus 2 calls per cell:
     // the visible date's own formatting and the accessibility label's). 50
     // is the midpoint of the two, matching `weekPlanner.test.tsx`'s own rule
@@ -304,7 +307,8 @@ it('cannot pick a day that has not happened yet', async () => {
   // Disabled means genuinely inert, not merely styled that way — the grid
   // must still be open and the day on screen must not have moved.
   expect(screen.getByTestId('food-month-close')).toBeTruthy();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
+  // N493 part 3 (#858 item 5) — see the note on the first of these.
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent(/^TODAY/);
 });
 
 it('the sheet\'s Today button returns to today from anywhere and closes the sheet', async () => {
@@ -324,7 +328,11 @@ it('the sheet\'s Today button returns to today from anywhere and closes the shee
   await settle();
 
   expect(screen.queryByTestId('food-month-close')).toBeNull();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
+  // N493 part 3 (#858 item 5) — the pill now carries BOTH lines Today's
+  // has: `TODAY` and the long date under it, from the one shared `DayPill`.
+  // So this asserts the word rather than the whole text content, which the
+  // sub-line would otherwise fail.
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent(/^TODAY/);
 });
 
 it('marks a day that already has an entry, and leaves an empty one bare', async () => {
@@ -349,7 +357,11 @@ it('the ±1-day arrows still work — the grid is an addition, not a replacement
   await render(<FoodScreen />);
   await settle();
 
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
+  // N493 part 3 (#858 item 5) — the pill now carries BOTH lines Today's
+  // has: `TODAY` and the long date under it, from the one shared `DayPill`.
+  // So this asserts the word rather than the whole text content, which the
+  // sub-line would otherwise fail.
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent(/^TODAY/);
 
   await fireEvent.press(screen.getByTestId('food-day-prev'));
   await settle();
@@ -357,5 +369,5 @@ it('the ±1-day arrows still work — the grid is an addition, not a replacement
 
   await fireEvent.press(screen.getByTestId('food-day-next'));
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent(/^TODAY/);
 });

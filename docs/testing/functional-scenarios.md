@@ -22910,3 +22910,55 @@ now exist, and a fourth deliberately does not.
   like nothing.
 - Turn System Haptics off in iOS Settings and confirm the drag is still fully
   usable on the visual lift alone.
+
+## N493 part 3 — the day pill, the Library curtain, and the scan sheet's Done button (#858 items 3, 5, 6, 7)
+
+Three of these are visual and one is a reachability bug, so the split below
+matters more than usual: what a test can settle is small, and what only a
+phone can settle is most of it.
+
+### Happy path
+
+- **The day pill reads the same on both tabs.** Open Today, note the pill;
+  open Food, note the pill. On today both say `TODAY` with the long date
+  (`Thursday, 10 September`) under it. Step back a day on each: both drop to
+  the short form (`WED, 9 SEP`) and neither repeats the date underneath.
+- **The pill's arrows still step a day** on both tabs, and Food's label still
+  opens the month grid while Today's steps back to today. These destinations
+  are deliberately different — see `DayPill`'s doc comment — so a run that
+  "corrects" one of them is reporting a design decision, not a bug.
+- **Scan a barcode, tap Amount, type a number, tap Done.** The sheet closes
+  with the typed amount applied. The point is that Done is *visible and
+  tappable while the keypad is open* — not that it works after dismissing the
+  keyboard first.
+- **Library → "More from your library"** opens a curtain whose fill and lit
+  corner match the app's other sheets (the food entry's 3-dot menu is the
+  closest comparison, one tap away on the Food tab).
+
+### Edge cases and errors
+
+- **A day with no entries** still renders the Food pill's second line on
+  today — the sub-line is about the date, not about the content.
+- **The amount sheet with a food that has no gram basis** (`ServingsFallback`)
+  gets the same lifted Done button as the grams path; both render inside the
+  same sheet shell.
+- **Rotate, or switch to a hardware keyboard, while the amount sheet is
+  open.** The lift follows a keyboard-frame change rather than only its first
+  appearance.
+- **The Library facet sheet** (tap a filter chip) shares every style with the
+  extras curtain and had the identical wash; check it in the same pass.
+- **Largest Dynamic Type.** The day pill now renders two lines on today where
+  Food previously rendered one; confirm it does not push the target row or the
+  first meal card off a small screen.
+
+### Needs a device
+
+- **The Done button clear of the keypad, measured by eye.** The regression
+  test asserts the footer is *told* to lift by at least the keyboard's height;
+  jest has no keyboard and runs no layout pass, so the pixel position is
+  unverifiable there. This is the one that must be seen.
+- **The curtain's colour against the app around it.** "Way off" was a
+  judgement made looking at a phone, and the fix is a judgement about the same
+  thing; a value read out of the source proves only that it is derived.
+- **Both sheets on an OLED phone in a dark room**, where a translucent fill
+  over a dimmed list is least forgiving.

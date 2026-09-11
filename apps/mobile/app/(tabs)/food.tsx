@@ -55,6 +55,7 @@ import { MealCard } from '@/components/food/MealCard';
 import { RemainingBlock } from '@/components/food/RemainingBlock';
 import { TargetRow } from '@/components/food/TargetRow';
 import { TrackerList } from '@/components/TrackerList';
+import { DayPill } from '@/components/ui/DayPill';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -62,7 +63,6 @@ import {
   addDays,
   addMonths,
   dayOffsetFor,
-  dayPillLabel,
   dayString,
   monthGrid,
   startOfMonth,
@@ -762,8 +762,14 @@ export default function FoodScreen() {
         <ScreenHeader title="Food" contentScrollsUnder={false} />
 
         <RNView style={styles.body}>
-          <PeriodSwitcher
-            label={dayPillLabel(new Date(`${on}T12:00:00`), isToday)}
+          {/* `DayPill`, not a hand-assembled `PeriodSwitcher` — N493 part 3
+              (#858 item 5). Both lines of text, the icon and the arrows'
+              names are decided in that one component, so this pill and
+              Today's cannot say different things again; see its doc comment
+              for why `onPress` is still ours to choose. */}
+          <DayPill
+            viewDay={new Date(`${on}T12:00:00`)}
+            isToday={isToday}
             onPrev={() => setDay(dayOffset - 1)}
             onNext={() => setDay(dayOffset + 1)}
             // N81/#415: this used to jump straight back to today and only when
@@ -776,9 +782,6 @@ export default function FoodScreen() {
             // grid now, matching `WeekPlanner`'s identical control — "back to
             // today" moved to that sheet's own Today button, one tap in.
             onPress={openMonth}
-            icon="calendar"
-            prevLabel="Previous day"
-            nextLabel="Next day"
             pressLabel="Open the calendar to jump to another day."
             testID="food-day"
           />

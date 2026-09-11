@@ -173,7 +173,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: 'rgba(255,255,255,0.07)',
+    // N493 part 3 (#858 item 6) tokenised the Library sheets these
+    // styles were copied from; matched here in the same commit so the two
+    // do not sit a hair apart. `vola.text` is #F3F6FA, not pure white.
+    borderColor: withAlpha(vola.text, 0.07),
     overflow: 'hidden',
   },
   grabber: {
@@ -181,7 +184,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: withAlpha(vola.text, 0.18),
     marginTop: 8,
     marginBottom: 4,
   },
@@ -193,7 +196,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: withAlpha(vola.text, 0.08),
   },
   title: { flex: 1, fontSize: 16, fontWeight: '800' },
   done: { fontSize: 14, fontWeight: '700', color: vola.lime },
@@ -203,7 +206,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 2,
   },
-  optionPressed: { backgroundColor: 'rgba(255,255,255,0.05)' },
+  optionPressed: { backgroundColor: withAlpha(vola.text, 0.05) },
   optionOff: { opacity: 0.45 },
   optionText: { fontSize: 15, fontWeight: '600' },
   optionDanger: { color: vola.danger },

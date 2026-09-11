@@ -138,7 +138,11 @@ beforeEach(() => {
 it('with no `?date=`, opens on today — unchanged from before N430/#692', async () => {
   await render(<FoodScreen />);
   await settle();
-  expect(screen.getByTestId('food-day-label')).toHaveTextContent('TODAY');
+  // N493 part 3 (#858 item 5) — the pill now carries BOTH lines Today's
+  // has: `TODAY` and the long date under it, from the one shared `DayPill`.
+  // So this asserts the word rather than the whole text content, which the
+  // sub-line would otherwise fail.
+  expect(screen.getByTestId('food-day-label')).toHaveTextContent(/^TODAY/);
 });
 
 it('seeds the stepper from `?date=` on first mount, without a flash of today first', async () => {
