@@ -17,7 +17,13 @@ import { useAccent } from '@/lib/AccentProvider';
 import { isNotFound } from '@/lib/apiError';
 import { PHASE_LABELS, listPhases, type Phase } from '@/lib/body';
 import { isHealthKitSupported } from '@/lib/healthkit';
-import { healthSourceFor, healthSourceLabel, vo2MaxFetchWindow, vo2MaxRowVisible } from '@/lib/vo2MaxSource';
+import {
+  healthSourceFor,
+  latestReadingOn,
+  vo2MaxFetchWindow,
+  vo2MaxRowDetail,
+  vo2MaxRowVisible,
+} from '@/lib/vo2MaxSource';
 import { listBiometricSamples } from '@/lib/biometric';
 import { dayString } from '@/lib/calendar';
 import { playSound } from '@/lib/sounds';
@@ -194,7 +200,14 @@ export default function YouScreen() {
   // from a previous phone, or from the other platform, are the athlete's
   // whatever this handset can read from. `false` until answered — a fetch
   // failure leaves the row to the device-source rule, never hides it.
-  const [vo2HasReadings, setVo2HasReadings] = useState(false);
+  // N524/#939 — the count and newest day as well, not only whether any exist,
+  // so the pill's spoken description (`NavRow`'s `accessibilityHint`; the grid
+  // draws no caption) can say "1 reading, from 21 Aug" instead of promising a
+  // trend the account has never had. `null` until answered; a failed fetch
+  // leaves it there, and the hint keeps its feature description rather than
+  // guessing. See `vo2MaxRowDetail` for why the pill is not visibly relabelled.
+  const [vo2Readings, setVo2Readings] = useState<{ count: number; latestOn: string | null } | null>(null);
+  const vo2HasReadings = (vo2Readings?.count ?? 0) > 0;
   const [friendCountAnswered, setFriendCountAnswered] = useState(false);
   /*
     The last counts we actually saw, so a rise can be told from a first look.
@@ -310,11 +323,12 @@ export default function YouScreen() {
         // was refused with a 400 on every call, and swallowed it: the
         // "account has readings" branch below was dead code behind a green
         // test. See `vo2MaxFetchWindow`'s doc comment.
-        const { from, to } = vo2MaxFetchWindow(dayString(new Date()));
+        const today = dayString(new Date());
+        const { from, to } = vo2MaxFetchWindow(today);
         listBiometricSamples(getToken, 'vo2_max', from, to)
           .then((samples) => {
             if (!alive) return;
-            setVo2HasReadings(samples.length > 0);
+            setVo2Readings({ count: samples.length, latestOn: latestReadingOn(samples, today) });
           })
           .catch(() => {
             // Leave whatever was known; the source rule still shows the row.
@@ -578,11 +592,12 @@ export default function YouScreen() {
                   <NavRow
                     icon="heart"
                     label="VO2max"
-                    detail={
-                      source
-                        ? `Your cardio fitness trend, read from ${healthSourceLabel(source)}`
-                        : 'Your cardio fitness trend'
-                    }
+                    detail={vo2MaxRowDetail({
+                      source,
+                      readingCount: vo2Readings?.count ?? null,
+                      latestOn: vo2Readings?.latestOn ?? null,
+                      today: dayString(new Date()),
+                    })}
                     onPress={() => router.push('/vo2max/trend')}
                     testID="you-vo2max"
                   />
