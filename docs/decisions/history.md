@@ -72032,7 +72032,7 @@ Verified in both directions, against real input rather than only the fixtures:
   (the retry went through REST). The claim convention is right that an issue exists the moment
   it is created; the window between scan and create is still a window.
 
-### 2026-09-11 — L14: the admin console's three irreversible writes acknowledge a press
+## 2026-09-11 — L14: the admin console's three irreversible writes acknowledge a press
 
 **What.** `PublishButton`, `RetireButton` and `ReactivateButton` — the console's
 only write surface — get a `.pressable` rule: a 3% scale on `:active`, timed from
