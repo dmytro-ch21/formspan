@@ -72359,6 +72359,104 @@ the same mechanical way (every name the brief gives resolves) and by a fresh
   exceptions would each need a written reason, like `ALLOWED_OUTSIDE` has, and
   deciding whether palette/icons/tokens *should* run in CI is its own question.
 
+## 2026-09-11 — H29 (#1113): `ci:checks` waits out REST's `mergeable: null` before calling a green set UNKNOWN
+
+### Most of this ticket had already been done, and nobody noticed until it merged
+
+H29 started as "make `ci:checks` stop dying on the shared GraphQL rate limit". It
+reached a green, reviewed, CI-passing pull request (#1115) that did exactly that:
+REST lookups, the REST→GraphQL mapping measured on live pull requests, and
+zero-GraphQL runs proven with a stand-in `gh`. It was one rebase from merging when
+H27 (#1116, issue #1099) landed underneath it, having done the same work in the
+same file.
+
+#1099 was filed at 15:27; H29 was claimed after 18:00. **The claim looked for the
+highest free id and never searched the open list for the same problem.**
+CLAUDE.md's claiming rules stop two sessions taking *the same ticket*. Nothing in
+them stops two sessions filing *two tickets* for one problem.
+
+The cost was one full implementation cycle. What surfaced it was `ci:checks`
+itself exiting 5, because H27's merge had moved the base under #1115. Before
+allocating an id, search open *and recently closed* issues by topic.
+
+### What H27 did not cover
+
+H27 maps REST `mergeable: null` straight to UNKNOWN, and its self-test pins that a
+green set with `null` exits 0. In H27's own snapshot, REST and GraphQL were `null`
+together on four pull requests, so the two APIs agreed.
+
+Two things measured on 2026-09-11 say a single read is not enough:
+
+- **After the base moves.** H26 (#1103) merged into `main` at 18:22:09Z. Seconds
+  later REST read `mergeable: null` for #1100, while GraphQL still, correctly,
+  reported CONFLICTING. The GraphQL-era script exited **5**; a REST script
+  mapping `null` straight to UNKNOWN exited **0**. Minutes later REST read
+  `false/dirty` on all ten polls over 38 seconds.
+- **On the first read of a pull request nobody has asked about lately.** At about
+  19:01Z, listing the open pull requests one by one found **five of eight**
+  reading `null/unknown`. Seconds later every one had an answer. #1105 went from
+  `null` to `false/dirty`, so a single read at that moment would have let a
+  stale green exit 0.
+
+GitHub computes mergeability lazily, and the moment it is least likely to be
+computed is exactly when a green set goes stale. That second case is the ordinary
+one for a session running `ci:checks` once on its own pull request.
+
+### What changed
+
+`resolve_pull` handles an **open** pull request whose REST `mergeable` is `null`:
+
+- it re-reads `GET pulls/{n}` after 2s, then 3s, then 5s;
+- it stops the moment REST answers, so a healthy run pays nothing;
+- if REST is still `null` after the last delay, it maps to UNKNOWN, exactly as
+  H27 did.
+
+A closed or merged pull request is `null` for good (both APIs say UNKNOWN for
+#1095), so it is read once and never waited on.
+
+**No GraphQL fallback.** H29's first version asked GraphQL once for its last
+computed answer when REST stayed `null`, which would catch exit 5 even in a
+longer window. It was dropped, by the user's decision, because it would break
+H27's REST-only invariant, which `gh_rest` and the self-test's
+single-`gh`-subprocess check enforce. The retry goes through `gh_rest` like
+every other call, so that check passes unmodified.
+
+The full first version is on the local branch `h29-full-backup` and in #1115's
+history, if the trade-off is ever revisited.
+
+### Verified, not asserted
+
+- **Self-test: five new checks.** Four vectors call `resolve_pull` directly:
+  answered first time, `null`→`null`→`false`, `null` throughout, and a merged
+  pull request. Each asserts the exit code through `diagnose`, the number of
+  REST reads, and the exact delays slept.
+- **The fifth is a wiring check, added because a mutation survived without it.**
+  Making `pr_facts` go back to a single read, with `resolve_pull` itself left
+  intact, kept every vector green, because nothing called `pr_facts`. The new
+  check swaps the module's `gh_rest` and `time` for fakes and asserts
+  `pr_facts` re-reads a `null` and lands on CONFLICTING.
+- **Mutations, in-process and never on disk, each checked against a green
+  unmutated load:** no retry, a merged PR retried, sleeping on after REST
+  answered, wrong delays, `resolve_pull` replaced by one read, and `pr_facts`
+  bypassing `resolve_pull`. Every one goes red with the failing vector named, and
+  a fresh load is green again afterwards.
+- **Live, with GraphQL refused by a stand-in `gh`:**
+  - `--pr 1115`, conflicting: exit 5, one read, 1s.
+  - `--pr 1095`, merged: exit 0, one read, no sleep.
+  - #1105, #1009, #1008, #926 and #868: exits 5, 2, 0, 2 and 1, matching each
+    PR's real state.
+  - Zero GraphQL-shaped calls in every call log.
+  - The retry path itself was not caught firing live: by the time the script
+    ran, the listing's own reads had triggered the computation. The self-test is
+    what exercises it.
+
+### What is not settled
+
+- **How long the window lasts was never measured.** Both observations closed
+  within seconds to minutes. Ten seconds covers the short end.
+- **Past the last delay, a stale green still reads UNKNOWN.** That is exit 0 with
+  a note to re-run, which is H27's behaviour, now reached only after the retries.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
