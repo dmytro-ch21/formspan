@@ -883,6 +883,11 @@ def self_test() -> int:
     # in `facts_from_rest`; the stale-green pair runs them through the REAL
     # decision, because a mapping that is right in isolation and wrong where
     # `diagnose` reads it would be the exit-5 case silently passing again.
+    # Counted into the summary line, so `verify`'s output shows these ran — the
+    # line used to name only the decision and diagnosis vectors, which made a
+    # self-test that silently skipped all of this look identical to one that
+    # ran it. Noted by pre-merge-checker.
+    rest_checks = 0
     for url, want in [
         ("https://github.com/dmytro-ch21/formspan.git", "dmytro-ch21/formspan"),
         ("https://github.com/o/r", "o/r"),
@@ -892,6 +897,7 @@ def self_test() -> int:
         ("https://gitlab.com/o/r.git", None),
         ("", None),
     ]:
+        rest_checks += 1
         got = parse_github_slug(url)
         if got != want:
             failures.append(f"  parse_github_slug({url.strip()!r}): {got!r}, expected {want!r}")
@@ -909,6 +915,7 @@ def self_test() -> int:
         ("an integer is not a boolean", {"mergeable": 1}, "UNKNOWN", "UNKNOWN"),
         ("a zero is not a boolean", {"mergeable": 0}, "UNKNOWN", "UNKNOWN"),
     ]:
+        rest_checks += 1
         got = facts_from_rest({"number": 1, "head": {"sha": "abc", "ref": "b"}, **pull})
         if (got["mergeable"], got["mergeStateStatus"], got["headRefOid"]) != (want_m, want_s, "abc"):
             failures.append(
@@ -916,6 +923,7 @@ def self_test() -> int:
                 f"/{got['headRefOid']}, expected {want_m}/{want_s}/abc"
             )
 
+    rest_checks += 2
     green, _ = evaluate(FIVE, [_run(n) for n in FIVE])
     stale = diagnose(green, facts_from_rest({"mergeable": False, "mergeable_state": "dirty"}))
     if stale[0] != EXIT_STALE:
@@ -925,6 +933,7 @@ def self_test() -> int:
         failures.append("  REST lazy mergeable: null on a green set must stay 0 AND say UNKNOWN")
 
     for pulls, want in [([], "no open pull request"), ([{"number": 1}, {"number": 2}], "#1, #2")]:
+        rest_checks += 1
         try:
             pick_open_pr(pulls, "b")
             failures.append(f"  pick_open_pr: {len(pulls)} pull requests did not refuse")
@@ -933,10 +942,12 @@ def self_test() -> int:
                 failures.append(f"  pick_open_pr: {str(err)!r} does not mention {want!r}")
         except Exception as err:  # noqa: BLE001 — a crash here must be a reported failure, not a traceback
             failures.append(f"  pick_open_pr: {len(pulls)} pull requests raised {type(err).__name__}, not a refusal")
+    rest_checks += 1
     if pick_open_pr([{"number": 7}], "b") != {"number": 7}:
         failures.append("  pick_open_pr: one pull request was not returned")
 
     for path in ("graphql", "/graphql", "graphql?query=x"):
+        rest_checks += 1
         try:
             gh_rest(path)
             failures.append(f"  gh_rest: GraphQL path {path!r} was not refused")
@@ -947,6 +958,7 @@ def self_test() -> int:
     # And that nothing calls `gh` AROUND `gh_rest`: exactly one `gh`
     # subprocess in this file, and it is `gh api`. The needle is assembled so
     # this line does not count itself.
+    rest_checks += 1
     own = Path(__file__).read_text(encoding="utf-8")
     gh_calls = re.findall(re.escape('["' + 'gh"') + r"[^\]]*\]", own)
     if gh_calls != ['["' + 'gh", "api", path]']:
@@ -1006,6 +1018,7 @@ def self_test() -> int:
     print(
         f"ci-check detector ok — {len(vectors)} decision vectors, "
         f"{len(diagnoses)} diagnosis vectors, "
+        f"{rest_checks} REST-only checks (H27), "
         f"{len(names)} check(s) declared by the workflows ({', '.join(names)})"
     )
     return EXIT_OK
