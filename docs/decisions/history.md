@@ -72238,6 +72238,127 @@ GraphQL call per PR-body edit, and `gh pr create` still spends it. Neither is
 polled. Attributing points per session, a second account, or per-session PATs
 are the board owner's credential decisions.
 
+## 2026-09-11 — H25: the pre-merge checker stops carrying a copy of the verify chain (#1096)
+
+`.claude/agents/pre-merge-checker.md` is the brief `/pre-merge` hands to the
+agent that runs the check suite. It carried a description of that suite, and
+three parts of it had gone stale in ways the agent acts on. Measured against
+`origin/main` at `e240c094`:
+
+- **The chain.** "As of 2026-08-19 the chain is 20 links", then the list. The
+  real `verify` is **48 top-level links**, and `check-verify-chain.py` reports
+  "54 gates, 49 in the chain, 5 excluded and run by CI". The 49 includes
+  `routes:mobile`, which `typecheck:mobile` runs. The copy started at
+  `validate_palette` → `generate_icons --check`. Those two are now
+  `check:palette` / `check:icons`, and seven `check:` links run ahead of them.
+  This was the list's **fourth** drift. It had already missed `lint:mobile`'s
+  ratchet, then the two parity checks, then `check:evals`, and the paragraph
+  directly above it already said so and already told the agent not to trust it.
+- **The warning ratchet.** It said `lint:mobile` is `eslint . --max-warnings=54`
+  with zero headroom. It has been a plain `eslint .` since N153 (#557) moved the
+  budget into `scripts/check-lint-ratchet.mjs`: per-rule caps, a separate
+  `check:lint-ratchet` link, and a separate CI step. An agent following the old
+  text reports a green `lint:mobile` as the warning gate, and that link cannot
+  fail on warnings at all.
+- **The by-job list.** It said CI's Scripts job runs "all four" scripts. It runs
+  eighteen.
+
+**The decision, same as H24's (#1094, CI check-run numeral): no corrected copy.**
+The brief now tells the agent to read the chain from `package.json` and to quote
+`check-verify-chain.py`'s success line for its size. The lint paragraph points at
+the per-app, per-rule `live / cap` tables the ratchet prints, and names neither a cap nor the
+script's cap table. The by-job block
+is now a `grep` over `ci.yml`'s step names, plus the short list of what CI runs
+that `verify` does not.
+
+That short list is the one dated enumeration left, and it is kept on purpose. Its
+`package.json` half (`build:web`, `build:admin`, `test:api:all`) is exactly the
+set `check-verify-chain.py` prints and fails on, so the brief tells the agent to
+trust the script if the two disagree. Its other half (migrate, Docker build) has
+no checker, and the brief says so.
+
+### The verify-only set, re-derived rather than renamed
+
+The old brief also said `validate_palette` and `generate_icons --check` run in
+`verify` and in no CI job. Renaming them would have been wrong. Checked against
+every file in `.github/workflows/`, the set is **three** links:
+`check:palette`, `check:icons` and **`check:design-tokens`**, which the old
+sentence predates. `check:pr-work`'s self-test is absent from `ci.yml` but runs
+in `pr-has-work.yml`.
+
+**The first pass at this measurement was wrong, and the way it was wrong is now
+in the brief.** Matching each link by its `pnpm run` name against `ci.yml`
+reported **all ten** Go links (`fmt:api` through `test:engine`) as missing from
+CI. They are not missing. CI sets `working-directory: backend` / `engine` where
+`package.json` says `cd backend &&`, and it runs the gofmt/vet/build/test lines
+under step names rather than script names. `test:contract` is covered a third
+way: its package sits under the `./...` that `test:api:all` runs. `check-verify-chain.py`'s own
+`gate_runs_in_ci` strips a leading `cd` for this reason. The brief now tells an
+agent re-deriving the set to match the command, not the name, since **nothing
+enforces this direction.** `check-verify-chain.py` asserts every gate is in
+`verify`, never that every `verify` link is in CI.
+
+### Also corrected in passing
+
+- A dangling "As of this writing `verify` is:" sat directly above the paragraph
+  that says not to trust a listing.
+- "The three that need more than it exited 0" introduced four paragraphs. It is
+  now "The checks that…", with no numeral.
+- The `-p 1` paragraph now says `check-api-tests.py` already passes it
+  (`GO_TEST_ARGS`), so the warning is aimed at a hand-run `go test`.
+
+### Checked
+
+Every `pnpm run` name the brief still gives exists in `package.json`, and every
+script path it gives exists on disk, checked with a script rather than by
+reading. The `grep` over `ci.yml` step names was run and returns each job's name
+followed by its steps. The ratchet's per-app heading, its row format
+(`<status> <live> / <cap> <rule>`) and its four statuses were read from the
+script's print statements, not assumed. They were read again after the rebase
+described below.
+
+### N555 landed underneath this branch, and the hedge against it did not hold
+
+N555 (#1034) merged while this PR's gates were running. The ratchet now covers
+`apps/mobile`, `apps/web` and `apps/admin`, with one cap table per app in
+`APP_BUDGETS`. That left PR #1100 `CONFLICTING` on `history.md` with **zero check
+runs**, which is exactly H18's case. `ci:checks` named the cause; the rebase went
+through cleanly and the append-only driver kept both entries.
+
+The first draft of this entry listed N555 as not settled. It said the brief should
+survive N555 because it described the ratchet by its table and its link name,
+not by the apps it covers. **It did not survive, and naming things was the
+reason.**
+
+- The brief named the table `RULE_CAPS`, and N555 replaced that table.
+- The brief called it "the mobile warning budget" and said a green `lint:mobile`
+  tells you nothing about warnings. That is still true, but it is now equally
+  true of `lint:web` and `lint:admin`, and the ratchet's CI step can fail its
+  mobile-named job over a web or admin warning.
+
+Naming the thing rather than pointing at its output is the same copy-that-rots
+mistake this ticket removes, one level down, and it went stale within the same
+review cycle. The paragraph now points at the tables the run prints, and names no
+table in the source.
+
+Everything else measured above was re-measured on the rebased tree (`e29a0a29`)
+and is unchanged: 48 links, `check:palette` eighth, the same 54/49/5 line, and
+eighteen Scripts steps. The three verify-only links are also the same. The only
+`ci.yml` change N555 made was the ratchet step's name and comment.
+
+**The two gate agents' verdicts predate this paragraph.** Both `ac-verifier` and
+`pre-merge-checker` reported against `afa08c18`. The post-rebase edit was checked
+the same mechanical way (every name the brief gives resolves) and by a fresh
+`verify`, not by another agent run.
+
+### Not settled
+
+- **The verify-only set is dated prose with no checker.** If a fourth
+  CI-absent link appears, nothing turns red. A check for that direction would
+  belong in `check-verify-chain.py`. It was not added here: the three existing
+  exceptions would each need a written reason, like `ALLOWED_OUTSIDE` has, and
+  deciding whether palette/icons/tokens *should* run in CI is its own question.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
