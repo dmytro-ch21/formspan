@@ -22838,3 +22838,58 @@ stated three times, not two.
 - With Reduce Motion on: push into Settings and back; finish a session; watch a
   live heart-rate reading arrive.
 - Toggle Reduce Motion off while backgrounded, return, confirm all three revert.
+
+## F44 — the food reorder drag has haptics and one clock (`apps/mobile/lib/useEntryDrag.ts`, `components/food/EntryRow.tsx`, #1043)
+
+Press-and-hold to reorder an entry (N553) shipped silent. Three haptic moments
+now exist, and a fourth deliberately does not.
+
+### Happy path
+
+- **Arm**: hold a food row ~300ms. One light impact the moment it lifts, in the
+  same frame the row rises.
+- **Cross**: drag up or down. One selection tick each time the row's landing
+  position changes — a different slot, or a different meal — and nothing between
+  crossings.
+- **Drop**: release over a valid target. One light impact, and the row lands.
+- The lift's scale and its translate move together: the row grows into the lift
+  and settles out of it, rather than popping and snapping.
+
+### Edge cases & errors
+
+- **A cancelled drag is silent.** Release outside every section, or let the
+  gesture terminate (a call arrives, the parent scroll steals the responder).
+  No impact. The athlete must never feel the same confirmation for "moved" and
+  "gave up".
+- **A release before the frames arrive** is a cancel, not a guessed move —
+  silent, and `onDrop` is not called.
+- **Holding still inside one slot** produces exactly one tick, not one per
+  frame. This is the failure mode the change is most likely to introduce:
+  `move` runs 60-120 times a second.
+- **A drag that crosses many slots quickly** produces one tick per crossing, in
+  order. Expect them to feel like a ratchet, not a rattle.
+- **System Haptics off**, or Android hardware with no actuator: everything still
+  works and the visual lift is unchanged. The haptic is never the only feedback.
+
+### What a test can and cannot reach
+
+- **Reachable, and covered** (`lib/__tests__/useEntryDrag.test.ts`, 6 cases):
+  the count and placement of every call — one on arm, one per crossing (asserted
+  against twenty frames inside a single slot), one on commit, zero on both cancel
+  paths. Both mutations — removing the crossing guard, and firing the commit on
+  cancel — go red.
+- **NOT reachable, and it is the whole point of a haptic**: whether any of it can
+  be *felt*, and whether three feedback types read as three distinct events under
+  a thumb. A simulator has no Taptic Engine, so the suite asserts calls and can
+  never assert sensation.
+- **Also not reachable**: whether the crossing tick is welcome or irritating over
+  a long drag. That is a taste judgment on hardware, and it is the one thing most
+  likely to want tuning after a real session.
+
+### Needs a device
+
+- Reorder a row within one meal, slowly, feeling for one tick per crossing.
+- Drag across meals and drop; then drag and cancel — confirm the second feels
+  like nothing.
+- Turn System Haptics off in iOS Settings and confirm the drag is still fully
+  usable on the visual lift alone.

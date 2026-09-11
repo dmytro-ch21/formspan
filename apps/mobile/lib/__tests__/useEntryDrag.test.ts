@@ -7,6 +7,7 @@
  * A drop now names TWO things — the meal, and the SLOT inside it — so every
  * case below asserts both.
  */
+import * as Haptics from 'expo-haptics';
 import { act, renderHook } from '@testing-library/react-native';
 
 import {
@@ -247,5 +248,113 @@ describe('useEntryDrag', () => {
     expect(result.current.target).toBeNull();
     await act(() => result.current.end(250));
     expect(onDrop).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F44 — the drag's three haptic moments, and the one that must never fire.
+ *
+ * `move` is called from `onPanResponderMove`, which runs 60-120 times a second.
+ * React bails out of an unchanged `setSlot`, so the RE-RENDER cost is per
+ * crossing — but a haptic has no such bail-out. Fired unguarded there it is a
+ * buzz per frame, and that is the single worst thing this change could ship.
+ * These tests exist because "it felt fine when I dragged it once" cannot tell
+ * the difference between one tap per crossing and one tap per frame on a
+ * simulator with no haptics at all.
+ */
+describe('F44 — haptics', () => {
+  // `jest.setup.js` mocks `expo-haptics` with plain arrows (there is no native
+  // module under jest), so there is nothing to assert on until we spy. Spying
+  // locally rather than making the global mock a `jest.fn()`: that file is
+  // shared by every suite, and widening it for one test is how shared setup
+  // accumulates.
+  let impactSpy: jest.SpyInstance;
+  let selectionSpy: jest.SpyInstance;
+
+  const impact = () => impactSpy.mock.calls.length;
+  const selection = () => selectionSpy.mock.calls.length;
+
+  beforeEach(() => {
+    impactSpy = jest.spyOn(Haptics, 'impactAsync').mockResolvedValue(undefined);
+    selectionSpy = jest.spyOn(Haptics, 'selectionAsync').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('the lift is felt once, when the hold arms', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    expect(impact()).toBe(1);
+  });
+
+  it('dragging within one slot is felt ONCE, not once per frame', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    selectionSpy.mockClear();
+
+    // Twenty frames of a finger that has not left the slot. A real drag sends
+    // far more than twenty; this is the shape, not the volume.
+    await act(() => {
+      for (let i = 0; i < 20; i++) result.current.move(155);
+    });
+    expect(selection()).toBe(1);
+  });
+
+  it('each crossing is felt, and only on the crossing', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    selectionSpy.mockClear();
+
+    await act(() => {
+      result.current.move(115); // breakfast, slot 0
+      result.current.move(115); // same — silent
+      result.current.move(165); // breakfast, a later slot
+      result.current.move(250); // lunch
+      result.current.move(250); // same — silent
+    });
+    expect(selection()).toBe(3);
+  });
+
+  it('a completed drop is felt', async () => {
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    impactSpy.mockClear();
+
+    await act(() => result.current.end(250));
+    expect(impact()).toBe(1);
+  });
+
+  it('a CANCELLED drag is felt exactly nothing', async () => {
+    // The asymmetry that matters. `cancel` is also what `onPanResponderTerminate`
+    // calls, and confirming a move that did not happen is worse than silence —
+    // the athlete would feel the same tap for "moved" and "gave up".
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    impactSpy.mockClear();
+
+    await act(() => result.current.cancel());
+    expect(impact()).toBe(0);
+  });
+
+  it('a release with no frames is a cancel, and is silent', async () => {
+    // The frames never arrived, so there is no honest drop target. `end` takes
+    // the cancel path, and must feel like one.
+    const measure = jest.fn(() => new Promise<Frames>(() => {}));
+    const onDrop = jest.fn();
+    const { result } = await renderHook(() =>
+      useEntryDrag({ enabled: true, measure, onDrop }),
+    );
+    await act(() => result.current.start('e1', 'breakfast'));
+    impactSpy.mockClear();
+
+    await act(() => result.current.end(250));
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(impact()).toBe(0);
   });
 });

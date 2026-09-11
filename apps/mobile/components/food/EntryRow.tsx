@@ -63,12 +63,13 @@
  * Greek yoghurt" — hidden while selecting for the same reason the drag is.
  */
 
-import { useCallback, useMemo, useState } from 'react';
-import { Animated, PanResponder, StyleSheet, View as RNView } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Animated, Easing, PanResponder, StyleSheet, View as RNView } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { EASE, MS } from '@/constants/Motion';
 import { glyphFor } from '@/lib/foodGlyph';
 import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { type Entry, type Meal } from '@/lib/nutrition';
@@ -173,9 +174,33 @@ export function EntryRow({
 }) {
   // One of each per row, for the row's lifetime — see `gestureFlags`.
   const [lift] = useState(() => new Animated.Value(0));
+  /**
+   * The lift's SCALE, on the same clock as its translate.
+   *
+   * It used to be a plain `scale: isDragging ? 1.02 : 1` bound to a boolean, so
+   * the row popped to 1.02 in one frame at pickup and snapped back to 1.0 the
+   * instant the flag cleared — while `lift` was still springing home underneath
+   * it. Two halves of one gesture on two different clocks, and the snap-back
+   * was the visible half.
+   *
+   * Lazy `useState`, not `useRef(...).current`: `react-hooks/refs` flags
+   * reading `.current` during render, and `check:lint-ratchet` is in `verify`.
+   */
+  const [liftScale] = useState(() => new Animated.Value(1));
   const [flags] = useState(gestureFlags);
   const dragEnabled = !!drag && drag.enabled && !selecting;
   const isDragging = !!drag && drag.activeId === entry.id;
+
+  useEffect(() => {
+    const anim = Animated.timing(liftScale, {
+      toValue: isDragging ? 1.02 : 1,
+      duration: MS.press,
+      easing: Easing.bezier(...EASE.out),
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [isDragging, liftScale]);
 
   // The responder is memoised on the callbacks it forwards to and on the one
   // thing that changes its DECISION (`dragEnabled`) — never on `activeId`,
@@ -264,7 +289,9 @@ export function EntryRow({
       style={[
         styles.wrap,
         isDragging && styles.lifted,
-        { transform: [{ translateY: lift }, { scale: isDragging ? 1.02 : 1 }] },
+        // `translateY` stays FIRST: transform order matters, and scaling
+        // before translating would scale the translation too.
+        { transform: [{ translateY: lift }, { scale: liftScale }] },
       ]}
       {...responder.panHandlers}
       testID={`food-entry-${entry.id}-row`}

@@ -69834,6 +69834,58 @@ can. It makes the write impossible to COMMIT unnoticed, which is the reachable
 half. The skill's instruction to check `git status` after running that command
 is still the earlier and cheaper catch.
 
+### 2026-09-11 — F44: the reorder drag gets its three haptic moments, and one clock
+
+**What.** Press-and-hold to reorder a food entry (N553, #1029) shipped
+completely silent. All three haptic moments now exist, in `lib/useEntryDrag.ts`
+rather than spread across the components that call it: an impact when the hold
+arms, a **selection tick on every slot crossing**, and an impact on the commit.
+Separately `EntryRow`'s lift scale moved onto the same `Animated.Value` clock as
+its translate.
+
+**Why the lift was the visible half.** `scale` was a plain
+`isDragging ? 1.02 : 1` bound to a boolean, so the row popped to 1.02 in one
+frame and snapped back the instant the flag cleared — while `lift` was still
+springing home underneath it. Two halves of one gesture on two different clocks,
+and the snap-back is the one you notice.
+
+**The boundary haptic is a judgment call, taken deliberately, and the two audits
+disagreed.** `improve-animations`' P6 asked only for pickup and drop;
+`apple-design` H3 asked for a tick on every crossing because that is what tells
+you where the row will land without watching, and iOS does it natively in its
+own reorder lists. Taken, because this product's stated use is one-handed and
+glancing — feeling the landing position is worth more here than on a desktop.
+
+**It is also the one change most likely to ship a defect, so it is the one most
+tested.** `move` runs from `onPanResponderMove` — 60-120 times a second. React
+bails out of an unchanged `setSlot`, which is why the re-render cost is per
+crossing; a haptic has no such bail-out, so unguarded it is a buzz per frame. A
+`feltAt` ref keys on `section:slot` and fires once per change. Six tests cover
+it, including twenty frames inside one slot asserting exactly one tick. Both
+mutations — removing the guard, and firing the commit on cancel — go red.
+
+**Cancel must feel like nothing, and that asymmetry is tested.** A release whose
+frames never arrived takes the cancel path, and `onPanResponderTerminate` calls
+`cancel` — confirming a move that did not happen is worse than silence, because
+the athlete would feel the same tap for "moved" and for "gave up".
+
+**A criterion this ticket could not satisfy literally, stated rather than
+quietly reinterpreted.** F44's acceptance criteria say *zero* haptic calls in
+`onPanResponderMove` — but the same ticket explicitly permits the boundary tick,
+which can only live there. The criterion's intent is "no unguarded per-frame
+haptic"; that is how it was read, and the guard is what earns it. If the literal
+reading was meant, the boundary tick has to go and the ticket should say so.
+
+**Deliberately not fixed here.** `useEntryDrag.ts`'s `move()` still calls
+`setTarget`/`setSlot` from the gesture, one full re-render of the day view per
+crossing on the JS thread. Moving that decision onto the UI thread needs a
+gesture recognizer that runs there, which is N560's decision, not this ticket's.
+
+**Not verified.** No device. Haptics are the one thing a simulator cannot report
+at all — it has no Taptic Engine, so every test here asserts *calls*, never
+sensation. Whether three distinct feedback types read as three distinct events
+under a thumb is a question only hardware answers.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
