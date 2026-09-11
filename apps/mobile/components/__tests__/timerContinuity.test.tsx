@@ -180,22 +180,35 @@ describe('defect 3 — the drain is one UI-thread animation per change, not a st
     const timing = jest.spyOn(Reanimated, 'withTiming');
     await startRest(90);
 
+    // One arm: a zero-length jump to the true position, then the drain.
     const armed = timing.mock.calls.length;
-    expect(armed).toBeGreaterThan(0);
+    expect(armed).toBe(2);
     const [toValue, config] = timing.mock.calls[armed - 1];
     expect(toValue).toBe(0);
     expect(config).toMatchObject({
       easing: Reanimated.Easing.linear,
       reduceMotion: Reanimated.ReduceMotion.Never,
     });
-    // The drain lasts what is left, less the bridge — the deadline, not a guess.
-    expect(config!.duration).toBeGreaterThan(90_000 - MS.control - 50);
-    expect(config!.duration).toBeLessThanOrEqual(90_000 - MS.control);
+    // The drain lasts what is left — the deadline, not a guess.
+    expect(config!.duration).toBeGreaterThan(90_000 - 50);
+    expect(config!.duration).toBeLessThanOrEqual(90_000);
 
     await advance(30_000);
     expect(timing.mock.calls.length).toBe(armed);
     // Where the armed animation comes to rest: empty.
     expect(drainScale()).toBe(0);
+  });
+
+  it('jumps on its FIRST arm rather than refilling from a stale seed', async () => {
+    // On a fresh rest the countdown's clock has not published yet when the bar
+    // first renders, so the fill can be seeded at 0. A bridge from there would
+    // refill the bar from empty over 180ms at the start of EVERY rest.
+    answerReduceMotion(false);
+    const timing = jest.spyOn(Reanimated, 'withTiming');
+    await startRest(90);
+    const [jumpTo, jump] = timing.mock.calls[0];
+    expect(jump).toMatchObject({ duration: 0 });
+    expect(jumpTo).toBeCloseTo(1, 2);
   });
 
   it('re-arms from the countdown\'s CURRENT position on ±15s, not from the top', async () => {
@@ -272,6 +285,17 @@ describe('defect 2 — arrival and the bar ↔ card swap are animated, and respe
     expect(exiting.name).toBe('FadeOutUp');
     // Exits are faster than entries.
     expect(exiting.config.duration).toBe(MS.press);
+  });
+
+  it('skips the swap animation when the whole surface arrives or leaves (no fade inside a fade)', async () => {
+    answerReduceMotion(false);
+    await startRest(90);
+    const config = screen.getByTestId('layout-animation-config');
+    expect(config.props.skipEntering).toBe(true);
+    expect(config.props.skipExiting).toBe(true);
+    // And the swap wrapper is actually inside it, not beside it.
+    const inside = findAllByType(config as TreeNode, 'View').filter((n) => n.props.entering != null);
+    expect(inside).toHaveLength(1);
   });
 
   it('crossfades the swap, the incoming form settling up from SWAP_SCALE', async () => {

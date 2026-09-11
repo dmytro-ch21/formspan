@@ -1192,6 +1192,17 @@ suite. Run on a **release** build on a real phone, ideally the slowest supported
    of this fix.
 7. With Reduce Motion on in iOS Settings (relaunch the app): nothing slides or
    crossfades, the fill steps, and the log still does not move.
+8. With **VoiceOver on**, expand and minimise the timer: focus lands on the new
+   form, and is never trapped in the outgoing card during its ~120ms fade.
+   The card is `accessibilityViewIsModal`, and for a moment the outgoing and
+   incoming forms coexist.
+9. Finish a session **while a rest bar is still up**: the log shifts up 64pt
+   once, as the bar fades out and the screen becomes the report. Judge whether
+   that single transition reads as part of finishing or as a jump. It is a
+   one-off, not per set, but it is the one place a timer can still move the
+   log.
+10. Start a rest and watch the bar's first frames: it arrives already **full**
+    and starts draining. It must not visibly refill from empty as it fades in.
 
 ---
 

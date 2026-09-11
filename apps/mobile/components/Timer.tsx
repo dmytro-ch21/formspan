@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, View as RNView } from 'react-native';
 import Animated, {
   Easing,
@@ -284,14 +284,26 @@ function Drain({ timer, remaining, color }: { timer: Countdown; remaining: numbe
   // Seeded from the digits' value so a bar remounted by minimise shows its true
   // width on its first frame instead of refilling from full.
   const drain = useSharedValue(fractionOf(remaining, timer.total));
+  /*
+    Whether this bar has armed since it mounted. The FIRST arm jumps to the true
+    position instead of bridging, because on a fresh rest the seed above is
+    stale: the countdown's clock publishes in an effect that runs after this
+    first render, so `remaining` can still be 0 (or the last rest's value).
+    Bridging from that seed would refill the bar from empty over 180ms at the
+    start of every rest (found in review). Re-arms after that — ±15s, pause,
+    resume, the next step — bridge from the width that is really on screen.
+  */
+  const armed = useRef(false);
 
   useEffect(() => {
     if (reduced !== false) return;
+    const first = !armed.current;
+    armed.current = true;
     const now = Date.now();
     const leftMs = remainingAt(timer, now) * 1000;
-    const bridgeMs = Math.min(MS.control, leftMs);
+    const bridgeMs = first ? 0 : Math.min(MS.control, leftMs);
     const bridge = {
-      duration: MS.control,
+      duration: first ? 0 : MS.control,
       easing: EASE_OUT,
       reduceMotion: ReduceMotion.Never,
     };
@@ -302,6 +314,8 @@ function Drain({ timer, remaining, color }: { timer: Countdown; remaining: numbe
       return;
     }
 
+    // Two legs, one assignment: the bridge (zero-length on a first arm), then
+    // the linear drain to the deadline.
     drain.set(
       withSequence(
         withTiming(fractionOf((leftMs - bridgeMs) / 1000, timer.total), {

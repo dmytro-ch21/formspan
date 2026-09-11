@@ -468,13 +468,21 @@ jest.mock('react-native-reanimated', () => {
       `entering.config.reduceMotion` off the rendered view. A no-op builder
       would let a missing `.reduceMotion(ReduceMotion.System)` pass silently —
       the one property of these builders that is a rule rather than taste.
-      `LayoutAnimationConfig` renders its children and nothing else.
+
+      `LayoutAnimationConfig` renders a plain View CARRYING its skip flags. It
+      first rendered its children bare, which threw the flags away — and review
+      measured the cost: deleting `skipEntering skipExiting` from `Timer.tsx`
+      left every test green. Same no-op-builder trap, one component over.
     */
     useAnimatedStyle: (worklet) => worklet(),
     withSequence: (...animations) => animations[animations.length - 1],
-    cancelAnimation: () => {},
     ReduceMotion: { System: 'system', Always: 'always', Never: 'never' },
-    LayoutAnimationConfig: ({ children }) => children,
+    LayoutAnimationConfig: ({ children, skipEntering, skipExiting }) =>
+      React.createElement(
+        View,
+        { testID: 'layout-animation-config', skipEntering, skipExiting },
+        children,
+      ),
     FadeInDown: layoutBuilder('FadeInDown', {}),
     FadeOutUp: layoutBuilder('FadeOutUp', {}),
     FadeOut: layoutBuilder('FadeOut', {}),

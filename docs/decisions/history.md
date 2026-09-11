@@ -73287,7 +73287,9 @@ exercise and set row.
 **The bar is `Drain`**: `scaleX` on an absolutely positioned, childless fill
 with `transformOrigin: 'left'`, driven by a shared value on the UI thread. It
 is armed **once per change of the countdown itself** (start, ±15s, pause,
-resume, the next step of a run) and never on a tick:
+resume, the next step of a run) and never on a tick. Each arm is ONE assignment
+of a TWO-leg `withSequence`, not a single `withTiming`, and that is stated here
+because the ticket's criterion says "one `Animated.timing`":
 
 - It reads the deadline model (`remainingAt(timer, now)`), the same source as the
   digits, so both reach zero together.
@@ -73299,6 +73301,12 @@ resume, the next step of a run) and never on a tick:
 - It then drains with `Easing.linear` to empty at the deadline. Constant
   progress is the one place linear is correct: the bar is a clock, and an eased
   clock lies.
+- **The first arm after the bar mounts does not bridge; it jumps** (a
+  zero-length first leg). On a fresh rest the countdown's clock publishes in an
+  effect that runs after the bar's first render, so the fill can be seeded at 0.
+  Bridging from that seed refilled the bar from empty over 180ms at the start of
+  every rest. `frontend-reviewer` found it from source; it is now pinned by its
+  own test.
 - Paused or spent, it settles on the true width and arms nothing further.
 
 **Reanimated `withTiming`, not the issue's core `Animated.timing` +
@@ -73314,9 +73322,12 @@ argument. There are three reasons:
   for exactly this class of work, and the `animate-expo` skill makes Reanimated
   the rule.
 
-Every other acceptance-criterion property is kept literally: one predetermined
-animation per change, `scaleX`, `Easing.linear`, absolute childless fill,
-`transformOrigin: 'left'`, re-armed from the current value.
+Every other acceptance-criterion property is kept literally: `scaleX`,
+`Easing.linear` on the drain, absolute childless fill, `transformOrigin:
+'left'`, re-armed from the current value, and one assignment per change of the
+countdown. The one further drift is the two-leg sequence described above. A
+single linear timing from the current value would satisfy the letter, and it
+would under-report a +15s for most of the remaining rest.
 
 ### Reduce Motion
 
@@ -73339,8 +73350,11 @@ animation per change, `scaleX`, `Easing.linear`, absolute childless fill,
 ### The jest Reanimated mock grew a third time
 
 Added: `useAnimatedStyle`, `withSequence`, `cancelAnimation`, `ReduceMotion`,
-`Easing.linear`, `LayoutAnimationConfig`, and recording builders for
-`FadeInDown`, `FadeOutUp`, `FadeOut` and `Keyframe`. Each chained call returns
+`Easing.linear`, a `LayoutAnimationConfig` that renders a View carrying its skip
+flags, and recording builders for `FadeInDown`, `FadeOutUp`, `FadeOut` and
+`Keyframe`. The config first rendered its children bare, which discarded the
+flags: review deleted `skipEntering skipExiting` from `Timer.tsx` and every test
+stayed green. It now records them, and a test asserts both. Each chained call returns
 a builder that remembers what it was told, so a missing
 `.reduceMotion(ReduceMotion.System)` is observable rather than a no-op. There is
 still no frame clock: tests read how an animation was ARMED (how often, from
@@ -73355,17 +73369,18 @@ them is not a shape a device ever produces. The test advances one second per
 
 ### Verification
 
-`components/__tests__/timerContinuity.test.tsx` has 14 tests. The load-bearing
+`components/__tests__/timerContinuity.test.tsx` has 16 tests. The load-bearing
 one renders a stand-in for the session screen: it calls `useCountdown` and
 mounts `TimerSurface`, and nothing else. It counts its own renders across 30
 seconds of a running rest and asserts **zero**. A positive control proves the
 counter counts (±15s re-renders the owner), and a second test proves the digits
 still repaint.
 
-Twelve mutations were each applied from a byte-exact backup, confirmed on disk,
-run, restored, and byte-compared. Every one went red on a named assertion and
-none broke the suite. The baseline was green in the same session, and so was a
-final unmutated re-run (14/14).
+Fourteen mutations were each applied from a byte-exact backup, confirmed on
+disk, run, restored, and byte-compared. Every one went red on a named assertion
+and none broke the suite. The baseline was green in the same session, and so was
+a final unmutated re-run. M1–M12 ran against the first cut (14/14 green). M13–M14
+cover the two review fixes (16/16 green).
 
 | # | Mutation | Went red |
 |---|---|---|
@@ -73381,11 +73396,31 @@ final unmutated re-run (14/14).
 | M10 | A paused countdown still arms a drain | pause-holds-width |
 | M11 | Drain timing on `ReduceMotion.System` (the launch snapshot) | arms-once (config) |
 | M12 | Surface reads the clock once instead of subscribing | digits-repaint (+3) |
+| M13 | First arm bridges from the stale seed again | first-arm-jumps; arms-once (duration) |
+| M14 | `LayoutAnimationConfig` loses `skipEntering skipExiting` | skip-flags test (it passed every test before the mock fix) |
 
 The existing suites that touch what changed still pass: `pressFeedback` (the
 session screen still carries no animation), `strengthSessionFinishPlacement`,
 `strengthSessionCollapse`, `macroRingCaps`, `macroRingSweep`,
 `reducedMotionGating` and `holdToConfirm` — 70/70 against the grown mock.
+
+### Review
+
+- **`frontend-reviewer`: no blocking findings.** It confirmed the diff stays in
+  the timer and scroll-padding regions, clear of N563's report region. Its
+  suggestions and what became of them:
+  - Fixed: the first-arm refill, and the mock discarding the skip flags.
+  - Fixed: an unused `cancelAnimation` removed from the mock.
+  - Added as device checks: the one-off 64pt step when a session is finished
+    while a bar is still up, and VoiceOver focus while the outgoing card (which
+    is `accessibilityViewIsModal`) fades.
+- **`ac-verifier`**: 5 criteria MET. 3 MET WITH STATED REASON: (b) never
+  attempted, `FadeInDown` instead of `SlideInUp`, Reanimated instead of core
+  `Animated`. 5 NEEDS HUMAN EVIDENCE. It reproduced M1 and M6 itself. It asked
+  for the two-leg sequence to be stated rather than glossed, which is done above.
+- **The motion gate (`/pre-merge` step 4, `/review-animations`) is UNMET.** It
+  is the user's command, not an agent's, and it has not been run. Two green
+  reviews do not stand in for it.
 
 ### What is not fixed, and is recorded rather than folded in
 
