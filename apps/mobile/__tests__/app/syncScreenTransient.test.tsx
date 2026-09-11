@@ -29,6 +29,16 @@ jest.mock('@/lib/sessionStore', () => ({
   retryBlockedRow: jest.fn(),
 }));
 
+// N167/#544 — the screen now reads a SECOND list (rows the server refused and
+// the outbox has stopped sending). Empty here: this file is about the blocked
+// half and the transient-error copy, and `syncRefused.test.tsx` owns the rest.
+// Mocked rather than left to hit the real SQLite layer, like `sessionStore`
+// above and for the same reason.
+jest.mock('@/lib/rejectedRows', () => ({
+  rejectedRows: jest.fn(async () => []),
+  discardRejectedRow: jest.fn(),
+}));
+
 let mockSyncState: {
   syncing: boolean;
   pending: number;
