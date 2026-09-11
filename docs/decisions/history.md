@@ -71485,6 +71485,19 @@ to `null`, which opens rather than folds.
 - **Re-hydrate when the sets change shape.** Re-reads keys that describe the old
   shape — the bug, not its fix.
 
+**Review found a hole in the first cut, fixed before the PR.** `frontend-reviewer`:
+the pending slot was single, so a second swap started before the first swap's
+`load` had consumed its handoff REPLACED it — and the second handoff's `before`
+is the first write's `after`, which the screen's fold state has never described.
+The result would have been a wrong-but-plausible rekey, not a refusal, because
+`handoffStillApplies` checks the rows against SQLite, not the fold state against
+`before`. `recordSetsHandoff` now chains an unconsumed handoff with the new one
+(`chainHandoffs`: compose the two `sourceOf`s through the first write; if the
+second did not start from exactly what the first wrote, every row reads as new).
+Four more mutations, and the first test set let one survive — every vector began
+with a swap, whose mapping is identity, so skipping the first mapping passed them
+all; an append-then-swap vector was added and catches it.
+
 **What it does not cover, stated in the module.** The handoff is in memory: an
 app kill between the write and the next focus loses it and the screen hydrates
 the pre-swap keys, which is `main`'s behaviour. Persisting it would be a second
@@ -71493,7 +71506,7 @@ sync pull that relabels rows underneath the screen is still unhandled — and
 `handoffStillApplies` makes sure such a pull landing between a swap and focus
 discards the handoff rather than misapplying it.
 
-**Checks.** 15 mutations, all caught as test failures (not compile errors), each
+**Checks.** 15 mutations (plus the four chaining ones above), all caught as test failures (not compile errors), each
 restore confirmed byte-identical and then by re-running the suites green:
 `every → some`; a new row inheriting its block's fold; grouping the old rows
 (`rekeyCollapsed`'s shape); `handoffStillApplies` always true / ignoring ids;

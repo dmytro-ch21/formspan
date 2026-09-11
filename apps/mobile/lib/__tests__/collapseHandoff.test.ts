@@ -2,6 +2,7 @@ import { groupKeys } from '../sessionCollapse';
 import { groupSets } from '../sessions';
 import {
   applySetsHandoff,
+  chainHandoffs,
   handoffForAppend,
   handoffForSwap,
   handoffStillApplies,
@@ -36,11 +37,16 @@ describe('takeSetsHandoff', () => {
     expect(takeSetsHandoff('user-a', 'session-1')).not.toBeNull();
   });
 
-  it('keeps only the latest unconsumed handoff for a session', () => {
+  it('chains a second write onto an unconsumed first, so the screen gets one correspondence from ITS rows', () => {
+    // The screen's fold state still describes `[squat]`; handing it the second
+    // handoff alone would describe `[deadlift]` rows it has never seen.
     recordSetsHandoff('user-a', 'session-1', handoffForSwap(rows('squat'), rows('deadlift')));
-    const later = handoffForSwap(rows('deadlift'), rows('bench'));
-    recordSetsHandoff('user-a', 'session-1', later);
-    expect(takeSetsHandoff('user-a', 'session-1')).toEqual(later);
+    recordSetsHandoff('user-a', 'session-1', handoffForSwap(rows('deadlift'), rows('bench')));
+    expect(takeSetsHandoff('user-a', 'session-1')).toEqual({
+      before: ['squat'],
+      after: ['bench'],
+      sourceOf: [0],
+    });
   });
 });
 
@@ -72,6 +78,50 @@ describe('handoffForAppend', () => {
       null,
       null,
     ]);
+  });
+});
+
+describe('chainHandoffs', () => {
+  it('composes a swap then an append through the first write', () => {
+    const first = handoffForSwap(rows('squat', 'bench'), rows('deadlift', 'bench'));
+    const second = handoffForAppend(rows('deadlift', 'bench'), rows('deadlift', 'bench', 'bench'));
+    expect(chainHandoffs(first, second)).toEqual({
+      before: ['squat', 'bench'],
+      after: ['deadlift', 'bench', 'bench'],
+      sourceOf: [0, 1, null],
+    });
+  });
+
+  it('carries the FIRST write\'s new rows through as new — an append then a swap', () => {
+    // Every other vector here starts with a swap, whose mapping is identity, so
+    // skipping the first mapping entirely would still pass them.
+    const first = handoffForAppend(rows('squat'), rows('squat', 'bench'));
+    const second = handoffForSwap(rows('squat', 'bench'), rows('deadlift', 'bench'));
+    expect(chainHandoffs(first, second)).toEqual({
+      before: ['squat'],
+      after: ['deadlift', 'bench'],
+      sourceOf: [0, null],
+    });
+  });
+
+  it('refuses when the second did not start from what the first wrote — every row reads as new', () => {
+    const first = handoffForSwap(rows('squat', 'bench'), rows('deadlift', 'bench'));
+    const second = handoffForSwap(rows('bench', 'deadlift'), rows('bench', 'row'));
+    expect(chainHandoffs(first, second).sourceOf).toEqual([null, null]);
+  });
+
+  it('end to end: a double swap keeps the fold on the block the athlete folded', () => {
+    // [squat, bench, squat], second squat folded. Swap squat -> deadlift, then
+    // deadlift -> row, before the screen reloads between them.
+    const s0 = rows('squat', 'bench', 'squat');
+    const s1 = rows('deadlift', 'bench', 'deadlift');
+    const s2 = rows('row', 'bench', 'row');
+    const chained = chainHandoffs(handoffForSwap(s0, s1), handoffForSwap(s1, s2));
+    const out = applySetsHandoff(new Set(['squat#1']), chained);
+    expect(groupKeys(groupSets(s2)).map((k) => out.has(k))).toEqual([false, false, true]);
+    // Applying only the second — the replaced-not-chained behaviour — loses it.
+    const lost = applySetsHandoff(new Set(['squat#1']), handoffForSwap(s1, s2));
+    expect(groupKeys(groupSets(s2)).map((k) => lost.has(k))).toEqual([false, false, false]);
   });
 });
 

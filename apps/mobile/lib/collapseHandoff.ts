@@ -47,6 +47,13 @@ import type { LoggedSet } from './sessions';
  * behaviour before F35, and one tap on Done to fix. Persisting it would need a
  * second writer of fold state, which is the thing ruled out above.
  *
+ * **Two writes before the screen consumes one are CHAINED, not replaced.**
+ * The screen's fold state still describes the rows before the FIRST write, so a
+ * second handoff alone — whose `before` is the first write's `after` — would be
+ * applied to keys it does not describe. {@link recordSetsHandoff} composes the
+ * two when they meet, and refuses a correspondence when they do not (found by
+ * `frontend-reviewer` on F35: a second swap started before the first `load` ran).
+ *
  * **Nothing else records one.** A change underneath the screen from anywhere
  * else — a sync pull, say — has no correspondence to offer, and
  * {@link handoffStillApplies} makes the screen discard a handoff whose rows are
@@ -101,9 +108,36 @@ export function handoffForAppend(before: Rows, after: Rows): SetsHandoff {
   };
 }
 
-/** Record the correspondence for this session's next `load`. Replaces any unconsumed one. */
+/**
+ * Record the correspondence for this session's next `load`.
+ *
+ * If one is still unconsumed, the two are chained — see {@link chainHandoffs} —
+ * because the screen has applied neither and its fold state still describes the
+ * rows before the first.
+ */
 export function recordSetsHandoff(userId: string, sessionId: string, handoff: SetsHandoff): void {
-  pending.set(keyOf(userId, sessionId), handoff);
+  const key = keyOf(userId, sessionId);
+  const prior = pending.get(key);
+  pending.set(key, prior ? chainHandoffs(prior, handoff) : handoff);
+}
+
+/**
+ * One handoff equivalent to applying `first` and then `second`.
+ *
+ * They chain only if `second` started from exactly the rows `first` wrote. If
+ * not, something else changed the list in between, and there is no honest
+ * correspondence: every row reads as new, so nothing stays folded — the same
+ * refusal the builders make.
+ */
+export function chainHandoffs(first: SetsHandoff, second: SetsHandoff): SetsHandoff {
+  const meets =
+    first.after.length === second.before.length &&
+    first.after.every((exercise, i) => exercise === second.before[i]);
+  return {
+    before: first.before,
+    after: second.after,
+    sourceOf: second.sourceOf.map((src) => (meets && src != null ? (first.sourceOf[src] ?? null) : null)),
+  };
 }
 
 /** Take this session's pending handoff, if any. Returns a given handoff at most once. */
