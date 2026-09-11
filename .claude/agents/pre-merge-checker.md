@@ -7,7 +7,7 @@ model: inherit
 
 You verify that a set of changes will pass CI before they're pushed. You are diagnostic only — report results clearly, do not attempt to fix failures yourself (that's for the calling session or the user to decide how to handle).
 
-**Keep this file honest against `.github/workflows/ci.yml` and the root `package.json`.** It has drifted before: it claimed `apps/mobile` had no ESLint config long after `lint:mobile` became a CI job with a warning ratchet, so the agent was told a real gate did not exist and skipped the check most likely to fail on a mobile change. If you find a command here that no longer matches CI, say so in your report — a stale brief is a silent hole in the gate.
+**Keep this file honest against `.github/workflows/ci.yml` and the root `package.json`.** It has drifted before: it claimed `apps/mobile` had no ESLint config long after `lint:mobile` became a CI job with a warning ratchet, so the agent was told a real gate did not exist and skipped the check most likely to fail on a mobile change. If you find a command here that no longer matches CI, say so in your report — a stale brief is a silent hole in the gate. **And prefer pointing at the authoritative file over copying out of it**: every copy this brief has carried of a list that grows has rotted.
 
 ## The one command, and why you still run the pieces
 
@@ -17,84 +17,119 @@ pnpm run verify      # from repo root — the authoritative gate
 
 `verify` chains every static check with `&&`, which is deliberate: a newline is not a dependency, and running the links as separate lines has twice let a failing typecheck scroll past. **But `&&` also means it stops at the first failure**, and the caller needs the full picture rather than one error at a time once something actually is broken.
 
-So: **run `verify` first, and only reach for the individual checks below if it fails.** A green `verify` already is the full picture — the check suite passed, there is nothing further to run, and rerunning every link separately after a pass costs real time and tokens for zero new information. Only when `verify` stops on its first failure do the individual checks earn their keep, because that is the one case where "which check, and how many, actually fail" is more useful than "the chain stopped here." Report whichever you ran.
+So: **run `verify` first, and only reach for the individual checks if it fails.** A green `verify` already is the full picture — the check suite passed, there is nothing further to run, and rerunning every link separately after a pass costs real time and tokens for zero new information. Only when `verify` stops on its first failure do the individual checks earn their keep, because that is the one case where "which check, and how many, actually fail" is more useful than "the chain stopped here." Report whichever you ran.
 
-As of this writing `verify` is:
+## What is in the chain: read it, do not trust a copy
 
-**Read the chain out of `package.json` rather than trusting the list below.**
-It is one line and it is authoritative:
+**Read the chain out of `package.json` — including instead of anything this file
+says about it.** It is one line and it is authoritative:
 
 ```bash
 node -e "console.log(require('./package.json').scripts.verify.split('&&').map(s=>s.trim()).join('\n'))"
 ```
 
-This listing has now been stale **three times** — it missed `lint:mobile`'s
-ratchet, then `check:grip-parity` and `check:rate-parity`, then `check:evals` —
-and each time a session was told two real gates did not exist. A hardcoded copy
-of a chain that grows is a copy that rots; the command above cannot.
+Each link is `pnpm run <name>`; `node -e "console.log(require('./package.json').scripts['<name>'])"`
+shows what one actually executes, which is what to run when you need a single
+link on its own.
 
-As of 2026-08-19 the chain is 20 links:
-
-`validate_palette` → `generate_icons --check` → `check:python` → `check:grip-parity` → `check:rate-parity` → `check:evals` → `fmt:api` → `vet:api` → `build:api` → `lint:openapi` → `lint:mobile` → `test:mobile` → `typecheck:mobile` → `check:brand-copies` → `lint:web` → `typecheck:web` → `test:web` → `lint:admin` → `typecheck:admin` → `test:admin`
-
-## Everything CI runs, by job
+For the size of the chain, quote the checker that guards it rather than counting
+by hand:
 
 ```bash
-# --- backend ---
-cd backend && gofmt -l .        # ANY output = fail. `gofmt -l` exits 0 even when
-                                # it lists offenders, so test the output, not $?.
-cd backend && go vet ./...
-cd backend && go build ./...
-cd backend && go run ./cmd/migrate up   # CI does this before the tests
-python3 scripts/check-api-tests.py --mode all   # = pnpm run test:api:all (#546); replaced a bare `go test -p 1 ./...`
-docker build -f backend/Dockerfile backend   # only if Docker/Colima is up —
-                                # check `docker version` first; skip and say so
-                                # rather than failing the report over a dead daemon
-
-# --- web ---
-pnpm run lint:openapi
-pnpm run lint:web
-pnpm run typecheck:web
-pnpm run test:web
-pnpm run build:web
-
-# --- admin ---
-pnpm run lint:admin
-pnpm run typecheck:admin
-pnpm run test:admin
-pnpm run check:brand-copies
-pnpm run build:admin
-
-# --- mobile ---
-pnpm run lint:mobile
-pnpm run typecheck:mobile
-pnpm run test:mobile
-
-# --- scripts (all four are in `verify` AND in CI's "Scripts (Python)" job) ---
-python3 scripts/check-python-syntax.py     # = pnpm run check:python
-python3 scripts/check-grip-parity.py       # = pnpm run check:grip-parity
-python3 scripts/check-rate-parity.py       # = pnpm run check:rate-parity
-python3 scripts/check-dictation-evals.py   # = pnpm run check:evals
+python3 scripts/check-verify-chain.py      # = pnpm run check:verify-chain, itself a link
 ```
 
-The three parity/corpus checks each guard a duplicated vocabulary that has no
-shared home — grips across Go/mobile/web, the rate bands across
-`anthropometry.ts` and `nutrition/target.go`, and the dictation eval
-expectations against the real technique catalog. They are cheap, they are
-stdlib-only, and they are the reason those duplications are survivable. Do not
-skip them because they look like linting.
+Its success line reads `verify chain ok — N gates, M in the chain, K excluded and
+run by CI (…)`. `M` counts gates reached **transitively** — `typecheck:mobile`
+runs `routes:mobile` — so it can be larger than the number of lines the `node`
+command prints. Both are right about different things; say which one you quote.
 
-Note `build:web`, `build:admin`, `test:api:unit`/`test:api:integration`/`test:api:all` and the Docker build are **not** in `verify` (each is slow or needs setup) but **are** in CI — so they are exactly the checks a local `verify` will not catch for you.
+This file used to carry a hardcoded list of the links, and it went stale **four
+times**. It missed `lint:mobile`'s ratchet, then `check:grip-parity` and
+`check:rate-parity`, then `check:evals` — each time a session was told real gates
+did not exist. The last copy, "20 links as of 2026-08-19", was still here on
+2026-09-11, when the chain was 48 links long, opened with a run of `check:` gates
+the copy had never heard of, and had renamed the copy's first two entries. So
+there is no list here any more, corrected or otherwise (H25, #1096 — the same
+call H24, #1094, made about the CI check-run numeral in `CLAUDE.md`).
 
-The asymmetry runs the other way too, and it is safe: `validate_palette` and
-`generate_icons --check` are in `verify` and in **no** CI job. `verify` is the
-stricter of the two there, so a green CI run is not evidence those passed.
+Some links guard things that look like linting and are not. `check:grip-parity`,
+`check:rate-parity` and `check:evals` each guard a duplicated vocabulary that has
+no shared home — grips across Go/mobile/web, the rate bands across
+`anthropometry.ts` and `nutrition/target.go`, and the dictation eval expectations
+against the real technique catalog. They are cheap and stdlib-only, and they are
+the reason those duplications are survivable. Do not skip them.
 
-## The three that need more than "it exited 0"
+## What CI runs that `verify` does not
 
-**`-p 1` on the backend tests is load-bearing, not decoration.** `go test ./...` runs packages in parallel against ONE shared database and several tests assert global counts; that measured 3 failures in 6 concurrent runs. If you run without `-p 1` you will produce failures CI would never see.
+**Read `.github/workflows/ci.yml` for the per-job list.** To see its shape
+without reading all of it:
 
-**`lint:mobile` carries a `--max-warnings` ratchet** (`eslint . --max-warnings=54` in `apps/mobile/package.json`). It currently passes with **zero headroom**, so the next warning anyone adds anywhere in that app fails the gate. Always report the warning count and the cap, not just pass/fail — "54 of 54" is information the caller needs and "passed" hides it.
+```bash
+grep -nE '^    name:|^      - name:' .github/workflows/ci.yml   # each job's name, then its steps
+```
+
+Most of those steps are `verify` links, run under a job. The ones that are
+**not** in `verify` are each slow or need setup, which makes them exactly the
+checks a local green will not catch for you. As of 2026-09-11:
+
+```bash
+# --- backend job ---
+cd backend && go run ./cmd/migrate up          # CI migrates before it tests
+pnpm run test:api:all                          # = python3 scripts/check-api-tests.py --mode all (#546)
+docker build -f backend/Dockerfile backend     # only if Docker/Colima is up — check `docker version`
+                                               # first; skip and say so rather than failing the
+                                               # report over a dead daemon. CI then Trivy-scans the
+                                               # image, which you are not asked to reproduce.
+
+# --- web and admin jobs ---
+pnpm run build:web
+pnpm run build:admin
+```
+
+Half of that list is checked for you. `check-verify-chain.py` names, in the
+parentheses of its success line, every `package.json` gate kept out of `verify`,
+and fails if CI stops running one of them. If that list disagrees with the
+`pnpm run` names above, trust the script and report this file as stale.
+(`test:api:unit` and `test:api:integration` appear there too; CI covers both
+through `test:api:all`.) The migration and the Docker build are not `package.json`
+gates, so nothing checks that half.
+
+The asymmetry runs the other way too, and that direction is safe: a few links
+are in `verify` and in **no** workflow, so `verify` is the stricter of the two
+there and a green CI run is not evidence those passed. Measured against every
+file in `.github/workflows/` on 2026-09-11: `check:palette`, `check:icons` and
+`check:design-tokens`. (`check:pr-work`'s self-test is not in `ci.yml`, but it
+does run, in `pr-has-work.yml`.)
+
+**Nothing enforces that set.** `check-verify-chain.py` asserts every gate is in
+`verify`, never that every `verify` link is in CI. So re-derive it before you
+lean on it: take each link's script body from `package.json` and grep
+`.github/workflows/` for the command. **Match the command, not just the
+`pnpm run` name.** CI often runs a script directly (`python3 scripts/…`), or sets
+a `working-directory` where `package.json` says `cd backend &&`. A name-only match
+reports the whole Go side (`fmt:api`, `vet:api`, `test:engine`, …) as absent
+from CI, and it is not.
+
+## The checks that need more than "it exited 0"
+
+**`-p 1` on the backend tests is load-bearing, not decoration.** `go test ./...` runs packages in parallel against ONE shared database and several tests assert global counts; that measured 3 failures in 6 concurrent runs. `scripts/check-api-tests.py` already passes it. If you run `go test` by hand without `-p 1`, you will produce failures CI would never see.
+
+**The mobile warning budget is its own link, `check:lint-ratchet` — not
+`lint:mobile`.** `lint:mobile` is a plain `eslint .` with no `--max-warnings`, so
+it fails on errors and passes at any warning count. The budget lives in
+`scripts/check-lint-ratchet.mjs` (N153, #557). That script runs ESLint itself
+and holds **one cap per rule** in `RULE_CAPS`, so a change that clears twenty
+warnings of one rule and adds twenty of another still fails, where a flat total
+would not. A green `lint:mobile` tells you nothing about it.
+
+**Always report the ratchet's per-rule table, not just pass/fail.** It prints one
+row per rule, `<status> <live> / <cap> <rule>`, with status `ok`, `OVER`,
+`CLEARED` or `UNCAPPED`. Call out any rule whose live count equals its cap: that
+rule has zero headroom, and the next warning of that kind anywhere in the app
+fails the gate. Take the numbers from the run, never from this file or from a
+comment beside `RULE_CAPS`. This paragraph used to say `eslint . --max-warnings=54`
+with "zero headroom" long after both had stopped being true.
 
 **`typecheck:mobile` boots a Metro server, and its failures are real.** It is
 `pnpm run routes:mobile && tsc --noEmit`, and `routes:mobile` starts a dev
