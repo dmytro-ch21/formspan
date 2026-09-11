@@ -249,6 +249,8 @@ export default function WorkoutEditorPage({
         // The goal goes with it: it decides the rep range the recommendation
         // is expressed in, so omitting it here would pre-fill a session on the
         // general 5-8 range that the session screen then re-derives on 3-5.
+        // No time-mode guard here, unlike mobile, and deliberately so — see
+        // the doc comment on `applySuggestions` in lib/api.ts (F36/#1015).
         sets = applySuggestions(
           sets,
           await fetchSuggestions(

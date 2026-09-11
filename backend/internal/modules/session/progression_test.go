@@ -963,6 +963,13 @@ func TestStalledSessionsAt_LightSessionDoesNotCountTowardAStall(t *testing.T) {
 // is the case a narrowed gate would actually reach.
 //
 // If this has to change, change web's applySuggestions in the same commit.
+//
+// The TargetReps and TargetWeightKg assertions below do NOT catch the gate
+// being narrowed — the Code assertion does. The fixture carries no weight, so
+// the engine finds nothing weighted to build from and emits no target either
+// way (a narrowed V1 gate reports repeat_unknown_effort). Those two would only
+// fire for a WEIGHTED reps exercise, a weighted dip say, which is a real shape
+// in this schema. Stated so they are not mistaken for the guard.
 func TestProgress_DualModeRepsExerciseGetsNoRepTarget(t *testing.T) {
 	reps := 20
 	logged := Set{

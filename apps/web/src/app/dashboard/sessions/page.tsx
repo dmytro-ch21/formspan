@@ -203,6 +203,8 @@ export default function HistoryPage() {
       let sets = workout ? setsFromWorkout(workout.items) : [];
       if (sets.length > 0) {
         try {
+          // No time-mode guard here, unlike mobile, and deliberately so — see
+          // the doc comment on `applySuggestions` in lib/api.ts (F36/#1015).
           sets = applySuggestions(
             sets,
             await fetchSuggestions(

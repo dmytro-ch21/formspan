@@ -71347,6 +71347,17 @@ parameter unarmed at half its call sites reads as protection and provides it hal
 the time. (The fail-open concern does not apply on `workouts/[id]`: `load()` sets
 `workout` and `catalog` together, and `start()` returns while `workout` is null.)
 
+**Nor would checking `code !== "not_applicable"`**, which `frontend-reviewer`
+raised as the obvious cheaper alternative: it needs no catalog and would cover
+both callers uniformly. It adds no protection because it is not independent —
+the engines set `SuggestNotApplicable` and leave `target_reps` nil in the same
+early return, so it is exactly equivalent to the `target_reps != null` test web
+already relies on, and a backend regression would flip both at once. Mobile's
+guard differs in kind: it reads load type from the client's own catalog, so it
+survives exactly that change. The web doc comment now says so, and both web
+call sites carry a one-line pointer back to it, matching the pointers mobile
+already had at its own two.
+
 A parity **script** in the style of `check-timeout-parity.py` was also
 considered for criterion 4 and rejected: those assert values that must agree,
 and these two functions are now intentionally different. Cross-referencing
@@ -71360,21 +71371,34 @@ be introduced.
   incidental.
 - Narrowing **only** V1's gate fails only the V1 pin (`got
   "repeat_unknown_effort"`); narrowing **only** V2's fails only the V2 pin (`got
-  "no_history"`). Both reds are the pins' own `Fatalf`, with no panic — a nil-
-  weight panic would also exit non-zero and prove nothing about either test.
+  "abstain"`, after the fixture fix below). Both reds are the pins'
+  own `Fatalf`, with no panic — a nil-weight panic would also exit non-zero and
+  prove nothing about either test.
 
 All restored and confirmed green by re-running.
 
 **The mutation output is worth keeping, because it is subtler than the argument
-above.** With the gate narrowed, *neither engine emits a rep target yet either*:
-V1 reports nothing weighted to build from, V2 reports no finished history. The
-harm needs two steps — open the gate, then teach the engine to progress
+above.** With the gate narrowed, *neither engine emits a rep target yet either*.
+The harm needs two steps — open the gate, then teach the engine to progress
 weightless reps — and the pins fire at the first, which is where the
-conversation about web has to happen. It also means the V2 pin models "an
-athlete who has logged this" less faithfully than its comment suggests: V2 reads
-the fixture session as not finished. Its `Code` assertion is on the gate and is
-unaffected, but the fixture is weaker than the V1 one, and that is said here
-rather than left for somebody to discover.
+conversation about web has to happen.
+
+Two consequences of that, both caught by `backend-reviewer` and both acted on:
+
+- **The `TargetReps`/`TargetWeightKg` assertions do not catch the narrowing; the
+  `Code` assertion does.** The fixture has no weight, so the engine drops it
+  before any target exists whichever way the gate is set. Those two assertions
+  would only fire for a *weighted* reps exercise — a weighted dip, say. Both pins
+  now say so, so they are not mistaken for the guard. It is the same shape as
+  several tests written earlier this session: an assertion present for a reason
+  unrelated to the change it appears to guard.
+- **The first V2 pin broke its own file's documented convention.**
+  `progression_v2_test.go`'s header says every V2 history fixture uses
+  `finishedSess`, because `sess` leaves `Finished` false and V2 refuses that as
+  history. The first draft used `sess`, so a narrowed gate reached `no_history`
+  — "never happened" — rather than modelling an athlete who has logged the
+  movement. Swapped to `finishedSess`; a narrowed V2 gate now lands on
+  `abstain`, one branch deeper, and still fails the pin.
 
 ### A correction made during the work
 

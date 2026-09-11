@@ -751,6 +751,16 @@ func TestProgressV2_GoldenCalves_AthleteConfiguredTenToFifteenOutranksProfileDef
 // change that starts sending rep targets for dual-mode exercises. Before F36,
 // TestProgressV2_NotApplicable pinned only LoadType "time". See the v1 test for
 // the full account of what this protects.
+//
+// The history uses finishedSess, per this file's own header: sess leaves
+// Finished false, which V2 refuses as history. The first draft used sess, so a
+// narrowed gate reached no_history — "never happened" — instead of modelling
+// an athlete who has actually logged the movement.
+//
+// As in the v1 test, the TargetReps and TargetWeightKg assertions do NOT catch
+// the narrowing; the Code assertion does. The fixture has no weight, so it is
+// dropped before any target exists whichever way the gate is set. They matter
+// only for a weighted reps exercise.
 func TestProgressV2_DualModeRepsExerciseGetsNoRepTarget(t *testing.T) {
 	reps := 20
 	logged := Set{
@@ -763,7 +773,7 @@ func TestProgressV2_DualModeRepsExerciseGetsNoRepTarget(t *testing.T) {
 		ExerciseID: "mountain-climber",
 		LoadType:   "reps",
 		Goal:       "hypertrophy",
-		Recent:     []SessionEffort{sess(3*24*time.Hour, testNow, logged)},
+		Recent:     []SessionEffort{finishedSess(3*24*time.Hour, testNow, logged)},
 	}
 
 	p := ProgressV2(in, testNow)

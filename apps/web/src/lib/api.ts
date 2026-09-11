@@ -1512,6 +1512,16 @@ export async function fetchSuggestions(
  * lookup in front of starting a session — which mobile's `session/start.tsx`
  * explicitly refuses to do. An optional parameter left unarmed at half its call
  * sites is a guard that reads as protection and provides it half the time.
+ *
+ * **Nor would checking `hit.code !== "not_applicable"`**, the obvious cheaper
+ * alternative: it needs no catalog, costs nothing, and would cover both callers
+ * uniformly. It adds no protection because it is not independent. The engines
+ * set `SuggestNotApplicable` and leave `target_reps` nil in the SAME early
+ * return, so that check is exactly equivalent to the `target_reps != null` test
+ * below — a regression letting rep targets through for dual-mode exercises
+ * would flip both at once. Mobile's guard differs in kind: it reads the load
+ * type from the client's own catalog, so it survives exactly that backend
+ * change. (Raised in F36's review.)
  */
 export function applySuggestions(
   sets: LoggedSet[],
