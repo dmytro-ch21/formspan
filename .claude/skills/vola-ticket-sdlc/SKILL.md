@@ -81,6 +81,21 @@ authority; this skill is the ordered checklist those sections add up to.
     on rebase are normal (it's the file every ticket edits) — resolve by
     keeping both entries, re-verify the heading count.
 
+    **Wait over REST, then run `ci:checks` once — do not poll it (H27,
+    #1099).** Every session authenticates as one account, so the fleet
+    shares ONE GraphQL budget of 5,000 points an hour. On 2026-09-11 it ran
+    out twice in an hour, and while it is out `gh pr create`, `gh pr merge`
+    and `closingIssuesReferences` fail for every session at once.
+    `ci:checks` is REST-only now, but the other calls still spend it. So:
+    wait on `gh api repos/{o}/{r}/commits/{sha}/check-runs` (one poll a
+    minute is plenty); run `ci:checks` once when those settle; and prefer
+    `gh api -X PUT repos/{o}/{r}/pulls/{n}/merge -f merge_method=squash -f
+    sha=<head>` to `gh pr merge`, since it is REST and refuses if the head
+    moved. **Never read the GraphQL budget from `gh api rate_limit`**: it
+    reported 5000/5000 while a real query was refused at 0. The true figure
+    is in a request's own headers:
+    `gh api graphql -i -f query='{viewer{login}}' | grep -i x-ratelimit`.
+
 11. **Merge policy: the default is ASK.** Green CI is not permission. The
     user may grant standing authority for a session, in their own words, and
     it does not transfer between sessions. Standing authority still never
