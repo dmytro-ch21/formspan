@@ -345,6 +345,19 @@ beforeEach(() => {
   mockLogFood.mockResolvedValue(undefined);
 });
 
+describe('the way into the day panel (N541 tranche 1, #972)', () => {
+  // One entry point, in the header, and it goes to the panel's route. The
+  // panel does not replace this screen — see `app/day.tsx` — so the link is
+  // the whole of Today's change, and this is the test that it is wired.
+  it('is a header link that opens /day', async () => {
+    await render(<TodayScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('today-open-day')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('today-open-day'));
+    expect(mockPush).toHaveBeenCalledWith('/day');
+  });
+});
+
 describe('the active session outranks everything', () => {
   it('leads with Resume and renders no competing plan card', async () => {
     mockListLocalSessions.mockResolvedValue([session({ id: 'open', ended_at: null })]);

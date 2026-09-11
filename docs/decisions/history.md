@@ -71684,6 +71684,223 @@ day panel) touches none of these files.
   chart — is outstanding by design and cannot be settled from a render tree.
 - The drain-cursor regression above is uncovered.
 
+## 2026-09-11 — N541 tranche 1: the day panel's deterministic layer, with no AI in it yet (part of #972)
+
+The athlete asked for one entry point that tells them their day instead of
+making them find it: *"our planned workouts and sessions, remind our goals and
+remind any things to target like do steps"*. #972 sets three hard constraints —
+deterministic first and AI second, fully offline, and a stated cost policy for
+generation. **This tranche is the first two and stops.** There is no LLM call, no
+prompt, no endpoint and no caching policy anywhere in the diff; those are
+tranche 2, and the caching policy is a cost decision the user has not made.
+
+### What landed
+
+- **`apps/mobile/lib/dayPanel.ts`** — `assembleDay`, a pure function from local
+  reads to the day. Every positive claim is a `DayFact` carrying the rows behind
+  it (`RowRef`: table plus id, or `effective_on` for a target). An "absence" —
+  *nothing planned today* — is a separate kind with no rows, reachable only from
+  a read that answered. `panelFacts(panel)` is the complete list of what the
+  panel asserts.
+- **`apps/mobile/lib/useDayPanel.ts`** — the reads, all SQLite.
+- **`apps/mobile/app/day.tsx`** — the screen, titled **Your day**, pushed over
+  the tabs like `goals` and `phase`.
+- **`apps/mobile/lib/dayNarration.ts`** and
+  **`components/day/DayNarrationSlot.tsx`** — the narration seam.
+- **One way in**: a **Your day** link in Today's header (`today-open-day`).
+
+### It reuses the sources that already existed, and computes nothing twice
+
+| The panel says | Decided by |
+|---|---|
+| a session is open, and whether it is stale | `buildTrainBoard` → `buildTodayBoard` (`STALE_SESSION_MS`) |
+| today's plans are owed / all met / nothing planned | `buildTodayBoard`'s `lead` (`owedOn` → `matchPlans`) |
+| what today logged | `buildTodayBoard`'s `logged` (`loggedOn`) |
+| what is next | `buildTodayBoard`'s `later` |
+| a plan's name and Start/Log verb | `toPlannedOffer` |
+| a tracker's target and count | `targetCount`, `loggedCount`, `valueLine`, `footLine` |
+| food eaten today | `dayTotals` |
+| the target in force | `localTargetView` |
+| whether a food log exists | `hasFoodLog` |
+
+**The plan half is `useTodayBoard` itself, called from the panel's hook**, not a
+copy of its three reads. The issue names `lib/useTrainBoard.ts`; Train is retired
+(`app/train.tsx` redirects), and `useTodayBoard` is the hook built on it — same
+`useSource`, same `buildTrainBoard`, plus the done-versus-rest distinction a day
+summary cannot do without. Going straight to `useTrainBoard` would have lost
+exactly that, and made "you planned two and did both" read as "nothing planned".
+
+Trackers and food have no hook that returns a three-state source, so the panel
+calls the same SQLite functions Today and Food call — `localTrackers`, both
+`localEntries`, `localTargetView` — and nothing else.
+
+### Where the existing sources disagree, or cannot be reused as they are
+
+Stated rather than silently resolved:
+
+1. **`useTrackerDay.entriesFor` returns `[]` while loading.** A tracker card can
+   live with that; a panel reading "0 of 8 cups" during a load is a false fact.
+   So the panel does not reuse the hook, only its read functions.
+2. **Today fetches the nutrition target and the tracker day from the network
+   and caches them; the panel reads only the cache.** On a device where Today
+   has never run a successful fetch, Today can show a target the panel reports
+   as *not on this phone yet*. Both are true descriptions of what each read
+   knows, but it is two screens giving different answers to "what is my target"
+   for the length of one first fetch. Once Today or Food has fetched, they agree.
+3. **`buildTodayBoard`'s `done` returns a count with no ids.** The panel names the
+   rows behind it by taking the day's plans from the same read. A test pins the
+   count and the row list to each other, so a divergence goes red rather than
+   shipping as a number with the wrong provenance.
+4. **Check-ins and the phase goal are online-only** (`lib/body.ts`, by recorded
+   decision). Today's `ProgressCard` shows them with signal. The panel's offline
+   constraint means a reminder that vanishes in a gym basement, so they are **left
+   out** rather than shipped half-true.
+5. **Steps do not exist on this device.** No table stores a step count and no
+   read of one exists in `apps/mobile`. "Do your steps" would have been the first
+   fabricated fact, so it is absent, and that is a scope question for the user
+   rather than a gap to paper over.
+
+### Offline
+
+Nothing on the screen waits on a request, and the tests assert the stronger
+property: with `apiRequest` rejecting and `fetch` a spy, the day renders in full
+and **neither is called at all**. The one network-adjacent thing is inherited:
+`useTodayBoard` fires `request('today-focus')` to the sync orchestrator on focus,
+which is fire-and-forget and decided by the orchestrator.
+
+A read that fails is scoped to its section and says *Not available on this phone
+yet*; it never becomes "nothing logged". Day-scoped reads are stored with the day
+they were made for, and a read answering for another day is treated as unread —
+the W16/#704 lesson, applied so a panel left open across midnight does not show
+last night's cups as today's.
+
+### The narration seam
+
+`DayNarration` is a one-member union, `{ kind: 'absent' }`, and
+`DayNarrationSlot` renders nothing for it through an exhaustive switch, so adding
+a `ready` member is a type error until somebody decides what it draws. The slot
+sits above the facts, so removing it can never remove a fact. **No placeholder
+copy anywhere** — a stub sentence where narration will go is itself an unbacked
+user-facing assertion.
+
+A `ready` shape was deliberately not declared: how generated text cites facts,
+and whether it is cached per day or regenerated on change, is tranche 2's policy.
+
+### What Today already answers, what this adds, and where they duplicate
+
+This is the comparison the tranche was asked to hand back, and the honest
+headline is that **without narration, the panel is almost a strict subset of
+Today.**
+
+| | Today | Your day |
+|---|---|---|
+| Open session / owed plan / all done / nothing planned | yes — lead block, with Start | yes — same board, rows open the same routes |
+| What today logged | yes — `LOGGED` | yes — same `loggedOn` |
+| Next planned day | yes — `LATER` | yes — same `later` |
+| Trackers | yes — tap to log, cutoff line, collapses after 3 | read-only; only trackers that have a target |
+| Food today | yes — rings, remaining, quick-add, Log food | totals line; *Log food* when empty |
+| Nutrition target | inside the food card | its own **Goal** line with macros |
+| Check-in / weight trend | yes (online) | no |
+| This week, training count, insight, detected activities | yes | no |
+| Browse another day | yes — day switcher | no — today only |
+| A row-level provenance model a narrator can be checked against | no | **yes** |
+| A place narration attaches | no | **yes** |
+
+**Where they duplicate**: the plan, logged, next, trackers and food blocks —
+all from the same derivations, so they cannot disagree about content, but they
+are two screens answering "what is my day" with the same facts.
+
+**What this adds** is not visible yet: provenance per fact, and the seam. The case
+for a second screen rests entirely on what tranche 2 puts in that seam. If
+narration is a paragraph above the same facts, it could equally be a card at the
+top of Today — `DayNarrationSlot` takes nothing but the narration, and
+`assembleDay` needs nothing Today does not already read — which would answer the
+athlete's "one entry point" without adding a screen in front of the one they
+already open. That is the user's call and is not made here.
+
+### How it is reachable on a phone
+
+Today → **Your day** in the header → `/day`. It is not the landing screen and
+does not replace Today; the tab bar is untouched.
+
+### Tests
+
+- `lib/__tests__/dayPanel.test.ts` — 14 cases over a migrated real-SQLite
+  fixture, rows written through the app's own writers (`planSession`,
+  `startLocalSession`, `logTap`, `logFood`, `cacheTargets`) under
+  `TZ=America/Los_Angeles`: a full day offline, an 8:30pm session stored as UTC
+  tomorrow filed under today, another account's rows ignored, done/rest/resume,
+  a tombstoned plan not stated, `unknown` never becoming "none", a dated read
+  for another day refused, food off versus empty, and the provenance check shown
+  failing on an invented, withdrawn, foreign and empty-ref fact.
+- `__tests__/app/dayScreen.test.tsx` — 6 cases rendering the screen over the same
+  kind of fixture with the network failing: the whole day renders; **the set of
+  `day-fact-*` elements equals `panelFacts` of an independently read panel, and
+  every one of those facts is a live row** (`unbackedFacts`); a fresh device gets
+  absences and "not here yet", never "none"; a dropped table degrades only its
+  own section; a planned row routes through `startSessionHref`; the seam renders
+  nothing.
+- `__tests__/app/todayScreen.test.tsx` — the header link opens `/day`.
+
+`lib/__tests__/support/dayFacts.ts`'s `unbackedFacts` is the invariant tranche 2's
+fabricated-fact guard extends: a narrated sentence citing a key outside
+`panelFacts`, or a fact whose rows it reports, is the failure #972 names.
+
+### Mutation-checked
+
+Every guard was broken on disk, run until red, restored from a byte copy, and
+confirmed green by **re-running** the suite — not by reading the file back. The
+baseline was green in the same session (95 passed across the three files), and
+no mutation produced a suite that failed to run, which would have proved nothing.
+
+| # | Mutation | Went red |
+|---|---|---|
+| M1 | `current()` no longer refuses a read made for another day | dated-read case |
+| M2 | target `unknown` becomes "no target set" | fresh-device case, unit and screen |
+| M3 | trackers `unknown` become "no trackers" | fresh-device case, unit and screen |
+| M4 | trackers without a target are no longer skipped | full-day case |
+| M5 | the food-log module gate is removed | food-off case |
+| M6 | the `done` fact loses its plan rows | done case |
+| M7 | the screen draws one extra unbacked "narrated" row | rendered-equals-assembled, fresh device |
+| M8 | "No food logged" drawn from an unreadable table | unreadable-table case |
+| M9 | the panel's read makes a network request | offline case |
+| M10 | the provenance check stops excluding tombstoned plans | provenance-can-fail case |
+| M11 | Today's header link does nothing | Today header case |
+| M12 | the hook files food under the wrong day | three screen cases |
+| M13 | the screen drops the logged rows the assembly asserts | offline and rendered-equals-assembled |
+
+Not mutation-tested, and said so: `DayNarrationSlot`'s exhaustive switch (a
+type-level guard, which `tsc` enforces rather than a test), and the
+`AppState` foreground refresh of the screen's clock, which no test drives.
+
+### What tranche 2 owns
+
+- The narration and prioritisation itself — **extending
+  `backend/internal/platform/llm`**, not a second LLM path.
+- The generation and caching policy, with its cost reasoning (criterion 4).
+- The fabricated-fact case with the LLM mocked (criterion 5's last clause),
+  built on `panelFacts` and `unbackedFacts`.
+- Adding the `ready` member to `DayNarration`.
+- The device evidence criterion — several real days as the actual entry point.
+
+### Questions tranche 2 needs the user to answer
+
+1. **Replace Today, sit beside it, or narrate inside it?** See the comparison
+   above; without narration the panel duplicates Today's first three blocks.
+2. **Generation and caching**: cached per day, regenerated on a real change
+   (and what counts as one — a logged set? a glass of water?), or on explicit
+   pull — and what monthly cost per athlete is acceptable.
+3. **Check-ins and the phase goal**: cache them locally so the panel can remind
+   offline, which reverses `lib/body.ts`'s online-only decision, or leave them
+   out of the panel?
+4. **Steps**: build a HealthKit / Health Connect step read (a new permission and
+   a new table), or drop steps from the ask?
+5. **Naming**: the athlete said "VOLA AI panel". The screen is titled "Your day"
+   because nothing on it is generated yet. Keep that, or rename when narration
+   lands?
+6. **Actions**: should the panel log (tap a tracker, quick-add food), or stay a
+   router to the screens that own logging, as it is now?
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

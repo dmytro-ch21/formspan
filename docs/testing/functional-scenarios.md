@@ -23231,3 +23231,89 @@ answer the same way forever.
 - Drag well past both edges and hold, then release.
 - Start a swipe and let a parent scroll steal it: the row must return calmly,
   not fling.
+
+## N541 tranche 1 — Your day, the deterministic day panel (`apps/mobile/app/day.tsx`, part of #972)
+
+One mobile screen, reached from Today's header, that states the day from local
+rows: today's plan, what was logged, what is next, trackers with a target, food
+eaten, and the nutrition target. **No AI in this tranche** — the narration slot
+renders nothing. Every positive line is a `day-fact-<key>` element; every "nothing
+here" line is a `day-absent-*` or `day-unavailable-*` element.
+
+### Happy path
+
+- **Open it.** On Today, tap **Your day** in the header. The panel opens with
+  today's long date under the title and a back button that returns to Today.
+- **A planned day.** Plan a strength session for today at 6:00 PM on Plan, then
+  open the panel: it shows *Strength · Planned today · 6:00 PM*. Tap it and the
+  same start screen Today's Start button opens appears.
+- **Plan met.** Log that session, return to the panel: the planned row is gone,
+  *Everything planned today is logged* shows with *1 planned*, and the session
+  appears under it as logged. Tap the session and it opens.
+- **A session in progress** leads the Training section as *In progress*, and is
+  not listed a second time as logged.
+- **Next up.** Plan something for later in the week: a *Next* row names it with
+  its date.
+- **Trackers.** With water set to 2 L at 250 ml, log two glasses on Today, open
+  the panel: *Water · 2 of 8 cups · 6 to go · last at …*. A tracker with no
+  target (e.g. coffee as a plain count) does not appear.
+- **Food.** Log lunch, open the panel: *Food · 640 kcal · 32 g protein · 1 entry
+  today*. Tap it and Food opens on today.
+- **Goal.** With a target set, the Goal section states it with its macros; tap it
+  and **Your target** opens.
+
+### Offline (the ticket's second hard constraint)
+
+- **Airplane mode, then open the panel.** Everything above still renders, in
+  full, with no spinner and no error. Nothing on the screen waits on a request.
+- **Airplane mode, log a glass of water on Today, back to the panel.** The count
+  has moved.
+- **Airplane mode on a freshly installed, signed-in device that has never
+  synced.** Training says *Nothing planned today*, Food says *No food logged yet
+  today*, and Targets and Goal say *Not available on this phone yet* — never "no
+  trackers" or "no target set", because the phone has never been told.
+
+### Edge cases & errors
+
+- **Nothing planned, but a session logged** — *Nothing planned today* shows and
+  the logged session is still listed beneath it. An off-plan session is not
+  ignored.
+- **A session started at 8:30 PM** appears as today's, not tomorrow's.
+- **A plan deleted on Plan** disappears from the panel on return, even before it
+  syncs.
+- **Nutrition module turned off** — no Food row and no Goal section at all, not
+  "no target set".
+- **Leave the panel open across midnight, then foreground the app.** The date
+  moves to the new day, and yesterday's cups and meals do not appear under it.
+- **Target set on the web, device not yet synced** — Goal says *Not available on
+  this phone yet* until Today or Food has fetched it; after that, both agree.
+- **Two accounts on one phone** — sign out, sign in as another athlete: the panel
+  shows only the new account's day.
+- **Largest Dynamic Type** — rows grow rather than truncating the numbers, and
+  the chevron stays clear of the text.
+
+### What it deliberately does not do (so a run does not report it as a bug)
+
+- No check-in or weight row, and no steps: neither exists offline on the device.
+- No tap-to-log on trackers and no quick-add: rows open the screen that owns
+  logging.
+- No day switcher: the panel is today only.
+- No AI text of any kind.
+
+### What a test can and cannot reach
+
+`lib/__tests__/dayPanel.test.ts` and `__tests__/app/dayScreen.test.tsx` cover the
+assembly and the render over real SQLite with the network failing, including the
+rule that every rendered fact is a live row. They cannot reach: the header link's
+placement beside the sync chip and wordmark at small widths, VoiceOver reading
+each row as one button with the label shown, or a real radio being off.
+
+### Needs a device
+
+- **The header on a 375pt phone** with the sync chip showing: *Your day* must not
+  collide with the wordmark (the header hides the wordmark when it cannot fit).
+- **VoiceOver** on a planned row reads *Start Strength* and on the food row
+  *Open today's food*.
+- **A real dead spot** — the gym basement the constraint is written for.
+- **Several days as the actual entry point** — #972's own evidence criterion, and
+  the answer to whether this removed navigation or added a screen.
