@@ -23198,9 +23198,9 @@ answer the same way forever.
 
 ### Still true after this ticket, and worth confirming
 
-- **A blocked SESSION still counts as pending forever.** Not fixed in this
-  slice. An athlete with a permanently refused session sees a pending count
-  that never reaches zero — expected today, and the next slice's job.
+- ~~**A blocked SESSION still counts as pending forever.**~~ **Superseded by
+  N167's second slice** — see "Sync — rows waiting on a person" below. Refused
+  sessions and workouts now count as *needs attention*, not as waiting.
 
 ## F45 — velocity handoff and edge resistance on the two drags (`apps/mobile/components/SwipeToDelete.tsx`, `components/food/EntryRow.tsx`, #1044)
 
@@ -23409,3 +23409,49 @@ place an operator could not otherwise tell whether a click registered.
   without animating.
 - Trigger a publish and immediately press again while it is in flight: nothing
   should move.
+
+## Sync — rows waiting on a person (N167 / #544, slice 2)
+
+Sessions and workouts the server refused no longer inflate "waiting to sync".
+They are counted separately as **needs attention**, and the sync chip — the
+only route to the repair screen — sends the athlete there instead of retrying.
+
+### Happy path
+
+- **A refused session reads as needing attention, not as waiting.** Log a
+  session the server will refuse permanently (a set it rejects), let sync run.
+  **Pass:** the chip reads "1 needs attention" in the alarming colour, tapping
+  it opens Sync, the session is under "Needs your attention", and "waiting to
+  sync" does not count it. **Fail:** "1 to sync", forever.
+- **Fixing it sends it.** Open the session from Sync, correct the offending
+  set, save. **Pass:** it leaves "Needs your attention", the chip goes to
+  syncing, and the session reaches the server. **Fail:** it stays listed as
+  refused, or it never goes out — the stale refusal surviving the fix is the
+  trap this slice closes.
+
+### Edge cases and errors
+
+- **Cold start.** Force-quit and reopen with a refused session on the device.
+  **Pass:** the chip still reads "1 needs attention", and a tap OPENS Sync
+  rather than retrying. This is the case the old code could not cover: the run
+  error lived only in memory, so after a relaunch the chip said nothing.
+- **Offline with a refused row.** The chip says "Offline", unchanged; once
+  signal returns it says "needs attention".
+- **A refused row and a failing run together.** "Needs attention" wins over
+  "Sync failed" — it is the more specific, more actionable state.
+- **Editing an unrelated field of a still-refused session** (renaming it,
+  moving its day) sends it once more; it is refused again and returns to
+  needing attention. Expected: one request per edit the athlete makes.
+- **A refused delete** stays in "waiting to sync" rather than "needs
+  attention" — a deleted row has nothing to open.
+- **A workout refused on a rename alone** stays in "waiting to sync". It is
+  never both uncounted and invisible.
+- **Switching accounts.** Sign out and in as another athlete: the attention
+  count resets, and the previous athlete's number never appears — including
+  when the switch happens while the count is still being read.
+
+### Not covered by this slice
+
+- **A plan the server refuses still counts as pending forever and appears on
+  no screen.** Plans are a separate outbox with both defects at once, and are
+  split into their own ticket rather than absorbed here — N564, #1106.

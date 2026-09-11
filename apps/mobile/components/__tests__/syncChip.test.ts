@@ -1,4 +1,4 @@
-import { chipFor } from '../SyncChip';
+import { chipFor, chipOpensRepair } from '../SyncChip';
 import type { SyncState } from '@/lib/sync';
 
 /**
@@ -13,6 +13,7 @@ const base: SyncState = {
   syncing: false,
   pending: 0,
   deferred: 0,
+  needsAttention: 0,
   lastSyncAt: null,
   lastError: null,
   online: true,
@@ -77,4 +78,48 @@ it('an error outranks a run in progress', () => {
   // failure behind "Syncing…" would make the problem invisible exactly when
   // it is being looked for.
   expect(at({ syncing: true, lastError: 'refused' })?.label).toBe('Sync failed');
+});
+
+describe('needsAttention — a row waiting on a person (N167/#544)', () => {
+  it('shows it, as the alarming state it is', () => {
+    const c = at({ needsAttention: 1 });
+    expect(c?.label).toBe('1 needs attention');
+    expect(c?.tone).toBe('danger');
+  });
+
+  it('pluralises', () => {
+    expect(at({ needsAttention: 3 })?.label).toBe('3 need attention');
+  });
+
+  it('shows it on a COLD START — nothing pending, no error in memory', () => {
+    // The reason the count exists at all. `lastError` lives in memory, so after
+    // a relaunch this is the only thing keeping a refused row discoverable; the
+    // chip used to render nothing here while the row sat on the repair screen.
+    expect(at({ needsAttention: 1, pending: 0, lastError: null })).not.toBeNull();
+  });
+
+  it('outranks a run-level error — the more specific, more actionable truth', () => {
+    expect(at({ needsAttention: 2, lastError: 'Server refused' })?.label).toBe('2 need attention');
+  });
+
+  it('is still outranked by offline, deliberately and unchanged', () => {
+    expect(at({ online: false, needsAttention: 2 })?.label).toBe('Offline');
+  });
+});
+
+describe('chipOpensRepair — where a tap goes', () => {
+  it('opens the repair screen for a row needing attention with NO error in memory', () => {
+    // The cold-start trap. The tap and its label each tested `lastError`
+    // inline, so this chip would have announced "Tap to sync now" and retried
+    // a request the server refuses forever, instead of opening the fix.
+    expect(chipOpensRepair({ ...base, needsAttention: 1 })).toBe(true);
+  });
+
+  it('opens it for a run-level error, as before', () => {
+    expect(chipOpensRepair({ ...base, lastError: 'Server refused' })).toBe(true);
+  });
+
+  it('retries rather than opening repair when rows are merely queued', () => {
+    expect(chipOpensRepair({ ...base, pending: 3 })).toBe(false);
+  });
 });

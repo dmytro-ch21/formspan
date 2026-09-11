@@ -8,14 +8,26 @@ import { getDb } from './db';
  * `lib/sessionStore.ts`'s `blockedRows` and this are deliberately different
  * states, and conflating them is the defect this ticket exists to fix:
  *
- * - **blocked** (`dirty = 1 AND last_error IS NOT NULL`) — still owed, still
- *   being retried. A transient failure wearing an error. It SHOULD count as
- *   pending, because it is.
+ * - **blocked** (`dirty = 1 AND last_error IS NOT NULL`, on sessions and
+ *   workouts) — refused permanently, but still owed, because those two tables
+ *   never clear `dirty` on a refusal. As of N167's second slice it does NOT
+ *   count as pending (it used to, forever) and is counted as
+ *   `SyncState.needsAttention` instead — see `BLOCKED_ROW` in
+ *   `sessionStore.ts`. It is re-sent only when a sync runs for some other
+ *   reason, or when an edit clears the refusal.
+ *
+ *   **Corrected, not silently rewritten.** Slice 1 described this state as "a
+ *   transient failure wearing an error" that "SHOULD count as pending, because
+ *   it is". Both halves were wrong by the time slice 2 landed: `noteRowError`
+ *   only ever records a PERMANENT refusal, and slice 2 stopped counting it.
+ *   Found by `frontend-reviewer` — a comment this change falsified in a file it
+ *   did not otherwise touch.
  * - **rejected** (`dirty = 0 AND last_error IS NOT NULL`) — the outbox has
  *   stopped. A 4xx will not become a 2xx, so the row is no longer owed. It
  *   must NOT count as pending, because nothing is going to happen to it.
  *
- * Both are "something is wrong with this row". Only one is waiting.
+ * Both are "something is wrong with this row", and neither counts as waiting.
+ * The difference is whether the phone still owes the row to the server.
  *
  * ## The gap this closes: the reason was kept and nothing read it
  *
