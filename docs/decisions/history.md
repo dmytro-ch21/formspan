@@ -69724,6 +69724,17 @@ deliberate OFF control exposed it. The suite now counts `Animated.timing` calls,
 which is the decision the component actually makes. All three cases go red when
 the gate is removed, and green again on restore.
 
+**Gating the animation was not enough, and review caught it.** The first
+version of the celebration left the burst RENDERED and only declined to animate
+it. That reads as correct in a diff and is worse than the motion it replaced:
+`t` starts at 0, and at 0 every flare sits at `opacity: 1`, untranslated, scale
+1 — fourteen dots stacked on the medal. So an athlete with Reduce Motion on got
+a coloured blob sitting on their result for as long as the OS took to answer,
+then blinking out. It now returns `null` unless motion is known to be allowed,
+so the fourteen views never mount. The distinction — *absent*, not merely
+*invisible* — is the whole fix, and it is now pinned by three tests that go red
+against the original form.
+
 **Two things stated rather than implied.** `(reduced ?? false) ? 'fade' :
 'default'` is behaviourally identical to `reduced ? ...` — `null` is already
 falsy — so the `?? false` is documentary, making the three-state handling visible

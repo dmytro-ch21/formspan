@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react-native';
 import { AccessibilityInfo, Animated } from 'react-native';
 
 import { LiveHRIndicator } from '../LiveHRIndicator';
+import { SessionCelebration } from '../SessionCelebration';
 import { __dispatchLiveHRForTests } from '@/lib/hrMonitor/liveHR';
 
 /**
@@ -100,5 +101,73 @@ describe('F41 — the heart respects Reduce Motion, in all three states', () => 
     // every launch, in the window before the OS replies.
     expect(timing).not.toHaveBeenCalled();
     expect(screen.getByTestId('live-hr-bpm').props.children).toBe('165');
+  });
+});
+
+/**
+ * The celebration's gate is a DIFFERENT claim from the heart's, and it is the
+ * one that was wrong first.
+ *
+ * The first version gated only the animation and left the burst rendered. That
+ * looks correct in a diff and is worse than the motion it replaced: `t` starts
+ * at 0, and at 0 every flare sits at `opacity: 1`, untranslated, scale 1 —
+ * fourteen dots stacked on the medal. So an athlete with Reduce Motion on got a
+ * coloured blob sitting on their result until the OS answered, then blinking
+ * out. `frontend-reviewer` caught it; these tests are what stop it coming back.
+ *
+ * The assertion is therefore on PRESENCE, not on whether an animation started.
+ */
+
+const summary = {
+  title: 'Evening session',
+  sport: 'strength' as const,
+  durationSeconds: 45 * 60,
+  exercises: 4,
+  sets: 12,
+  reps: 96,
+  tonnageKg: 5400,
+  records: [],
+};
+
+async function mountCelebration() {
+  await render(
+    <SessionCelebration
+      summary={summary as never}
+      formatTonnage={(kg) => `${kg} kg`}
+      formatWeight={(kg) => `${kg} kg`}
+      onDismiss={() => {}}
+      sessionID="s-1"
+    />,
+  );
+  await act(async () => {});
+}
+
+describe('F41 — the celebration flare is absent, not merely invisible', () => {
+  test('Reduce Motion OFF: the flares render', async () => {
+    answerReduceMotion(false);
+    await mountCelebration();
+
+    // The control. Without it, a component that never rendered the burst under
+    // any condition would pass both cases below.
+    expect(screen.queryByTestId('celebration-flares')).not.toBeNull();
+  });
+
+  test('Reduce Motion ON: nothing is mounted, and the result is still there', async () => {
+    answerReduceMotion(true);
+    await mountCelebration();
+
+    expect(screen.queryByTestId('celebration-flares')).toBeNull();
+    // Reduce Motion asks for less movement, not less of the report.
+    expect(screen.queryByTestId('session-celebration')).not.toBeNull();
+  });
+
+  test('the OS has not answered yet: still nothing — this is the blob case', async () => {
+    answerReduceMotion('pending');
+    await mountCelebration();
+
+    // The regression this file exists for. Gating only the animation leaves the
+    // burst mounted at full opacity for exactly this window.
+    expect(screen.queryByTestId('celebration-flares')).toBeNull();
+    expect(screen.queryByTestId('session-celebration')).not.toBeNull();
   });
 });

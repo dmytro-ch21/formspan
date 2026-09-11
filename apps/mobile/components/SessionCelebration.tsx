@@ -71,20 +71,11 @@ function Flares({ color }: { color: string }) {
   const reduced = useReducedMotion();
 
   useEffect(() => {
-    // Three states, and `null` holds — the same shape `MacroRings` uses. The
-    // first frame always precedes the OS's answer, so starting here on `null`
-    // would sweep the burst across the screen of somebody who asked not to be
-    // moved, every single time.
-    if (reduced === null) return;
-
-    if (reduced) {
-      // Jump to the end state rather than skipping it. At `t === 1` every flare
-      // has interpolated to `opacity: 0`, so the burst is simply absent and the
-      // medal, the stats and Done underneath are untouched. Reduce Motion asks
-      // for less movement, not for less of the report.
-      t.setValue(1);
-      return;
-    }
+    // Three states, and only one of them animates. `null` is "the OS has not
+    // answered yet" and is the value on the first frame, so starting here on
+    // `null` would sweep the burst across the screen of somebody who asked not
+    // to be moved, every single time.
+    if (reduced !== false) return;
 
     const anim = Animated.timing(t, {
       toValue: 1,
@@ -96,8 +87,22 @@ function Flares({ color }: { color: string }) {
     return () => anim.stop();
   }, [t, reduced]);
 
+  // Render nothing at all unless motion is known to be allowed — NOT merely
+  // "nothing visible".
+  //
+  // The distinction is the whole fix. `t` starts at 0, and at 0 every flare is
+  // at `opacity: 1`, untranslated, scale 1 — fourteen dots stacked on the
+  // medal. So a version that gated only the *animation* left the burst sitting
+  // there at full strength for as long as the OS took to answer, and then
+  // blinked it out. For somebody with Reduce Motion on, that swaps a sweep for
+  // a coloured blob appearing and vanishing on top of their result, which is
+  // worse than the motion it replaced.
+  //
+  // Returning null also means the fourteen views never mount in that case.
+  if (reduced !== false) return null;
+
   return (
-    <RNView style={styles.flareLayer} pointerEvents="none">
+    <RNView style={styles.flareLayer} pointerEvents="none" testID="celebration-flares">
       {seeds.map((s, i) => (
         <Animated.View
           key={i}

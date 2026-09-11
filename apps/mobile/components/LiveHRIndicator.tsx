@@ -83,7 +83,7 @@ export function LiveHRIndicator({
   if (variant === 'chip') {
     return (
       <RNView style={styles.chip} testID={testID} accessibilityRole="text" accessibilityLabel={liveA11y(state, fresh, zone)}>
-        <Animated.View style={{ transform: [{ scale: beat }] }} testID={`${testID}-beat`}>
+        <Animated.View style={{ transform: [{ scale: beat }] }}>
           <Icon name="heart" size={14} color={color} />
         </Animated.View>
         <Text style={[styles.chipNumber, { color }]} testID={`${testID}-bpm`}>
@@ -112,7 +112,7 @@ export function LiveHRIndicator({
         </Text>
       </RNView>
       <RNView style={styles.cardBody}>
-        <Animated.View style={{ transform: [{ scale: beat }] }} testID={`${testID}-beat`}>
+        <Animated.View style={{ transform: [{ scale: beat }] }}>
           <Icon name="heart" size={28} color={color} />
         </Animated.View>
         <Text style={[styles.cardNumber, { color }]} testID={`${testID}-bpm`}>

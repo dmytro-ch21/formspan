@@ -22812,7 +22812,14 @@ stated three times, not two.
 
 - **Reachable, and covered** (`components/__tests__/reducedMotionGating.test.tsx`):
   all three hook states on `LiveHRIndicator`, asserted by counting
-  `Animated.timing` calls. All three go red when the gate is removed.
+  `Animated.timing` calls, and all three on `SessionCelebration`, asserted on
+  whether the flare layer is **mounted**. All six go red against the forms they
+  replaced.
+- **The celebration's assertion is on presence, not on animation, and that is
+  deliberate.** Gating only the animation leaves the burst rendered at `t === 0`
+  — full opacity, untranslated, stacked on the medal — so a Reduce Motion user
+  gets a blob appearing and vanishing instead of a sweep. *Absent* and
+  *invisible* are different outcomes and only one of them is correct.
 - **NOT reachable, and this is the important half**: whether the OS setting is
   actually honoured at runtime. The suite mocks `AccessibilityInfo`, so it
   proves the component reacts correctly to the hook — never that the hook
