@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { vola } from '@/constants/Colors';
+import { drawnOffset, springVelocity } from '@/lib/gesturePhysics';
 import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
@@ -82,47 +83,6 @@ export function shouldClaim(dx: number, dy: number, enabled: boolean): boolean {
   return Math.abs(dx) > CLAIM_DX && Math.abs(dx) > Math.abs(dy) * 1.5;
 }
 
-/**
- * Progressive resistance past an edge, so a boundary feels like an edge rather
- * than like the gesture breaking.
- *
- * Exported for its own tests. Pure: given an overshoot in points it returns how
- * far the row should ACTUALLY move, which approaches `dimension` asymptotically
- * and never reaches it — so the row keeps responding to the finger no matter
- * how hard it is pulled, but visibly gives less and less.
- *
- * (The limit is `dimension`, not `dimension * constant`: as the overshoot grows
- * the expression reduces to `(x·d·c)/(c·x) = d`. The first draft of this
- * comment said the latter and a test caught it — worth stating, because the
- * whole point of the function is the ceiling it approaches.)
- *
- * The 0.55 constant is UIScrollView's, and the formula is the one iOS uses for
- * its own bounce. It is deliberately NOT a token: this is the shape of a
- * physical law, not a duration or a curve, and `constants/Motion.ts` covers
- * time only.
- */
-/**
- * `gestureState.vx`/`vy` in px per MILLISECOND → the px per SECOND that React
- * Native's spring expects.
- *
- * A named function for a multiply by 1000, deliberately, because the units are
- * the entire risk in F45 and an inline `* 1000` is the kind of thing a later
- * edit "simplifies" away. Measured, not assumed: `SpringAnimation.js:281` is
- * `const deltaTime = (now - this._lastTime) / 1000;` with `now` from
- * `Date.now()` — re-checked against the installed react-native 0.86.3.
- *
- * Wrong by three orders of magnitude in either direction and the row either
- * ignores a flick completely or leaves the screen, and both read as a broken
- * spring rather than as a unit error.
- */
-export function springVelocity(pxPerMs: number): number {
-  return pxPerMs * 1000;
-}
-
-export function rubberband(overshoot: number, dimension: number, constant = 0.55): number {
-  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
-}
-
 /** Where the row settles when the finger lifts: 0 closed, -ACTION_WIDTH open. */
 export function settleTarget(a: { rest: number; dx: number; vx: number }): number {
   // A fast flick settles in the direction it was thrown regardless of
@@ -180,6 +140,15 @@ export function SwipeToDelete({
      * Defaults to 0 on purpose. A termination and a programmatic close have no
      * velocity, and inventing one would make the row leap on a gesture the
      * athlete did not make.
+     *
+     * One caveat, because the line above overstates what is enforced: if a
+     * spring is ALREADY running on this value, React Native overwrites the
+     * velocity you pass with the running spring's current one
+     * (`SpringAnimation.js:217-224`). The terminate path is unaffected — the
+     * drag's `setValue` clears the animation first — but a programmatic
+     * `close()` landing mid-settle will continue at the flick's remaining
+     * speed rather than at zero. That is continuous, and fine; it is simply
+     * not the zero this default implies.
      */
     (to: number, vx = 0) => {
       rest.current = to;
@@ -231,13 +200,7 @@ export function SwipeToDelete({
           // Note this changes only what is DRAWN. The release still hands
           // `settleTarget` the raw `g.dx`, so every settle decision — and every
           // test of it — is untouched.
-          if (next > 0) {
-            translate.setValue(rubberband(next, ACTION_WIDTH));
-          } else if (next < -ACTION_WIDTH) {
-            translate.setValue(-ACTION_WIDTH + rubberband(next + ACTION_WIDTH, ACTION_WIDTH));
-          } else {
-            translate.setValue(next);
-          }
+          translate.setValue(drawnOffset(next, ACTION_WIDTH));
         },
         onPanResponderRelease: (_e, g) =>
           settle(settleTarget({ rest: rest.current, dx: g.dx, vx: g.vx }), g.vx),
@@ -311,6 +274,16 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'flex-end',
     justifyContent: 'center',
+    // The action layer carries the button's own colour, not just the button.
+    //
+    // Before F45 `translate` was provably inside [-ACTION_WIDTH, 0], so nothing
+    // was ever drawn to the left of the 96pt button and this layer's emptiness
+    // never showed. A released flick now carries a few pixels past the open
+    // position before settling back, and without this that gap is whatever is
+    // behind the row — a background sliver beside a red button, which is the
+    // same defect class `styles.row`'s comment below is about.
+    backgroundColor: vola.danger,
+    borderRadius: 12,
   },
   deleteButton: {
     width: ACTION_WIDTH,

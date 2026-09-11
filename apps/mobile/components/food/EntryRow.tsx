@@ -76,7 +76,7 @@ import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { type Entry, type Meal } from '@/lib/nutrition';
 import type { FoodUnit } from '@/lib/units';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { springVelocity } from '@/components/SwipeToDelete';
+import { springVelocity } from '@/lib/gesturePhysics';
 
 /** How long the finger has to hold still before a move becomes a drag. */
 export const LONG_PRESS_MS = 300;
