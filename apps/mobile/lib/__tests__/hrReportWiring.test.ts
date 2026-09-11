@@ -207,36 +207,74 @@ describe('finishing a session kicks enrichment whichever path it was on', () => 
 });
 
 /**
- * N545/#988 — the chart's window must be the window the NUMBERS came from.
+ * N545/#988 + N563/#1068 — the chart's window must be the window the NUMBERS
+ * came from, on every screen that draws one.
  *
  * W19/#985 moved a session's heart rate off the athlete's typed start/end and
  * onto the watch's own workout window, because a 90-minute class was being
  * scored almost entirely from pre-class background readings. A timeline built
  * over the logged window would draw a real curve, with a real time axis and a
  * marked peak, underneath an avg/max/TRIMP measured from a different stretch
- * of time — the same bug W19 fixed, re-entered through the chart.
+ * of time — the same bug W19 fixed, re-entered through the chart. N545 fixed
+ * it on the BJJ screen.
  *
- * Checked at the source level for the same reason as everything else in this
- * file: the invariant spans a fetch, a pure builder and a component, and no
- * unit test can see all three at once. `hrTimelineAxis.test.ts` covers what
- * the chart does with the window; this covers which window it is handed.
+ * N563 wired strength and running to the same chart and lifted BJJ's inline
+ * fetch into `lib/useSessionHRTimeline.ts`, which takes the metrics ROW rather
+ * than two timestamps. So the invariant now has two halves, pinned separately
+ * because they fail separately:
+ *
+ *  - the hook reads the metrics window and has no session time to be wrong
+ *    with;
+ *  - every screen hands the hook its `hrMetrics`, and fetches and builds no
+ *    timeline of its own.
+ *
+ * The second half is what a render test cannot see. A screen that inlined its
+ * own fetch over `started_at`/`ended_at` draws a perfectly good chart — over
+ * the wrong stretch of time, on a session whose two windows usually agree —
+ * and strength has no render harness at all. `hrTimelineAxis.test.ts` covers
+ * what the chart does with a window; this covers which window it is handed.
+ * Comments are stripped before the negative assertions so each screen's own
+ * explanation of the trap cannot trip them.
  */
 describe('the session HR timeline is built from the metrics window, not the logged one', () => {
-  const SCREEN = 'app/bjj/session/[id].tsx';
+  const HOOK = 'lib/useSessionHRTimeline.ts';
 
-  it('fetches the samples over the metrics window', () => {
-    const src = screenSource(SCREEN);
-    expect(src).toContain('hrMetrics?.hr_window_start');
-    expect(src).toContain('hrMetrics?.hr_window_end');
-    expect(src).toContain("listBiometricSamples(getToken, 'heart_rate', hrWindowStart, hrWindowEnd)");
+  it('the hook fetches and builds over the metrics window', () => {
+    const src = withoutComments(screenSource(HOOK));
+    expect(src).toContain('metrics?.hr_window_start');
+    expect(src).toContain('metrics?.hr_window_end');
+    expect(src).toContain("listBiometricSamples(getToken, 'heart_rate', windowStart, windowEnd)");
+    expect(src).toContain('buildHRTimeline(samples, windowStart, windowEnd)');
   });
 
-  it('builds the timeline over that same window', () => {
-    expect(screenSource(SCREEN)).toContain('buildHRTimeline(samples, hrWindowStart, hrWindowEnd)');
+  it('the hook has no session time to be wrong with', () => {
+    const src = withoutComments(screenSource(HOOK));
+    // Guards the guard: the comment stripper is apparatus too, and a blanked
+    // file would satisfy the absence below.
+    expect(src).toContain('export function useSessionHRTimeline(');
+    expect(src).not.toMatch(/started_?at|ended_?at/i);
   });
 
-  it('no longer builds it over the session’s own logged times', () => {
-    const src = screenSource(SCREEN);
-    expect(src).not.toContain('buildHRTimeline(samples, startedAt, endedAt)');
+  it.each(SCREENS)('%s gets its timeline from the hook, handed the metrics row', (rel) => {
+    const src = withoutComments(screenSource(rel));
+    expect(src).toContain('useSessionHRTimeline(getToken, id, hrMetrics)');
+    expect(src).toContain('hrTimeline={hrTimeline}');
+  });
+
+  it.each(SCREENS)('%s fetches and builds no timeline of its own', (rel) => {
+    const src = withoutComments(screenSource(rel));
+    // Guards the guard, as above.
+    expect(src).toContain('<HRSessionReport');
+    expect(src).not.toContain('buildHRTimeline(');
+    expect(src).not.toContain("'heart_rate'");
+  });
+
+  it.each(SCREENS)('%s passes the logged window, so the differing-window caption can fire', (rel) => {
+    // `timelineCaption` and N522's footnote both compare the metrics window
+    // against these; a screen that omits them is silent about a mismatch
+    // rather than wrong about one, which is the quieter failure.
+    const src = withoutComments(screenSource(rel));
+    expect(src).toContain('sessionStartedAt=');
+    expect(src).toContain('sessionEndedAt=');
   });
 });

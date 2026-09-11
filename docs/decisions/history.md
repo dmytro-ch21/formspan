@@ -71522,6 +71522,168 @@ its exercise picker and photo identify are all mobile-only. **Not verified on a
 device**: the wiring is proven by reading the source, as N543's screen tests
 were; nothing here renders `session/[id].tsx`.
 
+## 2026-09-11 — N563: the session heart-rate timeline reaches strength and running, and the running screen can be rendered in a test
+
+N545 (#988) gave the session heart-rate chart a real elapsed-time axis, a bpm
+ladder and a marked, labelled peak — on the BJJ report only. A finished
+strength session and a finished run still showed their zone stats with no
+chart. N563 (#1068) was split out of N545 for one reason, and it was not the
+wiring: **the running screen had no test harness.** Doing it inside N545 would
+have meant shipping the one untestable surface alongside two testable ones, or
+building a harness inside a ticket about an axis.
+
+**What each screen now renders.** With heart rate: the same chart as BJJ,
+between the zone stats and the zone bars — time axis, bpm ladder, dashed
+average, the peak dot with `171 bpm at 20m`, zone-coloured segments. On
+strength the per-exercise breakdown still renders below it; the two are
+independent. Without heart rate (no metrics row, or `hr_source: 'none'`):
+nothing — no chart, no frame, no axis, no zeros. The existing "no heart-rate
+data" card and its "Sync heart rate" button are all that appear, exactly as
+before. Both screens now also hand `HRSessionReport` their logged window, so
+the chart's caption says "Heart rate across the recording — 0m is 6:12 PM,
+when the readings start" and N522's both-windows footnote fires when the watch
+recorded somewhere else. Neither screen passed those before, so neither could
+have said so even about its numbers.
+
+**One hook, not three copies of an effect — and the hook takes the metrics
+ROW.** The obvious assembly was pasting BJJ's fetch effect into two more
+screens. That effect's one load-bearing decision is which window it fetches
+and draws over, and W19 (#985) is why that decision matters: a session's heart
+rate comes from the watch's own workout window, not the athlete's typed
+`started_at`/`ended_at`, because a 90-minute class was once scored almost
+entirely from pre-class background readings. A timestamped curve drawn over
+the logged window sits under an avg/max/TRIMP measured from a different
+stretch of time. N545 had to correct exactly that on BJJ. Three copies of the
+line are three places to get it wrong again. So `lib/useSessionHRTimeline.ts`
+takes `SessionMetrics` and reads `hr_window_start`/`hr_window_end` itself —
+no call site has a session time to hand it — and gates on the row existing:
+no row, no fetch, no chart. All three screens call it, BJJ included; BJJ's
+inline effect is gone. Criterion 5's rule ("no second implementation per
+screen") is kept for the fetch as well as for the axis.
+
+**`hrTimelineAxis.ts` is untouched.** Nothing about tick choice, the bpm
+domain, the peak or label clamping differs between sports — the module was
+sport-agnostic when N545 wrote it, and nothing in this ticket needed it to
+learn anything.
+
+**The W19 trap is pinned twice, at two levels, because each level is blind to
+something the other sees.** `hrReportWiring.test.ts` asserts at the source
+level that the hook reads the metrics window and contains no session time at
+all (comments stripped first, with a positive guard so a blanked file cannot
+pass), and that every screen calls `useSessionHRTimeline(getToken, id,
+hrMetrics)`, passes `hrTimeline={hrTimeline}`, passes both logged times, and
+neither builds nor fetches a timeline of its own. That is the only check that
+covers strength — whose 3,900-line screen still has no render harness — and
+the only one that catches a screen quietly inlining its own fetch over
+`started_at`, which draws a perfectly good chart on every session whose two
+windows happen to agree. The running render test covers the other side: its
+fixture deliberately puts the watch's window 20 minutes after the logged one,
+past `HR_WINDOW_MISMATCH_THRESHOLD_MINUTES`, which is the one shape where
+fetching over the wrong window is observable in a render at all.
+
+**11 mutations, 11 killed, every one red as a TEST failure and every restore
+re-run green** — driven by one sequential script, because every mutation edits
+a file the wiring test reads and two at once would redden each other for the
+wrong reason. It asserts the mutation is on disk before running, runs whole
+files rather than `-t` filters (a filter matching nothing exits 0), and treats
+"Test suite failed to run" as invalid rather than killed. Baseline 47/47 green
+in the same session, first.
+
+| Mutation | Went red |
+|---|---|
+| Running screen hands the hook its LOGGED window | the running render test (wrong-window fetch) **and** the running source pin |
+| Strength screen hands the hook its LOGGED window | the strength source pin — the only check that can see it |
+| Hook swaps the window's start and end | the running render test and the hook's source pin |
+| Running drops `hrTimeline={hrTimeline}` | both running timeline render tests and the source pin |
+| Running drops `sessionStartedAt` | the differing-window caption test and its source pin |
+| Running asks the OS for location when `canAskAgain` is false | "refused for good" |
+| Accuracy floor raised to 5 km | "drops a fix too inaccurate to trust" |
+| Fix queue cleared before the track is saved | the finish-order test |
+| Finished-branch prune removed | the reopened-run test and the existing prune-count pin |
+| Sport guard removed | "refuses a session that is not a run" |
+| `startRunTracking` removed | both tracking-start tests |
+
+The first run of the driver classified every one as "red, no test failure" —
+jest prints `✕` only in verbose mode, so the parser found no names while the
+`Tests:` line said 2 failed. The counts were right and proved nothing about
+WHICH test went red, so it was re-run reading jest's `● suite › test` headers.
+That second run is the table above.
+
+**The running-screen harness — the actual work.** `__tests__/app/support/
+runningScreen.tsx` renders `app/running/[id].tsx` with its boundaries replaced
+and its decisions left real. Replaced: the OS (`expo-location`), the disk
+(`sessionStore`, the fix queue in `runningTrackingTask`), the network
+(`biometric`), the radio (`hrMonitor/*`, `LiveHRIndicator`), the speaker
+(`voice`), and `HoldToConfirm`'s gesture. Real: `lib/running.ts`'s distance
+and split arithmetic, the auto-pause hysteresis, the accuracy floor,
+`HRSessionReport` and its state machine, `hrSourceSentence`, the timeline
+builder and axis, `useSessionVo2Max`. A test is one call —
+`renderRunningScreen({ session, detail, permission, fixes, metrics, samples,
+hrAbsence })` — which resets every mock and installs that world, so no test
+inherits another's implementation. The fix queue honours the cursor the
+screen passes, the way the real one does. It lives in one module because
+`jest.mock` hoists within the file that calls it, and that module both
+registers the mocks and imports the screen.
+
+Two things about building it are worth knowing before extending it:
+
+- **The global `react-native-maps` stand-in cannot hold a ref**, and the
+  screen calls `mapRef.current?.animateCamera(...)` for the newest fix of
+  every drain. The optional chain is on `current`, not the method, so it
+  throws inside `processFix`, the drain's own catch logs it as "a dropped GPS
+  fix", and the track never persists. That reads exactly like the screen's own
+  "athlete never moved" failure. The harness overrides the map with a
+  `forwardRef` exposing `animateCamera`.
+- **RNTL's awaited `render` flushes microtasks**, so with immediately
+  resolving stores the screen is usually past `running-loading` by the time
+  the harness returns. Measured: the first draft asserted the loading branch
+  and failed. A test about loading has to hold a store call open itself.
+
+What it can now catch that nothing could before — each confirmed by mutation
+above rather than asserted: the OS being asked for location when it will not
+show the prompt; a run tracked with tracking never started; a strength
+session opened in the running screen; an inaccurate fix reaching the saved
+route; the fix queue released before the track it held is saved (checked on
+FIRST invocations — a queue cleared early and again at the end reads in-order
+by its last call); the finished-branch prune going missing; the heart-rate
+timeline missing, drawn over the wrong window, or captioned as the session
+when it is not. **What it does not catch, recorded rather than implied:** a
+drain cursor that stops advancing (a `waitFor` on the saved route's length
+sees the first correct write before any duplicate lands), anything about real
+time passing on the GPS clock, a real permission alert, a real map, or a real
+monitor.
+
+**PR #868 (N486, the location-permission double-request race) becomes testable
+through this harness.** Its fix routes the mount effect's permission request
+through a per-mount latch and still passes the `expo-location` module in, so
+the harness's `expo-location` mock covers both versions of the screen. A
+double-invoked mount effect asking twice is a render-level property this
+harness can now reach — whoever lands #868 should add that test here rather
+than only its pure latch test.
+
+**Overlap with #868, measured rather than eyeballed.** Three-way merge of
+`app/running/[id].tsx` against #868's own merge base: `main` × #868 already
+conflicts in one hunk (the `@/lib/sessions` import, which `main` widened to
+`emptySet, roundDistanceM` after #868 branched, and next to which #868 adds its
+import block). This branch × #868 conflicts in the same one hunk and no other;
+none of this branch's lines sit inside it. This branch's three hunks (one
+import at line 59, the hook call after the metrics effect, three props on
+`HRSessionReport`) stay out of #868's mount-effect region. Whichever merges
+second resolves that import hunk and should re-run the mobile suite against
+the merged file rather than trust a clean-looking resolution. #972 (N541's
+day panel) touches none of these files.
+
+### Open items / gaps this leaves
+
+- **Strength still has no render harness.** Its timeline wiring is pinned at
+  the source level only; `HRSessionReport`'s own component tests cover what the
+  report does with a timeline. The running harness's shape is the template if
+  that screen ever gets one.
+- The ticket's `NEEDS HUMAN EVIDENCE` criterion — a strength session and a run
+  with heart rate each show a locatable peak, one of each without shows no
+  chart — is outstanding by design and cannot be settled from a render tree.
+- The drain-cursor regression above is uncovered.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

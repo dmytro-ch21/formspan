@@ -22565,6 +22565,74 @@ rather than from the session's own logged start.
 - The tick labels and the peak label are legible at the real font size on a real
   phone, in both light and dark, without overlapping the curve.
 
+## N563 — the session HR timeline on strength and running reports (`apps/mobile/lib/useSessionHRTimeline.ts`, `apps/mobile/app/session/[id].tsx`, `apps/mobile/app/running/[id].tsx`)
+
+N545's chart — elapsed time axis, bpm ladder, marked and labelled peak — was
+BJJ-only. N563 draws the same chart on a finished strength session and a
+finished run, from one shared hook. **Read N545's section above first**: every
+axis, peak and caption scenario there now applies to all three sports, and is
+not repeated here. What is new is which screens reach it, and that they must
+all reach it over the same window.
+
+### Happy path
+
+- **A finished strength session with heart rate** shows the timeline between
+  the zone stats and the zone bars, with a peak label (`171 bpm at 20m`) and a
+  time axis ending at the recording's duration. The per-exercise breakdown
+  still renders below the zone bars — the two are independent.
+- **A finished run with heart rate** shows the same chart under distance, time
+  and pace, above the "Distance over time" row.
+- **A run reopened from Training History** (not just finished) shows it too —
+  the finished branch is the same one either way.
+- Strength, running and BJJ sessions with the same heart-rate shape draw the
+  same chart: same colours, same tick choice, same label format. A difference
+  between sports is a bug, not a styling choice.
+
+### Edge cases and errors
+
+- **The W19 shape on strength and on a run**: the watch's workout began more
+  than 10 minutes after the athlete's logged start. The chart's `0m` is the
+  WATCH's start, the caption reads "Heart rate across the recording — 0m is
+  H:MM, when the readings start", and N522's both-windows footnote is still
+  underneath. A chart labelled against the logged start is the defect this
+  ticket exists to avoid — check the peak's time against the watch's own
+  workout, not the logged one.
+- **No heart rate at all** (no wearable, or `hr_source: 'none'`): no chart, no
+  empty card, no axis, no `0 bpm`. The "no heart-rate data" card and its
+  "Sync heart rate" button are all that appear.
+- **Heart rate arrives later** (the "Sync heart rate" button finds readings):
+  the report replaces the empty card and the chart appears with it, without
+  leaving the screen.
+- **The raw-sample fetch fails** (offline after the metrics already loaded):
+  the stats and zones still render; only the chart is missing.
+- **A run still in progress** fetches no heart-rate report at all — the live
+  chip is the only heart-rate surface until the run is finished.
+- **Sparse readings** (the report's `limited` state): no chart, as on BJJ.
+
+### Auth and security
+
+- Nothing new: the same two athlete-scoped endpoints N545 reads. Sign out and
+  in as a second athlete on the same phone; reopening the first athlete's run
+  from a stale deep link must not draw their curve.
+
+### Needs a device
+
+- **A strength session and a run, each with heart rate, both show the timeline
+  with a locatable peak; one of each with no heart rate shows no chart rather
+  than an empty frame** — the ticket's `NEEDS HUMAN EVIDENCE` criterion. Use
+  real sessions from a real wearable, not seeded rows.
+- On the running summary specifically: the chart fits inside the scroll view
+  at the largest accessibility text size without clipping the Done button.
+
+### The running screen's test harness
+
+`apps/mobile/__tests__/app/support/runningScreen.tsx` renders the running
+screen with its OS, disk, network and radio boundaries replaced and its own
+logic real. When a running-screen scenario above is automatable — a
+permission answer, a queued fix, the finish sequence, a report state — it
+belongs in `__tests__/app/runningSessionScreen.test.tsx` through that harness
+rather than as another source-text assertion.
+
 ## F40 — Reduce Motion is respected in web and admin (`apps/web/src/app/globals.css`, `apps/admin/src/app/globals.css`, #1039)
 
 Before this, `prefers-reduced-motion` appeared **nowhere** in either app: 100
