@@ -245,7 +245,12 @@ describe('the heart-rate timeline on a finished run (N563/#1068)', () => {
     expect(screen.queryByTestId('running-hr-timeline')).toBeNull();
   });
 
-  it('keeps the rest of the report when the raw-sample fetch fails', async () => {
+  it('keeps the rest of the report, and draws no chart, when the raw-sample fetch fails', async () => {
+    // What this proves: a rejected samples fetch neither breaks the report nor
+    // leaves a chart behind. What it does NOT prove is that the hook's `.catch`
+    // ran — the timeline starts as `[]`, so an emptied catch body passes this
+    // too (frontend-reviewer measured it). That branch only matters when a
+    // second fetch follows a successful one, which no session screen does.
     await renderRunningScreen({
       session: finishedRun(),
       detail: runDetail(),
