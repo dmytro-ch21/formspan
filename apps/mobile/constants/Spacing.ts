@@ -87,6 +87,50 @@ export const Spacing = {
 } as const;
 
 /**
+ * The touch-target floor, in points. 44 on iOS (Apple's HIG), 48dp on
+ * Android; 44 is the binding one here and the smaller of the two is what a
+ * cross-platform control has to clear.
+ *
+ * **This lives in the design system, not in a screen.** `vola-athlete-ux`
+ * lists large one-handed touch targets as a property of the interface rather
+ * than a per-screen choice, and F42's audit is what that distinction costs
+ * when it is not enforced anywhere: `components/ui/Pill.tsx` is one file
+ * behind every filter chip, date pill and toggle in the app, so its
+ * `hitSlop={6}` was a single wrong number wrong in dozens of places at once.
+ *
+ * The standard this app is held to is harsher than the HIG's: a control is
+ * hit standing up, one-handed, with sweaty hands, in the ~20 seconds between
+ * sets. 44 is a floor, not a target.
+ */
+export const TOUCH_MIN = 44;
+
+/**
+ * The `hitSlop` a control of a given visual height (or width) needs to reach
+ * {@link TOUCH_MIN}.
+ *
+ * **The rule this encodes is that the VISUAL does not grow.** A filter chip
+ * is 27pt because 27pt is what it should look like; making it 44pt to be
+ * hittable would be answering a layout question with a legibility answer.
+ * `hitSlop` extends the touch rectangle beyond the painted bounds and leaves
+ * the design alone, which is why it is the right instrument here and growing
+ * `paddingVertical` usually is not.
+ *
+ * Rounds UP, and clamps at zero so a control that already clears the floor
+ * asks for nothing. Symmetric, because `hitSlop` as a number applies to all
+ * four edges — hence the halving.
+ *
+ * **Slop is not free, and this is the one place to say so.** It overlaps
+ * nothing on an isolated control, but on a row of adjacent small targets
+ * (a calendar's seven day cells, say) enough slop makes neighbouring
+ * rectangles overlap, and an overlap resolves to whichever view is on top
+ * rather than to the one under the thumb. Check the neighbour spacing before
+ * reaching for this on anything in a tight row; a cell that already clears
+ * 44 by its own layout needs none.
+ */
+export const slopFor = (visualHeight: number) =>
+  Math.max(0, Math.ceil((TOUCH_MIN - visualHeight) / 2));
+
+/**
  * The radius scale. Same sourcing as {@link Spacing}, from `RADIUS_SCALE`.
  */
 export const Radius = {

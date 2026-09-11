@@ -70258,6 +70258,115 @@ sentinel that shares a type with a real value will eventually be read as one.**
 `0` is a legitimate inset. `null` is not, which is what makes it safe to mean
 "nothing".
 
+## 2026-09-11 — F42: the 44pt floor gets a name, and three of the five sites it was filed against did not need fixing (#1041)
+
+`components/ui/Pill.tsx` carried `hitSlop={6}` around a 27pt control — an
+effective target of **39pt**, under the 44pt floor.
+
+**The ticket's argument for why that matters is wrong, and review caught it.**
+#1041 says `Pill` "is the shared component behind every filter chip, date pill
+and toggle in the app, so one wrong number is wrong in dozens of places at
+once". It is not, yet: `Pill` has **zero call sites** anywhere outside its own
+tests. N444's own history entry is titled *"shared Button/Pill primitives — the
+foundation, not the migration"* and lists, under **What did NOT land,
+deliberately**, "migrating the ≥15 existing ad-hoc chip/pill declarations onto
+the new components". Every pill-shaped control in the app today — `intentPill`,
+`slotPill`, `scopePill`, `protocolPill`, `phasePill` and the rest — is still its
+own hand-rolled `Pressable` and is untouched by this.
+
+So the honest statement of this fix is narrower than the ticket's: **it corrects
+the foundation before anything is built on it, and it has no runtime effect
+today.** That is still worth doing, and arguably is the cheapest moment to do
+it — a wrong default in an unused primitive costs one line now and fifteen call
+sites later. But "dozens of places at once" describes a migration that has not
+happened, and repeating it would have made this entry assert an impact the app
+does not currently have.
+
+`components/today/WeekStrip.tsx`'s "Week in review" control was worse and is on
+the first screen of the app: no padding and no `hitSlop`, so its height was the
+12pt label's line box — roughly 16pt.
+
+Both are fixed, and the floor now has a name rather than being re-derived per
+site. `constants/Spacing.ts` gains `TOUCH_MIN = 44` and
+`slopFor(visualHeight)`, beside `Spacing` and `Radius`, because
+`vola-athlete-ux` lists large one-handed touch targets as a property of the
+design system rather than a per-screen choice — which is precisely what the
+`Pill` finding demonstrates costs something when it is enforced nowhere.
+
+**The rule `slopFor` encodes is that the visual does not grow.** A chip is 27pt
+because that is what it should look like; making it 44pt to be hittable answers
+a legibility question with a layout change. `hitSlop` extends the touch
+rectangle past the painted bounds and leaves the design alone.
+
+`WeekStrip`'s review row is the one deliberate exception, and it earns it: at
+16pt, slop alone would have reached 44 while leaving a control that still read
+as a caption, and the week strip sits directly below it — a 14pt slop reaching
+up and down from a 16pt row is exactly the neighbour overlap `slopFor`'s own
+doc comment warns about. So it takes `paddingVertical: 8` first and slop on
+what remains.
+
+### Three of the five named sites did not need fixing, and one was never a target
+
+The ticket named five, all re-verified against `f00c6a82`. Re-checking each
+against `main` as it stands today:
+
+- **`WeekStrip`'s `mark` (16×16) is not a touch target at all.** It renders as
+  an `RNView` — a status dot showing whether a day was logged. `WeekStrip`'s
+  only pressable is the review control. `hitSlop` on a `View` does nothing, so
+  the criterion asking this to "reach ≥44pt effective" is unsatisfiable as
+  written, not merely unmet.
+- **`TrainingCalendar`'s `gridDate` (34×34) is the painted circle, not the
+  target.** The `Pressable` wrapping it uses `gridCell`, which is `flex: 1`
+  across seven columns — roughly 51pt wide — and 49pt tall (2 + 34 + gap 3 +
+  an 8pt dot + 2). It already clears the floor in both directions, and adding
+  slop there would be actively wrong: seven adjacent cells at ~51pt with slop
+  produce overlapping rectangles, and an overlap resolves to whichever view is
+  on top rather than to the one under the thumb.
+- **`Timer`'s `headButton` already carries `hitSlop={12}`** — 34 + 24 = 58pt.
+  It gained that in `8efd83e1`, F48 tranche one (#1060). This entry first said
+  "most likely in F38's press-feedback pass", which review checked with
+  `git log f00c6a82..HEAD -- apps/mobile/components/Timer.tsx` and found to be
+  the wrong ticket — a guess written in the register of a fact, in an entry
+  whose whole point is that the audit guessed.
+
+So the diff touches two components and the constants file, not five. **The
+audit measured painted geometry from source and read three visuals as targets
+they are not** — a `View`, a circle inside a larger pressable, and a control
+that had since been fixed. That is not a criticism of the audit's arithmetic,
+which was right about `Pill` and `WeekStrip`; it is the specific hazard of
+reading touch targets out of style objects, where the hit rectangle is decided
+by the *pressable's* layout and the style you can see is usually a child's.
+
+### The sweep, since the ticket asked the PR to size it
+
+Measured on this branch: **124 files contain a pressable; 57 of them set no
+`hitSlop` anywhere**, covering **156 pressable elements**. The ticket's figures
+at `f00c6a82` were 125 and 58, so one file has gained slop since.
+
+The concentration is in the flows with the most controls: `app/bjj/dictate.tsx`
+(17), `app/food/scan.tsx` (13), `app/food/describe.tsx` (9),
+`components/food/IngredientPicker.tsx` (8), `app/food/entry/[id].tsx` (7).
+
+**A count of files with no `hitSlop` is not a count of defects, and the three
+false positives above are why that has to be said explicitly.** Many of those
+156 are already ≥44pt from their own padding, and the calendar cell shows a
+control can be compliant while every style literal in it reads as too small.
+Sizing a follow-up needs the pressable's own resolved layout, not a grep — the
+grep gives an upper bound of 156 and the real number is certainly far smaller.
+
+### What is not settled
+
+**No figure here was measured on glass.** The 39pt and 16pt are computed from
+padding, font size and `hitSlop` in source, and so are the 45pt and 49pt this
+entry claims in reply. Whether 39pt was actually failing under a thumb, and
+whether the enlarged "Week in review" now swallows taps meant for the week
+strip below it, are #1041's two device criteria and neither has been run.
+
+Out of scope and deliberately untouched: press feedback on these controls, which
+is F38's. Worth noting that the ticket's claim that `WeekStrip`'s review row
+"has no `pressed` state either" is also now stale — it is a `PressableScale`
+and has had press feedback since F38 landed.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

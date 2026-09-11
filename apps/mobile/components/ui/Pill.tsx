@@ -6,6 +6,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { withAlpha } from '@/lib/palette';
 import { PRESS_OPACITY } from '@/constants/Motion';
+import { slopFor } from '@/constants/Spacing';
 
 /**
  * The one rounded-label shape — a chip you can select, or a badge you can't.
@@ -85,7 +86,7 @@ export function Pill({ label, onPress, active, icon, accessibilityLabel, testID 
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={6}
+      hitSlop={slopFor(CHIP_HEIGHT)}
       style={({ pressed }) => [
         styles.base,
         styles.chip,
@@ -107,13 +108,44 @@ export function Pill({ label, onPress, active, icon, accessibilityLabel, testID 
   );
 }
 
+/** The chip's vertical padding. The style below uses this, not a literal. */
+export const CHIP_PADDING_V = 6;
+
+/** The 12pt label's line box, rounded. The one figure here that is an estimate. */
+export const CHIP_LABEL_LINE = 15;
+
+/**
+ * The chip's painted height — 27pt, which asks {@link slopFor} for 9 and
+ * gives 27 + 18 = 45pt against the 44pt floor. Before F42 this was
+ * `hitSlop={6}`, an effective 39pt.
+ *
+ * **Composed from the two constants above rather than restated, and the
+ * stylesheet consumes the same ones**, so the height cannot drift from the
+ * padding it is derived from — an earlier draft wrote `6 + 15 + 6` here
+ * beside a separate `paddingVertical: 6` literal, which is three places to
+ * change in lockstep and exactly the drift this ticket exists to end.
+ * `CHIP_LABEL_LINE` is still an estimate; React Native gives no cheap way to
+ * measure a text line box without an `onLayout` round trip, and `hitSlop` is
+ * a static prop that needs a number before layout happens.
+ *
+ * **If this is ever dropped into a ROW of chips, the row needs a `gap` of at
+ * least 18pt** — `slopFor(27)` is 9, applied to all four edges, so two
+ * adjacent chips any closer have overlapping touch rectangles and a tap
+ * resolves to whichever is on top rather than the one under the thumb. See
+ * {@link slopFor}'s own note. Not a live concern yet: as of F42 this
+ * component has no call sites at all (N444 built it as foundation and
+ * deliberately did not migrate the ~15 ad-hoc pills), so the first person to
+ * adopt it is the first person this matters to.
+ */
+export const CHIP_HEIGHT = CHIP_PADDING_V * 2 + CHIP_LABEL_LINE;
+
 const styles = StyleSheet.create({
   base: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     borderRadius: 999,
-    paddingVertical: 6,
+    paddingVertical: CHIP_PADDING_V,
     paddingHorizontal: 12,
     backgroundColor: vola.surfaceRaised,
   },
