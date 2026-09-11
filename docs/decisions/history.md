@@ -70220,6 +70220,44 @@ declined at set level in part 2, see #863), and **10** (modernised arrows and
 haptics — F38/F48/F49 are in that area). The `NEEDS HUMAN EVIDENCE` criterion
 covers all ten and stays open.
 
+
+### Review round: `0` was standing in for "no answer", and it flickered two screens this ticket never touched
+
+`frontend-reviewer` caught the item-7 mechanism regressing two unrelated
+screens, and the shape of it is worth keeping.
+
+`measure()` applies its geometry-free answer **synchronously**, on every
+`show` *and* every `changeFrame`, ahead of `measureInWindow`'s callback —
+that immediacy is the fix, because under jest the callback never arrives at
+all and a lift that depends on it has a failure mode with no symptom. But the
+answer for a caller **not** anchored to the display's bottom was written as
+`0`, and `apply(0)` is `setInset(0)`: an instruction to collapse, not an
+instruction to do nothing.
+
+So every `changeFrame` drove the footer's padding to zero for one render and
+the async measurement snapped it back — a visible drop-and-snap on
+`app/food/add.tsx` and `app/bjj/reflect/[id].tsx`, both pre-existing, neither
+in this ticket's scope. iOS fires `changeFrame` when the QuickType bar changes
+height mid-typing, which a prose field invites, so the trigger is ordinary use.
+
+`preMeasureInset` now returns **`null`** for "there is no geometry-free
+answer", and `measure()` applies nothing when it gets one. Returning `null` is
+a different instruction from returning `0`.
+
+**A render test cannot catch this, which is why the test pins the decision
+instead.** Under jest `measureInWindow`'s callback never fires, so an
+unanchored footer's inset is `0` either way — the collapse has nothing to
+collapse *from*, and the rendered padding is identical with the bug and
+without it. `lib/__tests__/preMeasureInset.test.ts` asserts the `null`/`0`
+distinction directly, at the one layer where the two cases are
+distinguishable. Mutation-checked: restoring `return 0` turns 3 of its 6 red,
+restore confirmed by re-running rather than by grepping.
+
+The general form, and it has bitten this repo before in other clothes: **a
+sentinel that shares a type with a real value will eventually be read as one.**
+`0` is a legitimate inset. `null` is not, which is what makes it safe to mean
+"nothing".
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

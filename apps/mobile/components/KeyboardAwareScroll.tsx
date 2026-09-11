@@ -314,6 +314,40 @@ export function keyboardInsetForScreenBottom(a: {
   return Math.max(a.measuredInset, a.keyboardHeight);
 }
 
+/**
+ * The pre-measurement answer, or `null` when there ISN'T one.
+ *
+ * `null` rather than `0`, and the distinction is the whole point (found in
+ * review of N493 part 3, #858 item 7). `measure()` applies this synchronously
+ * on EVERY `show` and `changeFrame`, before `measureInWindow`'s callback can
+ * arrive. A caller that is not anchored to the display's bottom has no
+ * geometry-free answer at all — and returning `0` for "no answer" made the
+ * footer collapse to zero padding for a render on every `changeFrame`, then
+ * snap back when the async measurement landed.
+ *
+ * That cost nothing on the anchored sheet this ticket was about and flickered
+ * two screens it was not: `app/food/add.tsx` and `app/bjj/reflect/[id].tsx`,
+ * both pre-existing, neither touched. iOS fires `changeFrame` when the
+ * QuickType bar toggles height mid-typing, which a prose field invites, so
+ * the trigger is ordinary use rather than an edge case.
+ *
+ * Returning `null` says "nothing to apply", which is a different instruction
+ * from "apply nothing".
+ */
+export function preMeasureInset(a: {
+  anchoredToScreenBottom: boolean;
+  os: string;
+  /** The keyboard's own height; null when it is down. */
+  keyboardHeight: number | null;
+}): number | null {
+  if (!a.anchoredToScreenBottom) return null;
+  return keyboardInsetForScreenBottom({
+    os: a.os,
+    keyboardHeight: a.keyboardHeight,
+    measuredInset: 0,
+  });
+}
+
 const Ctx = createContext<EnsureVisible>(() => {});
 
 /**
@@ -750,10 +784,12 @@ export function KeyboardAwareFooter({
        * Zero unless the caller claims its bottom edge is the display's; see
        * `keyboardInsetForScreenBottom`.
        */
-      const direct = anchoredToScreenBottom
-        ? keyboardInsetForScreenBottom({ os: Platform.OS, keyboardHeight, measuredInset: 0 })
-        : 0;
-      apply(direct);
+      const direct = preMeasureInset({
+        anchoredToScreenBottom,
+        os: Platform.OS,
+        keyboardHeight,
+      });
+      if (direct !== null) apply(direct);
 
       const node = ref.current;
       if (!node) return;
@@ -770,7 +806,7 @@ export function KeyboardAwareFooter({
         // Whichever answer is larger, so a measurement that was already right
         // is never subtracted from and one taken in the wrong coordinate
         // space is never believed over the keyboard's own height.
-        apply(Math.max(measured, direct));
+        apply(Math.max(measured, direct ?? 0));
       });
     };
     const subs = [
