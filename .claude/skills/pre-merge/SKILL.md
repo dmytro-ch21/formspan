@@ -235,10 +235,13 @@ Once the branch is pushed and the PR is open, run:
 pnpm run ci:checks
 ```
 
-It must report **8** check runs and exit 0 (read from `EXPECTED_CHECK_RUNS` in
-`scripts/check-ci-checks.py` if this number and the tool's own output ever
-disagree — it has drifted once already, see CLAUDE.md's "CI can run ZERO
-checks" section). **A count of 0 is not "nothing
+It must report every check run it expects — its first line reads
+`check runs on this commit: N (expected M)` — and exit 0. The count is
+deliberately not written here: `M` is derived from the workflows and
+cross-checked against `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py`,
+which is the only copy of that number anything enforces. A numeral in this
+file lagged it twice (H24, #1094; see CLAUDE.md's "CI can run ZERO checks"
+section). **A count of 0 is not "nothing
 failed" — it is "nothing ran", and the two are indistinguishable** in
 `gh pr view`, in an empty `statusCheckRollup`, and in `mergeStateStatus`. A
 conflicting PR receives no new runs, because GitHub cannot build the
