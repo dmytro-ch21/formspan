@@ -137,6 +137,7 @@ place — but it is a different shape from the promise above.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -735,6 +736,30 @@ def self_test() -> int:
     check("shape: indenting it inside the fence clears the finding",
           history_problems(quoted_doc) == [], str(history_problems(quoted_doc)))
 
+    # H26: an entry heading one level too deep, the shape F45 (#1088) landed
+    # in. Dated fixtures, because the undated `good` never exercises the rule.
+    dated = _doc(["2026-09-10 — A", "2026-09-11 — B"], ["gap one"])
+    check("shape: dated `## ` entries report nothing",
+          history_problems(dated) == [], str(history_problems(dated)))
+    nested = dated.replace("## 2026-09-11 — B", "### 2026-09-11 — B", 1)
+    check("shape: a dated entry at `###` is caught, with its line",
+          any("not at `## `" in p and "line 7:" in p
+              for p in history_problems(nested)),
+          str(history_problems(nested)))
+    check("shape: a dated heading at `#` is caught too",
+          any("not at `## `" in p for p in history_problems(
+              dated.replace("## 2026-09-10 — A", "# 2026-09-10 — A", 1))))
+    quoted_entry = dated.replace(
+        "prose for 2026-09-10 — A.",
+        "prose for 2026-09-10 — A.\n\n```\n### 2026-01-01 — quoted\n```")
+    check("shape: a fenced dated heading is not a finding",
+          history_problems(quoted_entry) == [], str(history_problems(quoted_entry)))
+    subsection = dated.replace(
+        "prose for 2026-09-10 — A.",
+        "prose for 2026-09-10 — A.\n\n### What 2026-09-10 changed\n\nmore.")
+    check("shape: an undated subsection mentioning a date is not a finding",
+          history_problems(subsection) == [], str(history_problems(subsection)))
+
     # ---- 10. The apparatus can fail --------------------------------------
     # CLAUDE.md's rule: check that a check can go red. Every case above would
     # pass on a driver that always concatenated, EXCEPT the refusals — so the
@@ -977,6 +1002,11 @@ def _real_history_case() -> tuple[str, str, str, str] | None:
 HISTORY = "docs/decisions/history.md"
 OPEN_ITEMS = "## Open items / known gaps as of this entry"
 
+# Every entry opens `## YYYY-MM-DD — …`. The date is what marks it as an entry
+# rather than a subsection, so a date straight after the hashes at any other
+# level is an entry at the wrong depth (H26).
+DATED_HEADING = re.compile(r"^(#+) \d{4}-\d{2}-\d{2}\b")
+
 # Files `.gitattributes` must route through this driver. Kept here so a rename
 # of either side fails rather than silently orphaning the attribute — the same
 # floor `check-verify-chain.py` puts on a `verify` link.
@@ -1029,7 +1059,7 @@ def _unfenced_scan(text: str) -> tuple[list[str], int | None]:
 
 
 def history_problems(text: str) -> list[str]:
-    """The two structural assertions on `history.md`, as a pure function.
+    """The structural assertions on `history.md`, as a pure function.
 
     Separated from `check_shape` so `--self-test` can feed it the historical
     defect — a first-match-anchored insert — rather than only ever seeing a
@@ -1067,6 +1097,20 @@ def history_problems(text: str) -> list[str]:
             f"{len(raw)} rather than 1.\n"
             f"    Lines: {', '.join(str(i + 1) for i in raw[:5])}. If one is an "
             "example inside a code fence, indent it by two spaces."
+        )
+
+    # An entry heading at `###` parses as a SUBSECTION of the entry above it,
+    # so an outline files its content under a different ticket. F45 (#1088)
+    # landed that way under N167, and a scan of the file found fifteen more —
+    # none a genuine dated subsection, so this costs nothing to enforce.
+    misleveled = [i for i, l in enumerate(lines)
+                  if (m := DATED_HEADING.match(l)) and len(m.group(1)) != 2]
+    if misleveled:
+        problems.append(
+            f"{HISTORY}: {len(misleveled)} dated entry heading(s) not at `## ` "
+            f"(first at line {misleveled[0] + 1}: {lines[misleveled[0]][:70]}).\n"
+            f"    Lines: {', '.join(str(i + 1) for i in misleveled[:5])}. At "
+            "`###` an entry nests under the one above it; make it `## `."
         )
 
     headings = [i for i, l in enumerate(lines) if l == OPEN_ITEMS]
@@ -1107,14 +1151,16 @@ def check_shape() -> int:
     heading. So `grep`ping for it and taking any match is now wrong five times
     out of six, and the odds worsen monotonically.
 
-    Three assertions, all cheap:
+    Four assertions, all cheap:
 
     1. exactly one line IS the heading (column 0, `## `);
     2. it is the LAST `## ` heading in the file, so nothing was appended after
        it and the gap list is not stranded under a newer entry;
     3. no committed conflict markers in any append-only doc — a resolution
        left half-finished, which lints and typechecks clean because these are
-       prose files nothing else reads.
+       prose files nothing else reads;
+    4. every dated entry heading is `## `, so no entry parses as a subsection
+       of the one above it (H26).
 
     **All three skip fenced code blocks, and that is not a loophole — it is
     what makes the check usable in a repo whose narrative is largely ABOUT

@@ -863,7 +863,10 @@ has described for four repairs and nothing ever read. Verified by reproducing
 the historical defect, which it reports at line 16331 against the 16330
 measured above. It also refuses an **unterminated** code fence, because that
 blanks the rest of the file to a fence-aware reader and a stranded entry below
-one was invisible.
+one was invisible. And it refuses a **dated entry heading at any level but
+`## `** (H26): at `###` an entry parses as a subsection of the one above it, so
+an outline files it under a different ticket — F45 landed that way under N167,
+and fifteen older entries had too, because nothing read heading levels.
 
 **When you quote this heading inside a code fence, indent it.** The check skips
 fenced blocks, so an example costs it nothing — but the `grep` above does not
