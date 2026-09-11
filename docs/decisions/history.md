@@ -70616,6 +70616,66 @@ day at eight agents; the entries-directory option becomes correct at some
 throughput and nobody knows which. The trigger above is a proxy for that number,
 not the number itself.
 
+## 2026-09-11 — L16: the third site of F43's inert-switch invariant, and the gap that was cheaper than it looked (#1089)
+
+F43 (#1042) put three toggles on React Native's `<Switch>` and made each one
+touch-inert and hidden from the accessibility tree, because the surrounding row
+owns the press. Review caught that only **one** of the three sites had a
+regression test. `profile/edit.tsx` gained one in the same PR;
+`(tabs)/workouts.tsx`'s "Share publicly" did not, because it lives inside the
+new-workout sheet and no existing test opened it. That was filed rather than
+rushed.
+
+**Opening the sheet is one press on the FAB** (`workouts-new`, which flips
+`setComposing(true)`; the composer is a `Modal`, whose children RNTL renders
+inline). The whole test is that press plus the four assertions the other two
+sites already use.
+
+So the estimate in #1089 — "needs scaffolding to drive the modal open" — was
+wrong, and wrong in the direction that matters: a gap deferred as expensive
+sat open across a merge when it cost a single `fireEvent.press`. Worth
+recording because the deferral was otherwise reasonable and would be made again
+on the same reasoning.
+
+### What the invariant is, restated where the third test lives
+
+The row owns the press and already announces as a switch carrying `checked`.
+The native switch inside it must therefore be:
+
+- **touch-inert** (`pointerEvents="none"`) — otherwise one tap fires the
+  switch's handler *and* the row's, toggling twice and landing back where it
+  started, which reads to the athlete as "the toggle does nothing";
+- **hidden from the accessibility tree** — otherwise VoiceOver reads the
+  control twice, once for the row and once for the switch, which carries an
+  `accessibilityRole` of its own.
+
+Neither half substitutes for the other, and `components/SwipeToDelete.tsx:184-193`
+is the incident that proves it: `pointerEvents` maps to
+`userInteractionEnabled` and gates **hit-testing only**, while the
+accessibility tree is walked independently — and on Android, TalkBack
+activation goes through `performClick()`, which `pointerEvents` does not gate
+at all.
+
+### Mutation-checked, both halves
+
+Removing `pointerEvents="none"` turns the new test red; removing
+`accessibilityElementsHidden` turns it red; both restored and confirmed green
+by re-running rather than by grepping the file. The wrapper count is asserted
+to equal the switch count **before** the per-wrapper loop, because a loop over
+zero wrappers passes while testing nothing — which is precisely the shape of
+the two assertions F43 had to rewrite after mutation testing exposed them.
+
+`switchWrappers` in `lib/__tests__/support/tree.ts` is now used by all three
+sites, so the walk exists once.
+
+### What is not settled
+
+The same four device criteria on #1042 remain outstanding and this changes
+nothing about them: whether the knob glides, whether label-tap and switch-tap
+each toggle exactly once on glass, whether VoiceOver announces once, and
+whether the off-state track is visible in both themes. Structure is what a
+test can reach here; none of those four is structure.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
