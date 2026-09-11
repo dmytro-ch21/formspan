@@ -66,7 +66,23 @@ function writeSpy(name: string) {
   };
 }
 
+/** The real shape, because `explain()` does `err instanceof ApiError` in every
+ *  action's catch block. Omitting it made Vitest throw inside the refusal path
+ *  of every test here — invisible, because these assertions only read
+ *  `apiCalls`, but it meant no refusal was exercised the way production runs
+ *  one. Found in review. */
+class ApiError extends Error {
+  status: number;
+  detail?: string;
+  constructor(status: number, detail?: string) {
+    super(`api ${status}`);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 vi.mock("@/lib/api", () => ({
+  ApiError,
   createTechnique: writeSpy("createTechnique"),
   updateTechnique: writeSpy("updateTechnique"),
   publishTechnique: writeSpy("publishTechnique"),
@@ -102,23 +118,33 @@ async function allActions(): Promise<{ name: string; fn: AnyAction }[]> {
 }
 
 /**
- * Actions have two shapes — `(prev, form)` and `(id, prev, form)` — so the
- * arguments are supplied positionally-agnostically: an id string first is
- * harmless to the two-argument form, which reads `prev` for an attempt counter
- * it can survive not finding. Calling every action through one shim is what
- * keeps this test from having to know each signature, which is the same
- * staleness the enumeration exists to avoid.
+ * Actions come in two shapes — `(prev, form)` for the two creates, and
+ * `(id, prev, form)` for the other eight — so the shim DISPATCHES ON ARITY.
+ *
+ * **An earlier version passed `(id, prev, form)` to everything**, on the
+ * written assumption that "an id string first is harmless to the two-argument
+ * form." That was false, and review caught it. A create then received
+ * `prev = "some-id"` and `form = { status: "idle" }`, and threw
+ * `form.get is not a function` inside `bodyFrom` — before reaching any write,
+ * and identically whether or not it was authorized. So "no write occurred"
+ * passed for the wrong reason and the two creates' gates were not tested at
+ * all: exactly the hole this file exists to close, hiding inside the file that
+ * claims to close it.
+ *
+ * `fn.length` is safe to dispatch on here because no action uses default or
+ * rest parameters — asserted below rather than assumed, since a default
+ * parameter would silently drop the arity and quietly restore the bug.
  */
 async function invoke(fn: AnyAction): Promise<unknown> {
   const form = new FormData();
   form.set("name", "Anything");
+  form.set("revision", "2");
   form.set("id", "some-id");
+  const f = fn as unknown as (...a: unknown[]) => Promise<unknown>;
   try {
-    return await (fn as unknown as (...a: unknown[]) => Promise<unknown>)(
-      "some-id",
-      { status: "idle" },
-      form,
-    );
+    return fn.length === 2
+      ? await f({ status: "idle" }, form)
+      : await f("some-id", { status: "idle" }, form);
   } catch (err) {
     return { threw: err };
   }
@@ -138,6 +164,14 @@ describe("content server actions — the allowlist is the boundary", () => {
     // `*Action` suffix would empty the list and every assertion below would
     // pass over nothing at all.
     expect(actions.length).toBe(EXPECTED_ACTION_COUNT);
+  });
+
+  it("every action has an arity this suite knows how to call", async () => {
+    // The guard on the dispatch above. A default or rest parameter would drop
+    // `fn.length` to something unexpected, the shim would call it wrongly, and
+    // the refusal assertions would go back to passing because of a crash.
+    const arities = (await allActions()).map((a) => a.fn.length).sort();
+    expect(arities).toEqual([2, 2, 3, 3, 3, 3, 3, 3, 3, 3]);
   });
 
   it("performs NO write for a signed-out caller", async () => {

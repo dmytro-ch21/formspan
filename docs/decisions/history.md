@@ -69529,6 +69529,39 @@ API call tells them apart. And `assertAdmin` is not mocked — only Clerk's
 `currentUser` is — so the real allowlist runs. A stub of the gate would be a
 test of the stub.
 
+### The first version of this test had the exact hole it was written to close
+
+Review caught it, and it is the sharpest instance of this repo's own rule that
+has come up in a while. The shim that calls each enumerated action passed
+`(id, prev, form)` to all ten, on the **written assumption** that "an id string
+first is harmless to the two-argument form."
+
+It is not. Two of the ten — `createTechniqueAction` and `createExerciseAction`
+— are `(prev, form)`. They received `prev = "some-id"` and
+`form = { status: "idle" }`, and threw `form.get is not a function` inside
+`bodyFrom` **before reaching any write, identically whether or not the caller
+was authorized**. So `expect(wrote).toEqual([])` passed for those two because
+the action crashed, not because the gate refused — and dropping `assertAdmin`
+from either would not have turned anything red. The suite whose entire purpose
+is "no action writes without the gate" was not testing the gate on the two
+content-CREATION paths.
+
+It survived the original mutation testing because the mutation was applied to
+`publishExerciseAction`, a three-argument action, where the shim worked. Nine
+guards mutation-tested, and the tenth not exercised — the same sentence
+CLAUDE.md already records, this time inside the test written to honour it.
+
+`invoke` now dispatches on `fn.length`, and an assertion pins the arities
+(`[2,2,3,3,3,3,3,3,3,3]`) so a default parameter — which would drop `fn.length`
+to 0 and silently restore the bug — fails loudly instead. Both two-argument
+creates were then mutation-tested directly and both now fail by name.
+
+A second review finding, smaller: the authorization file's `@/lib/api` mock
+omitted `ApiError`, which `explain()` tests with `instanceof` in every catch
+block. Vitest threw on access, so nothing silently passed — but it meant every
+refusal in that file crashed inside the error path rather than returning the
+`{ status: "error" }` production returns. Added.
+
 ### The write tests cover traps the code already documented and nothing checked
 
 `bodyFrom` in both action files is a dense run of deliberate decisions, each
@@ -69556,14 +69589,16 @@ restore path) with the verdict: all three caught in review, none by the suite.
 
 ### Verification
 
-Six mutations, each caught by exactly the one test written for it, restore
-confirmed by re-running rather than grepping: `assertAdmin` dropped from one
-action (and the failure NAMES that action); the allowlist made to fail open on
+Nine mutations, each caught by exactly the one test written for it, restore
+confirmed by re-running rather than grepping: `assertAdmin` dropped from a
+three-argument action, and separately from EACH of the two two-argument
+creates (every failure NAMES the action); a default parameter added to drop
+`fn.length` and defeat the shim's dispatch; the allowlist made to fail open on
 an empty `ADMIN_USER_IDS`; `implements` coerced to 1; `is_unilateral` read by
 string comparison; `media` admitted to the body; `note` dropped from it; the
 restore id taken from the form; and `revisionFrom` loosened to accept NaN.
 
-Admin suite: 3 files and 13 tests before, 5 files and 49 after.
+Admin suite: 3 files and 13 tests before, 5 files and 50 after.
 
 **Environment/production guard behaviour was already covered** and was
 deliberately not duplicated — `apiConfig.test.ts` exercises both the
