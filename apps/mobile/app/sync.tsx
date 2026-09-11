@@ -8,6 +8,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { triggerBiometricSyncNow } from '@/lib/biometricSync';
 import { useModules } from '@/lib/ModulesProvider';
+import { discardRejectedRow, rejectedRows, type RejectedRow } from '@/lib/rejectedRows';
 import { blockedRows, retryBlockedRow, type BlockedRow } from '@/lib/sessionStore';
 import { sessionHref } from '@/lib/startSession';
 import { syncNow, useSyncState } from '@/lib/sync';
@@ -43,6 +44,25 @@ import { PressableScale } from '@/components/ui/PressableScale';
  * moved on its own; anything the athlete has to change needs the screen that
  * can change it.
  *
+ * **REFUSED rows are a second list, below the first, and the separation is
+ * the point (N167/#544).** A blocked row is still owed and still being
+ * retried; a refused one is finished — the server answered, it will answer the
+ * same way forever, and the outbox has stopped. Both belong on this screen and
+ * they need different words and different buttons: "Try again" is the right
+ * offer for the first and a lie for the second.
+ *
+ * Until N167 the refused half appeared NOWHERE. Both writing domains recorded
+ * the server's reason and both said in their own comments that somebody showed
+ * it — `foodLog.ts`: "keep the row and the reason so the sync screen can
+ * explain it"; `sequences.ts`: "the row stays on the device for the athlete to
+ * see" — and this screen read neither. A refused food entry left the pending
+ * count, kept its reason, and was invisible.
+ *
+ * **Which is why "Nothing is stuck" now depends on both lists.** A screen
+ * reassuring an athlete while their breakfast sits refused underneath it is
+ * the worst state this file can be in: it is the app being confidently wrong
+ * about the athlete's own record.
+ *
  * **"Sync now" used to mean only the offline outbox** (`lib/sync.ts`'s
  * `syncNow`) — activities, sessions, workouts. N522/#934: the biometric
  * enrichment pass (heart-rate windows, VO₂max — `lib/biometricSync.ts`) is a
@@ -61,12 +81,18 @@ export default function SyncScreen() {
   const { modules } = useModules();
   const state = useSyncState();
   const [rows, setRows] = useState<BlockedRow[] | null>(null);
+  const [refused, setRefused] = useState<RejectedRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      setRows(await blockedRows(userId));
+      // Read together so the two lists can never describe different moments —
+      // a refused row disappearing from one while still shown in the other is
+      // the sort of disagreement this screen exists to end.
+      const [blocked, rejected] = await Promise.all([blockedRows(userId), rejectedRows(userId)]);
+      setRows(blocked);
+      setRefused(rejected);
     } catch {
       // A failed read of the repair list must not itself become an error
       // state on the repair screen. `null` keeps the honest "still loading"
@@ -89,6 +115,17 @@ export default function SyncScreen() {
       // The row keeps (or regains) its recorded error; `load` below re-reads
       // it, so a still-failing retry is reported by the list rather than by a
       // separate transient message that would disagree with it.
+    } finally {
+      setBusy(null);
+      await load();
+    }
+  }
+
+  async function discard(row: RejectedRow) {
+    if (!userId) return;
+    setBusy(row.id);
+    try {
+      await discardRejectedRow(userId, row);
     } finally {
       setBusy(null);
       await load();
@@ -146,7 +183,7 @@ export default function SyncScreen() {
 
         {rows === null ? (
           <ActivityIndicator accessibilityLabel="Loading" style={styles.spinner} />
-        ) : rows.length === 0 && state.lastError ? (
+        ) : rows.length === 0 && refused.length === 0 && state.lastError ? (
           // N493 — the chip that sends an athlete here reads `lastError` for
           // ANY failure (see `SyncChip.tsx`'s `chipFor`), but this list is
           // deliberately scoped to PERMANENT ones only (this file's own doc
@@ -163,14 +200,14 @@ export default function SyncScreen() {
               Nothing here needs your input yet — this keeps retrying on its own.
             </Text>
           </View>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && refused.length === 0 ? (
           <View style={styles.empty} testID="sync-nothing-stuck">
             <Text style={styles.emptyTitle}>Nothing is stuck</Text>
             <Text style={styles.emptyBody}>
               Anything still waiting will go out on its own when you have signal.
             </Text>
           </View>
-        ) : (
+        ) : rows.length === 0 ? null : (
           <View style={styles.list}>
             <Text style={styles.listHeading}>Needs your attention</Text>
             {rows.map((row) => (
@@ -209,6 +246,46 @@ export default function SyncScreen() {
                   >
                     <Text style={styles.retryMuted}>
                       {busy === row.id ? 'Trying…' : 'Try again'}
+                    </Text>
+                  </PressableScale>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {refused.length > 0 && (
+          <View style={styles.list} testID="sync-refused">
+            <Text style={styles.listHeading}>Refused</Text>
+            <Text style={styles.emptyBody}>
+              The server would not accept these, and trying again will not change that. They
+              are only on this phone.
+            </Text>
+            {refused.map((row) => (
+              <View key={`${row.kind}:${row.id}`} style={styles.row} testID={`refused-${row.id}`}>
+                <Text style={styles.rowName}>{row.name || 'Untitled'}</Text>
+                <Text style={styles.rowKind}>
+                  {row.kind === 'food-entry' ? `food entry${row.on ? ` · ${row.on}` : ''}` : 'sequence'}
+                </Text>
+                {/* The server's own words, same rule as the list above: the
+                    API writes these for cases a person can act on, so
+                    paraphrasing loses the only part that says what to do. */}
+                <Text style={styles.rowError}>{row.reason}</Text>
+                <View style={styles.rowActions}>
+                  {/* Discard only. Retry is meaningless here — that is the
+                      whole difference between this list and the one above —
+                      and editing lives on the screen that owns the row. */}
+                  <PressableScale
+                    onPress={() => void discard(row)}
+                    disabled={busy === row.id}
+                    style={styles.rowAction}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Discard ${row.name || 'this item'}`}
+                    accessibilityState={{ busy: busy === row.id, disabled: busy === row.id }}
+                    testID={`discard-${row.id}`}
+                  >
+                    <Text style={styles.retryMuted}>
+                      {busy === row.id ? 'Discarding…' : 'Discard'}
                     </Text>
                   </PressableScale>
                 </View>

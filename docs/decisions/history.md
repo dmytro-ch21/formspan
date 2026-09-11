@@ -70676,6 +70676,111 @@ each toggle exactly once on glass, whether VoiceOver announces once, and
 whether the off-state track is visible in both themes. Structure is what a
 test can reach here; none of those four is structure.
 
+## 2026-09-11 — N167 (#544), first slice: rows the server refused had nowhere to live
+
+**Two code comments promised a surface that was never built.** `foodLog.ts`'s
+permanent-failure branch says it keeps the row and the reason *"so the sync
+screen can explain it"*. `sequences.ts`'s says *"the row stays on the device
+for the athlete to see"*. `app/sync.tsx` — the screen whose entire job is
+saying what is stuck — imported neither, and never had.
+
+So a food entry or sequence the server refused: left the pending count
+(correct — it is not retryable), kept the server's reason (correct), and
+appeared on no screen in the application. The one screen an athlete opens when
+they are worried about their training would say **"Nothing is stuck"** with
+their refused breakfast sitting in the database underneath it. That is not an
+ugly error state; it is the app being confidently wrong about the athlete's
+own record.
+
+### The ticket named the wrong reference pattern, and the criteria proved it
+
+#544 said to converge every domain on `sessionStore.ts`'s `blockedRows`. The
+two existing concepts turn out to use OPPOSITE `dirty` values and mean
+opposite things:
+
+- **blocked** (`dirty = 1 AND last_error`) — still owed, still retrying. A
+  transient failure wearing an error. It *should* count as pending.
+- **refused** (`dirty = 0 AND last_error`) — the outbox has stopped. A 4xx will
+  not become a 2xx.
+
+Sessions never clear `dirty` on a permanent refusal, and `countPendingSessions`
+is `COUNT(*) WHERE dirty = 1` with no error filter — so **a blocked session
+counts toward the pending badge forever**, which is exactly what the ticket's
+own criterion 2 forbids ("the pending counter athletes see is
+`retryable + queued`, never including `blocked`"). The named reference
+contradicts the criteria it was named in support of. `sessionStore.ts`'s own
+comment already records the cost: a refused session is *"permanently refused,
+dirty forever, and unreachable by any screen"*, and a bespoke repair exists
+only because that policy has no exit.
+
+So the convergence runs the other way, onto the shape N533/#964 already built
+for saved foods (`foodSyncProblems`). `lib/rejectedRows.ts` generalises that
+rather than inventing a fourth vocabulary.
+
+### And a correction that was itself wrong
+
+An earlier revision of the rewritten ticket claimed `food_entries`' permanent
+branch discards the reason entirely. **False, and my error** — made exactly
+the way the original brief's three were: I grepped for the `dirty = 0`
+statement and did not notice the separate `UPDATE ... SET last_error` on the
+line immediately above it, which runs for every failure kind. Left visible in
+the ticket rather than silently edited, because a correction that is itself
+wrong is what this ticket's history is made of, and hiding that would make the
+record worse than the bug.
+
+The real defect is sharper than "the reason is lost": the reason is recorded
+faithfully and *nothing reads it*.
+
+### What this slice builds
+
+`lib/rejectedRows.ts` — `rejectedRows`, `countRejectedRows`,
+`discardRejectedRow` — reading both domains in the foods shape, and the sync
+screen renders them as a second list titled **Refused**, below the blocked one
+and worded differently.
+
+**The two lists stay separate on purpose.** "Try again" is the right offer for
+a blocked row and a lie for a refused one, so the refused list offers
+**Discard** only. Discard is a HARD delete rather than a tombstone: a tombstone
+queues a DELETE for an id the server never accepted, turning one refused write
+into a second one. It carries `dirty = 0 AND last_error IS NOT NULL` into the
+DELETE's own predicate, so a row that an edit re-dirtied between the list
+being read and the button being pressed is not thrown away mid-flight — the
+same compare-and-swap discipline `foodLog.ts`'s push paths already use.
+
+**"Nothing is stuck" now depends on both lists**, which is the single assertion
+this whole slice exists for.
+
+### Verification
+
+Nine mutations, each caught, restore confirmed by re-running: each half of the
+`dirty = 0 AND last_error IS NOT NULL` predicate dropped independently; the
+user scope dropped from the list and from the discard; the tombstone filter
+dropped; discard tombstoning instead of hard-deleting; the empty state no
+longer accounting for refused rows (the original bug, restored deliberately);
+the refused section never rendering; and discard wired to the wrong row.
+
+The library tests run against a real SQLite database through
+`migratedFixture()`, like every other outbox test, so what is asserted is what
+the shipped schema does.
+
+**One apparatus failure worth recording.** The first attempt at the screen
+mutations ran all three through a shell function whose output produced *no
+`Tests:` line at all* — and three mutations "passing" silently would have read
+as three mutations caught if the grep had been trusted. Re-run individually,
+all three fail correctly. A filter that matches nothing has found nothing.
+
+### What is left
+
+Deliberately not in this slice, per the ticket's own "one domain per PR":
+
+- **Sessions still count blocked rows as pending forever.** That is criterion
+  2's other half and a change to `countPendingSessions`' semantics, which
+  every pending badge in the app reads.
+- **No telemetry** for blocked-row count and age by domain and error code.
+- **A refused tombstone remains invisible**, as `foodLog.ts` already records —
+  it is filtered by every read of that table, so listing it would show the
+  athlete a row they already deleted.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

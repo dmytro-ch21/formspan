@@ -23011,3 +23011,41 @@ phone can settle is most of it.
   thing; a value read out of the source proves only that it is derived.
 - **Both sheets on an OLED phone in a dark room**, where a translucent fill
   over a dimmed list is least forgiving.
+
+## Sync screen — rows the server refused (N167 / #544)
+
+`app/sync.tsx` now carries two lists. **Blocked** rows are still owed and still
+being retried; **Refused** rows are finished — the server answered and will
+answer the same way forever.
+
+### Happy path
+
+- **A refused food entry is visible.** Log a food entry whose `source_food_id`
+  names a food the server does not have (the N533 reproduction), let the outbox
+  run, then open Sync. **Pass:** the entry appears under "Refused", named, with
+  the server's own message. **Fail:** the screen says "Nothing is stuck".
+- **A refused sequence is visible** the same way (a sequence whose local
+  `steps_json` cannot be parsed marks itself refused without ever reaching the
+  network).
+- **Discard removes it**, the list shrinks, and the row does not come back on
+  the next sync pass — it was never on the server, so nothing re-creates it.
+
+### Edge cases and errors
+
+- **Both lists at once.** A blocked session and a refused food entry: both
+  render, under their own headings, with their own buttons.
+- **Refused rows offer Discard and never "Try again."** Retry cannot change a
+  4xx, and offering it promises something that cannot happen.
+- **A refused row that becomes owed again is not discarded.** Hard to stage by
+  hand: edit the entry (which re-dirties it) on another screen between opening
+  Sync and pressing Discard. **Pass:** the row survives and returns to waiting.
+- **Refused rows do not inflate the "waiting to sync" count.** The count above
+  and the Refused list below must never describe the same row.
+- **A second account's refused rows never appear.** Sign out, sign in as
+  another athlete: the list is theirs alone.
+
+### Still true after this ticket, and worth confirming
+
+- **A blocked SESSION still counts as pending forever.** Not fixed in this
+  slice. An athlete with a permanently refused session sees a pending count
+  that never reaches zero — expected today, and the next slice's job.
