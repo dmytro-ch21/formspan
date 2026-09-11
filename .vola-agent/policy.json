@@ -5,9 +5,27 @@
     "JSON, not YAML, deliberately: the validator (scripts/check-agent-policy.py) stays stdlib-only,",
     "and the Go engine parses it with encoding/json \u2014 no dependency either side.",
     "auto_merge.enabled stays false until the circuit-breaker/merge-policy engine exists;",
-    "the validator refuses true so flipping it is a deliberate two-file change, not a config drift."
+    "the validator refuses true so flipping it is a deliberate two-file change, not a config drift.",
+    "board: the ONE place this repo's project identity lives (N174/#551) \u2014 owner, number, and the ids a session writes Status with.",
+    "Its ids were checked against the live API, not copied from memory; re-check them if the board ever moves (N145)."
   ],
   "base_branch": "main",
+  "board": {
+    "owner": "dmytro-ch21",
+    "project_number": 2,
+    "url": "https://github.com/users/dmytro-ch21/projects/2",
+    "project_id": "PVT_kwHOBO4-H84Bg8w2",
+    "status_field_id": "PVTSSF_lAHOBO4-H84Bg8w2zhf6XVA",
+    "status_options": {
+      "Todo": "b8ad2af5",
+      "In Progress": "0c1fca53",
+      "In Review": "3fced7cf",
+      "Awaiting evidence": "61afcc10",
+      "Blocked": "3464fcfe",
+      "Done": "32639d92"
+    },
+    "verified_against_live_api": "2026-09-11"
+  },
   "max_ci_fix_attempts": 3,
   "max_runtime_minutes": 60,
   "max_parallel_agents": 8,

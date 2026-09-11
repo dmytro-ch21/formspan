@@ -11,7 +11,7 @@ written, say so and hand it back.
 
 ## Where the tickets live
 
-- **GitHub Issues** on `dmytro-ch21/formspan`, all added to the **VOLA project board**.
+- **GitHub Issues** on this repository — whichever one `gh repo view` names — all added to the **VOLA project board**. `gh` infers the repository from the checkout's git remote, so no command below names it; the board's owner, number and ids live in `.vola-agent/policy.json` under `board`.
   Issues, not draft project items: an issue has a number a PR can close, a URL a
   commit message can name, and it is visible to `gh issue list` without the
   `project` scope. A draft item has none of that.
@@ -25,7 +25,7 @@ written, say so and hand it back.
 Check the board exists before assuming a project number:
 
 ```bash
-gh project list --owner dmytro-ch21
+gh project list --owner "$(gh repo view --json owner -q .owner.login)"
 ```
 
 If `gh` reports a missing `project` scope, stop and tell the user to run
@@ -53,8 +53,8 @@ Two rules that are not negotiable:
   titles — a claim PR can hold an id whose issue does not exist yet.
 
 ```bash
-gh issue list --repo dmytro-ch21/formspan --state all --limit 500 --json title -q '.[].title'
-gh pr list --repo dmytro-ch21/formspan --state open --json title -q '.[].title'
+gh issue list --state all --limit 500 --json title -q '.[].title'
+gh pr list --state open --json title -q '.[].title'
 ```
 
 Take the highest number for that prefix and add one. Never fill a gap below it — a
@@ -84,7 +84,7 @@ Read the number from the policy file rather than from here.
 So before starting anything, the claim check is:
 
 ```bash
-gh issue view <n> --repo dmytro-ch21/formspan --json assignees,state
+gh issue view <n> --json assignees,state
 ```
 
 Assigned and `In Progress` means taken. Unassigned and `Todo` means free.
@@ -118,7 +118,7 @@ device-reported tickets legitimately sit for a while.
   device run, and the user runs those personally.
 
 ```bash
-gh issue list --repo dmytro-ch21/formspan --label evidence-outstanding
+gh issue list --label evidence-outstanding
 ```
 
 **When you write a ticket that will need a device check, write the criterion in

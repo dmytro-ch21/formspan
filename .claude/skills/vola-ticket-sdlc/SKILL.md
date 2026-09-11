@@ -112,6 +112,26 @@ authority; this skill is the ordered checklist those sections add up to.
     reopens: Status → Awaiting evidence — CI writes the `evidence-outstanding`
     label, never the Status field.
 
+    **The ids come from `.vola-agent/policy.json`'s `board` block — never from
+    memory or a command copied out of another session (N174, #551).** Until
+    then they were in no file at all. Verified live 2026-09-11 on #551, by
+    writing its current value and re-reading it:
+
+    ```bash
+    ISSUE=<n>; STATUS='Done'   # Todo | In Progress | In Review | Awaiting evidence | Blocked | Done
+    read -r PROJECT FIELD OPTION <<<"$(python3 -c 'import json,sys; b=json.load(open(".vola-agent/policy.json"))["board"]; print(b["project_id"], b["status_field_id"], b["status_options"][sys.argv[1]])' "$STATUS")"
+    ITEM=$(gh api graphql -F owner='{owner}' -F name='{repo}' -F n=$ISSUE \
+      -f query='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){projectItems(first:20){nodes{id project{id}}}}}}' \
+      -q ".data.repository.issue.projectItems.nodes[] | select(.project.id == \"$PROJECT\") | .id")
+    [ -n "$ITEM" ] || echo "#$ISSUE is not on the board"
+    gh api graphql -f p="$PROJECT" -f i="$ITEM" -f f="$FIELD" -f o="$OPTION" \
+      -f query='mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){projectV2Item{id}}}'
+    ```
+
+    `-f`, not `-F`, for the ids: `gh api`'s own help says `-F` converts a
+    value that looks like an integer, so an all-digit option id would reach
+    the API as a number.
+
 13. **Clean up**: `git worktree remove`, `git worktree prune`,
     `git branch -D` — from the primary checkout, not from inside the
     worktree being removed.

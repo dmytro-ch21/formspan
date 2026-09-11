@@ -4,7 +4,8 @@
 ## What `.vola-agent/` is
 
 The machine-readable half of the AI-SDLC dev engine: `policy.json` (budgets,
-human-gated paths/labels, auto-merge posture), `risk-rules.json` (raise-only
+human-gated paths/labels, auto-merge posture, and `board` — the project board's
+identity, which lives there and nowhere else since N174), `risk-rules.json` (raise-only
 risk classification), `context-map.json` (path → docs/traps/gates for the
 context builder), and `ticket-schema.md` (the required ticket sections the
 dispatcher enforces). The engine consumes these; humans review changes to them
@@ -66,6 +67,9 @@ REQUIRED_HUMAN_GATE_PATHS = (
     "backend/internal/platform/auth/**",
     "backend/migrations/**",
 )
+# The statuses sessions and CLAUDE.md name. A session writing one needs its id.
+BOARD_STATUS_OPTIONS = ("Todo", "In Progress", "In Review", "Awaiting evidence", "Blocked", "Done")
+GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 
 def glob_prefix(pattern: str) -> str:
@@ -172,7 +176,57 @@ def validate_policy(agent_dir: Path, repo_root: Path) -> list[str]:
             isinstance(l, str) and l for l in labels
         ):
             errors.append("policy.json: human_gate.labels must be a non-empty list of strings")
+    validate_board(data.get("board"), errors)
     return errors
+
+
+def validate_board(board, errors: list[str]) -> None:
+    """The project board's identity — N174 (#551).
+
+    Before this block the owner, project number and every id a session writes
+    Status with lived in flag defaults, agent prompts and memory. Each guard
+    below rejects a way this block goes wrong WITHOUT anything else noticing:
+    nothing polls with the status ids, so a wrong one fails only at the moment
+    somebody moves a ticket.
+    """
+    if not isinstance(board, dict):
+        errors.append("policy.json: board must be an object — the board's identity lives here (N174)")
+        return
+    owner = board.get("owner")
+    if not isinstance(owner, str) or not GITHUB_LOGIN.fullmatch(owner):
+        errors.append("policy.json: board.owner must be a GitHub login")
+    number = board.get("project_number")
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        errors.append("policy.json: board.project_number must be an integer >= 1")
+    elif isinstance(owner, str):
+        # The URL is the field a human clicks, so it is the one likeliest to be
+        # corrected by hand while the two a program reads are not.
+        allowed = (
+            f"https://github.com/users/{owner}/projects/{number}",
+            f"https://github.com/orgs/{owner}/projects/{number}",
+        )
+        if board.get("url") not in allowed:
+            errors.append(f"policy.json: board.url must be the board owner and project_number name ({allowed[0]})")
+    for key, prefix in (("project_id", "PVT_"), ("status_field_id", "PVTSSF_")):
+        v = board.get(key)
+        if not isinstance(v, str) or not v.startswith(prefix) or len(v) == len(prefix):
+            errors.append(f"policy.json: board.{key} must be a {prefix}... node id")
+    options = board.get("status_options")
+    if not isinstance(options, dict):
+        errors.append("policy.json: board.status_options must be an object")
+    else:
+        for name in BOARD_STATUS_OPTIONS:
+            if not isinstance(options.get(name), str) or not options.get(name):
+                errors.append(f"policy.json: board.status_options is missing {name!r}")
+        ids = [str(v) for v in options.values()]
+        if len(set(ids)) != len(ids):
+            errors.append("policy.json: board.status_options ids must be unique — two statuses on one id write the same value")
+    verified = board.get("verified_against_live_api")
+    if not isinstance(verified, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", verified):
+        errors.append(
+            "policy.json: board.verified_against_live_api must be a YYYY-MM-DD date — "
+            "ids copied from memory rather than read from the API are how this block goes wrong"
+        )
 
 
 def validate_risk_rules(agent_dir: Path, repo_root: Path) -> list[str]:
@@ -306,7 +360,7 @@ def mutate_json(path: Path, fn) -> None:
     path.write_text(json.dumps(data))
 
 
-def self_test() -> list[str]:
+def self_test() -> tuple[list[str], int]:
     """Mutate copies of the REAL files and assert each mutation is caught.
 
     Mutating copies of the live files rather than fixtures means the self-test
@@ -355,7 +409,7 @@ def self_test() -> list[str]:
 
         baseline = validate(tmp_root)
         if baseline:
-            return [f"self-test baseline should validate clean, got: {baseline[:3]}"]
+            return [f"self-test baseline should validate clean, got: {baseline[:3]}"], 0
 
         agent = tmp_root / AGENT_DIR
         mutations = [
@@ -395,6 +449,28 @@ def self_test() -> list[str]:
              lambda: (agent / "ticket-schema.md").write_text(
                  (agent / "ticket-schema.md").read_text().replace(
                      "## Acceptance criteria", "## Criteria"))),
+            ("policy.json loses the board block",
+             lambda: mutate_json(agent / "policy.json", lambda d: d.pop("board"))),
+            ("board.owner is blank (and the url agrees, so only the owner guard can see it)",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"].update(
+                 owner="", url=f"https://github.com/users//projects/{d['board']['project_number']}"))),
+            ("board.project_number is a string",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"].__setitem__(
+                 "project_number", str(d["board"]["project_number"])))),
+            ("board.url names a different board",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"].__setitem__(
+                 "url", d["board"]["url"] + "0"))),
+            ("board.status_field_id is the project id",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"].__setitem__(
+                 "status_field_id", d["board"]["project_id"]))),
+            ("board.status_options loses Done",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"]["status_options"].pop("Done"))),
+            ("two board statuses share one id",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"]["status_options"].__setitem__(
+                 "Done", d["board"]["status_options"]["Todo"]))),
+            ("board ids carry no live-API date",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"].__setitem__(
+                 "verified_against_live_api", ""))),
             ("policy.json is not JSON at all",
              lambda: (agent / "policy.json").write_text("{not json")),
         ]
@@ -407,12 +483,12 @@ def self_test() -> list[str]:
                 (agent / fname).write_text(text)
         if validate(tmp_root):
             failures.append("restore after mutations left the copies invalid — harness bug")
-    return failures
+    return failures, len(mutations)
 
 
 def main() -> int:
     # Self-test first, every run: a validator that cannot go red proves nothing.
-    failures = self_test()
+    failures, mutation_count = self_test()
     if failures:
         print("check-agent-policy SELF-TEST failed:\n", file=sys.stderr)
         for f in failures:
@@ -426,7 +502,7 @@ def main() -> int:
             print(f"  {e}", file=sys.stderr)
         return 1
 
-    print("agent policy ok — 4 files valid, self-test caught all 13 mutations")
+    print(f"agent policy ok — 4 files valid, self-test caught all {mutation_count} mutations")
     return 0
 
 

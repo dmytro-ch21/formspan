@@ -164,7 +164,44 @@ LABEL = "evidence-outstanding"
 LABEL_COLOR = "d93f0b"
 LABEL_DESC = "Code merged, human evidence not yet produced"
 
-DEFAULT_REPO = "dmytro-ch21/formspan"
+def resolve_repo(env, gh_view) -> str:
+    """Which repository to act on — N174/#551. Never a literal.
+
+    This used to be a `DEFAULT_REPO` constant naming this repository by owner
+    and name. Run by hand, the script therefore acted on that repository
+    whatever checkout it was run from, and any repo or org migration would have
+    broken it without a sound, because nothing asserted the assumption. The
+    workflow already passes `GH_REPO` from `github.repository`; this is the
+    order for every other caller, and it REFUSES rather than guessing.
+
+    `gh_view` is injected so the self-test can exercise every branch without
+    touching the network.
+    """
+    for key in ("GH_REPO", "GITHUB_REPOSITORY"):
+        value = (env.get(key) or "").strip()
+        if value:
+            return value
+    viewed = gh_view()
+    if viewed:
+        return viewed
+    raise SystemExit(
+        "evidence-latch: cannot tell which repository to act on — set GH_REPO "
+        "or GITHUB_REPOSITORY, pass --repo, or run inside a checkout that "
+        "`gh repo view` recognises"
+    )
+
+
+def _gh_repo_view() -> str | None:
+    try:
+        out = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
 
 # A markdown task list item. GitHub accepts `-` and `*` and any indentation.
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*][ \t]+\[([ xX])\][ \t]*(.*)$", re.MULTILINE)
@@ -1523,6 +1560,32 @@ def self_test() -> int:
     check("resolve comment quotes the observation",
           "> ran it twice" in render_resolve_comment("ran it twice"), True)
 
+    # --- which repository (N174/#551): never a literal -----------------------
+    def _answers_nothing():
+        return None
+
+    def _resolved(env, gh_view):
+        # A refusal is a SystemExit. Caught here so that a regression which
+        # starts refusing a case it should answer is reported BY NAME like
+        # every other check — the first draft called resolve_repo bare, and
+        # such a regression killed the self-test part-way through instead.
+        try:
+            return resolve_repo(env, gh_view)
+        except SystemExit:
+            return "<refused>"
+
+    check("repo: GH_REPO wins over everything",
+          _resolved({"GH_REPO": "a/b", "GITHUB_REPOSITORY": "c/d"}, lambda: "e/f"), "a/b")
+    check("repo: GITHUB_REPOSITORY when GH_REPO is absent",
+          _resolved({"GITHUB_REPOSITORY": "c/d"}, lambda: "e/f"), "c/d")
+    check("repo: a blank GH_REPO does not count as set",
+          _resolved({"GH_REPO": "   ", "GITHUB_REPOSITORY": "c/d"}, _answers_nothing), "c/d")
+    check("repo: `gh repo view` when the environment names nothing",
+          _resolved({}, lambda: "e/f"), "e/f")
+    check("repo: nothing to go on REFUSES rather than falling back to a literal",
+          _resolved({}, _answers_nothing), "<refused>")
+    check("repo: no DEFAULT_REPO constant remains to fall back to", "DEFAULT_REPO" in globals(), False)
+
     if failures:
         print(f"evidence-latch self-test: {len(failures)} FAILED", file=sys.stderr)
         for f in failures:
@@ -1547,13 +1610,16 @@ def main() -> int:
     p.add_argument("--only", help="with --backfill, restrict to these issue numbers "
                                   "(comma-separated) — read the threads first")
     p.add_argument("--dry-run", action="store_true", help="decide and print, change nothing")
-    p.add_argument("--repo", default=os.environ.get("GH_REPO", DEFAULT_REPO))
+    p.add_argument("--repo", default=None,
+                   help="owner/name; defaults to GH_REPO, then GITHUB_REPOSITORY, then `gh repo view`")
     args = p.parse_args()
 
     if args.self_test:
         return self_test()
 
-    client = Client(args.repo, args.dry_run, args.execute)
+    # Resolved only AFTER the self-test branch above, so `--self-test` stays
+    # the no-network run its help text promises.
+    client = Client(args.repo or resolve_repo(os.environ, _gh_repo_view), args.dry_run, args.execute)
     if args.backfill:
         only = None
         if args.only:

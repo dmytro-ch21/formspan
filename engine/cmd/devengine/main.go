@@ -25,16 +25,42 @@ import (
 	"github.com/dmytro-ch21/vola/engine/internal/devengine"
 )
 
-func main() {
-	owner := flag.String("owner", "dmytro-ch21", "login owning the project")
-	project := flag.Int("project", 2, "Projects v2 number")
-	policyDir := flag.String("policy-dir", ".vola-agent", "path to the .vola-agent policy directory")
-	logPath := flag.String("log", "devengine-decisions.jsonl", "append-only JSONL decision log")
-	interval := flag.Duration("interval", 20*time.Second, "poll interval (15–30s per the design)")
-	once := flag.Bool("once", false, "take one snapshot (baseline only) and exit — a connectivity/config check")
-	flag.Parse()
+// options are devengine's flags. The board's owner and project number default
+// to EMPTY on purpose (N174, #551): they used to default to this repository's
+// owner and project number, and nothing that launches the engine ever passed
+// either, so the literals were the real configuration. An unset flag now means
+// "use policy.json's board block", and run refuses to start if neither names
+// a board.
+type options struct {
+	owner     string
+	project   int
+	policyDir string
+	logPath   string
+	interval  time.Duration
+	once      bool
+}
 
-	if err := run(*owner, *project, *policyDir, *logPath, *interval, *once); err != nil {
+func parseFlags(args []string) (options, error) {
+	var o options
+	fs := flag.NewFlagSet("devengine", flag.ContinueOnError)
+	fs.StringVar(&o.owner, "owner", "", "login owning the project (default: board.owner in policy.json)")
+	fs.IntVar(&o.project, "project", 0, "Projects v2 number (default: board.project_number in policy.json)")
+	fs.StringVar(&o.policyDir, "policy-dir", ".vola-agent", "path to the .vola-agent policy directory")
+	fs.StringVar(&o.logPath, "log", "devengine-decisions.jsonl", "append-only JSONL decision log")
+	fs.DurationVar(&o.interval, "interval", 20*time.Second, "poll interval (15–30s per the design)")
+	fs.BoolVar(&o.once, "once", false, "take one snapshot (baseline only) and exit — a connectivity/config check")
+	return o, fs.Parse(args)
+}
+
+func main() {
+	o, err := parseFlags(os.Args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(0)
+	}
+	if err != nil {
+		os.Exit(2) // the FlagSet has already printed the error and usage
+	}
+	if err := run(o.owner, o.project, o.policyDir, o.logPath, o.interval, o.once); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -46,6 +72,10 @@ func run(owner string, project int, policyDir, logPath string, interval time.Dur
 	cfg, err := devengine.LoadConfig(policyDir)
 	if err != nil {
 		return fmt.Errorf("load policy: %w", err)
+	}
+	owner, project, err = cfg.Policy.Board.Resolve(owner, project)
+	if err != nil {
+		return fmt.Errorf("which board: %w", err)
 	}
 	token, err := devengine.ResolveToken(ctx)
 	if err != nil {

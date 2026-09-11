@@ -26,6 +26,48 @@ type Policy struct {
 		Paths  []string `json:"paths"`
 		Labels []string `json:"labels"`
 	} `json:"human_gate"`
+	// Board is the project board this repository's tickets live on (N174,
+	// #551). Its owner and number used to be flag defaults in cmd/devengine,
+	// and since nothing launches the engine with flags those literals were the
+	// real configuration. The ids beside them are what a session writes Status
+	// with; the engine reads only Owner and ProjectNumber.
+	Board Board `json:"board"`
+}
+
+// Board mirrors policy.json's board block.
+type Board struct {
+	Owner                  string            `json:"owner"`
+	ProjectNumber          int               `json:"project_number"`
+	URL                    string            `json:"url"`
+	ProjectID              string            `json:"project_id"`
+	StatusFieldID          string            `json:"status_field_id"`
+	StatusOptions          map[string]string `json:"status_options"`
+	VerifiedAgainstLiveAPI string            `json:"verified_against_live_api"`
+}
+
+// Resolve names the board to poll. A flag that was set wins, otherwise the
+// policy's value is used, and identity that neither supplies is an error —
+// there is deliberately no literal left to fall back to. A nonsense --project
+// is refused rather than quietly replaced by the policy's number: whoever
+// passed it meant something by it.
+func (b Board) Resolve(ownerFlag string, projectFlag int) (string, int, error) {
+	owner, number := b.Owner, b.ProjectNumber
+	if ownerFlag != "" {
+		owner = ownerFlag
+	}
+	if projectFlag != 0 {
+		if projectFlag < 1 {
+			return "", 0, fmt.Errorf("--project must be a Projects v2 number >= 1, got %d", projectFlag)
+		}
+		number = projectFlag
+	}
+	if strings.TrimSpace(owner) == "" {
+		return "", 0, fmt.Errorf("no board owner: set board.owner in .vola-agent/policy.json or pass --owner")
+	}
+	if number < 1 {
+		return "", 0, fmt.Errorf("no board project number: set board.project_number in .vola-agent/policy.json or pass --project")
+	}
+	return owner, number, nil
 }
 
 // RiskRules mirrors .vola-agent/risk-rules.json.
