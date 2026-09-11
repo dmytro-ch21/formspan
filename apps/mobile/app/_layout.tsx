@@ -419,6 +419,12 @@ function RootStack() {
             button (N484's pattern, same as `library.tsx`), so `headerShown:
             false` here for the same reason as `library`. */}
         <Stack.Screen name="goals" options={{ title: 'Your target', headerShown: false }} />
+        {/* N541 tranche 1 (#972) — the day panel. A pushed root screen drawing
+            its own `ScreenHeader` with a back button, the same arrangement as
+            `goals` above, so `headerShown: false` for the same reason. Reached
+            from Today's header; deliberately NOT the landing screen — see
+            `app/day.tsx`. */}
+        <Stack.Screen name="day" options={{ title: 'Your day', headerShown: false }} />
         {/* N83: build/edit a curriculum on the phone. Titled here for the
             same reason `profile/edit` is — the file segment ("new",
             "[id]") would otherwise be what the back button reads. */}

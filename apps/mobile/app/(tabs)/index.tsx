@@ -1058,7 +1058,32 @@ export default function TodayScreen() {
       >
         {/* Inside the ScrollView, so it scrolls away with the content and
             nothing passes under it — no bottom rule. See `ScreenHeader`. */}
-        <ScreenHeader title="Today" contentScrollsUnder={false} />
+        <ScreenHeader
+          title="Today"
+          contentScrollsUnder={false}
+          action={
+            /* N541 tranche 1 (#972) — the way into the day panel, and the only
+               one. A header link rather than a card in the body: the panel is
+               NOT a replacement for this screen until the user decides it is,
+               so it takes no slot from Today's own blocks. See `app/day.tsx`
+               and the N541 history entry for what the two screens share. */
+            <Pressable
+              onPress={() => router.push('/day')}
+              style={({ pressed }) => [styles.dayLink, pressed && styles.dayLinkPressed]}
+              // 6pt vertical is `slopFor(32)`. Only 2pt on the LEFT: the sync
+              // chip sits 12pt to that side with its own `hitSlop={10}`, and
+              // more here would overlap the two rectangles — which resolves to
+              // whichever view is on top, not the one under the thumb (see
+              // `slopFor` in `constants/Spacing.ts`). Raised in review.
+              hitSlop={{ top: 6, bottom: 6, left: 2, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Your day"
+              testID="today-open-day"
+            >
+              <Text style={[styles.dayLinkText, { color: accent.ink }]}>Your day</Text>
+            </Pressable>
+          }
+        />
 
         <View style={styles.body}>
           {/*
@@ -2095,6 +2120,9 @@ const styles = StyleSheet.create({
   themeTitle: { fontSize: 15, fontWeight: '700' },
   themeNotes: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
   container: { gap: 12 },
+  dayLink: { minHeight: 32, justifyContent: 'center' },
+  dayLinkPressed: { opacity: PRESS_OPACITY },
+  dayLinkText: { fontSize: 14, fontWeight: '700' },
 
   // The workouts tab's pill, to the point: same radius, same padding, same
   // `bottom`, same accent shadow. Two floating primary actions that sat at
