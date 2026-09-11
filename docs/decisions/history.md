@@ -70803,6 +70803,99 @@ Deliberately not in this slice, per the ticket's own "one domain per PR":
   it is filtered by every read of that table, so listing it would show the
   athlete a row they already deleted.
 
+### 2026-09-11 — F45: the velocity the app already measured, and an edge that gives
+
+**What.** Both drag surfaces — swipe-to-delete and the food-entry lift — now
+hand their release velocity to the settle spring, and `SwipeToDelete`'s two
+boundaries resist instead of clamping.
+
+**The velocity was already there.** `settleTarget` has always used
+`gestureState.vx` to *decide* where a row lands, and then the spring started
+from zero anyway. So the row tracked the finger, stopped dead the instant the
+finger lifted, and a fresh animation began — a visible stop-and-restart at every
+release, on a gesture that had all the information needed to avoid it.
+
+**The unit conversion is the entire risk, and it was re-measured rather than
+cited.** `gestureState.vx` is px per *millisecond*; React Native's spring
+integrates in *seconds* — `deltaTime = (now - this._lastTime) / 1000` with `now`
+from `Date.now()`, checked against the installed 0.86.3 at
+`SpringAnimation.js:281`, not taken from the ticket. Wrong by three orders of
+magnitude in either direction and the row either ignores a flick entirely or
+leaves the screen, and both read as a broken spring rather than as a unit error.
+It is therefore a named exported `springVelocity()` with four tests rather than
+an inline `* 1000` — a multiply that small is exactly what a later edit
+"simplifies" away, and nothing else in the suite would notice.
+
+**Only the rendering changed, never the decisions.** `settleTarget` and
+`shouldClaim` are untouched, `CLAIM_DX` / `OPEN_AT` / `FLICK_VX` /
+`ACTION_WIDTH` are unchanged, and the release still hands `settleTarget` the raw
+`g.dx` — so all 36 existing decision tests pass unmodified. The rubber-band
+affects what is drawn mid-drag and nothing else.
+
+**A false claim caught by its own test.** The rubber-band's doc comment said the
+function approaches `dimension * constant`. It approaches `dimension` — as the
+overshoot grows the expression reduces to `(x·d·c)/(c·x) = d`. The assertion was
+written to match the comment, failed, and the comment was the thing that was
+wrong. Both now say `dimension`, and the correction is recorded in both places
+because the ceiling is the whole point of the function.
+
+**Review found a regression the first pass introduced, by simulating the spring
+rather than reading it.** `bounciness: 0` sets the damping ratio (ζ≈0.998); it
+is **not** `overshootClamping`, which defaults to false. So a spring handed a
+real initial velocity overshoots: ~29px past the Delete button at 3 px/ms, ~67px
+at 5. Past the OPEN edge that shows a background sliver beside a red button,
+because the action layer had no colour of its own — it never needed one while
+`translate` was provably inside `[-96, 0]`. Past the CLOSED edge it is worse in
+kind: the row overhangs its container, and nothing clips it.
+
+The mechanism is that `gestureState.vx` is an **unsmoothed single-frame finite
+difference** — React Native's own `PanResponder.js` carries
+`// TODO: This must be filtered intelligently.` above the calculation, and
+`onResponderRelease` does not recompute it. At 120Hz that frame is ~8ms, so one
+jittery sample reads as a 2-3 px/ms flick the athlete never made, landing
+exactly in the band where the overshoot shows. So the velocity is now clamped to
+2 px/ms — which bounds the overshoot to 5-7px, reading as weight rather than as
+a bounce, while leaving every real flick untouched — and the action layer
+carries the button's colour.
+
+**The helpers moved to `lib/gesturePhysics.ts`, for a hazard rather than for
+tidiness.** `EntryRow` needed `springVelocity`, and importing it from a sibling
+COMPONENT drags that whole module in behind a multiply.
+`__tests__/app/savedFoodsScreen.test.tsx` already whole-module-mocks
+`@/components/SwipeToDelete`, so any future test that mocks it *and* renders
+`EntryRow` would get `undefined` and a `TypeError` on release — latent today
+only because nothing renders `EntryRow` yet. `shouldClaim` and `settleTarget`
+deliberately stayed put: the ticket's constraint is that the decisions do not
+change, and moving them would churn a file it says to leave alone.
+
+**Two documentation defects, both the same shape as the asymptote one.** The
+`rubberband` doc block had drifted above `springVelocity`, so every editor hover
+attributed it to the wrong function and `rubberband` shipped undocumented. And
+the `velocity: 0` comment promised an enforcement React Native does not honour:
+a spring already running on the value has its velocity carried over
+(`SpringAnimation.js:217-224`), so a programmatic `close()` landing mid-settle
+continues at the flick's remaining speed. That is continuous and fine — it was
+simply not what the comment claimed.
+
+**A test file that claimed coverage it did not have.** Its docstring said it
+covered "what gets drawn during the drag and how the settle starts". Deleting
+the entire handover wiring left all 46 assertions green: neither `PanResponder`
+handler is reachable without rendering the component and driving a gesture. The
+docstring now says so explicitly, and `drawnOffset` was extracted so the
+three-way branch's composition — where an off-by-one would actually live — is
+pinned. A mutation breaking the left edge's frame reddens only those new tests.
+
+**Terminations deliberately get no velocity.** Both `onPanResponderTerminate`
+sites call `settle()` with no argument. A gesture taken away by a parent scroll
+or a system gesture was never released, so there is no throw to carry, and
+inventing one would fling a row on a movement the athlete did not finish.
+
+**Not verified.** No device. Whether a flick now feels continuous rather than
+stop-start, and whether the edge resistance reads as an edge rather than as
+lag, are the two questions this change exists to answer and neither is reachable
+from a test — the suite asserts that the velocity is converted and handed over,
+never that the result feels right.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

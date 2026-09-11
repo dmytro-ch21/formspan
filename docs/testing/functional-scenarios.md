@@ -23049,3 +23049,56 @@ answer the same way forever.
 - **A blocked SESSION still counts as pending forever.** Not fixed in this
   slice. An athlete with a permanently refused session sees a pending count
   that never reaches zero — expected today, and the next slice's job.
+
+## F45 — velocity handoff and edge resistance on the two drags (`apps/mobile/components/SwipeToDelete.tsx`, `components/food/EntryRow.tsx`, #1044)
+
+### Happy path
+
+- **Flick a set row left, fast, and let go early.** The row continues under its
+  own momentum into the open position rather than stopping at the finger and
+  restarting from zero.
+- **Flick it back right.** Same, in the other direction.
+- **Drag past the open position** (further left than the Delete action). The row
+  keeps moving but gives progressively less, and springs back on release.
+- **Drag right past closed**, where nothing is revealed. Same resistance.
+- **Lift and release a food row.** The settle carries the vertical throw.
+
+### Edge cases & errors
+
+- **A slow drag with no flick** settles exactly as before — zero velocity is the
+  default and nothing about the resting behaviour changed.
+- **A gesture taken away mid-drag** (parent scroll wins, a system gesture, a
+  call) settles with **no** velocity. It was never released, so there is no
+  throw to carry; a row that flings itself after an interruption is worse than
+  one that simply returns.
+- **A programmatic close** (`enabled` flips false while a row is open) also
+  passes no velocity.
+- **A very hard drag past an edge** approaches one action-width of overshoot and
+  never more — the row cannot be dragged off screen.
+
+### What a test can and cannot reach
+
+- **Reachable, and covered** (`components/__tests__/swipePhysics.test.ts`, 10
+  cases): `rubberband` as pure maths — monotonic, always less than the finger,
+  symmetric, resisting harder the further it goes, approaching `dimension` and
+  never reaching it; and `springVelocity`'s unit contract, including an explicit
+  case that fails if the ×1000 is ever "simplified" away. Both mutations —
+  dropping the conversion, and replacing the rubber-band with a clamp — redden
+  three tests each.
+- **Unchanged and still covered elsewhere**: `settleTarget` and `shouldClaim` in
+  `inputErgonomics.test.ts`, 36 tests, passing unmodified. That is the point —
+  F45 changed rendering, not decisions.
+- **NOT reachable**: whether the handoff removes the seam. The spring runs on
+  the native driver, so the JS value never ticks under jest; the suite can prove
+  the velocity was converted and passed, never that the motion is continuous.
+- **Also not reachable**: whether the edge resistance reads as an edge or as the
+  row being sluggish. That is the judgment the constant `0.55` encodes, and only
+  a thumb can settle it.
+
+### Needs a device
+
+- Flick a set row open hard, then closed hard — feel for momentum carrying, not
+  stop-and-restart.
+- Drag well past both edges and hold, then release.
+- Start a swipe and let a parent scroll steal it: the row must return calmly,
+  not fling.

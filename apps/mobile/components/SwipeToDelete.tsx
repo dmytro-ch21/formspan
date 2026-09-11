@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { vola } from '@/constants/Colors';
+import { drawnOffset, springVelocity } from '@/lib/gesturePhysics';
 import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
@@ -125,13 +126,38 @@ export function SwipeToDelete({
   const [open, setOpen] = useState(false);
 
   const settle = useCallback(
-    (to: number) => {
+    /**
+     * `vx` is `gestureState.vx`, in pixels per MILLISECOND. React Native's
+     * spring integrates in SECONDS — `deltaTime = (now - this._lastTime) / 1000`
+     * at `Libraries/Animated/animations/SpringAnimation.js:281`, re-measured
+     * against the installed 0.86.3 rather than taken on trust. Hence ×1000.
+     *
+     * Get this wrong by three orders of magnitude and the row either ignores
+     * the flick entirely or leaves the screen; both look like a broken spring
+     * rather than a unit error, which is why the conversion is stated here
+     * instead of inlined at the call site.
+     *
+     * Defaults to 0 on purpose. A termination and a programmatic close have no
+     * velocity, and inventing one would make the row leap on a gesture the
+     * athlete did not make.
+     *
+     * One caveat, because the line above overstates what is enforced: if a
+     * spring is ALREADY running on this value, React Native overwrites the
+     * velocity you pass with the running spring's current one
+     * (`SpringAnimation.js:217-224`). The terminate path is unaffected — the
+     * drag's `setValue` clears the animation first — but a programmatic
+     * `close()` landing mid-settle will continue at the flick's remaining
+     * speed rather than at zero. That is continuous, and fine; it is simply
+     * not the zero this default implies.
+     */
+    (to: number, vx = 0) => {
       rest.current = to;
       setOpen(to !== 0);
       Animated.spring(translate, {
         toValue: to,
         useNativeDriver: true,
         bounciness: 0,
+        velocity: springVelocity(vx),
       }).start();
     },
     [translate],
@@ -165,13 +191,19 @@ export function SwipeToDelete({
         onMoveShouldSetPanResponder: (_e, g) => shouldClaim(g.dx, g.dy, enabled),
         onPanResponderMove: (_e, g) => {
           const next = rest.current + g.dx;
-          // Clamped both ways: left stops at the action's width so the row
-          // cannot be dragged off screen, and right stops at 0 because there
-          // is nothing revealed on that side to look at.
-          translate.setValue(Math.max(-ACTION_WIDTH, Math.min(0, next)));
+          // Resisted rather than clamped. Both edges still hold — the row
+          // cannot be dragged off screen, and there is still nothing revealed
+          // to the right of closed — but they now give progressively instead of
+          // stopping dead, which is what tells a finger it has reached an edge
+          // rather than that the gesture has broken.
+          //
+          // Note this changes only what is DRAWN. The release still hands
+          // `settleTarget` the raw `g.dx`, so every settle decision — and every
+          // test of it — is untouched.
+          translate.setValue(drawnOffset(next, ACTION_WIDTH));
         },
         onPanResponderRelease: (_e, g) =>
-          settle(settleTarget({ rest: rest.current, dx: g.dx, vx: g.vx })),
+          settle(settleTarget({ rest: rest.current, dx: g.dx, vx: g.vx }), g.vx),
         // The gesture can be taken away mid-drag (a parent scroll wins).
         // Without this the row is left stranded part-open.
         onPanResponderTerminate: () => settle(rest.current),
@@ -242,6 +274,16 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'flex-end',
     justifyContent: 'center',
+    // The action layer carries the button's own colour, not just the button.
+    //
+    // Before F45 `translate` was provably inside [-ACTION_WIDTH, 0], so nothing
+    // was ever drawn to the left of the 96pt button and this layer's emptiness
+    // never showed. A released flick now carries a few pixels past the open
+    // position before settling back, and without this that gap is whatever is
+    // behind the row — a background sliver beside a red button, which is the
+    // same defect class `styles.row`'s comment below is about.
+    backgroundColor: vola.danger,
+    borderRadius: 12,
   },
   deleteButton: {
     width: ACTION_WIDTH,
