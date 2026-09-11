@@ -70575,6 +70575,19 @@ as unswept (F46), and an `onValueChange` assertion against a prop React Native
 never puts on the host node (F43). The shape is always the same: **the needle
 was present for a reason that had nothing to do with the thing under test.**
 
+### The trigger is honour-system, and that is now its own ticket
+
+Nothing computes either number. The threshold above fires only if somebody
+rereads this section at the moment it is breached — which is the same shape as
+the defect N456 found, where **0 of 415 acceptance-criteria checkboxes had ever
+been ticked** and a latch depending on one would have deadlocked every device
+ticket. A revisit threshold nobody evaluates is a threshold that never fires.
+
+Raised by `ac-verifier` on this branch, which correctly noted #983 asked only
+that a trigger be *stated*. Filed as **L17 (#1091)** rather than expanded into
+this ticket: the decision to accept H18's cost is defensible only while the
+cost stays where it was measured, and right now there is no way to know it has.
+
 ### What is not settled
 
 Whether accepting this is right at a larger fleet. The measurement is one busy
