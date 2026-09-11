@@ -71901,6 +71901,83 @@ type-level guard, which `tsc` enforces rather than a test), and the
 6. **Actions**: should the panel log (tap a tracker, quick-add food), or stay a
    router to the screens that own logging, as it is now?
 
+## 2026-09-11 — N127 (#531): web's targets page reported a failed load as "no target yet"
+
+`apps/web/src/app/dashboard/nutrition/targets/page.tsx` had no notion of having
+loaded. On a failed read `loading` went false, `targets` stayed `[]`, and the
+page rendered the error **and** "No target yet. Derive one below, or type your
+own." — with the History section gone as well, so a request that never returned
+was pixel-identical to a brand-new account. Every sibling nutrition page
+(`nutrition/page.tsx`, `days/page.tsx`, `DayEditor.tsx`) had already been fixed
+for exactly this with a `loaded` flag; this page was the outlier. Found while
+building N86 (#411), which gave the phone its five-state version.
+
+**The gate.** `targets/targetsState.tsx` holds a three-state view —
+`loading | failed | ready` — and the page renders every section only in
+`ready`. `ready` means a read has succeeded at least once on this visit,
+including a genuinely empty one, which is the only thing now allowed to say
+"No target yet". A never-loaded failure renders one panel ("Your targets did
+not load", the reason, Try again) and nothing that makes a claim about the
+athlete's data — not the derivation or the typed-target form either, matching
+the siblings. A refresh that fails AFTER a successful load keeps what was really
+read on screen and says it could not be refreshed.
+
+**One deliberate difference from the siblings: the load has its own error
+slot.** The page's shared `error` is written by the derivation, the activity
+chip and three saves, and each clears it before trying. Gating on it would let
+any of those turn a failed load back into "Loading…" forever. The same move
+removed `load`'s `setError(null)`, which could only ever erase a message
+somebody else had just set — a derivation that failed on mount a few
+milliseconds earlier.
+
+**The load is `loadTargetsInto(read, sink, signal)`**, with the requests
+injected, so the acceptance criterion's "verified by forcing the fetch to
+reject, not by reading the code" is met by running the page's own load against
+a rejecting request and applying the page's own gate to what it recorded:
+`loaded` never set, `targets` never handed an empty list, view `failed`. What
+is NOT verified: the page's effects in a browser. Web's tests run in node with no
+DOM (`vitest.config.mts` explains why), and the dashboard needs a Clerk session
+this session cannot create. The functional-scenarios entry carries the devtools
+recipe for that check.
+
+**The typed-target rails.** `lib/manualTarget.ts` is mobile's
+`parseManualTarget`, ported — kcal 800–8,000, protein ≤500 g, carbs ≤1,200 g,
+fat ≤400 g, fibre ≤120 g — with the limit named in the message. The old check
+was "finite and not negative", so a dropped digit submitted, came back a
+permanent 400 and read like a save that merely failed. Fibre was worse:
+`Math.round(Number("abc"))` is `NaN`, `JSON.stringify` writes `NaN` as `null`,
+and the server stores `null` as "not stated", so a typo in the one optional
+field was discarded under a success message. **The three copies of the bounds —
+server, phone, web — are compared number for number by a web test that reads the
+Go and the phone's TypeScript from source**, because a copied bound is only a
+copy until somebody edits one side.
+
+**The label.** `SOURCE_LABEL[t.source]` was indexed unguarded, so an absent
+source rendered as a trailing `·`. `sourceLabel()` returns "source not recorded"
+for absent and the raw key for unknown, the fallback its siblings use. The
+no-basis explanation line had the same shape one level up — anything not
+`manual` was described as a weekly adjustment — and now says only that no
+explanation is stored.
+
+**Checks.** 17 mutations. 15 caught as test failures, each restored byte-identical and re-run green:
+- the view: a failed read shown as ready, or as loading;
+- the load: a catch that marks the targets loaded, hands the page an empty list, or writes after an abort; a lost fallback message;
+- the label guard;
+- the rails: kcal, protein and fibre each widened; non-numeric fibre saved as null; blank fibre saved as zero;
+- the page: ungated; loading without the helper; a submit that ignores the rails.
+
+Two survived, both on purpose. Setting `loaded` before the data is invisible, because React batches the three writes, and the comment that claimed the order mattered was corrected rather than tested. Re-adding a `targets.length > 0` guard around `TargetHistory` changes nothing, because it already renders nothing for an empty list.
+
+**Lint, noted because it looks like noise and is not.** Moving the state
+writes into `loadTargetsInto` made the load effect's
+`react-hooks/set-state-in-effect` disable unused — the rule can no longer see
+the writes — and web's ratchet allows zero warnings, so the disable went. The
+comment keeps the reasoning it carried.
+
+**Reachable on a phone**: this is web's copy of a job the phone already does —
+target history and typed targets have lived on the phone since N86, which is
+also where these rails came from. Nothing here is web-only.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

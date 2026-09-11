@@ -15,9 +15,17 @@ import {
   type Target,
 } from "@/lib/nutritionApi";
 import { updateActivityLevel } from "@/lib/api";
+import { parseManualTarget } from "@/lib/manualTarget";
 import { useUnits } from "@/lib/useUnits";
 import { AdjustmentCard } from "./AdjustmentCard";
 import { Derivation } from "./Derivation";
+import {
+  loadTargetsInto,
+  sourceLabel,
+  TargetHistory,
+  TargetsLoadFailed,
+  targetsView,
+} from "./targetsState";
 
 /**
  * Setting the target, with the arithmetic that produced it.
@@ -77,7 +85,14 @@ export default function NutritionTargetPage() {
    * an answer that cannot have moved.
    */
   const [pinnedActivity, setPinnedActivity] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  /**
+   * Whether the targets have EVER loaded on this visit, and why the last read
+   * did not (N127, #531). Without these a failed read rendered "No target yet"
+   * — see `targetsState.tsx`. `loadError` is deliberately not the shared
+   * `error` below, which five other paths clear.
+   */
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<null | "derived" | "manual" | "adjustment">(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -98,26 +113,22 @@ export default function NutritionTargetPage() {
     abortRef.current?.abort();
     const c = new AbortController();
     abortRef.current = c;
-    setLoading(true);
-    setError(null);
-    try {
-      const [t, a] = await Promise.all([
-        // A year back, so the history reads as a sequence of decisions rather
-        // than as one row. The window also carries in the target live at its
-        // start, which is what makes "what was I eating to last spring"
-        // answerable at all.
-        listTargets(getToken, { from: addDays(now, -365), to: now }, c.signal),
-        fetchAdjustment(getToken, now, c.signal),
-      ]);
-      if (c.signal.aborted) return;
-      setTargets(t);
-      setAdjustment(a);
-    } catch (e) {
-      if (c.signal.aborted) return;
-      setError(e instanceof Error ? e.message : "Could not load your targets.");
-    } finally {
-      if (!c.signal.aborted) setLoading(false);
-    }
+    // No `setError(null)` here any more: the load no longer writes the shared
+    // slot, so clearing it could only erase a message somebody else just set —
+    // a derivation that failed on mount, say, a few milliseconds earlier.
+    await loadTargetsInto(
+      () =>
+        Promise.all([
+          // A year back, so the history reads as a sequence of decisions rather
+          // than as one row. The window also carries in the target live at its
+          // start, which is what makes "what was I eating to last spring"
+          // answerable at all.
+          listTargets(getToken, { from: addDays(now, -365), to: now }, c.signal),
+          fetchAdjustment(getToken, now, c.signal),
+        ]),
+      { setTargets, setAdjustment, setLoaded, setLoadError },
+      c.signal,
+    );
   }, [getToken, now]);
 
   /** The derivation, which is the only thing the activity chip changes. */
@@ -141,12 +152,12 @@ export default function NutritionTargetPage() {
   }, [getToken, now, pinnedActivity]);
 
   useEffect(() => {
-    // The same disable every fetch-on-mount screen in this app carries: the
-    // rule cannot see that `load` aborts its own previous request and bails on
-    // `signal.aborted` before any setState, so the cascade it warns about is
-    // one render on mount rather than a loop. Removing the fetch is not the
-    // alternative — there is no data without it.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // No `set-state-in-effect` disable here any more, unlike the suggestion's
+    // effect below: the state writes moved into `loadTargetsInto` (N127), where
+    // the rule cannot see them, and an unused disable is itself a lint warning.
+    // The reasoning it carried still holds — `load` aborts its previous request
+    // and bails on `signal.aborted` before any write, so this is one render on
+    // mount, not a loop.
     load();
     return () => abortRef.current?.abort();
   }, [load]);
@@ -266,6 +277,8 @@ export default function NutritionTargetPage() {
     [getToken, load],
   );
 
+  const view = targetsView(loaded, loadError);
+
   return (
     <div className="flex flex-col gap-6">
       {error && (
@@ -279,8 +292,18 @@ export default function NutritionTargetPage() {
         </p>
       )}
 
-      {loading && !live && !adjustment ? (
+      {view === "ready" && loadError && (
+        // A refresh after a save failed. What is below was really read, so it
+        // stays — but it is said to be from before.
+        <p role="alert" className="rounded-card border border-danger/40 bg-danger/10 p-3 text-sm text-danger-ink">
+          Could not refresh your targets ({loadError}). What is below is from the last time they loaded.
+        </p>
+      )}
+
+      {view === "loading" ? (
         <p className="text-sm text-text-dim">Loading…</p>
+      ) : view === "failed" ? (
+        <TargetsLoadFailed message={loadError ?? "Could not load your targets."} onRetry={() => void load()} />
       ) : (
         <>
           {adjustment && (
@@ -303,7 +326,7 @@ export default function NutritionTargetPage() {
                 <p className="text-lg">
                   <strong className="font-display tabular-nums">{live.kcal} kcal</strong>{" "}
                   <span className="text-text-muted">
-                    from {live.effective_on} · {SOURCE_LABEL[live.source]}
+                    from {live.effective_on} · {sourceLabel(live.source)}
                   </span>
                 </p>
                 {live.basis ? (
@@ -330,7 +353,12 @@ export default function NutritionTargetPage() {
                         than one that says there is nothing to show. */}
                     {live.source === "manual"
                       ? "You typed this one, so there is no arithmetic to show."
-                      : "This target came from a weekly adjustment. Its arithmetic was shown at the time you accepted it and is not stored on the row."}
+                      : live.source === "adjustment"
+                        ? "This target came from a weekly adjustment. Its arithmetic was shown at the time you accepted it and is not stored on the row."
+                        : // Absent or unknown. It used to fall through to the
+                          // adjustment sentence, which is a claim about where
+                          // the number came from that nothing supports.
+                          "No explanation is stored with this target."}
                   </p>
                 )}
                 <ul className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-sm text-text-muted">
@@ -461,44 +489,12 @@ export default function NutritionTargetPage() {
             }}
           />
 
-          {targets.length > 0 && (
-            <section className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4">
-              <h2 className="eyebrow">History</h2>
-              <p className="text-xs text-text-dim">
-                Every target you have set, newest first. Past days are judged
-                against the target that was live then, so these rows are the
-                record — not a setting with one current value.
-              </p>
-              <ul className="mt-1 divide-y divide-line-soft">
-                {[...targets]
-                  .sort((a, b) => (a.effective_on < b.effective_on ? 1 : -1))
-                  .map((t) => (
-                    <li
-                      key={t.effective_on}
-                      className="flex flex-wrap items-baseline justify-between gap-x-4 py-2 text-sm"
-                    >
-                      <span className="text-text-muted">
-                        {t.effective_on} · {SOURCE_LABEL[t.source]}
-                      </span>
-                      <span className="tabular-nums">
-                        {t.kcal} kcal · {t.protein_g}P / {t.carb_g}C / {t.fat_g}F
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          )}
+          <TargetHistory targets={targets} />
         </>
       )}
     </div>
   );
 }
-
-const SOURCE_LABEL: Record<string, string> = {
-  derived: "derived",
-  manual: "typed",
-  adjustment: "weekly adjustment",
-};
 
 function listMissing(missing: string[]): string {
   const words = missing.map((m) => MISSING_LABEL[m] ?? m);
@@ -542,8 +538,13 @@ function ManualTarget({
   const [fat, setFat] = useState(String(live?.fat_g ?? ""));
   const [fibre, setFibre] = useState(live?.fibre_g != null ? String(live.fibre_g) : "");
 
-  const numbers = [kcal, protein, carb, fat].map((v) => Number(v));
-  const valid = numbers.every((n) => Number.isFinite(n) && n >= 0) && numbers[0] > 0;
+  // The server's rails, checked before a round trip (N127). The old check was
+  // "finite and not negative", so a dropped digit submitted and came back a
+  // permanent 400 that read like a failed save — and a typo in fibre became
+  // `NaN`, which JSON writes as `null`, which the server stores as "not stated".
+  const parsed = parseManualTarget({ kcal, protein_g: protein, carb_g: carb, fat_g: fat, fibre_g: fibre });
+  // An untouched empty form is not a mistake to report.
+  const typed = [kcal, protein, carb, fat, fibre].some((v) => v.trim() !== "");
 
   return (
     <details className="rounded-card border border-line bg-surface p-4">
@@ -554,18 +555,10 @@ function ManualTarget({
         className="mt-4 flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!valid) return;
-          onSave({
-            effective_on: on,
-            kcal: Math.round(numbers[0]),
-            protein_g: Math.round(numbers[1]),
-            carb_g: Math.round(numbers[2]),
-            fat_g: Math.round(numbers[3]),
-            // Absent rather than zero. A target that does not state fibre is
-            // not a zero-fibre target, and the column is nullable for exactly
-            // that reason.
-            fibre_g: fibre.trim() === "" ? null : Math.round(Number(fibre)),
-          });
+          if (!parsed.ok) return;
+          // Blank fibre arrives as null, not zero — `parseManualTarget` keeps
+          // that rule, for the reason it gives.
+          onSave({ effective_on: on, ...parsed.input });
         }}
       >
         <div className="grid gap-3 sm:grid-cols-3">
@@ -576,10 +569,15 @@ function ManualTarget({
           <Field label="Fat" value={fat} onChange={setFat} suffix="g" />
           <Field label="Fibre" value={fibre} onChange={setFibre} suffix="g" optional />
         </div>
+        {typed && !parsed.ok && (
+          <p role="status" className="text-xs text-danger-ink">
+            {parsed.problem}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={!valid || saving}
+            disabled={!parsed.ok || saving}
             className="rounded-control border border-line px-4 py-2 text-sm font-semibold disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save typed target"}

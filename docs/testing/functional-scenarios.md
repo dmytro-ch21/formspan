@@ -10584,8 +10584,31 @@ average with no denominator looks fine.
 - A clamped derivation shows the clamp as its own line. Without it the last line
   of the arithmetic does not follow from the one above.
 - Fibre left blank on a typed target saves as `null`, not `0`.
-- A target below 800 or above 8000 kcal is rejected by the server; the message
-  surfaces.
+- A target below 800 or above 8000 kcal is refused **before** it is sent (N127):
+  typing `700` names the limit under the form ("between 800 and 8000 kcal") and
+  the save button stays disabled. Assert no `PUT` is issued. The server's
+  own 400 is still the backstop.
+- Every macro rail matches the server's exactly: protein 501, carbs 1201, fat
+  401 and fibre 121 are each refused with the limit named; 500 / 1200 / 400 /
+  120 save.
+- A non-numeric fibre (`abc`) is refused with "Fibre needs to be a number." —
+  it must **not** save as a target with no fibre stated.
+- An empty, untouched typed-target form shows no error message.
+
+#### A failed load (N127, #531)
+- **Force the targets request to fail** (block `GET /v1/nutrition/targets*` in
+  devtools, or take the API down) and load the page. It says "Your targets did
+  not load", shows the reason and a Try again button, and renders **none** of:
+  "No target yet", the History section, the derivation or the typed-target
+  form. A failed read must not look like a new account.
+- Unblock, press Try again: the page loads normally.
+- With the targets loaded, save a target while the refresh after it fails: the
+  existing rows stay on screen with "Could not refresh your targets" above them.
+  They are not replaced by the failure panel, because they were really read.
+- A brand-new account with a successful, empty read still says "No target yet".
+- A target row with no or an unknown `source` renders a word ("source not
+  recorded", or the key) after the date, never a bare trailing `·`. Its
+  explanation line does not claim it was a weekly adjustment.
 
 ### The weekly adjustment proposal (N27's only client)
 
