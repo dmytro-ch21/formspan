@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, StyleSheet, Switch, TextInput } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScroll';
@@ -468,10 +468,26 @@ export default function EditProfileScreen() {
                 testID={`profile-${s.key}`}
               >
                 <Text style={styles.toggleLabel}>{s.label}</Text>
+                {/*
+                  F43/#1042 — the platform switch, replacing a knob that
+                  moved by flipping `alignSelf` and therefore teleported. The
+                  row owns the press and already announces as a switch with
+                  its `checked` state, so this one is touch-inert and hidden
+                  from the accessibility tree — otherwise a tap on it toggles
+                  twice and VoiceOver reads the control twice. No
+                  `onValueChange`, for the same reason; `settings.tsx` carries
+                  the fuller note on this swap.
+                */}
                 <View
-                  style={[styles.switch, on && [styles.switchOn, { backgroundColor: accent.accent }]]}
+                  pointerEvents="none"
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
                 >
-                  <View style={[styles.knob, on && styles.knobOn]} />
+                  <Switch
+                    value={on}
+                    trackColor={{ true: accent.accent, false: vola.line }}
+                    thumbColor={vola.text}
+                  />
                 </View>
               </PressableScale>
             );
@@ -686,16 +702,5 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   toggleLabel: { fontSize: 15, fontWeight: '600' },
-  switch: {
-    width: 50,
-    height: 30,
-    borderRadius: 999,
-    backgroundColor: vola.line,
-    padding: 3,
-    justifyContent: 'center',
-  },
-  switchOn: {},
-  knob: { width: 24, height: 24, borderRadius: 999, backgroundColor: vola.surface },
-  knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
   error: { color: vola.danger, fontSize: 14 },
 });

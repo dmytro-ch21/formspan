@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import EditProfileScreen from '../../app/profile/edit';
+import { findAllByType, switchWrappers } from '@/lib/__tests__/support/tree';
 
 /**
  * N12's picker/remove flow on the profile edit screen — the one place an
@@ -234,4 +235,63 @@ it('declines to upload when camera permission is refused, without touching uploa
   await waitFor(() => expect(screen.getByText(/needs camera access/i)).toBeTruthy());
   expect(mockLaunchCamera).not.toHaveBeenCalled();
   expect(mockUploadAvatar).not.toHaveBeenCalled();
+});
+
+/**
+ * F43/#1042 — the sport toggles are the platform switch, and inert.
+ *
+ * Lives here rather than in its own file because this suite already stands the
+ * real Edit Profile screen up with the mocks it needs, and a second copy of
+ * that harness is a second thing to drift.
+ *
+ * The invariant is the one `__tests__/app/settingsSwitch.test.tsx` documents at
+ * length: the ROW owns the press and already announces as a switch, so the
+ * native switch inside it must be touch-inert (or one tap toggles twice) and
+ * hidden from the accessibility tree (or VoiceOver reads the control twice).
+ * `components/SwipeToDelete.tsx` carries the prior incident this pattern comes
+ * from — `pointerEvents` gates hit-testing only, never the accessibility tree,
+ * so both halves are load-bearing and neither substitutes for the other.
+ */
+it('the sport toggles are inert platform switches, not hand-rolled knobs', async () => {
+  // The shared mock returns no modules, so the sport rows — and therefore
+  // every switch on this screen — do not render at all. Without this the
+  // assertions below would iterate an empty list and pass while testing
+  // nothing, which is the precise failure mode this file is guarding against.
+  //
+  // `mockReturnValue`, not `mockReturnValueOnce`: the screen calls
+  // `useModules()` once per render and re-renders several times before it
+  // settles, so a one-shot override is consumed by the first call and every
+  // later render falls back to the empty default. Measured — it still read
+  // zero switches. Restored afterwards so the override cannot leak into
+  // another case.
+  const empty = { modules: [] as unknown[], ready: true, stale: false, apply: jest.fn() };
+  mockUseModules.mockReturnValue({
+    modules: [
+      { key: 'strength', label: 'Strength', enabled: true },
+      { key: 'bjj', label: 'BJJ', enabled: false },
+    ] as unknown[],
+    ready: true,
+    stale: false,
+    apply: jest.fn(),
+  });
+
+  try {
+    await render(<EditProfileScreen />);
+    await screen.findByTestId('profile-avatar-row');
+
+    const switches = findAllByType(screen.root, 'RCTSwitch');
+    const wrappers = switchWrappers(screen.root);
+
+    expect(switches.length).toBeGreaterThan(0);
+    // Every switch is wrapped — not merely "the wrapped ones are correct".
+    expect(wrappers.length).toBe(switches.length);
+
+    for (const w of wrappers) {
+      expect(w.props.pointerEvents).toBe('none');
+      expect(w.props.accessibilityElementsHidden).toBe(true);
+      expect(w.props.importantForAccessibility).toBe('no-hide-descendants');
+    }
+  } finally {
+    mockUseModules.mockReturnValue(empty);
+  }
 });

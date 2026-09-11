@@ -10,6 +10,7 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
+  Switch,
   TextInput,
   useWindowDimensions,
 } from 'react-native';
@@ -979,10 +980,26 @@ function NewWorkoutSheet({
               <Text style={styles.label}>Share publicly</Text>
               <Text style={styles.muted}>Anyone can view it. You stay the only editor.</Text>
             </View>
+            {/*
+              F43/#1042 — the platform switch, replacing a knob that moved by
+              flipping `alignSelf` and therefore teleported. The row above
+              owns the press and already announces as a switch with its
+              `checked` state, so this one is made touch-inert and hidden
+              from the accessibility tree: without that, a tap on the switch
+              toggles twice and VoiceOver reads the control twice. No
+              `onValueChange` for the same reason — see `settings.tsx`'s
+              fuller note on the same swap.
+            */}
             <View
-              style={[styles.switch, isPublic && [styles.switchOn, { backgroundColor: accent.accent }]]}
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
             >
-              <View style={[styles.knob, isPublic && styles.knobOn]} />
+              <Switch
+                value={isPublic}
+                trackColor={{ true: accent.accent, false: vola.line }}
+                thumbColor={vola.text}
+              />
             </View>
           </Pressable>
 
@@ -1297,15 +1314,4 @@ const styles = StyleSheet.create({
   chipTextActive: {},
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.lg },
   toggleBody: { flex: 1 },
-  switch: {
-    width: 50,
-    height: 30,
-    borderRadius: Radius.pill,
-    backgroundColor: vola.line,
-    padding: 3,
-    justifyContent: 'center',
-  },
-  switchOn: {},
-  knob: { width: 24, height: 24, borderRadius: Radius.pill, backgroundColor: vola.surface },
-  knobOn: { alignSelf: 'flex-end', backgroundColor: vola.navy },
 });

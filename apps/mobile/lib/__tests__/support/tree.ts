@@ -58,3 +58,24 @@ export function collectNodes(root: TreeNode | null | undefined): TreeNode[] {
   walk(root);
   return out;
 }
+
+/**
+ * The view wrapping each native `<Switch>` — the nodes F43/#1042's invariant
+ * is about.
+ *
+ * Found by looking for a node that HAS a switch as a direct child rather than
+ * by walking up from the switch, because RNTL 14's node carries no `parent`
+ * pointer (see the note at the top of this file on what the `test-renderer`
+ * swap removed).
+ *
+ * Shared rather than copied because the invariant holds at three call sites
+ * and a per-file copy is how two of them would drift apart. Compare its length
+ * against the switch count at the call site: a loop over zero wrappers passes
+ * vacuously, which is exactly the shape of the two assertions that had to be
+ * rewritten when this was first written.
+ */
+export function switchWrappers(root: TreeNode | null | undefined): TreeNode[] {
+  return collectNodes(root).filter((n) =>
+    (n.children ?? []).some((c) => typeof c !== 'string' && c.type === 'RCTSwitch'),
+  );
+}

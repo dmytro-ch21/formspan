@@ -22839,6 +22839,55 @@ stated three times, not two.
   live heart-rate reading arrive.
 - Toggle Reduce Motion off while backgrounded, return, confirm all three revert.
 
+## F43 — three toggles use the platform switch (`apps/mobile/app/{settings,profile/edit}.tsx`, `app/(tabs)/workouts.tsx`, #1042)
+
+Three hand-rolled toggles moved their knob by flipping `alignSelf`, a layout
+property with no transition, so it teleported. They are now React Native's
+`<Switch>`. The row still owns the press; the switch is touch-inert and hidden
+from the accessibility tree so it cannot toggle or announce twice.
+
+### Happy path
+
+- Settings → tap the **label** of any toggle row (Sounds, Voice, Auto-rest):
+  the value flips exactly once and the knob glides.
+- Settings → tap the **switch itself**: the value flips exactly once. The row's
+  handler is the only one wired.
+- New workout → "Share publicly": flips once from either the label or the
+  switch, and the workout saves with the value shown.
+- Profile → Edit → a sport row: flips once, and the change survives Save.
+
+### Edge cases & errors
+
+- A toggle whose value is still loading is `disabled`: pressing the row or the
+  switch does nothing and the value does not flicker.
+- Flip a toggle, leave the screen before the write settles, come back: the row
+  shows the value that was actually persisted, not the optimistic one.
+- Flip rapidly several times: the final on-screen state matches the final
+  persisted state — no lost or doubled write.
+
+### What a test can and cannot reach
+
+`apps/mobile/__tests__/app/settingsSwitch.test.tsx` covers the structure: that
+the platform switch is on screen, that its wrapper is `pointerEvents="none"`
+and accessibility-hidden, and that pressing the row calls the writer exactly
+once. It cannot see the knob move — `<Switch>` renders as a host node with no
+animation in jest — and it cannot exercise VoiceOver.
+
+Note for whoever writes these: asserting `onValueChange` on the switch proves
+nothing. React Native maps it to `onChange` on the host node, which is always
+present; two tests in this file's first draft were green for that reason and
+caught only by mutation.
+
+### Needs a device
+
+- The knob **glides** rather than teleporting, matching
+  `settings/suggestions.tsx` exactly. Put them side by side.
+- VoiceOver: each row announces once as a switch with its on/off state — not
+  "button, switch", and not with the state read twice.
+- Dark mode then light: the off-state track (`vola.line`) is visible against
+  the row background in both.
+
+
 ## F44 — the food reorder drag has haptics and one clock (`apps/mobile/lib/useEntryDrag.ts`, `components/food/EntryRow.tsx`, #1043)
 
 Press-and-hold to reorder an entry (N553) shipped silent. Three haptic moments
