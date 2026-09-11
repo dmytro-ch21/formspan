@@ -35,6 +35,14 @@ function day(eaten_on: string, kcal: number, entries = 1): DayTotals {
     carb_g: kcal / 10,
     fat_g: kcal / 30,
     fibre_g: null,
+    // The five label macros are irrelevant to what this test measures, but
+    // `Macros` requires them (F37). Null is the honest fixture value: nothing
+    // states them.
+    saturated_fat_g: null,
+    sugar_g: null,
+    added_sugar_g: null,
+    sodium_mg: null,
+    cholesterol_mg: null,
     target_kcal: 2000,
     target_protein_g: 150,
   };

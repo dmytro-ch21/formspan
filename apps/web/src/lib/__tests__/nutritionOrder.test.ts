@@ -30,6 +30,13 @@ const entry = (id: string, meal: Meal, name: string, position: number): Entry =>
   carb_g: 5,
   fat_g: 2,
   fibre_g: null,
+  // Required by `Macros` since F37; null is the honest value for a fixture
+  // that is about ordering, not nutrition.
+  saturated_fat_g: null,
+  sugar_g: null,
+  added_sugar_g: null,
+  sodium_mg: null,
+  cholesterol_mg: null,
   source_food_id: null,
   notes: "",
   position,

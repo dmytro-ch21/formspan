@@ -410,6 +410,31 @@ components:
       allOf:
         - $ref: "#/components/schemas/NutritionMacros"
         - type: object
+          description: >
+            **THE FIVE LABEL MACROS HAVE THREE STATES ON THIS SCHEMA, NOT TWO
+            (F37).** `saturated_fat_g`, `sugar_g`, `added_sugar_g`, `sodium_mg`
+            and `cholesterol_mg` are inherited from `NutritionMacros` above, and
+            on a WRITE the difference between omitting a key and sending it as
+            `null` is meaningful:
+
+
+            * **absent** — the stored value is KEPT. A client that has never
+            heard of these columns (web's entry editor and its scale button both
+            omit all five today) cannot wipe a barcode scan's label just by
+            correcting a typo in the name.
+
+            * **`null`** — the value is CLEARED. This is a statement: no source
+            gives a figure. The phone sends all five on every push as `number |
+            null`, so its null has to be able to take a stale figure back off a
+            row.
+
+            * **a number** — the value is SET.
+
+
+            Before F37 the server accepted neither: it discarded all five on
+            decode and the upsert then wrote the nils over whatever was stored,
+            so every write through this schema silently blanked the label half
+            of a scanned product.
           required: [eaten_on, meal, name, servings, serving_label]
           properties:
             eaten_on: { type: string, format: date }
@@ -464,6 +489,17 @@ components:
             One component of a recipe. Its numbers are copied here, exactly like
             an entry's: correcting a saved ingredient must not rewrite a recipe
             built last month.
+
+
+            **Unlike `NutritionEntryInput` and `NutritionFoodInput`, the five
+            label macros here are two-state, not three (F37): omitting one means
+            "nothing states it", not "keep what was there".** An item list is
+            REPLACED wholesale on every write, so there is no previous item to
+            keep a value from — item 2 of the new list is a different ingredient,
+            not a continuation of item 2 of the old one. A recipe's own
+            per-serving label macros are then summed from whatever its items
+            state, so an ingredient that omits `sodium_mg` removes its
+            contribution to the recipe's total rather than preserving it.
           required: [name, quantity, serving_label]
           properties:
             name: { type: string, minLength: 1, maxLength: 120 }
@@ -837,6 +873,18 @@ components:
         `NutritionMacros`: inheriting them would make them required on a recipe
         too, and required-but-ignored is a contradiction a generated client
         cannot satisfy.
+
+
+        **The five label macros are three-state on a WRITE, exactly as on
+        `NutritionEntryInput` (F37):** absent KEEPS the stored value, `null`
+        CLEARS it, a number SETS it. They were missing from this schema
+        altogether before F37, which matched a server that discarded them.
+
+
+        **For a `recipe` they are DERIVED and none of the three applies** — the
+        server sums whatever the `items` state and writes that, so a recipe whose
+        ingredients stop stating sodium has its own `sodium_mg` cleared rather
+        than kept.
       required: [name, serving_label]
       properties:
         kind: { type: string, enum: [food, recipe], default: food }
@@ -849,6 +897,14 @@ components:
         carb_g: { type: number, description: Required for a food; ignored for a recipe. }
         fat_g: { type: number, description: Required for a food; ignored for a recipe. }
         fibre_g: { type: number, nullable: true }
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g: { type: number, nullable: true }
+        sodium_mg:
+          type: number
+          nullable: true
+          description: MILLIGRAMS. See the note on `NutritionMacros`.
+        cholesterol_mg: { type: number, nullable: true }
         yield_servings: { type: number, nullable: true }
         items:
           type: array

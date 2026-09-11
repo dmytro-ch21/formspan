@@ -12,6 +12,8 @@ import {
   listEntries,
   listTargets,
   saveEntry,
+  scaleLabelMacros,
+  NO_LABEL_MACROS,
   type Entry,
   type Meal,
   type Target,
@@ -273,6 +275,18 @@ export function DayEditor({ date }: { date: string }) {
           carb_g: macros.carb_g * servings,
           fat_g: macros.fat_g * servings,
           fibre_g: macros.fibre_g == null ? null : macros.fibre_g * servings,
+          // **The five label macros are not on this form, so they follow the
+          // QUANTITY (F37).** Correcting a name or a macro leaves the ratio at
+          // 1 and they are re-sent unchanged; changing the servings count
+          // scales them exactly as it scales the four figures above, so a
+          // scanned product's sodium stays consistent with its calories.
+          //
+          // Re-sent rather than omitted. The server would keep them on an
+          // omission — that is the fix this ticket landed — but "keep" is the
+          // safety net for a client that cannot know about them, and this one
+          // now can. Omitting here would silently be wrong the moment somebody
+          // edits the servings.
+          ...scaleLabelMacros(entry, entry.servings > 0 ? servings / entry.servings : 1),
           // Provenance is preserved across a correction — this is still the
           // row that came from that food, even after the numbers changed.
           source_food_id: entry.source_food_id,
@@ -319,6 +333,11 @@ export function DayEditor({ date }: { date: string }) {
           carb_g: entry.carb_g * factor,
           fat_g: entry.fat_g * factor,
           fibre_g: entry.fibre_g == null ? null : entry.fibre_g * factor,
+          // The five, multiplied like everything else. Omitting them here would
+          // leave a halved entry carrying full-strength sodium — a number that
+          // is not merely stale but contradicted by the calories printed beside
+          // it. F37.
+          ...scaleLabelMacros(entry, factor),
           source_food_id: entry.source_food_id,
           notes: entry.notes,
         });
@@ -764,6 +783,11 @@ function AddEntry({
             carb_g: macros.carb_g * servings,
             fat_g: macros.fat_g * servings,
             fibre_g: macros.fibre_g == null ? null : macros.fibre_g * servings,
+            // Typed by hand, so nothing states a label figure. Explicit nulls
+            // rather than an omission: on a NEW row the two are identical to
+            // the server, and saying it out loud is what stops this becoming a
+            // silent omission if this form ever grows the fields. F37.
+            ...NO_LABEL_MACROS,
             notes: draft.notes,
           });
           onAdded();

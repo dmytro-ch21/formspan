@@ -130,7 +130,35 @@ type entryBody struct {
 	CarbG        float64  `json:"carb_g"`
 	FatG         float64  `json:"fat_g"`
 	FibreG       *float64 `json:"fibre_g"`
-	SourceFoodID *string  `json:"source_food_id"`
+	// **THE FIVE LABEL MACROS, AND WHY THEY ARE apihttp.Field RATHER THAN
+	// *float64 (F37).**
+	//
+	// Absent from the body means KEEP WHAT IS STORED; an explicit null means
+	// CLEAR IT. `*float64` cannot tell those apart, and this struct having no
+	// field for them at all is the bug this shape exists to close: the handler
+	// built a Macros with five nils, and SaveEntry's `ON CONFLICT ... SET
+	// saturated_fat_g = EXCLUDED.saturated_fat_g` wrote them over real values.
+	// Renaming a scanned entry was enough to lose its whole label.
+	//
+	// Both states are live, in the two clients, today:
+	//   - web omits all five (its `Macros` type has only the first five
+	//     fields), so absent MUST mean keep, or every web correction wipes
+	//     a barcode scan's label — the reported bug;
+	//   - the phone sends all five on every push as `number | null`
+	//     (apps/mobile/lib/foodLog.ts), so its null is a STATEMENT, not an
+	//     omission, and must clear — otherwise a re-scan that corrects a
+	//     figure to unknown could never take the stale number back off.
+	//
+	// This is the FOURTH instance of the class CLAUDE.md records under
+	// `exercise.updateWithin`. See postgres.go for the SQL that acts on the
+	// unset state, and `position` just below for the same argument made with
+	// a pointer where only two states were needed.
+	SaturatedFatG apihttp.Field[float64] `json:"saturated_fat_g"`
+	SugarG        apihttp.Field[float64] `json:"sugar_g"`
+	AddedSugarG   apihttp.Field[float64] `json:"added_sugar_g"`
+	SodiumMG      apihttp.Field[float64] `json:"sodium_mg"`
+	CholesterolMG apihttp.Field[float64] `json:"cholesterol_mg"`
+	SourceFoodID  *string                `json:"source_food_id"`
 	// Category rides along the same way SourceFoodID does: the client already
 	// knows it (it copied it from the catalog food when it built this entry),
 	// and nothing here derives it from a join. See Entry.Category's doc
@@ -188,7 +216,23 @@ func (h *Handler) SaveEntry(w http.ResponseWriter, r *http.Request) {
 		ID: r.PathValue("id"), UserID: userID,
 		EatenOn: in.EatenOn, Meal: in.Meal, Name: strings.TrimSpace(in.Name),
 		Servings: in.Servings, ServingLabel: strings.TrimSpace(in.ServingLabel),
-		Macros:       Macros{Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG},
+		Macros: Macros{
+			Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG,
+			// The VALUES go on Macros so Validate's bounds rails run over them
+			// (a mis-keyed sodium is still a mis-keyed sodium when it arrives
+			// through a three-state field), and the three STATES go on
+			// LabelWanted, which is what SaveEntry acts on. An unset field
+			// leaves nil here, Validate ignores nil, and the response comes
+			// back from the statement's own RETURNING — so what the athlete
+			// sees is the stored row, never this half-filled copy.
+			SaturatedFatG: in.SaturatedFatG.Value, SugarG: in.SugarG.Value,
+			AddedSugarG: in.AddedSugarG.Value, SodiumMG: in.SodiumMG.Value,
+			CholesterolMG: in.CholesterolMG.Value,
+		},
+		LabelWanted: LabelWanted{
+			SaturatedFatG: in.SaturatedFatG, SugarG: in.SugarG, AddedSugarG: in.AddedSugarG,
+			SodiumMG: in.SodiumMG, CholesterolMG: in.CholesterolMG,
+		},
 		SourceFoodID: in.SourceFoodID, Category: category, Notes: in.Notes,
 		PositionWanted: in.Position,
 	}
@@ -240,29 +284,60 @@ func (h *Handler) Days(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------------------------------ foods
 
+// recipeItemBody's five label macros are PLAIN POINTERS, and the asymmetry
+// with entryBody/foodBody above is deliberate rather than an oversight (F37).
+//
+// A three-state field answers "was this column named?" so a row can be left
+// alone — but an item list has no row to leave alone. The server REPLACES the
+// stored list wholesale (DELETE then INSERT in one transaction), so "the value
+// this item had before" is not a question with an answer: item 2 of the new
+// list is not a continuation of item 2 of the old one, it is a different
+// ingredient that happens to sit at the same index.
+//
+// So for an item, absent genuinely means "nothing states this", which is what
+// nil already means everywhere else in Macros. What was broken here was
+// simpler and needed no restore path: the five had no field at all, so figures
+// a client DID send were dropped. And the loss compounds — `Food.PerServing`
+// derives a recipe's own label macros by summing its items, so five dropped
+// items make a recipe that reports "not stated" for a label its ingredients
+// carry.
 type recipeItemBody struct {
+	Name          string   `json:"name"`
+	Quantity      float64  `json:"quantity"`
+	ServingLabel  string   `json:"serving_label"`
+	Kcal          float64  `json:"kcal"`
+	ProteinG      float64  `json:"protein_g"`
+	CarbG         float64  `json:"carb_g"`
+	FatG          float64  `json:"fat_g"`
+	FibreG        *float64 `json:"fibre_g"`
+	SaturatedFatG *float64 `json:"saturated_fat_g"`
+	SugarG        *float64 `json:"sugar_g"`
+	AddedSugarG   *float64 `json:"added_sugar_g"`
+	SodiumMG      *float64 `json:"sodium_mg"`
+	CholesterolMG *float64 `json:"cholesterol_mg"`
+	SourceFoodID  *string  `json:"source_food_id"`
+}
+
+type foodBody struct {
+	Kind         FoodKind `json:"kind"`
 	Name         string   `json:"name"`
-	Quantity     float64  `json:"quantity"`
+	Brand        string   `json:"brand"`
 	ServingLabel string   `json:"serving_label"`
+	ServingGrams *float64 `json:"serving_grams"`
 	Kcal         float64  `json:"kcal"`
 	ProteinG     float64  `json:"protein_g"`
 	CarbG        float64  `json:"carb_g"`
 	FatG         float64  `json:"fat_g"`
 	FibreG       *float64 `json:"fibre_g"`
-	SourceFoodID *string  `json:"source_food_id"`
-}
+	// The same five, the same three states, the same reason — see entryBody.
+	// A saved food is the row a barcode scan actually creates, so this is the
+	// path the label figures arrive on in the first place.
+	SaturatedFatG apihttp.Field[float64] `json:"saturated_fat_g"`
+	SugarG        apihttp.Field[float64] `json:"sugar_g"`
+	AddedSugarG   apihttp.Field[float64] `json:"added_sugar_g"`
+	SodiumMG      apihttp.Field[float64] `json:"sodium_mg"`
+	CholesterolMG apihttp.Field[float64] `json:"cholesterol_mg"`
 
-type foodBody struct {
-	Kind          FoodKind         `json:"kind"`
-	Name          string           `json:"name"`
-	Brand         string           `json:"brand"`
-	ServingLabel  string           `json:"serving_label"`
-	ServingGrams  *float64         `json:"serving_grams"`
-	Kcal          float64          `json:"kcal"`
-	ProteinG      float64          `json:"protein_g"`
-	CarbG         float64          `json:"carb_g"`
-	FatG          float64          `json:"fat_g"`
-	FibreG        *float64         `json:"fibre_g"`
 	YieldServings *float64         `json:"yield_servings"`
 	Items         []recipeItemBody `json:"items"`
 	Barcode       *string          `json:"barcode"`
@@ -346,7 +421,14 @@ func (h *Handler) SaveFood(w http.ResponseWriter, r *http.Request) {
 		items = append(items, RecipeItem{
 			Name: strings.TrimSpace(it.Name), Quantity: it.Quantity,
 			ServingLabel: strings.TrimSpace(it.ServingLabel),
-			Macros:       Macros{Kcal: it.Kcal, ProteinG: it.ProteinG, CarbG: it.CarbG, FatG: it.FatG, FibreG: it.FibreG},
+			Macros: Macros{
+				Kcal: it.Kcal, ProteinG: it.ProteinG, CarbG: it.CarbG, FatG: it.FatG, FibreG: it.FibreG,
+				// Plain pass-through, unlike the parent below: an item list is
+				// replaced wholesale, so there is no previous item to preserve
+				// against. See recipeItemBody.
+				SaturatedFatG: it.SaturatedFatG, SugarG: it.SugarG, AddedSugarG: it.AddedSugarG,
+				SodiumMG: it.SodiumMG, CholesterolMG: it.CholesterolMG,
+			},
 			SourceFoodID: it.SourceFoodID,
 		})
 	}
@@ -354,7 +436,17 @@ func (h *Handler) SaveFood(w http.ResponseWriter, r *http.Request) {
 		ID: r.PathValue("id"), UserID: userID, Kind: in.Kind,
 		Name: strings.TrimSpace(in.Name), Brand: strings.TrimSpace(in.Brand),
 		ServingLabel: strings.TrimSpace(in.ServingLabel), ServingGrams: in.ServingGrams,
-		Macros:        Macros{Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG},
+		Macros: Macros{
+			Kcal: in.Kcal, ProteinG: in.ProteinG, CarbG: in.CarbG, FatG: in.FatG, FibreG: in.FibreG,
+			// Values for Validate, states for SaveFood — see SaveEntry above.
+			SaturatedFatG: in.SaturatedFatG.Value, SugarG: in.SugarG.Value,
+			AddedSugarG: in.AddedSugarG.Value, SodiumMG: in.SodiumMG.Value,
+			CholesterolMG: in.CholesterolMG.Value,
+		},
+		LabelWanted: LabelWanted{
+			SaturatedFatG: in.SaturatedFatG, SugarG: in.SugarG, AddedSugarG: in.AddedSugarG,
+			SodiumMG: in.SodiumMG, CholesterolMG: in.CholesterolMG,
+		},
 		YieldServings: in.YieldServings, Items: items,
 		Source:  in.Source,
 		Barcode: in.Barcode,

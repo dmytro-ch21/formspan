@@ -55,6 +55,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/dmytro-ch21/vola/backend/internal/platform/apihttp"
 )
 
 var (
@@ -244,6 +246,84 @@ type Macros struct {
 	CholesterolMG *float64 `json:"cholesterol_mg"`
 }
 
+// LabelWanted carries the five LABEL macros in their three WIRE states, and it
+// is to them exactly what PositionWanted is to Position (F37).
+//
+// `Macros` says what a row's label figures ARE. This says what a caller is
+// ASKING them to become, which is a different question with one more answer:
+//
+//	not stated       -> the stored value is kept
+//	stated as null   -> the column is set to NULL
+//	stated as a value-> the column is set to it
+//
+// The middle and the top are the same `nil` in `Macros`, and collapsing them
+// is the bug this exists to close: every PUT built a Macros with five nils and
+// the upsert's `SET saturated_fat_g = EXCLUDED.saturated_fat_g` wrote them
+// over a barcode scan's real label. Fourth instance of the class CLAUDE.md
+// records under `exercise.updateWithin`.
+//
+// json:"-" for PositionWanted's reason: it is never a response key, because
+// what a caller asked for is not what the row is.
+type LabelWanted struct {
+	SaturatedFatG apihttp.Field[float64]
+	SugarG        apihttp.Field[float64]
+	AddedSugarG   apihttp.Field[float64]
+	SodiumMG      apihttp.Field[float64]
+	CholesterolMG apihttp.Field[float64]
+}
+
+// LabelMacro is one resolved answer: whether the column is written at all, and
+// what to.
+type LabelMacro struct {
+	Stated bool
+	Value  *float64
+}
+
+// resolve answers, for each of the five, "is this column written at all, and to
+// what?" — the three states collapsed into the two things SQL needs.
+//
+// The five are listed ONCE here, in the order every SQL statement lists them,
+// rather than as five hand-written repetitions at each call site. A transposed
+// pair would be a 1000x error between sodium_mg and everything measured in
+// grams, and nothing downstream would catch it.
+func (l LabelWanted) resolve(m Macros) [5]LabelMacro {
+	pairs := [5]struct {
+		wanted apihttp.Field[float64]
+		stored *float64
+	}{
+		{l.SaturatedFatG, m.SaturatedFatG},
+		{l.SugarG, m.SugarG},
+		{l.AddedSugarG, m.AddedSugarG},
+		{l.SodiumMG, m.SodiumMG},
+		{l.CholesterolMG, m.CholesterolMG},
+	}
+	var out [5]LabelMacro
+	for i, p := range pairs {
+		switch {
+		case p.wanted.Set:
+			// The wire spoke, either way. A null here CLEARS — see the type doc.
+			out[i] = LabelMacro{Stated: true, Value: p.wanted.Value}
+		case p.stored != nil:
+			// **A Go caller that filled in Macros and never touched LabelWanted
+			// still writes.** This keeps every in-process caller — the importers,
+			// the share copiers, this package's own repository tests — behaving
+			// exactly as before, rather than silently losing writes to a field
+			// they have never heard of. Which is the mirror of the bug being
+			// fixed, and would have been a fine way to reintroduce it one layer
+			// down.
+			//
+			// The cost is that such a caller cannot CLEAR by leaving Macros nil;
+			// it has to say so, with `apihttp.Null[float64]()`. That asymmetry is
+			// deliberate: "I did not mention it" is the overwhelmingly common
+			// case and must be the safe one.
+			out[i] = LabelMacro{Stated: true, Value: p.stored}
+		default:
+			out[i] = LabelMacro{}
+		}
+	}
+	return out
+}
+
 // bounds are sanity rails against a mis-keyed decimal, not nutritional limits.
 // A 90,000 kcal entry is a typo; catching it here is what stops one bad row
 // dragging a month of averages with it. Nothing here has an opinion about
@@ -380,6 +460,10 @@ type Entry struct {
 	// SaveEntry's COALESCE is what acts on the distinction.
 	PositionWanted *int64 `json:"-"`
 
+	// LabelWanted is to the five label macros what PositionWanted is to
+	// Position. See the type.
+	LabelWanted LabelWanted `json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -489,6 +573,10 @@ type Food struct {
 	// YieldServings is set for a recipe and nil for a food — "this makes 6
 	// portions". The database enforces the biconditional; it is repeated in
 	// Validate because a CHECK violation cannot say which half is missing.
+	// LabelWanted is to the five label macros what PositionWanted is to an
+	// entry's Position. See the type.
+	LabelWanted LabelWanted `json:"-"`
+
 	YieldServings *float64     `json:"yield_servings"`
 	Items         []RecipeItem `json:"items"`
 
@@ -594,8 +682,18 @@ func (f *Food) Validate() error {
 //
 // Fibre is summed only if at least one item states it — otherwise the recipe
 // reports "not stated" rather than a total assembled from silence.
+// DerivesMacros reports whether PerServing COMPUTES this food's macros from
+// its items rather than handing back what the caller set.
+//
+// A method rather than the condition written out twice, because SaveFood needs
+// the same question answered (F37) and two copies of a three-clause guard is
+// two things to keep in step.
+func (f *Food) DerivesMacros() bool {
+	return f.Kind == KindRecipe && f.YieldServings != nil && *f.YieldServings > 0
+}
+
 func (f *Food) PerServing() Macros {
-	if f.Kind != KindRecipe || f.YieldServings == nil || *f.YieldServings <= 0 {
+	if !f.DerivesMacros() {
 		return f.Macros
 	}
 	var total Macros
