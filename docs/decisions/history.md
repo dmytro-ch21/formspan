@@ -71196,6 +71196,63 @@ That is the behaviour #436 asked for, working.
 **Rows already blanked are not recovered.** There is no history to restore them from — `nutrition_entries` keeps no revision trail the way `exercise` does, which is the one respect in which the `updateWithin` instances were luckier. An athlete who scanned a product and later corrected its name has lost that label, permanently, and the only way back is to scan it again.
 
 
+## 2026-09-11 — H24: the CI check-run count comes out of the prose, because the prose lagged the code at every change (#1094)
+
+`CLAUDE.md`'s "CI can run ZERO checks" section and the `/pre-merge` skill both
+told the reader what `pnpm run ci:checks` must report, as a numeral. That
+numeral has had three values — 5, 6, 8 — and **it was behind the code after
+both transitions**: 5 to 6 was noticed by probe-PR #401 on 2026-08-20, and 6 to
+8 (N166, #543) went unnoticed until H18 (#1092) corrected both files earlier
+today. The ticket that prompted this was written against the stale 6, and by
+the time the work started H18 had already landed the fix — which is itself a
+small instance of the same thing: a copy of a number, read at the wrong moment.
+
+### The decision: point at the constant, carry no numeral
+
+The number already exists in two places that are **enforced** and one that is
+not. `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py` is a literal; the
+script derives the set of pull_request jobs from `.github/workflows/` and
+refuses — `EXIT_ERROR`, before it asks GitHub anything — when the derived count
+and the constant disagree. And the tool prints the number on its first line,
+`check runs on this commit: N (expected M)`, at the exact moment the reader
+needs it. Prose was the third copy, and the only one nothing checked.
+
+So both places now say the command must report every check it expects and exit
+0, name the `expected M` line and the constant as where the number lives, and
+keep the drift history as the *reason* rather than as a correction note. The
+instruction the section already carried — read it from `EXPECTED_CHECK_RUNS`
+rather than trusting the numeral — was the part that survived both drifts; this
+keeps it and removes what it was guarding against.
+
+Considered and not taken: **a check that asserts the prose numeral equals the
+constant.** It would work, and this repo builds that kind of check readily. It
+was rejected because it enforces a copy whose only function is to repeat what
+the tool prints anyway — the check would exist to keep a redundancy alive.
+
+### Verified, not asserted
+
+The prose now makes two claims about the tool, and both were measured rather
+than read off the old wording. Loading `scripts/check-ci-checks.py` in-process
+(not editing the file): at baseline the workflows derive 8 names against a
+constant of 8, zero problems; with `EXPECTED_CHECK_RUNS` set to 7 in memory,
+`expected_check_names()` returns the mismatch naming all eight jobs. `main()`
+returns `EXIT_ERROR` on any problem from that function before querying GitHub.
+A `git grep` of every live doc, skill and agent definition (history excluded)
+found no other statement of the current count; `append-only-merge.py`'s quote of
+"all six CI checks" is a dated 2026-08-21 measurement and correct as history.
+
+### Noticed in passing, not fixed here
+
+- **H23 is allocated twice** — #1070 (a test regressing to the pre-RNTL-14
+  shape) and #1077 (`/pre-merge`'s motion gate). Both are real tickets; the
+  collision is in the id, which the allocation rule exists to prevent. This
+  ticket took H24.
+- **The board's `In Progress` column held 12 items against a cap of 8, of
+  which at most 5 had an assignee.** Six are evidence-latch reopens (#581,
+  #876, #940, #962, #1040, #1043) that belong in `Awaiting evidence`, and #753
+  is unassigned outright. That is the stale-claim pattern the "At most eight at
+  once" section predicts, and it is not this ticket's to rewrite.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete
