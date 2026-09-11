@@ -69869,12 +69869,41 @@ frames never arrived takes the cancel path, and `onPanResponderTerminate` calls
 `cancel` — confirming a move that did not happen is worse than silence, because
 the athlete would feel the same tap for "moved" and for "gave up".
 
-**A criterion this ticket could not satisfy literally, stated rather than
-quietly reinterpreted.** F44's acceptance criteria say *zero* haptic calls in
-`onPanResponderMove` — but the same ticket explicitly permits the boundary tick,
-which can only live there. The criterion's intent is "no unguarded per-frame
-haptic"; that is how it was read, and the guard is what earns it. If the literal
-reading was meant, the boundary tick has to go and the ticket should say so.
+**A criterion this branch does not satisfy literally, stated rather than quietly
+reinterpreted — and the first version of this paragraph was wrong.** F44's
+criteria say *zero* haptic calls in `onPanResponderMove`. I wrote that the
+boundary tick "can only live there"; `ac-verifier` checked and that is **false**.
+`target` and `slot` are already React state, so a `useEffect` keyed on them
+would fire once per crossing with no haptic in the responder at all. The literal
+reading is satisfiable.
+
+The case for the tick therefore rests on the ticket's *intent*, not on
+impossibility: the prohibition sits under a heading about the two impact calls,
+its stated reason is per-frame buzzing (which a guard answers), criterion 5's
+"if so, how is it guarded" branch is unreachable under the literal reading, and
+the ticket itself prescribes "staying on `PanResponder`". The tick stays; the
+criterion needs a human to amend it, which is not something this branch can do
+for itself.
+
+**Three defects review caught after the first pass, all real.** The guard
+started `null`, so the first pixel of movement announced the slot the row was
+already in — an impact and a tick tens of milliseconds apart at pickup, a
+double-buzz announcing a move that had not happened, and precisely what the
+ticket's device criterion forbids. **All six original tests were structurally
+blind to it**: each cleared the spy after the measure settled, discarding
+exactly that tick. The guard is now seeded with the row's origin slot when the
+frames land. Separately, the new scale animation shipped with no Reduce Motion
+gate one commit after F41 extended that hook to four consumers —
+`animate-expo`'s rule is that reduced motion ships *with* an animation, not as a
+follow-up. And the "one clock" claim was not true: the scale was a 120ms timing
+while the translate settles on a spring running hundreds of milliseconds, so the
+release now springs with the same shape as `settle()`'s.
+
+**Known and deliberately kept:** a drop back onto the row's origin still feels
+like a commit, even though the caller's `plan` writes nothing for it. UIKit's
+own reorder thunks on any drop, so this matches the platform — but it is the
+mirror of the cancel asymmetry above, and it is on the device checklist as a
+judgment for a thumb rather than a bug settled here.
 
 **Deliberately not fixed here.** `useEntryDrag.ts`'s `move()` still calls
 `setTarget`/`setSlot` from the gesture, one full re-render of the day view per

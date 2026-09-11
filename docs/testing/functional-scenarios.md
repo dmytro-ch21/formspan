@@ -22866,6 +22866,18 @@ now exist, and a fourth deliberately does not.
 - **Holding still inside one slot** produces exactly one tick, not one per
   frame. This is the failure mode the change is most likely to introduce:
   `move` runs 60-120 times a second.
+- **Pickup is ONE tap.** Lift a row and move a couple of millimetres: the
+  impact, and nothing else. The crossing guard is seeded with the row's origin
+  slot so the first movement is not announced as a crossing — without that seed
+  the athlete feels a double-buzz at pickup, announcing a move that has not
+  happened.
+- **Dropping a row back where it started** still feels like a commit, even
+  though nothing is written. Deliberate (UIKit thunks on any drop) and on the
+  device list as a judgment call, not a settled answer.
+- **Reduce Motion on**: the lift's 120ms scale ramp is dropped and the row jumps
+  to its lifted size. `translateY` keeps tracking the finger regardless — that
+  is direct manipulation, and removing it would make the drag incomprehensible
+  rather than calmer.
 - **A drag that crosses many slots quickly** produces one tick per crossing, in
   order. Expect them to feel like a ratchet, not a rattle.
 - **System Haptics off**, or Android hardware with no actuator: everything still
@@ -22878,6 +22890,11 @@ now exist, and a fourth deliberately does not.
   against twenty frames inside a single slot), one on commit, zero on both cancel
   paths. Both mutations — removing the crossing guard, and firing the commit on
   cancel — go red.
+- **A blind spot worth naming**: the first six tests all cleared the haptic spy
+  *after* the measure settled, which discarded the pickup tick entirely — so a
+  real double-buzz at pickup passed all six. Review found it, not the suite. Any
+  test added here must decide deliberately whether it is asserting across the
+  pickup or after it.
 - **NOT reachable, and it is the whole point of a haptic**: whether any of it can
   be *felt*, and whether three feedback types read as three distinct events under
   a thumb. A simulator has no Taptic Engine, so the suite asserts calls and can

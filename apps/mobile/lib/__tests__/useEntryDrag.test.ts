@@ -289,6 +289,37 @@ describe('F44 — haptics', () => {
     expect(impact()).toBe(1);
   });
 
+  it('pickup is ONE tap: the first move does not announce the slot the row is already in', async () => {
+    // The defect `frontend-reviewer` found, and the one the other five cases
+    // were structurally blind to — every one of them clears the spy AFTER
+    // `settle()`, which discards exactly this tick.
+    //
+    // `feltAt` used to start null, so the first pixel of movement "entered" the
+    // row's own slot and ticked. On hardware that is the lift impact followed
+    // tens of milliseconds later by a selection tick: a double-buzz at pickup,
+    // announcing a move that has not happened.
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    // Deliberately NOT cleared: this asserts across the whole pickup.
+    await act(() => result.current.move(115)); // e1's own position
+
+    expect(selection()).toBe(0);
+    expect(impact()).toBe(1); // the lift, and only the lift
+  });
+
+  it('a real crossing after pickup still ticks — the seed must not silence everything', async () => {
+    // The control for the test above. A guard seeded too broadly would pass it
+    // by never ticking at all.
+    const { result } = await setup();
+    await act(() => result.current.start('e1', 'breakfast'));
+    await settle();
+    selectionSpy.mockClear();
+
+    await act(() => result.current.move(165)); // past e2 and e3's midpoints
+    expect(selection()).toBe(1);
+  });
+
   it('dragging within one slot is felt ONCE, not once per frame', async () => {
     const { result } = await setup();
     await act(() => result.current.start('e1', 'breakfast'));
@@ -310,13 +341,17 @@ describe('F44 — haptics', () => {
     selectionSpy.mockClear();
 
     await act(() => {
-      result.current.move(115); // breakfast, slot 0
+      result.current.move(115); // e1's OWN slot — the seed, so silent
       result.current.move(115); // same — silent
-      result.current.move(165); // breakfast, a later slot
-      result.current.move(250); // lunch
+      result.current.move(165); // past e2 and e3: a real crossing
+      result.current.move(250); // lunch: another
       result.current.move(250); // same — silent
     });
-    expect(selection()).toBe(3);
+    // Two, not three. `move(115)` puts the row back where it started, and the
+    // guard is seeded with that slot at pickup — announcing it would be the
+    // double-buzz the test above forbids. This expectation was 3 before that
+    // seed existed, and the 3 was the bug.
+    expect(selection()).toBe(2);
   });
 
   it('a completed drop is felt', async () => {

@@ -203,6 +203,27 @@ export function useEntryDrag({
         .then((frames) => {
           if (seq !== dragSeq.current || !activeRef.current) return;
           framesRef.current = frames;
+          // Seed the crossing guard with the slot the row is ALREADY in, so
+          // the first movement is not announced as a crossing.
+          //
+          // Without this, `feltAt` is null when the finger first moves, the
+          // row "enters" its own position, and the athlete feels the lift
+          // impact followed a few tens of milliseconds later by a selection
+          // tick — a double-buzz at pickup, announcing a move that has not
+          // happened. The ticket's own device criterion forbids exactly that
+          // ("a single light tap at the moment it lifts").
+          //
+          // `slotFor` excludes the dragged row, so removing it at index i and
+          // reinserting at i is the identity — that index IS the origin slot.
+          const originRows = frames.rows
+            .filter((r) => r.meal === meal && r.id !== id)
+            .sort((a, b) => a.top - b.top);
+          const self = frames.rows.find((r) => r.id === id);
+          const origin =
+            self === undefined
+              ? null
+              : originRows.filter((r) => r.top < self.top).length;
+          feltAt.current = origin === null ? null : `${meal}:${origin}`;
         })
         .catch(() => {
           // Unmeasurable cards mean no drop target can be found, so the
