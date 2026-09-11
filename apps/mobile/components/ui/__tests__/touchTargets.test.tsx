@@ -1,8 +1,12 @@
 import { StyleSheet } from 'react-native';
 import { render, screen } from '@testing-library/react-native';
 
-import { Pill } from '../Pill';
-import { WeekStrip } from '@/components/today/WeekStrip';
+import { Pill, CHIP_HEIGHT, CHIP_LABEL_LINE } from '../Pill';
+import {
+  WeekStrip,
+  REVIEW_HEIGHT,
+  REVIEW_ICON,
+} from '@/components/today/WeekStrip';
 import { TOUCH_MIN, slopFor } from '@/constants/Spacing';
 
 /**
@@ -69,11 +73,15 @@ describe('Pill — the shared chip reaches the floor (F42, #1041)', () => {
     const pill = screen.getByTestId('pill');
     const style = StyleSheet.flatten(pill.props.style);
 
-    // Reconstructed from the component's own style rather than restated: if
-    // the padding moves, this moves with it and the assertion still means
-    // "does the real chip clear 44".
-    const painted = style.paddingVertical * 2 + 15;
-    expect(effective(painted, pill.props.hitSlop as number)).toBeGreaterThanOrEqual(TOUCH_MIN);
+    // Two assertions, because they can fail for different reasons. First: the
+    // declared height still describes what is actually painted — this is what
+    // catches the padding being changed and the constant left behind.
+    expect(style.paddingVertical * 2 + CHIP_LABEL_LINE).toBe(CHIP_HEIGHT);
+    // Then: the slop the component really rendered takes that height over the
+    // floor. Never a literal `9` — a test pinning the slop alone goes green
+    // when the padding shrinks underneath it, which is the exact drift that
+    // produced the 39pt target.
+    expect(effective(CHIP_HEIGHT, pill.props.hitSlop as number)).toBeGreaterThanOrEqual(TOUCH_MIN);
   });
 
   it('a badge has no press target at all, so it is exempt rather than failing', async () => {
@@ -103,8 +111,10 @@ describe('WeekStrip — "Week in review" reaches the floor (F42, #1041)', () => 
     );
     const review = screen.getByTestId('week-strip-review');
     const style = StyleSheet.flatten(review.props.style);
-    // 13pt chevron is the tallest child; the label is 12pt.
-    const painted = style.paddingVertical * 2 + 13;
-    expect(effective(painted, review.props.hitSlop as number)).toBeGreaterThanOrEqual(TOUCH_MIN);
+    // The chevron is the tallest child; the label is 12pt.
+    expect(style.paddingVertical * 2 + REVIEW_ICON).toBe(REVIEW_HEIGHT);
+    expect(effective(REVIEW_HEIGHT, review.props.hitSlop as number)).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
   });
 });

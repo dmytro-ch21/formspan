@@ -70260,12 +70260,27 @@ sentinel that shares a type with a real value will eventually be read as one.**
 
 ## 2026-09-11 — F42: the 44pt floor gets a name, and three of the five sites it was filed against did not need fixing (#1041)
 
-`components/ui/Pill.tsx` is the component N444 consolidated roughly fifteen
-hand-rolled chip variants into, so it sits behind every filter chip, date pill
-and toggle in the app. It carried `hitSlop={6}` around a 27pt control — an
-effective target of **39pt**, under the 44pt floor, in dozens of places at
-once from one wrong number. That is the whole argument for this ticket and it
-held up exactly as filed.
+`components/ui/Pill.tsx` carried `hitSlop={6}` around a 27pt control — an
+effective target of **39pt**, under the 44pt floor.
+
+**The ticket's argument for why that matters is wrong, and review caught it.**
+#1041 says `Pill` "is the shared component behind every filter chip, date pill
+and toggle in the app, so one wrong number is wrong in dozens of places at
+once". It is not, yet: `Pill` has **zero call sites** anywhere outside its own
+tests. N444's own history entry is titled *"shared Button/Pill primitives — the
+foundation, not the migration"* and lists, under **What did NOT land,
+deliberately**, "migrating the ≥15 existing ad-hoc chip/pill declarations onto
+the new components". Every pill-shaped control in the app today — `intentPill`,
+`slotPill`, `scopePill`, `protocolPill`, `phasePill` and the rest — is still its
+own hand-rolled `Pressable` and is untouched by this.
+
+So the honest statement of this fix is narrower than the ticket's: **it corrects
+the foundation before anything is built on it, and it has no runtime effect
+today.** That is still worth doing, and arguably is the cheapest moment to do
+it — a wrong default in an unused primitive costs one line now and fifteen call
+sites later. But "dozens of places at once" describes a migration that has not
+happened, and repeating it would have made this entry assert an impact the app
+does not currently have.
 
 `components/today/WeekStrip.tsx`'s "Week in review" control was worse and is on
 the first screen of the app: no padding and no `hitSlop`, so its height was the
@@ -70308,8 +70323,11 @@ against `main` as it stands today:
   produce overlapping rectangles, and an overlap resolves to whichever view is
   on top rather than to the one under the thumb.
 - **`Timer`'s `headButton` already carries `hitSlop={12}`** — 34 + 24 = 58pt.
-  It gained that after the audit commit, most likely in F38's press-feedback
-  pass.
+  It gained that in `8efd83e1`, F48 tranche one (#1060). This entry first said
+  "most likely in F38's press-feedback pass", which review checked with
+  `git log f00c6a82..HEAD -- apps/mobile/components/Timer.tsx` and found to be
+  the wrong ticket — a guess written in the register of a fact, in an entry
+  whose whole point is that the audit guessed.
 
 So the diff touches two components and the constants file, not five. **The
 audit measured painted geometry from source and read three visuals as targets

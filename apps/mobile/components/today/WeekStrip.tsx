@@ -141,7 +141,7 @@ export function WeekStrip({ now, logged, days, onWeekInReview, testID }: WeekStr
           testID="week-strip-review"
         >
           <Text style={styles.reviewLabel}>Week in review</Text>
-          <Icon name="chevron" size={13} color={vola.textMuted} />
+          <Icon name="chevron" size={REVIEW_ICON} color={vola.textMuted} />
         </PressableScale>
       </RNView>
     </View>
@@ -189,10 +189,15 @@ function Mark({
   );
 }
 
+/** The review row's vertical padding. The style and the height both use this. */
+export const REVIEW_PADDING_V = 8;
+
+/** The chevron — the tallest thing in the row; the label is 12pt. */
+export const REVIEW_ICON = 13;
+
 /**
- * The "Week in review" row's painted height after F42's `paddingVertical: 8`:
- * 8 above and below a 13pt chevron, which is the tallest thing in the row
- * (the label is 12pt). 29pt asks {@link slopFor} for 8, giving 45pt.
+ * The "Week in review" row's painted height: 29pt, which asks
+ * {@link slopFor} for 8 and gives 45pt.
  *
  * **This is the one control in F42 whose VISUAL grew**, and deliberately: it
  * had no padding at all, so its height was the 12pt label's line box —
@@ -201,8 +206,11 @@ function Mark({
  * neighbouring week strip sits directly below it, so a 14pt slop reaching up
  * and down from a 16pt row is exactly the overlap {@link slopFor}'s own note
  * warns about. Padding first, then slop on what remains.
+ *
+ * Composed from the two constants above, which the stylesheet and the icon
+ * below also consume, so the height cannot drift from what is painted.
  */
-const REVIEW_HEIGHT = 8 + 13 + 8;
+export const REVIEW_HEIGHT = REVIEW_PADDING_V * 2 + REVIEW_ICON;
 
 const styles = StyleSheet.create({
   card: {
@@ -243,6 +251,6 @@ const styles = StyleSheet.create({
 
   foot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   summary: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
-  review: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8 },
+  review: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: REVIEW_PADDING_V },
   reviewLabel: { fontSize: 12, color: vola.textMuted },
 });

@@ -108,19 +108,36 @@ export function Pill({ label, onPress, active, icon, accessibilityLabel, testID 
   );
 }
 
+/** The chip's vertical padding. The style below uses this, not a literal. */
+export const CHIP_PADDING_V = 6;
+
+/** The 12pt label's line box, rounded. The one figure here that is an estimate. */
+export const CHIP_LABEL_LINE = 15;
+
 /**
- * The chip's painted height: `paddingVertical` 6 top and bottom around a
- * 12pt label, whose line box rounds to 15. Stated here rather than measured
- * at runtime because `hitSlop` is a static prop and the padding below is a
- * literal — if either changes, this has to change with it, which is why they
- * sit adjacent.
+ * The chip's painted height — 27pt, which asks {@link slopFor} for 9 and
+ * gives 27 + 18 = 45pt against the 44pt floor. Before F42 this was
+ * `hitSlop={6}`, an effective 39pt.
  *
- * 27pt asks {@link slopFor} for 9, giving 27 + 18 = 45pt of touch target
- * against a 44pt floor. Before F42 this was `hitSlop={6}` — an effective
- * 39pt, under the floor, on the one component N444 consolidated ~15
- * hand-rolled chip variants into.
+ * **Composed from the two constants above rather than restated, and the
+ * stylesheet consumes the same ones**, so the height cannot drift from the
+ * padding it is derived from — an earlier draft wrote `6 + 15 + 6` here
+ * beside a separate `paddingVertical: 6` literal, which is three places to
+ * change in lockstep and exactly the drift this ticket exists to end.
+ * `CHIP_LABEL_LINE` is still an estimate; React Native gives no cheap way to
+ * measure a text line box without an `onLayout` round trip, and `hitSlop` is
+ * a static prop that needs a number before layout happens.
+ *
+ * **If this is ever dropped into a ROW of chips, the row needs a `gap` of at
+ * least 18pt** — `slopFor(27)` is 9, applied to all four edges, so two
+ * adjacent chips any closer have overlapping touch rectangles and a tap
+ * resolves to whichever is on top rather than the one under the thumb. See
+ * {@link slopFor}'s own note. Not a live concern yet: as of F42 this
+ * component has no call sites at all (N444 built it as foundation and
+ * deliberately did not migrate the ~15 ad-hoc pills), so the first person to
+ * adopt it is the first person this matters to.
  */
-const CHIP_HEIGHT = 6 + 15 + 6;
+export const CHIP_HEIGHT = CHIP_PADDING_V * 2 + CHIP_LABEL_LINE;
 
 const styles = StyleSheet.create({
   base: {
@@ -128,7 +145,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     borderRadius: 999,
-    paddingVertical: 6,
+    paddingVertical: CHIP_PADDING_V,
     paddingHorizontal: 12,
     backgroundColor: vola.surfaceRaised,
   },
