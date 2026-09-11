@@ -82,6 +82,47 @@ export function shouldClaim(dx: number, dy: number, enabled: boolean): boolean {
   return Math.abs(dx) > CLAIM_DX && Math.abs(dx) > Math.abs(dy) * 1.5;
 }
 
+/**
+ * Progressive resistance past an edge, so a boundary feels like an edge rather
+ * than like the gesture breaking.
+ *
+ * Exported for its own tests. Pure: given an overshoot in points it returns how
+ * far the row should ACTUALLY move, which approaches `dimension` asymptotically
+ * and never reaches it — so the row keeps responding to the finger no matter
+ * how hard it is pulled, but visibly gives less and less.
+ *
+ * (The limit is `dimension`, not `dimension * constant`: as the overshoot grows
+ * the expression reduces to `(x·d·c)/(c·x) = d`. The first draft of this
+ * comment said the latter and a test caught it — worth stating, because the
+ * whole point of the function is the ceiling it approaches.)
+ *
+ * The 0.55 constant is UIScrollView's, and the formula is the one iOS uses for
+ * its own bounce. It is deliberately NOT a token: this is the shape of a
+ * physical law, not a duration or a curve, and `constants/Motion.ts` covers
+ * time only.
+ */
+/**
+ * `gestureState.vx`/`vy` in px per MILLISECOND → the px per SECOND that React
+ * Native's spring expects.
+ *
+ * A named function for a multiply by 1000, deliberately, because the units are
+ * the entire risk in F45 and an inline `* 1000` is the kind of thing a later
+ * edit "simplifies" away. Measured, not assumed: `SpringAnimation.js:281` is
+ * `const deltaTime = (now - this._lastTime) / 1000;` with `now` from
+ * `Date.now()` — re-checked against the installed react-native 0.86.3.
+ *
+ * Wrong by three orders of magnitude in either direction and the row either
+ * ignores a flick completely or leaves the screen, and both read as a broken
+ * spring rather than as a unit error.
+ */
+export function springVelocity(pxPerMs: number): number {
+  return pxPerMs * 1000;
+}
+
+export function rubberband(overshoot: number, dimension: number, constant = 0.55): number {
+  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
+}
+
 /** Where the row settles when the finger lifts: 0 closed, -ACTION_WIDTH open. */
 export function settleTarget(a: { rest: number; dx: number; vx: number }): number {
   // A fast flick settles in the direction it was thrown regardless of
@@ -125,13 +166,29 @@ export function SwipeToDelete({
   const [open, setOpen] = useState(false);
 
   const settle = useCallback(
-    (to: number) => {
+    /**
+     * `vx` is `gestureState.vx`, in pixels per MILLISECOND. React Native's
+     * spring integrates in SECONDS — `deltaTime = (now - this._lastTime) / 1000`
+     * at `Libraries/Animated/animations/SpringAnimation.js:281`, re-measured
+     * against the installed 0.86.3 rather than taken on trust. Hence ×1000.
+     *
+     * Get this wrong by three orders of magnitude and the row either ignores
+     * the flick entirely or leaves the screen; both look like a broken spring
+     * rather than a unit error, which is why the conversion is stated here
+     * instead of inlined at the call site.
+     *
+     * Defaults to 0 on purpose. A termination and a programmatic close have no
+     * velocity, and inventing one would make the row leap on a gesture the
+     * athlete did not make.
+     */
+    (to: number, vx = 0) => {
       rest.current = to;
       setOpen(to !== 0);
       Animated.spring(translate, {
         toValue: to,
         useNativeDriver: true,
         bounciness: 0,
+        velocity: springVelocity(vx),
       }).start();
     },
     [translate],
@@ -165,13 +222,25 @@ export function SwipeToDelete({
         onMoveShouldSetPanResponder: (_e, g) => shouldClaim(g.dx, g.dy, enabled),
         onPanResponderMove: (_e, g) => {
           const next = rest.current + g.dx;
-          // Clamped both ways: left stops at the action's width so the row
-          // cannot be dragged off screen, and right stops at 0 because there
-          // is nothing revealed on that side to look at.
-          translate.setValue(Math.max(-ACTION_WIDTH, Math.min(0, next)));
+          // Resisted rather than clamped. Both edges still hold — the row
+          // cannot be dragged off screen, and there is still nothing revealed
+          // to the right of closed — but they now give progressively instead of
+          // stopping dead, which is what tells a finger it has reached an edge
+          // rather than that the gesture has broken.
+          //
+          // Note this changes only what is DRAWN. The release still hands
+          // `settleTarget` the raw `g.dx`, so every settle decision — and every
+          // test of it — is untouched.
+          if (next > 0) {
+            translate.setValue(rubberband(next, ACTION_WIDTH));
+          } else if (next < -ACTION_WIDTH) {
+            translate.setValue(-ACTION_WIDTH + rubberband(next + ACTION_WIDTH, ACTION_WIDTH));
+          } else {
+            translate.setValue(next);
+          }
         },
         onPanResponderRelease: (_e, g) =>
-          settle(settleTarget({ rest: rest.current, dx: g.dx, vx: g.vx })),
+          settle(settleTarget({ rest: rest.current, dx: g.dx, vx: g.vx }), g.vx),
         // The gesture can be taken away mid-drag (a parent scroll wins).
         // Without this the row is left stranded part-open.
         onPanResponderTerminate: () => settle(rest.current),

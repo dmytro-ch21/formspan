@@ -76,6 +76,7 @@ import { loggedAmountLabel } from '@/lib/foodQuantity';
 import { type Entry, type Meal } from '@/lib/nutrition';
 import type { FoodUnit } from '@/lib/units';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { springVelocity } from '@/components/SwipeToDelete';
 
 /** How long the finger has to hold still before a move becomes a drag. */
 export const LONG_PRESS_MS = 300;
@@ -244,10 +245,29 @@ export function EntryRow({
   const onEnd = drag?.onEnd;
   const onCancel = drag?.onCancel;
 
-  const settle = useCallback(() => {
-    flags.reset();
-    Animated.spring(lift, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
-  }, [flags, lift]);
+  const settle = useCallback(
+    /**
+     * `vy` is `gestureState.vy`, in pixels per MILLISECOND; React Native's
+     * spring integrates in SECONDS (`deltaTime = (now - this._lastTime) / 1000`,
+     * `Libraries/Animated/animations/SpringAnimation.js:281`, re-measured
+     * against the installed 0.86.3). Hence ×1000.
+     *
+     * Defaults to 0, and the two TERMINATE call sites deliberately pass
+     * nothing: the gesture was taken away rather than released, so there is no
+     * throw to carry, and inventing one would fling a row on a movement the
+     * athlete did not finish.
+     */
+    (vy = 0) => {
+      flags.reset();
+      Animated.spring(lift, {
+        toValue: 0,
+        useNativeDriver: true,
+        bounciness: 0,
+        velocity: springVelocity(vy),
+      }).start();
+    },
+    [flags, lift],
+  );
 
   const responder = useMemo(
     () =>
@@ -266,7 +286,7 @@ export function EntryRow({
         },
         onPanResponderRelease: (_e, g) => {
           onEnd?.(g.moveY);
-          settle();
+          settle(g.vy);
         },
         // Taken away by something this cannot refuse (the native scroll on
         // iOS, a system gesture). Not a drop — the finger never lifted on a
@@ -304,7 +324,7 @@ export function EntryRow({
         },
         onPanResponderRelease: (_e, g) => {
           onEnd?.(g.moveY);
-          settle();
+          settle(g.vy);
         },
         onPanResponderTerminate: () => {
           onCancel?.();
