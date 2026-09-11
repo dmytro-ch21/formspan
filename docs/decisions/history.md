@@ -72793,7 +72793,7 @@ screen.
 
 ## 2026-09-11 — F47 (#1057): the mobile suite's leaked act() updates, fixed in the tests that left work running
 
-**The ticket said 76 unwrapped updates across 11 components. On current `main` that table no longer reproduces, and the number was never stable.** The census is a race outcome, not a count. What is stable is the set of **mechanisms**, and each one is fixed here in the test that triggered it. No production source file, `jest.setup.js` or console handling was touched.
+**The ticket said 76 unwrapped updates across 11 components. On current `main` that table no longer reproduces, and the number was never stable.** The census is a race outcome, not a count. What is stable is the set of **mechanisms**, and each one is fixed here in the test that triggered it. No production source file or console handling was touched. `jest.setup.js` changed once, last, for a leak no test could fix: see *The leak no test could fix* below.
 
 ### The census on `main`, before any change
 
@@ -72843,7 +72843,7 @@ It was found uncommitted in a stale worktree whose HEAD was already on `main`, a
 
 **F52 (#1114): cancelling a barcode lookup does not cancel it.** `resolve` in `app/food/scan.tsx` has no tie to the phase it started in. When a cancelled lookup answers late, `setPhase` moves the athlete, now back at the camera, to a result for a barcode they walked away from. This was demonstrated with a throwaway probe of the `scanScreen` test, deleted afterwards. The test's own `waitFor` found `scan-hint` after Cancel (the positive control), and it was gone once the late answer landed inside `act`. F47's criteria keep this out of a test-only change. The `scanScreen` comment names F52 as the place its assertion belongs.
 
-### After
+### After the per-test fixes, before the teardown
 
 One full run with every fix applied, `CI=1` and the same diagnostic file, at load 70–99: **0** `not wrapped in act`, **0** `not configured to support act`, **0** `Uncaught error`. All 352 suites and 5689 tests passed (exit 0, 133s). `goalsScreen` standalone: 5 runs, 64/64 each, 0 warnings. `dictateScreen` standalone: 3 runs, 29/29 each, 0 warnings.
 
@@ -72864,15 +72864,133 @@ One full run with every fix applied, `CI=1` and the same diagnostic file, at loa
 - **M1, M2 and M4 pass every test while leaking.** That is why none of this ever failed on its own, and why a green run was never evidence of a clean one.
 - **M7 is the only timing-dependent one**: one warning a run, from a different test each time. That is the same signature the original census had at scale.
 
-**Consecutive full runs** (`CI=1 pnpm run test:mobile`, in a separate worktree pinned to the committed tree so nothing edited during the loop could reach it):
+**Consecutive full runs before the teardown change.** `CI=1 pnpm run test:mobile` on `50b5e797`, the per-test fixes alone, in a separate worktree pinned to that commit. Every run exited 0 with 5689/5689 passing, and the loop's own streak read **11**. **By this ticket's definition only 3 of the 11 were clean.** An act warning never fails a test, and the loop counted its streak on the exit code alone: `loop.sh` line 25, while line 28 of the same script already defined a clean run as exit 0 with all three counters at zero. That is a check that could not fail on the thing it existed to catch, and the coordinator caught it by reading the per-row columns, not the `DONE` line.
 
-**LOOP RESULT NOT YET RECORDED.** The loop (target 20, at most 30 attempts) was started on commit `50b5e797`, in a separate worktree. A follow-up commit on this branch replaces this paragraph with the per-run table. If you are reading this paragraph, that has not happened, and no consecutive-run count is claimed.
+| run | secs | 1-min load, start → end | `not wrapped in act` | components |
+|---|---|---|---|---|
+| 1 | 167 | 125.7 → 101.8 | 1 | `VirtualizedList` (`workoutsScreen`) |
+| 2 | 85 | 101.8 → 87.4 | 0 | |
+| 3 | 93 | 87.4 → 84.9 | 1 | `VirtualizedList` (`workoutsScreen`) |
+| 4 | 144 | 84.9 → 105.7 | 6 | `LibraryScreen` 5 (`libraryBjjEntries`), `VirtualizedList` 1 (`sessionHistoryScreen`) |
+| 5 | 72 | 105.7 → 82.2 | 0 | |
+| 6 | 60 | 82.2 → 72.4 | 1 | `VirtualizedList` (`sessionHistoryScreen`) |
+| 7 | 63 | 72.4 → 69.6 | 0 | |
+| 8 | 92 | 69.6 → 103.8 | 2 | `VirtualizedList` 2 (`libraryRunTypes`, `workoutsScreen`) |
+| 9 | 113 | 103.8 → 96.4 | 1 | `VirtualizedList` (`libraryRunTypes`) |
+| 10 | 310 | 96.4 → 99.6 | 12 | `LibraryScreen` 10 (`libraryControlsBoundary` 5, `libraryBjjEntries` 5), `VirtualizedList` 2 (`sessionHistoryScreen`, `socialScreen`) |
+| 11 | 146 | 99.6 → 107.8 | 1 | `VirtualizedList` (`workoutsScreen`) |
+
+Files are the nearest preceding `PASS` header in the log. Jest interleaves worker output, so that is the likeliest source, not proof. Six test files in eleven runs, never the same set twice. `not configured to support act` and `Uncaught error` were 0 in every run. A twelfth run was killed by `SIGTERM` when that session was stopped. It has no row and is not counted.
+
+**So the single clean full run under "After" was one sample, not a property of the suite**, which is the ticket's own point about the original 76 turned on the fix.
+
+### The leak no test could fix: RNTL's own teardown, and the one shared-setup change
+
+**Two sources remained, and neither is a chain a test can await.**
+
+- **React Native's own `VirtualizedList`.** Its `componentDidUpdate` calls `_scheduleCellsToRenderUpdate`, which arms a `setTimeout` of `updateCellsBatchingPeriod ?? 50` ms on every re-render. The stack has no app frame at all, which is why the file-by-file pass never saw it.
+- **`app/library.tsx`'s 250ms search debounce** (`LibraryScreen`). It is cleared on unmount, so this is not a production bug. The leaked `setError(null)` runs synchronously inside the timer callback, which means the timer fired outside `act` against a screen that was still mounted.
+
+**Both come down to where RNTL 14 unmounts.** Its automatic cleanup is `afterEach(async () => { await flushMicroTasks(); await cleanup(); })`, and `flushMicroTasks` is one real `setImmediate`. That yield runs **outside `act`** and **before** the unmount, so a timer due when the body returns fires in it, whatever the test did. The window is milliseconds wide: neither leak reproduced in 4 standalone runs of the files it came from, and run 10, the slowest, was also the worst.
+
+**`jest.setup.js` already had a hook meant for exactly this, and it was inert.** `afterEach(async () => { await act(async () => {}); })` was documented as letting "each screen's trailing async work settle inside `act`". jest-circus runs a block's `afterEach` hooks in declaration order (`getEachHooksForTest` in `jest-circus/build/utils.js`). RNTL registers its cleanup the moment `jest.setup.js` requires it, so the "settle" always ran after RNTL had already yielded and unmounted.
+
+**The change**, in `jest.setup.js`, committed on its own:
+
+- `RNTL_SKIP_AUTO_CLEANUP` is set before RNTL is required.
+- The inert flush is replaced by **one** root `afterEach` that yields one real `setImmediate` and then runs `cleanup()`, **both inside `act`**. These are RNTL's own two steps, in the same order.
+- `IS_REACT_ACT_ENVIRONMENT` is set in a `beforeAll` and restored in an `afterAll`, as RNTL's skipped hooks did. Without that, React emits no act warnings at all, and the census would read zero for the wrong reason.
+
+The pending work still **runs**, inside `act`. Anything not yet due is cleared by the unmount.
+
+**Measured against three controls before anything shared changed.** Each control is a throwaway test in a scratch directory outside both worktrees. Each was run 3 times against `main`'s `jest.setup.js` (RNTL's cleanup) and 3 times against the committed one:
+
+| control | RNTL's automatic cleanup | teardown inside `act` |
+|---|---|---|
+| 1. a component arms a 5ms timer; the test returns after it is due | warns, 3 of 3 | **0 of 3** |
+| 2. a bare, synchronous state update outside `act` in the test body | warns, 3 of 3 | **warns, 3 of 3** |
+| 3a. N505's shape: the handler sets state before its first `await`, `waitFor` returns on that, and one timer hop is left unawaited, due at teardown | warns, 1 of 3 | **0 of 3** |
+| 3b. the same, with two hops; the first is due at teardown | warns, 3 of 3 | **0 of 3** |
+| 3c. the same, with the tail not due until 50ms after the body returns | 0 of 3 | 0 of 3 |
+
+`IS_REACT_ACT_ENVIRONMENT` was `true` in every test in both arms.
+
+- **Control 2 is what shows warnings were not switched off.** A real unwrapped update still prints, exactly as before.
+- **Control 3 is the cost, and it is the one the coordinator asked for.** Control 2 is synchronous, so it cannot say what happens to an **unawaited async chain** whose next step lands in the teardown window. The answer is that this teardown absorbs it: the step runs inside `act`, and nothing prints. A census of 0 after this change therefore **cannot prove a test awaited its chain**.
+- **Control 3c prints in neither arm.** A tail that lands after unmount is invisible to the census under either cleanup, because React does not warn about an update to an unmounted component. That was already true before this change.
+
+**The probe apparatus failed twice before it measured anything,** and both failures are recorded because either would have been believed:
+
+- The scratch test resolved a second copy of React: `Cannot read properties of null (reading 'useState')`. Both arms "failed", and a grep counted printed code frames as warnings.
+- A syntax check for the re-mutation script could not load `@babel/parser` under pnpm, and reported every mutation as unparseable. It was replaced with `typescript`'s transpiler and controlled in both directions: an unmodified file parses, and a deliberately broken one is refused.
+
+**PR #1105** (the rest timer, open at the time of writing) also edits `jest.setup.js`, inside the `react-native-reanimated` mock. This change is at the top of the file, so the two do not overlap textually. Whichever merges second should re-run the suite against the merged file.
+
+### Which per-test fixes the census can still see, after the teardown
+
+Every mutation from "After" that is measured by the census was re-run on the committed teardown. Two were also run in the other arm, against `main`'s `jest.setup.js`, in the same session. That arm was given a positive control first: in the same config, control 1 warned. The method was the same each time: confirm the mutation is on disk, confirm it parses, run it, restore it from backup, **re-run** the restored file, then `cmp` it against the backup. Before any mutation, all four files ran clean on the new teardown (29/29, 16/16, 64/64, 9/9, 0 warnings).
+
+| # | mutation | RNTL's cleanup | teardown inside `act` | census still sees it? |
+|---|---|---|---|---|
+| M1 | `dictateScreen`'s `press()` without its outer `act` | 70 (earlier run) | **49** | yes |
+| M2 | `holdToFinish` without `act` | 35 (earlier run) | **35** | yes |
+| M4 | `goalsScreen`'s `refocus()` calling the callbacks bare | 25 (earlier run) | **25** | yes |
+| M6 | `syncRefused`'s nine renders unawaited | 16 not-configured (earlier run) | **16** not-configured | yes |
+| M7 | `speak()` not waiting for the library | 0, 2, 1 | **0, 0, 0** | **no, absorbed by the teardown** |
+| M8 | **N505's two ported waits removed** (`goalsScreen` › *does not let a slow cache read revert a pill pressed while it was in flight*) | 0 in 5 of 5 | 0 in 5 of 5 | **no, in either arm** |
+
+All restores re-ran at 0, and every restored file was byte-identical to its backup. Every mutated run still passed every test, which is the ticket's point again: a leak is not a failure.
+
+M3 and M5 were not re-run. They are detected by a test failing, not by the census, and the teardown does not touch what they exercise.
+
+**What M7 and M8 mean, stated plainly:**
+
+- **M7 was census-visible before the teardown and is not after.** Its fix, `speak()` awaiting the library the draft asked for, is still correct: the fetch really is left in flight without it. But it is now justified by reading the code and by its pre-teardown measurement, and the census no longer guards it.
+- **M8, the recovered N505 fix, was never visible to a standalone census**, under either cleanup, in 10 runs at load 100–200. The test releases its held slow read inside `act` right after the removed lines, and in isolation the chain's tail lands inside that `act`. The sightings N505 recorded were all full-suite, under contention, where the chain outruns that `act`. So the census was never the instrument for this fix. It rests on the mechanism N505 diagnosed, on the `choiceSeq` mutation (M5), and on its standalone runs. Control 3 adds that where such a chain's next step is due at teardown, the new teardown now absorbs it too.
+- **So after this change a census of 0 means:** no unwrapped update from synchronous work, from a render or press left unawaited over a `waitFor`, or from a `fireEvent` whose handler outlives its `act` (M1, M2, M4, M6). It does **not** mean every async chain was awaited. F47's criterion 2 asks for a census whose 0 means something, and for the unawaited-chain class this one cannot see it.
+
+### After the teardown: consecutive full runs
+
+**20 consecutive clean runs, in 20 attempts**, on `f8b8cc64`, the teardown commit. Each was `CI=1 pnpm run test:mobile` in a separate worktree pinned to that commit. A run counted only if it exited 0 **and** `not wrapped in act`, `not configured to support act` and `Uncaught error` were all 0. The loop script's streak was corrected to that definition before it started, and the count here was read back from the per-row columns, not from its `DONE` line.
+
+Every row also shows `Tests: 5689 passed, 5689 total`, which was checked for a reason. Runs 15–20 took about a minute where earlier ones took two to eight, and a short run could have been one that ran nothing. None was.
+
+| run | secs | 1-min load, start → end | exit | `not wrapped` / `not configured` / `Uncaught error` | tests |
+|---|---|---|---|---|---|
+| 1 | 134 | 101.9 → 159.8 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 2 | 98 | 159.8 → 159.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 3 | 175 | 159.5 → 210.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 4 | 107 | 210.5 → 176.0 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 5 | 96 | 176.0 → 156.6 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 6 | 232 | 156.6 → 200.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 7 | 96 | 200.5 → 128.0 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 8 | 173 | 128.0 → 130.3 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 9 | 143 | 130.3 → 191.4 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 10 | 265 | 191.4 → 239.7 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 11 | 154 | 239.7 → 260.0 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 12 | 208 | 260.0 → 289.4 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 13 | 460 | 289.4 → 234.2 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 14 | 122 | 234.2 → 224.7 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 15 | 65 | 224.7 → 324.8 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 16 | 61 | 324.8 → 368.5 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 17 | 55 | 368.5 → 358.6 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 18 | 58 | 358.6 → 252.6 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 19 | 59 | 252.6 → 202.4 | 0 | 0 / 0 / 0 | 5689/5689 |
+| 20 | 56 | 202.4 → 234.3 | 0 | 0 / 0 / 0 | 5689/5689 |
+
+**No run failed, leaked or timed out, so there was nothing to classify.** One-minute load ranged 102–368 on 10 CPUs, well above the 70–126 the pre-teardown loop ran under.
+
+**What this does and does not show.**
+- **It shows** the census stayed at 0 through 20 full runs under heavy contention, where the per-test fixes alone leaked in 8 of 11.
+- **It does not show** that every async chain is awaited. Control 3 and M8 above are why.
+- **It was measured on `f8b8cc64`.** The PR head is that commit rebased onto a later `main`, and the loop was not re-run there.
 
 ### Open questions
 
-- **The ticket's census command counts only one of the two act warnings.** `grep -c "not wrapped in act"` misses "not configured to support act", which is the same class of leak: work still running when a scope closes. It was counted separately throughout. A future census should count both.
+- **A census that can see an unawaited chain does not exist yet.** One design would be a diagnostic in the teardown that records any state update landing inside the teardown's `act`: the class control 3 shows is now absorbed. That would be an instrument, not a fix, and it needs its own controls. **So #1057 is left open** (`part of #1057` in the PR, not `closes`): its criterion 2 asks for a census whose 0 means something, and for this class the current census cannot see a leak.
+- **The ticket's census command counts only one of the two act warnings.** `grep -c "not wrapped in act"` misses "not configured to support act", which is the same class of leak: work still running when a scope closes. It was counted separately throughout, and the loop counted both. A future census should count both.
 - **F52 (#1114)** is open and unowned.
-- **Nothing here stops the mechanism coming back.** A new `await fireEvent.press` on an async handler will leak exactly as before, and nothing in the suite goes red when it does. Failing the suite on act warnings in `jest.setup.js` would enforce it. That is shared with PR #1105's mock changes, and it was out of scope for a ticket whose criteria forbid touching console handling, so it is recorded here rather than done.
+- **Nothing here stops the `fireEvent` mechanism coming back.** A new `await fireEvent.press` on an async handler will leak exactly as before. The census will print it (M1 still shows 49), but nothing in the suite goes red. Failing the suite on act warnings from `jest.setup.js` would enforce it, and it is a separate decision about console handling that this ticket did not take.
 
 ## Open items / known gaps as of this entry
 
