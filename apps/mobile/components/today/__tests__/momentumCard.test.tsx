@@ -94,20 +94,42 @@ describe('MomentumCard — the day-open link text agrees with the title (W13, #6
 describe('MomentumCard — the rings do not carry a previous day\'s fill (W15, #703)', () => {
   // `index.tsx` keys `<MomentumCard key={on} .../>` on the browsed day, for
   // exactly the reason this test pins: `Ring`'s sweep animation lives in a
-  // `useState(() => new Animated.Value(0))` that only re-initialises on a
-  // fresh mount. `Host` below reproduces that exact wiring — a `key` prop
-  // conditioned on which day is showing — the same shape `index.tsx` uses, so
-  // this protects the mechanism the real fix depends on. It does not exercise
-  // `index.tsx`'s own line directly (rendering the whole screen hits the same
-  // wall `todayScreen.test.tsx`'s own comments describe — `listTargets`
-  // mocked to `[]` never reaches a real target), which is what this ticket's
-  // own `NEEDS HUMAN EVIDENCE` device check is for.
+  // per-fiber value that only re-initialises on a fresh mount. `Host` below
+  // reproduces that exact wiring — a `key` prop conditioned on which day is
+  // showing — the same shape `index.tsx` uses, so this protects the mechanism
+  // the real fix depends on. It does not exercise `index.tsx`'s own line
+  // directly (rendering the whole screen hits the same wall
+  // `todayScreen.test.tsx`'s own comments describe — `listTargets` mocked to
+  // `[]` never reaches a real target), which is what this ticket's own
+  // `NEEDS HUMAN EVIDENCE` device check is for.
   //
-  // Reduce Motion is forced OFF so the ring genuinely animates over 620ms
-  // rather than snapping instantly via `setValue` — under Reduce Motion BOTH
-  // the buggy and fixed paths converge to the identical final value (the
-  // `useEffect`'s deps retarget correctly either way), so the bug is only
-  // observable mid-transition, which is where an athlete actually sees it.
+  // ## F46/#1045 rewrote HOW this is checked, and not WHAT
+  //
+  // This used to sample the ring's `strokeDashoffset` 50ms into the 620ms
+  // sweep, under `jest.useFakeTimers()`, and assert the remounted ring read
+  // much closer to empty than the same-key one. That worked because core
+  // `Animated` interpolates in JavaScript on a JS timer, which fake timers
+  // drive. F46 moved the sweep onto Reanimated's UI runtime — where there is
+  // no JS timer to advance, on a device or in jest — so the technique is gone
+  // for good rather than temporarily unavailable. Inventing a frame clock in
+  // the Reanimated mock to keep the old assertion alive would be measuring
+  // that invented clock, not the component.
+  //
+  // What survives is the mechanism itself, asserted one step earlier and
+  // without needing a clock at all: a day switch must MOUNT A FRESH `Ring`,
+  // and a fresh mount re-runs `useReducedMotion`'s effect. So the number of
+  // times the OS is asked about Reduce Motion is a direct, exact count of how
+  // many times `Ring` has been constructed. Same key across a day switch: the
+  // fiber is reused, the value carries the previous day's fill, and the OS is
+  // never asked again. New key: a fresh fiber, a fresh zero, a fresh ask.
+  //
+  // The mid-switch APPEARANCE — a ring that visibly still shows yesterday for
+  // a moment — is no longer checkable here and is a device-evidence criterion
+  // on #1045.
+  //
+  // Reduce Motion is forced OFF so the animated branch is the one taken; the
+  // reduced branch snaps via a direct write and would construct no animation
+  // at all.
   const FULL: EatenView = {
     state: 'ready',
     rows: [],
@@ -143,76 +165,49 @@ describe('MomentumCard — the rings do not carry a previous day\'s fill (W15, #
     );
   }
 
-  /** The kcal ring's current `strokeDashoffset` — higher means emptier. */
-  function kcalOffset(tree: unknown): number | undefined {
-    function walk(node: any): number | undefined {
-      if (!node) return undefined;
-      if (
-        typeof node.type === 'string' &&
-        node.type.toLowerCase().includes('circle') &&
-        node.props.strokeDashoffset !== undefined
-      ) {
-        return node.props.strokeDashoffset;
-      }
-      if (Array.isArray(node.children)) {
-        for (const child of node.children) {
-          const found = walk(child);
-          if (found !== undefined) return found;
-        }
-      }
-      return undefined;
-    }
-    return walk(tree);
-  }
+  /**
+   * How many times the OS has been asked about Reduce Motion — i.e. how many
+   * times a `Ring` has been constructed, since `useReducedMotion`'s effect
+   * runs once per mount and this card draws exactly one ring.
+   */
+  let asks: jest.SpyInstance;
 
   beforeEach(() => {
-    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(false);
+    asks = jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(false);
+    // `jest.spyOn` hands back the EXISTING mock when one is already installed,
+    // carrying every call the rest of this file has made through it — which is
+    // how the count below read 10 rather than 1 the first time. Cleared rather
+    // than reset: `mockClear` drops the calls and keeps the resolved value.
+    asks.mockClear();
     jest.spyOn(AccessibilityInfo, 'addEventListener').mockReturnValue({ remove: () => {} } as never);
   });
 
-  it('a keyed remount reads far closer to empty, soon after switching, than the same key does', async () => {
-    jest.useFakeTimers();
-    try {
-      // SAME key across the switch — the pre-fix shape: no remount, so `base`
-      // animates smoothly FROM its current (filled) value.
-      const sameKey = await render(<Host day="2026-08-20" eaten={FULL} />);
-      await act(async () => {
-        await Promise.resolve();
-      });
-      await act(() => {
-        jest.advanceTimersByTime(700);
-      });
-      await sameKey.rerender(<Host day="2026-08-20" eaten={NOTHING} />);
-      await act(() => {
-        jest.advanceTimersByTime(50);
-      });
-      const sameKeySoon = kcalOffset(sameKey.toJSON());
+  it('the same key across a day switch reuses the ring, carrying its fill', async () => {
+    const sameKey = await render(<Host day="2026-08-20" eaten={FULL} />);
+    await act(async () => {});
+    expect(asks).toHaveBeenCalledTimes(1);
 
-      // NEW key across the switch — the actual fix: a fresh mount, so `base`
-      // starts over at 0 and animates from empty toward empty.
-      const newKey = await render(<Host day="2026-08-20" eaten={FULL} />);
-      await act(async () => {
-        await Promise.resolve();
-      });
-      await act(() => {
-        jest.advanceTimersByTime(700);
-      });
-      await newKey.rerender(<Host day="2026-08-21" eaten={NOTHING} />);
-      await act(() => {
-        jest.advanceTimersByTime(50);
-      });
-      const newKeySoon = kcalOffset(newKey.toJSON());
+    // The day's DATA changes but the key does not — the pre-fix shape.
+    await sameKey.rerender(<Host day="2026-08-20" eaten={NOTHING} />);
+    await act(async () => {});
 
-      expect(sameKeySoon).toBeDefined();
-      expect(newKeySoon).toBeDefined();
-      // The keyed remount must read meaningfully closer to empty than the
-      // same-key path does, 50ms into a 620ms transition — this is the
-      // "still shows filled after browsing back to an empty today" symptom,
-      // caught at the moment it is visible rather than after it resolves.
-      expect(newKeySoon! - sameKeySoon!).toBeGreaterThan(150);
-    } finally {
-      jest.useRealTimers();
-    }
+    // No second construction: the same fiber, and therefore the same value,
+    // still holding what yesterday swept it to.
+    expect(asks).toHaveBeenCalledTimes(1);
+  });
+
+  it('a new key across a day switch remounts the ring, so its sweep restarts from empty', async () => {
+    const newKey = await render(<Host day="2026-08-20" eaten={FULL} />);
+    await act(async () => {});
+    expect(asks).toHaveBeenCalledTimes(1);
+
+    await newKey.rerender(<Host day="2026-08-21" eaten={NOTHING} />);
+    await act(async () => {});
+
+    // A second construction is the whole fix: a fresh `Ring`, a freshly
+    // zeroed value, and a sweep that starts from empty rather than from the
+    // previous day's fill.
+    expect(asks).toHaveBeenCalledTimes(2);
   });
 });
 

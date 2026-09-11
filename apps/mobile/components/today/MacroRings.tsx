@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Animated, Easing, StyleSheet, View as RNView } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { StyleSheet, View as RNView } from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedProps,
+  useSharedValue,
+  withDelay,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 import Svg, { Circle, G } from 'react-native-svg';
 
 import { vola } from '@/constants/Colors';
+import { EASE } from '@/constants/Motion';
 import { overtakeRamp, ringCap, ringColor, sweepFor, type RingReading } from '@/lib/macroRings';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
@@ -113,6 +123,19 @@ export function MacroRings({
   );
 }
 
+/**
+ * The geometry every arc of one ring shares — the track, the base lap and each
+ * ramp arc are the same circle drawn with different strokes. Named so that
+ * {@link RampArc} can take it as a prop without restating it.
+ */
+type RingArcProps = {
+  cx: number;
+  cy: number;
+  r: number;
+  strokeWidth: number;
+  fill: 'none';
+};
+
 function Ring({
   reading,
   colour,
@@ -130,8 +153,21 @@ function Ring({
   const circumference = 2 * Math.PI * radius;
 
   const reduced = useReducedMotion();
-  const [base] = useState(() => new Animated.Value(0));
-  const [over] = useState(() => new Animated.Value(0));
+  /*
+    F46/#1045 — shared values, not `Animated.Value`s, so the interpolation
+    below runs on the UI runtime instead of being computed in JavaScript once
+    per frame. Read and written with `.get()` / `.set()`, never `.value` — the
+    form the React Compiler can see through — and never during render.
+
+    W15/#703 still applies unchanged and still needs the day-tied `key` on
+    `MomentumCard` in `app/(tabs)/index.tsx`: `useSharedValue` is per-fiber in
+    exactly the way `useState(() => new Animated.Value(0))` was, so reusing a
+    `Ring` fiber across a day switch would reuse its swept values just the
+    same. That comment's wording now names a type this file no longer uses;
+    the mechanism it guards is untouched.
+  */
+  const base = useSharedValue(0);
+  const over = useSharedValue(0);
 
   const targetBase = sweep ? sweep.base : 0;
   const targetOver = sweep?.overflow ?? 0;
@@ -145,49 +181,40 @@ function Ring({
     if (reduced) {
       // Reduce Motion is a request not to be MOVED, not a request to see
       // nothing — the ring still shows its value, it just arrives there.
-      base.setValue(targetBase);
-      over.setValue(targetOver);
+      base.set(targetBase);
+      over.set(targetOver);
       return;
     }
 
-    const anim = Animated.parallel([
-      Animated.timing(base, {
-        toValue: targetBase,
-        duration: 620,
-        easing: Easing.out(Easing.cubic),
-        // strokeDashoffset is not a transform or an opacity, so it cannot go
-        // to the native thread. Stated rather than left as a silent `false`.
-        useNativeDriver: false,
-      }),
-      Animated.timing(over, {
-        toValue: targetOver,
-        duration: 620,
+    // `strokeDashoffset` still is not a transform or an opacity — that has not
+    // changed and never will. What changed is that it no longer has to be:
+    // `useAnimatedProps` below evaluates the interpolation in a worklet on the
+    // UI runtime, so core `Animated`'s `useNativeDriver` question does not
+    // arise. This matters here specifically because the rings are on the
+    // landing tab, sweeping while that screen is doing its SQLite reads on
+    // focus, at an 8ms frame budget (`CADisableMinimumFrameDurationOnPhone` is
+    // set in `ios/VOLA/Info.plist`).
+    base.set(withTiming(targetBase, { duration: 620, easing: Easing.bezier(...EASE.out) }));
+    over.set(
+      withDelay(
         // The second lap starts only once the first has closed, so it reads as
         // one continuous sweep going round again rather than two racing arcs.
-        delay: targetOver > 0 ? 380 : 0,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }),
-    ]);
-    anim.start();
-    return () => anim.stop();
+        targetOver > 0 ? 380 : 0,
+        withTiming(targetOver, { duration: 620, easing: Easing.bezier(...EASE.out) }),
+      ),
+    );
   }, [reduced, targetBase, targetOver, base, over]);
 
-  const dashOffset = useMemo(
-    () =>
-      base.interpolate({
-        inputRange: [0, 1],
-        outputRange: [circumference, 0],
-      }),
-    [base, circumference],
-  );
+  const baseProps = useAnimatedProps(() => ({
+    strokeDashoffset: interpolate(base.get(), [0, 1], [circumference, 0]),
+  }));
 
-  const common = {
+  const common: RingArcProps = {
     cx: size / 2,
     cy: size / 2,
     r: radius,
     strokeWidth: stroke,
-    fill: 'none' as const,
+    fill: 'none',
   };
 
   /*
@@ -240,7 +267,7 @@ function Ring({
           strokeLinecap={baseCap}
           stroke={colour}
           strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
+          animatedProps={baseProps}
         />
       ) : null}
       {sweep?.overflow != null ? (
@@ -267,30 +294,72 @@ function Ring({
             Each arc clamps at its own share of the sweep, so they reveal in
             order and the ramp grows with the ring instead of appearing whole.
           */}
-          {ramp.map((shade, i) => {
-            const reach = ((ramp.length - i) / ramp.length) * targetOver;
-            return (
-              <AnimatedCircle
-                key={shade + i}
-                {...common}
-                strokeLinecap={overCap}
-                stroke={shade}
-                strokeDasharray={circumference}
-                strokeDashoffset={over.interpolate({
-                  inputRange: reach >= 1 ? [0, 1] : [0, reach, 1],
-                  outputRange:
-                    reach >= 1
-                      ? [circumference, 0]
-                      : [circumference, circumference * (1 - reach), circumference * (1 - reach)],
-                })}
-              />
-            );
-          })}
+          {ramp.map((shade, i) => (
+            <RampArc
+              key={shade + i}
+              over={over}
+              reach={((ramp.length - i) / ramp.length) * targetOver}
+              circumference={circumference}
+              shade={shade}
+              overCap={overCap}
+              common={common}
+            />
+          ))}
         </>
       ) : null}
     </>
   );
 }
+
+/**
+ * One arc of the overtake ramp.
+ *
+ * **A separate component because `useAnimatedProps` is a hook**, and a hook
+ * cannot be called inside the `ramp.map()` that produces these. That is the
+ * whole reason this exists — it carries no logic of its own beyond the `reach`
+ * clamp, which is byte-identical to the expression that used to sit inline.
+ *
+ * The clamp is what makes the ramp reveal in order rather than appear whole:
+ * each arc stops at its own share of the sweep and holds there while the
+ * shorter, lighter arcs above it keep going.
+ */
+function RampArc({
+  over,
+  reach,
+  circumference,
+  shade,
+  overCap,
+  common,
+}: {
+  over: SharedValue<number>;
+  reach: number;
+  circumference: number;
+  shade: string;
+  overCap: ReturnType<typeof ringCap>;
+  common: RingArcProps;
+}) {
+  const props = useAnimatedProps(() => ({
+    strokeDashoffset:
+      reach >= 1
+        ? interpolate(over.get(), [0, 1], [circumference, 0])
+        : interpolate(
+            over.get(),
+            [0, reach, 1],
+            [circumference, circumference * (1 - reach), circumference * (1 - reach)],
+          ),
+  }));
+
+  return (
+    <AnimatedCircle
+      {...common}
+      strokeLinecap={overCap}
+      stroke={shade}
+      strokeDasharray={circumference}
+      animatedProps={props}
+    />
+  );
+}
+
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', justifyContent: 'center' },
