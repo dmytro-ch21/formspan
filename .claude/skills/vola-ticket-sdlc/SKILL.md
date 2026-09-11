@@ -123,9 +123,12 @@ authority; this skill is the ordered checklist those sections add up to.
     ITEM=$(gh api graphql -F owner='{owner}' -F name='{repo}' -F n=$ISSUE \
       -f query='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){projectItems(first:20){nodes{id project{id}}}}}}' \
       -q ".data.repository.issue.projectItems.nodes[] | select(.project.id == \"$PROJECT\") | .id")
-    [ -n "$ITEM" ] || echo "#$ISSUE is not on the board"
-    gh api graphql -f p="$PROJECT" -f i="$ITEM" -f f="$FIELD" -f o="$OPTION" \
-      -f query='mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){projectV2Item{id}}}'
+    if [ -z "$ITEM" ]; then
+      echo "#$ISSUE is not on the board — nothing written"
+    else
+      gh api graphql -f p="$PROJECT" -f i="$ITEM" -f f="$FIELD" -f o="$OPTION" \
+        -f query='mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){projectV2Item{id}}}'
+    fi
     ```
 
     `-f`, not `-F`, for the ids: `gh api`'s own help says `-F` converts a

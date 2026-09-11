@@ -73758,9 +73758,9 @@ confirming the same form found a line known to be present, it found the
 - **`.vola-agent/policy.json` gained a `board` block** — owner, number, URL,
   project id, Status field id, all six option ids, and the date they were read
   from the live API (they matched what sessions had been using).
-  `scripts/check-agent-policy.py` validates it with eight guards, one self-test
-  mutation each; the self-test's success line now reports a computed mutation
-  count instead of a hardcoded 13.
+  `scripts/check-agent-policy.py` validates it, with a self-test mutation for
+  each guard; the self-test's success line now reports a computed mutation
+  count (22) instead of a hardcoded 13.
 - **`devengine` reads the owner and number from it.** `Board.Resolve`: a set
   flag wins, else the policy, else an error — no literal left to fall back to.
   The flags moved into `parseFlags` with EMPTY board defaults, because a
@@ -73789,9 +73789,9 @@ confirming the same form found a line known to be present, it found the
 
 ### Mutation-verified
 
-Twenty-one mutations, each caught as a named test failure, each restore
+Twenty-two mutations, each caught as a named test failure, each restore
 confirmed by re-running rather than by reading the file: six on the latch's
-resolver; eight on the policy validator, mutating the VALIDATOR so that each
+resolver; nine on the policy validator, mutating the VALIDATOR so that each
 self-test mutation is shown to depend on its own guard; seven on
 `Board.Resolve` and the flag defaults, checked to fail as tests rather than as
 builds.
@@ -73807,6 +73807,24 @@ given inputs only they can see: a blank owner is also caught by the URL
 comparison, so its mutation blanks the owner AND rewrites the URL to agree; a
 string project number formats into the same URL, so only the type guard sees
 it.
+
+### What review changed
+
+`backend-reviewer` found nothing blocking. It re-read the board ids from the
+live API, re-derived the identity table's counts from the tree, and reasoned
+each validator guard through against its mutation. Its two suggestions were
+taken rather than argued:
+
+- **The Status recipe printed "not on the board" and then ran the mutation
+  anyway**, with an empty item id. It now branches, and writes nothing. It
+  uses `if`/`else`, not `exit`, because a recipe gets pasted into an
+  interactive shell, and `exit` there closes the terminal. Checked by
+  running the extracted recipe against a `gh` stub both ways: an empty lookup
+  wrote nothing, and a non-empty one reached the mutation. The second run is
+  what shows the first could have caught a call.
+- **The login pattern accepted a trailing hyphen and `--`**, which GitHub
+  forbids. Tightened, with its own self-test mutation whose URL is rewritten to
+  agree, so only the pattern can see it. That is the ninth validator mutation.
 
 ### Not done
 

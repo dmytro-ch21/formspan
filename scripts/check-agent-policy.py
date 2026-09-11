@@ -69,7 +69,9 @@ REQUIRED_HUMAN_GATE_PATHS = (
 )
 # The statuses sessions and CLAUDE.md name. A session writing one needs its id.
 BOARD_STATUS_OPTIONS = ("Todo", "In Progress", "In Review", "Awaiting evidence", "Blocked", "Done")
-GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+# GitHub logins: 1-39 characters, alphanumeric or single hyphens, never
+# starting or ending with one. Found looser in review (N174).
+GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
 
 
 def glob_prefix(pattern: str) -> str:
@@ -454,6 +456,10 @@ def self_test() -> tuple[list[str], int]:
             ("board.owner is blank (and the url agrees, so only the owner guard can see it)",
              lambda: mutate_json(agent / "policy.json", lambda d: d["board"].update(
                  owner="", url=f"https://github.com/users//projects/{d['board']['project_number']}"))),
+            ("board.owner ends in a hyphen (url agrees, so only the login pattern can see it)",
+             lambda: mutate_json(agent / "policy.json", lambda d: d["board"].update(
+                 owner=d["board"]["owner"] + "-",
+                 url=f"https://github.com/users/{d['board']['owner']}-/projects/{d['board']['project_number']}"))),
             ("board.project_number is a string",
              lambda: mutate_json(agent / "policy.json", lambda d: d["board"].__setitem__(
                  "project_number", str(d["board"]["project_number"])))),
