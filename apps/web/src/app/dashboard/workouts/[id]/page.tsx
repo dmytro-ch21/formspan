@@ -727,7 +727,7 @@ function ItemRow({
           </button>
           {/* Revealed on hover so the row stays calm at rest, but never hidden
               from keyboard users. */}
-          <div className="flex gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
+          <div className="flex gap-1 opacity-0 transition duration-(--duration-control) ease-(--ease-out) group-focus-within:opacity-100 group-hover:opacity-100">
             <IconButton
               label="Move up"
               onClick={() => onMoveTo(index - 1)}

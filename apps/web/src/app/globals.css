@@ -353,6 +353,73 @@ input[type="number"] {
 }
 
 /*
+  N559 — a pointer that can actually hover.
+
+  `hover:` alone fires on TAP on a touch device: the browser synthesises a
+  hover on the tapped element and leaves it there. For a colour change that is
+  harmless; for the heatmap's growth it means every tap inflates a cell and
+  leaves it inflated. `(hover: hover) and (pointer: fine)` is the pair that
+  means "a real pointer" — `hover: hover` alone still matches some stylus and
+  smart-TV inputs.
+*/
+@custom-variant fine-hover (@media (hover: hover) and (pointer: fine));
+
+/*
+  N559 — the entrance layer.
+
+  Every conditionally-mounted surface in this app hard-mounted: two popovers
+  appeared from nowhere rather than from the button that opened them, and the
+  only modal dropped a 70%-black scrim with no motion at all. The one moment
+  the page animated was the WAIT (the skeletons) and the payoff teleported.
+
+  ENTRANCES ONLY. There is no exit here and that is deliberate: an unmount
+  cannot be animated without holding the element past the state change, which
+  is a component-architecture change rather than a motion one.
+
+  Durations and curves come from `motion.generated.css` (N556) — a popover is
+  a surface, a modal is a sheet.
+*/
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.popover-in {
+  animation: scale-in var(--duration-surface) var(--ease-out);
+  /* Both popovers are `right-0`-anchored under their trigger, so the corner
+     they grow from is the corner the trigger is in. Without this they inflate
+     symmetrically from their own centre, which reads as "appeared", not
+     "opened from there". */
+  transform-origin: top right;
+}
+
+.scrim-in {
+  animation: fade-in var(--duration-sheet) var(--ease-out);
+}
+
+.dialog-in {
+  animation: scale-in var(--duration-sheet) var(--ease-out);
+  /* NO `transform-origin` — a modal is not anchored to anything, so it scales
+     from its own centre. Setting an origin here would be the mistake the
+     popovers exist to fix, applied where it does not belong. */
+}
+
+/*
   Reduce Motion (F40).
 
   A user who has asked their OS not to animate things was getting every
@@ -426,5 +493,28 @@ input[type="number"] {
   */
   .animate-pulse {
     animation-iteration-count: 1;
+  }
+
+  /*
+    N559's entrances, which are ANIMATIONS rather than transitions — the
+    `transition-property` narrowing above does not reach them at all, so
+    without these they would keep scaling under Reduce Motion.
+
+    Faded in, not removed: an entrance that explains where a surface came from
+    is worth keeping; the SCALE is the part that moves. `fade-in` is the same
+    keyframe the scrim already uses.
+  */
+  .popover-in,
+  .dialog-in {
+    animation-name: fade-in;
+  }
+
+  /*
+    And the heatmap's hover growth. The narrowing above makes it INSTANT rather
+    than animated, which is not the same as not happening — Reduce Motion
+    should mean the cell does not grow at all.
+  */
+  .fine-hover\:hover\:scale-110:hover {
+    scale: 1;
   }
 }

@@ -229,7 +229,7 @@ function DayCell({
       aria-pressed={selected}
       aria-label={label}
       title={label}
-      className={`h-3 w-3 rounded-[3px] transition-transform hover:scale-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime ${
+      className={`h-3 w-3 rounded-[3px] transition-transform fine-hover:hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime ${
         LEVEL_CLASS[Math.min(level, 4)]
       } ${selected ? "ring-2 ring-text ring-offset-1 ring-offset-bg" : ""}`}
     />

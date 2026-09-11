@@ -22660,3 +22660,51 @@ session's stats, never inside them and never on a list row.
   measurement to an actual athlete. That is a judgement about wording on a real
   screen, and it is the one thing worth checking by eye — if it reads as "your
   VO₂max for this session", the shape is wrong however the tests behave.
+
+## N559 — the web entrance layer: popovers, the modal, the heatmap (`apps/web/src/app/globals.css`, #1048)
+
+Conditionally-mounted surfaces used to hard-mount. Entrances only — there is no
+exit animation anywhere, deliberately.
+
+### Happy path
+
+- Open the **share popover** (a session's Share control) and the **"New
+  session" dropdown**. Each fades and scales up over ~240ms, **growing from its
+  top-right corner** — the corner its trigger sits in. Symmetrical inflation
+  from the centre is the failure: it means `transform-origin` did not apply.
+- Open the **New workout modal**. The scrim fades and the dialog scales from its
+  own centre, **starting and finishing together** over ~320ms. A scrim that
+  lands before the dialog reads as two events rather than one surface arriving.
+- Hover a **heatmap cell** with a mouse: it grows to 110% smoothly.
+- Hover a **workout row's actions** and a **calendar day's label**: they fade in
+  on `ease-out` rather than the default ease-in-out.
+
+### Edge cases & errors
+
+- **Tap** a heatmap cell on a touch device (or DevTools device emulation). It
+  must **not** grow — `hover:` alone fires a synthetic hover on tap and leaves
+  the cell inflated, which is what the `fine-hover` gate exists to stop.
+- **Reduce Motion on**: all three surfaces still fade in, with **no scaling**,
+  and the heatmap cell does not grow at all. Instant growth is still growth — if
+  the cell jumps to 110% rather than staying put, the override is not applying.
+- Closing any of the three is instant. That is intended, not an omission.
+- Open and close a popover rapidly: no half-finished state should persist, since
+  the animation runs on mount only.
+
+### Auth/security
+
+- Nothing new — stylesheet and four `className` additions, no data or route
+  surface.
+
+### What a test can and cannot reach
+
+- **Automated** (`apps/web/src/app/__tests__/entranceLayer.test.ts`): both
+  popovers carry the class; the popover sets `transform-origin: top right`; the
+  **dialog does not** set one; scrim and dialog share `--duration-sheet`; no
+  `*-out` keyframe exists; the heatmap is gated and scaled to 110%; exactly two
+  transitions gained a curve; and the Reduce Motion overrides exist for both the
+  entrances and the heatmap. All mutation-verified.
+- **Not reachable**: whether the popover visibly grows *from the corner*. The
+  tests assert the CSS says so; only DevTools → Animations at 10% playback shows
+  that it does. Same for "scrim and dialog start together" — a CSS duration
+  match is not proof of a synchronised start on screen.

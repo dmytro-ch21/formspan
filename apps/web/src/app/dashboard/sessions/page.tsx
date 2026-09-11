@@ -674,7 +674,7 @@ function NewSessionMenu({
           swallowed by a widget that doesn't implement the keys it advertised.
           A plain list of buttons is fully operable today with nothing added. */}
       {open && (
-        <div className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-card border border-line bg-surface shadow-lg">
+        <div className="popover-in absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-card border border-line bg-surface shadow-lg">
           {workouts.length > 0 && (
             <>
               <p className="eyebrow px-4 pt-3 pb-1 text-[0.625rem]">
