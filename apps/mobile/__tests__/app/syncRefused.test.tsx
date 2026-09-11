@@ -131,6 +131,30 @@ describe('a refused row is on the repair screen', () => {
     await waitFor(() => expect(screen.getByTestId('sync-nothing-stuck')).toBeTruthy());
   });
 
+  it('a failing refused read does not take the blocked list down with it', async () => {
+    // The bug review caught in the first version. With `Promise.all`, a throw
+    // from the newer query discarded the already-resolved `blockedRows`
+    // result, leaving `rows` null and the spinner running forever — a new
+    // query taking the existing, working list with it.
+    mockBlockedRows.mockResolvedValue([
+      { kind: 'session', id: 'sess1', name: 'Push day', lastError: 'set 10: weight must be > 0', href: '' },
+    ] as never);
+    mockRejected.mockRejectedValue(new Error('table is gone'));
+    render(<SyncScreen />);
+    await waitFor(() => expect(screen.getByText('Push day')).toBeTruthy());
+    // And the screen is not stuck loading.
+    expect(screen.queryByLabelText('Loading')).toBeNull();
+  });
+
+  it('a failing blocked read still shows the refused list', async () => {
+    // The mirror. Neither read may be load-bearing for the other.
+    mockBlockedRows.mockRejectedValue(new Error('nope'));
+    mockRejected.mockResolvedValue([ENTRY]);
+    render(<SyncScreen />);
+    await waitFor(() => expect(screen.getByTestId('sync-refused')).toBeTruthy());
+    expect(screen.getByText('Porridge')).toBeTruthy();
+  });
+
   it('shows the blocked list and the refused list together when both have rows', async () => {
     // They are different states and the screen must not collapse one into the
     // other, or drop one because the other rendered.

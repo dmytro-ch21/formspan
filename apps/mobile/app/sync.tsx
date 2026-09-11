@@ -86,18 +86,28 @@ export default function SyncScreen() {
 
   const load = useCallback(async () => {
     if (!userId) return;
-    try {
-      // Read together so the two lists can never describe different moments —
-      // a refused row disappearing from one while still shown in the other is
-      // the sort of disagreement this screen exists to end.
-      const [blocked, rejected] = await Promise.all([blockedRows(userId), rejectedRows(userId)]);
-      setRows(blocked);
-      setRefused(rejected);
-    } catch {
-      // A failed read of the repair list must not itself become an error
-      // state on the repair screen. `null` keeps the honest "still loading"
-      // rather than claiming nothing is wrong.
-    }
+    // `allSettled`, not `all`, and this is the difference between a screen
+    // that degrades and one that hangs. Review caught the first version: with
+    // `Promise.all`, a throw from the NEWER `rejectedRows` query discards the
+    // `blockedRows` result that had already resolved, so `rows` stays `null`
+    // and the spinner never resolves — a brand-new query taking the existing,
+    // working list down with it.
+    //
+    // This is also the idiom this codebase already reaches for whenever two
+    // independent reads feed one screen, in `biometricSync.ts`'s words: "a
+    // slow or failing VO₂max read must not block session enrichment, and vice
+    // versa." Same shape, same answer.
+    const [blocked, rejected] = await Promise.allSettled([
+      blockedRows(userId),
+      rejectedRows(userId),
+    ]);
+    // Each list is set on its own. A failed read leaves that half alone rather
+    // than becoming an error state on the repair screen — `null` for the
+    // blocked list keeps the honest "still loading" rather than claiming
+    // nothing is wrong, and an empty refused list is the same claim it would
+    // make on a device with nothing refused, which is the safe direction.
+    if (blocked.status === 'fulfilled') setRows(blocked.value);
+    if (rejected.status === 'fulfilled') setRefused(rejected.value);
   }, [userId]);
 
   useFocusEffect(

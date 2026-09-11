@@ -70752,16 +70752,38 @@ this whole slice exists for.
 
 ### Verification
 
-Nine mutations, each caught, restore confirmed by re-running: each half of the
+Ten mutations, each caught, restore confirmed by re-running: each half of the
 `dirty = 0 AND last_error IS NOT NULL` predicate dropped independently; the
 user scope dropped from the list and from the discard; the tombstone filter
 dropped; discard tombstoning instead of hard-deleting; the empty state no
 longer accounting for refused rows (the original bug, restored deliberately);
-the refused section never rendering; and discard wired to the wrong row.
+the refused section never rendering; discard wired to the wrong row; and the
+two reads put back on `Promise.all` so one failure blanks the other.
 
 The library tests run against a real SQLite database through
 `migratedFixture()`, like every other outbox test, so what is asserted is what
 the shipped schema does.
+
+**Review caught a real bug, and it was one the diff introduced rather than
+inherited.** The first version read both lists with `Promise.all`. A throw from
+the NEWER `rejectedRows` query therefore discarded the `blockedRows` result
+that had already resolved — leaving `rows` at `null` and the spinner running
+forever. A brand-new, less-exercised query taking the existing, working list
+down with it, in the screen an athlete opens precisely when something is
+already wrong.
+
+It was untested in both directions, because both test files mock
+`rejectedRows` to resolve. Now `Promise.allSettled`, each list set
+independently, with a test for each half failing — and the mutation back to
+`Promise.all` turns both red.
+
+This is also the idiom the codebase already reaches for whenever two
+independent reads feed one screen — `biometricSync.ts`, `useWeightTrend.ts`,
+`goals/nutritionTrend.tsx`, `position/[id].tsx`, `bjj/proficiency.tsx` — in
+`biometricSync.ts`'s own words: *"a slow or failing VO₂max read must not block
+session enrichment, and vice versa."* The first version was not a new problem
+needing a new answer; it was an old problem whose answer was already written
+down five times.
 
 **One apparatus failure worth recording.** The first attempt at the screen
 mutations ran all three through a shell function whose output produced *no
