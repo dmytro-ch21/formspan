@@ -70575,6 +70575,27 @@ as unswept (F46), and an `onValueChange` assertion against a prop React Native
 never puts on the host node (F43). The shape is always the same: **the needle
 was present for a reason that had nothing to do with the thing under test.**
 
+### One more stale numeral, found by the same gate
+
+`pre-merge-checker` noticed while running this branch that **CLAUDE.md and the
+`/pre-merge` skill both still said `ci:checks` must report `6`**, while
+`EXPECTED_CHECK_RUNS` has been `8` since N166 (#543). Corrected in both, and
+the parenthetical now records that the number has drifted **twice** rather than
+once.
+
+Folded in rather than filed separately, which is a judgement call worth
+stating: it is one numeral, demonstrably wrong against a constant in the same
+repo, in the adjacent section of a file this branch is already editing for
+accuracy — and it is the same defect class as H18 itself, documentation
+asserting something the code contradicts. The checker suggested a separate
+ticket; that would have been the right call if the fix were larger than the
+ticket describing it.
+
+Worth noting what actually caught it: **the instruction in that very sentence
+to read the number from `EXPECTED_CHECK_RUNS` rather than trust the prose.**
+That instruction has now been load-bearing twice, which is the argument for
+keeping it rather than for believing the numeral next to it.
+
 ### The trigger is honour-system, and that is now its own ticket
 
 Nothing computes either number. The threshold above fires only if somebody

@@ -403,14 +403,17 @@ Then: `git push -u origin <branch>`, `gh pr create`, watch CI with `gh run watch
 pnpm run ci:checks          # the current branch's PR; --pr <n> or --sha <sha> also work
 ```
 
-It must report 6 and exit 0 — 6 being however many jobs the workflows declare
+It must report **8** and exit 0 — 8 being however many jobs the workflows declare
 today, which the script derives rather than assumes: it cross-checks the derived
 set against `EXPECTED_CHECK_RUNS` in `scripts/check-ci-checks.py` and **fails
 loudly if the two disagree**, so adding a CI job means changing that constant in
 the same commit rather than discovering later that the bar quietly moved. (This
-number has already drifted once — see the 2026-08-20 probe-PR #401 correction
-below — so read it from `EXPECTED_CHECK_RUNS` itself if you ever suspect this
-sentence is behind the code again, rather than trusting the numeral here.)
+number has now drifted **twice** — 5 to 6 at the 2026-08-20 probe-PR #401
+correction below, and 6 to 8 by N166 (#543), which this sentence did not follow
+until H18 noticed the gap on 2026-09-11. So read it from `EXPECTED_CHECK_RUNS`
+itself if you ever suspect this sentence is behind the code again, rather than
+trusting the numeral here — that instruction has now been load-bearing twice,
+which is the argument for keeping it rather than for believing the number.)
 A count of **0** satisfies "no failures"
 trivially: `gh pr view` shows nothing red because there is nothing at all,
 `statusCheckRollup` is an empty list, and `mergeStateStatus` does not
