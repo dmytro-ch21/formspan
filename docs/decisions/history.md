@@ -69598,7 +69598,7 @@ an empty `ADMIN_USER_IDS`; `implements` coerced to 1; `is_unilateral` read by
 string comparison; `media` admitted to the body; `note` dropped from it; the
 restore id taken from the form; and `revisionFrom` loosened to accept NaN.
 
-Admin suite: 3 files and 13 tests before, 5 files and 50 after.
+Admin suite: 3 files and 13 tests before, 6 files and 56 after.
 
 **Environment/production guard behaviour was already covered** and was
 deliberately not duplicated — `apiConfig.test.ts` exercises both the
@@ -69606,15 +69606,46 @@ development fallback and the production refusal when `NEXT_PUBLIC_API_URL` is
 unset, and `environmentBadge.test.ts` covers the classification that stops an
 operator editing production believing they are on staging.
 
-### What this does not do
+### The first render tests in apps/web or apps/admin
 
-**No component or render tests.** `vitest.config.mts` is deliberately node-only
-and its comment says why: *"the console's render path has not earned component
-tests — no defect has lived there — and a jsdom setup nobody needs yet is
-maintenance rather than safety."* That argument still holds; the defects this
-console has actually had were in classification and in write payloads, and
-both are now covered. Adding jsdom belongs to the first render-path bug, not
-to this ticket.
+**The original version of this entry argued against them, and `ac-verifier`
+was right that the argument did not survive the ticket's own text.** It said:
+*"the console's render path has not earned component tests — no defect has
+lived there."* True, and also exactly the argument that held right up until
+`load_mode`, `implements` and `note` each blanked authored data with no test
+noticing.
+
+The deciding point was not taste. #547's criteria ask for
+"component/integration tests", and its Steps to test require that a failed
+mutation **renders** as an error state the operator can act on, *asserted by a
+test*. The action suites prove the action returns the right shape; nothing
+proved the operator ever sees it. `ac-verifier` graded criteria 4, 5 and 7
+`MET` on a narrower reading than their text and said the narrowing deserved a
+conscious decision rather than silent acceptance. This is that decision.
+
+So `apps/admin` gains `jsdom` and `@testing-library/react`, and
+`vitest.config.mts` selects the environment **per file** — the logic tests stay
+in node, where they are faster and lose nothing, and a render test opts in with
+a `@vitest-environment jsdom` docblock.
+
+Two behaviours, both carrying a rule, neither previously covered by anything:
+
+- **`RevisionHistory` offers no restore on the newest revision** (`i > 0`) —
+  its own comment: it "is already the current state, so the button would do
+  nothing but add a revision saying so." An `i >= 0` writes a no-op revision
+  into the audit trail and is invisible in review.
+- **A rejected save puts the API's reason on screen in a `role="alert"`, and
+  re-seeds the form with the submission** — the React 19 reset that otherwise
+  erases the paragraph the operator just typed while telling them the name is
+  taken.
+
+Three more mutations, all caught: the off-by-one; the alert downgraded to
+`role="note"`, which renders identically and is silent to a screen reader; and
+the re-seed removed.
+
+CLAUDE.md records the standing gap as *"0 of 40 web/admin pages have a test
+that renders them"*. This is the first, and is deliberately two components and
+not a snapshot of the console.
 
 ## Open items / known gaps as of this entry
 

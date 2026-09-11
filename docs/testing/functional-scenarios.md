@@ -22752,6 +22752,17 @@ against a real API rather than a mocked one.
 - **The restore id cannot be redirected by the client**: a submitted `id`
   field must not change which row a restore writes to.
 
+### Covered by render tests as of N170
+
+- The revision history offers no restore control on the newest entry, and none
+  at all when there is only one revision.
+- A rejected save shows the API's reason in an alert, and the form still holds
+  what was typed.
+
+These are unit-level now; a functional run should still confirm the same two
+against a real API, since the render tests stub the action state rather than
+driving a real submission.
+
 ### Needs a device / a real environment
 
 - **The environment badge against a real production API** — that it says
