@@ -69488,6 +69488,99 @@ All the guards were mutation-verified: giving the dialog an origin, dropping the
 reduced-motion override, and ungating the heatmap each turn exactly one test
 red, and the suite goes green again on a re-run rather than on inspection.
 
+## 2026-09-10 — N170 (#547): the admin console's write paths get their first tests
+
+**The console publishes content that is live to athletes immediately, and had
+three test files, none of which touched a write.** `apiConfig`, the
+environment badge, and reduced motion — configuration and chrome. Ten server
+actions that create, edit, publish, retire and restore technique and exercise
+content had nothing.
+
+(The ticket's measured counts had drifted — it recorded 1 admin test file
+against 169 mobile; today it is 3 against 335. The proportion was the point
+and the proportion held.)
+
+### The authorization test is enumerated, not listed
+
+`src/lib/admin.ts` already states the hazard exactly: *"a server action is a
+POST endpoint the router exposes on its own. Nothing about being defined in a
+gated route segment protects it — an unauthorized caller who never loads the
+page can still invoke it."* The gate is therefore one `await assertAdmin()`
+line per action, and a missing line looks like nothing at all: it compiles,
+the page renders, the happy path is unchanged, and the only symptom is that a
+stranger can publish.
+
+All ten actions gate correctly today. The test exists to keep that true, and
+it **reads the modules' exports at runtime** rather than naming the ten. The
+listing version passes forever while being silently wrong about an eleventh —
+this repo's own recorded lesson, in its words: *"Nine guards mutation-tested,
+and the tenth did not exist... Testing the guards you wrote says nothing about
+the one you did not."*
+
+`EXPECTED_ACTION_COUNT` then guards the enumeration itself. Without it a
+rename that stopped matching the `*Action` suffix would empty the list and
+every assertion would pass over nothing — the "filter that matched nothing"
+apparatus trap, pointed at the test's own machinery.
+
+**Two further choices that decide whether it means anything.** It asserts that
+no WRITE happened, not that an error came back: a refusal and a swallowed
+failure both produce a tidy `{ status: "error" }`, and only the absence of the
+API call tells them apart. And `assertAdmin` is not mocked — only Clerk's
+`currentUser` is — so the real allowlist runs. A stub of the gate would be a
+test of the stub.
+
+### The write tests cover traps the code already documented and nothing checked
+
+`bodyFrom` in both action files is a dense run of deliberate decisions, each
+carrying a comment naming a specific silent failure. Every one was a data-loss
+path with a stated mechanism and no test:
+
+- **`implements: Number(...)`, raw.** The obvious `=== 2 ? 2 : 1` reads
+  identically from the rendered form and fails OPEN: a malformed submission
+  fabricates a valid `1` that the API accepts and writes, silently halving a
+  stored pair. NaN serialises to null, which the API reads as absent.
+- **`is_unilateral: form.has(...)`, not `=== "on"`.** A `value` attribute
+  added for styling would write `false` for every checked box, with no error.
+- **`media` omitted from the request shape**, so an edit cannot clear assets a
+  deploy attached — and asserted against a caller that pushes one in, since a
+  server action is reachable without the form.
+- **`note` always sent**, so an emptied textarea clears it. The deliberate
+  opposite of `media`, for the stated reason: the field is on the form and
+  rendered with its stored value, so "empty" is something the author saw.
+- **The restore `id` is the page's, never the form's** — `revisionForm.ts`:
+  *"nothing a client sends may decide which row gets written."*
+
+This is the class CLAUDE.md's backend section already records three times
+(`load_mode`, `implements`, `note` each blanked authored data through a
+restore path) with the verdict: all three caught in review, none by the suite.
+
+### Verification
+
+Six mutations, each caught by exactly the one test written for it, restore
+confirmed by re-running rather than grepping: `assertAdmin` dropped from one
+action (and the failure NAMES that action); the allowlist made to fail open on
+an empty `ADMIN_USER_IDS`; `implements` coerced to 1; `is_unilateral` read by
+string comparison; `media` admitted to the body; `note` dropped from it; the
+restore id taken from the form; and `revisionFrom` loosened to accept NaN.
+
+Admin suite: 3 files and 13 tests before, 5 files and 49 after.
+
+**Environment/production guard behaviour was already covered** and was
+deliberately not duplicated — `apiConfig.test.ts` exercises both the
+development fallback and the production refusal when `NEXT_PUBLIC_API_URL` is
+unset, and `environmentBadge.test.ts` covers the classification that stops an
+operator editing production believing they are on staging.
+
+### What this does not do
+
+**No component or render tests.** `vitest.config.mts` is deliberately node-only
+and its comment says why: *"the console's render path has not earned component
+tests — no defect has lived there — and a jsdom setup nobody needs yet is
+maintenance rather than safety."* That argument still holds; the defects this
+console has actually had were in classification and in write payloads, and
+both are now covered. Adding jsdom belongs to the first render-path bug, not
+to this ticket.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

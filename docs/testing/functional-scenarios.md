@@ -22708,3 +22708,53 @@ exit animation anywhere, deliberately.
   tests assert the CSS says so; only DevTools → Animations at 10% playback shows
   that it does. Same for "scrim and dialog start together" — a CSS duration
   match is not proof of a synchronised start on screen.
+
+## Admin console — content write paths (N170 / #547)
+
+`apps/admin` publishes content that reaches athletes immediately. These are
+the scenarios the unit suite now covers; a functional run should confirm them
+against a real API rather than a mocked one.
+
+### Happy path
+
+- **Create, edit and publish a technique**, then the same for an exercise: the
+  row appears in the list, the detail page shows it, and publishing makes it
+  visible to a client.
+- **Restore a revision** from the history panel: the restored values are the
+  ones the chosen revision held, and the row's authored fields are intact
+  afterwards — specifically `load_mode`, `implements` and `note`, the three
+  columns a restore path has silently blanked before.
+
+### Edge cases and errors
+
+- **A save the API rejects** (duplicate name): the console shows the API's own
+  reason, and the form still holds everything that was typed. React 19 resets
+  a form after its action, so a rejected save that did not hand the submission
+  back would erase a paragraph of prose along with the error.
+- **The same failure twice** re-announces to a screen reader rather than going
+  silent on the second identical message.
+- **An unreachable API** says so, rather than blaming the payload.
+- **A restore with no revision selected** writes nothing — and in particular
+  does not send the literal path segment `NaN` and surface the resulting 404
+  as a meaningless error.
+- **An edit does not clear media.** Attach media to an exercise via a deploy
+  or another path, then edit and save from the console: the media survives.
+
+### Auth and security
+
+- **A server action is its own POST endpoint.** Signed out, and signed in as
+  an ordinary (non-allowlisted) athlete, invoke a content action directly —
+  bypassing the page entirely. **Pass:** nothing is written and nothing is
+  revalidated. **Fail:** anything reaches the API. The layout gating the page
+  does not protect the action.
+- **An empty `ADMIN_USER_IDS` admits nobody**, rather than admitting everyone
+  — the misconfiguration that fails open in a fresh environment.
+- **The restore id cannot be redirected by the client**: a submitted `id`
+  field must not change which row a restore writes to.
+
+### Needs a device / a real environment
+
+- **The environment badge against a real production API** — that it says
+  Production when pointed at production. A badge that classifies wrongly is
+  worse than none: it is a wrong answer to a question the operator has stopped
+  asking.
