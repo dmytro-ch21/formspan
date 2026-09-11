@@ -23,6 +23,7 @@ import {
   RECORD_BASIS,
   RECORD_LABEL,
   pendingSuggestableIndices,
+  type SuggestableIndices,
   pickImage,
   replaceSets,
   setExerciseUnit,
@@ -425,7 +426,11 @@ export default function SessionPage({
    * when the early sets hold fresh real data.
    */
   const applySuggestion = useCallback(
-    (indices: number[], weightKg: number | null, reps: number | null) => {
+    (
+      indices: SuggestableIndices,
+      weightKg: number | null,
+      reps: number | null,
+    ) => {
       const next = sets.map((s, i) =>
         indices.includes(i)
           ? {
@@ -776,8 +781,15 @@ function ExerciseBlock({
   onSwap: (exerciseID: string) => void;
   swapping: boolean;
   suggestion: Suggestion | undefined;
+  /**
+   * N555/#1032 — `SuggestableIndices`, not `number[]`, and that is the guard
+   * rather than a preference. Only `pendingSuggestableIndices` produces this
+   * type, so re-inlining the old `set_type !== "warmup"` filter here is a
+   * compile error instead of a silent return of the #753 defect. See the type's
+   * own doc comment in `src/lib/api.ts` for what was measured.
+   */
   onApplySuggestion: (
-    indices: number[],
+    indices: SuggestableIndices,
     weightKg: number | null,
     reps: number | null,
   ) => void;

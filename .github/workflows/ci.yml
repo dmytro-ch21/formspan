@@ -580,7 +580,16 @@ jobs:
       # `--max-warnings`) so a ratchet failure reads distinctly from a plain
       # ESLint error in CI logs. Not a new job: EXPECTED_CHECK_RUNS in
       # scripts/check-ci-checks.py is unaffected.
-      - name: Lint ratchet
+      #
+      # N555/#1032 widened it to apps/mobile + apps/web + apps/admin, so THIS
+      # STEP CAN FAIL FOR A WARNING IN WEB OR ADMIN even though the check run is
+      # named "Mobile (Expo)" — the step name says so to save the next person
+      # that confusion. It stays in this job on purpose: the job's
+      # `pnpm install --frozen-lockfile` is unfiltered, so all three apps'
+      # `node_modules/.bin/eslint` exist here (the script shells out to each app's
+      # own local binary), and a dedicated job would move EXPECTED_CHECK_RUNS off
+      # 8 for a check that adds ~12s to a job already doing a 43s mobile lint.
+      - name: Lint ratchet (mobile + web + admin)
         run: pnpm run check:lint-ratchet
 
       - name: Typecheck

@@ -1087,6 +1087,57 @@ export function sessionVolume(sets: LoggedSet[]): {
 }
 
 /**
+ * Set indices a progression suggestion is allowed to be written into — and the
+ * only way to obtain one is `pendingSuggestableIndices` below.
+ *
+ * N555/#1032, and it exists because of a gap measured on N551's own work rather
+ * than a style preference. N551 extracted `pendingSuggestableIndices` out of the
+ * session page and gave it 19 tests. Reverting ONLY the page's call site back to
+ * the old inline `set_type !== "warmup"` filter — leaving function and tests
+ * untouched — reinstated the #753 defect and was caught by NOTHING: `tsc` exit 0,
+ * `pnpm --filter web lint` exit 0 (the orphaned import is a mere *warning*), 301
+ * web tests green. The RULE was testable; the WIRING was not.
+ *
+ * The brand makes the wiring a type error. `applySuggestion` and the
+ * `onApplySuggestion` prop in `apps/web/src/app/dashboard/sessions/[id]/page.tsx`
+ * both demand this type, and a bare `indices.filter(...)` produces `number[]`,
+ * which is not assignable to it. So the one-line revert now fails `tsc` — and it
+ * fails even if the now-unused import is deleted too, which is the residual the
+ * lint ratchet (`scripts/check-lint-ratchet.mjs`, the other half of N555) cannot
+ * see, because a deleted import leaves no warning behind.
+ *
+ * **Not mirrored in `apps/mobile/lib/sessions.ts`, deliberately.** Mobile's twin
+ * has no typed boundary to hang this on — its apply path is an inline `onPress`
+ * in `app/session/[id].tsx`, so a brand there would be a guard with no sink,
+ * i.e. one that cannot fail, which is the thing CLAUDE.md's "verify that a check
+ * can fail" section is about. Mobile is covered by the ratchet instead, and that
+ * was measured, not assumed: the same revert applied there fails
+ * `check:lint-ratchet` on the orphaned import (exit 1, UNCAPPED). If mobile's
+ * apply mapping is ever lifted into `lib/`, that extraction is the moment to
+ * give it this type as well.
+ *
+ * The brand is a phantom property — nothing ever reads it and nothing writes it.
+ * At runtime these values are ordinary arrays, which is why the 19 tests compare
+ * them with `toEqual([...])` unchanged.
+ *
+ * **The base is `number[]` and not `readonly number[]` on purpose**, which looks
+ * backwards for a value nothing should mutate and is worth a sentence so it does
+ * not get "fixed". A mutable base makes the intersection a subtype of the
+ * `number[]` that `.filter()` returns, so the assertion below is an ordinary
+ * narrowing. A readonly base overlaps in NEITHER direction — readonly is not
+ * assignable to mutable, and mutable lacks the brand — so TypeScript rejects the
+ * single assertion outright and demands `as unknown as`. Measured, not assumed:
+ * `error TS2352: Conversion of type 'number[]' to type 'ReadonlyBrand' may be a
+ * mistake because neither type sufficiently overlaps ... convert the expression
+ * to 'unknown' first`. Trading a narrowing cast for an `unknown` laundering cast
+ * would weaken the one line the whole guard rests on, to gain immutability that
+ * nothing here wants: the value is produced and consumed within a single render.
+ */
+export type SuggestableIndices = number[] & {
+  readonly __brand: "suggestable-set-indices";
+};
+
+/**
  * The set rows a progression suggestion may be written into.
  *
  * N551/#1013, item 7 — and the web half of a fix that shipped on mobile alone.
@@ -1114,10 +1165,10 @@ export function sessionVolume(sets: LoggedSet[]): {
 export function pendingSuggestableIndices(
   indices: readonly number[],
   sets: readonly Pick<LoggedSet, "completed" | "set_type">[],
-): number[] {
+): SuggestableIndices {
   return indices.filter(
     (i) => !sets[i]?.completed && (sets[i]?.set_type ?? "working") === "working",
-  );
+  ) as SuggestableIndices;
 }
 
 export type UnitSystemPref = "metric" | "imperial";
