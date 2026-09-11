@@ -1124,6 +1124,75 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
 - Leaving the session screen ends the rest — it belongs to the session on screen, not to the app.
 - The bar sits outside the scroll view, so scrolling the set list never hides it.
 
+### Continuity and cost (N558, #1047)
+
+**The log does not move (reserved space)**
+- On a live session with no timer showing, the log starts 64pt below the header.
+  Start a rest: **nothing in the log moves**, the bar arrives into the empty room.
+- The same holds for each of the other three taps that used to move it: skip/end
+  the rest, expand the bar to the card, minimise the card back to the bar.
+- Finish a session while a rest bar is still up: the report does not slide under
+  the bar. Dismiss the bar on the finished report: the 64pt room goes away
+  (acceptable, as the screen has already changed).
+- A finished session opened from history (no timer possible) has no reserved room.
+
+**Arrival, exit and swap**
+- The bar arrives from just above its slot with a short fade (≈180ms) and leaves
+  upward, faster (≈120ms).
+- Expand and minimise crossfade: the incoming form settles up from 97% scale. At
+  no point are there two fully opaque surfaces, and there is never an empty frame
+  between them.
+- Starting a new rest while a finished "Rest done" bar is up does NOT replay the
+  arrival. The bar stays and its fill refills.
+
+**The drain**
+- The bar empties continuously from right to left and reaches empty at the same
+  moment the digits read `0:00`.
+- **±15s** grows or shrinks the fill over ~180ms from where it was, then keeps
+  draining. It never snaps back to full.
+- **Pause** freezes the fill where it is; **resume** continues from that width.
+- In a guided run, each new rest step refills and drains on its own duration.
+- Background the app mid-rest for longer than the rest and return: the fill
+  shows the right width (or empty), not the width it had when it left.
+
+**Render cost (pinned in `components/__tests__/timerContinuity.test.tsx`)**
+- The component that owns `useCountdown` renders **zero** times across a running
+  rest. Only the timer surface re-renders on the 250ms tick, and the digits still
+  repaint on it.
+- ±15s, pause and resume DO re-render the owner (they change the countdown).
+
+**Reduce Motion**
+- **On**: the bar appears and disappears in place, expand/minimise cut without a
+  crossfade, and the fill STEPS with the digits instead of gliding. Nothing
+  teleports, because the room was already reserved.
+- Turning Reduce Motion **on** with the app open stops the glide on the next
+  repaint. Turning it **off** with the app open resumes gliding from the
+  current width. The arrival/swap builders only pick the change up after a
+  relaunch (Reanimated reads the setting at launch). That is known, not a bug.
+
+### Needs a device
+
+Jest runs no Yoga pass and no UI thread, so none of this can be observed by the
+suite. Run on a **release** build on a real phone, ideally the slowest supported:
+
+1. Mid-workout, scrolled into the log with a thumb resting near a set's tick,
+   start a rest (Rest button, and ticking a set with Auto rest timer on). **The
+   log does not move** and the row under the thumb stays under the thumb.
+2. Scroll the log while the bar arrives, and again while it leaves: the scroll
+   offset is not disturbed and the list does not jump.
+3. Watch a 90-second rest all the way down: the bar **drains** smoothly rather
+   than stepping four times a second, and it is still readable from across a gym.
+4. Adjust ±15s and pause/resume mid-rest: the fill continues from where it was
+   and does not snap.
+5. Minimise and expand several times in a row, including mid-animation: the swap
+   reads as one surface changing size, not two surfaces cutting, and never
+   leaves a ghost or a blank frame.
+6. At scroll top on a live session with no timer: judge whether the 64pt room
+   above the first exercise reads as intentional or as a gap. It is the one cost
+   of this fix.
+7. With Reduce Motion on in iOS Settings (relaunch the app): nothing slides or
+   crossfades, the fill steps, and the log still does not move.
+
 ---
 
 ## Offline workout execution (`apps/mobile`)

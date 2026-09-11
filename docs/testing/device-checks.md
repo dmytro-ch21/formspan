@@ -308,10 +308,12 @@ that is a finding worth filing.
 
 ## Sound, speech and haptics
 
-None of this can be heard or felt in jest, and `components/Countdown.tsx` and
-`components/Timer.tsx` both execute **zero statements** under the entire suite.
-The timing arithmetic is well covered; the wiring to the speaker is not covered
-at all.
+None of this can be heard or felt in jest. `components/Countdown.tsx` and
+`components/Timer.tsx` executed **zero statements** under the entire suite until
+N558 (#1047). `components/__tests__/timerContinuity.test.tsx` now renders them
+to pin render cost and how the drain is armed, with sounds and voice mocked out.
+The timing arithmetic is well covered; the wiring to the speaker is still not
+covered at all.
 
 ### D8 — The rest timer, with the phone silenced and music playing
 

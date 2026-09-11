@@ -13,7 +13,7 @@ import {
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { useCountdown } from '@/components/Countdown';
-import { TIMER_BAR_SPACE, TimerSurface } from '@/components/Timer';
+import { TimerSurface, timerSpaceFor } from '@/components/Timer';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { HRSessionReport } from '@/components/HRSessionReport';
 import { SessionCelebration } from '@/components/SessionCelebration';
@@ -1273,8 +1273,11 @@ export default function SessionScreen() {
   function bankRunningWork() {
     const t = timerState.timer;
     if (t?.kind !== 'work' || t.setIndex == null || !t.exerciseID) return;
-    if (timerState.remaining <= 0) return;
-    const elapsed = elapsedOf(t, timerState.remaining);
+    // Read on demand: the countdown no longer re-renders this screen per tick
+    // (N558) — see `RemainingClock`.
+    const remaining = timerState.clock.read();
+    if (remaining <= 0) return;
+    const elapsed = elapsedOf(t, remaining);
     // A banked ZERO is not a shorter set, it is an invalid row. `elapsedOf`
     // rounds, so starting a timer and tapping another one within half a second
     // banks 0 — and the server's CHECK is `seconds IS NULL OR seconds > 0`, so
@@ -1682,9 +1685,10 @@ export default function SessionScreen() {
       <KeyboardAwareScrollView
         contentContainerStyle={[
           styles.scroll,
-          // Only for the collapsed bar. The expanded card is modal by intent
-          // and overlays instead — see TIMER_BAR_SPACE.
-          timerState.timer && timerState.minimized ? { paddingTop: TIMER_BAR_SPACE } : null,
+          // Reserved for the whole live session, not added when a timer shows —
+          // so starting, ending, expanding or minimising a timer never moves
+          // the log under the thumb (N558). See `timerSpaceFor`.
+          { paddingTop: timerSpaceFor({ finished, timerShowing: timerState.timer != null }) },
         ]}
         // `keyboardShouldPersistTaps` and `automaticallyAdjustKeyboardInsets`
         // used to be restated here. They are the wrapper's defaults, and as of
@@ -2729,7 +2733,7 @@ export default function SessionScreen() {
       {timerState.timer && (
         <TimerSurface
           timer={timerState.timer}
-          remaining={timerState.remaining}
+          clock={timerState.clock}
           run={timerState.run}
           minimized={timerState.minimized}
           onMinimize={() => timerState.setMinimized(true)}
@@ -2762,8 +2766,9 @@ export default function SessionScreen() {
             // completion callback has already written the set and this button
             // is only dismissing the surface.
             const t = timerState.timer;
-            if (t?.kind === 'work' && t.setIndex != null && t.exerciseID && timerState.remaining > 0) {
-              recordTimedSet(t.setIndex, t.exerciseID, elapsedOf(t, timerState.remaining), false);
+            const remaining = timerState.clock.read();
+            if (t?.kind === 'work' && t.setIndex != null && t.exerciseID && remaining > 0) {
+              recordTimedSet(t.setIndex, t.exerciseID, elapsedOf(t, remaining), false);
             }
             timerState.stop();
           }}

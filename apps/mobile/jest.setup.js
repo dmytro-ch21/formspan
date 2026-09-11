@@ -342,6 +342,15 @@ jest.mock('react-native-reanimated', () => {
   const React = require('react');
   const { View } = require('react-native');
 
+  /** A layout-animation builder that remembers every call made on it. See N558 below. */
+  const layoutBuilder = (name, config) => {
+    const chain = { name, config };
+    for (const key of ['duration', 'delay', 'easing', 'reduceMotion', 'withInitialValues', 'withCallback']) {
+      chain[key] = (value) => layoutBuilder(name, { ...config, [key]: value });
+    }
+    return chain;
+  };
+
   /*
     Real piecewise-linear interpolation, not a stub. Mirrors Reanimated's own
     default extrapolation (EXTEND) by clamping to the first and last segment's
@@ -383,7 +392,11 @@ jest.mock('react-native-reanimated', () => {
     // The curve is carried as data rather than evaluated: nothing in jest
     // advances a clock, so no test can observe its shape, and returning a
     // describable object keeps a wrong call site visible.
-    Easing: { bezier: (...points) => ({ factory: () => (t) => t, points }) },
+    Easing: {
+      bezier: (...points) => ({ factory: () => (t) => t, points }),
+      // Identity, which is also what the real `Easing.linear` is.
+      linear: (t) => t,
+    },
     interpolate,
     // No frame clock in jest — see the note above. Both resolve to the value
     // the animation would come to rest at.
@@ -436,5 +449,39 @@ jest.mock('react-native-reanimated', () => {
     // the next render, which is as close to the real thing as a mock without
     // a frame clock can get.
     useAnimatedProps: (worklet) => worklet(),
+
+    /*
+      N558/#1047 grew it a third time, for `components/Timer.tsx`: the rest
+      timer's drain (`useAnimatedStyle` + `withSequence`) and its four layout
+      animations. Same rules as above — real where a test can observe it, and
+      no invented clock.
+
+      `withSequence` resolves to its LAST animation's destination, which is
+      what a sequence comes to rest at. `withTiming` is left exactly as it was
+      (returns its destination) so a test can `jest.spyOn` it and read the
+      config each drain was armed with — the duration, the curve and the
+      `reduceMotion` — which is the observable half of an animation jest cannot
+      run.
+
+      The layout-animation builders are RECORDERS, not no-ops: each chained
+      call returns a new builder carrying what it was told, so a test can read
+      `entering.config.reduceMotion` off the rendered view. A no-op builder
+      would let a missing `.reduceMotion(ReduceMotion.System)` pass silently —
+      the one property of these builders that is a rule rather than taste.
+      `LayoutAnimationConfig` renders its children and nothing else.
+    */
+    useAnimatedStyle: (worklet) => worklet(),
+    withSequence: (...animations) => animations[animations.length - 1],
+    cancelAnimation: () => {},
+    ReduceMotion: { System: 'system', Always: 'always', Never: 'never' },
+    LayoutAnimationConfig: ({ children }) => children,
+    FadeInDown: layoutBuilder('FadeInDown', {}),
+    FadeOutUp: layoutBuilder('FadeOutUp', {}),
+    FadeOut: layoutBuilder('FadeOut', {}),
+    // A constructor returning an object is how `new Keyframe(frames)` keeps the
+    // same recording chain as the preset builders.
+    Keyframe: function Keyframe(frames) {
+      return layoutBuilder('Keyframe', { frames });
+    },
   };
 });
