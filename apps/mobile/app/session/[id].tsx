@@ -113,6 +113,7 @@ import {
   saveLocalSets,
 } from '@/lib/sessionStore';
 import { groupKeys, rekeyCollapsed, summariseGroup, toggleGroup } from '@/lib/sessionCollapse';
+import { applySetsHandoff, handoffStillApplies, takeSetsHandoff } from '@/lib/collapseHandoff';
 import { ApiError, isPermanentRejection } from '@/lib/apiError';
 import * as Haptics from 'expo-haptics';
 import { report } from '@/lib/report';
@@ -747,6 +748,17 @@ export default function SessionScreen() {
         const folded = await readCollapsedGroups(userId, id).catch(() => []);
         collapsedHydratedFor.current = `${userId}:${id}`;
         setCollapsed(new Set(folded));
+      }
+      // F35/#999 — the exercise picker and photo identify write a swap or an
+      // append straight to SQLite, bypassing `commit`, and a swap RENAMES fold
+      // keys (see `groupKeys`). They leave the correspondence only they know,
+      // and it is applied here, AFTER hydration, so a fresh mount rekeys the
+      // stored keys as well. `handoffStillApplies` drops a handoff whose rows
+      // are no longer what SQLite holds: a correspondence about rows that have
+      // gone would be a guess, which is what N543 declined to make.
+      const handoff = takeSetsHandoff(userId, id);
+      if (handoff && handoffStillApplies(handoff, s.sets)) {
+        setCollapsed((prev) => applySetsHandoff(prev, handoff));
       }
       setSession(s);
       setSets(s.sets);

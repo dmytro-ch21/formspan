@@ -18,6 +18,7 @@ import {
 } from '@/lib/identifyApi';
 import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
 import { emptySet, swapExercise } from '@/lib/sessions';
+import { handoffForAppend, handoffForSwap, recordSetsHandoff } from '@/lib/collapseHandoff';
 import { readLocalSession, saveLocalSets } from '@/lib/sessionStore';
 import { fetchExercise, type Exercise } from '@/lib/exercises';
 import { request as requestSync } from '@/lib/sync';
@@ -263,6 +264,14 @@ export default function IdentifyMachineScreen() {
         ? swapExercise(session.sets, swap, exercise, fromLoadType)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
       await saveLocalSets(userId, id, next);
+      // F35/#999 — same handoff as the exercise picker's, for the same reason:
+      // this write bypasses the session screen's `commit`, and a swap renames
+      // its fold keys. Recorded only once the save has landed.
+      recordSetsHandoff(
+        userId,
+        id,
+        swapping ? handoffForSwap(session.sets, next) : handoffForAppend(session.sets, next),
+      );
       requestSync('exercise-added');
       router.back();
     } catch (err) {

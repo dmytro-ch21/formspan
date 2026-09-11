@@ -2,6 +2,7 @@ import {
   groupKeys,
   parseCollapsed,
   rekeyCollapsed,
+  rekeyCollapsedAcross,
   summariseGroup,
   toggleGroup,
 } from '../sessionCollapse';
@@ -342,5 +343,127 @@ describe('rekeyCollapsed — removing a block leaves every survivor as the athle
     const sets = circuit();
     const all = sets.map((_, i) => i);
     expect([...rekeyCollapsed(new Set(['squat#1']), sets, all)]).toEqual(['squat#1']);
+  });
+});
+
+/*
+  F35/#999 — a swap or an append written OFF the session screen.
+
+  The exercise picker and photo identify write straight to SQLite, so the screen
+  only sees the result on focus. A swap changes `exercise_id`, which the removal
+  and reorder cases above never do — so each case below first asserts what
+  TODAY's code does (carry `collapsed` unchanged, because nothing rebuilt it) and
+  shows it is wrong, then asserts the rekeyed answer. A test that only asserted
+  the fix would stay green if the bug came back.
+*/
+describe('rekeyCollapsedAcross — a swap or an append written off-screen (F35/#999)', () => {
+  const foldedAfter = (after: LoggedSet[], collapsed: ReadonlySet<string>): boolean[] =>
+    groupKeys(groupSets(after)).map((k) => collapsed.has(k));
+  /** What `swapExercise` does to exercise ids: EVERY row of `from` becomes `to`. */
+  const swapAll = (sets: LoggedSet[], from: string, to: string): LoggedSet[] =>
+    sets.map((s) => (s.exercise_id === from ? { ...s, exercise_id: to } : s));
+  const identity = (rows: readonly unknown[]): number[] => rows.map((_, i) => i);
+
+  it('a swapped block keeps the fold the athlete gave it, under its new name', () => {
+    const before = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'squat' }),
+    ];
+    const collapsed = new Set(['squat#1']);
+    const after = swapAll(before, 'squat', 'deadlift');
+    expect(groupKeys(groupSets(after))).toEqual(['deadlift#0', 'bench#0', 'deadlift#1']);
+
+    // Today: `squat#1` names nothing any more, so the fold is silently dropped.
+    expect(foldedAfter(after, collapsed)).toEqual([false, false, false]);
+
+    const out = rekeyCollapsedAcross(collapsed, before, after, identity(after));
+    expect(foldedAfter(after, out)).toEqual([false, false, true]);
+  });
+
+  it("a swap that welds a block to a folded neighbour does not hand it the neighbour's fold", () => {
+    // #999's merge case, constructed: squat / bench / deadlift, only the deadlift
+    // folded. Swap the bench for a deadlift, and the two deadlifts are adjacent,
+    // so `groupSets` welds them into one block.
+    const before = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'deadlift' }),
+    ];
+    const collapsed = new Set(['deadlift#0']);
+    const after = swapAll(before, 'bench', 'deadlift');
+    expect(groupKeys(groupSets(after))).toEqual(['squat#0', 'deadlift#0']);
+
+    // Today: the stale `deadlift#0` now names the WELDED block, so the swapped-in
+    // half is folded shut without the athlete ever tapping Done on it.
+    expect(foldedAfter(after, collapsed)).toEqual([false, true]);
+
+    const out = rekeyCollapsedAcross(collapsed, before, after, identity(after));
+    expect(foldedAfter(after, out)).toEqual([false, false]);
+  });
+
+  it('a weld whose halves were BOTH folded stays folded', () => {
+    const before = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'bench' }),
+      set({ exercise_id: 'deadlift' }),
+    ];
+    const collapsed = new Set(['bench#0', 'deadlift#0']);
+    const after = swapAll(before, 'bench', 'deadlift');
+    const out = rekeyCollapsedAcross(collapsed, before, after, identity(after));
+    expect(foldedAfter(after, out)).toEqual([false, true]);
+  });
+
+  it('a swap renames later blocks of the exercise swapped TO, and the fold stays on its own block', () => {
+    // squat / deadlift / bench, the BENCH folded. Swap the squat for a bench and
+    // a new bench now precedes it: the athlete's block is renamed `bench#0` →
+    // `bench#1`, and `bench#0` becomes the block they never touched.
+    const before = [
+      set({ exercise_id: 'squat' }),
+      set({ exercise_id: 'deadlift' }),
+      set({ exercise_id: 'bench' }),
+    ];
+    const collapsed = new Set(['bench#0']);
+    const after = swapAll(before, 'squat', 'bench');
+    expect(groupKeys(groupSets(after))).toEqual(['bench#0', 'deadlift#0', 'bench#1']);
+
+    // Today: the fold jumps to the swapped-in bench at the top.
+    expect(foldedAfter(after, collapsed)).toEqual([true, false, false]);
+
+    const out = rekeyCollapsedAcross(collapsed, before, after, identity(after));
+    expect(foldedAfter(after, out)).toEqual([false, false, true]);
+  });
+
+  it('an exercise appended into a folded last block opens it, so the new set is not hidden', () => {
+    // squat / bench with the bench folded; add another bench. It welds into the
+    // folded block, which today renders it hidden under a header the athlete
+    // closed before the set existed.
+    const before = [set({ exercise_id: 'squat' }), set({ exercise_id: 'bench' })];
+    const collapsed = new Set(['bench#0']);
+    const after = [...before, set({ exercise_id: 'bench' })];
+    expect(groupKeys(groupSets(after))).toEqual(['squat#0', 'bench#0']);
+
+    expect(foldedAfter(after, collapsed)).toEqual([false, true]);
+
+    const out = rekeyCollapsedAcross(collapsed, before, after, [0, 1, null]);
+    expect(foldedAfter(after, out)).toEqual([false, false]);
+  });
+
+  it('appending a different exercise leaves every existing fold where it was', () => {
+    const before = [set({ exercise_id: 'squat' }), set({ exercise_id: 'bench' })];
+    const after = [...before, set({ exercise_id: 'deadlift' })];
+    const out = rekeyCollapsedAcross(new Set(['squat#0']), before, after, [0, 1, null]);
+    expect(foldedAfter(after, out)).toEqual([true, false, false]);
+  });
+
+  it('a source that names no row reads as never folded, rather than borrowing a neighbour', () => {
+    // This pins the OUTCOME, not the range check: an out-of-range index would
+    // also land on `undefined` through the lookups and read as unfolded. The
+    // check is kept because relying on that chain is the kind of thing a later
+    // refactor breaks without noticing; the `[]` case is the `null` branch.
+    const before = [set({ exercise_id: 'squat' })];
+    const after = [set({ exercise_id: 'squat' })];
+    expect([...rekeyCollapsedAcross(new Set(['squat#0']), before, after, [7])]).toEqual([]);
+    expect([...rekeyCollapsedAcross(new Set(['squat#0']), before, after, [])]).toEqual([]);
   });
 });
