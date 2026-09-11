@@ -43589,7 +43589,7 @@ about the *sequence* our own code performs, which any HTTP server can verify.
 - `docs/testing/functional-scenarios.md` has the N12 entry, including the
   device-check steps above as `NEEDS HUMAN EVIDENCE`.
 
-### 2026-08-26 — N13: the feed window is now read off the response, not hardcoded in three places (#379)
+## 2026-08-26 — N13: the feed window is now read off the response, not hardcoded in three places (#379)
 
 The 3-day feed window (`feed.FeedWindow`) existed as one Go constant and
 three independent English copies of "3 days": the OpenAPI description for
@@ -43874,7 +43874,7 @@ had cited 186/2966, the pre-rebase counts.
   giving Swap/Remove their own icon-only compact row — but that would be a
   second pass with its own device evidence, not folded in here.
 
-### 2026-08-26 — N205: uploaded avatars now reach the friends list and the feed (#652, closing #378)
+## 2026-08-26 — N205: uploaded avatars now reach the friends list and the feed (#652, closing #378)
 
 N12 built avatar upload/replace/remove, the monogram fallback, server-side
 resize and the admin takedown, but deliberately left the friends list and the
@@ -46003,7 +46003,7 @@ already read as "judge for yourself" rather than "resolve before merge". If
 that turns out to be too soft, the same file:line requirement generalizes
 to `[suggestion]` findings that name a repo convention.
 
-### 2026-08-27 — N428: a fresh install (or reinstall) backfills the food log too (#686)
+## 2026-08-27 — N428: a fresh install (or reinstall) backfills the food log too (#686)
 
 **The mistake that surfaced this**: mid-session, a device uninstall was run
 against the user's own phone to rule out a stale-binary theory during N426
@@ -46103,7 +46103,7 @@ had never had to distinguish the two before.
 device reinstall + sign-in showing the food log repopulate — has not been
 run yet as of this entry; that is the remaining step before this closes.
 
-### The weight trend refusal's goal figure now rides the same payload as its reason (N103, #475)
+## The weight trend refusal's goal figure now rides the same payload as its reason (N103, #475)
 
 On `apps/mobile/app/goals/trend.tsx`, the refusal sentence — *"Not enough yet to
 say when you'll reach X kg"*, or N101's server-authored *"This plan never
@@ -46152,7 +46152,7 @@ rendering a sentence where the AC requires silence) rather than a compile
 error, restored the fix, and reran to confirm green again rather than trusting
 the restore by inspection.
 
-### Every mobile route-test file moved out from under the route root (N104, #477)
+## Every mobile route-test file moved out from under the route root (N104, #477)
 
 Expo Router's `require.context` (`expo-router/_ctx.ios.js`) pulls in **everything**
 under the app root except `+api`/`+html`/`+middleware`, and `apps/mobile/app/__tests__/`
@@ -47262,7 +47262,7 @@ real fix depends on (a day-tied `key` genuinely resets `Ring`'s animation
 mid-transition), not the wiring at the call site. The ticket's own `NEEDS
 HUMAN EVIDENCE` device check is still the closure for that gap, unchanged.
 
-### 2026-08-28 — W16/#704: a tracker tap logged on a browsed day leaked onto every other day
+## 2026-08-28 — W16/#704: a tracker tap logged on a browsed day leaked onto every other day
 
 The user's report: *"the water intake and coffee if we change in one place
 any day we modify it for all days, i change yesterday that i drank 10 cups
@@ -48443,7 +48443,7 @@ guided runner, N442 is Plan/calendar scheduling. Per the mobile-first rule,
 neither gap makes the product phone-impossible today: a plan authored on web
 is fully usable data, just not yet runnable from the mat.
 
-### 2026-08-28 — N441: the class-plan mobile guided runner (#728)
+## 2026-08-28 — N441: the class-plan mobile guided runner (#728)
 
 Part 3 of 4 of the class-plan workstream (N439 backend → N440 web authoring →
 **N441 mobile guided runner** → N442 Plan/calendar scheduling), and the piece
@@ -51546,7 +51546,7 @@ typecheck:mobile`, `lint:mobile`, and the full mobile and backend suites all
 green after the fixes; backend `bjj` package green against a freshly
 migrated database.
 
-### 2026-09-02 — N464: web running analytics — route map, elevation profile, pace zones, comparison (#775)
+## 2026-09-02 — N464: web running analytics — route map, elevation profile, pace zones, comparison (#775)
 
 The desk-depth running surface, alongside `dashboard/records` and
 `dashboard/sessions`: `apps/web/src/app/dashboard/running/` — a list of runs
@@ -52042,7 +52042,7 @@ without the user's sign-off on scope would be the coordinator-side version of
 the "dispatch a fourth" failure the ticket-limit rule exists to prevent.
 Worth a ticket of its own.
 
-### 2026-09-02 — N471: `checkin/[date].tsx`'s `load()` gets a "latest call wins" guard (#800)
+## 2026-09-02 — N471: `checkin/[date].tsx`'s `load()` gets a "latest call wins" guard (#800)
 
 Fixed the out-of-order-response race `frontend-reviewer` flagged as a
 [suggestion] on #519 (N125) and deliberately left out of that PR to stay in
@@ -53689,7 +53689,7 @@ ticket's own scope cut:**
   the normal one — nothing in this environment can drive the actual mobile
   picker or confirm the suggestion card's copy reads right on a phone.
 
-### 2026-09-03 — N111: the derivation converts g/kg and kcal/kg for an imperial athlete, closing the gap N105 deliberately left (#494)
+## 2026-09-03 — N111: the derivation converts g/kg and kcal/kg for an imperial athlete, closing the gap N105 deliberately left (#494)
 
 **The decision, since the ticket required one recorded either way: convert.**
 N105 (units-system infrastructure) converted every weight an athlete *owns* —
@@ -55088,7 +55088,7 @@ file both clean. No test referenced the removed bottom button's testID, so
 nothing else needed updating. No functional-scenario changes — this is a
 navigation-affordance fix, not new behavior.
 
-### 2026-09-04 — N483/#833: `session_metrics` records which HRmax produced its zones
+## 2026-09-04 — N483/#833: `session_metrics` records which HRmax produced its zones
 
 Follow-up from **N476/#821** (`backend/internal/modules/biometric`, the
 storage half of the HealthKit/Health Connect integration), flagged by
@@ -55876,7 +55876,7 @@ class reads correctly end-to-end (elapsed Stat, history row, HR window) —
 this fix is unit-tested at the screen's wiring boundary only, same class of
 gap N434's own original fix carried on the strength side.
 
-### 2026-09-04 — N485/#837: one `biometric.ts`, not two — and it fixes a live break
+## 2026-09-04 — N485/#837: one `biometric.ts`, not two — and it fixes a live break
 
 Follow-up from **N477/#822** (iOS, merged `22c7b864`) and **N478/#823**
 (Android, merged `558a3856`), flagged by N478's own implementer during that
@@ -58561,7 +58561,7 @@ becomes a real reader of this column. Not fixed here because a correct fix
 needs an actual ownership signal `workout.ItemProtocols` doesn't currently
 return, not a one-line change; recorded here so it isn't forgotten.
 
-### 2026-09-06 — F23/#523: retiring a technique never deletes it, and the two foreign keys that disagreed about what a delete means now agree
+## 2026-09-06 — F23/#523: retiring a technique never deletes it, and the two foreign keys that disagreed about what a delete means now agree
 
 Found while diagnosing #511 (N122): two foreign keys pointed at
 `techniques(id)` and disagreed about what deleting a row meant —
@@ -68275,7 +68275,7 @@ told **no**, three times, in the file that owns the type. Found by
 `frontend-reviewer`; worth recording because the class is general: **the
 comments a change falsifies are rarely the ones it edits.**
 
-### 2026-09-09 — H22: the interface bar becomes the repo's, and three audits say where it stands
+## 2026-09-09 — H22: the interface bar becomes the repo's, and three audits say where it stands
 
 **What.** Eight skills from [emilkowalski/skills](https://github.com/emilkowalski/skills)
 (MIT, upstream `d23d7f8`) are vendored into `.claude/skills/`: `apple-design`,
@@ -69660,7 +69660,7 @@ CLAUDE.md records the standing gap as *"0 of 40 web/admin pages have a test
 that renders them"*. This is the first, and is deliberately two components and
 not a snapshot of the console.
 
-### 2026-09-10 — H23: the motion gate told the agent to do something agents cannot do
+## 2026-09-10 — H23: the motion gate told the agent to do something agents cannot do
 
 **What.** `/pre-merge`'s step 4, added by H22 the same day, instructed the agent
 to *"invoke the `review-animations` skill"*. An agent cannot: the skill is
@@ -69699,7 +69699,7 @@ step 4 and reports the other three as green still produces a PR that looks
 fully reviewed — the gate is a convention, and the only thing making it real is
 that it is now written as an action somebody can actually take.
 
-### 2026-09-10 — F41: Reduce Motion reaches the rest of the app, and the splash stops arriving backwards
+## 2026-09-10 — F41: Reduce Motion reaches the rest of the app, and the splash stops arriving backwards
 
 **What.** `lib/useReducedMotion.ts` went from one consumer to four. The root
 `Stack` cross-fades instead of sliding when Reduce Motion is on
@@ -69847,7 +69847,7 @@ can. It makes the write impossible to COMMIT unnoticed, which is the reachable
 half. The skill's instruction to check `git status` after running that command
 is still the earlier and cheaper catch.
 
-### 2026-09-11 — F44: the reorder drag gets its three haptic moments, and one clock
+## 2026-09-11 — F44: the reorder drag gets its three haptic moments, and one clock
 
 **What.** Press-and-hold to reorder a food entry (N553, #1029) shipped
 completely silent. All three haptic moments now exist, in `lib/useEntryDrag.ts`
@@ -70803,7 +70803,7 @@ Deliberately not in this slice, per the ticket's own "one domain per PR":
   it is filtered by every read of that table, so listing it would show the
   athlete a row they already deleted.
 
-### 2026-09-11 — F45: the velocity the app already measured, and an edge that gives
+## 2026-09-11 — F45: the velocity the app already measured, and an edge that gives (#1044)
 
 **What.** Both drag surfaces — swipe-to-delete and the food-entry lift — now
 hand their release velocity to the settle spring, and `SwipeToDelete`'s two
@@ -71977,6 +71977,60 @@ comment keeps the reasoning it carried.
 **Reachable on a phone**: this is web's copy of a job the phone already does —
 target history and typed targets have lived on the phone since N86, which is
 also where these rails came from. Nothing here is web-only.
+
+## 2026-09-11 — H26: sixteen entries were subsections of their neighbours, and the shape check now reads heading levels (#1097)
+
+F45 (#1088) landed as `### 2026-09-11 — F45: …`. Every entry here is a `## `
+heading, so at `###` it parsed as a **subsection of N167**, the entry above it —
+any outline, and anyone navigating by heading, filed F45's content under a
+different ticket. `check:doc-merge` was green: it asserted the gap-list heading
+and fence balance, and nothing read heading levels.
+
+### It was not one heading
+
+A fence-aware scan of the whole file on `e240c094` found **16** dated entry
+headings at `###`: N13, N205, N428, W16, N441, N464, N471, N111, N483, N485,
+F23, H22, H23, F41, F44 and F45, the oldest from 2026-08-26. All sixteen are
+standalone entries with their own ticket id; **none** is a genuine dated
+subsection. All sixteen are `## ` now, and F45's heading gained its issue ref
+`(#1044)`, matching its 2026-09-11 neighbours. No line numbers moved.
+
+Two more had to move with them. N428 was followed by two **undated** `###`
+entries, N103 (#475) and N104 (#477), which sat under N109. Promoting N428 alone
+would have re-parented them under N428 — trading one wrong parent for another —
+so they are `## ` too. W16's `### \`frontend-reviewer\` finding` is a real
+subsection of W16, and promoting W16 is what put it back under its own entry.
+
+### The check, and why it was added rather than left as a habit
+
+`history_problems` now refuses any heading outside a fence whose text starts
+with a `YYYY-MM-DD` date and whose level is not 2 — `#` as well as `###`+. The
+date is what makes a heading an entry here, and a corpus of 70,000 lines holds
+no dated subsection, so the rule has nothing to false-positive on today. A
+fenced example, and an undated subsection that merely *contains* a date, are
+not findings; `--self-test` holds both, next to the two red cases.
+
+Verified in both directions, against real input rather than only the fixtures:
+
+- the fixed file reports nothing;
+- the fixed file with **only F45 reverted** to `###` reports exactly one finding,
+  at **line 70806** — the defect this ticket was filed for;
+- `e240c094`'s file reports all 16, first at 43592;
+- with the guard disabled (`!= 2` → `!= len(...)`), `--self-test` exits 1 on
+  two assertion failures — not a crash — and after restoring, re-running
+  `--check` is green again.
+
+### What is left
+
+- **Undated entry headings at `###` are still invisible to it.** N103 and N104
+  were found only because they sat next to a dated one. Without a date there is
+  no reliable way to tell an entry from a subsection that cites a ticket
+  (`### \`frontend-reviewer\` finding`), so this was left rather than guessed at.
+- The id collided once in flight: H25 was free at the scan and #1096 took it
+  minutes later, while this ticket's first create call had failed on an
+  exhausted GraphQL rate limit and the rest of the claim script ran on past it
+  (the retry went through REST). The claim convention is right that an issue exists the moment
+  it is created; the window between scan and create is still a window.
 
 ## Open items / known gaps as of this entry
 
