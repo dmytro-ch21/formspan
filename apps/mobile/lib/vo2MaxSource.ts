@@ -47,7 +47,8 @@
  * device" is a true statement the athlete can act on; a missing row is not.
  */
 
-import { shiftDate } from './anthropometry';
+import { daysBetween, shiftDate } from './anthropometry';
+import { dayString, shortDate } from './calendar';
 import { RANGE_DAYS, RANGES, type TrendEmpty, type TrendRangeKey } from './trendSeries';
 
 export type HealthSource = 'healthkit' | 'health_connect';
@@ -173,23 +174,145 @@ export function healthSyncSettingLabel(source: HealthSource): string {
 }
 
 /**
+ * -----------------------------------------------------------------------
+ * N524 (#939) — an empty VO₂max chart explains what WRITES a reading,
+ * rather than counting how many are missing
+ * -----------------------------------------------------------------------
+ *
+ * The `too-few` sentence was "1 of 2 readings needed for a trend line." True,
+ * and it read as "keep waiting, it is filling up". The athlete who reported it
+ * had exactly one VO₂max sample ever (2026-08-21), heart rate from a strap via
+ * its vendor's app rather than a watch, and a sync pass that demonstrably ran
+ * with the permission granted and got zero rows back. For that hardware
+ * nothing done in this app will move the number, and the screen had no way to
+ * say so — the causal half W16 had given the `none` sentence vanished the
+ * moment one reading existed.
+ *
+ * ## Why the copy explains the MECHANISM and never a verdict on the device
+ *
+ * HealthKit does not tell an app which devices can write VO₂max, and it
+ * answers a declined grant with `[]` exactly as it answers an empty store
+ * (`lib/healthkit.ts`; the same reason `hrPathDetail`'s `health_quiet`
+ * sentence states an observation and an action rather than a cause). So
+ * "your device will never record VO₂max" would be an inference presented as
+ * a fact — a new wrong-on-screen defect in the ticket that exists to end one.
+ *
+ * What the app DOES know, and says: it cannot measure VO₂max itself; it only
+ * reads what a device has written to the store; which kind of device writes
+ * one; that many wearables and chest straps never do, and that with those no
+ * new reading will arrive (a statement about that class, true by definition,
+ * not about this athlete); and, for a device that should write one, the
+ * permission to check. The athlete supplies the one fact the app cannot know
+ * — what they wear — and draws the conclusion themselves.
+ *
+ * ## Vocabulary shared with `lib/hrPath.ts`
+ *
+ * The store is named by `healthSourceLabel`, the same helper `hrPathName`
+ * uses for "From Apple Health afterwards", and the sentence follows
+ * `hrPathDetail`'s shape — VOLA "reads … from {store} once {a device} has
+ * written it there", then "check VOLA can read … from {store}". `hrPath.ts`
+ * is not imported here: it imports `healthSourceLabel` from this file, and a
+ * cycle between the two would put Metro's "Require cycle" warning on every
+ * dev launch. No brand but Apple Watch is named, and Apple Watch only on the
+ * HealthKit source, where it is the device that writes the metric — the
+ * N552 rule against a reporter's own vendor creeping into copy holds.
+ */
+
+/** What the store calls VO₂max on its permission screen — "Cardio Fitness" in
+ *  iOS Settings → Health → Data Access (the name the reporter of #939 found the
+ *  grant under). Health Connect lists it as VO2 max. */
+function vo2MaxPermissionName(source: HealthSource): string {
+  return source === 'healthkit' ? 'Cardio Fitness' : 'VO2max';
+}
+
+/**
+ * The half of every no-trend sentence that says where a reading comes from.
+ * Source-specific because the device that writes it differs: an Apple Watch
+ * cannot write to Health Connect, which is how W16's first copy named the
+ * wrong vendor on Android.
+ */
+export function vo2MaxReadingOrigin(source: HealthSource | null): string {
+  if (source === null) {
+    return (
+      "VOLA can't measure VO2max itself — it only shows readings a device has written to a health app, " +
+      'and this device has none VOLA can read from.'
+    );
+  }
+  const label = healthSourceLabel(source);
+  const writers =
+    source === 'healthkit'
+      ? 'Apple Watch estimates it on outdoor walks, runs and hikes.'
+      : 'Some watches estimate it and write it there.';
+  return (
+    `VOLA can't measure VO2max itself — it reads it from ${label} once a device has written it there. ` +
+    `${writers} Many other wearables and chest straps never write one, and with those no new reading will ` +
+    `arrive. If yours does estimate VO2max, check VOLA can read ${vo2MaxPermissionName(source)} from ${label}.`
+  );
+}
+
+/**
+ * The newest reading's LOCAL calendar day, or `null` for none. Same
+ * `measured_at` → day mapping `useVo2MaxTrend` hands `buildTrend`, and a
+ * future-dated reading is ignored for the same reason `buildTrend` drops it: a
+ * device with a wrong clock would otherwise make an old account look fresh.
+ */
+export function latestReadingOn(samples: readonly { measured_at: string }[], today: string): string | null {
+  let latest: string | null = null;
+  for (const s of samples) {
+    const at = new Date(s.measured_at);
+    if (Number.isNaN(at.getTime())) continue;
+    const on = dayString(at);
+    if (on > today) continue;
+    if (latest === null || on > latest) latest = on;
+  }
+  return latest;
+}
+
+/**
+ * "from 21 Aug, 3 weeks ago" — the date AND the age, because the ticket's
+ * second criterion is that one reading from yesterday and one from three weeks
+ * ago must not read alike, and a bare date makes the athlete do the arithmetic.
+ * The year is added only when it is not this year's, so a reading from last
+ * August cannot pass for this August's.
+ */
+export function readingAgePhrase(on: string, today: string): string {
+  const days = daysBetween(on, today);
+  if (days <= 0) return 'from today';
+  if (days === 1) return 'from yesterday';
+  const year = on.slice(0, 4);
+  const date = year === today.slice(0, 4) ? shortDate(on) : `${shortDate(on)} ${year}`;
+  let ago: string;
+  if (days < 14) ago = `${days} days ago`;
+  else if (days < 60) ago = `${Math.floor(days / 7)} weeks ago`;
+  else if (days < 365) ago = `${Math.floor(days / 30)} months ago`;
+  else ago = 'over a year ago';
+  return `from ${date}, ${ago}`;
+}
+
+/** The newest reading and today, so a no-trend sentence can say how old it is.
+ *  `on: null` (or omitting it) drops the age rather than inventing one. */
+export type LatestReading = { on: string | null; today: string };
+
+/**
  * The sentence for an empty chart, in the VO₂max screen's own voice.
  *
  * The read-only sibling of `emptyCopy` in `components/TrendCard.tsx`. Not
  * reused from there: that function's `none` case reads "Record your X and the
  * trend appears here", which presumes the athlete logs the metric by hand.
- * Nobody records a VO₂max — it is read from a device — so the honest sentence
- * names WHAT to do about it rather than an action this screen has no control
- * to offer.
+ * Nobody records a VO₂max — it is read from a device.
+ *
+ * **`none` and `too-few` carry `vo2MaxReadingOrigin` (N524).** Both used to
+ * invite a wait — "No VO2max reading yet", "1 of 2 readings needed" — and for
+ * an athlete whose wearable never writes the metric, waiting is the one thing
+ * that cannot help. See the block comment above for why the sentence explains
+ * the mechanism rather than judging the device.
  *
  * **`hasWiderRange` is F34's (#955) half of it.** The `none-in-range`
  * sentence ended "Try a wider one," which was true while `All` was on the
- * chips and is not once `1Y` is the widest: an athlete whose only readings
- * are older than a year would be told to widen a range that cannot widen —
- * the same "screen promises what it cannot deliver" defect this ticket
- * closes, one sentence down. So the invitation is only extended when a wider
- * preset actually exists, and otherwise the screen says where its own edge
- * is.
+ * chips and is not once `1Y` is the widest. So the invitation is only extended
+ * when a wider preset actually exists, and otherwise the screen says where its
+ * own edge is. `none-in-range` does NOT get the origin sentence: readings
+ * exist, and the true next step is the range, not the device.
  *
  * Lives here rather than in the screen so it is reachable by a test: no test
  * in this repo renders either VO₂max screen (see this file's header), which
@@ -199,25 +322,80 @@ export function vo2MaxEmptyCopy(
   empty: TrendEmpty,
   source: HealthSource | null,
   hasWiderRange: boolean,
+  latest: LatestReading | null = null,
 ): string {
+  const age = latest?.on ? readingAgePhrase(latest.on, latest.today) : null;
   switch (empty.kind) {
     case 'unavailable':
       return "Couldn't load your VO2max trend. It'll be here when the connection is back.";
     case 'none':
-      // W16/#945 — names the source THIS device reads from; "Apple Watch …
-      // Health" on an Android phone was a sentence about somebody else's device.
-      return `No VO2max reading yet. A watch or another device that estimates it needs to have written one to ${source ? healthSourceLabel(source) : 'your health app'}.`;
+      // "The past year" is the fetch window, not a guess: `VO2MAX_FETCH_DAYS`
+      // plus slack reaches back further than 365 days (pinned by a test), so
+      // an account with no reading in it has none from the past year. The old
+      // "yet" is gone — it promised one was coming.
+      return `VOLA has no VO2max reading from the past year. ${vo2MaxReadingOrigin(source)}`;
     case 'none-in-range': {
       const held = `you have ${empty.totalReadings} ${
         empty.totalReadings === 1 ? 'reading' : 'readings'
       } further back`;
+      const newest = age ? `, the latest ${age}` : '';
       return hasWiderRange
-        ? `Nothing in this range — ${held}. Try a wider one.`
-        : `Nothing in this range — ${held} than this screen reaches.`;
+        ? `Nothing in this range — ${held}${newest}. Try a wider one.`
+        : `Nothing in this range — ${held} than this screen reaches${newest}.`;
     }
-    case 'too-few':
-      return `${empty.have} of ${empty.need} readings needed for a trend line.`;
+    case 'too-few': {
+      // The count stays — it is still the reason there is no line — but it
+      // is no longer the whole sentence, and it is scoped to the range it
+      // actually counts (`have` is in-window readings, not the account's).
+      const count = `${empty.have} VO2max ${empty.have === 1 ? 'reading' : 'readings'} in this range — a trend line needs ${empty.need}.`;
+      const newest = age ? ` The latest is ${age}.` : '';
+      return `${count}${newest} ${vo2MaxReadingOrigin(source)}`;
+    }
   }
+}
+
+/**
+ * The You-tab pill's spoken description — N524's fourth criterion, decided
+ * here.
+ *
+ * **The pill stays, and stays visually unchanged; what it SAYS stops
+ * promising a trend.** Three options were weighed:
+ *
+ * - **Hide it** for an account with fewer than two readings — ruled out by
+ *   the "nothing hides" rule (`lib/tabs.ts`): a conditional surface once made
+ *   an athlete report present features as missing, and this pill's visibility
+ *   is already data-first (`vo2MaxRowVisible`).
+ * - **A visible subdued/labelled pill** — the ticket's own lean, and not done
+ *   here, because the You grid draws NO caption on any pill: N509 made the
+ *   `detail` line spoken-only (`NavRow`'s doc comment in `app/(tabs)/you.tsx`)
+ *   to match its reference design. One pill growing a caption re-opens that
+ *   layout decision for the whole grid, which is its own call, not a side
+ *   effect of a copy ticket. Recorded as an open item, not assumed away.
+ * - **Keep it, and make its description true** — taken. `detail` is the
+ *   pill's `accessibilityHint`, so "Your cardio fitness trend" was being
+ *   spoken over an account that has never had one. It now says what the
+ *   account holds. The explanation of WHY lives one tap away, on the trend
+ *   screen, which is where N524's copy change does its work.
+ *
+ * `readingCount: null` is "not answered" — still fetching, or the fetch failed
+ * — and keeps the feature description rather than guessing. That line
+ * describes the feature, not the data, so refining it once the answer arrives
+ * is not the flip-flop the monotonic-screen rule forbids.
+ */
+export function vo2MaxRowDetail(input: {
+  source: HealthSource | null;
+  readingCount: number | null;
+  latestOn: string | null;
+  today: string;
+}): string {
+  const { source, readingCount, latestOn, today } = input;
+  if (readingCount === 0) return 'No reading from the past year';
+  if (readingCount === 1) {
+    return latestOn
+      ? `1 reading, ${readingAgePhrase(latestOn, today)} — too few for a trend`
+      : '1 reading — too few for a trend';
+  }
+  return source ? `Your cardio fitness trend, read from ${healthSourceLabel(source)}` : 'Your cardio fitness trend';
 }
 
 export type Vo2MaxScreenState =

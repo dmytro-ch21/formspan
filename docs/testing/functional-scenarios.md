@@ -23455,3 +23455,77 @@ only route to the repair screen — sends the athlete there instead of retrying.
 - **A plan the server refuses still counts as pending forever and appears on
   no screen.** Plans are a separate outbox with both defects at once, and are
   split into their own ticket rather than absorbed here — N564, #1106.
+
+## N524 — an empty VO₂max chart explains what writes a reading, instead of counting missing ones (`apps/mobile/lib/vo2MaxSource.ts`'s `vo2MaxEmptyCopy`/`vo2MaxReadingOrigin`/`readingAgePhrase`/`latestReadingOn`/`vo2MaxRowDetail`, `apps/mobile/app/vo2max/trend.tsx`, `apps/mobile/app/(tabs)/you.tsx`, #939)
+
+An athlete whose wearable never writes VO₂max to Apple Health had one reading,
+three weeks old, and the screen said "1 of 2 readings needed for a trend
+line" — which reads as "keep waiting". The `none` and `too-few` sentences now
+say VOLA cannot measure VO₂max itself, which kind of device writes one, that
+many wearables and chest straps never do, and which permission to check. The
+copy never states a verdict about the athlete's own device, because HealthKit
+cannot tell the app which devices write the metric.
+
+### Automated (`lib/__tests__/vo2MaxSource.test.ts`)
+
+- **One reading (`too-few`, 1 of 2)**: the sentence keeps the count, scoped to
+  the range ("1 VO2max reading in this range — a trend line needs 2."), adds
+  the newest reading's date and age, and carries the origin sentence on every
+  source. It is not the old count-only sentence.
+- **Zero readings (`none`)**: "VOLA has no VO2max reading from the past year."
+  plus the origin sentence. "Yet" is gone. "The past year" is pinned to the
+  fetch window reaching at least 365 days.
+- **Nothing invites a wait**, in either state, on any source, with or without
+  a newest-reading age: no "yet", "check back", "will appear", "soon", or the
+  old "needed for a trend line".
+- **No verdict about the athlete's device** ("your device/watch/strap …
+  never/can't/won't"), and **no brand name** other than Apple Watch, which is
+  named only on the HealthKit source.
+- **No shame or pressure**: no "you need/should/must", "buy", "upgrade", or
+  "train more/harder".
+- **The permission named as the store names it**: "Cardio Fitness" for Apple
+  Health, "VO2max" for Health Connect, and no permission instruction when the
+  device has no store at all.
+- **The age is legible**: 21 days reads "from 21 Aug, 3 weeks ago", yesterday
+  reads "from yesterday", and the two sentences differ. With no known newest
+  day, the age is dropped rather than invented.
+- **Age buckets**: today, yesterday, 2–13 days, 2–8 weeks, 2–12 months, then
+  "over a year ago". The year is shown only when it is not the current one.
+- **`none-in-range`** gains the age but not the origin sentence (readings
+  exist, so the range is the next step). "Try a wider one" is still only
+  offered while a wider preset exists (F34).
+- **`latestReadingOn`**: newest local day, order-independent, ignores
+  future-dated and unparseable timestamps, and uses the same local-day mapping
+  as `useVo2MaxTrend` (checked under `TZ=America/Los_Angeles`).
+- **You pill's spoken description (`vo2MaxRowDetail`)**: unknown or ≥2
+  readings → the feature description; 0 → "No reading from the past year";
+  1 → "1 reading, from 21 Aug, 3 weeks ago — too few for a trend". It never
+  promises a trend to an account with fewer than two readings.
+
+### Device checks (no test renders either VO₂max screen)
+
+- **One old reading, a wearable that does not write VO₂max**: open You →
+  VO2max. The screen explains that VOLA reads VO₂max from Apple Health, which
+  devices write one, that many never do, and the Cardio Fitness permission to
+  check. It shows the newest reading's date and age. Nothing implies waiting
+  will help, and nothing names the athlete's wearable brand.
+- **No readings at all** (a fresh account, or one with nothing in the last
+  ~13 months): same explanation, led by "VOLA has no VO2max reading from the
+  past year."
+- **`1W` selected with one reading three weeks old**: "Nothing in this range —
+  you have 1 reading further back, the latest from … Try a wider one."
+- **VoiceOver on the You VO2max pill**: the hint is "1 reading, from 21 Aug,
+  3 weeks ago — too few for a trend" (or "No reading from the past year"), not "Your cardio
+  fitness trend". Visually the pill is unchanged; the grid draws no captions
+  (N509).
+- **Android / Health Connect**: the sentence names Health Connect, never Apple
+  or Apple Watch, and says to check VOLA can read VO2max from Health Connect.
+
+### Edge cases and errors
+
+- **A failed fetch** still says "Couldn't load your VO2max trend…", at every
+  range width, with no origin sentence and no age.
+- **The You screen's fetch fails**: the pill keeps its feature-description
+  hint rather than claiming zero readings.
+- **A device clock writing a future-dated reading** does not make the newest
+  reading look fresh; it is ignored, as `buildTrend` ignores it.

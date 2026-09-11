@@ -6,7 +6,11 @@ import {
   healthSourceFor,
   healthSourceLabel,
   healthSyncSettingLabel,
+  latestReadingOn,
+  readingAgePhrase,
   vo2MaxEmptyCopy,
+  vo2MaxReadingOrigin,
+  vo2MaxRowDetail,
   vo2MaxRanges,
   vo2MaxRowVisible,
   vo2MaxScreenState,
@@ -288,7 +292,7 @@ describe('vo2MaxEmptyCopy — never invites a range that does not exist', () => 
     expect(vo2MaxEmptyCopy({ kind: 'none-in-range', totalReadings: 2 }, null, false)).toContain('2 readings ');
   });
 
-  it('keeps the other three sentences exactly as W16 left them', () => {
+  it('leaves the failed-fetch sentence alone, and keeps W16\'s source rule for none', () => {
     // The widest-range flag must not leak into copy that has nothing to do
     // with ranges — a failed fetch says the same thing at every width.
     for (const wider of [true, false]) {
@@ -298,9 +302,243 @@ describe('vo2MaxEmptyCopy — never invites a range that does not exist', () => 
       // W16: names the source THIS device reads from, never the other vendor.
       expect(vo2MaxEmptyCopy({ kind: 'none' }, 'health_connect', wider)).toContain('Health Connect');
       expect(vo2MaxEmptyCopy({ kind: 'none' }, 'health_connect', wider)).not.toContain('Apple');
-      expect(vo2MaxEmptyCopy({ kind: 'none' }, null, wider)).toContain('your health app');
-      expect(vo2MaxEmptyCopy({ kind: 'too-few', have: 1, need: 2 }, 'healthkit', wider)).toBe(
-        '1 of 2 readings needed for a trend line.',
+      // No source: names no store at all rather than one this device lacks.
+      expect(vo2MaxEmptyCopy({ kind: 'none' }, null, wider)).not.toMatch(/Apple|Health Connect/);
+    }
+  });
+});
+
+
+
+/**
+ * N524/#939 — an empty chart says what WRITES a reading, rather than counting
+ * how many are missing.
+ *
+ * The reporter's account had one VO₂max sample ever, from a strap that never
+ * writes the metric, and the screen said "1 of 2 readings needed for a trend
+ * line" — an invitation to keep checking back on a screen that could not fill.
+ * These pin the three properties the fix rests on: the cause is stated in
+ * both no-trend states, nothing invites a wait, and nothing judges the
+ * athlete's device (HealthKit cannot tell the app which devices write it).
+ */
+describe('vo2MaxEmptyCopy — no-trend states explain the mechanism, never a wait (N524)', () => {
+  const SOURCES = ['healthkit', 'health_connect', null] as const;
+  const oneReading = { kind: 'too-few', have: 1, need: 2 } as const;
+  const none = { kind: 'none' } as const;
+  // 2026-08-21 is the reporter's one real reading; 2026-09-11 is 21 days on.
+  const threeWeeks = { on: '2026-08-21', today: '2026-09-11' };
+
+  /** Anything that tells the athlete to wait, or implies the number is filling. */
+  const WAIT = /\byet\b|keep (checking|waiting)|check back|come back|will appear|appears here|soon|filling|on its way|give it time|needed for a trend line/i;
+  /** A verdict about the athlete's own hardware — an inference the app cannot back. */
+  const DEVICE_VERDICT = /your (device|watch|wearable|strap|monitor)\b[^.]*\b(doesn't|does not|can't|cannot|won't|will not|never|isn't|is not)\b/i;
+  /** A vendor name that is not the store's own or the one watch that writes it on iOS. */
+  const OTHER_BRAND = /\b(amazfit|zepp|garmin|polar|whoop|fitbit|oura|coros|suunto|samsung|wahoo|helio)\b/i;
+  /** Shame or pressure: a nudge to train differently, or to buy something. */
+  const PRESSURE = /\byou (need|should|must|have) to\b|\bbuy\b|\bupgrade\b|\bpurchase\b|train (more|harder|differently)|\bfail/i;
+
+  it('the one-reading case explains what writes a reading, not only the count', () => {
+    for (const source of SOURCES) {
+      const copy = vo2MaxEmptyCopy(oneReading, source, true, threeWeeks);
+      expect(copy).toContain("VOLA can't measure VO2max itself");
+      expect(copy).toContain(vo2MaxReadingOrigin(source));
+      // The count survives as the reason there is no line, scoped to the range.
+      expect(copy).toContain('1 VO2max reading in this range — a trend line needs 2.');
+    }
+  });
+
+  it('the one-reading case is no longer the bare count it was', () => {
+    // THE regression: restoring W16's count-only sentence must fail here.
+    const copy = vo2MaxEmptyCopy(oneReading, 'healthkit', true, threeWeeks);
+    expect(copy).not.toBe('1 of 2 readings needed for a trend line.');
+    expect(copy.length).toBeGreaterThan(120);
+  });
+
+  it('the zero-readings case explains it too, and no longer says "yet"', () => {
+    for (const source of SOURCES) {
+      const copy = vo2MaxEmptyCopy(none, source, true);
+      expect(copy).toContain("VOLA can't measure VO2max itself");
+      expect(copy).toContain('VOLA has no VO2max reading from the past year.');
+    }
+  });
+
+  it('"the past year" is what the fetch actually covers', () => {
+    // `none` means no reading over the fetch window, so the sentence may only
+    // claim a year while the window reaches at least that far back.
+    expect(VO2MAX_FETCH_DAYS).toBeGreaterThanOrEqual(365);
+  });
+
+  it('never invites the athlete to wait, in either no-trend state, on any source', () => {
+    for (const source of SOURCES) {
+      for (const empty of [none, oneReading, { kind: 'too-few', have: 3, need: 5 } as const]) {
+        for (const latest of [null, threeWeeks, { on: '2026-09-10', today: '2026-09-11' }]) {
+          expect(vo2MaxEmptyCopy(empty, source, true, latest)).not.toMatch(WAIT);
+        }
+      }
+    }
+  });
+
+  it('says that with a device that never writes one, no new reading will arrive', () => {
+    // The sentence the reporter needed — stated about the CLASS of device, so
+    // it is true whatever they wear.
+    for (const source of ['healthkit', 'health_connect'] as const) {
+      const copy = vo2MaxEmptyCopy(oneReading, source, true, threeWeeks);
+      expect(copy).toMatch(/Many other wearables and chest straps never write one/);
+      expect(copy).toMatch(/no new reading will arrive/);
+    }
+  });
+
+  it('never delivers a verdict about the athlete\'s own device', () => {
+    for (const source of SOURCES) {
+      for (const empty of [none, oneReading]) {
+        const copy = vo2MaxEmptyCopy(empty, source, true, threeWeeks);
+        expect(copy).not.toMatch(DEVICE_VERDICT);
+        expect(copy).not.toMatch(OTHER_BRAND);
+      }
+    }
+  });
+
+  it('names Apple Watch only where it writes the metric — the HealthKit source', () => {
+    expect(vo2MaxReadingOrigin('healthkit')).toContain('Apple Watch estimates it on outdoor walks, runs and hikes');
+    expect(vo2MaxReadingOrigin('health_connect')).not.toContain('Apple');
+    expect(vo2MaxReadingOrigin(null)).not.toContain('Apple');
+  });
+
+  it('states a fact, with no shame or pressure framing', () => {
+    for (const source of SOURCES) {
+      for (const empty of [none, oneReading]) {
+        expect(vo2MaxEmptyCopy(empty, source, true, threeWeeks)).not.toMatch(PRESSURE);
+      }
+    }
+  });
+
+  it('points at the permission under the name the store gives it — and only where a store exists', () => {
+    // An empty HealthKit read looks identical to a declined grant, so a
+    // device that SHOULD write one gets the one check that can explain it.
+    expect(vo2MaxReadingOrigin('healthkit')).toContain('check VOLA can read Cardio Fitness from Apple Health');
+    expect(vo2MaxReadingOrigin('health_connect')).toContain('check VOLA can read VO2max from Health Connect');
+    // No store on this device: there is no permission to check, so no instruction.
+    expect(vo2MaxReadingOrigin(null)).not.toMatch(/check VOLA/);
+    expect(vo2MaxReadingOrigin(null)).toContain('this device has none VOLA can read from');
+  });
+
+  it('makes the newest reading\'s age legible in the one-reading case', () => {
+    expect(vo2MaxEmptyCopy(oneReading, 'healthkit', true, threeWeeks)).toContain(
+      'The latest is from 21 Aug, 3 weeks ago.',
+    );
+    // Yesterday and three weeks ago are different news, and must read differently.
+    const yesterday = vo2MaxEmptyCopy(oneReading, 'healthkit', true, { on: '2026-09-10', today: '2026-09-11' });
+    expect(yesterday).toContain('The latest is from yesterday.');
+    expect(yesterday).not.toBe(vo2MaxEmptyCopy(oneReading, 'healthkit', true, threeWeeks));
+  });
+
+  it('drops the age rather than inventing one when the newest day is unknown', () => {
+    for (const latest of [null, { on: null, today: '2026-09-11' }]) {
+      const copy = vo2MaxEmptyCopy(oneReading, 'healthkit', true, latest);
+      expect(copy).not.toContain('latest');
+      expect(copy).toContain("VOLA can't measure VO2max itself");
+    }
+  });
+
+  it('gives none-in-range the age too, but not the origin — readings exist, the range is the step', () => {
+    const empty = { kind: 'none-in-range', totalReadings: 1 } as const;
+    expect(vo2MaxEmptyCopy(empty, 'healthkit', true, threeWeeks)).toBe(
+      'Nothing in this range — you have 1 reading further back, the latest from 21 Aug, 3 weeks ago. Try a wider one.',
+    );
+    expect(vo2MaxEmptyCopy(empty, 'healthkit', false, { on: '2025-08-20', today: '2026-09-11' })).toBe(
+      'Nothing in this range — you have 1 reading further back than this screen reaches, the latest from 20 Aug 2025, over a year ago.',
+    );
+    expect(vo2MaxEmptyCopy(empty, 'healthkit', true, threeWeeks)).not.toContain("can't measure");
+  });
+});
+
+describe('readingAgePhrase — a date and an age, never one without the other', () => {
+  const today = '2026-09-11';
+
+  it('says today and yesterday in words', () => {
+    expect(readingAgePhrase('2026-09-11', today)).toBe('from today');
+    expect(readingAgePhrase('2026-09-10', today)).toBe('from yesterday');
+  });
+
+  it('counts days, then weeks, then months, then gives up at a year', () => {
+    expect(readingAgePhrase('2026-09-09', today)).toMatch(/^from 9 \w+, 2 days ago$/);
+    expect(readingAgePhrase('2026-08-29', today)).toMatch(/, 13 days ago$/);
+    expect(readingAgePhrase('2026-08-28', today)).toMatch(/, 2 weeks ago$/);
+    expect(readingAgePhrase('2026-07-14', today)).toMatch(/, 8 weeks ago$/);
+    expect(readingAgePhrase('2026-07-13', today)).toMatch(/, 2 months ago$/);
+    expect(readingAgePhrase('2025-09-12', today)).toMatch(/, 12 months ago$/);
+    expect(readingAgePhrase('2025-09-11', today)).toMatch(/, over a year ago$/);
+  });
+
+  it('adds the year only when it is not this year', () => {
+    expect(readingAgePhrase('2026-08-21', today)).toBe('from 21 Aug, 3 weeks ago');
+    expect(readingAgePhrase('2025-08-21', today)).toBe('from 21 Aug 2025, over a year ago');
+  });
+});
+
+describe('latestReadingOn — the newest real reading, as a local day', () => {
+  const today = '2026-09-11';
+
+  it('is null for no readings', () => {
+    expect(latestReadingOn([], today)).toBeNull();
+  });
+
+  it('picks the newest regardless of order', () => {
+    const samples = [
+      { measured_at: '2026-08-21T12:00:00Z' },
+      { measured_at: '2026-09-02T12:00:00Z' },
+      { measured_at: '2026-06-01T12:00:00Z' },
+    ];
+    expect(latestReadingOn(samples, today)).toBe('2026-09-02');
+  });
+
+  it('ignores a future-dated reading and an unparseable one, as buildTrend does', () => {
+    const samples = [
+      { measured_at: '2026-08-21T12:00:00Z' },
+      { measured_at: '2026-10-01T12:00:00Z' },
+      { measured_at: 'not a date' },
+    ];
+    expect(latestReadingOn(samples, today)).toBe('2026-08-21');
+  });
+
+  it('uses the local calendar day, the same mapping the trend hook uses', () => {
+    // The suite runs under TZ=America/Los_Angeles: 03:00Z on the 22nd is
+    // still the evening of the 21st there.
+    expect(latestReadingOn([{ measured_at: '2026-08-22T03:00:00Z' }], today)).toBe('2026-08-21');
+  });
+});
+
+describe('vo2MaxRowDetail — the You row keeps its place and stops promising a trend (N524)', () => {
+  const today = '2026-09-11';
+
+  it('keeps the feature description while the answer is unknown, or when there is a trend', () => {
+    expect(vo2MaxRowDetail({ source: 'healthkit', readingCount: null, latestOn: null, today })).toBe(
+      'Your cardio fitness trend, read from Apple Health',
+    );
+    expect(vo2MaxRowDetail({ source: 'health_connect', readingCount: 14, latestOn: '2026-09-10', today })).toBe(
+      'Your cardio fitness trend, read from Health Connect',
+    );
+    expect(vo2MaxRowDetail({ source: null, readingCount: 2, latestOn: '2026-09-10', today })).toBe(
+      'Your cardio fitness trend',
+    );
+  });
+
+  it('says what the account holds when it is not a trend', () => {
+    expect(vo2MaxRowDetail({ source: 'healthkit', readingCount: 0, latestOn: null, today })).toBe(
+      'No reading from the past year',
+    );
+    expect(vo2MaxRowDetail({ source: 'healthkit', readingCount: 1, latestOn: '2026-08-21', today })).toBe(
+      '1 reading, from 21 Aug, 3 weeks ago — too few for a trend',
+    );
+    expect(vo2MaxRowDetail({ source: 'healthkit', readingCount: 1, latestOn: null, today })).toBe(
+      '1 reading — too few for a trend',
+    );
+  });
+
+  it('never promises a trend to an account with fewer than two readings', () => {
+    for (const readingCount of [0, 1]) {
+      expect(vo2MaxRowDetail({ source: 'healthkit', readingCount, latestOn: '2026-08-21', today })).not.toMatch(
+        /cardio fitness trend/,
       );
     }
   });

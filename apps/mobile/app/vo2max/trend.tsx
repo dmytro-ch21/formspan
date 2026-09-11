@@ -13,6 +13,7 @@ import { isHealthKitSupported } from '@/lib/healthkit';
 import {
   VO2MAX_FETCH_DAYS,
   healthSourceFor,
+  latestReadingOn,
   vo2MaxEmptyCopy,
   vo2MaxRanges,
   vo2MaxScreenState,
@@ -130,7 +131,11 @@ export default function Vo2MaxTrendScreen() {
     }, [userId, source]),
   );
 
-  const { loading, series, samples } = useVo2MaxTrend(getToken, range, FETCH_DAYS);
+  const { loading, series, samples, today } = useVo2MaxTrend(getToken, range, FETCH_DAYS);
+  // N524/#939 — the newest reading's day, over the whole fetch rather than
+  // the selected range, so a no-trend sentence can say how old it is: one
+  // reading from yesterday and one from three weeks ago are different news.
+  const latestOn = latestReadingOn(samples, today);
   const fmt = (v: number) => v.toFixed(1);
 
   return (
@@ -209,7 +214,7 @@ export default function Vo2MaxTrendScreen() {
 
             {series.empty ? (
               <Text style={styles.empty} testID="vo2max-empty">
-                {vo2MaxEmptyCopy(series.empty, source, range !== WIDEST_RANGE)}
+                {vo2MaxEmptyCopy(series.empty, source, range !== WIDEST_RANGE, { on: latestOn, today })}
               </Text>
             ) : (
               <TrendChart

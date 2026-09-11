@@ -72627,6 +72627,115 @@ to end. Its rulings were not rubber stamps:
 - **Telemetry** for blocked-row count and age by domain and error code — N565,
   #1108, filed before #544 closed (see the acceptance review above).
 
+## 2026-09-11 — N524 (#939): an empty VO₂max chart explains what writes a reading, instead of counting missing ones
+
+**What the athlete saw.** An athlete whose wearable never writes VO₂max
+(Cardio Fitness) to Apple Health opened You → VO2max and read "1 of 2 readings
+needed for a trend line." True, and it reads as "keep waiting, it's filling
+up." For their hardware, nothing done in this app will move that number. The
+issue's diagnosis stands: `HKQuantityTypeIdentifierVO2Max` is in `READ_TYPES`,
+the grant was confirmed, the unit matches the library's canonical one, the
+high-water mark is sample-based, the pass ran, and HealthKit returned zero
+rows. The account has one `vo2_max` sample ever, dated 2026-08-21, and heart
+rate comes from a strap via its vendor's app, not from a watch.
+
+**Which of the issue's code anchors still held, and which F34 (#955) had moved.**
+Still held: the `too-few` branch was the bare count (unchanged by F34), the
+`none` branch was already causal, and nothing else on the sync side needed
+touching. Moved: `FETCH_DAYS = 365 * 3` is gone. W16 clamped the fetch to
+`VO2MAX_FETCH_DAYS` (385) under `SERVER_MAX_LIST_RANGE_DAYS` (400), and the
+issue's "fetches 3 years" was never true in production: every such request was
+refused with a 400. The empty copy lives in `lib/vo2MaxSource.ts`'s
+`vo2MaxEmptyCopy`, not in the screen. `All` is gone and `1Y` is the widest
+preset. The issue also quotes the `none` sentence as naming "An Apple Watch";
+W16 had already made that source-neutral.
+
+**The copy explains the mechanism, and never states a verdict about the
+athlete's device.** HealthKit does not tell an app which devices can write
+VO₂max, and it answers a declined grant with `[]` exactly as it answers an empty
+store. So "your device will never record VO₂max" would be an inference
+presented as a fact: a new wrong-on-screen defect inside the ticket written to
+stop that. The new `vo2MaxReadingOrigin(source)` says only what the app knows:
+
+- VOLA cannot measure VO₂max itself, and reads it from the store once a device
+  has written it there.
+- Which device writes one: Apple Watch on outdoor walks, runs and hikes, named
+  only on the HealthKit source, because an Apple Watch cannot write to Health
+  Connect. On Android it says "some watches".
+- Many other wearables and chest straps never write one, and with those no new
+  reading will arrive. That is a statement about the class, true by
+  definition, not about this athlete.
+- For a device that should write one, check VOLA can read Cardio Fitness (iOS
+  Settings' name for the grant, as the reporter found it) or VO2max (Health
+  Connect).
+
+The athlete supplies the one fact the app lacks, what they wear, and draws the
+conclusion. `none` now leads with "VOLA has no VO2max reading from the past
+year." ("yet" promised one was coming, and "the past year" is pinned to the
+fetch window reaching ≥365 days). `too-few` leads with "1 VO2max reading in
+this range — a trend line needs 2. The latest is from 21 Aug, 3 weeks ago."
+before the same origin sentence. `none-in-range` gains the age but not the
+origin, because readings exist and the range is the true next step.
+
+**The age.** `readingAgePhrase` gives a date and an age ("from 21 Aug, 3 weeks
+ago"; today; yesterday; days; weeks; months; "over a year ago"), with the year
+only when it is not this year's. `latestReadingOn` takes the newest local day
+over the whole fetch, using the same `measured_at` → day mapping
+`useVo2MaxTrend` uses, and ignores future-dated readings as `buildTrend` does.
+
+**`hrPath` vocabulary reused by helper and shape, not by import.** The store is
+named by `healthSourceLabel`, the same helper `hrPathName` uses for "From Apple
+Health afterwards". The sentence follows `hrPathDetail`'s shape: VOLA "reads …
+from {store} once {a device} has written it there", then "check VOLA can read …
+from {store}". It also follows that module's decided reason for its
+`health_quiet` copy: state an observation and an action, not a cause.
+`hrPath.ts` is not imported, because it already imports `healthSourceLabel` from
+`vo2MaxSource.ts`, and a cycle would put Metro's "Require cycle" warning on
+every dev launch. A "Live over Bluetooth never carries VO₂max" clause was
+considered and dropped: true by construction (GATT 0x2A37 carries no VO₂max),
+but "chest straps never write one" already covers it, and length costs
+legibility on a centred empty state. No brand but Apple Watch appears, and the
+suite asserts it, so the reporter's vendor cannot creep in.
+
+**The You entry point (criterion 4): the pill stays, visually unchanged, and
+its spoken description stops promising a trend.** Hiding it is ruled out by
+"nothing hides" (`lib/tabs.ts`). A visible subdued or labelled pill, the
+ticket's lean, was not done: the You grid draws no caption on any pill, and
+N509 made `detail` spoken-only (`accessibilityHint`) to match its reference
+design. One pill growing a caption re-opens that decision for the whole grid.
+What was done: `vo2MaxRowDetail` now gives VoiceOver "No reading from the past
+year" or "1 reading, from 21 Aug, 3 weeks ago — too few for a trend", instead
+of "Your cardio fitness trend" over an account that never had one. While the
+answer is unknown or the fetch failed, it keeps the feature description.
+
+**Tests and mutation.** `lib/__tests__/vo2MaxSource.test.ts` went from 34 to 57
+tests. The new ones:
+
+- the one-reading and zero-readings cases each carry the origin sentence;
+- nothing invites a wait, on any source, with or without an age;
+- no verdict about "your device/watch/strap", and no other brand name;
+- no shame or pressure framing;
+- the permission names, the age buckets, and the year rule;
+- `latestReadingOn`'s future-date and local-day rules, under
+  `TZ=America/Los_Angeles`;
+- the pill's hint.
+
+Baseline green in the same session. Restoring the old count-only `too-few`
+sentence turned **6 tests red**. Restoring the old "No VO2max reading yet…"
+`none` sentence turned **2 red**. Each was restored from a saved copy with a
+matching checksum and confirmed green **by re-running**, 57/57.
+
+**Open, and not decided here:**
+
+- Whether the You grid should carry a visible state for an account with no
+  usable trend. That is N509's no-caption decision to re-open, not a copy
+  ticket's.
+- The Health Connect permission is called "VO2max" in the copy, unverified
+  against a device's permission sheet. The iOS name "Cardio Fitness" rests on
+  the reporter's own Settings screen.
+- The NEEDS HUMAN EVIDENCE criterion (a real device whose wearable does not
+  write VO₂max) is outstanding. No test renders either VO₂max screen.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
