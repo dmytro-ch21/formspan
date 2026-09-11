@@ -23370,6 +23370,18 @@ place an operator could not otherwise tell whether a click registered.
   `:active` while Space is held on a focused button, so keyboard users get the
   same acknowledgement. Enter activates without a held `:active` in most engines;
   that is expected, not a defect.
+- **Pressing near the edge.** At `scale(0.97)` the button shrinks 1.5% on each
+  side. A press released inside that band used to land on the parent row, so the
+  button looked pressed and received no click. A cover that exists only while
+  pressed restores the original target. Regression shape: a press 0.8px inside the
+  edge gives 0 clicks. And the cover must never exist at rest — a press 1px
+  *outside* the edge must still give 0 clicks, or the target of an irreversible
+  write has grown.
+- **Double-clicking an irreversible write.** Unproven either way. `disabled`
+  lands on the next render and `useActionState` queues an extra submit rather than
+  dropping it, so a double-click faster than that render could send two writes.
+  Check it in DevTools → Network: a fast double-click on Publish must produce
+  exactly one POST. This is pre-existing behaviour, not something L14 changed.
 - **A failed action** still renders its `role="alert"` message — unchanged by L14.
 
 ### What a test can and cannot reach
@@ -23380,9 +23392,14 @@ place an operator could not otherwise tell whether a click registered.
   the generated scale, that the motion `@import` is the first statement, that the
   generated sheet defines both variables, and that all three rendered buttons carry
   the class. Seven mutations, each reddening exactly its own test.
-- **NOT reachable**: whether the scale is actually visible, and whether Reduce
-  Motion actually suppresses its animation. jsdom computes neither `:active` nor
-  the cascade, and a live-engine check did not complete on this host.
+- **Measured outside the suite, not re-run by CI**: in headless Chromium over the
+  DevTools protocol, against admin's real built stylesheet, development and
+  minified production. The scale animates without Reduce Motion and arrives at
+  0.97 at 0ms with it. Edge presses give 1 click with the cover and 0 without it,
+  on 88px and 240px buttons, and a press 1px outside the edge gives 0 either way.
+- **NOT reachable**: Safari and Firefox; whether a fast double-click sends two
+  writes; what the backend does with a duplicate; and whether the press *reads* as
+  acknowledgement to an operator.
 
 ### Needs a browser
 

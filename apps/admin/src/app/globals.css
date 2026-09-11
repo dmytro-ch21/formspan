@@ -87,15 +87,17 @@ body {
   Reduce Motion (F40). The same block `apps/web/src/app/globals.css` carries —
   see that file for the fuller reasoning.
 
-  **This app has no motion at all today**, and that is judged correct rather
-  than an omission: `apps/admin/src` contains zero `transition` and zero
-  `animate-*` across its `.tsx` files (adding interaction feedback here is
-  L14's question, deliberately not this ticket's). So this block currently
-  disables nothing.
+  **This block is live, not a floor waiting for a first animation.** Until L14,
+  admin had no motion at all and this block disabled nothing. L14 added the
+  console's only motion — the press scale on its three irreversible writes, in
+  the components layer at the end of this file — and this block is what stops
+  that scale animating under Reduce Motion. The press still lands; it arrives
+  rather than animates. Confirmed in headless Chrome over the DevTools protocol,
+  on both the development and the minified production build.
 
-  It is here anyway, for four lines, so that the next feature added to admin
-  does not have to remember — the failure this ticket exists to fix is not that
-  someone wrote a bad animation, it is that nobody wrote the floor.
+  That only works because every press rule is LAYERED and this block is not. An
+  unlayered class rule would outrank this universal selector on specificity and
+  keep animating, silently. The L14 tests assert every press rule's layer.
 
   Reduce Motion is a request not to be MOVED, not a request to see nothing:
   colour and opacity are kept, position/scale/rotation are dropped. Unlayered
@@ -136,11 +138,35 @@ body {
   in flight, and a button that cannot be pressed should not look pressed.
 */
 @layer components {
+  /* `relative` so the pressed-state cover below positions against the button
+     itself. No offsets are set, so this never moves the button. */
   .pressable {
+    position: relative;
     transition: transform var(--duration-press) var(--ease-out);
   }
 
+  /* 0.97 is mobile's PRESS_SCALE in apps/mobile/constants/Motion.ts. Both sides
+     are hand-typed because design-tokens.json's `motion` key covers time only,
+     not ratios — change one, change both. */
   .pressable:active:not(:disabled) {
     transform: scale(0.97);
+  }
+
+  /* Keeps the ORIGINAL hit area while the button is scaled down. At 0.97 the
+     button loses 1.5% of its size on each side, and a press released inside
+     that band lands on the parent row — so the button that visibly
+     acknowledged the press receives no click. On an irreversible write that
+     is the one failure this block exists to prevent. Measured in headless
+     Chrome over the DevTools protocol, on the real Tailwind build, 88px and
+     240px buttons, Reduce Motion on and off: 0 clicks at 0.8px inside the edge
+     without this rule, 1 with it. The inset is a percentage because the band
+     scales with width: a fixed -2px leaves part of a wide button's band
+     uncovered. It exists only while pressed, so the target is never larger
+     than the button at rest — a press 1px outside the edge gives 0 clicks
+     either way. */
+  .pressable:active:not(:disabled)::before {
+    content: "";
+    position: absolute;
+    inset: -2%;
   }
 }

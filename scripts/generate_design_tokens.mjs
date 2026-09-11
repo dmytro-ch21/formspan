@@ -147,9 +147,9 @@ const targets = [
 ];
 
 if (process.argv.includes('--check')) {
-  // Collect every stale file rather than exiting on the first: with two
+  // Collect every stale file rather than exiting on the first: with several
   // outputs, reporting only the first one to differ sends you round the loop
-  // twice for a single edit.
+  // once per output for a single edit.
   const stale = [];
   for (const { path, content } of targets) {
     let current;
