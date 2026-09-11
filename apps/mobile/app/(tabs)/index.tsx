@@ -22,7 +22,7 @@ import { Text, View } from '@/components/Themed';
 
 import { Icon } from '@/components/ui/Icon';
 import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
-import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
+import { DayPill } from '@/components/ui/DayPill';
 import { SectionHeader } from '@/components/ui/Section';
 import { WeekStrip } from '@/components/today/WeekStrip';
 import { MomentumCard } from '@/components/today/MomentumCard';
@@ -139,11 +139,6 @@ function workingSets(s: Session): number {
   // `countsAsSet`, not `contributesVolume` — a drop is part of the set above
   // it, so it does not add to the number the athlete counts.
   return s.sets.filter(countsAsSet).length;
-}
-
-/** e.g. "Thursday, 31 July" — orientation, not decoration. */
-function todayLabel(now: Date): string {
-  return now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 /**
@@ -1084,30 +1079,17 @@ export default function TodayScreen() {
             would be a control that moved the date line and nothing else.
           */}
           {!resume && (
-            <PeriodSwitcher
-              label={dayLabel}
-              // The full date, folded into the pill rather than repeated in a
-              // standalone line under it — see N179/#584. `TODAY` and
-              // "Wednesday, 26 August" were the same fact stated twice.
-              //
-              // **Only on today, though (W14, #694).** The N179/#584 fix
-              // above reasoned this should be ONE expression regardless of
-              // `isToday`, on the grounds that `todayLabel(viewDay)` already
-              // covers both cases without a second place to drift — true, but
-              // it stated the SAME fact `label` already states on every other
-              // day too: `dayLabel` is `todayLabel(viewDay)`'s own short form
-              // (`FRI 28 AUG`) once `isToday` is false, so pairing them
-              // reintroduced exactly the duplication this prop exists to
-              // remove, one level down. `label` alone already carries the
-              // date on a browsed day; the sub-line adds nothing there and is
-              // omitted.
-              subLabel={isToday ? todayLabel(viewDay) : undefined}
+            /* `DayPill`, not a hand-assembled `PeriodSwitcher` — N493
+               tranche 1 (#858 item 5). Both lines of text, the icon and the
+               arrows' names now live in that one component, which is what
+               keeps this pill and Food's identical; the W14/#694 reasoning
+               for showing the long date only on today moved there with it. */
+            <DayPill
+              viewDay={viewDay}
+              isToday={isToday}
               onPrev={() => setDayOffset((d) => d - 1)}
               onNext={() => setDayOffset((d) => d + 1)}
               onPress={isToday ? undefined : () => setDayOffset(0)}
-              icon="calendar"
-              prevLabel="Previous day"
-              nextLabel="Next day"
               pressLabel="Back to today"
               testID="today-day"
             />

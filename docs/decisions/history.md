@@ -70054,6 +70054,172 @@ wording is stale by one type name and nothing else. And `EASE.out` against
 device can judge — the instruction on it is to report it rather than quietly
 revert to a built-in.
 
+## 2026-09-10 — N493 part 3 (#858 items 3, 5, 6, 7): a Done button under the keypad, two day pills that were never one component, and a curtain lit brighter than the app
+
+Third slice of the ten-item, user-reported UX pass filed as #858. Parts 1
+(#861) and 2 (#863) already landed; this one — dispatched as the first
+tranche of what was left — takes the four self-contained items from the
+issue's own suggested order — **3** (Food's stray Share
+button), **7** (the barcode-scan amount editor's covered Done button), **6**
+(the Library curtain's colours) and **5** (the day pill). The PR does **not**
+close #858: six items remain, and a closing keyword would take them with it.
+
+### Item 3 was already done, and saying so is the finding
+
+Part 1 (#861) removed Food's day-level `ShareToFriend` button; N531 (#962)
+then moved the entry screen's own big Share button into the per-row 3-dot
+menu. Nothing on the Food tab renders a standalone Share affordance today —
+verified by reading `app/(tabs)/food.tsx`, where the only `ShareToFriend`
+import left is the `ShareSheet` the row menu opens. **No code changed for this
+item.** The acceptance box is ticked on the strength of the earlier PR, not
+this one.
+
+### Item 7 — the fix was already in the file, and it did nothing
+
+This is the one worth reading, because it is the second time this repo has
+watched a *present* mechanism fail silently.
+
+`components/food/AmountSheet.tsx` has had a `KeyboardAwareFooter` around its
+Done button since **N426, merged 2026-08-28**, complete with a doc comment
+explaining that this is exactly what stops a keyboard covering it. The athlete
+reported the Done button covered on **2026-09-04**, from a device, against a
+build that contained every word of that comment.
+
+The mechanism: `KeyboardAwareFooter`'s lift is `measureInWindow`'s
+`y + h` minus the keyboard event's `endCoordinates.screenY`. Those are two
+numbers from two sources, and the subtraction is only exact when they share a
+coordinate space — true on every screen the file was written for, and not
+guaranteed inside a `Modal`, whose content is laid out by its own host view
+and which iOS insets from the top of the display when it is a `pageSheet`.
+Under-measure `containerBottom` and the footer lifts by less than the overlap,
+which is precisely "the Done button is still under the keypad".
+
+**Reproduced rather than argued.** Under this repo's jest environment a host
+view's `measureInWindow` exists and **never invokes its callback** (probed
+directly — `typeof node.measureInWindow === 'function'`, callback never
+reached). So `setInset` was never called at all: render `AmountSheet`, fire a
+real `keyboardWillShow` with a 336pt keypad, and the footer takes **zero**
+padding. That is the same failure with the measurement error at its maximum,
+and `components/food/__tests__/amountSheetKeyboard.test.tsx` pins it.
+
+Two changes came out of that, and the second was not in the original plan:
+
+- `keyboardInsetForScreenBottom` — for a footer whose bottom edge IS the
+  display's, the overlap is simply the keyboard's height, one number from one
+  source with no geometry to get wrong. It takes the LARGER of that and the
+  measured answer, so it can never lift less than before; where the
+  measurement was already right the two agree and nothing changes. **iOS
+  only**, because `keyboardInsetFor`'s own doc comment is explicit that
+  Android's `resize` has already shrunk the window and a keyboard-height there
+  would push the footer a second keyboard up the screen. Android keeps the
+  measured path byte for byte.
+- **It is applied BEFORE `measureInWindow`, not inside its callback.** The
+  probe above is the reason: a footer whose entire lift hangs on an async
+  native callback arriving has a failure mode whose only symptom is the bug it
+  was added to prevent. The geometry-free answer is applied immediately and
+  the measurement can only raise it.
+
+Opted into by `AmountSheet` alone (`anchoredToScreenBottom`), and the claim
+that prop makes — this sheet's last child really is flush with the bottom of
+the display — is written down next to it, because a sheet that later gained a
+safe-area gap under the footer would be over-lifted by exactly that gap.
+
+Mutation-tested both ways, green baseline in the same session: drop the prop →
+2 of 6 red; neuter the pure function to `return a.measuredInset` → 3 of 6 red;
+restore → 6 green, confirmed by re-running rather than by reading the file.
+
+**What this does NOT prove**, and the issue's `NEEDS HUMAN EVIDENCE` criterion
+stays open for it: that the button visually clears the keypad on a real
+display. jest has no keyboard and runs no Yoga pass.
+
+### Item 6 — the curtain was lit 67% brighter than the app's own glass
+
+"It opens a curtain from bottom but the colors are wayyy off from what app
+looks like." Part 1 (#861) converted this sheet's FILL and backdrop to
+`withAlpha(vola.surfaceRaised, 0.93)` / `withAlpha(vola.bg, 0.62)` and said
+honestly in its own history entry that this might not be the reported
+complaint. It was not.
+
+What was left was a `LinearGradient` glass wash across the whole sheet at
+`rgba(255,255,255,0.10) → 0.03 → transparent`, hand-written in
+`app/library.tsx` — **on both** the facet sheet and the extras one. N508 later
+settled the app's one glass wash at `CARD_GLASS_COLORS` (`0.06 → 0.02 → 0`)
+and gave it a component, `CardGlass`, which every other glass surface in the
+app now uses. These two predated it and never moved. 0.10 against 0.06 is 67%
+more white at the lit corner, on top of a translucent fill, which is exactly
+"lighter than everything else on screen" — and the app's newest sheet,
+`EntryMenuSheet` (N531), was written to copy this one and pointedly omitted
+the gradient, so there was already a direct A/B of the two on a phone.
+
+Both sheets now render `<CardGlass />`. The four remaining hand-written whites
+in their chrome (border, grabber, head hairline, pressed row) became
+`withAlpha(vola.text, …)` — a derivation, which is what the design system's
+"no arbitrary new colours" rule asks for (N444/#741), and a touch warmer than
+pure white because `vola.text` is `#F3F6FA`. `EntryMenuSheet`'s copies of the
+same four moved in the same commit, so the two sheets do not end up a hair
+apart.
+
+`components/__tests__/sheetTokens.test.ts` reads both files: no raw
+`rgba(255,255,255`, `withAlpha` still present (so the pass cannot be satisfied
+by deleting the chrome), `<CardGlass />` in **both** Library sheets, and no
+`<LinearGradient` left in that file. Deliberately scoped to those two files —
+`constants/Card.ts` IS the wash's definition and `BjjRankHeader.tsx` tints its
+own on purpose; a repo-wide ban is a different decision than a bug report
+about one curtain gets to make.
+
+### Item 5 — "same component" was true and still not enough
+
+Part 1 extracted `dayPillLabel` into `lib/calendar.ts` and pointed Today and
+Food at it, which fixed the loudest half (Food's pill fell through to the raw
+`YYYY-MM-DD` on any non-today day). Both screens already rendered
+`PeriodSwitcher`. They still differed — because each assembled that
+component's props itself, and Today folded the long date (`Thursday, 10
+September`) into the pill as a `subLabel` while Food did not. On today, the
+day either tab is most often showing, one pill was two lines and the other was
+one.
+
+`components/ui/DayPill.tsx` now owns everything about a day pill that is not a
+per-screen decision: both lines of text, the W14/#694 rule that the long date
+shows only on today (on any other day the short line already states the date,
+and repeating it is the duplication `subLabel` exists to remove), the calendar
+icon, and the arrows' accessible names. Food's pill gains the second line;
+Today's is unchanged.
+
+**What stops them drifting again** is not the shared component on its own — it
+is `components/ui/__tests__/dayPill.test.tsx`, whose second half reads
+`app/(tabs)/index.tsx` and `app/(tabs)/food.tsx` and asserts each contains
+`<DayPill` and NOT `prevLabel="Previous day"`, the signature of a
+hand-assembled day stepper. A render test cannot see a screen quietly growing
+its own `PeriodSwitcher` back; that was the actual failure mode here, twice.
+Narrow on purpose: `PeriodSwitcher` still serves the week and month steppers,
+which are not day pills.
+
+`onPress` stays a prop, and that is a decision rather than an oversight: Food's
+label always opens the month grid (N81/#415 is the ticket, and its whole
+complaint was a pill that only ever meant "undo my navigation"), Today has no
+month grid to open. Unifying that means building one on Today, which is a
+product change and not this ticket. Written down in `DayPill`'s doc comment.
+
+`lib/calendar.ts` gained `longDayLabel`, moved out of `index.tsx` where it was
+a private `todayLabel` helper, so both halves of the pill's text live in one
+file.
+
+One measured number moved and was **re-measured rather than raised**, as
+`foodDayJump.test.tsx`'s own note insists: mounting the Food screen with the
+grid closed now costs **1** `toLocaleDateString` call, not 0 — `dayPillLabel`
+still short-circuits to the literal `TODAY`, but the shared pill now formats
+the long date underneath it, exactly as Today's always has.
+
+### What remains on #858
+
+Items **1** (header scroll behaviour + a back control on every screen), **2**
+(sync stuck on "Sync failed" — part 1 fixed the dead end the chip led to, the
+root cause is #544's area), **4** and **8** (the universal 3-dot item-actions
+menu, and removal consolidated behind it), **9** (drag-reorder for sets —
+declined at set level in part 2, see #863), and **10** (modernised arrows and
+haptics — F38/F48/F49 are in that area). The `NEEDS HUMAN EVIDENCE` criterion
+covers all ten and stays open.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

@@ -57,6 +57,23 @@ export function dayPillLabel(viewDay: Date, isToday: boolean): string {
 }
 
 /**
+ * The day-stepper pill's SECOND line: `Thursday, 31 July` — orientation, not
+ * decoration.
+ *
+ * N493 part 3 (#858 item 5) moved this out of `app/(tabs)/index.tsx`, where
+ * it was a private `todayLabel` helper, so that it lives beside
+ * {@link dayPillLabel} — the other half of the same pill's text. The two are
+ * now read by exactly one caller, `components/ui/DayPill.tsx`, which is what
+ * stops Today's pill and Food's from saying different things again: part 1 of
+ * this ticket (#861) shared the FIRST line and left the second one on Today
+ * only, so the two pills still differed on the day the athlete is most often
+ * looking at.
+ */
+export function longDayLabel(viewDay: Date): string {
+  return viewDay.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+/**
  * `2026-08-19` → `19 Aug`, for an axis tick.
  *
  * Parsed as UTC and formatted as UTC, matching how a `YYYY-MM-DD` is STORED —

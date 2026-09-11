@@ -259,6 +259,61 @@ export function keyboardInsetFor(a: {
   return Math.max(0, a.containerBottom - a.keyboardTop);
 }
 
+/**
+ * The overlap for a footer whose bottom edge IS the screen's bottom edge —
+ * the case {@link keyboardInsetFor}'s measurement cannot answer.
+ *
+ * ## Why this exists (N493 part 3, #858 item 7)
+ *
+ * Reported from a device: on the barcode-scan amount editor, the numeric
+ * keypad covers the Done button, so a scanned item's amount cannot be
+ * confirmed. That sheet **already had** a `KeyboardAwareFooter` — it was
+ * added with the sheet itself (N426, merged a week before the report) — so
+ * the mechanism was present and did nothing.
+ *
+ * The reason is that `keyboardInsetFor` compares two numbers from two
+ * different sources: `containerBottom`, from `measureInWindow`, and
+ * `keyboardTop`, from the keyboard event's `endCoordinates.screenY`. On every
+ * screen this file was written for those are the same coordinate space, and
+ * the subtraction is exact. Inside a `Modal` they need not be: the modal's
+ * content is laid out by its own host view, and an iOS `pageSheet` is inset
+ * from the top of the screen, so a measurement taken inside it can describe
+ * the sheet rather than the display. Under-measure `containerBottom` and the
+ * footer lifts by less than the overlap — which looks exactly like the bug
+ * reported, a Done button still under the keypad.
+ *
+ * **Reproduced, not assumed** — see
+ * `components/food/__tests__/amountSheetKeyboard.test.tsx`. Under jest,
+ * `measureInWindow` reports zeros, so `keyboardInsetFor` returns 0 and the
+ * footer takes no padding at all for a keyboard that is genuinely up. That is
+ * the same failure with the measurement error at its maximum, and it is what
+ * that test pins.
+ *
+ * **The fix is to stop mixing spaces rather than to guess the offset.** For a
+ * footer flush with the bottom of the display, the overlap IS the keyboard's
+ * own height — one number, from one source, needing no geometry at all. The
+ * measured answer is still taken and the LARGER of the two wins, so this can
+ * only ever lift further, never less: where the measurement was already right
+ * the two agree and nothing changes.
+ *
+ * **iOS only, and that is the whole reason `keyboardInsetFor` refuses to read
+ * the height.** On Android's default `resize` the window has already shrunk
+ * and the footer has already moved with it, so the honest lift there is zero
+ * and a keyboard-height would push the footer a second keyboard up the
+ * screen. Android keeps the measured answer, unchanged, byte for byte.
+ */
+export function keyboardInsetForScreenBottom(a: {
+  os: string;
+  /** The keyboard's own height; null when it is down. */
+  keyboardHeight: number | null;
+  /** What {@link keyboardInsetFor} made of the measured geometry. */
+  measuredInset: number;
+}): number {
+  if (a.os !== 'ios') return a.measuredInset;
+  if (a.keyboardHeight === null) return 0;
+  return Math.max(a.measuredInset, a.keyboardHeight);
+}
+
 const Ctx = createContext<EnsureVisible>(() => {});
 
 /**
@@ -622,8 +677,19 @@ export function KeyboardAwareFlatList<ItemT>({ onScroll, ...props }: FlatListPro
  * default). Drop this into a content-hugging parent with no slack to give and
  * the bottom edge moves when the padding does, at which point the measurement
  * feeds itself. Worth checking before the second call site.
+ *
+ * **`anchoredToScreenBottom` is for a footer inside a `Modal`** — see
+ * {@link keyboardInsetForScreenBottom} for the coordinate-space mismatch it
+ * answers and the device report that found it. Pass it only when the footer
+ * really does sit flush with the bottom of the display; on a footer above a
+ * tab bar or a safe-area gap the claim is false and the lift would overshoot.
  */
-export function KeyboardAwareFooter({ style, children, ...props }: ViewProps) {
+export function KeyboardAwareFooter({
+  style,
+  children,
+  anchoredToScreenBottom = false,
+  ...props
+}: ViewProps & { anchoredToScreenBottom?: boolean }) {
   const [inset, setInset] = useState(0);
   const ref = useRef<View>(null);
 
@@ -656,9 +722,41 @@ export function KeyboardAwareFooter({ style, children, ...props }: ViewProps) {
 
   useEffect(() => {
     const names = keyboardEventNames(Platform.OS);
-    const measure = (keyboardTop: number | null) => {
+    /**
+     * `+ MARGIN` when lifting at all, because this padding REPLACES the
+     * footer's own `paddingBottom` rather than adding to it — so the bare
+     * overlap parks the buttons flush against the keyboard's top edge with no
+     * air at all, which reads as clipped. Same 24pt the field-lifting path
+     * leaves, so the two paths space alike.
+     */
+    const apply = (lift: number) => setInset(lift > 0 ? lift + MARGIN : 0);
+
+    const measure = (keyboardTop: number | null, keyboardHeight: number | null) => {
+      if (!onTop.current) return;
+
+      /**
+       * The answer that needs no geometry, applied straight away.
+       *
+       * **This is not an optimisation, it is the fix** (N493 part 3, #858
+       * item 7). Everything below happens inside `measureInWindow`'s
+       * CALLBACK, and a callback is not a guarantee: under this repo's own
+       * jest environment it is never invoked at all, which is how the
+       * regression test for the scan sheet reproduces a footer that never
+       * lifts. A footer whose entire lift hangs on that callback arriving has
+       * a failure mode with no symptom other than the bug it was added to
+       * prevent — so where a geometry-free answer exists, it is taken first
+       * and the measurement can only raise it.
+       *
+       * Zero unless the caller claims its bottom edge is the display's; see
+       * `keyboardInsetForScreenBottom`.
+       */
+      const direct = anchoredToScreenBottom
+        ? keyboardInsetForScreenBottom({ os: Platform.OS, keyboardHeight, measuredInset: 0 })
+        : 0;
+      apply(direct);
+
       const node = ref.current;
-      if (!node || !onTop.current) return;
+      if (!node) return;
       node.measureInWindow((_x, y, _w, h) => {
         // `y + h` — the footer's BOTTOM edge — is invariant under this
         // padding, which is what makes measuring here safe to repeat. The
@@ -668,24 +766,30 @@ export function KeyboardAwareFooter({ style, children, ...props }: ViewProps) {
         // edge stays put. Feeding the previous inset back in would therefore
         // compound it on every keyboard frame change, walking the footer up
         // the screen a keyboard-height at a time.
-        const lift = keyboardInsetFor({ keyboardTop, containerBottom: y + h });
-        // `+ MARGIN` when lifting at all, because this padding REPLACES the
-        // footer's own `paddingBottom` rather than adding to it — so the bare
-        // overlap parks the buttons flush against the keyboard's top edge with
-        // no air at all, which reads as clipped. Same 24pt the field-lifting
-        // path leaves, so the two paths space alike.
-        setInset(lift > 0 ? lift + MARGIN : 0);
+        const measured = keyboardInsetFor({ keyboardTop, containerBottom: y + h });
+        // Whichever answer is larger, so a measurement that was already right
+        // is never subtracted from and one taken in the wrong coordinate
+        // space is never believed over the keyboard's own height.
+        apply(Math.max(measured, direct));
       });
     };
     const subs = [
-      Keyboard.addListener(names.show, (e) => measure(e.endCoordinates.screenY)),
+      Keyboard.addListener(names.show, (e) =>
+        measure(e.endCoordinates.screenY, e.endCoordinates.height),
+      ),
       Keyboard.addListener(names.hide, () => setInset(0)),
     ];
     if (names.changeFrame) {
-      subs.push(Keyboard.addListener(names.changeFrame, (e) => measure(e.endCoordinates.screenY)));
+      subs.push(
+        Keyboard.addListener(names.changeFrame, (e) =>
+          measure(e.endCoordinates.screenY, e.endCoordinates.height),
+        ),
+      );
     }
     return () => subs.forEach((s) => s.remove());
-  }, []);
+    // `anchoredToScreenBottom` is a constant at every call site, so
+    // resubscribing on it costs nothing and keeps the closure honest.
+  }, [anchoredToScreenBottom]);
 
   return (
     <View ref={ref} style={[style, inset > 0 && { paddingBottom: inset }]} {...props}>

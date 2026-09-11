@@ -29,6 +29,34 @@
  * context only coordinates with a sibling `KeyboardAwareScrollView`, which
  * this sheet does not have (its content is short enough to need no scrolling)
  * — it measures and pads itself regardless.
+ *
+ * ### …and that was not enough, which is the part worth reading
+ *
+ * The paragraph above shipped with N426 on 2026-08-28. The athlete reported
+ * the covered Done button **on 2026-09-04**, from a device, against a build
+ * that already had every word of it (#858 item 7). The component was there
+ * and the lift was zero.
+ *
+ * The footer's lift is `measureInWindow` minus the keyboard event's
+ * `screenY`, and those are only the same coordinate space when the footer is
+ * in the app's own view tree. This one is inside a `Modal` — and an iOS
+ * `pageSheet` is inset from the top of the display, so a measurement taken
+ * inside it can describe the sheet instead. Under-measure and the footer
+ * lifts by less than the overlap, which is a Done button still under the
+ * keypad.
+ *
+ * `anchoredToScreenBottom` is the answer: for a sheet flush with the bottom
+ * of the display the overlap is simply the keyboard's height, with no
+ * geometry to get wrong. It takes the larger of that and the measured
+ * answer, so it cannot lift less than before. See
+ * `keyboardInsetForScreenBottom` for the full account and
+ * `__tests__/amountSheetKeyboard.test.tsx` for the reproduction.
+ *
+ * **The claim the prop makes is true here and must be re-checked if this
+ * sheet's presentation changes**: `styles.sheet` is `flex: 1` inside a
+ * full-height `Modal`, so its last child's bottom edge really is the bottom
+ * of the display. A sheet that gained a safe-area gap under the footer, or
+ * stopped being full-height, would be over-lifted by exactly that gap.
  */
 import { Modal, StyleSheet, View as RNView } from 'react-native';
 
@@ -76,7 +104,11 @@ export function AmountSheet({
         <View style={styles.body}>{children}</View>
         {/* Same shape as `add.tsx`'s `pickingFooter` — padding on the footer
             itself, a hairline separating it from the content above. */}
-        <KeyboardAwareFooter style={styles.footer}>
+        <KeyboardAwareFooter
+          style={styles.footer}
+          anchoredToScreenBottom
+          testID="amount-sheet-footer"
+        >
           <PressableScale
             onPress={onClose}
             style={[styles.done, { backgroundColor: accent.accent }]}

@@ -18,6 +18,7 @@ import {
 } from '@/components/KeyboardAwareScroll';
 import { LibraryTile, categoryBadge, patternBadge, positionBadge } from '@/components/LibraryTile';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { CardGlass } from '@/components/ui/CardGlass';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
@@ -25,7 +26,6 @@ import { ApiError, transportDiagnosis } from '@/lib/apiError';
 import { getStanding } from '@/lib/bjj';
 import { withAlpha } from '@/lib/palette';
 import { stillWanted } from '@/lib/inflight';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/ui/Icon';
@@ -1302,13 +1302,15 @@ export default function LibraryScreen() {
           onAccessibilityEscape={() => setOpenFacet(null)}
         >
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 10 }]}>
-          <LinearGradient
-            colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0.9, y: 1 }}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
+          {/* N493 part 3 (#858 item 6) — `CardGlass`, not a gradient
+              written out here. This sheet predates N508, which settled the
+              app's one glass wash at `CARD_GLASS_COLORS`; the literals it had
+              were 0.10/0.03 against that 0.06/0.02, so the lit corner of both
+              Library sheets sat visibly lighter than every other glass
+              surface in the app. That is the "colors are wayyy off" the
+              athlete reported, and it cannot come back now the value is read
+              rather than written. */}
+          <CardGlass />
           {/* The grab handle a sheet of this shape is read by. */}
           <View style={styles.grabber} />
           <View style={styles.sheetHead}>
@@ -1413,7 +1415,7 @@ export default function LibraryScreen() {
         render — here, on every keystroke in the search box — whether or not
         `visible` is true, so an ungated `<Modal visible={openExtras}>` would
         rebuild `positions.map`, `syllabuses.map`, seven `Pressable`s and a
-        `LinearGradient` on every keystroke while invisible. Wrapping the
+        `CardGlass` gradient on every keystroke while invisible. Wrapping the
         whole subtree in `shownExtras` (set the moment the affordance is
         tapped, cleared only by `onDismiss` — i.e. once the sheet has
         genuinely finished leaving the screen) is what the facet sheet above
@@ -1443,13 +1445,9 @@ export default function LibraryScreen() {
           onAccessibilityEscape={() => setOpenExtras(false)}
         >
           <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 10 }]}>
-            <LinearGradient
-              colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.03)', 'transparent']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0.9, y: 1 }}
-              style={StyleSheet.absoluteFill}
-              pointerEvents="none"
-            />
+            {/* The same `CardGlass` as the facet sheet above — see the note
+                there. N493 part 3 (#858 item 6). */}
+            <CardGlass />
             <View style={styles.grabber} />
             <View style={styles.sheetHead}>
               <Text style={styles.sheetTitle}>More from your library</Text>
@@ -1939,7 +1937,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: 'rgba(255,255,255,0.07)',
+    // N493 part 3 — `withAlpha(vola.text, …)` rather than a raw white.
+    // The design system's rule is "no arbitrary new colours" and
+    // `withAlpha` is the derivation it expects (N444/#741); `vola.text` is
+    // #F3F6FA, so this is also a touch warmer than the pure white it
+    // replaces, matching every other ink on the sheet.
+    borderColor: withAlpha(vola.text, 0.07),
     // Capped so the sheet cannot grow past the display: Movement has eleven
     // options and already fills most of it, and at a larger text size it would
     // push its own title off the top. The inner ScrollView takes over instead
@@ -1952,7 +1955,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: withAlpha(vola.text, 0.18),
     marginTop: 8,
     marginBottom: 4,
   },
@@ -1963,7 +1966,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: withAlpha(vola.text, 0.08),
   },
   sheetTitle: { fontSize: 16, fontWeight: '800' },
   sheetClose: { fontSize: 14, fontWeight: '700', color: vola.lime },
@@ -1977,7 +1980,7 @@ const styles = StyleSheet.create({
     // is where an undersized row is felt most.
     paddingVertical: 14,
   },
-  optionPressed: { backgroundColor: 'rgba(255,255,255,0.05)' },
+  optionPressed: { backgroundColor: withAlpha(vola.text, 0.05) },
   optionText: { fontSize: 15, color: vola.textMuted },
   optionTextOn: { color: vola.text, fontWeight: '700' },
 
