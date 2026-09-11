@@ -29,7 +29,7 @@ export function RetireButton({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-[10px] border border-border px-4 py-2 font-semibold text-text disabled:opacity-60"
+          className="pressable rounded-[10px] border border-border px-4 py-2 font-semibold text-text disabled:opacity-60"
         >
           {pending ? "Retiring…" : "Retire"}
         </button>

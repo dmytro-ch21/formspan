@@ -72032,6 +72032,141 @@ Verified in both directions, against real input rather than only the fixtures:
   (the retry went through REST). The claim convention is right that an issue exists the moment
   it is created; the window between scan and create is still a window.
 
+## 2026-09-11 — L14: the admin console's three irreversible writes acknowledge a press
+
+**What.** `PublishButton`, `RetireButton` and `ReactivateButton` — the console's
+only write surface — get a `.pressable` rule: a 3% scale on `:active`, timed from
+the brand motion scale. To use that scale without hardcoding it, the token
+generator now emits a third output, `apps/admin/src/app/motion.generated.css`,
+imported as the first statement of admin's `globals.css`, exactly as web does.
+
+**Reading the three files first overturned half the ticket.** It asked for "a
+disabled/in-flight state… so a second click is impossible". All three already
+had one: `useActionState` supplies `pending`, each button is `disabled={pending}`
+with a "Publishing…"-style label and `disabled:opacity-60`. The ticket itself
+noted the audits swept these files by grep and never read them, and a grep for
+`transition|animate-` cannot see in-flight state, because it is not motion. What
+was genuinely missing was press acknowledgement: zero `:active` states and zero
+`active:` variants anywhere in `apps/admin`. What the existing state does NOT prove is that a double-click
+can never send two writes: `disabled` lands on the next render, and
+`useActionState` queues an extra submit rather than dropping it, so a double-click
+faster than that render could still issue a second irreversible write. That is a
+question about pre-existing behaviour, not about this CSS, and it is left as a
+browser check on the ticket rather than asserted here — an earlier comment on the
+ticket said a double submit was already impossible, and that overstated it. The correction is on the ticket.
+
+**The ticket had the cascade backwards, and that is the load-bearing part.** It
+said F40 should land first "so this class is covered by it from the start". F40's
+admin block is an *unlayered* universal rule (specificity 0,0,0) narrowing
+`transition-property`. An unlayered `.pressable` (0,1,0) would beat it, so the
+scale would keep animating under Reduce Motion — parsing fine, shipping fine, and
+ignoring the setting. `.pressable` therefore lives inside `@layer components`: an
+unlayered declaration beats every layered one regardless of specificity, which is
+the same fact F40's own comment relies on. `:active:not(:disabled)`, so a button
+whose action is in flight does not look pressed.
+
+**How that was established — first argued, then measured.** It was argued
+first, from the CSS Cascade Level 5 layering rule and F40's documented reasoning,
+because the live checks I tried did not complete: the Browser pane refuses local
+files, Playwright is not installed anywhere in the repo, and headless Chrome under
+`--dump-dom` wrote the DOM and then never exited, so the pipe I read it through
+blocked — twice, the second time with `--use-mock-keychain`. `frontend-reviewer`
+then measured it, driving headless Chrome 152 over the DevTools protocol instead
+(`--remote-debugging-port=0`) against admin's stylesheet as `@tailwindcss/postcss`
+actually builds it: under Reduce Motion the scale reads `0.9700` at 0ms, and
+without it the scale animates through `0.9702`. `ac-verifier` confirmed the same
+against the minified production build from `build:admin`, where the minifier moves
+the components layer ahead of the unlayered reduced-motion block and the result is
+still correct. It is also a **checked invariant**: F40's `reducedMotion.test.ts`
+asserts `.pressable {` appears exactly once and that the block enclosing it is an
+`@layer`. The enclosing header is found by walking braces, not by comparing
+`lastIndexOf("@layer")` with `lastIndexOf("@media")`, which any comment mentioning
+either word would fool.
+
+**Every new assertion was mutation-tested, and each broke exactly the one test it
+exists for.** Seven mutations, each reddening one of 65 tests and nothing else:
+un-layering the rule, dropping `:not(:disabled)`, hardcoding the timing, moving the
+motion `@import` below Tailwind's, stripping the class from one button, deleting
+`--ease-out` from the generated sheet, and adding a comment containing
+`.pressable {`. Each was restored by copying the backup back and re-running — all
+three mutated files byte-identical afterwards. (`ac-verifier`
+reproduced all seven and added one qualification: the comment mutation reddens
+exactly one test only because the comment went inside the layer after the rule —
+placed at the top of the file it reddens three.)
+
+**Review found a real defect in the very thing L14 is for.** At `scale(0.97)`
+the button loses 1.5% of its size on each side, and a press released inside that
+band lands on the parent row: the button visibly acknowledges the press and
+receives no click. On an irreversible write, that is exactly the failure L14
+exists to prevent. The fix restores the original target only while pressed —
+`position: relative` on `.pressable`, plus a `::before` cover on
+`:active:not(:disabled)` with `inset: -2%`. It is a percentage because the band
+scales with width; a fixed `-2px` would leave a wide button partly uncovered.
+Measured before and after on the real Tailwind build, with real admin markup, on
+88px and 240px buttons, with Reduce Motion on and off: a press 0.8px inside the
+edge, and one at the deepest point of the band, gave 0 clicks before and 1 after;
+a centre press gave 1 both times; and a press 1px *outside* the edge at rest gave
+0 both times, so the target is never larger than the button when nobody is
+pressing it.
+
+**Two holes in my own guard, found by `ac-verifier` and closed.** The layer check
+anchored on `.pressable {` — the base rule only — so a later unlayered
+`.pressable:hover` would have passed every test while animating under Reduce
+Motion. Every rule whose selector names `.pressable` is now required to sit inside
+some `@layer`, walking all enclosing blocks with comments blanked first, so
+neither a commented-out brace nor a quoted `@layer` can fool it; a dry run proved
+the new guard catches both before it shipped. And the brand curve turned out to be
+winning by accident: Tailwind v4 emits its own `--ease-out` inside `@layer theme`,
+and ours beats it only because the generated sheet is unlayered — now asserted.
+Review also caught two more stale summaries of the same shape as before: F40's
+comment still said admin had no motion and that its block disabled nothing, and
+the generator's `--check` comment still said "two outputs".
+
+**The new assertions were mutation-tested as well, and one mutant survived until
+it was pinned.** Nine mutations: removing the cover, a `-2px` inset, dropping
+`position: relative`, a bare `::before` at rest, an unlayered `.pressable:hover`,
+the generated sheet wrapped in a layer, each of the two header-boundary bugs put
+back, and the committed single-header helper reverted to its old copy. Eight went
+red; removing the cover reddened three tests, because the layer guard's floor of
+three press rules caught it too. The ninth survived: the old helper still reads the
+real stylesheet correctly — a comment happens to sit right before the one header it
+is ever asked about — so nothing noticed it had come back. An assertion now calls
+it on a layer nested inside a media query, and that mutation goes red. Separately,
+the shipped stylesheet was confirmed rule-identical, once comments are stripped, to
+the one measured in Chrome, so those measurements describe what ships.
+
+**The import position gets its own test because its failure is silent.** An
+`@import` that lands after any other rule is not an error; the browser ignores it.
+`var(--ease-out)` would then be undefined and the transition would quietly degrade
+with nothing reporting it. The test strips comments and asserts the motion import
+is the first statement.
+
+**Two more instances of the list-outgrows-its-summary slip, both fixed.** The
+generator's doc comment said "TWO outputs", and its `--check` success line
+hardcoded the same two filenames. The line is now derived from `targets`, so it
+cannot fall behind again; the comment records that it can, and why. Web's and
+mobile's generated files were regenerated byte-identically.
+
+**Three things about this environment worth any session knowing, all met here.**
+`gh api rate_limit` reported GraphQL at `5000/5000 used=0` while every real
+GraphQL call was refused — the headers on an actual response
+(`X-Ratelimit-Remaining: 0`, `X-Ratelimit-Used: 5000`) are what counts, and the
+summary endpoint is not. The whole fleet runs as one GitHub user and shares that
+one quota, so a session polling CI every twenty seconds spends everyone's budget;
+a claim was deferred here until the window reset rather than skipping the
+claim-first rule. `grep` in this shell is `ugrep`: it matches its own command line
+in process listings, and parses a pattern beginning with `-` as an option, so use
+`-e`. And headless Chrome under `--dump-dom` writes the DOM but never exits, so anything reading it through a pipe blocks forever — redirect to a file and kill the process, or drive Chrome over the DevTools protocol with `--remote-debugging-port=0`.
+
+**Not verified.** The engine measurements used a scratch page carrying the real
+button markup and admin's real built stylesheet, in Chromium only — not the
+running console, and not Safari or Firefox. Also unverified: whether a fast
+double-click can send two writes before `disabled` renders, and what the backend
+does with a duplicate publish or retire. Whether the press *reads* as
+acknowledgement to an operator is a judgment no measurement answers. The suite
+asserts the stylesheet's structure and that the class reaches the rendered button,
+because jsdom computes neither `:active` nor the cascade; the engine measurements
+are recorded here, not re-run by CI.
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

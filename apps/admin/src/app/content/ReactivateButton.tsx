@@ -24,7 +24,7 @@ export function ReactivateButton({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-[10px] bg-accent-dark px-4 py-2 font-semibold text-page disabled:opacity-60"
+          className="pressable rounded-[10px] bg-accent-dark px-4 py-2 font-semibold text-page disabled:opacity-60"
         >
           {pending ? "Reactivating…" : "Reactivate"}
         </button>

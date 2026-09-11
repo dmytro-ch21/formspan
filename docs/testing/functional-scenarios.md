@@ -23340,3 +23340,72 @@ each row as one button with the label shown, or a real radio being off.
 - **A real dead spot** — the gym basement the constraint is written for.
 - **Several days as the actual entry point** — #972's own evidence criterion, and
   the answer to whether this removed navigation or added a screen.
+
+## L14 — the admin console's write buttons acknowledge a press (`apps/admin/src/app/content/{Publish,Retire,Reactivate}Button.tsx`, `apps/admin/src/app/globals.css`, #1051)
+
+The console's only write surface. Deliberately the only motion in `apps/admin`:
+the console's restraint is correct, and this is a narrow carve-out for the one
+place an operator could not otherwise tell whether a click registered.
+
+### Happy path
+
+- **Press and hold Publish, Retire or Reactivate.** The button shrinks slightly
+  (3%) while held and returns when released. The press is visible before the
+  action has done anything.
+- **Release to submit.** The existing in-flight state takes over: the label reads
+  "Publishing…" / "Retiring…" / "Reactivating…", the button dims and cannot be
+  pressed again.
+
+### Edge cases & errors
+
+- **Pressing a button whose action is already in flight** does nothing visible.
+  It is `disabled`, and `:not(:disabled)` keeps it from looking pressed — a button
+  that cannot be pressed must not look pressed.
+- **Reduce Motion on** (OS setting): the press still registers, but the scale
+  arrives rather than animates. F40's reduced-motion rule narrows
+  `transition-property` to colour and opacity, and wins because `.pressable` is
+  layered. Regression shape to watch for: an unlayered `.pressable` would keep
+  animating here, silently.
+- **Keyboard activation** (Tab to the button, hold Space): browsers apply
+  `:active` while Space is held on a focused button, so keyboard users get the
+  same acknowledgement. Enter activates without a held `:active` in most engines;
+  that is expected, not a defect.
+- **Pressing near the edge.** At `scale(0.97)` the button shrinks 1.5% on each
+  side. A press released inside that band used to land on the parent row, so the
+  button looked pressed and received no click. A cover that exists only while
+  pressed restores the original target. Regression shape: a press 0.8px inside the
+  edge gives 0 clicks. And the cover must never exist at rest — a press 1px
+  *outside* the edge must still give 0 clicks, or the target of an irreversible
+  write has grown.
+- **Double-clicking an irreversible write.** Unproven either way. `disabled`
+  lands on the next render and `useActionState` queues an extra submit rather than
+  dropping it, so a double-click faster than that render could send two writes.
+  Check it in DevTools → Network: a fast double-click on Publish must produce
+  exactly one POST. This is pre-existing behaviour, not something L14 changed.
+- **A failed action** still renders its `role="alert"` message — unchanged by L14.
+
+### What a test can and cannot reach
+
+- **Reachable, and covered** (`app/__tests__/reducedMotion.test.ts`, "Press
+  feedback (L14)"; `app/content/__tests__/pressFeedback.test.tsx`): that the rule
+  exists once, sits inside an `@layer`, excludes `:disabled`, takes its timing from
+  the generated scale, that the motion `@import` is the first statement, that the
+  generated sheet defines both variables, and that all three rendered buttons carry
+  the class. Seven mutations, each reddening exactly its own test.
+- **Measured outside the suite, not re-run by CI**: in headless Chromium over the
+  DevTools protocol, against admin's real built stylesheet, development and
+  minified production. The scale animates without Reduce Motion and arrives at
+  0.97 at 0ms with it. Edge presses give 1 click with the cover and 0 without it,
+  on 88px and 240px buttons, and a press 1px outside the edge gives 0 either way.
+- **NOT reachable**: Safari and Firefox; whether a fast double-click sends two
+  writes; what the backend does with a duplicate; and whether the press *reads* as
+  acknowledgement to an operator.
+
+### Needs a browser
+
+- Sign in to the console, open a draft, and press-and-hold Publish: confirm the
+  shrink is visible and releases cleanly.
+- With the OS Reduce Motion setting on, repeat: the press should still register,
+  without animating.
+- Trigger a publish and immediately press again while it is in flight: nothing
+  should move.
