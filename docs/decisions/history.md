@@ -72791,6 +72791,89 @@ screen.
 - The NEEDS HUMAN EVIDENCE criterion (a real device whose wearable does not
   write VO₂max) is outstanding. No test renders either VO₂max screen.
 
+## 2026-09-11 — F47 (#1057): the mobile suite's leaked act() updates, fixed in the tests that left work running
+
+**The ticket said 76 unwrapped updates across 11 components. On current `main` that table no longer reproduces, and the number was never stable.** The census is a race outcome, not a count. What is stable is the set of **mechanisms**, and each one is fixed here in the test that triggered it. No production source file, `jest.setup.js` or console handling was touched.
+
+### The census on `main`, before any change
+
+Both runs were on `b342a9b6` with `CI=1` (jest's 2-worker cap), on this host shared with other sessions:
+
+| run | how | load | `not wrapped in act` | `not configured to support act` | result |
+|---|---|---|---|---|---|
+| A | `pnpm run test:mobile` | 120–187 | **105** | 42 | exit 1: 2 failures, both jest timeouts |
+| B | same suite, plus a diagnostic setup file naming the test each warning fired in | 155–177 | **69** | 25 | exit 0 |
+
+Run A's two failures were `goalsScreen` › `asks again on every focus, not only on mount` (the 15s budget) and `todayScreen` › `is a header link that opens /day` (the file's 30s budget). Both are the missing-element-under-load signature, so they are classified as load, not as leaks.
+
+**None of `Ring`, `AddFoodScreen`, `HoldToConfirm`, `PickSessionSheet`, `TodayScreen`, `WeekPlanner` or `IngredientPicker` appeared in either run.** F47 was filed at 04:25Z on 2026-09-10. Later that day N550 (#1069) moved the suite to RNTL 14, where `render` is async and flushes inside `act`, and F46 (#1085) rewrote the ring tests. Their resolved-mock updates now land inside `render`'s `act`. What remained was a different set, dominated by `DictateReflectionScreen` (65 in run A) and `BjjSessionScreen` (35).
+
+**The ticket's follow-up comment called 76 "deterministic and measurable on every run". It is not.** `dictateScreen` alone produced seven updates from each of 13 tests in one run, and from 5 in the next, with no code change in between. A census taken once is one sample of a race.
+
+**The diagnostic file is not committed, and neither is anything like it.** It wrapped `console.error` only to append `expect.getState().currentTestName` to a tagged stderr line, and then called the original. Attributing a warning to a **test** rather than a file is what made this tractable. Jest prints a file's console output under that file's header, but a leaked update from one file can be printed under another's: run A showed `profile/edit.tsx`'s setters inside `runningSessionScreen`'s block.
+
+### One mechanism does most of it: RNTL 14's `fireEvent` closes `act` before the handler finishes
+
+`fireEvent` is implemented as `await act(() => { returnValue = handler(...) }); return returnValue;`. The `act` covers the **synchronous** call only. The handler's promise is then awaited outside `act`. So `await fireEvent.press(x)` on an `async` handler runs everything past the handler's first `await` outside `act`. Whether React notices depends on whether that continuation lands before or after `act`'s own exit tick. A mock that resolves on a `setTimeout` usually lands after, which is exactly what `dictateScreen`'s and `bjjSessionScreen`'s `deferred` helpers do.
+
+The fix is an outer `act` held open until the press settles (`await act(async () => { await fireEvent.press(x); })`). It is the same shape `editProfileAvatar`, `savedFoodsScreen` and `scanScreen` already used for their handlers.
+
+**The second warning is a different overlap.** "The current testing environment is not configured to support act(...)" means a state update happened inside an `act` scope while React's act environment was switched **off**. RNTL's `waitFor` switches it off while it polls. An **unawaited** `render` or `fireEvent` leaves its `act` open across that `waitFor`, and the screen's updates then land inside a scope React has been told does not exist.
+
+### Per file: cause, then fix
+
+- **`dictateScreen`**: `speak()` and every Save awaited `fireEvent.press` on `read`/`save`, which are async. Now a local `press()` holds `act` open. **A second, separate leak came to light only once that was fixed.** Any draft starts `fetchTechniques`, resolved on a `setTimeout` after the press settles, so a test ending on a synchronous assertion ended with `setCatalog` still out. `speak()` now awaits the library the draft asked for (`catalogLanded()`). The one test that holds that fetch open on purpose opts out, and resolves it inside `act`. The first version put that wait in an `afterEach`, **and it still leaked**: jest yields between a test body and its hooks, and a `setTimeout` can land in the gap. The retry test's release-and-await moved inside `act` too.
+- **`bjjSessionScreen`**: `holdToFinish` stepped the fake clock with `jest.advanceTimersByTimeAsync` outside any `act`, and awaited the press outside it. `finishNow`'s `load()` and the celebration it opens printed seven warnings from each of five tests in every measured run. The whole helper now runs inside one `act`.
+  - **This surfaced a latent fixture bug.** In the three finish tests that never set a history, `fetchHistory` is a bare `jest.fn()`, so the celebration's `fetchHistory(...).then` **threw**. Measured on `main`: all three green, each logging `Uncaught error: TypeError: Cannot read properties of undefined (reading 'then')`, because the throw happened after `act` had closed. Inside `act` it failed the test it had always been happening in. A file-level `beforeEach` now resolves an empty history; tests that are about a streak still set their own.
+- **`goalsScreen`**: `refocus()` called the focus callbacks bare, and the first thing each does is `setOn(todayString())`, which leaked one warning per refocus. The helper is now `async` and runs the callbacks inside `act`, so a new refocus test cannot forget. **The recovered N505 (#878) fix is also ported here**, and the next section covers it.
+- **`syncRefused`**: all nine tests called `render(...)` without `await`, and the discard press was unawaited. That produced "not configured to support act" out of every test. Renders are awaited now, and the discard is held in `act`.
+- **`runningSessionScreen`** › `finishes a run in order`: the finish press was unawaited, overlapping `findByTestId`, which gave five "not configured" per run. It is now held in `act`. Awaiting it bare would only have moved the updates outside `act`.
+- **`editProfileAvatar`** › `disables Save while an avatar upload is in flight`: the press cannot be awaited to completion here (it deadlocks on the held upload), and it overlapped the `waitFor`, giving two "not configured" per run. It is now held in `act` until the upload has been **called**, which comes after the handler's `setAvatarBusy(true)` and before the upload the test is holding. A promise the mock resolves on invocation marks that point.
+- **`roadmapScreen`**: `apply.onPress()` was called bare, and its synchronous `setBusy(true)` leaked. It is now inside `act`.
+- **`scanScreen`** › `offers a way out of the spinner`: the held lookup was released **after** the test's last assertion, so its `setPhase` landed after the body. It is now released inside `act`. **It is released, not asserted on**, and the next section explains why.
+- **`todayScreen`, `dayScreen`**: a bare `fireEvent.press` on a synchronous `router.push` left its `act` open past the end of the test. Both are now awaited.
+
+### The recovered `TargetScreen` fix (N505, #878)
+
+It was found uncommitted in a stale worktree whose HEAD was already on `main`, and recovered read-only as a patch. The coordinator's `git apply --check` failed at `goalsScreen.test.tsx:1010`, because the RNTL 14 migration had rewritten the file around it (`await render`, `await fireEvent.press`). **It was ported by hand, and the mechanism it names was re-checked on current `main` rather than assumed.** On RNTL 14 it could have gone away: `await fireEvent.press` awaits whatever the handler returns. It had not. The pill's `onChoose` is `(level) => void chooseActivity(level)`, which returns nothing, so the press still does not wait for remember → push → settle.
+
+**Its claim that the extra waits do not change what the test checks was verified by mutation**, not by reading. Removing `|| seq !== choiceSeq.current` from the focus read's guard in `app/goals.tsx`, with the ported waits in place, turns `does not let a slow cache read revert a pill pressed while it was in flight` red: the pill is expected selected and is not. Restored, it is green again. The filter matched exactly that one test both times (1 failed / 63 skipped, then 1 passed / 63 skipped). **So the claim holds on current `main`**: the guard is still what the test measures, and waiting for the push does not disarm it.
+
+### A production bug found on the way, and filed rather than fixed
+
+**F52 (#1114): cancelling a barcode lookup does not cancel it.** `resolve` in `app/food/scan.tsx` has no tie to the phase it started in. When a cancelled lookup answers late, `setPhase` moves the athlete, now back at the camera, to a result for a barcode they walked away from. This was demonstrated with a throwaway probe of the `scanScreen` test, deleted afterwards. The test's own `waitFor` found `scan-hint` after Cancel (the positive control), and it was gone once the late answer landed inside `act`. F47's criteria keep this out of a test-only change. The `scanScreen` comment names F52 as the place its assertion belongs.
+
+### After
+
+One full run with every fix applied, `CI=1` and the same diagnostic file, at load 70–99: **0** `not wrapped in act`, **0** `not configured to support act`, **0** `Uncaught error`. All 352 suites and 5689 tests passed (exit 0, 133s). `goalsScreen` standalone: 5 runs, 64/64 each, 0 warnings. `dictateScreen` standalone: 3 runs, 29/29 each, 0 warnings.
+
+**Mutation checks.** Each mutation was confirmed on disk, run, restored, and confirmed restored **by re-running**:
+
+| # | mutation | result | restored, re-run |
+|---|---|---|---|
+| M1 | `dictateScreen`'s `press()` without its outer `act` | **70** `DictateReflectionScreen` warnings, 29/29 still pass | 0 |
+| M7 | `speak()` defaulting to `waitForCatalog: false` | **1** `setCatalog` warning in each of two runs, from a different test each time | 0 |
+| M2 | `holdToFinish` without `act` | **35** `BjjSessionScreen` warnings: 7 from each of the five fake-clock finish tests | 0 |
+| M3 | the `fetchHistory` default disabled | **3 tests red**, `TypeError: Cannot read properties of undefined (reading 'then')` | 16/16 green |
+| M4 | `goalsScreen`'s `refocus()` calling the callbacks bare | **25** `TargetScreen` warnings across four tests | 0 |
+| M5 | `goals.tsx`'s `choiceSeq` guard removed (production source, restored) | slow-read test **red** | green |
+| M6 | `syncRefused`'s nine renders unawaited | **16** `not configured to support act` | 0 |
+
+**Two of these say something beyond "the fix is load-bearing".**
+
+- **M1, M2 and M4 pass every test while leaking.** That is why none of this ever failed on its own, and why a green run was never evidence of a clean one.
+- **M7 is the only timing-dependent one**: one warning a run, from a different test each time. That is the same signature the original census had at scale.
+
+**Consecutive full runs** (`CI=1 pnpm run test:mobile`, in a separate worktree pinned to the committed tree so nothing edited during the loop could reach it):
+
+**LOOP RESULT NOT YET RECORDED.** The loop (target 20, at most 30 attempts) was started on commit `50b5e797`, in a separate worktree. A follow-up commit on this branch replaces this paragraph with the per-run table. If you are reading this paragraph, that has not happened, and no consecutive-run count is claimed.
+
+### Open questions
+
+- **The ticket's census command counts only one of the two act warnings.** `grep -c "not wrapped in act"` misses "not configured to support act", which is the same class of leak: work still running when a scope closes. It was counted separately throughout. A future census should count both.
+- **F52 (#1114)** is open and unowned.
+- **Nothing here stops the mechanism coming back.** A new `await fireEvent.press` on an async handler will leak exactly as before, and nothing in the suite goes red when it does. Failing the suite on act warnings in `jest.setup.js` would enforce it. That is shared with PR #1105's mock changes, and it was out of scope for a ticket whose criteria forbid touching console handling, so it is recorded here rather than done.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
