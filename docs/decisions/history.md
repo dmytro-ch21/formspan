@@ -71420,6 +71420,95 @@ happened to include the missing lines.
 - No functional scenarios were added: nothing here changes behaviour an athlete
   can observe. It is documentation, two server-side pins and a client test.
 
+## 2026-09-11 — F35 (#999): a swap renamed the fold keys from another screen, so the fix is a handoff, not a diff
+
+N543 (#981) made every on-screen mutator of the strength session screen rebuild
+the per-exercise **Done** fold state across the key rename an occurrence-numbered
+key suffers (`squat#0`, `bench#0`, `squat#1`). `frontend-reviewer` found a fourth
+mutator on that PR and it was filed, not folded in: **the exercise swap**.
+`swapExercise` rewrites `exercise_id` on every row of the swapped exercise, and
+both the picker (`app/session/[id]/add.tsx`) and photo identify
+(`app/session/[id]/identify.tsx` — the ticket names only the first; the second is
+a byte-identical write) save the result straight to SQLite and navigate back.
+The screen re-reads sets on focus but hydrates fold state once per session, so
+nothing rebuilt it. No data was ever at risk; the cost is one tap.
+
+Three effects, each now a test that fails against the code before this entry
+(measured by swapping the new rekey for "carry `collapsed` unchanged", which is
+what `main` did — 5 of the new unit tests go red; and by running the new wiring
+test against the three screens as they were — 6 of 7 go red):
+
+- **Orphaned fold** — `[squat, bench, squat]`, fold `squat#1`, swap squat →
+  deadlift: the key names nothing and the block re-opens.
+- **Misapplied fold** — `[squat, bench, deadlift]`, fold `deadlift#0`, swap bench
+  → deadlift: the two deadlifts weld into one block and the stale key folds the
+  whole thing, including the half nobody tapped Done on. The ticket's merge case.
+- **Jumped fold, not in the ticket** — `[squat, deadlift, bench]`, fold
+  `bench#0`, swap squat → bench: a new bench now precedes the athlete's, so their
+  block becomes `bench#1` and the fold jumps to the swapped-in block at the top.
+- **Hidden append, not in the ticket** — the same picker appends; an exercise
+  matching a folded last block welds into it and renders **hidden** under a
+  header closed before the set existed. The worst of the four, because the
+  athlete's next action is to log that set.
+
+**The rule.** `rekeyCollapsedAcross(collapsed, before, after, sourceOf)` is
+`rekeyCollapsed` generalised to changes that relabel rows: `sourceOf[j]` is the
+`before` index `after[j]` came from, or `null` for a new row. **An after-block is
+folded only if every row in it came from a folded block** — which keeps a
+swapped block's fold under its new name, refuses a weld half a fold, and opens a
+block a new row landed in. `rekeyCollapsed` now delegates to it (a removal or
+reorder is the no-relabel case), so there is one grouping implementation; the
+existing N543 tests are what guard that refactor, and one of them goes red under
+the `every → some` mutation along with the new ones.
+
+**The handoff.** Only the writer knows the correspondence — identity for a swap,
+the old prefix for an append — so it records one in `lib/collapseHandoff.ts`
+after `saveLocalSets` lands, keyed by user and session, and the screen's `load`
+takes it once, after hydration (so a fresh mount rekeys the stored keys too) and
+before `setSets` (so the first paint has the new keys), through the functional
+updater. `handoffStillApplies` refuses one whose `after` ids are no longer what
+SQLite holds. Both builders refuse to claim a correspondence they did not keep:
+a "swap" that changed length, or an "append" whose prefix moved, maps every row
+to `null`, which opens rather than folds.
+
+**Rejected, and why — the three shapes the ticket offered plus the obvious one:**
+
+- **Diff old and new sets in `load`.** N543 declined exactly this: with no set
+  ids a same-length change could be a swap or a sync-pulled reorder, and those
+  need different answers. A guessed correspondence is the silent rename.
+- **Picker returns the swap for the screen to apply through `commit`.** Moves
+  the write off SQLite, so an app killed between screens loses the swap itself —
+  a durability regression to fix a one-tap view bug.
+- **Picker writes `collapsed_json`.** Breaks N543's one-writer rule, and would
+  not work: the screen hydrates once and its in-memory set overwrites the
+  picker's write on the next change.
+- **Re-hydrate when the sets change shape.** Re-reads keys that describe the old
+  shape — the bug, not its fix.
+
+**What it does not cover, stated in the module.** The handoff is in memory: an
+app kill between the write and the next focus loses it and the screen hydrates
+the pre-swap keys, which is `main`'s behaviour. Persisting it would be a second
+writer of fold state. Nothing other than these two screens records one, so a
+sync pull that relabels rows underneath the screen is still unhandled — and
+`handoffStillApplies` makes sure such a pull landing between a swap and focus
+discards the handoff rather than misapplying it.
+
+**Checks.** 15 mutations, all caught as test failures (not compile errors), each
+restore confirmed byte-identical and then by re-running the suites green:
+`every → some`; a new row inheriting its block's fold; grouping the old rows
+(`rekeyCollapsed`'s shape); `handoffStillApplies` always true / ignoring ids;
+take not consuming; the key ignoring the user; swap identity ignoring length;
+append prefix unchecked; the screen skipping the still-applies check or not
+using the functional updater; either writer recording nothing, recording before
+the save, or with its arms swapped. One redundancy recorded rather than hidden:
+the out-of-range check on `sourceOf` has the same outcome as the `undefined`
+lookup chain it guards, so its test pins the outcome, and says so.
+
+**Reachability on a phone**: this is the phone — the strength session screen,
+its exercise picker and photo identify are all mobile-only. **Not verified on a
+device**: the wiring is proven by reading the source, as N543's screen tests
+were; nothing here renders `session/[id].tsx`.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

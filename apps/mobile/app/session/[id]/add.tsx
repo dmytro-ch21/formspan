@@ -12,6 +12,7 @@ import { vola } from '@/constants/Colors';
 import { LibraryTile, patternBadge } from '@/components/LibraryTile';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
 import { emptySet, swapExercise, swapSuggestions } from '@/lib/sessions';
+import { handoffForAppend, handoffForSwap, recordSetsHandoff } from '@/lib/collapseHandoff';
 import { sharesMuscleGroup } from '@/lib/exerciseFacets';
 import {
   cachedExercises,
@@ -129,6 +130,15 @@ export default function AddExerciseToSessionScreen() {
         ? swapExercise(session.sets, swap, exercise, current?.load_type)
         : [...session.sets, emptySet(exercise.id, session.sets.length)];
       await saveLocalSets(userId!, id, next);
+      // F35/#999 — this write bypasses the session screen's `commit`, and a swap
+      // renames its fold keys. Hand over the correspondence only this code
+      // knows; the screen applies it on focus. Recorded only once the save has
+      // landed, so a failed write leaves nothing behind to apply.
+      recordSetsHandoff(
+        userId!,
+        id,
+        swapping ? handoffForSwap(session.sets, next) : handoffForAppend(session.sets, next),
+      );
       requestSync('exercise-added');
       router.back();
     } catch (err) {

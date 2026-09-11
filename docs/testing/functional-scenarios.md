@@ -707,6 +707,13 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **A decimal weight must be typable** ("72.5" via "72." must survive) — the input holds the raw string, not the parsed number.
 - **Saves must be serialised**, and `flush()` must await an in-flight save, or the exercise picker's read-modify-write can silently drop a set.
 - **Swapping an exercise keeps the sets already logged**, rewriting them in place. Measures carry over only when the load types match; effort is always cleared.
+- **A swap or an add from the picker leaves each exercise's Done fold where the athlete left it (F35/#999).** Mobile, both the picker and photo identify:
+  - `[squat, bench, squat]`, tap Done on the **second** squat, swap squat → deadlift: the second deadlift is still folded, the first is still open.
+  - `[squat, bench, deadlift]`, tap Done on the deadlift only, swap the bench → deadlift: the two deadlifts become one block, and it is **open** — the swapped-in half was never marked done.
+  - The same, with Done tapped on **both** the bench and the deadlift: the merged block stays folded.
+  - `[squat, deadlift, bench]`, Done on the bench, swap squat → bench: the fold stays on the bottom bench, and the new bench at the top is open.
+  - `[squat, bench]`, Done on the bench, add another bench: the bench block **opens**, so the new set is visible and loggable rather than hidden under a closed header.
+  - Kill the app between the picker and the session screen: the swap itself is kept; the fold may come back on its old keys (one tap to fix) — known and accepted, not a regression.
 
 **Not yet covered / deferred**
 - ~~**Weights and distances are kilograms and metres everywhere** — there is no unit preference.~~ **Done.** `profiles.unit_system` has existed since migration 000011, and N105 finished the other half: one generated units module, height and girth support, and a check that fails when a screen prints a unit itself. See *Units and settings* below.

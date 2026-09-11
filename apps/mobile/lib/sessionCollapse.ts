@@ -63,10 +63,22 @@ export type GroupKey = string;
  * write the circuit down and run it — the argument is easy to get right about
  * a case that is not the one that bites.
  *
+ * **And two faces that happen OFF this screen (F35/#999).** Swapping an
+ * exercise rewrites `exercise_id` on every row of it, so it renames every
+ * block of BOTH the exercise swapped away from and the one swapped to, and can
+ * weld a swapped block into a same-exercise neighbour. Appending an exercise
+ * that matches the last block welds the new row into that block. Both are
+ * written straight to SQLite by the exercise picker (`session/[id]/add.tsx`)
+ * and by photo identify (`session/[id]/identify.tsx`) — never through the
+ * session screen's `commit` — so the screen learns of them only when `load`
+ * re-reads the sets on focus.
+ *
  * Nothing here can prevent any of it, because a set carries no id to key on
- * instead. The caller must rebuild the fold state with
- * {@link rekeyCollapsed}, and the session screen does at every site that
- * removes or reorders — `removeSet`, `removeGroup`, `moveGroup`.
+ * instead. The caller must rebuild the fold state with {@link rekeyCollapsed}
+ * or {@link rekeyCollapsedAcross}. The session screen does at every site that
+ * removes or reorders — `removeSet`, `removeGroup`, `moveGroup` — and in
+ * `load`, from the correspondence the off-screen writer recorded in
+ * `lib/collapseHandoff.ts`, which is the one place that actually knows it.
  */
 export function groupKeys(groups: readonly { exerciseID: string }[]): GroupKey[] {
   const seen = new Map<string, number>();
@@ -114,19 +126,65 @@ export function rekeyCollapsed(
   // would shift `after`'s indices out of step with `surviving`'s, which is a
   // silent wrong answer rather than a missing one.
   const surviving = survivingOldIndices.filter((i) => i >= 0 && i < before.length);
+  // A removal or a reorder keeps every surviving row's exercise, so the rows
+  // after the change ARE the surviving rows and each one's source is the index
+  // it came from. That is the special case of `rekeyCollapsedAcross` in which
+  // nothing is relabelled — so this delegates, rather than keeping a second
+  // copy of the grouping logic that could drift away from the first.
+  return rekeyCollapsedAcross(collapsed, before, surviving.map((i) => before[i]), surviving);
+}
 
+/**
+ * The general form of {@link rekeyCollapsed}: carry the fold state across a
+ * change that can RELABEL rows, not only drop or reorder them (F35/#999).
+ *
+ * `rekeyCollapsed` builds the after-grouping from `before`'s own rows, which
+ * is right for a removal or a reorder — every surviving row keeps its
+ * exercise — and wrong for a swap, whose whole effect is to change
+ * `exercise_id`. Grouping the old rows would compute the new keys from the old
+ * exercise names.
+ *
+ * So this takes the rows as they are AFTER the change, and `sourceOf[j]` is the
+ * index in `before` that `after[j]` came from, or `null` for a row that did not
+ * exist before. For a swap that is identity; for an append it is the old
+ * prefix followed by `null`s. As with `rekeyCollapsed`, only the writer knows
+ * it, so it is a parameter rather than something diffed out of the two lists.
+ *
+ * **An after-block reads as folded only if EVERY row in it came from a folded
+ * block.** That one rule covers each case F35 names:
+ *
+ * - a swapped block keeps the fold the athlete gave it, under its new name;
+ * - a block the swap welds to a folded neighbour does NOT inherit that
+ *   neighbour's fold, because part of it was never folded;
+ * - a row APPENDED into a folded last block has no source, so the block opens
+ *   rather than hiding the set the athlete has just added.
+ *
+ * Same asymmetry as N543, for the same reason: folding rows nobody folded
+ * hides work still owed, and leaving them open costs one tap.
+ */
+export function rekeyCollapsedAcross(
+  collapsed: ReadonlySet<GroupKey>,
+  before: readonly Pick<LoggedSet, 'exercise_id'>[],
+  after: readonly Pick<LoggedSet, 'exercise_id'>[],
+  sourceOf: readonly (number | null)[],
+): Set<GroupKey> {
   const beforeGroups = groupSets(before);
   const beforeKeys = groupKeys(beforeGroups);
   const groupOfSet: number[] = [];
   beforeGroups.forEach((g, gi) => g.indices.forEach((i) => (groupOfSet[i] = gi)));
 
-  const afterGroups = groupSets(surviving.map((i) => before[i]));
+  const afterGroups = groupSets(after);
   const afterKeys = groupKeys(afterGroups);
 
   const next = new Set<GroupKey>();
   afterGroups.forEach((g, gi) => {
-    const sources = new Set(g.indices.map((i) => groupOfSet[surviving[i]]));
-    if ([...sources].every((s) => collapsed.has(beforeKeys[s]))) next.add(afterKeys[gi]);
+    const folded = g.indices.every((j) => {
+      const src = sourceOf[j];
+      // No source, or one naming no row: a row the athlete never folded.
+      if (src == null || src < 0 || src >= before.length) return false;
+      return collapsed.has(beforeKeys[groupOfSet[src]]);
+    });
+    if (folded) next.add(afterKeys[gi]);
   });
   return next;
 }
