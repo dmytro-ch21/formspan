@@ -72167,6 +72167,77 @@ acknowledgement to an operator is a judgment no measurement answers. The suite
 asserts the stylesheet's structure and that the class reaches the rendered button,
 because jsdom computes neither `:active` nor the cascade; the engine measurements
 are recorded here, not re-run by CI.
+## 2026-09-11 — H27 (#1099): `ci:checks` stops spending the fleet's one GraphQL budget
+
+Every session in this fleet authenticates as the same GitHub account, so they
+share **one** GraphQL budget of 5,000 points an hour. On 2026-09-11 it ran out
+twice within about an hour, and while it was out no session could open a PR with
+`gh pr create`, confirm what a PR closes (`closingIssuesReferences` is
+GraphQL-only), merge with `gh pr merge`, or run `pnpm run ci:checks` — which
+CLAUDE.md requires before every merge. One drained bucket blocked merging for
+everybody at once. `scripts/check-ci-checks.py` was the one GraphQL consumer our
+own tooling repeated: `gh pr view --json headRefOid,mergeable,...` and
+`gh repo view` on every call, and sessions polled it every few seconds while CI
+ran.
+
+**It is now REST-only.** The pull request comes from `GET /repos/{o}/{r}/pulls/{n}`
+(`head.sha` is `headRefOid`); a branch's pull request from the list endpoint
+filtered by `head`, then the single-PR endpoint for mergeability; the repository
+from `GITHUB_REPOSITORY` or `origin`'s URL instead of `gh repo view`; the check
+runs as before. All of it goes through one `gh_rest(path)` helper that refuses a
+GraphQL path, and the self-test reads the script's own source and fails if any
+other `gh` subprocess appears — a generic `gh(args)` wrapper is exactly how the
+GraphQL calls got in.
+
+**The mapping was measured, not assumed.** Nine open PRs, both APIs, the same
+minute:
+
+    REST mergeable / mergeable_state   GraphQL mergeable / mergeStateStatus
+    null  / unknown        (4 PRs)     UNKNOWN     / UNKNOWN
+    false / dirty          (4 PRs)     CONFLICTING / DIRTY
+    true  / unstable       (1 PR)      MERGEABLE   / UNSTABLE
+
+The four nulls were lazy computation in BOTH APIs; a REST re-read seconds later
+had answers. So `null` → `UNKNOWN`, keeping `diagnose`'s tolerance, and
+`false` + `dirty` → `CONFLICTING` + `DIRTY`, keeping exit 5. Also measured: the
+list endpoint carries no `mergeable` field at all, which is why branch mode
+re-reads the single PR — a missing field would have read as UNKNOWN, the one
+value `diagnose` lets through.
+
+**Proved end to end with GraphQL refused.** A stand-in `gh` on `PATH` that
+fails anything other than `gh api <REST path>` (the shape of an exhausted
+budget), old script vs new on four real PRs: #1103 exit 0 / 0, #1100 exit 5 / 5,
+#1109 exit 5 / 5, #1111 exit 0 / 0 with the same UNKNOWN note — identical
+decisions, and the new one's call log is eight `gh api repos/...` calls and
+nothing else. What this cannot prove: that `gh` itself spends nothing internally
+on a REST call. Not measured, because exhausting the shared budget on purpose
+would block every other session.
+
+**Two corrections the mutation run forced**, both the vacuous-vector shape this
+repo keeps meeting. The coercion vector used the string `"true"`, which a bare
+dict lookup already rejects, so the `isinstance` guard survived being deleted;
+the real hole is `1 == True`, and the vector now uses `1` and `0`. And deleting
+the zero-PR refusal crashed the self-test with an `IndexError` instead of
+failing it — a traceback is not a caught mutation — so that check now reports
+any exception as a failure. After both, **11 of 11 mutations caught**:
+false→MERGEABLE, null→MERGEABLE, the `isinstance` guard, state not upper-cased,
+head SHA from the wrong field, the GraphQL guard, a `gh pr view` reintroduced,
+the slug parser losing the scp form or the credential skip, two PRs accepted,
+zero PRs not refused.
+
+**Guidance, in the `vola-ticket-sdlc` skill rather than CLAUDE.md** (the ticket
+allows either, and H26's open PR is editing CLAUDE.md): wait for CI over REST
+check runs and run `ci:checks` once at the end; prefer the REST merge
+(`PUT .../pulls/{n}/merge` with `sha`, which also refuses a moved head) to
+`gh pr merge`; and **never read the GraphQL budget from `gh api rate_limit`**,
+which reported 5000/5000 while a real query was refused at 0 — read the
+`X-Ratelimit-*` headers of a real `gh api graphql -i` call instead.
+
+**Not done, and not this ticket:** `closingIssuesReferences` still needs one
+GraphQL call per PR-body edit, and `gh pr create` still spends it. Neither is
+polled. Attributing points per session, a second account, or per-session PATs
+are the board owner's credential decisions.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

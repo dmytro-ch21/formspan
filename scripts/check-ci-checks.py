@@ -50,7 +50,8 @@ Hence the remedy this script prints when it finds zero:
    commit, and the raw run count is reported alongside — the count is the number
    #368's acceptance criteria name, the name set is the strictly stronger test
    (four of five present is a count of 4, but it is also a *named* absence).
-2. It reads the pull request's **`headRefOid`**, never the newest run on the
+2. It reads the pull request's **`headRefOid`** (REST's `head.sha`, the same
+   field — see "It spends no GraphQL" below), never the newest run on the
    branch. `gh run list --branch` will happily hand you a green run for a commit
    two pushes ago, which is the same absence-reads-as-answer failure wearing a
    green tick.
@@ -69,6 +70,30 @@ two disagree the script **refuses to run** rather than trusting either. So a new
 CI job does not raise the bar by itself — it turns `check:ci-detector` red until
 the constant is bumped in the same commit, which is the intended cost. A parser
 that silently found one job would otherwise make this whole check vacuous.
+
+## It spends no GraphQL (H27, #1099)
+
+Every session in this fleet authenticates as ONE GitHub account, so they share
+ONE GraphQL budget of 5,000 points an hour. On 2026-09-11 it ran out twice
+within an hour, and while it is out, `gh pr create`, `gh pr merge`, closing-
+reference checks and the old version of this script fail for every session at
+once. This script is the call every session repeats, so it reads everything
+over REST, which is a separate quota:
+
+- the pull request from `GET /repos/{o}/{r}/pulls/{n}`, whose `head.sha` is the
+  `headRefOid` above and whose `mergeable`/`mergeable_state` feed `diagnose`;
+- a branch's pull request from the list endpoint, filtered by `head`;
+- the repository from `GITHUB_REPOSITORY`, or `origin`'s URL, never
+  `gh repo view`;
+- the check runs, as it always did.
+
+`gh_rest` refuses a GraphQL path, and `--self-test` reads this file to make sure
+nothing calls `gh` around it. The REST→GraphQL mapping was measured, not
+assumed — see `facts_from_rest`.
+
+**`gh api rate_limit` misreports that budget.** It said 5000 remaining while a
+real query was refused with 0. Read the true figure from a request's own
+headers: `gh api graphql -i -f query='{viewer{login}}' | grep -i x-ratelimit`.
 
 ## What it does not promise
 
@@ -96,10 +121,12 @@ that silently found one job would otherwise make this whole check vacuous.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github/workflows"
@@ -481,27 +508,155 @@ def diagnose(code: int, facts: dict) -> tuple[int, str]:
 # --------------------------------------------------------------------------
 
 
-def gh(args: list[str]) -> str:
+def gh_rest(path: str):
+    """GET one REST path through `gh api`, and nothing else (H27, #1099).
+
+    The only way this script talks to GitHub. It takes a PATH rather than
+    arbitrary `gh` arguments on purpose: `gh pr view` and `gh repo view` are
+    GraphQL underneath, and a generic wrapper is how they got in. A GraphQL path
+    is refused outright, before anything is spent.
+    """
+    if path.lstrip("/").split("?", 1)[0].split("/", 1)[0] == "graphql":
+        raise RuntimeError(
+            "check-ci-checks is REST-only (H27, #1099): refusing a GraphQL call. "
+            "The fleet shares one GraphQL budget, and this script is polled by "
+            "every session."
+        )
     proc = subprocess.run(
-        ["gh"] + args, capture_output=True, text=True, cwd=str(ROOT)
+        ["gh", "api", path], capture_output=True, text=True, cwd=str(ROOT)
     )
     if proc.returncode != 0:
         raise RuntimeError(
-            f"`gh {' '.join(args)}` failed ({proc.returncode}):\n{proc.stderr.strip()}"
+            f"`gh api {path}` failed ({proc.returncode}):\n{proc.stderr.strip()}"
         )
-    return proc.stdout
+    return json.loads(proc.stdout)
+
+
+_SLUG = re.compile(
+    r"^(?:[a-z+]+://)?(?:[^@/\s]+@)?github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$"
+)
+
+
+def parse_github_slug(url: str) -> str | None:
+    """`owner/repo` from a github.com remote URL — https, ssh or scp-style, with
+    or without credentials and `.git` — or None for anything else."""
+    m = _SLUG.match(url.strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
 def repo_slug() -> str:
-    return json.loads(gh(["repo", "view", "--json", "nameWithOwner"]))["nameWithOwner"]
+    """Which repository to ask about, without `gh repo view` (GraphQL).
+
+    `GITHUB_REPOSITORY` first: Actions sets it, and it is the override N174
+    (#551) asks repo scripts to honour. Otherwise `origin`'s URL.
+    """
+    env = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if env:
+        return env
+    proc = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    slug = parse_github_slug(proc.stdout) if proc.returncode == 0 else None
+    if not slug:
+        raise RuntimeError(
+            "could not tell which GitHub repository this is: set "
+            "GITHUB_REPOSITORY=owner/repo, or give `origin` a github.com URL."
+        )
+    return slug
 
 
-def pr_facts(pr: str | None) -> dict:
-    args = ["pr", "view"]
-    if pr:
-        args.append(pr)
-    args += ["--json", "number,headRefOid,headRefName,mergeable,mergeStateStatus,url"]
-    return json.loads(gh(args))
+def current_branch() -> str:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not name or name == "HEAD":
+        raise RuntimeError(
+            "not on a branch (detached HEAD), so there is no pull request to "
+            "find: pass --pr <n>."
+        )
+    return name
+
+
+def pick_open_pr(pulls: list[dict], branch: str) -> dict:
+    """The one open pull request whose head is `branch`, or a refusal.
+
+    Zero is "there is no pull request", which is not "nothing ran" — it is
+    EXIT_ERROR territory, not a verdict. More than one would be a guess.
+    """
+    if not pulls:
+        raise RuntimeError(
+            f"no open pull request has `{branch}` as its head; pass --pr <n>."
+        )
+    if len(pulls) > 1:
+        numbers = ", ".join(f"#{p.get('number')}" for p in pulls)
+        raise RuntimeError(
+            f"{len(pulls)} open pull requests have `{branch}` as their head "
+            f"({numbers}); pass --pr <n>."
+        )
+    return pulls[0]
+
+
+_MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}
+
+
+def facts_from_rest(pull: dict) -> dict:
+    """`GET /repos/{o}/{r}/pulls/{n}`, in the vocabulary `diagnose` speaks.
+
+    REST's `mergeable` is a boolean or null where GraphQL's is an enum, and
+    `mergeable_state` is GraphQL's `mergeStateStatus` in lower case. Measured
+    2026-09-11 on nine open pull requests, both APIs read in the same minute:
+
+        REST mergeable / mergeable_state   GraphQL mergeable / mergeStateStatus
+        null  / unknown        (4 PRs)     UNKNOWN     / UNKNOWN
+        false / dirty          (4 PRs)     CONFLICTING / DIRTY
+        true  / unstable       (1 PR)      MERGEABLE   / UNSTABLE
+
+    The four nulls were GitHub computing lazily, in BOTH APIs: a REST re-read
+    seconds later had answers (true/unstable, true/clean, false/dirty). So
+    `null` is `UNKNOWN` and keeps `diagnose`'s tolerance for it.
+
+    Anything that is not exactly true/false/null reads as UNKNOWN rather than
+    being coerced. The `isinstance` check is load-bearing: `1 == True`, so a
+    bare lookup in `_MERGEABLE` would read an integer 1 as MERGEABLE.
+    """
+    head = pull.get("head") or {}
+    mergeable = pull.get("mergeable")
+    state = pull.get("mergeable_state")
+    return {
+        "number": pull.get("number"),
+        "headRefOid": head.get("sha"),
+        "headRefName": head.get("ref"),
+        "url": pull.get("html_url"),
+        "mergeable": _MERGEABLE.get(mergeable, "UNKNOWN")
+        if mergeable is None or isinstance(mergeable, bool)
+        else "UNKNOWN",
+        "mergeStateStatus": state.upper() if isinstance(state, str) and state else "UNKNOWN",
+    }
+
+
+def pr_facts(slug: str, pr: str | None) -> dict:
+    if pr is not None:
+        if not re.fullmatch(r"\d+", pr):
+            raise RuntimeError(f"--pr takes a pull request number, got {pr!r}.")
+        number = pr
+    else:
+        branch = current_branch()
+        owner = slug.split("/", 1)[0]
+        pulls = gh_rest(
+            f"repos/{slug}/pulls?state=open&per_page=100"
+            f"&head={owner}:{quote(branch, safe='/')}"
+        )
+        number = pick_open_pr(pulls, branch)["number"]
+    # Always the single-PR endpoint: the list endpoint does not carry
+    # `mergeable` at all, and a missing field would read as UNKNOWN — the one
+    # value `diagnose` deliberately lets through.
+    facts = facts_from_rest(gh_rest(f"repos/{slug}/pulls/{number}"))
+    if not facts["headRefOid"]:
+        raise RuntimeError(f"pull request #{number} came back without a head commit.")
+    return facts
 
 
 def check_runs_for(slug: str, sha: str) -> list[dict]:
@@ -524,9 +679,7 @@ def check_runs_for(slug: str, sha: str) -> list[dict]:
     red then green on a re-run reports FAILED, because the stale `failure`
     is still in the list.
     """
-    payload = json.loads(
-        gh(["api", f"repos/{slug}/commits/{sha}/check-runs?per_page=100&filter=latest"])
-    )
+    payload = gh_rest(f"repos/{slug}/commits/{sha}/check-runs?per_page=100&filter=latest")
     runs = payload.get("check_runs", [])
     total = payload.get("total_count")
     if total is not None and total != len(runs):
@@ -726,6 +879,81 @@ def self_test() -> int:
     if diagnose(EXIT_OK, {"mergeable": "CONFLICTING"})[0] == EXIT_OK:
         failures.append("  diagnose: a green set on a CONFLICTING pull request exits 0")
 
+    # H27 (#1099): the REST plumbing. The mapping vectors are the measured table
+    # in `facts_from_rest`; the stale-green pair runs them through the REAL
+    # decision, because a mapping that is right in isolation and wrong where
+    # `diagnose` reads it would be the exit-5 case silently passing again.
+    for url, want in [
+        ("https://github.com/dmytro-ch21/formspan.git", "dmytro-ch21/formspan"),
+        ("https://github.com/o/r", "o/r"),
+        ("git@github.com:o/r.git", "o/r"),
+        ("ssh://git@github.com/o/r.git", "o/r"),
+        ("https://x-access-token:secret@github.com/o/r.git\n", "o/r"),
+        ("https://gitlab.com/o/r.git", None),
+        ("", None),
+    ]:
+        got = parse_github_slug(url)
+        if got != want:
+            failures.append(f"  parse_github_slug({url.strip()!r}): {got!r}, expected {want!r}")
+
+    for label, pull, want_m, want_s in [
+        ("conflicting", {"mergeable": False, "mergeable_state": "dirty"}, "CONFLICTING", "DIRTY"),
+        ("not yet computed", {"mergeable": None, "mergeable_state": "unknown"}, "UNKNOWN", "UNKNOWN"),
+        ("clean", {"mergeable": True, "mergeable_state": "clean"}, "MERGEABLE", "CLEAN"),
+        ("mergeable, unstable", {"mergeable": True, "mergeable_state": "unstable"}, "MERGEABLE", "UNSTABLE"),
+        ("fields absent", {}, "UNKNOWN", "UNKNOWN"),
+        # `1 == True` in Python, so a bare dict lookup would read an integer 1 as
+        # MERGEABLE (and 0 as CONFLICTING). A string would not reach that bug —
+        # the first version of this vector used "true" and the guard it covers
+        # survived deleting it.
+        ("an integer is not a boolean", {"mergeable": 1}, "UNKNOWN", "UNKNOWN"),
+        ("a zero is not a boolean", {"mergeable": 0}, "UNKNOWN", "UNKNOWN"),
+    ]:
+        got = facts_from_rest({"number": 1, "head": {"sha": "abc", "ref": "b"}, **pull})
+        if (got["mergeable"], got["mergeStateStatus"], got["headRefOid"]) != (want_m, want_s, "abc"):
+            failures.append(
+                f"  facts_from_rest/{label}: {got['mergeable']}/{got['mergeStateStatus']}"
+                f"/{got['headRefOid']}, expected {want_m}/{want_s}/abc"
+            )
+
+    green, _ = evaluate(FIVE, [_run(n) for n in FIVE])
+    stale = diagnose(green, facts_from_rest({"mergeable": False, "mergeable_state": "dirty"}))
+    if stale[0] != EXIT_STALE:
+        failures.append("  REST stale-green: mergeable false + dirty on a green set does not exit 5")
+    lazy = diagnose(green, facts_from_rest({"mergeable": None, "mergeable_state": "unknown"}))
+    if lazy[0] != EXIT_OK or "UNKNOWN" not in lazy[1]:
+        failures.append("  REST lazy mergeable: null on a green set must stay 0 AND say UNKNOWN")
+
+    for pulls, want in [([], "no open pull request"), ([{"number": 1}, {"number": 2}], "#1, #2")]:
+        try:
+            pick_open_pr(pulls, "b")
+            failures.append(f"  pick_open_pr: {len(pulls)} pull requests did not refuse")
+        except RuntimeError as err:
+            if want not in str(err):
+                failures.append(f"  pick_open_pr: {str(err)!r} does not mention {want!r}")
+        except Exception as err:  # noqa: BLE001 — a crash here must be a reported failure, not a traceback
+            failures.append(f"  pick_open_pr: {len(pulls)} pull requests raised {type(err).__name__}, not a refusal")
+    if pick_open_pr([{"number": 7}], "b") != {"number": 7}:
+        failures.append("  pick_open_pr: one pull request was not returned")
+
+    for path in ("graphql", "/graphql", "graphql?query=x"):
+        try:
+            gh_rest(path)
+            failures.append(f"  gh_rest: GraphQL path {path!r} was not refused")
+        except RuntimeError as err:
+            if "REST-only" not in str(err):
+                failures.append(f"  gh_rest: {path!r} refused for the wrong reason: {err}")
+
+    # And that nothing calls `gh` AROUND `gh_rest`: exactly one `gh`
+    # subprocess in this file, and it is `gh api`. The needle is assembled so
+    # this line does not count itself.
+    own = Path(__file__).read_text(encoding="utf-8")
+    gh_calls = re.findall(re.escape('["' + 'gh"') + r"[^\]]*\]", own)
+    if gh_calls != ['["' + 'gh", "api", path]']:
+        failures.append(
+            f"  REST-only: expected exactly one `gh` subprocess, `gh api <path>`; found {gh_calls}"
+        )
+
     # And the workflow parser, against the real files rather than a fixture —
     # the constant it cross-checks is the thing that stops a broken parser
     # silently lowering the bar.
@@ -822,7 +1050,7 @@ def main() -> int:
             sha, facts = args.sha, None
             print(f"commit {sha} in {slug}")
         else:
-            facts = pr_facts(args.pr)
+            facts = pr_facts(slug, args.pr)
             sha = facts["headRefOid"]
             print(
                 f"PR #{facts['number']} ({facts['headRefName']}) in {slug}\n"
