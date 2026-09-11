@@ -23454,4 +23454,4 @@ only route to the repair screen — sends the athlete there instead of retrying.
 
 - **A plan the server refuses still counts as pending forever and appears on
   no screen.** Plans are a separate outbox with both defects at once, and are
-  split into their own ticket rather than absorbed here.
+  split into their own ticket rather than absorbed here — N564, #1106.

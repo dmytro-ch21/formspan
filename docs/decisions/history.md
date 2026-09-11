@@ -72591,14 +72591,49 @@ Recorded rather than changed: offline plus a row needing attention shows
 "Offline" while the accessibility label says "Tap to see what went wrong" —
 accurate about the tap, and the same shape offline plus `lastError` already had.
 
+### Acceptance review — including a narrowing of my own
+
+`ac-verifier` graded all eight revised criteria MET across both slices,
+reproduced a mutation itself (restored by re-running), and re-ran `verify` end
+to end. Its rulings were not rubber stamps:
+
+- **Telemetry had been quietly dropped — by the ticket rewrite, not by the
+  code.** #544's original brief required that "telemetry tracks blocked-row
+  count and age by domain and error code". The revised criteria, rewritten
+  before implementation to correct the brief's errors, omitted it without a
+  word, and neither slice built it. It survived only as a prose bullet in this
+  file, attached to no issue, so closing #544 would have taken it off the board.
+  Filed as **N565, #1108** before the close. The uncomfortable part is that the
+  rewrite was a *correction*: fixing a ticket's mistakes is also a chance to
+  lose its requirements, and a ticket body's diff is not reviewed the way code
+  is.
+- **Plans are a genuine split** (N564, #1106), and the review found a sharper
+  form of their defect: the sync screen's "Still trying — this keeps retrying
+  on its own" state renders off `lastError`, and plans are invisible to both
+  repair lists, so a refused plan can be told it is still trying. Added to
+  #1106.
+- **Criterion 1 is met per state, not across all four domains.** `BlockedRow`
+  (sessions, workouts) and `RejectedRow` (food entries, sequences) are two
+  shapes, deliberately, because blocked and refused are different states. If
+  the criterion meant one type for all four, it is not met on the letter;
+  recorded here so that reading is a stated decision rather than a quiet one.
+
 ### What is left
 
 - **Plans.** `plan.ts` carries both of #544's defects at once — a refused plan
   counts as pending forever AND nothing anywhere reads its `last_error`. Split
-  into its own ticket rather than absorbed, per the delivery pipeline.
-- **No telemetry** yet for blocked-row count and age by domain and error code.
+  into its own ticket rather than absorbed, per the delivery pipeline — N564,
+  #1106.
+- **Telemetry** for blocked-row count and age by domain and error code — N565,
+  #1108, filed before #544 closed (see the acceptance review above).
 
 ## Open items / known gaps as of this entry
+
+- **N167: stuck sync rows report nothing off the device.** No count, age or
+  error code, by domain, reaches an operator — filed as N565, #1108. Age needs a
+  recorded timestamp (`updated_at` changes on every edit, and N167 made every
+  edit clear the refusal), and grouping needs the server's error code, since the
+  stored `last_error` is message text and messages are not a contract.
 
 - **N167: a plan the server refuses is counted as pending forever, and shown
   nowhere.** `plan.ts`'s push loop never clears `dirty` on a permanent
@@ -72606,7 +72641,7 @@ accurate about the tap, and the same shape offline plus `lastError` already had.
   trigger re-sends it on every open; and no file but `plan.ts` reads
   `planned_sessions` at all, so its `last_error` reaches no screen. The same two
   defects #544 fixed for food entries, sequences, sessions and workouts, split
-  into its own ticket. The fix is the pattern slice 2 established: a shared
+  into its own ticket — N564, #1106. The fix is the pattern slice 2 established: a shared
   blocked predicate, a place in `needsAttention`, a surface, and edits that
   clear the stale refusal.
 
