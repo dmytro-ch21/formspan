@@ -93,6 +93,7 @@ export function HRSessionReport({
   sourceLabel = 'Apple Health',
   onSyncNow,
   hrSourceLine = null,
+  vo2MaxLine = null,
   testID = 'hr-session-report',
 }: {
   metrics: SessionMetrics | null;
@@ -104,6 +105,30 @@ export function HRSessionReport({
    *  caller (`buildHRTimeline`). Omit, or pass `[]`, to render no timeline —
    *  the ordinary case for every screen except BJJ's today. */
   hrTimeline?: HRTimelinePoint[];
+  /**
+   * N547/#990 part two: the athlete's VO₂max estimate as it stood on this
+   * session's day, already worded by `lib/sessionVo2Max.ts`'s
+   * `vo2MaxAsOfLine`. `null` — the default — renders nothing.
+   *
+   * A pre-formatted STRING rather than a number, deliberately, and it is the
+   * whole reason this is safe to show here: the wording is what stops a
+   * slow-moving estimate reading as a per-session measurement, and that
+   * wording is decided and tested in one pure module rather than assembled at
+   * three call sites. This component renders what it is given; it does not get
+   * to decide how the number is described. It also sits BELOW the stat row on
+   * purpose — inside it, next to average and max heart rate, it would read as
+   * "your VO₂max for this session", which is what the ticket forbids.
+   *
+   * Rendered in ALL THREE report states, including `unavailable` and
+   * `limited`, and that is the point rather than an oversight. VO₂max does not
+   * come from this session's heart rate — it is a separate series — so gating
+   * it on the session having good HR data would hide it from exactly the
+   * athletes it is most use to: someone who trains without a monitor, or has
+   * no date of birth set, for whom it is their only slow-moving fitness
+   * signal. It was `full`-only until review pointed out that this contradicted
+   * the feature's own premise.
+   */
+  vo2MaxLine?: string | null;
   /** The per-exercise breakdown (N490/#851) — `null` for sports with no
    *  per-exercise concept (BJJ, running). */
   exerciseHR?: Pick<ExerciseHR, 'exercise_id' | 'avg_hr_bpm' | 'max_hr_bpm' | 'sample_count'>[] | null;
@@ -181,6 +206,11 @@ export function HRSessionReport({
             {hrAbsenceCopy(absenceState, sourceLabel)}
           </Text>
         </RNView>
+        {vo2MaxLine !== null && (
+          <Text style={styles.sourceLine} testID={`${testID}-vo2max`}>
+            {vo2MaxLine}
+          </Text>
+        )}
         {showSyncNow && (
           <RNView style={syncStyles.row} testID={`${testID}-sync-now`}>
             <Button
@@ -227,6 +257,11 @@ export function HRSessionReport({
               : 'Add your date of birth in your profile, or wear a heart-rate monitor for a session or two, to unlock training load and zone breakdown.'}
           </Text>
         </RNView>
+        {vo2MaxLine !== null && (
+          <Text style={styles.sourceLine} testID={`${testID}-vo2max`}>
+            {vo2MaxLine}
+          </Text>
+        )}
         <HRWindowMismatchNote
           hrWindow={report.hrWindow}
           sessionStartedAt={sessionStartedAt}
@@ -268,6 +303,12 @@ export function HRSessionReport({
         {hrStats}
         <Stat label="Training load" value={String(Math.round(report.trimp))} fit />
       </StatRow>
+
+      {vo2MaxLine !== null && (
+        <Text style={styles.sourceLine} testID={`${testID}-vo2max`}>
+          {vo2MaxLine}
+        </Text>
+      )}
 
       {hrTimeline != null && hrTimeline.length >= 2 && (
         // N491/#852. Real readings, in order — no boundary drawn or claimed;

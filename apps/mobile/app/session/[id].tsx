@@ -1,5 +1,6 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { request as requestSync } from '@/lib/sync';
+import { useSessionVo2Max } from '@/lib/useSessionVo2Max';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, TextInput } from 'react-native';
@@ -149,7 +150,7 @@ import {
   type SuggestionCode,
   type Volume,
 } from '@/lib/sessions';
-import { finishTimestampFor } from '@/lib/calendar';
+import { dayString, finishTimestampFor } from '@/lib/calendar';
 import { OptionSelect } from '@/components/ui/OptionSelect';
 import { gripGuide, setTypeGuide } from '@/lib/setGuide';
 import { getWorkout } from '@/lib/workouts';
@@ -942,6 +943,15 @@ export default function SessionScreen() {
   // and "asked, and there is genuinely nothing" — see the BJJ screen's own
   // comment on this exact distinction.
   const [hrMetrics, setHrMetrics] = useState<SessionMetrics | null>(null);
+  // N547/#990 part two — the VO₂max estimate as it stood on THIS
+  // session's day, not today's. Rendered under the stats rather than in
+  // them: it is a slow-moving estimate, not something this session
+  // measured. See `lib/sessionVo2Max.ts`.
+  const vo2MaxLine = useSessionVo2Max(
+    getToken,
+    session?.started_at ? dayString(new Date(session?.started_at)) : null,
+  );
+
   const [hrLoaded, setHrLoaded] = useState(false);
   // W18/#957 — which kind of "no HR" this is, and the on-demand attempt.
   // `onFound` re-reads the metrics so the report replaces the empty card.
@@ -1808,6 +1818,7 @@ export default function SessionScreen() {
             precedent. */}
         {finished && hrLoaded && (
           <HRSessionReport
+            vo2MaxLine={vo2MaxLine}
             metrics={hrMetrics}
             sessionRPE={null}
             absence={hrSync.absence}
