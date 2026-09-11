@@ -69915,6 +69915,145 @@ at all — it has no Taptic Engine, so every test here asserts *calls*, never
 sensation. Whether three distinct feedback types read as three distinct events
 under a thumb is a question only hardware answers.
 
+## 2026-09-11 — F46: the macro rings come off the JS thread, and the test that watched them mid-sweep cannot follow (#1045)
+
+`apps/mobile/components/today/MacroRings.tsx` draws the Today tab's concentric
+macro rings. Today is the landing screen, so those rings sweep — 620ms, plus a
+380ms-delayed second lap past 100% — at exactly the moment the screen is firing
+its SQLite reads on focus. Every frame of that was interpolated **in
+JavaScript**, because `strokeDashoffset` is neither a transform nor an opacity
+and core `Animated` cannot native-drive it. The file said so, honestly, in a
+comment sitting next to `useNativeDriver: false`.
+
+The comment was right about core `Animated` and wrong about the world: the app
+has shipped `react-native-reanimated@4.5.1` and `react-native-worklets@0.10.1`
+since before this ticket was filed, linked and installed, and used them in
+**zero** files — one bare side-effect import in `app/_layout.tsx` and nothing
+else. The 2026-09-09 motion audit named "Reanimated installed and switched off"
+independently in all three of its passes; the rings were its flagship instance,
+and F38 (#1037) had since made a start by putting the shared `Button` and
+`PressableScale` on Reanimated CSS transitions.
+
+So the two values now drive through `useSharedValue` and the arcs render from
+`useAnimatedProps`, which evaluates the interpolation in a worklet on the UI
+runtime. The frame budget this was measured against is **8ms, not 16**:
+`CADisableMinimumFrameDurationOnPhone` is set in `ios/VOLA/Info.plist`, so a
+ProMotion device is asking for 120fps and the rings were spending that budget
+in JS.
+
+**Nothing about the drawing changed.** Same 620ms, same 380ms second-lap delay,
+same colours, caps, radii, stroke widths and ramp arc count, same `sweepFor`
+maths, same reduced-motion behaviour. The one deliberate difference is the
+curve: `EASE.out` — `Easing.bezier(0.23, 1, 0.32, 1)`, from N556's token scale —
+replaces `Easing.out(Easing.cubic)`. It is a stronger form of the same shape,
+and it is the upgrade the audit asked for rather than an accident of the port.
+The 620ms itself stays off the token scale on purpose: `constants/Motion.ts`
+says in as many words that this sweep and the splash are deliberately outside
+the UI budget, because a ring sweep is not a UI transition.
+
+`RampArc` is a new component in the same file and exists for one mechanical
+reason — `useAnimatedProps` is a hook, and the overtake ramp is produced by a
+`.map()`, so the hook cannot be called where the arc is. Its clamp arithmetic
+is the expression that used to sit inline, unchanged.
+
+### The part that was not in the plan: a test that measured the old thread
+
+The audit's plan for this touched one file. It landed on three, and the two
+extra ones are worth recording because both were invisible from where the plan
+was written.
+
+**`jest.setup.js`'s Reanimated mock had to grow, and its own comment asked for
+exactly that.** F38 added that mock because Reanimated's entry point reaches
+for the native worklets module and dies in jest with `Cannot read properties of
+undefined (reading 'loadUnpackers')` — taking the whole SUITE down, not a test,
+so the failure reads as unrelated screens breaking. It was written deliberately
+minimal, with a note: *"Grow it when a second appears — a broad stub would let a
+real API mistake pass here and fail on device."* This is that second import
+site. Each addition does the real thing rather than returning a placeholder:
+`interpolate` computes the actual piecewise-linear value and `useAnimatedProps`
+actually calls the worklet, so the dash offsets an arc is drawn with are
+assertable and a mistake in that arithmetic fails in CI rather than on a device
+nobody is holding.
+
+What the mock deliberately does **not** simulate is time. `withTiming` and
+`withDelay` resolve to their resting value; there is no frame clock in jest and
+inventing one would be apparatus that cannot fail.
+
+It does make one honest departure from the real library, and it was found by
+measurement rather than reasoning: the first version left `useSharedValue`
+non-reactive, exactly as the real thing is — a real shared value is written on
+the UI runtime and pushed at the native view, and React never re-renders, which
+is the whole point. In jest there is no native view, so **every ring came back
+at full `strokeDashoffset` — unswept — and a test asserting that would have been
+green while watching nothing.** Writing a shared value now triggers a
+re-render, so a test sees where the sweep comes to rest. It still cannot see a
+frame partway along it.
+
+**`momentumCard.test.tsx`'s W15/#703 test could not survive the change, and
+this is the interesting failure.** W15 exists because `app/(tabs)/index.tsx`
+keys `<MomentumCard key={on} …>` on the browsed day: `Ring`'s animation value
+is per-fiber, the Today screen never unmounts, and without the key a day switch
+reuses the same fiber and its already-swept value — so the ring keeps showing
+yesterday's proportions while every number beside it is already correct.
+
+That test proved it by sampling `strokeDashoffset` **50ms into the 620ms
+sweep** under `jest.useFakeTimers()`, asserting the remounted ring read at least
+150 units closer to empty than the same-key one. That worked because core
+`Animated` interpolates on a JS timer, which fake timers drive. Reanimated does
+not use a JS timer — not in jest and not on a device — so the technique is gone
+permanently rather than temporarily. Giving the mock a frame clock to keep the
+old assertion alive would have been measuring the invented clock, not the
+component; that is the "a stub built from an assumption cannot falsify it" trap
+this repo already has a section about.
+
+**The invariant is untouched and the key is still load-bearing.** What changed
+is where it is observed. A day switch must MOUNT A FRESH `Ring`, and a fresh
+mount re-runs `useReducedMotion`'s effect — so the number of times the OS is
+asked about Reduce Motion is an exact count of how many times `Ring` has been
+constructed, needing no clock at all. Same key across a day switch: one ask,
+the fiber reused. New key: two asks, a fresh fiber and a fresh zero. Removing
+`key={day}` turns the second red and correctly leaves the first green.
+
+Finding that took one wrong answer first: the count read **10**, not 1, because
+`jest.spyOn` hands back the *existing* mock when one is already installed,
+carrying every call the rest of the file had made through it. `mockClear()` in
+`beforeEach`, and the count means what it says.
+
+The mid-switch **appearance** — a ring visibly still showing yesterday for a
+moment — is no longer checkable in jest by any means, and is now a device-
+evidence criterion on #1045 rather than a silently-lost one.
+
+### What was mutation-checked
+
+Five guards, each against a mutation that fails as a TEST failure rather than a
+compile error, each restored and re-confirmed green by re-running rather than
+by grepping the file:
+
+- drop the `reduced === null` hold → only the hold test goes red;
+- break the ramp clamp's held value → only the clamp test;
+- make the reduced branch snap to zero instead of the target → only the
+  reduced-motion test;
+- reverse the base interpolation → all five, which is what a value that
+  load-bearing should do;
+- remove `key={day}` from the W15 host → only the remount test.
+
+### What is not settled
+
+Nothing here was seen on a device, and that is the honest limit of it. The
+audit's own claim — that the rings drop frames today — was read from source and
+from `Info.plist` and **no frame was ever measured**, so this change is
+justified by where the work runs, not by an observed stutter. A slow-motion
+before/after on a real cold start is what would settle whether the athlete ever
+saw the problem this removes.
+
+Two smaller residues. The W15 comment in `app/(tabs)/index.tsx:1224` still
+describes the values as `Animated.Value`s living in `useState`; the mechanism
+it guards is exactly right and the file was out of this ticket's scope, so the
+wording is stale by one type name and nothing else. And `EASE.out` against
+`Easing.out(Easing.cubic)` is a real if small visual difference that only a
+device can judge — the instruction on it is to report it rather than quietly
+revert to a built-in.
+
 ## Open items / known gaps as of this entry
 
 - **N535: the observed-HRmax endpoint still counts every sample the athlete

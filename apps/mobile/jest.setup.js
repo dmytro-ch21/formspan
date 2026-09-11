@@ -232,10 +232,25 @@ afterEach(async () => {
   primitive: any component test that renders a button needs it, and "remember
   to mock Reanimated" is a rule each new test file would re-forget.
 
-  The mock is deliberately MINIMAL, and safe to be: the whole app has exactly
-  one Reanimated import site (`components/ui/Button.tsx`). Grow it when a
-  second appears — a broad stub would let a real API mistake pass here and
-  fail on device, which is the trade this repo's testing rules refuse.
+  The mock is deliberately MINIMAL, and stays that way: a broad stub would let
+  a real API mistake pass here and fail on device, which is the trade this
+  repo's testing rules refuse.
+
+  **F46/#1045 grew it, exactly as the note above asked.** The second import
+  site is `components/today/MacroRings.tsx`, which moved the ring sweep off
+  the JS thread onto `useSharedValue` + `useAnimatedProps`. Each addition
+  below does the REAL thing rather than returning a placeholder, for the same
+  reason: `interpolate` computes the actual piecewise-linear value, and
+  `useAnimatedProps` actually calls the worklet, so `macroRings*.test.tsx` can
+  assert the dash offsets the rings are drawn with and a mistake in that
+  arithmetic fails here rather than on a device nobody is holding.
+
+  What is deliberately NOT simulated is TIME. `withTiming` and `withDelay`
+  resolve to their final value immediately — there is no frame clock in jest,
+  and pretending otherwise would be an apparatus that cannot fail. So a test
+  here sees the sweep's DESTINATION, never a frame partway along it; the
+  620ms, the 380ms delay and the curve are device-evidence criteria on #1045,
+  not assertions.
 */
 jest.mock('react-native-reanimated', () => {
   // NOT `react-native-reanimated/mock`. The shipped mock re-imports the real
@@ -243,12 +258,102 @@ jest.mock('react-native-reanimated', () => {
   // assumed: same `loadUnpackers` throw, same stack through
   // `react-native-worklets`. A factory that never touches the package is the
   // only thing that works.
+  const React = require('react');
   const { View } = require('react-native');
+
+  /*
+    Real piecewise-linear interpolation, not a stub. Mirrors Reanimated's own
+    default extrapolation (EXTEND) by clamping to the first and last segment's
+    slope, which is also what core `Animated`'s `interpolate` did before F46 —
+    so a test comparing the two reads the same numbers.
+  */
+  const interpolate = (value, input, output) => {
+    if (value <= input[0]) return output[0];
+    const last = input.length - 1;
+    if (value >= input[last]) return output[last];
+    for (let i = 1; i <= last; i += 1) {
+      if (value <= input[i]) {
+        const span = input[i] - input[i - 1];
+        if (span === 0) return output[i];
+        return output[i - 1] + ((value - input[i - 1]) / span) * (output[i] - output[i - 1]);
+      }
+    }
+    return output[last];
+  };
+
   return {
     __esModule: true,
     // `Animated.createAnimatedComponent(Pressable)` must return something
     // renderable that still forwards props — the tests below press it.
-    default: { createAnimatedComponent: (c) => c, View },
+    // `animatedProps` is spread onto the wrapped component the way Reanimated
+    // applies it natively, so an SVG arc renders with the offset its worklet
+    // computed instead of silently dropping it.
+    default: {
+      createAnimatedComponent: (Component) => {
+        const Wrapped = React.forwardRef(({ animatedProps, ...rest }, ref) =>
+          React.createElement(Component, { ...rest, ...animatedProps, ref }),
+        );
+        Wrapped.displayName = `Animated(${Component.displayName || Component.name || 'Component'})`;
+        return Wrapped;
+      },
+      View,
+    },
     cubicBezier: (...points) => `cubic-bezier(${points.join(', ')})`,
+    // The curve is carried as data rather than evaluated: nothing in jest
+    // advances a clock, so no test can observe its shape, and returning a
+    // describable object keeps a wrong call site visible.
+    Easing: { bezier: (...points) => ({ factory: () => (t) => t, points }) },
+    interpolate,
+    // No frame clock in jest — see the note above. Both resolve to the value
+    // the animation would come to rest at.
+    withTiming: (toValue) => toValue,
+    withDelay: (_delay, animation) => animation,
+    /*
+      Backed by a ref for the value and a counter for the re-render.
+
+      **The re-render is the one place this mock is deliberately UNLIKE the
+      real library, and it is what makes the rings observable at all.** A real
+      shared value is written on the UI runtime and pushed straight at the
+      native view — React never re-renders, which is the entire point of
+      moving off `Animated.Value`. In jest there is no native view and no
+      frame clock, so a write that did not re-render would leave every arc
+      rendered with the value it had BEFORE the effect ran: measured, and it
+      is how this mock was first written — every ring came back at full
+      `strokeDashoffset`, i.e. unswept, and a test asserting that would have
+      been green while watching nothing.
+
+      Re-rendering on write means a test sees the value the sweep comes to
+      REST at. It still cannot see a frame partway along it; see the note
+      above on time.
+    */
+    useSharedValue: (initial) => {
+      const [, bump] = React.useState(0);
+      const ref = React.useRef(null);
+      if (ref.current === null) {
+        const box = { current: initial };
+        const write = (next) => {
+          const value = typeof next === 'function' ? next(box.current) : next;
+          if (Object.is(value, box.current)) return;
+          box.current = value;
+          bump((n) => n + 1);
+        };
+        ref.current = {
+          get: () => box.current,
+          set: write,
+          get value() {
+            return box.current;
+          },
+          set value(next) {
+            write(next);
+          },
+        };
+      }
+      return ref.current;
+    },
+    // Calls the worklet for real, so an error in it surfaces here. Re-running
+    // on every render is what makes a value written in an effect visible to
+    // the next render, which is as close to the real thing as a mock without
+    // a frame clock can get.
+    useAnimatedProps: (worklet) => worklet(),
   };
 });
