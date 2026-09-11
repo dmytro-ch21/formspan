@@ -303,7 +303,18 @@ export default function NutritionTargetPage() {
       {view === "loading" ? (
         <p className="text-sm text-text-dim">Loading…</p>
       ) : view === "failed" ? (
-        <TargetsLoadFailed message={loadError ?? "Could not load your targets."} onRetry={() => void load()} />
+        <TargetsLoadFailed
+          message={loadError ?? "Could not load your targets."}
+          onRetry={() => {
+            // Retry the derivation too, and clear the shared slot first. On a
+            // first paint where BOTH requests failed, retrying only the load
+            // left "Could not derive a target." standing over a page that had
+            // recovered — true once, and never re-checked. Found in review.
+            setError(null);
+            void load();
+            void loadSuggestion();
+          }}
+        />
       ) : (
         <>
           {adjustment && (

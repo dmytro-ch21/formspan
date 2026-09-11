@@ -34,6 +34,13 @@ describe("the load gate", () => {
     expect(noTarget).toBeGreaterThan(failedBranch);
   });
 
+  it("Try again retries the derivation as well, after clearing the shared error", () => {
+    const retry = source.slice(source.indexOf("onRetry={() => {"), source.indexOf("}}", source.indexOf("onRetry={() => {")));
+    expect(retry.indexOf("setError(null);")).toBeGreaterThan(-1);
+    expect(retry.indexOf("void load();")).toBeGreaterThan(retry.indexOf("setError(null);"));
+    expect(retry).toContain("void loadSuggestion();");
+  });
+
   it("loads through loadTargetsInto, into its own error slot", () => {
     expect(source).toContain("await loadTargetsInto(");
     expect(source).toContain("{ setTargets, setAdjustment, setLoaded, setLoadError }");
