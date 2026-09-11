@@ -305,6 +305,21 @@ jobs:
       - name: Task list integrity
         run: python3 scripts/check-tasks-integrity.py
 
+      # H17 (#952). pnpm 11.17 enforces a 24-hour `minimumReleaseAge` by
+      # default, and `expo install --fix` defeats it silently: to install a
+      # same-day Expo patch it writes a `minimumReleaseAgeExclude:` block into
+      # pnpm-workspace.yaml with no prompt and no output. Nine packages on
+      # 2026-09-08, one commit from landing as an unexamined side effect of
+      # making a red check green.
+      #
+      # This runs in CI and not only in `verify` because the thing it guards is
+      # a COMMIT. A branch whose author never ran `verify` locally would
+      # otherwise show a full set of green checks while carrying a policy
+      # exemption nobody decided — which is the exact shape of the incident.
+      # Stdlib-only, like every other check in this job.
+      - name: Release-age exemptions are decisions, not tool artefacts
+        run: python3 scripts/check-release-age-exemptions.py --self-test && python3 scripts/check-release-age-exemptions.py
+
       # N149 (#553). Two agents branching from the same base can independently
       # pick the same next migration version — this repo already lost an
       # afternoon to exactly that collision once under the old sequential
