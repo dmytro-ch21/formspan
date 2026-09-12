@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { render, renderHook, screen, waitFor } from '@testing-library/react-native';
 
@@ -90,5 +90,56 @@ describe('the teardown drains RNTL\'s cleanup queue even when nothing was render
     const before = polls;
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(polls).toBe(before);
+  });
+});
+
+/**
+ * F47's other promise: work that is DUE when a rendered test's body returns
+ * still runs — inside `act`, in the teardown's real yield — before the unmount
+ * clears it. "The pending work still RUNS, inside `act`; nothing is
+ * swallowed."
+ *
+ * This is also the only observable proof that a rendered test was recognised
+ * as rendered. Since the short path runs `cleanup()` too, a detection that
+ * wrongly said "nothing rendered" would still unmount — it would just do it
+ * first, clearing the timer instead of running it. No warning fires either
+ * way (React does not warn about work on an unmounted tree), so F47's
+ * warning-based controls cannot see that mistake. Measured: a destructured
+ * `screen` and an always-false detection both passed every other check here.
+ *
+ * The timer is armed synchronously in the test body, after `render` has
+ * returned, so it cannot fire inside `render`'s own `act` on a loaded host.
+ */
+describe('a rendered test still gets the full teardown: work due at its end runs before unmount', () => {
+  let fired = 0;
+  let arm: () => void = () => {};
+
+  function ArmsOnRequest() {
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+      arm = () => {
+        timer.current = setTimeout(() => {
+          fired += 1;
+        }, 5);
+      };
+      return () => {
+        if (timer.current) clearTimeout(timer.current);
+      };
+    }, []);
+    return <Text>arms a timer on request</Text>;
+  }
+
+  it('renders, then arms a 5ms timer that is due when the body returns', async () => {
+    await render(<ArmsOnRequest />);
+    arm();
+    const until = Date.now() + 30;
+    while (Date.now() < until) {
+      // hold the thread: the timer is now due, and has not had a chance to run
+    }
+    expect(fired).toBe(0);
+  });
+
+  it('sees that the timer ran in that teardown, before the unmount could clear it', () => {
+    expect(fired).toBe(1);
   });
 });
