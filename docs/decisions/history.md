@@ -74450,6 +74450,70 @@ outside the five wrapped sites. Its three suggestions:
 - **The two Library loaders now have different budgets**: 10s for techniques,
   30s for exercises.
 
+## 2026-09-12 — H32 (#1147): `check:doc-merge` went red with every assertion `ok`, because git 2.54+ gives the self-test's throwaway repos a background repack
+
+**What failed.** On #1137 (`0b30e129`), `Scripts (Python)` failed in the append-only merge step (job `103493568419`; ubuntu-24.04, git 2.55.0). Every assertion printed `ok`. The error was in apparatus cleanup: the first `TemporaryDirectory()` in `_union_is_wrong` raised `OSError: [Errno 39] Directory not empty: 'objects'`, about 55ms after that block's third check printed. The same step passed locally on that commit and on `main`.
+
+**The mechanism, read from git's source and measured where this host allows.**
+
+- **Every `git commit` and `git merge` starts a detached maintenance daemon.** Since v2.47.0, `prepare_auto_maintenance` (run-command.c) passes `--detach`. A tag scan found no `--detach` there in v2.46.0 and found it from v2.47.0 on. On the local git 2.49, `GIT_TRACE` shows `git maintenance run --auto --quiet --detach` on every commit.
+- **The daemon outlives the command.** In trace2 event order, the daemon's `exit` is logged after `git commit`'s own `exit`.
+- **The lock alone cannot cause this error.** `maintenance_run_tasks` takes `objects/maintenance.lock` before `daemonize()`, so the lock already exists when the command returns and is only removed later. `TemporaryDirectory`'s cleanup ignores `FileNotFoundError`, so an entry that disappears is harmless. ENOTEMPTY on `objects` needs an entry to APPEAR under it after `rmtree` has listed it.
+- **What creates that entry: v2.54.0 gave the daemon work to do.** v2.54.0 made `geometric` the default strategy for unscheduled maintenance; the tag scan confirms this in `initialize_task_config`. Its `geometric-repack` auto condition is `too_many_loose_objects(100)`. In v2.55.0 that counts the entries in `objects/17` and multiplies by 256 (`odb/source-loose.c`), then compares against 256. So in a repo with no packs, two loose objects in `objects/17/` start `git repack -d -l … --write-midx` from the daemon. That repack writes into `objects/pack/` after the command has already returned. If `rmtree` has already removed `pack/`, the repack recreates it, and the final `rmdir("objects")` fails. Commit ids include a timestamp, so whether two objects land in `17/` varies from run to run. That is the intermittency.
+- **Why this never reproduced locally.** In git 2.49 only `gc` is enabled by default, and its auto condition never holds for a tiny repo. trace2 over 40 local daemons showed each entering only the `detach` region and running no task.
+
+**First, proof that the apparatus can see this failure.** A real repo shaped like `_two_branch_repo`'s (39 files) was copied into a fresh `TemporaryDirectory`. A thread recreated `objects/pack/` and wrote a file *d* ms after `cleanup()` started.
+
+- **At d = 1–4 ms**, cleanup raised in 9/150 trials: **`Directory not empty: 'objects'` in 8**, CI's exact message, and `'pack'` in 1.
+- **At d = 0–0.5 ms**, it raised in 0/150, because the write lands before the walk reaches `pack/`.
+- **Window width:** `cleanup()` itself takes a median 5.3ms on this host (p10 3.9, p90 15.1).
+
+So a zero below means the write missed that window, not that the harness is blind.
+
+**Where the daemon's write lands.** The forced task on 2.49 was measured over 20 merges, relative to `git merge` returning, polling `objects/` and `objects/pack/`:
+
+- the first change directly under `objects/` came at a median 23.8ms (8.6–48.2);
+- the first write inside `objects/pack/` came at a median 68.3ms (36.3–145).
+
+A write only fails cleanup if it lands inside the ~5ms walk, which is why a fixed delay hits rarely and why CI, with faster process startup and a different load, can hit with no delay at all.
+
+The same probe saw `maintenance.lock` present at the instant `merge` returned in **0/20** runs. In 2.49, `daemonize()` does not hand the lock to the child, so the exiting parent deletes it. 2.55's release notes list exactly that as fixed ("did not use the lockfile…"). So on CI the lock outlives the command and is removed later, which is harmless, as argued above.
+
+**Measured.** Host ambient load ~440–600 on 10 CPUs throughout (other sessions), plus `yes` hogs where noted.
+
+| experiment | without the fix | with the fix |
+|---|---|---|
+| How often 2.55's trigger holds in the real self-test: ≥2 loose objects in `objects/17/` after a commit/merge. 100 runs of `_end_to_end` + `_union_is_wrong`, 2,800 calls. Hashes do not depend on the fix. | **11/100 runs**, in all 11 after a repo's LAST command. Per call: 0 objects 1,197, 1 object 1,576, 2 objects 27, never 3 | same (object ids are unaffected) |
+| The mechanism, reproduced on git 2.49 through `TemporaryDirectory.cleanup()` itself. A background task that writes into `objects/` was forced (`maintenance.loose-objects.enabled=true`, `.auto=-1`), with a delay swept between `merge` returning and cleanup starting. 30 runs per delay. | 0ms 0, 2ms 0, 5ms 0, 10ms 0, 20ms 0, **40ms 1** (`Directory not empty: 'pack'`), 80ms 0: **1/210** | **0/210** at the same delays |
+| The same, aimed at the measured write time: 60 runs per delay, modes interleaved | 25ms **2/60**, 40ms **2/60** (one `Directory not empty: 'objects'`, CI's exact message), 60ms **1/60**: **5/180**. Both forced sweeps together: **6/390** | **0/180**; both sweeps together **0/390** |
+| The self-test's exact repo sequence with default config, no forcing, local 2.49 (no task ever runs) | 0/400 without extra load, **0/400** with 10 `yes` hogs | 0/400, 0/400 |
+| `python3 scripts/append-only-merge.py --check` x100 with 10 `yes` hogs. Before = `origin/main` in its own worktree; after = this branch. The loops ran concurrently, so both saw the same host load. | **0/100** | **0/100** |
+
+**The fix.** `_Repo.__init__` now sets three config values:
+
+- `maintenance.auto=false`: `prepare_auto_maintenance` returns before spawning anything.
+- `gc.auto=0`: the same function's fallback when `maintenance.auto` is unset.
+- `core.fsmonitor=false`: overrides a global `core.fsmonitor=true`, which would leave a second process outliving the block. Measured with a simulated global config (`GIT_CONFIG_GLOBAL`): commit plus merge left `fsmonitor--daemon status` reporting "is watching" the throwaway repo, and with the local override it reported "is not watching".
+
+It does **not** use `ignore_cleanup_errors=True`. The leaking process is one this script's own git calls start, so the leak is within the script's control, and hiding the error would hide it.
+
+**The guard, and proof that it can fail.** A new self-test check traces a `commit` and a `merge` in a throwaway repo with `GIT_TRACE`. It fails if either trace names `maintenance run` or `gc --auto`. It also fails if the trace produced nothing, because a silent trace would otherwise pass. Both mutations were run by patching the loaded module in memory rather than editing the file:
+
+- fix removed: FAIL, naming `git maintenance run --auto --quiet --detach`;
+- trace suppressed: FAIL, `GIT_TRACE produced nothing`.
+
+Compared with `origin/main`, `--self-test` output differs by exactly one added `ok` line.
+
+**Apparatus errors on the way, recorded because each would have been believed.**
+
+- **A host-wide process probe.** `pgrep -f "git maintenance run"` matches every git process on this shared host, including other sessions'. It reported a live daemon in 8 of 40 probes in FIXED mode, where these repos can start none. That column was discarded; a probe that checks each repo's own files is the valid one.
+- **An empty CI log.** `gh run view --job … --log` returned 0 bytes with exit 0. The REST `actions/jobs/<id>/logs` endpoint returned the full 28,713-byte log.
+- **The first version of the new check crashed when passing.** It computed `spawned[0]` eagerly, so it threw `IndexError` on the passing path.
+- **A reproduction that swallowed the error it was looking for.** The first forced-task harness called `shutil.rmtree` directly and ignored `FileNotFoundError`. `rmtree` STOPS at the first vanished entry, while `TemporaryDirectory`'s cleanup continues past it. So exactly the runs where the daemon was busy under the walk ended early and counted as clean. Its 0/100 was discarded, and the experiment was rerun through `TemporaryDirectory.cleanup()` itself.
+- **A "leftover" that was live.** A listing of leftover temp dirs matched one by the forced harness's config key. It held `.git` and `other.md` but no `doc.md`, and briefly read as proof of a swallowed abort. By the time it was inspected, the directory no longer existed. It was a concurrent job of this session's own, carrying the same marker, caught mid-`cleanup()`.
+
+**Not verified.** No git ≥ 2.54 was run on this host (Homebrew 2.49), because getting one needs an install or an image pull. The mechanism was reproduced by forcing a task that writes into `objects/` on 2.49. The 2.55 trigger condition was read from source, and how often it fires was estimated from the self-test's own objects. CI on this PR runs the fixed script on 2.55, but a green run there is consistent with the fix, not proof of it, because the failure was intermittent to begin with.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -137,6 +137,7 @@ place — but it is a different shape from the promise above.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -804,6 +805,20 @@ class _Repo:
     def __init__(self, tmp: str, driver_attr: str) -> None:
         self.dir = Path(tmp)
         self.git("init", "-q", "-b", "main")
+        # H32: nothing git starts in here may outlive the command that started
+        # it, because the `with` block deletes the directory the moment the
+        # last command returns. Since git 2.47 every `commit` and `merge` runs
+        # `git maintenance run --auto --detach`, and since 2.54 that daemon's
+        # default tasks include a repack that fires once two loose objects
+        # land in `objects/17/` — so it can write into `.git/objects` while
+        # `rmtree` is walking it, and the cleanup raises ENOTEMPTY (#1137's
+        # red CI, with every assertion `ok`). `maintenance.auto` stops the
+        # spawn itself; `gc.auto` is its fallback when that is unset;
+        # `core.fsmonitor` overrides a global setting that would leave a
+        # daemon watching this directory.
+        self.git("config", "maintenance.auto", "false")
+        self.git("config", "gc.auto", "0")
+        self.git("config", "core.fsmonitor", "false")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Append Only Test")
         self.git("config", f"merge.{DRIVER_NAME}.name", "test")
@@ -811,9 +826,11 @@ class _Repo:
                  f'python3 "{Path(__file__).resolve()}" %O %A %B %L %P %X %S %Y')
         (self.dir / ".gitattributes").write_text(f"doc.md {driver_attr}\n")
 
-    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def git(self, *args: str,
+            env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", *args], cwd=self.dir,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True,
+                              env=None if env is None else {**os.environ, **env})
 
     def commit(self, text: str, message: str) -> None:
         (self.dir / "doc.md").write_text(text, encoding="utf-8")
@@ -841,6 +858,27 @@ def _end_to_end() -> None:
     base = _doc(["A"], ["gap one"])
     ours = _doc(["A", "B"], ["gap one"])
     theirs = _doc(["A", "C"], ["gap one"])
+
+    # H32: the throwaway repos start no background git. `commit` and `merge`
+    # are the two commands here that spawn `maintenance run --auto --detach`;
+    # traced, either would name it. The trace has to be LIVE for its silence
+    # to mean anything, so that is asserted in the same check.
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _Repo(tmp, f"merge={DRIVER_NAME}")
+        trace = {"GIT_TRACE": "1"}
+        (repo.dir / "doc.md").write_text(base, encoding="utf-8")
+        repo.git("add", "-A")
+        err = repo.git("commit", "-q", "-m", "base", env=trace).stderr
+        repo.git("checkout", "-q", "-b", "theirs")
+        repo.commit(theirs, "theirs")
+        repo.git("checkout", "-q", "main")
+        repo.commit(ours, "ours")
+        err += repo.git("merge", "--no-edit", "theirs", env=trace).stderr
+        spawned = [l for l in err.splitlines()
+                   if "maintenance run" in l or "gc --auto" in l]
+        check("apparatus: a throwaway repo's commit and merge start no background git",
+              "trace: " in err and not spawned,
+              spawned[0] if spawned else "GIT_TRACE produced nothing")
 
     with tempfile.TemporaryDirectory() as tmp:
         repo, code = _two_branch_repo(tmp, f"merge={DRIVER_NAME}", base, ours, theirs)
