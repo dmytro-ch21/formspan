@@ -75360,6 +75360,46 @@ That run used the first, timer-based controls. They were redesigned afterwards, 
 - **The audit reads React internals.** A React upgrade that renames `actQueue` or the reconciler functions turns the controls red rather than making the audit silent. That is the intended failure, and it is the only warning there will be.
 - **The six "overlapping act() calls" errors** from `scanScreen`'s double-tap tests (recorded on #1057 by L20's session) are untouched. They are a different message from a different mechanism.
 
+## 2026-09-12 — F60 (#1160): the share card's PR badge can shorten the exercise name, never the evidence
+
+**What was wrong.** The PR badge on the session card was one string, "Back Squat · 152kg × 5 PR", in a single `numberOfLines={1}` text inside a pill capped at 62% of the card. React Native truncates from the end, and the end is where the evidence sits. Catalog names run to 45 characters ("One-Arm Single-Leg Dumbbell Romanian Deadlift"), and F59 (#1156) appended "(2 assisted)". So a long name plus an assisted PR could cut " PR", or the assisted note itself, on the PNG an athlete posts. The second case brings back the overstatement F59 fixed. `frontend-reviewer` found this on F59. It was never seen on a device.
+
+### What changed
+
+- **`CardBadge = { lead?: string; tail: string }`** (`lib/sessionCard.ts`). `CardData.badges` is now a list of these. `lead` is what the card may shorten; `tail` is what it may not.
+- **`prBadgeFor`** (`lib/celebration.ts`) returns `{ lead: "Back Squat · ", tail: "152kg × 5 (2 assisted) PR" }`. The name is the lead. Everything that states what was lifted, including "PR", is the tail. The streak badge is tail-only.
+- **`SessionCard`** renders each pill as a row of two texts:
+  - the lead: `numberOfLines={1}`, `flexShrink: 1`, so it shrinks and ellipsizes first;
+  - the tail: no line limit, `flexShrink: 0`, `maxWidth: '100%'`, so it keeps its width, up to the whole pill, and wraps rather than truncating.
+  - The pill is `accessible`, with the full words as its label, so a screen reader hears the whole badge once, whatever was cut on screen.
+- **The pill is top-aligned** (`alignItems: 'flex-start'`), so a tail that wraps leaves the name on the first line. `frontend-reviewer` suggested it.
+- **Rejected: `adjustsFontSizeToFit` with a floor.** It is honoured on iOS only. Jest cannot observe it. And at its floor it still truncates, which is the failure this ticket exists to stop.
+
+### Tests, and what they can and cannot say
+
+`components/__tests__/sessionCardBadge.test.tsx` pins the structure that decides what gives way: the lead's line limit and shrink, the tail's missing line limit, its no-shrink and full-pill cap, the row, the accessible label, and a tail-only streak badge. `celebration.test` and `sessionCard.test` now assert the parts.
+
+**Jest cannot measure text**, so none of this shows how the exported 1080px PNG actually looks with the longest name. That stays the ticket's device criterion.
+
+**Mutation checks.** Each mutation was applied with a count-asserted replace and run. Each was then restored, confirmed byte-identical with `cmp`, and **re-run** green:
+
+| # | mutation | result |
+|---|---|---|
+| M1 | the tail gets `numberOfLines={1}` again | `sessionCardBadge`: *keeps the evidence… never truncated* **red** |
+| M2 | lead and tail `flexShrink` swapped | 2 red: the evidence test and *lets only the exercise name shorten* |
+| M3 | `prBadgeFor` moves the evidence into `lead`, leaving only "PR" in `tail` | `celebration.test`: 3 red |
+| M4 | the lead text never rendered, so the badge is one text again | 2 red: *lets only the exercise name shorten* and *…the tail alone* |
+| M5 | the pill's `alignItems: 'flex-start'` removed (added in review) | *lets only the exercise name shorten* **red** |
+
+**Runs.** The six affected suites (`sessionCardBadge`, `celebration`, `sessionCard`, `feed`, `sessionCardBackgroundPhoto`, `shareCardPreview`): 157/157, with 0 `not wrapped in act` and 0 `act audit:` lines. `tsc --noEmit` is clean, eslint passes on the changed files, and `check:rntl-awaits` reports 0 unawaited RNTL calls.
+
+**The first baseline was red, and that is recorded because the conversion script caused it.** Test assertions were converted from the old string to the new parts by a regex that matched `.toBe(…)` only. `celebration.test`'s *captions only the top record* test used `toContain` on the string, so it was missed and failed: `Expected value "Back Squat", Received object {lead, tail}`. It now asserts the lead, and that the joined text never names the other exercise. A search for any other string-shaped use of the badge found none.
+
+### Open questions
+
+- **Device evidence is owed on #1160:** share a PR on "One-Arm Single-Leg Dumbbell Romanian Deadlift" with assisted reps, and confirm that the exported card shows the whole tail and that only the name is shortened.
+- **A very long tail wraps the pill onto a second line.** That is the chosen trade: a taller pill rather than a cut. If it ever reads badly on the card, the next step is a shorter name, never a shorter tail.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

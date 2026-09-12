@@ -154,13 +154,38 @@ export const SessionCard = forwardRef<RNView, { data: CardData; width: number }>
               failed to win something. */}
           {data.badges.length > 0 && (
             <RNView style={s.badges}>
-              {data.badges.slice(0, 2).map((b) => (
-                <RNView key={b} style={[s.badge, { backgroundColor: accent.accent }]}>
-                  <Text style={[s.badgeText, { color: accent.on }]} numberOfLines={1}>
-                    {b}
-                  </Text>
-                </RNView>
-              ))}
+              {data.badges.slice(0, 2).map((b) => {
+                const words = `${b.lead ?? ''}${b.tail}`;
+                // F60 (#1160): two texts, so only the NAME can be cut. One
+                // `numberOfLines={1}` string lost its end first, and the end
+                // is the assisted note and "PR". The tail may wrap onto a
+                // second line inside the pill; it is never truncated.
+                return (
+                  <RNView
+                    key={words}
+                    style={[s.badge, { backgroundColor: accent.accent }]}
+                    accessible
+                    accessibilityLabel={words}
+                    testID="session-card-badge"
+                  >
+                    {b.lead ? (
+                      <Text
+                        style={[s.badgeText, s.badgeLead, { color: accent.on }]}
+                        numberOfLines={1}
+                        testID="session-card-badge-lead"
+                      >
+                        {b.lead}
+                      </Text>
+                    ) : null}
+                    <Text
+                      style={[s.badgeText, s.badgeTail, { color: accent.on }]}
+                      testID="session-card-badge-tail"
+                    >
+                      {b.tail}
+                    </Text>
+                  </RNView>
+                );
+              })}
             </RNView>
           )}
 
@@ -285,8 +310,21 @@ const buildStyles = (u: number) =>
     detailMore: { fontFamily: 'Barlow', fontSize: 11 * u, color: vola.textDim, marginTop: 2 * u },
 
     badges: { flexDirection: 'row', gap: 6 * u, marginTop: 12 * u },
-    badge: { borderRadius: 999, paddingHorizontal: 10 * u, paddingVertical: 4 * u, maxWidth: '62%' },
+    badge: {
+      flexDirection: 'row',
+      // Top-aligned, so a tail that wraps to a second line leaves the name on
+      // the first line rather than centred beside the pair. Raised in review.
+      alignItems: 'flex-start',
+      borderRadius: 999,
+      paddingHorizontal: 10 * u,
+      paddingVertical: 4 * u,
+      maxWidth: '62%',
+    },
     badgeText: { fontFamily: 'BarlowSemiBold', fontSize: 11 * u },
+    // The name gives up width first; the evidence keeps all of it, up to the
+    // whole pill, and wraps rather than truncating.
+    badgeLead: { flexShrink: 1 },
+    badgeTail: { flexShrink: 0, maxWidth: '100%' },
 
     foot: { flexDirection: 'row', alignItems: 'center', gap: 8 * u, marginTop: 14 * u },
     footRule: { width: 2 * u, height: 13 * u, borderRadius: 1 },

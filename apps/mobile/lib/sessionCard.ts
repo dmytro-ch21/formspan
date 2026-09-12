@@ -16,6 +16,15 @@ export type CardStat = {
   unit?: string;
 };
 
+/**
+ * One badge pill's words, split where the card is allowed to cut (F60, #1160).
+ *
+ * `tail` is never truncated. For a PR it is the evidence: the weight, the reps,
+ * any "(2 assisted)" and "PR", and losing any of that overstates the set.
+ * `lead`, the exercise name, is what gives way when the pill runs out of width.
+ */
+export type CardBadge = { lead?: string; tail: string };
+
 export type CardData = {
   /** The session id — the deterministic mountain is keyed off it. */
   id: string;
@@ -26,8 +35,11 @@ export type CardData = {
   eyebrow: string;
   dateLabel: string;
   stats: CardStat[];
-  /** Earned things only — PRs, streaks. Empty is the common case. */
-  badges: string[];
+  /**
+   * Earned things only — PRs, streaks. Empty is the common case. Each is a
+   * `lead` the card may shorten and a `tail` it may not (F60, #1160).
+   */
+  badges: CardBadge[];
   handle?: string;
   /** Drives the headline. Absent when there is nothing notable to say. */
   highlight?: 'pr' | 'streak' | 'hardest';
@@ -132,14 +144,14 @@ export function cardFromSummary(input: {
    * NOT the same as `hasRecord` below: a record with no resolvable caption
    * still earns the "NEW BEST." headline, it just gets no badge pill.
    */
-  prBadge?: string | null;
+  prBadge?: CardBadge | null;
   handle?: string;
   now?: Date;
 }): CardData {
   const { id, summary, stats, streak, handle, prBadge } = input;
   const when = input.now ?? new Date();
 
-  const badges: string[] = [];
+  const badges: CardBadge[] = [];
   // Whether THIS session set a personal record at all — drives the headline
   // (see `highlight` below) independently of whether the badge could be
   // captioned. `prBadge` failing to resolve a name should not un-happen the
@@ -152,7 +164,7 @@ export function cardFromSummary(input: {
   // Only when THIS session carried it. "4 weeks" on a session that merely
   // happened during a streak claims credit the session did not earn.
   if (streak?.carried && streak.weeks > 1) {
-    badges.push(`${streak.weeks} weeks unbroken`);
+    badges.push({ tail: `${streak.weeks} weeks unbroken` });
   }
 
   // THE STAT STRIP IS FOUR WIDE AND THAT IS A HARD CEILING — a fifth column

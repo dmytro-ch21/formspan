@@ -6942,6 +6942,18 @@ number would describe something still happening.
   152kg with 2 assisted, finish and share → the badge reads **"Back Squat ·
   152kg × 5 (2 assisted) PR"**. Before F59 it read "152kg × 5 PR", exactly like
   five unaided. A bodyweight rep PR with help reads "12 reps (4 assisted)".
+- **The PR badge never loses its evidence to a long name** (F60, #1160). Log
+  an assisted PR on the longest catalog name, "One-Arm Single-Leg Dumbbell
+  Romanian Deadlift", with a set of 5 and 2 assisted. Share the session and
+  open the exported image. The pill must show the whole **"… × 5 (2 assisted)
+  PR"**, with only the exercise name shortened (an ellipsis before " · ").
+  Before F60 it was one line that truncated from the end, so " PR", or the
+  assisted note itself, could be cut. If the evidence is still too long for
+  the pill, it wraps onto a second line; it is never ellipsized. With
+  VoiceOver on, the preview's badge reads the full, uncut text. A streak badge
+  beside it ("4 weeks unbroken") is unaffected. **NEEDS HUMAN EVIDENCE**: no
+  device run has happened for F60. The test pins which text may shorten and
+  which may not, and it cannot measure how the exported card actually renders.
 - **The records card agrees.** Open that exercise's records card: its set line
   reads "5 × 152kg (2 assisted)" in the measured half, never beside the RIR/RPE.
 - **0 assisted, or never recorded, adds nothing** to the badge or the card.

@@ -1,6 +1,7 @@
 import { assistedNote, type ExerciseRecords, type PersonalRecord } from './records';
 import { hasUnresolvedLoad, type SetType } from './sessions';
 import { formatDistance as formatDistanceMetric, formatPace as formatPaceMetric } from './units';
+import type { CardBadge } from './sessionCard';
 
 /**
  * What a finished session gets to say about itself.
@@ -327,7 +328,9 @@ export function prEvidence(
 }
 
 /**
- * The share card's PR badge text — "Back Squat · 152kg × 5 PR" — or null.
+ * The share card's PR badge — "Back Squat · 152kg × 5 PR" — or null. It comes
+ * back in two parts: `lead` ("Back Squat · "), which the card may shorten, and
+ * `tail` ("152kg × 5 PR"), which it never truncates.
  *
  * Null covers three honest reasons, and none of them fall back to a count or
  * a raw id: no record this session, the top record's exercise name could not
@@ -338,12 +341,15 @@ export function prEvidence(
 export function prBadgeFor(
   records: SessionRecord[],
   formatWeight: (kg: number) => string,
-): string | null {
+): CardBadge | null {
   const top = topRecord(records);
   if (!top?.exerciseName) return null;
   const evidence = prEvidence(top.record, formatWeight);
   if (!evidence) return null;
-  return `${top.exerciseName} · ${evidence} PR`;
+  // F60 (#1160): split where the card may cut. As one string, React Native
+  // truncated from the END, which is exactly where the assisted note and
+  // "PR" sit. The name is the only part the pill may shorten.
+  return { lead: `${top.exerciseName} · `, tail: `${evidence} PR` };
 }
 
 export function worthCelebrating(

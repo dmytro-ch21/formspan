@@ -201,12 +201,12 @@ describe('the PR badge (N447/#745)', () => {
 
     it('matches the shape the ticket asked for', () => {
       const records = [named('back-squat', 'Back Squat', { weight_kg: 152, reps: 5 })];
-      expect(prBadgeFor(records, fmt)).toBe('Back Squat · 152kg × 5 PR');
+      expect(prBadgeFor(records, fmt)).toEqual({ lead: 'Back Squat · ', tail: '152kg × 5 PR' });
     });
 
     it('carries the assisted count into the badge an athlete shares', () => {
       const records = [named('back-squat', 'Back Squat', { weight_kg: 152, reps: 5, assisted_reps: 2 })];
-      expect(prBadgeFor(records, fmt)).toBe('Back Squat · 152kg × 5 (2 assisted) PR');
+      expect(prBadgeFor(records, fmt)).toEqual({ lead: 'Back Squat · ', tail: '152kg × 5 (2 assisted) PR' });
     });
 
     it('is null with no records', () => {
@@ -229,8 +229,8 @@ describe('the PR badge (N447/#745)', () => {
         named('bench-press', 'Bench Press', { weight_kg: 100, reps: 3 }),
       ];
       const badge = prBadgeFor(records, fmt);
-      expect(badge).toContain('Back Squat');
-      expect(badge).not.toContain('Bench Press');
+      expect(badge?.lead).toBe('Back Squat · ');
+      expect(`${badge?.lead}${badge?.tail}`).not.toContain('Bench Press');
     });
   });
 });
