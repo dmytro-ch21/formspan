@@ -468,6 +468,16 @@ jobs:
       - name: Request timeout parity
         run: python3 scripts/check-timeout-parity.py
 
+      # `READ_RECORD_TYPES` (apps/mobile/lib/healthConnect.ts) and the Android
+      # manifest's health permissions (apps/mobile/app.config.js) are two
+      # hand-kept lists that must match one for one. W15 (#944) is what drift
+      # looked like: `ExerciseSession` joined the read list, `READ_EXERCISE`
+      # never joined the manifest, and walk/hike detection was silently dead on
+      # Android, because a manifest missing a permission prebuilds and builds
+      # cleanly. H16 (#951).
+      - name: Health Connect permission parity
+        run: python3 scripts/check-health-permissions-parity.py
+
       # `apps/web`'s units module is GENERATED from `apps/mobile`'s, and this is
       # what makes that a guarantee rather than a comment. Units are read on
       # nearly every screen in both apps, and the two hand-maintained copies
@@ -475,7 +485,7 @@ jobs:
       # functions, so mobile could render a volume in the athlete's own units
       # and web could not. Nobody decided that; it is what two copies do.
       #
-      # Unlike its four siblings above, this one can also FIX what it reports:
+      # Unlike its five siblings above, this one can also FIX what it reports:
       # `pnpm run units:write`. It is still a check here, because a generator
       # nobody runs is a source of truth nobody has.
       #

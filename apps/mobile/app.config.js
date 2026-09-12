@@ -63,8 +63,9 @@ module.exports = () => ({
       package: "com.vola.fitness",
       versionCode: 1,
       // ONE ENTRY PER RECORD TYPE IN `READ_RECORD_TYPES` (lib/healthConnect.ts),
-      // and the two lists have to be kept in step BY HAND — nothing generates
-      // one from the other, and nothing fails when they drift. W15/#944 is what
+      // and the two lists are kept in step BY HAND — nothing generates one from
+      // the other; `check:health-permissions-parity` (H16/#951) fails when they
+      // drift. W15/#944 is what
       // drifting looks like: `ExerciseSession` joined the read list for N479
       // (walk/hike detection) and `READ_EXERCISE` never joined this one, so on
       // Android every read of it threw a SecurityException that
