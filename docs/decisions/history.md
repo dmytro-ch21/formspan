@@ -74596,7 +74596,7 @@ The provenance check reports a fact whose row is gone, a fact claiming a fresher
 - **Edit profile's "What you train" card.** Its load-failure hint said "Couldn't load your sports just now", over a list that includes nutrition.
 
 **What changed.**
-- **The You tab's pill.** Its label is `MODULE_TOGGLE_LOCATION`, the heading it opens, and its hint is "Opens what you train, in your profile".
+- **The You tab's pill.** Its label is `MODULE_TOGGLE_LOCATION`, the heading it opens, and its hint is "Change it in your profile".
 - **Edit profile's load-failure hint.** It reads "Couldn't load what you train just now."
 
 The ticket's third criterion asks that no other surface pair sport wording with the all-modules list. That found three more, all changed:
@@ -74614,7 +74614,7 @@ The `you-sports` testID stays. It is not seen or spoken, and renaming it would c
 Across `apps/mobile`, `apps/web/src` and `apps/admin/src`, every remaining "sport" in copy is about a session's actual sport, which is correct: a session's sport label, the exercise-search placeholders, the web sport filters, and admin's Sport field. Web has no equivalent of the You pill.
 
 **Tests.**
-- **`youScreen.test.tsx`.** With strength and nutrition on, the pill's label is `MODULE_TOGGLE_LOCATION`, its value is "Strength · Nutrition", its hint doesn't mention sport, and no "Sports" text renders. The existing hint test now expects the hint to name what you train rather than "sport".
+- **`youScreen.test.tsx`.** With strength and nutrition on, the pill's label is `MODULE_TOGGLE_LOCATION`, its value is "Strength · Nutrition", its hint doesn't mention sport, and no "Sports" text renders. The existing hint test now pins the hint exactly.
 - **`editProfileAvatar.test.tsx`.** With modules stale, the hint names what you train, and "your sports" doesn't render.
 - **Not covered by a test:** the save-failure message, the Edit profile caption and Settings' hint. Those are copy-only and rest on the verified scan.
 
@@ -74622,6 +74622,12 @@ Across `apps/mobile`, `apps/web/src` and `apps/admin/src`, every remaining "spor
 - **the You pill's label back to "Sports":** the new W17 test fails;
 - **its hint back to "Opens your sport toggles":** that test and the hint test fail;
 - **the edit profile load hint back to "your sports":** the new edit-profile test fails.
+
+**Review.** `ac-verifier`: 3 of 3 met, from its own independent scan. `frontend-reviewer`: nothing blocking, and two suggestions taken:
+- **The hint first read "Opens what you train, in your profile".** VoiceOver reads the label, the value, then the hint, so the athlete heard "What you train" twice in a row. It now says only where the setting lives.
+- **A doc comment the first commit edited mid-sentence** left an orphaned "— but nothing links to them" after a full stop. It is whole again, and two internal comments still naming the pill "Sports" were updated.
+
+The reviewer's other point, that the longer label may wrap in the two-up grid, is the device check below.
 
 **Not measured.** "What you train" is longer than "Sports", and the pill's label has no `numberOfLines`, so on a narrow phone or at large text sizes it may wrap to two lines beside the Phase pill. Nothing truncates, but the look is a device check.
 

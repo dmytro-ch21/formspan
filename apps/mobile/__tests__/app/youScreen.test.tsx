@@ -321,7 +321,7 @@ describe('what the Phase row says', () => {
     const phase = await screen.findByTestId('you-phase');
     const sports = screen.getByTestId('you-sports');
     expect(phase.props.accessibilityHint).not.toBe(sports.props.accessibilityHint);
-    expect(sports.props.accessibilityHint).toContain(MODULE_TOGGLE_LOCATION.toLowerCase());
+    expect(sports.props.accessibilityHint).toBe('Change it in your profile');
   });
 });
 

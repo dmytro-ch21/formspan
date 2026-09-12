@@ -110,7 +110,7 @@ import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
  * - **Every destination that was a `NavRow` still IS a `NavRow`** — same
  *   props, same testID, same `accessibilityLabel`/`accessibilityHint`/badge
  *   contract — with one addition, an `icon`, and a grid container around
- *   groups of them instead of a vertical `gap`. `NavValueRow` (Sports, Phase)
+ *   groups of them instead of a vertical `gap`. `NavValueRow` (What you train, Phase)
  *   is the same trade: the value that used to sit at the end of a row is now
  *   the pill's own caption line, still visible, still the answer rather than
  *   a link to one. Every property a test in `youScreen.test.tsx` pins about
@@ -532,7 +532,7 @@ export default function YouScreen() {
                       : 'None chosen yet'
                 }
                 onPress={() => router.push('/profile/edit')}
-                hint="Opens what you train, in your profile"
+                hint="Change it in your profile"
                 testID="you-sports"
               />
               {/* A phase is the thing every calorie target points at, and until
@@ -737,18 +737,22 @@ export default function YouScreen() {
  * fact this app already reasoned over. The visual is new (N509); the contract
  * is not.
  *
- * Exists for exactly two callers — Sports and Phase — and the argument for
+ * Exists for exactly two callers — What you train and Phase — and the argument for
  * each is N61 and N181 respectively. Every module-gated surface in this app
  * disappears silently when its discipline is off: the belt roadmaps, the Plan
  * tab's curricula strip, BJJ in the session picker, and the Food and Goals
  * TABS. The destination screens explain themselves properly ("BJJ tracking is
  * off, turn it back on under What you train" — N471/#471 corrected this row's
  * own quoted copy, which had drifted to naming a "Sports" section that never
- * existed). W17/#737 then fixed this pill's OWN label and hint, which still
- * said "Sports" over a value listing every enabled module, nutrition included:
- * both now name `MODULE_TOGGLE_LOCATION`, the heading the pill opens. — but
- * nothing links to them while they are
- * off, so the athlete never reaches the screen that would say so.
+ * existed) — but nothing links to them while they are off, so the athlete
+ * never reaches the screen that would say so.
+ *
+ * W17/#737 then fixed this pill's OWN label and hint, which still said
+ * "Sports" over a value listing every enabled module, nutrition included. The
+ * label is now `MODULE_TOGGLE_LOCATION`, the heading the pill opens, and the
+ * hint says only where that is — "Change it in your profile" — because
+ * VoiceOver reads the label immediately before it, and a hint repeating the
+ * label's own phrase is heard twice in a row (raised in review).
  *
  * This pill already shows the answer — "Strength · Nutrition" — as its
  * caption line, so it names the cause of every one of those absences while
@@ -1016,7 +1020,7 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_GLASS_COLORS[0],
   },
   pillLabel: { ...Typography.emphasis, color: vola.text },
-  // The value/caption line — only `NavValueRow` (Sports, Phase) uses this;
+  // The value/caption line — only `NavValueRow` (What you train, Phase) uses this;
   // `NavRow`'s pills carry no visible caption, matching the reference, and
   // speak their description through `accessibilityHint` instead.
   pillValue: { ...Typography.caption, color: vola.textMuted },
