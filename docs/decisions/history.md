@@ -74450,6 +74450,36 @@ outside the five wrapped sites. Its three suggestions:
 - **The two Library loaders now have different budgets**: 10s for techniques,
   30s for exercises.
 
+## 2026-09-12 — F57 (#1140): the rest timer's ring and run bar drain on the UI thread, from the same armed value as the bar
+
+N558 (#1047) made the collapsed bar drain continuously on the UI thread, and F55 (#1134) kept both forms mounted. **The expanded card still stepped at 4Hz**: the ring's `strokeDashoffset` was computed from `remaining`, repainted on the 250ms clock, and the run bar under "Set N of M" animated `width: %` on the same tick, a layout pass per tick. So expanding a smooth bar revealed a stepping clock. `/review-animations` flagged it on #1105 as a follow-up, and F55 filed it.
+
+**The ring does not get its own drain; it reads the bar's.** The ring's fraction and the bar's are the same quantity, time left over the total, and two animations of one quantity can only ever disagree. `Drain`'s arming logic moved, unchanged, into a hook, `useCountdownFraction(timer, remaining, fractionAt, active)`, called ONCE in `TimerSurface`. The resulting shared value is passed to the bar's fill (`DrainFill`) and the card's `Ring`, whose arc is now an animated SVG circle driven through `useAnimatedProps`, following F46's `MacroRings` precedent. N558's rules carry over word for word:
+- a transform on a childless absolute fill;
+- linear to the deadline;
+- armed on a change of the countdown, never on a tick;
+- the first arm jumps, and later arms bridge from the on-screen value;
+- Reduce Motion, or an OS that hasn't answered, steps with the digits.
+
+**The run bar is a different quantity, armed by the same rules.** It fills across the whole run, measured in time (`runProgress`). A second call of the same hook, with `fractionAt = runProgress(run, ·)`, arms it toward where the run will be when the current step ends. It is now a `scaleX` fill with `transformOrigin: 'left'`, clipped by the track's existing `overflow: hidden`. It is `active` only inside a run, so a lone rest spends no UI-thread animation on a bar that isn't shown, and N558's "armed once" count (two `withTiming` calls per rest) is unchanged.
+
+**Tests** (`components/__tests__/timerContinuity.test.tsx`, 22 → 28):
+- **The ring rides the one drain.** After a rest arms, the `withTiming` count is still exactly two, and after 30 seconds the arc sits fully unwound: where the drain comes to rest, where a ring computed from `remaining` would sit a third unwound.
+- **Reduced motion.** With Reduce Motion on or unanswered, the ring steps with the digits.
+- **The run bar.** It is armed once, with its linear leg heading for 30 of 90 seconds at the end of the first step. It is a full-width `scaleX` fill growing from the left, it steps with the digits under Reduce Motion, and it doesn't exist on a lone rest.
+- **Finding the arc.** The helper reads `strokeDasharray` as the first array entry, because react-native-svg normalises it to an array on the host node; reading it as a number made the expected value NaN on the first run.
+
+**Checks.** 6 mutations, all caught as test failures, each restored byte-identical and re-run green:
+- **ring:** frozen;
+- **one drain:** the card arming its own copy (caught by N558's arm-count tests);
+- **run bar:** armed with no run; aimed at the wrong moment; animating `width` again; losing its left-edge origin.
+
+The last one first survived, because no test read the origin, so an assertion was added before it was run.
+
+**Not measured.** Since F55 the card stays mounted while minimised, so its ring now animates while hidden. That is on the UI thread with no React renders, but its cost on a device is unmeasured. Feel is the ticket's `NEEDS HUMAN EVIDENCE`: expanding mid-rest on a Release build shows a ring as smooth as the bar, and a 90-second rest never visibly steps. **The motion gate is the owner's** (`/review-animations`).
+
+**Reachability on a phone**: this is the phone — the rest timer on the strength session screen.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
