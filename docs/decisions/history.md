@@ -74220,6 +74220,78 @@ M1 and M4 were **not caught** before the due-work pair existed: with `cleanup()`
 
 **Not verified.** No run reproduced the production freeze itself — only its mechanism, by busy-wait and by `SIGSTOP`. Rendered tests remain exposed; reducing the oversubscription that freezes a worker (`verify` runs jest with its default worker count on a host shared by many sessions) is a different change and was not attempted here.
 
+## 2026-09-11 — N557 (#1046): Today's "eight jumps" were measured and were not there; Food's first open was
+
+**What.** `app/(tabs)/food.tsx` now reads the daily trackers when the screen
+MOUNTS, as well as on every focus. Food mounts at launch, behind the splash, and
+is not focused until the athlete opens it; with focus as the only trigger, the
+first open found `TrackerList` still empty and the Water / Caffeine cards
+arrived a few frames later, shoving the meals list about 387pt down. One effect,
+guarded on the hook's own state, plus `__tests__/app/foodTrackersOnMount.test.tsx`.
+
+**The ticket asked to be measured before any code, and the measurement changed
+the ticket.** N557 was the motion audit's highest-ranked item: Today "assembles
+itself in about eight visible jumps", fixed by `FadeIn` plus a `LinearTransition`
+on the siblings. The audit said, in as many words, that the ranking was an
+inference nobody had tested, and made a device measurement the first criterion.
+
+Measured on a Release build on the iPhone 17 Pro simulator, iOS 26.5, from
+`origin/main` @ `b6d0f95e` plus an uncommitted timing patch — `onContentSizeChange`
+on both screens' ScrollViews, logging milliseconds since mount and the content
+height. The account was signed in with sparse data: no plan, nothing logged, no
+macro target.
+
+- **Today, five cold starts:** three height changes per run — the first layout
+  at ~60ms, then +516pt at 303–323ms and +16pt at 519–807ms. Two arrivals after
+  the first layout, not eight. A screen recording settled whether they are seen:
+  the launch splash covers the screen for all of it, Today is already complete
+  when the splash fades, and nothing moves afterwards but a "Syncing…" chip in
+  the header.
+- **Food, first open:** Food's own content settles under the splash too
+  (47ms → 488pt, 1194ms → 915pt), because tab screens are not lazy. Tapping the
+  tab produced +387pt at the moment of the tap. Frame by frame: `13.818s`,
+  `13.830s` and `13.843s` show Food without its tracker cards, `13.855s` shows
+  them inserted and the meals pushed off screen.
+
+**So the ticket was re-scoped rather than built as written,** with the user
+choosing between that, closing it, waiting for a device, and building the
+original recipe anyway. That recipe would have been wrong in both places: on
+Today it animates arrivals nobody sees, and on Food a 200ms layout transition
+turns a three-frame flash into a visible 387pt slide the moment the tab opens.
+The defect was when the read started, not how the result was shown.
+
+**Why a state guard and not the ref one-shot first proposed.** The approved
+sketch seeded the read once behind a `useRef`, returning the hook's stop
+function. That combination abandons its own read: StrictMode's double effect,
+or `refresh` changing identity, runs the cleanup — marking the read dead — and
+the ref then refuses a second attempt, which is the original bug with extra
+steps. Guarding on `trackerDay.view.state === 'unknown'` retries a cancelled read
+until one lands and stops for good once one has. It also never runs signed out,
+where the hook could only restate `unknown`, and it adds no lint finding —
+checked against a positive control that does fire `set-state-in-effect`, since
+a clean result from a linter that is not running looks identical.
+
+**Every guard was mutation-tested, and each broke the test written for it.**
+Baseline 4/4, then five mutations, each restored byte-identical and the suite
+re-run green at the end: removing the effect reddened "reads at mount" and the
+retry test (whose first call never happens); dropping the `unknown` guard
+reddened "once loaded, mount reads nothing"; dropping the `userId` guard
+reddened "signed out"; returning no cleanup reddened the retry test; and
+swapping in the ref one-shot reddened the retry test **and** "once loaded" —
+the ref alone does not stop a mount read when the trackers are already there.
+The file's focus mock is deliberately the unfocused tab: every other Food
+screen test runs focus effects at mount, where a mount read and a focus read
+are indistinguishable, and the first test asserts a focus callback exists and
+was not run so that it cannot pass on the wrong read.
+
+**Not verified.** Everything above is a simulator on a heavily loaded Mac. A
+phone is slower, so Today's arrivals may outlast the splash there; a heavier
+athlete has more blocks above the fold; and a Today day-switch or re-focus was
+not measured. Both device checks are on the ticket as `NEEDS HUMAN EVIDENCE`.
+The measurement build is still installed on that simulator; it replaced a Sep 8
+build that had no dev launcher, which is why the first attempt — pointing it at
+a Metro on another port — measured nothing.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

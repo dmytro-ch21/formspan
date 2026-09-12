@@ -433,6 +433,27 @@ export default function FoodScreen() {
     }, [refresh, refreshTrackers, on]),
   );
 
+  // N557 — and at MOUNT, for the first load only.
+  //
+  // This tab mounts at launch, behind the splash, but is not focused until the
+  // athlete opens it. With the read above as the only trigger, the first open
+  // found `TrackerList` still empty — it renders nothing while the view is
+  // `unknown`, rightly — and the Water / Caffeine cards arrived a few frames
+  // later, shoving the meals list ~387pt down. Measured on a Release build: the
+  // N557 history entry has the frames.
+  //
+  // Guarded on the hook's own state, not a ref. While the view is still
+  // `unknown` this re-runs until a read lands — so a cancelled one (StrictMode's
+  // double effect, a dependency changing) simply tries again — and once it has
+  // landed it never runs again, leaving every later load, and this read's
+  // network half, to the focus effect above. Signed out it does nothing: the
+  // hook would only restate `unknown`.
+  const trackersUnread = trackerDay.view.state === 'unknown';
+  useEffect(() => {
+    if (!userId || !trackersUnread) return;
+    return refreshTrackers(on);
+  }, [userId, trackersUnread, refreshTrackers, on]);
+
   // And again after a sync lands, so a push that completed in the background is
   // reflected without a manual pull-to-refresh. A separate effect rather than a
   // dependency on the focus callback: `refresh` does not read `lastSyncAt`, so

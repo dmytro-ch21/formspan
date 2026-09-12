@@ -23772,3 +23772,59 @@ it and planning the day again. There is no plan edit screen on mobile.
 - **A refused removal on a real server.** The server currently has no plan
   delete that refuses with anything but 404, so this may need a staging
   backend change or a proxy to produce. Record how it was produced.
+
+## N557 — Food's tracker cards are already there on the first open (`apps/mobile/app/(tabs)/food.tsx`, #1046)
+
+Food mounts at launch, behind the splash, and is not focused until the athlete
+opens it. Its trackers used to load only on focus, so the first open showed the
+meals list directly under the kcal card for a few frames, then the Water and
+Caffeine cards arrived above it and shoved the meals ~387pt down. The trackers
+are now read at mount as well, so they are loaded before the tab can be opened.
+No animation was added: the fix is when the read starts.
+
+### Happy path
+
+- **Cold-start the app, wait for Today, tap Food.** The Water / Caffeine cards
+  (or the athlete's own trackers) are on screen in the very first frame, and the
+  meals list below them does not move.
+- **Step to another day on Food.** The cards stay; only their counts change.
+  (This never jumped — the cards only ever arrived late on the first load.)
+- **Log a cup on Food, switch to Today and back.** The focus refresh still runs,
+  so the count is current.
+
+### Edge cases & errors
+
+- **Signed out** (or before auth has resolved): no tracker cards at all — not a
+  "you have no trackers" state. The mount read does not run without a user id;
+  the hook could only restate `unknown`.
+- **The local tracker read fails:** the cards stay absent until the next focus
+  retries. A failed read must never render as "no trackers".
+- **Food is the first screen shown** (a `?date=` deep link opens it directly):
+  the mount read and the focus read both run once. Duplicate I/O on that one
+  path, harmless — same day, same answer.
+- **An athlete with no trackers** sees the existing empty state on the first
+  open, immediately, rather than after a flash of nothing.
+- **Nutrition module off:** unchanged — the screen explains the module is off.
+
+### What a test can and cannot reach
+
+- **Reachable, and covered** (`__tests__/app/foodTrackersOnMount.test.tsx`, with
+  a focus mock that registers the callback and does not run it — the unfocused
+  tab): the read happens at mount with focus never run; once loaded, mount reads
+  nothing and focus still refreshes; a mount read cancelled before it lands is
+  stopped and retried; signed out, mount reads nothing. Five mutations, each
+  reddening its own test.
+- **Measured outside the suite, not re-run by CI:** a Release build on the
+  iPhone 17 Pro simulator, frame by frame from a screen recording, before the
+  change. Food showed three frames without its tracker cards, then the shove.
+  Today's arrivals on cold start all landed under the splash — nothing visible.
+- **NOT reachable:** real-device timing; whether Today's arrivals outlast the
+  splash on a slower phone; a heavier athlete's Today.
+
+### Needs a device
+
+- Release build on a real phone: cold-start, wait for Today, tap Food. The
+  tracker cards are there on the first frame and the meals list does not move.
+- Same phone: cold-start onto Today several times. Say whether anything visibly
+  moves after the splash has gone — that decides whether Today's arrival needs a
+  ticket of its own.
