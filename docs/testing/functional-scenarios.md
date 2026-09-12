@@ -8,6 +8,8 @@ Recommended end-to-end scenarios for every shipped piece of functionality — on
 
 **Its companion is [device-checks.md](device-checks.md)**, and the split is worth knowing before you add anything here. This file lists what a test *could* assert. That one lists what **no test can reach** — a camera, a microphone, a real photograph, a permission prompt, a notch, a speaker, a gym with no signal — as a script a person walks on a real phone. If a scenario you are about to write here can only be settled by a human holding hardware, it belongs there instead.
 
+**Correctness pass, 2026-09-12 (N198, #630).** The navigation sections — tab bar, Train, Goals, Library, the nutrition-off states — and every cited mobile file path were checked against `main`. Corrections are marked in place with an `N198` note, and nothing was deleted. Sections without such a note were not individually re-verified: treat a specific visual detail elsewhere (a colour, a layout, an order) as true when written, and check it against the screen before writing a test from it.
+
 ---
 
 ## Backend health check (`GET /v1/healthz`)
@@ -151,6 +153,8 @@ Domain: Clerk auth (same instance as web/admin) with the session token in the OS
 ---
 
 ## Exercise library screen (`apps/mobile`, Library tab)
+
+> **N198 (2026-09-12):** the Library has not been a tab since N70 — it is `app/library.tsx`, a pushed screen opened from You › Library. Wherever this document says "Library tab", read that screen; headings are left as written so references to them still resolve.
 
 Domain: the mobile-facing view of the global catalog — browse, filter by sport, search by name, with images served from R2 via the API's assembled URLs.
 
@@ -1384,7 +1388,7 @@ regression test is the only thing pinning it.
 ## Library filter and search memory (`apps/mobile` Library tab)
 
 - The **sport filter persists** across visits and app launches; it's a standing fact about the athlete.
-- The **search box clears** on leaving the tab; it's a question already answered, and finding it still there makes the list look short for no visible reason.
+- The **search box clears** on leaving the Library; it's a question already answered, and finding it still there makes the list look short for no visible reason. **Except when the way out is a result**: search, open a technique, come back — the query is still there (`keepQueryRef` in `app/library.tsx`). *("on leaving the tab" corrected by N198, 2026-09-12 — the Library is a pushed screen, not a tab.)*
 - Both are stored per user — a shared device must not hand one account's filters to the next person.
 
 ## Today (`apps/mobile` Today tab)
@@ -1587,16 +1591,18 @@ card must return to real today's figures.
 
 ## Mobile shell (`apps/mobile` tab navigator)
 
-- **No seams.** Header, content and tab bar share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens.
-- **The tab bar carries an icon above an uppercase label**, on the app's own ground, with an **underline beneath the active tab** spanning that tab's full width rather than just the glyph, and one hairline separator. No pill, no fill. It sits in normal flow, so nothing scrolls underneath it.
-- Absolutely-positioned controls (the "New workout" button) sit above the bar, not behind it.
+> **Corrected 2026-09-12 (N198, #630).** Written for the custom `<Tabs>` bar. The bullets on the bar, its seams and the floating controls now describe N504's native bar, and each says what it used to claim. The wordmark and screen-name bullets were checked against `components/ScreenHeader.tsx` and still hold.
+
+- **No seams.** Header and content share one background; there must be no hairline rule or colour step between them, on tab screens *and* pushed stack screens. Two deliberate exceptions, both later than this line: W10's scroll-edge rule, which `Goals` and `Phase` draw under a header that sits directly on the scroller (see the W10 section), and the tab bar itself, which since N504 is the platform's own chrome (Liquid Glass on iOS 26, Material 3 on Android) rather than the app's ground. *(This said "Header, content and tab bar share one background" until N198.)*
+- **The tab bar is the platform's own (N504, `NativeTabs`)**: Today · Food · Progress · Plan · You, each a VOLA brand icon above a label in Barlow SemiBold 11 — not uppercase. The active tab's label takes the account's accent; its icon does too on iOS, while Android uses a fixed colour pair by design. **There is no VOLA underline** — the platform marks the active tab its own way — and the bar does not sit in normal flow: it floats over the content and minimizes on scroll-down. The N504 section carries the full checks. *(Until N198 this bullet described the custom bar: "an icon above an uppercase label… an underline beneath the active tab… one hairline separator… It sits in normal flow, so nothing scrolls underneath it." N504 removed all of that; #585 had earlier replaced the original type-only, dot-above-the-label description.)*
+- Floating controls — Today's **New log** pill and Plan's **New workout** — sit clear of the bar, not behind it. Since N504 the bar is drawn over the content, so this is geometry to check on a device (the N504 follow-up section). *(This said "Absolutely-positioned controls (the "New workout" button)" until N198.)*
 - **The wordmark must not collide with the Dynamic Island** — it sits below it. Check on a device with an island, not just a notch.
 - The wordmark's chevron apex must be closed, and must point up.
-- Screen names are small, uppercase, top-left; the wordmark is centred and stays centred regardless of the title's width.
+- Screen names are small, uppercase, top-left; the wordmark is centred and stays centred regardless of the title's width — and at accessibility text sizes it hides rather than collide with the title (N504 follow-up).
 
 ## You, profile editing, and Settings (`apps/mobile`)
 
-- **You** shows the display name, enabled sports and current units, and refreshes on focus so a save in Edit is visible on return.
+- **You** shows the display name and enabled sports, and refreshes on focus so a save in Edit is visible on return. **Units are no longer on You** — N181 (#586) removed that inert row, and Settings › Preferences › Units is their only home (see the N181 section). *("and current units" corrected by N198, 2026-09-12.)*
 - No profile row yet is an ordinary first-run state, not an error — You shows "Add your name" and Edit starts empty.
 - **Edit** saves name, date of birth, sex and sport toggles. It must create the profile first when there isn't one: `PATCH /v1/profile` 404s otherwise, and Settings is reachable without onboarding.
 - Tapping the selected sex again clears it — this feeds calorie maths and "unset" has to stay reachable.
@@ -4719,7 +4725,7 @@ shows. On Plan it is the week; inside the month sheet it is the month.
   pushed fresh every visit and always reads back what it just wrote, so checking
   it there proves nothing. Turn the master off, go back, and the card must be
   gone before the first frame settles; turn it on, go back, and it must return.
-  Covered at unit level by `app/__tests__/suggestionPrefsRefocus.test.tsx`, which
+  Covered at unit level by `__tests__/app/suggestionPrefsRefocus.test.tsx`, which
   has to override the shared `useFocusEffect` mock to be capable of failing —
   worth reading before writing the functional version.
 
@@ -5689,9 +5695,11 @@ scrolling back to the top first if you have scrolled down.
 
 - The scope control shows both segments under one hairline; the selected one
   carries a 2pt accent bar and its label takes the accent, the other is muted.
-- Tapping `Shared` loads other people's public templates; tapping
+- Tapping `VOLA Workouts` loads the published shelf — mostly VOLA's own
+  templates, plus anything anyone has published, marked by author; tapping
   `My workouts` returns to your own. The selection survives leaving and
-  returning to the tab.
+  returning to the tab. *(This segment was called `Shared` here until N198;
+  `SCOPES` in `app/(tabs)/workouts.tsx` names it `VOLA Workouts`.)*
 - `New workout` opens the create sheet, and a workout created there appears in
   the list without a manual refresh.
 - Switching scope while scrolled down does not flash the OTHER scope's rows
@@ -5707,7 +5715,7 @@ scrolling back to the top first if you have scrolled down.
   remove" hint permanently, at every scroll position, because the list reserved
   less bottom padding than the floating button occupied. Worth asserting at
   both extremes: an empty list, and a list long enough to scroll.
-- The bottom clearance must not change between scopes — `Shared` hides the
+- The bottom clearance must not change between scopes — `VOLA Workouts` (`Shared` when this was written) hides the
   button, and if the padding went with it the list would jump under the
   reader's thumb on every switch.
 - With no templates at all, the empty state is readable and the button does not
@@ -5739,7 +5747,10 @@ Covers `lib/AccentProvider.tsx`, the picker in `app/settings.tsx`,
 ### Choosing an accent
 
 - Five swatches appear in Settings → Preferences. Tapping one recolours the tab
-  bar's active icon, its label and the underline **without leaving the screen**.
+  bar's active label — and, on iOS, its active icon — **without leaving the screen**.
+  *(Corrected by N198, 2026-09-12: this also named "the underline", which N504's
+  native bar does not have, and Android's tab icons use a fixed colour pair by
+  design — see the N504 section.)*
 - **Selection is marked by a ring and a tick, never by colour alone.** That
   matters more here than anywhere else in the app, because the thing being
   chosen is colour. Assert the chosen swatch has both.
@@ -5795,6 +5806,8 @@ unchanged:
 - A promotion dated `2026-04-10` renders as 10 April in a UTC-negative zone —
   never the 9th.
 ## Library facet filters (mobile, `app/(tabs)/library.tsx` + `lib/exerciseFacets.ts`)
+
+> **N198 (2026-09-12):** the file is `app/library.tsx` — the Library is no longer in the tab group.
 
 Four axes — position and belt for BJJ, muscle and movement for strength — each
 a button that opens a picker rather than a row of pinned options.
@@ -6112,7 +6125,7 @@ The half that used to be missing, and the reason it was filed above every other
 phone-impossible gap: `shared/index.tsx` told an athlete who accepted a shared
 sequence that "your copy is in the Library", and **there was no sequence route
 in the app at all** — and the Library tab is the technique and exercise catalog,
-which has never held a chain. Every other audit finding omitted a surface; this
+which has never held a chain. *(True when written; N181 later gave the Library a `Your own chains` shelf — N198.)* Every other audit finding omitted a surface; this
 one made a claim the athlete would act on.
 
 **Two screens**: `/sequence` (the list) and `/sequence/[id]` (the chain). Reached
@@ -9550,6 +9563,10 @@ a scenario that spoils two at once cannot tell which guard fired:
 - **The Food tab is absent when no enabled module has `has_food_log`** — and
   absent by `href: null`, so `/food` still resolves for a deep link or an
   in-flight push.
+  *(Superseded — N198, 2026-09-12: since N180 (#585) the Food tab is in the bar
+  in every module state, and N504's `NativeTabs` has no `href: null`. With no
+  food-log module the Food screen renders `ModuleOffNotice`'s "Not available"
+  instead. See the N176/N180 and N504 sections.)*
 - **A local read is scoped to the signed-in athlete.** The entry editor opened
   on another athlete's id finds nothing, even though ids are generated on the
   device and are therefore guessable-adjacent.
@@ -10538,6 +10555,8 @@ training. Everything here is about it telling the truth.
 - **`lib/calendar.ts` and `lib/history.ts` both export `startOfWeek` / `addDays` / `today`, and they are different functions** — `Date` versus the `YYYY-MM-DD` key. Anything working on `HistoryDay` must import from `history`; the wrong one compiles and then compares a Date to a string.
 
 ## The Food target's "fix this first" button (N32, mobile — `lib/nutrition.ts`, `app/food/target.tsx`)
+
+> **N198 (2026-09-12):** `/food/target` is a `<Redirect>` to `/goals` (N70), and that screen is `app/goals.tsx` since N504. Either address reaches the same screen, so the checks below apply there.
 
 ### Happy path
 
@@ -12285,6 +12304,8 @@ target screen and the web derivation panel.
 
 ## The tab bar after N70 (`apps/mobile` — Library out, Goals in)
 
+> **Superseded in part — corrected 2026-09-12 (N198, #630).** The bar this section describes is gone: N176 (#581) took Goals off it, N180 (#585) put Food back in every module state, and N504 (#876) moved the Goals screen out of the tab group to `app/goals.tsx`, a pushed stack screen. The shipped bar is **Today · Food · Progress · Plan · You** — see "N176 / N180 — the bottom bar" and "N504 — bottom tab bar". **Still holds:** the Library opens from You (`router.push('/library')` in `app/(tabs)/you.tsx`); `/food/target` is still a `<Redirect>`, now to `/goals`; saving a target still says "Saved" in place rather than navigating away. **No longer holds:** "Goals is a tab", "Goals is gated with Food" (Food is always in the bar, and both screens render `ModuleOffNotice` instead), and the typed-routes check's `/(tabs)/goals`, corrected inline below. The body is otherwise left as written so its reasoning stays readable.
+
 Five tabs: **Today · Food · Plan · Goals · You**. The Library is a row inside
 `You`; the daily target lives in the Goals tab. Both moves are the user's own,
 quoted on N70's task line.
@@ -12352,7 +12373,8 @@ quoted on N70's task line.
   and passes, including dead ones. N35 exists because that shipped. The check
   that actually proves it: delete `apps/mobile/.expo/types`, run
   `pnpm run routes:mobile`, and confirm the file comes back naming the new
-  routes — `/library` and `/(tabs)/goals` present, `/(tabs)/library` absent.
+  routes — `/library` and `/goals` present, `/(tabs)/library` absent. *(This said
+  `/(tabs)/goals` until N504 moved the screen out of the tab group — N198.)*
 - **A test mock can violate an invariant the real code documents, and then the
   correct component fails.** Two of these, both in `goalsScreen.test.tsx`:
   mocking `useFocusEffect` with `[]` deps models a hook that never re-runs on a
@@ -12625,6 +12647,8 @@ Follows N51, which wired the search. This is what a result looks like.
 
 ## Setting a target by hand, and taking the weekly adjustment (N72, mobile — `app/(tabs)/goals.tsx`, `components/nutrition/ManualTarget.tsx`, `components/nutrition/AdjustmentCard.tsx`, `lib/manualTarget.ts`)
 
+> **N198 (2026-09-12):** Goals is a pushed screen at `app/goals.tsx` since N504 (#876) — not a tab and not in `app/(tabs)/`. Reach it from Food's `Daily target` row. That pass re-checked the location only; the checks below were not individually re-verified.
+
 The Goals tab offered one of the three ways a target gets its number. The other
 two — a number you type, and N27's weekly correction — were on web only, so a
 phone-only athlete could read the whole argument for 2,700 kcal and had nowhere
@@ -12776,6 +12800,8 @@ The scenarios that matter are the ones distinguishing three states, not two.
 
 ## The tab bar with nutrition off (#423 — `app/(tabs)/_layout.tsx`, `food.tsx`, `goals.tsx`)
 
+> **Superseded in part — corrected 2026-09-12 (N198, #630).** Goals is no longer in the bar (N176, #581; `app/goals.tsx` since N504), so "Food and Goals are still in the bar" now reads: **Food** is in the bar in every module state (N180, #585; the N504 section's "Exactly five tabs, always"), and **Goals** is reached from Food's target row or a deep link. Both screens still render `ModuleOffNotice` — `{label} is turned off` with the offer to turn it back on, or "Not available" with no offer — and both are still guarded at the fetch (`foodLogGate`). **Wrong outright now:** the no-food-log deployment no longer hides the Food tab; the screen says "Not available". The cold-start frame-hold is still `(tabs)/_layout.tsx`'s `if (!ready) return null`.
+
 N61's largest instance, fixed separately: the Food and Goals tabs used to
 disappear outright when nutrition was off — two of five, 40% of the primary
 navigation, with nothing to say why. The answer matches #370's: **a tab is a
@@ -12804,7 +12830,8 @@ link, so the tab stays and the screen behind it explains itself.**
 - **A deployment with no food-log module at all**: both tabs ARE hidden, and the
   screens — still reachable by deep link — say "Not available" and make **no
   offer to turn anything on**. This is the third state, and the one case where
-  hiding is still right.
+  hiding is still right. *(Superseded — N198: the Food tab is not hidden here
+  either any more; see the note at the top of this section.)*
 
 ### Regression trap
 
@@ -12825,6 +12852,8 @@ link, so the tab stays and the screen behind it explains itself.**
 
 ## The activity level, and where it lives (N93 — `profiles.activity_level`, `app/(tabs)/goals.tsx`, web `nutrition/targets`)
 
+> **N198 (2026-09-12):** Goals is a pushed screen at `app/goals.tsx` since N504 (#876) — not a tab and not in `app/(tabs)/`. Reach it from Food's `Daily target` row. That pass re-checked the location only; the checks below were not individually re-verified.
+
 Reported from a device as *"Target doesn't save previously added type of
 activity"*. The three daily-movement pills were component state on both clients,
 so they reset on every navigation — and the derived calorie target reset with
@@ -12842,7 +12871,7 @@ chosen*.
 - **The web app agrees.** Set `Physical job` on the phone, open
   `/dashboard/nutrition/targets` in a browser signed in as the same athlete: the
   same chip is active and the derivation runs at the same factor. Set it on web,
-  return to the phone's Goals tab, and the phone follows. Agreement is by
+  return to the phone's Goals screen, and the phone follows. Agreement is by
   construction — one column, both clients omit the `activity` parameter and
   adopt what the server reports — not by a parity script.
 - **A level chosen in airplane mode reaches the account by itself.** Pick one
@@ -13605,13 +13634,15 @@ phone scenario.
 
 ## Weight trend — the card and the full page (N56)
 
-`components/TrendCard` + `WeightTrendCard` (top of Goals), `app/goals/trend.tsx`
+`components/TrendCard` + `WeightTrendCard` (on Goals, inside the folded **Your weight** section at the bottom — this said "top of Goals" until N198; N106's rebuild moved it), `app/goals/trend.tsx`
 (the full page), `components/TrendChart` (the drawing). Mobile only.
 
 ### Happy path
 
 1. **The card opens Goals.** With a year of weigh-ins and a live phase carrying
-   a target, the Goals tab shows the weight card above "Daily movement": title,
+   a target, open Goals and unfold **Your weight** — the last section, below
+   "Daily movement", folded on arrival since N106 (this said "the Goals tab shows
+   the weight card above 'Daily movement'" until N198). The card shows: title,
    a delta reading `↓ 13.3 kg past year`, the line, `TODAY` with the latest
    value, and `Record Weight`.
 2. **`TODAY` is what the scale said.** Log a weigh-in that differs sharply from
@@ -13952,6 +13983,8 @@ bug; it does not remove it, and softens it least at accessibility text sizes.
 
 ## N106 — the Goals screen, rebuilt to a design reference (`app/(tabs)/goals.tsx`)
 
+> **N198 (2026-09-12):** Goals is a pushed screen at `app/goals.tsx` since N504 (#876) — not a tab and not in `app/(tabs)/`. Reach it from Food's `Daily target` row. That pass re-checked the location only; the checks below were not individually re-verified.
+
 A rebuild rather than a restyle: the authority card, the four macro tiles, the
 fourteen-day confidence block, three movement cards, the derivation ladder, the
 macro donut and the primary action. The parts most worth testing are the ones
@@ -14246,6 +14279,8 @@ replacement.
 
 ## N176 / N180 — the bottom bar: Today · Food · Progress · Plan · You (`app/(tabs)/_layout.tsx`, `lib/tabs.ts`, `app/(tabs)/food.tsx`, `components/food/TargetRow.tsx`)
 
+> **Corrected 2026-09-12 (N198, #630)** against N504's native bar (#876): the target-row link, what keeps Train's route alive, and the accessibility and device checks that named the custom underline and uppercase labels. Each corrected line says what it used to claim. The order, Food's slot and the always-five rule were checked against `lib/tabs.ts` and are unchanged.
+
 **This block was written for N176 and is rewritten by N180, which reversed part
 of it.** N176 made the bar Today · Train · Progress · Plan · You. The user
 carried that on their own phone and reversed it: food is logged three to five
@@ -14270,6 +14305,8 @@ a failure names the athlete-visible defect rather than the file.
   template, start a session from it: **no behaviour may differ at all.** N176
   renamed nothing and moved nothing there, and N180 did not touch it.
 - Progress: both rows open — the weight trend, and You. Neither is a dead end.
+  *(That was N176's two-row shell. N178 (#621) replaced it with the real
+  Progress tab — see the N178 section. N198, 2026-09-12.)*
 
 ### The daily target at the head of Food — N180
 
@@ -14278,7 +14315,8 @@ a failure names the athlete-visible defect rather than the file.
 - The row states the **number**, grouped — `2,700 kcal`, not `2700` and not the
   bare word "Target". An athlete must be able to read their target without
   opening anything.
-- Tap it: `(tabs)/goals` opens on the derivation and the history. Change the
+- Tap it: `/goals` opens on the derivation and the history — a pushed screen
+  with its own back button since N504 (this said `(tabs)/goals` until N198). Change the
   target there, come back, and the row shows the new number.
 - **The number is not recomputed on the Food tab.** Set a target on web, open
   Food: the same figure. The row reads what the screen already fetched.
@@ -14320,8 +14358,9 @@ a failure names the athlete-visible defect rather than the file.
 - A stale back-stack entry pointing at Train — background the app on it, return
   — lands on Today rather than erroring. **N182 changed what this checks**: you
   can no longer *be* on Train, so the state to reproduce is a link or a
-  back-stack entry that still names it. `href: null` keeps the route mounted;
-  omitting it would not.
+  back-stack entry that still names it. Since N504 what keeps the route
+  resolvable is `app/train.tsx` being a root stack screen — this used to credit
+  `href: null`, which `NativeTabs` does not have (N198).
 - **`train.tsx` still exists.** If it has been deleted to tidy the diff, that is
   the failure — the route has to keep resolving. N182 replaced its BODY with a
   redirect; it did not remove the file, and it must not be removed later either.
@@ -14355,20 +14394,26 @@ a failure names the athlete-visible defect rather than the file.
 
 - VoiceOver over the bar: five tabs, each announcing its name, its position
   ("3 of 5") and whether it is selected. Every tab must announce exactly like
-  its neighbours — one button implementation serves all five.
+  its neighbours. Since N504 those announcements come from the platform's own
+  tab bar rather than a VOLA button component, so check them on a device rather
+  than assume them (this said "one button implementation serves all five" until
+  N198).
 - VoiceOver on the target row: it announces as a button, **reads the number**,
   and its hint says what the tap does. The chevron is decoration and must be
   silent.
-- The active underline is decoration and must be silent; hearing a nameless
-  element after each tab name is the failure.
-- Largest accessibility text size: the bar still shows five labels. **`PROGRESS`
+- ~~The active underline is decoration and must be silent~~ — superseded by
+  N504: there is no underline. What remains: hearing a nameless element after
+  each tab name is the failure.
+- Largest accessibility text size: the bar still shows five labels. **`Progress`
   is the longest label the bar has ever carried** — it should truncate, never
-  wrap or push a neighbour off.
+  wrap or push a neighbour off. (It read `PROGRESS` while the custom bar set
+  labels in uppercase; N504's labels are not.)
 
 ### Needs a device — none of this is reachable from the suite
 
-- Safe areas on a phone with a home indicator: the bar sits above it, the
-  underline is not clipped, and no tab's label is cut off.
+- Safe areas on a phone with a home indicator: the bar sits above it and no
+  tab's label is cut off. ("The underline is not clipped" was dropped from this
+  check by N198 — N504's bar has none.)
 - One-handed reach: all five within a thumb's arc at the bottom of the screen.
 - The label widths above — jest has no font metrics, so a screenshot is the only
   evidence.
@@ -14526,6 +14571,8 @@ meaning something it did not.
   report).
 
 ## N177 — Train, the execution hub (`app/(tabs)/train.tsx`, `lib/trainBoard.ts`, `lib/useTrainBoard.ts`, `lib/startSession.ts`)
+
+> **Superseded by N182 (#587) — pointer added 2026-09-12 (N198).** Train is retired: `vola://train` redirects to Today, and the file is `app/train.tsx` (moved out of `app/(tabs)/` by N504). Train's blocks live on Today (Resume, the day's plans, **New log** for a quick start, Recent) and Plan (Later, plus `Beyond this week`). The section is kept because N182 keeps its non-regression list; read "N182 — Plan owns the forward schedule" first.
 
 N176's shell becomes the screen: **Resume · Today · Later · Quick start ·
 Recent**. It creates nothing — every action opens an existing route, and the
@@ -14770,17 +14817,20 @@ on screen. That, and only that, is what moved.
 - **Train renders no schedule, no Recent, no Quick start and no Resume card.**
   If any of them reappears, the app has two answers to one question again —
   which is what N182 removed, and what W2/W4 cost twice before.
-- **`train.tsx` still exists and is still in `OFF_BAR_ROUTES`.** Deleting it
-  puts the route back on the bar as a sixth tab titled "train", and breaks every
-  `vola://train` link in flight.
+- **`app/train.tsx` still exists.** Deleting it breaks every `vola://train` link
+  in flight. *(Corrected by N198, 2026-09-12: this also said it was "still in
+  `OFF_BAR_ROUTES`" and that deleting it would put a sixth tab titled "train" on
+  the bar. N504 removed `OFF_BAR_ROUTES` and moved the file to the app root; the
+  bar is `lib/tabs.ts`'s `TABS`, so a route file can no longer add a tab.)*
 - **Everything Train used to offer is still reachable in one tab.** Resume and
   the day's plans on Today; New log on Today for an unplanned session; Recent on
   Today; the week and what is beyond it on Plan.
 
 - **NEEDS HUMAN EVIDENCE — open `vola://train` on a device** and confirm it
   lands on Today rather than flashing an empty screen or bouncing. A redirect
-  rendered from a tab route is exactly the thing a test asserts structurally and
-  a phone asserts visually.
+  rendered from a route (a root stack screen since N504; a tab route when this
+  was written) is exactly the thing a test asserts structurally and a phone
+  asserts visually.
 - **NEEDS HUMAN EVIDENCE — plan something ten days out on a device**, open Plan,
   and confirm the `Beyond this week` line reads correctly against the week rows
   above it, at default and at the largest accessibility text size.
@@ -14949,7 +14999,7 @@ on screen. That, and only that, is what moved.
   guarantee, and it is the one thing this scenario list cannot exercise for
   you (it needs a real server rebuild).**
 - Confirm a 1-day window renders "1 day" (singular), not "1 days" —
-  covered by `apps/mobile/app/__tests__/socialScreen.test.tsx`'s
+  covered by `apps/mobile/__tests__/app/socialScreen.test.tsx`'s
   "pluralizes a one-day window correctly", but worth a manual spot-check if
   `FeedWindow` is ever set that low.
 - Confirm a client built against the OLD response shape (missing
@@ -15590,6 +15640,8 @@ on screen. That, and only that, is what moved.
 
 ## N94 — two screens compose the transport's own diagnosis instead of asserting one (`apps/mobile/app/phase/index.tsx`, `apps/mobile/app/(tabs)/goals.tsx`, `apps/mobile/lib/manualTarget.ts`)
 
+> **N198 (2026-09-12):** Goals is a pushed screen at `app/goals.tsx` since N504 (#876) — not a tab and not in `app/(tabs)/`. Reach it from Food's `Daily target` row. That pass re-checked the location only; the checks below were not individually re-verified.
+
 ### Happy path
 
 - Load the Phase screen with a live phase already recorded: confirm it shows
@@ -15726,6 +15778,8 @@ on screen. That, and only that, is what moved.
   previous signed-in account's history.
 
 ## N107 — the roadmap offer moves to Goals, and Today drops roadmap progress entirely (`apps/mobile/components/RoadmapOffer.tsx`, `apps/mobile/app/(tabs)/goals.tsx`, `apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/components/RoadmapSummary.tsx`, `apps/mobile/components/CurriculaStrip.tsx`)
+
+> **N198 (2026-09-12):** Goals is a pushed screen at `app/goals.tsx` since N504 (#876) — not a tab and not in `app/(tabs)/`. Reach it from Food's `Daily target` row. That pass re-checked the location only; the checks below were not individually re-verified.
 
 ### Happy path
 
@@ -17163,6 +17217,8 @@ to prove that claim never collides with either guard.
 
 ## N459 — mobile native scaffolding for GPS running: map library, when-in-use location permission (`apps/mobile/app.json`, `apps/mobile/package.json`)
 
+> **Superseded in part — noted 2026-09-12 (N198).** Two things here are no longer true of `main`. (1) The config is `apps/mobile/app.config.js`; N482 (#845) replaced `app.json`. (2) W21 (#992) enabled the `location` background mode (`isIosBackgroundLocationEnabled: true`) so a run keeps recording with the screen locked, and rewrote the permission copy to match — the quoted "does not track your location in the background" text is gone, and `UIBackgroundModes` **does** contain `location`. **Still holds:** no Always authorization (`locationAlwaysAndWhenInUsePermission` and `locationAlwaysPermission` stay `false`), so the prompt offers no "Always Allow"; and no motion prompt (`motionUsagePermission: false`).
+
 This ticket is scaffolding only — `expo-location` and `react-native-maps` are
 added as dependencies and app.json is configured, but no running screen
 exists yet (later tickets in this workstream build the actual UI). The
@@ -17180,6 +17236,8 @@ hand).
   Location is only accessed while VOLA is open and on screen — VOLA does not
   track your location in the background or when the app is closed." — not
   generic boilerplate ("Allow $(PRODUCT_NAME) to access your location").
+  *(That copy was rewritten by W21 — check the prompt against
+  `locationWhenInUsePermission` in `app.config.js`, not the quote above.)*
 - Confirm the prompt offers exactly **"Allow Once" / "Allow While Using App"
   / "Don't Allow"** — no "Always Allow" option and no second-step upgrade
   prompt. If an "Always" option appears, `NSLocationAlwaysAndWhenInUseUsageDescription`
@@ -17220,6 +17278,10 @@ hand).
 - Confirm `UIBackgroundModes` in the built Info.plist does not contain
   `location` — background location must not be silently enabled by a future
   dependency bump or config-plugin default change.
+  *(Superseded by W21 (#992), deliberately: `location` IS present now, so a run
+  records with the screen locked. What survives is that it arrived by decision —
+  `isIosBackgroundLocationEnabled` in `app.config.js` — and that no Always
+  authorization came with it. N198, 2026-09-12.)*
 
 ### Needs a device
 
@@ -17444,7 +17506,8 @@ unchanged here).
 
 ### Happy path
 
-- From the Train tab (or Today), choose Running on `session/start.tsx` and
+- From Today (this said "the Train tab (or Today)" — Train was retired by N182),
+  choose Running on `session/start.tsx` and
   start an empty session — routes to `/running/{id}`, not
   `/session/{id}` (the exact bug this ticket fixes: every sport used to fall
   through to the strength screen).
@@ -18166,7 +18229,7 @@ are navigation shortcuts to a different screen, not filters on this one).
 ### Auth/security
 
 - HealthKit access is READ-ONLY — the plugin config
-  (`apps/mobile/app.json`) explicitly sets `NSHealthUpdateUsageDescription:
+  (`apps/mobile/app.config.js` — `app.json` until N482) explicitly sets `NSHealthUpdateUsageDescription:
   false`, so the app never declares (and the settings toggle never
   requests) write access to Health data.
 - The `PUT /v1/running/sessions/{sessionID}` endpoint N458 already built is
@@ -18415,7 +18478,7 @@ in `units.ts` now convert these too, display-side only — the wire values
 
 ### Happy path
 
-- An **imperial** athlete opens Goals (`app/(tabs)/goals.tsx`) with a live
+- An **imperial** athlete opens Goals (`app/goals.tsx` — `app/(tabs)/goals.tsx` until N504) with a live
   target: the macro donut's legend reads "1 g per lb" for a 2.2 g/kg protein
   rule and "0.36 g per lb" for a 0.8 g/kg fat rule — never "g per kg" — and
   the numbers agree with the athlete's own displayed bodyweight (e.g. a
@@ -18459,6 +18522,8 @@ in `units.ts` now convert these too, display-side only — the wire values
   contains; no new endpoint, no new field, no authorization surface.
 
 ## N475 — Android distribution baseline (`apps/mobile/eas.json`, `apps/mobile/app.json`, `apps/mobile/package.json`)
+
+> **N198 (2026-09-12):** `apps/mobile/app.json` is now `apps/mobile/app.config.js` (N482, #845); read the settings below there.
 
 Scope is deliberately narrow: an Android **development** dev-client build
 exists and installs. Not Play Store distribution, not a `preview`/`production`
@@ -19536,8 +19601,8 @@ undifferentiated row in that chooser.
   workout" chooser (every other workout of that sport, tappable) rather than
   showing a broken or empty "Today's plan" card — a plan can outlive the
   template it names; there is no foreign key, by design.
-- Start a strength session with NO plan for today (ad-hoc, Train tab or an
-  unplanned day): the full "From a workout" chooser renders exactly as
+- Start a strength session with NO plan for today (ad-hoc from Today's New log, or an
+  unplanned day — this said "Train tab", retired by N182): the full "From a workout" chooser renders exactly as
   before this ticket — every workout of that sport listed, none singled out,
   "Today's plan" heading absent.
 - Offline: the planned card still renders and starts a session with no
@@ -20486,6 +20551,8 @@ request should ever be able to do.
 
 ## N132/#536 — EAS production-safety guard and the on-screen environment marker
 
+> **Superseded in part by N529 (#960) — noted 2026-09-12 (N198).** `components/EnvironmentBadge.tsx` no longer exists. The corner `DEV` pill was removed, the corner went to the share bell, and the environment label moved to the **Settings screen's footer** (`lib/environmentLabel.ts`, testID `settings-environment`). So the on-screen checks below read differently: the label is **not** on every screen and **not** over the splash — that first-frame guarantee was given up deliberately, by the user's call. **Still holds:** anything other than exactly `production` shows a label (unset fails safe to one), and a production build shows none. The build-time guard section is unaffected.
+
 No new API surface — this is a build-pipeline guard
 (`apps/mobile/scripts/validate-production-config.mjs`) and one always-mounted
 mobile component (`apps/mobile/components/EnvironmentBadge.tsx`). Neither is
@@ -20519,7 +20586,7 @@ credentials.
   `EXPO_PUBLIC_APP_ENV=development`/`preview`) shows a small corner label
   reading "DEV"/"PREVIEW" from the very first frame (including over the
   splash), in every screen the app can reach — it does not disappear on
-  navigation.
+  navigation. *(Superseded by N529 — see the note at the top of this section.)*
 - A build with `EXPO_PUBLIC_APP_ENV` unset entirely (simulating a
   misconfigured build, not a real profile) still shows a marker (defaults to
   "DEV") rather than silently showing none — this is the fail-safe direction
@@ -20530,7 +20597,8 @@ credentials.
 - The marker never intercepts taps on whatever is underneath it (it is
   `pointerEvents="none"`) — worth a direct tap-through check on a device
   near wherever it renders, since a corner badge overlapping a real header
-  control is a plausible collision on a small screen.
+  control is a plausible collision on a small screen. *(Superseded by N529: the
+  label is a Settings footer line now, not an overlay.)*
 
 ### Not covered, and why
 
@@ -21537,6 +21605,8 @@ M1a old carry restored · M1b numbers from the drop · M2 summary claims all tic
   no test that a subsequent pull clears it beyond the existing load tests.
 
 ## N528 (part 2) — live heart rate from a Bluetooth monitor: pairing, the live indicator on every session screen and Today, recording for the report (`apps/mobile/lib/hrMonitor/*`, `components/LiveHRIndicator.tsx`, `components/today/LiveHRCard.tsx`, `components/settings/HRMonitorPairing.tsx`, `app/settings.tsx`, `app/session/[id].tsx`, `app/bjj/session/[id].tsx`, `app/running/[id].tsx`, `app/(tabs)/index.tsx`, `app.config.js`, #958)
+
+> **Superseded in part by W21 (#992) — noted 2026-09-12 (N198).** Live heart rate is now **running-only**: the Bluetooth link is held only for a run. Today's **Live heart rate** card (`components/today/LiveHRCard.tsx`) and the strength and BJJ session chips were removed along with recording on those screens, so device steps 2 and 3's strength and BJJ halves, and step 6's Today half, no longer apply. The run screen's chip and the report still do. See `docs/decisions/history.md`'s W21 entry.
 
 ### Automated (`lib/__tests__/heartRateProfile.test.ts`, `hrRecorder.test.ts`, `hrMonitorStore.test.ts`, `hrSourceLine.test.ts`, `components/__tests__/LiveHRIndicator.test.tsx`, `HRSessionReport.test.tsx`)
 
@@ -23360,8 +23430,10 @@ answer the same way forever.
 
 ### What a test can and cannot reach
 
-- **Reachable, and covered** (`components/__tests__/swipePhysics.test.ts`, 10
-  cases): `rubberband` as pure maths — monotonic, always less than the finger,
+- **Reachable, and covered** (`lib/__tests__/gesturePhysics.test.ts`, 10
+  cases — this named `components/__tests__/swipePhysics.test.ts`, a file that
+  never existed; F45 added `gesturePhysics.test.ts`, whose `rubberband` and
+  `springVelocity` blocks hold the ten — N198): `rubberband` as pure maths — monotonic, always less than the finger,
   symmetric, resisting harder the further it goes, approaching `dimension` and
   never reaching it; and `springVelocity`'s unit contract, including an explicit
   case that fails if the ×1000 is ever "simplified" away. Both mutations —
