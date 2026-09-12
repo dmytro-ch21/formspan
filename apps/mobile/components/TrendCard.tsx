@@ -188,6 +188,15 @@ export function emptyCopy(empty: TrendEmpty, what: string): string {
         empty.totalReadings === 1 ? 'reading' : 'readings'
       } further back. Try a wider one.`;
     case 'too-few':
+      // F26/#710 — when the threshold is a density, say so. Two sentences,
+      // because one would be false half the time: "yours are further apart" is
+      // untrue of two readings on consecutive days, and "2 of 3" reads as
+      // already solved to someone holding five spread across a month.
+      if (empty.withinDays != null) {
+        return empty.have < empty.need
+          ? `${empty.have} of ${empty.need} readings so far — a trend line needs ${empty.need} within any ${empty.withinDays} days.`
+          : `A trend line needs ${empty.need} readings within any ${empty.withinDays} days, and yours are further apart. Log a few closer together to start one.`;
+      }
       return `${empty.have} of ${empty.need} readings needed for a trend line.`;
   }
 }

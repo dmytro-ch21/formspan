@@ -74667,6 +74667,47 @@ Neither the celebration card nor the share card prints a per-set line. The celeb
 
 **Reachability on a phone**: this is the phone — any finished strength session with an assisted set.
 
+## 2026-09-12 — F26 (#710): the weight chart's "too few readings" message names the real rule, a density
+
+**What was wrong.** On L1's device sweep (#380), with an ordinary weigh-in cadence of one every five days, the weight chart showed no line and said **"5 of 1 readings needed for a trend line."** The message was incoherent on its face, and wrong in both of its numbers:
+- **The 1 was a default.** `buildTrend` defaults `minReadings` to 1, and `useWeightTrend` never passed one.
+- **The real rule is `trendWeight`'s,** in `lib/anthropometry.ts`: `MIN_TREND_READINGS` (3) inside ONE trailing `TREND_DAYS` (7) window. That's a density, not a lifetime count. A weigh-in every five days never puts three in any week, so the smoother returns nothing and there is no line.
+- **Fixing only the 1 would not have been enough.** "5 of 3" reads as already solved to someone whose five are spread across a month. The ticket said so.
+
+**What changed.**
+- **`buildTrend` takes an optional `minReadingsWithinDays`,** and the `too-few` empty state carries it as `withinDays`. It is omitted when absent, so every other caller's state is byte-for-byte what it was.
+- **`useWeightTrend` passes both** `MIN_TREND_READINGS` and `TREND_DAYS`.
+- **`emptyCopy` gains two sentences for a known window**, because one sentence would be false half the time:
+  - fewer than three readings: "2 of 3 readings so far — a trend line needs 3 within any 7 days.";
+  - three or more, too far apart: "A trend line needs 3 readings within any 7 days, and yours are further apart. Log a few closer together to start one."
+
+  Without a window, the old count sentence is unchanged.
+
+**Who else could see this message: nobody, measured rather than assumed.** `emptyCopy` is shared, but `too-few` only fires when a smoother ran and drew no line at all:
+- **Nutrition:** its smoother means over any day in the window that has a total, so a day with a reading always has a value.
+- **Running and records:** they pass no smoother.
+- **Training load and VO₂max:** they have their own copy functions.
+
+Weight's two surfaces, the Goals card and the full trend screen, both take their series from `useWeightTrend`, so the hook fix covers both.
+
+**Tests.**
+- **`lib/__tests__/weightTrendThreshold.test.tsx` (new)** runs the REAL hook with only `@/lib/body` mocked. The defect was in the hook's wiring, and every other test of this hook mocks the hook itself away. It covers:
+  - five weigh-ins five days apart: `too-few` with `withinDays: 7`, and the exact sentence;
+  - the ticket's control, the same five plus two beside today: the line draws;
+  - two readings a day apart: the count sentence, not "further apart";
+  - the no-window sentence unchanged.
+- **`trendSeries.test.ts`** gains the window reaching the `too-few` state.
+
+**Checks.** 4 mutations, each caught as a test failure, restored byte-identical and re-run to 114/114 across the new file, `trendSeries`, `trendCard`, `weightTrendCard` and `vo2MaxSource`:
+- **the hook passing no threshold at all (the original bug):** 2 tests fail;
+- **the hook passing the count but not the window:** 2 fail;
+- **the copy always saying "further apart":** the two-close-readings test fails;
+- **`buildTrend` dropping the window from `too-few`:** 3 fail.
+
+**Not measured.** On a device, with weigh-ins every five days, confirm the card's sentence and that adding readings inside one week draws the line. The copy sits in the card's empty area, which already wraps.
+
+**Reachability on a phone**: this is the phone — Goals → the weight trend card, and its full trend screen.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

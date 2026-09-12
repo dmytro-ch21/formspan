@@ -100,6 +100,21 @@ describe('emptiness is discriminated', () => {
     expect(s.empty).toEqual({ kind: 'too-few', have: 1, need: 3 });
   });
 
+  // F26/#710 — a smoother that counts inside a trailing window says so, so the
+  // copy can name a density instead of a count the athlete may have cleared.
+  test('too few inside a window carries the window', () => {
+    const readings: Reading[] = [0, 5, 10].map((d) => ({ on: shift(TODAY, -d), value: 100 }));
+    const s = buildTrend({
+      readings,
+      today: TODAY,
+      range: '1M',
+      smooth: meanSmoother(readings, 3),
+      minReadings: 3,
+      minReadingsWithinDays: 7,
+    });
+    expect(s.empty).toEqual({ kind: 'too-few', have: 3, need: 3, withinDays: 7 });
+  });
+
   test('a drawable series is not empty at all', () => {
     const readings = every(30, 1, 100, -0.1);
     const s = buildTrend({ readings, today: TODAY, range: '1M', smooth: meanSmoother(readings) });

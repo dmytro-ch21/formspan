@@ -13655,7 +13655,16 @@ phone scenario.
 10. **Readings outside the window.** With weigh-ins only from a year ago,
     select `1W`. It must say nothing is in this range and how many exist
     further back — not that there are none.
-11. **Too few to smooth** reports the counts, and the dots still draw.
+11. **Too few to smooth** says why, and the dots still draw. The rule is three
+    weigh-ins inside any seven days, a density, not a total (F26, #710):
+    - **Weigh in every five days for a month** → no line, and the card says "A
+      trend line needs 3 readings within any 7 days, and yours are further
+      apart. Log a few closer together to start one." Before F26 it said "5 of
+      1 readings needed", which no athlete can act on.
+    - **Add two weigh-ins beside the latest one**, three inside one week → the
+      line draws with nothing else changed.
+    - **Two weigh-ins a day apart** → "2 of 3 readings so far — a trend line
+      needs 3 within any 7 days." Not "further apart", because they aren't.
 12. **No goal set** (a maintenance phase, `target_weight_kg` null): no goal
     line, no projection sentence, and the card still works.
 13. **Every projection refusal gets a sentence.** Reachable states: already

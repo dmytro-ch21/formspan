@@ -101,7 +101,17 @@ export type TrendEmpty =
   | { kind: 'unavailable' }
   | { kind: 'none' }
   | { kind: 'none-in-range'; totalReadings: number }
-  | { kind: 'too-few'; have: number; need: number };
+  | {
+      kind: 'too-few';
+      have: number;
+      need: number;
+      /**
+       * The span `need` readings must fall inside, when the smoother counts a
+       * trailing window rather than a lifetime total. Absent when the
+       * threshold is a plain count. See `BuildTrendInput.minReadingsWithinDays`.
+       */
+      withinDays?: number;
+    };
 
 /** A change across the window, and the evidence behind it. */
 export type TrendDelta = {
@@ -154,6 +164,19 @@ export type BuildTrendInput = {
   planFrom?: string | null;
   /** How many readings the smoother needs before it returns anything. */
   minReadings?: number;
+  /**
+   * The trailing window `minReadings` must fall inside, when the smoother
+   * counts readings per window rather than in total.
+   *
+   * F26/#710: `trendWeight` needs `MIN_TREND_READINGS` inside ONE `TREND_DAYS`
+   * window. An athlete weighing in every five days never has three in any
+   * week, so the smoother returns nothing and the card said "5 of 1 readings
+   * needed". The 1 was this function's default for `minReadings`, and even the
+   * honest 3 would read as already cleared to someone with five spread across
+   * a month. Carrying the window into the `too-few` state lets its copy name
+   * the actual rule, a density.
+   */
+  minReadingsWithinDays?: number;
 };
 
 /**
@@ -184,7 +207,7 @@ function windowStart(input: BuildTrendInput, readings: Reading[]): string {
  * empty space.
  */
 export function buildTrend(input: BuildTrendInput): TrendSeries {
-  const { today, range, smooth, minReadings = 1 } = input;
+  const { today, range, smooth, minReadings = 1, minReadingsWithinDays } = input;
 
   // Not-loaded is answered before anything else and never falls through to a
   // count. An empty array and a null are different facts.
@@ -224,7 +247,7 @@ export function buildTrend(input: BuildTrendInput): TrendSeries {
     if (run.length) segments.push(run);
   }
 
-  const empty = emptinessOf(sorted, readings, segments, smooth != null, minReadings);
+  const empty = emptinessOf(sorted, readings, segments, smooth != null, minReadings, minReadingsWithinDays);
   const all = [...readings, ...segments.flat()];
   const low = all.length ? Math.min(...all.map((p) => p.value)) : null;
   const high = all.length ? Math.max(...all.map((p) => p.value)) : null;
@@ -256,6 +279,7 @@ function emptinessOf(
   segments: TrendPoint[][],
   smoothed: boolean,
   minReadings: number,
+  withinDays: number | undefined,
 ): TrendEmpty | null {
   if (allReadings.length === 0) return { kind: 'none' };
   if (inWindow.length === 0) return { kind: 'none-in-range', totalReadings: allReadings.length };
@@ -263,7 +287,9 @@ function emptinessOf(
   // supplied and produced no line at all, the chart is dots without a trend and
   // the copy should say why rather than leaving the athlete to guess.
   if (smoothed && segments.length === 0) {
-    return { kind: 'too-few', have: inWindow.length, need: minReadings };
+    return withinDays == null
+      ? { kind: 'too-few', have: inWindow.length, need: minReadings }
+      : { kind: 'too-few', have: inWindow.length, need: minReadings, withinDays };
   }
   return null;
 }
