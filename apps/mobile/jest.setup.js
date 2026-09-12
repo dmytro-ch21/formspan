@@ -274,19 +274,29 @@ jest.mock('react-native-safe-area-context', () => {
  * Flushed rather than silenced. The warning is noise here, but suppressing it
  * would also swallow the next one, which might not be.
  *
- * **A test that rendered nothing returns before any of that (F56, #1135).**
- * Such a test has nothing here to settle or unmount. Returning early also keeps
- * its teardown from crossing a macrotask boundary, and that boundary is how
- * this hook used to fail.
+ * **A test that rendered nothing skips `act` and the yield (F56, #1135), but
+ * still runs `cleanup()`.** It has no React work to settle. Skipping the
+ * macrotask boundary is the point, because that boundary is how this hook
+ * used to fail.
  *
  * Measured on a host at load ~340: a worker descheduled for 15s while inside
  * this hook fails with "Exceeded timeout of 15000 ms for a hook", in whatever
  * test happens to be running. The yield, `cleanup()` and `act`'s own tail each
- * take milliseconds; the slowest of 5,822 teardowns across the full suite was
- * 260ms. The failure is not slow work. It is jest's timeout timer expiring
- * while the process is not running, then firing first at the next timers phase.
- * A hook that finishes in microtasks never reaches a timers phase, so a stall
- * of any length cannot fail it.
+ * take milliseconds. Across the full suite the unconditional hook's slowest
+ * teardown was 260ms; with this change, the 1,445 tests that still take the
+ * full path peak at 283ms. The failure is not slow work. It is jest's timeout
+ * timer expiring while the process is not running, then firing first at the
+ * next timers phase. A hook that finishes in microtasks never reaches a timers
+ * phase, so a stall of any length cannot fail it.
+ *
+ * `cleanup()` stays on the short path because "nothing rendered" is not
+ * "nothing to clean up". RNTL's `waitFor` registers its poll in the same queue
+ * `cleanup()` drains, whether or not anything was rendered
+ * (`dist/wait-for.js`). A first version returned before `cleanup()`, and that
+ * poll kept firing into the next test: `renderedTree.test.tsx`'s "sees no
+ * further polls" went red on it, 10 polls where 1 was expected. Draining it
+ * stays microtask-only, because the callback `waitFor` queues is synchronous
+ * and `cleanup()` only awaits each one.
  *
  * Rendered tests still take the full teardown above. They stay exposed to a
  * worker frozen for 15s; this fixes the tests that render nothing, not the
@@ -303,7 +313,10 @@ jest.mock('react-native-safe-area-context', () => {
  * went red on it.
  */
 afterEach(async () => {
-  if (!hasRenderedTree(rntl.screen)) return;
+  if (!hasRenderedTree(rntl.screen)) {
+    await cleanup();
+    return;
+  }
   await act(async () => {
     await new Promise((resolve) => realSetImmediate(resolve));
     await cleanup();

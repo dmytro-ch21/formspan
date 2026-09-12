@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
-import { render, renderHook, screen } from '@testing-library/react-native';
+import { render, renderHook, screen, waitFor } from '@testing-library/react-native';
 
 import { hasRenderedTree } from '../../lib/__tests__/support/renderedTree';
 
 /**
  * F56 (#1135) — pins the one signal `jest.setup.js`'s teardown trusts when it
- * skips its macrotask boundary.
+ * skips its macrotask boundary, and what that teardown must still do.
  *
  * The tests are ORDERED on purpose: each test's teardown is part of what the
  * next one checks. Getting this wrong in one direction costs the F56 immunity;
@@ -61,5 +61,34 @@ describe('hasRenderedTree', () => {
     expect(hasRenderedTree(throwing(new Error('`render` function has not been called')))).toBe(false);
     expect(hasRenderedTree(throwing(new Error('something else entirely')))).toBe(true);
     expect(hasRenderedTree(throwing('not even an Error'))).toBe(true);
+  });
+});
+
+/**
+ * "Nothing rendered" is not "nothing to clean up". RNTL's `cleanup()` also
+ * drains a queue that `waitFor` registers its poll in, whether or not anything
+ * was rendered. A teardown that skipped `cleanup()` for an unrendered test
+ * left that poll running into the next test — measured on this branch's first
+ * fix: the next test saw it fire 5–9 times in 60ms, and jest reported an open
+ * handle. F47's teardown, which always cleans up, saw 0.
+ */
+describe('the teardown drains RNTL\'s cleanup queue even when nothing was rendered', () => {
+  let polls = 0;
+
+  it('starts an RNTL waitFor that never settles, renders nothing, and returns', () => {
+    void waitFor(
+      () => {
+        polls += 1;
+        throw new Error('never satisfied');
+      },
+      { timeout: 60_000, interval: 5 },
+    ).catch(() => {});
+    expect(hasRenderedTree(screen)).toBe(false);
+  });
+
+  it('sees no further polls in the next test', async () => {
+    const before = polls;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(polls).toBe(before);
   });
 });

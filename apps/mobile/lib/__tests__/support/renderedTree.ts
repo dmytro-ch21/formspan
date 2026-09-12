@@ -1,9 +1,12 @@
 /**
- * F56 (#1135) — whether a test left anything for RNTL's `cleanup()` to tear down.
+ * F56 (#1135) — whether a test rendered anything with RNTL: a tree or a hook
+ * host that needs `act` to settle before it unmounts.
  *
- * `jest.setup.js`'s teardown hook reads this to decide whether it has to cross
- * a macrotask boundary at all; that hook's comment says why the boundary is
- * the whole problem.
+ * It answers only that. It is NOT "is there anything for `cleanup()` to do":
+ * RNTL's `waitFor` queues its poll for `cleanup()` whether or not anything was
+ * rendered. So `jest.setup.js`'s teardown uses this to decide only whether to
+ * cross a macrotask boundary (`act` plus a real yield); it runs `cleanup()`
+ * either way. That hook's comment says why the boundary is the whole problem.
  *
  * The signal is RNTL's `screen.root` THROWING "`render` function has not been
  * called", and nothing else. Measured on RNTL 14.0.1: after `renderHook`, after
