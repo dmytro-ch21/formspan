@@ -34,5 +34,18 @@
  */
 export type DayNarration = { kind: 'absent' };
 
+/**
+ * One narrated sentence, and the fact keys it rests on (N570, #1131).
+ *
+ * Declared beside the seam because it is the unit the fabricated-fact guard in
+ * `lib/narrationGuard.ts` checks. `cites` must name keys from `panelFacts`, and
+ * every number in `text` must be a number those cited facts state themselves.
+ *
+ * **It is not yet a member of {@link DayNarration}.** Nothing produces
+ * narration that reaches the screen until the model path lands, and a `ready`
+ * variant with no producer would be the placeholder this file's doc forbids.
+ */
+export type NarrationSentence = { text: string; cites: string[] };
+
 /** What the panel passes while nothing narrates. The only value in tranche 1. */
 export const NO_NARRATION: DayNarration = { kind: 'absent' };
