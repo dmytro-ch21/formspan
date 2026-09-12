@@ -226,6 +226,13 @@ export default function ScanBarcodeScreen() {
    * `scanAgain` between them, so F52's guard let both answers through. A ref for
    * the reason `confirming` is one: the second tap must see the first tap's
    * decision, not the render that drew the button.
+   *
+   * `scanAgain` clears it too (found in review). Without that, Cancel during a
+   * retry left the latch set until the ABANDONED request settled — on one bar,
+   * tens of seconds — so a later Try again on a different scan did nothing at
+   * all: no spinner, no request, a dead button. The abandoned lookup's own
+   * `.finally` still clears it later; that is harmless, because while a newer
+   * retry is out its button is not on screen to be tapped.
    */
   const retrying = useRef(false);
 
@@ -355,6 +362,8 @@ export default function ScanBarcodeScreen() {
     // Whatever lookup is still out no longer owns the screen.
     lookupSeq.current += 1;
     handling.current = false;
+    // Nor does it own Try again — see `retrying`.
+    retrying.current = false;
     setMisread(false);
     setSaveError(null);
     setPhase({ kind: 'scanning' });

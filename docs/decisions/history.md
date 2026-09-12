@@ -74786,17 +74786,19 @@ None of this was ever stored: `readDraft` trims the noun before saving, and the 
 - **Why a ref and not state.** The second tap has to see the first tap's decision, not the render that drew the button.
 - **Why the callback sits after `resolve`.** `react-hooks/immutability` rejects referencing a `useCallback` binding above its declaration.
 - **Why the latch clears.** A retry that fails again can be tried again; the second test pins that.
+- **Why Cancel clears it too (found in review, and the first version got it wrong).** The first commit left `scanAgain` alone, and its history entry said the latch "still clears when the cancelled lookup settles". That is true, but only eventually. Until the ABANDONED request settled — on one bar, tens of seconds — Try again on a *different* scan's failure did nothing at all: no spinner, no request, a dead button, in exactly the poor-signal case this screen exists for. `scanAgain` now clears it. The abandoned lookup's own `.finally` still clears it later, which is harmless: while a newer retry is out, its button is not on screen to be tapped.
 
 **Tests** (`__tests__/app/scanScreen.test.tsx`, new describe "retrying twice"):
 - **Double-tap.** Two presses in the same tick, the "confirming twice" pattern, give exactly one retry lookup: the scan's own plus one.
 - **The latch clears.** After a retry has answered, *Try again* starts another lookup.
+- **Cancel releases it.** Try again, Cancel while it is out, scan another packet that fails, Try again: a fourth lookup starts while the abandoned one is still unanswered.
 
-**Checks.** 3 mutations, each caught as a test failure, restored byte-identical and re-run to 41/41:
+**Checks.** 4 mutations, each caught as a test failure, restored byte-identical and re-run to 42/42:
 - **the latch check removed:** the double-tap test fails;
 - **the latch never clearing:** the try-again-after-an-answer test fails;
-- **the button calling `resolve` directly again:** the double-tap test fails.
+- **the button calling `resolve` directly again:** the double-tap test fails;
+- **Cancel not clearing the latch:** the new cancel-then-rescan test fails.
 
-**Not covered by a test.** Cancelling mid-retry is not pinned here. `scanAgain` does not touch `retrying`, but the latch still clears when the cancelled lookup settles, because `.finally` runs regardless of `current()`.
 
 **Reachability on a phone**: this is the phone — Food → Quick-add → Scan a barcode, on a connection that fails, then tap *Try again* twice quickly.
 

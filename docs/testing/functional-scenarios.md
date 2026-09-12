@@ -11231,6 +11231,10 @@ is the code #319 measured as a real 404.
   quickly. Exactly one new request goes out, and the screen shows one answer.
   Once that retry has answered, Try again works again — the guard clears, it
   does not stick.
+- **Cancel releases Try again** (L20). Tap Try again, Cancel while it is still
+  looking up, scan a different packet with the connection still failing, then
+  tap Try again: it must start a lookup straight away, not sit dead until the
+  first, abandoned request finally times out.
 - **A misread code** (a creased packet, a wrong check digit) leaves the scanner
   running and says it did not read cleanly. It must not perform a lookup, since
   a lookup on a misread returns a miss that reads as a missing product.
