@@ -964,6 +964,19 @@ export function describeSet(
   if (s.reps != null && s.weight_kg != null) parts.push(`${s.reps} × ${shown}`);
   else if (s.reps != null) parts.push(`${s.reps} reps`);
   else if (s.weight_kg != null) parts.push(shown);
+  // F25/#707 — `reps` holds the FULL count, assisted included, so without this
+  // a set logged as "8, 3 of them with a spotter" read "8 reps" on every
+  // read-only surface this function feeds: the completed session's rows, their
+  // VoiceOver label, and a collapsed group's headline. That overstates what the
+  // athlete did unaided, which is the one number `soloReps` exists to keep.
+  //
+  // Only when some reps WERE assisted. `null` is unrecorded and `0` is "none
+  // of them", and neither is worth hearing back: the row already reads as
+  // unassisted. Its own part rather than a parenthesis, because a pair of
+  // dumbbells already puts "(60kg total)" there.
+  if (s.reps != null && (s.assisted_reps ?? 0) > 0) {
+    parts.push(`${s.assisted_reps} assisted`);
+  }
   if (s.seconds != null) parts.push(formatDuration(s.seconds, duration));
   if (s.distance_m != null) parts.push(formatDistance(s.distance_m, units));
   if (s.rpe != null) parts.push(`RPE ${s.rpe}`);

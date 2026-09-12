@@ -74633,6 +74633,40 @@ The reviewer's other point, that the longer label may wrap in the two-up grid, i
 
 **Reachability on a phone**: this is the phone — You → What you train, You → Edit profile, Settings → Profile.
 
+## 2026-09-12 — F25 (#707): a finished set says how many of its reps were assisted
+
+**What was wrong.** `assisted_reps` was saved correctly, round-tripped through the API, and read back by the edit form, but no read-only surface ever showed it. `reps` holds the **full** count, assisted included, so a set logged as "8 reps, 3 with a spotter" read "8 reps", exactly like an unaided one. That overstates what the athlete did alone, the one number `soloReps` exists to keep. L1's device sweep (#380) found it on an Assisted Pull-Up.
+
+**The fix is one function.** `describeSet` in `lib/sessions.ts` composes the summary line for every read-only place a set is printed. After the reps figure, it now adds `N assisted` as its own part: "8 reps · 3 assisted", and "8 × 30kg (60kg total) · 2 assisted" for a pair of dumbbells, which is why it isn't a parenthesis.
+- **Only when some reps were assisted.** `null` is unrecorded and `0` is "none of them". Neither is worth hearing back, since the row already reads as unaided.
+- **Only when there is a rep count beside it.** A cached row with assisted reps and no reps is unreachable in valid data: the server's CHECK and `withSetChange` both prevent it. It would still read as three reps done, so it says nothing.
+- **The condition is `s.reps != null && (s.assisted_reps ?? 0) > 0`.** The first draft also had `s.assisted_reps != null`, which is redundant because `null > 0` is already false. Removing it would have survived every test and read as dead code, so it went.
+
+**Where it shows, and where the ticket was wrong.** The ticket said the share card and celebration card use `describeSet`. They don't: a search for callers found exactly two.
+- **The finished session's set rows and their VoiceOver labels** (`app/session/[id].tsx`).
+- **A collapsed exercise group's headline** (`lib/sessionCollapse.ts`).
+
+Neither the celebration card nor the share card prints a per-set line. The celebration card shows totals: sets and tonnage, its reps tile removed in N447. The share card's PR badge builds "152kg × 5" from the **personal record**, not from a set. That badge has the same blind spot, because the backend `Record` sends `assisted_reps` and mobile's `PersonalRecord` type never declares it. It is filed as its own ticket (F59) rather than folded in, including the open question of whether any record kind can carry assistance at all.
+
+**So this lands PART of #707, and #707 stays open.** `ac-verifier` graded its criterion 2 honestly: history and VoiceOver met, the share card not met. The criterion assumed the card's text comes from `describeSet`, and it doesn't. The PR says "part of", not "closes", as the pipeline requires for a partial NOT MET, and the share-card half is F59 (#1156). The verifier also caught this entry's first draft claiming 10 test cases; the file has 9.
+
+**Web** has no equivalent line either. `apps/web/src/lib/api.ts` already records that web "can neither display nor clear `assisted_reps`". That gap is known and unchanged here.
+
+**Tests** (`lib/__tests__/describeSetAssisted.test.ts`, new, 9 cases):
+- a bodyweight set, a loaded set with its total, the order of effort and grip after it, and every rep assisted;
+- null, absent and 0 each say nothing;
+- no rep count says nothing;
+- the row names the count `soloReps` subtracts.
+
+**Checks.** 3 mutations, each caught as a test failure, restored byte-identical and re-run to 70/70 across this file, `loadFactor.test.ts` and `grip.test.ts`:
+- **the assisted part removed:** 5 tests fail;
+- **zero reported too (`> 0` becomes `>= 0`):** 13 fail, because every set with reps then grows "· 0 assisted", including the existing load-factor and grip tests;
+- **the reps guard removed:** the no-rep-count test fails.
+
+**Not measured.** On a device: finish a session with an assisted set, and read the row, its VoiceOver label and the collapsed headline.
+
+**Reachability on a phone**: this is the phone — any finished strength session with an assisted set.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
