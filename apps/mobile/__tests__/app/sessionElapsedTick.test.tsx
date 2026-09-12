@@ -266,9 +266,7 @@ describe('a live session', () => {
     // renders would pass the zero assertion above forever.
     await renderSession(liveSession());
     const before = rendersOf('Sets').length;
-    await act(async () => {
-      screen.rerender(<SessionScreen />);
-    });
+    await screen.rerender(<SessionScreen />);
     expect(rendersOf('Sets').length).toBeGreaterThan(before);
   });
 });
@@ -302,15 +300,20 @@ describe('a finished session', () => {
       <ElapsedStat startedAt={STARTED_AT} endedAt="2026-09-11T07:47:30.000Z" label="Time" />,
     );
     expect(secondTicks()).toBe(0);
-    view.unmount();
+    await view.unmount();
     // The control: an open one does arm exactly one.
     const open = await render(<ElapsedStat startedAt={STARTED_AT} endedAt={null} label="Time" />);
     expect(secondTicks()).toBe(1);
-    // Unmounted HERE, not left to auto-cleanup. Measured: left mounted, the
-    // NEXT test's screen never rendered `session-summary` — and it passed in
-    // isolation, so it read as that test's bug. Removing the spy did not change
-    // that; unmounting did.
-    open.unmount();
+    // Every unmount and render in this file is AWAITED, and that is the part
+    // that matters: RNTL 14's are async. With `view.unmount()` above left bare,
+    // it overlapped the render below — two "overlapping act() calls" here, four
+    // "not configured to support act" from later tests' screen teardown, and
+    // (before this unmount existed) the NEXT test's screen never rendered
+    // `session-summary` at all. Every test in this file still passed while it
+    // leaked, which is F47's point. Measured with the awaits in place, deleting
+    // this unmount changes nothing; it stays so no live interval outlives the
+    // spy restored below.
+    await open.unmount();
     intervals.mockRestore();
   });
 

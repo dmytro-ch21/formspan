@@ -73912,19 +73912,32 @@ baseline, each restored and re-run green:
   the render counts stay flat either way. And `jest.getTimerCount()` read **3**
   for a lone finished `ElapsedStat` (the renderer's own timers), so it could not
   answer either. It spies `setInterval` for the 1000ms period instead.
-- **That component-level test leaked into the next one.** Left mounted, the
-  open `ElapsedStat` made the following test's screen never render
-  `session-summary`; that test passed in isolation, so it read as its own bug.
-  Removing the `setInterval` spy did not change it; unmounting explicitly did.
-  The first M3 run landed on that already-red test and was discarded and re-run
-  once the baseline was green.
+- **That component-level test broke the next one, and the first diagnosis of
+  why was wrong.** The following test's screen never rendered
+  `session-summary`, and passed in isolation. Removing the `setInterval` spy did
+  not change it; adding an explicit unmount of the open `ElapsedStat` did — so
+  the leak was written up, and the frontend reviewer confirmed, as "a mounted
+  component leaking". **It was not.** RNTL 14's `unmount` and `rerender` are
+  async, and the test called `view.unmount()` bare, so it overlapped the next
+  `render`'s `act`. The added unmount was also bare, and happened to rebalance
+  it. Found only because the suite printed a `● Console` block on the rebased
+  branch: **6 `console.error`, every run, with all 8 tests passing** — 2
+  "overlapping act() calls" from that test, 4 "not configured to support act"
+  from later tests' screen teardown (`Countdown`'s `stop`). Isolating each test
+  with `-t` put all of it on that one test. With every unmount and `rerender`
+  awaited (the F47 / #1122 pattern): 0 console output in three solo runs and
+  alongside `timerContinuity`. Then, measured rather than argued: un-awaiting the
+  two unmounts brings back exactly 6 / 2 / 4 with 8/8 still green; deleting the
+  explicit unmount with the awaits in place changes **nothing**. The awaits are
+  load-bearing; the unmount is hygiene. The first M3 run landed on the
+  already-red test and was discarded and re-run once the baseline was green.
 
 ### The review gate reported a failure that was a reviewer's mutation
 
 - **The gate's own `verify` went red on a reviewer's mutation, not on this
   diff.** `pre-merge-checker` ran `verify` while `frontend-reviewer` was
   mutation-testing the same worktree. The reviewer deleted `open.unmount()` to
-  confirm the cross-test leak, which left `const open` unused. The lint ratchet,
+  reproduce the cross-test failure, which left `const open` unused. The lint ratchet,
   one link after `lint:mobile`, counted **51** warnings where `lint:mobile` had
   counted 50, and failed on an uncapped `@typescript-eslint/no-unused-vars`.
   It did not reproduce on re-run.
