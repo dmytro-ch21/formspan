@@ -74942,6 +74942,41 @@ Web `tsc --noEmit` and eslint are clean.
 
 **Reachability on a phone**: unchanged. Mobile's finished session already names the grip (`describeSet`); this is web catching up.
 
+## 2026-09-12 — H16 (#951): a parity check between Health Connect's read list and the Android manifest's health permissions
+
+**Why.** `READ_RECORD_TYPES` in `apps/mobile/lib/healthConnect.ts` and `android.permissions` in `apps/mobile/app.config.js` are two hand-kept lists that must match one for one, and nothing failed when they drifted. W15 (#944) is what drift looked like: `ExerciseSession` joined the read list for N479, `READ_EXERCISE` never joined the manifest, and walk/hike detection was silently dead on Android. A manifest missing a permission prebuilds and builds cleanly, and no test can see a manifest.
+
+W15 deliberately did not add this check. Its fix already makes a refused read throw `HealthConnectPermissionError`, which is self-reporting, but only once somebody runs an Android dev build. This check says it in `verify` first.
+
+**What was built.** `scripts/check-health-permissions-parity.py`, stdlib-only, in the shape of `check-timeout-parity.py` and `check-grip-parity.py`:
+- **Reading.** It parses `const READ_RECORD_TYPES = [...] as const;` and the single `permissions: [...]` array, with line comments stripped so a commented-out permission does not count.
+- **Mapping.** Each record type maps to its permission through an **explicit table**, `PERMISSION_FOR`, not a derivation. Health Connect's names are not mechanical: `ExerciseSession` is `READ_EXERCISE`, not `READ_EXERCISE_SESSION`. A CamelCase-to-SNAKE rule would be right twice and wrong exactly where W15 was. A record type missing from the table fails and asks for its real name.
+- **What fails.** A record type with no declared permission, a declared `android.permission.health.*` permission no record type needs, a duplicate, or a list the parser cannot find. An empty parse compares equal on both sides, so finding nothing fails too.
+- **Wiring.** It is `check:health-permissions-parity`, in `verify` right after `check:timeout-parity`, and a `Health Connect permission parity` step in the `Scripts (Python)` CI job, calling `python3` directly like its siblings: that job installs no Node or pnpm. `check:verify-chain` now counts 55 gates, 50 of them in the chain.
+- **The manifest comment.** `app.config.js`'s comment used to say "nothing fails when they drift". It now names the check.
+
+**Checks.** Baseline green: "3 record types, 3 health permissions, one each". 7 mutations, each exit 1 with the right message, restored byte-identical, then re-run to exit 0:
+- **`READ_EXERCISE` removed from the manifest** (W15 reintroduced): names `ExerciseSession`;
+- **`READ_STEPS` added to the manifest:** names it as declared with no record type;
+- **`Steps` added to `READ_RECORD_TYPES`:** asks for its `PERMISSION_FOR` entry;
+- **the constant renamed:** "could not find `const READ_RECORD_TYPES = [...] as const;`";
+- **`READ_VO2_MAX` commented out:** names `Vo2Max`, which proves comments are stripped.
+- **a second `permissions: [...]` added in a plugin option outside `android`:** still passes, the case review raised;
+- **a URL string with `//` put in front of `READ_HEART_RATE` on its line:** still passes, so quoting is honoured.
+
+`check:python` parses the new file, and `app.config.js` still loads under `node`.
+
+**What it cannot promise.** It compares the two LISTS syntactically. It does not see what the Health Connect library requests at runtime, or the permission-rationale activity the manifest also needs.
+
+**Taken from review.** `frontend-reviewer` found no blocking issue and made three suggestions; all three were applied:
+- **The permissions array is searched for only inside `android: { … }`,** found by brace depth, so a plugin option also named `permissions` cannot be mistaken for it. Before, a second match anywhere in the file would have failed the check for a reason unrelated to Health Connect.
+- **Line-comment stripping tracks quotes,** so a URL inside a string is not cut at its `//`.
+- **Permissions that belong to no record type are a documented gap.** `READ_HEALTH_DATA_IN_BACKGROUND` and `READ_HEALTH_DATA_HISTORY` exist, and the check rejects them today. `PERMISSIONS_WITHOUT_RECORD_TYPE` is the empty, named place to add one with a reason.
+
+The reviewer also read `react-native-health-connect`'s config plugin. It injects the rationale intent filter and activity alias, and no health permission, so `app.config.js` really is the only source.
+
+**Reachability on a phone**: no athlete-facing change. This guards the Android build an athlete installs.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
