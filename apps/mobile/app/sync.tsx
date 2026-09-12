@@ -335,7 +335,7 @@ export default function SyncScreen() {
           <View style={styles.list} testID="sync-plans">
             <Text style={styles.listHeading}>Plans</Text>
             {plans.map((p) => {
-              const { title, when } = refusedPlanLabel(p, modules);
+              const { title, when, spokenWhen } = refusedPlanLabel(p, modules);
               return (
                 <View key={`plan:${p.id}`} style={styles.row} testID={`plan-${p.id}`}>
                   <Text style={styles.rowName}>{title}</Text>
@@ -356,7 +356,7 @@ export default function SyncScreen() {
                         disabled={busy === p.id}
                         style={styles.rowAction}
                         accessibilityRole="button"
-                        accessibilityLabel={`Remove ${title} on ${when} from your plan`}
+                        accessibilityLabel={`Remove ${title} on ${spokenWhen} from your plan`}
                         accessibilityState={{ busy: busy === p.id, disabled: busy === p.id }}
                         testID={`remove-plan-${p.id}`}
                       >
@@ -370,7 +370,7 @@ export default function SyncScreen() {
                         disabled={busy === p.id}
                         style={styles.rowAction}
                         accessibilityRole="button"
-                        accessibilityLabel={`Keep ${title} on ${when}`}
+                        accessibilityLabel={`Keep ${title} on ${spokenWhen}`}
                         accessibilityState={{ busy: busy === p.id, disabled: busy === p.id }}
                         testID={`keep-plan-${p.id}`}
                       >
@@ -457,15 +457,22 @@ export function destinationOf(row: BlockedRow, modules: Module[] = fallbackModul
  * it, else the sport's label — and when, as the day and the time if one was
  * given. `shortDate` reads the `YYYY-MM-DD` as a calendar date, never through
  * the device's zone.
+ *
+ * `spokenWhen` is the same fact without the middots, for the buttons'
+ * accessibility labels: some screen readers read "·" aloud, and "Remove Push day
+ * on plan dot 15 Sep dot 7:00 PM" is noise in the one sentence that says what a
+ * tap will do (frontend-reviewer, N564).
  */
 export function refusedPlanLabel(
   p: RefusedPlan,
   modules: Module[] = fallbackModules(),
-): { title: string; when: string } {
+): { title: string; when: string; spokenWhen: string } {
   const time = formatPlanTime(p.timeOfDayMinutes);
+  const date = shortDate(p.day);
   return {
     title: p.workoutName || labelFor(modules, p.sport),
-    when: `plan · ${shortDate(p.day)}${time ? ` · ${time}` : ''}`,
+    when: `plan · ${date}${time ? ` · ${time}` : ''}`,
+    spokenWhen: `${date}${time ? ` at ${time}` : ''}`,
   };
 }
 

@@ -73563,7 +73563,7 @@ change.
   count leaves the last value).
 - Screen: `__tests__/app/syncRefusedPlans.test.tsx` (7). The two existing sync
   screen suites gained a `@/lib/plan` mock.
-- **19 mutations, 19 caught, 0 invalid.** Each was checked on disk and restored
+- **19 mutations, 19 caught, 0 invalid** (a 20th, from review, is below). Each was checked on disk and restored
   in memory; the restore was confirmed by re-running the five suites (89/89
   green). They were: pending ignores `BLOCKED_ROW`; `unplanSession` keeps the
   error; either half of `PLAN_NEEDS_ATTENTION` dropped; acknowledge loses its
@@ -73574,6 +73574,27 @@ change.
   as a JOIN (`ambiguous column name: id`, confirming the doc comment's claim);
   a predicate naming a missing column; an unclassified export; Keep it does not
   recount.
+
+### Review
+
+- **`frontend-reviewer`: no blocking findings.** One suggestion was adopted.
+  The buttons' accessibility labels interpolated the visual
+  `plan · 15 Sep · 7:00 PM`, and some screen readers read the middot aloud, in
+  the one sentence that says what a tap does. `refusedPlanLabel` now also
+  returns a `spokenWhen` ("15 Sep at 7:00 PM"), with a test asserting both
+  labels. **Mutation 20**: pointing the label back at the visual string turns
+  that test red; restored and re-run green. The other suggestion was declined,
+  and the reason is recorded: `busy` is one id-keyed string shared by all three
+  lists. That pattern predates this change, and every id is a client
+  `randomUUID()`.
+- **`ac-verifier`: 7 of 7 criteria MET.** It independently grepped every
+  `planned_sessions` write, re-ran two of the mutations itself, and re-ran the
+  mobile suite (356 suites, 5784 tests). The device steps are graded as needing
+  human evidence. Its sharper note is about the ticket, not the code: #1106's
+  "Steps to test" are numbered prose, not `NEEDS HUMAN EVIDENCE` checkboxes, so
+  the evidence latch has nothing to key on and a merge closes the ticket for
+  good. That was handed to the coordinator rather than fixed by editing the
+  issue from this branch.
 
 ### What is left
 

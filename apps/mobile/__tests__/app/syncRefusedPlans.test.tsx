@@ -121,6 +121,14 @@ describe('a refused plan is on the repair screen', () => {
     expect(screen.getByText('plan is managed by your coach')).toBeTruthy();
   });
 
+  it('announces each action in plain words — no middots read aloud', async () => {
+    mockRefusedPlans.mockResolvedValue([PLAN, REMOVAL]);
+    await render(<SyncScreen />);
+    await waitFor(() => expect(screen.getByTestId('remove-plan-p1')).toBeTruthy());
+    expect(screen.getByLabelText('Remove strength on 15 Sep at 7:00 PM from your plan')).toBeTruthy();
+    expect(screen.getByLabelText('Keep Push day on 16 Sep')).toBeTruthy();
+  });
+
   it('a refused plan offers Remove and not Try again; pressing it removes the plan and recounts', async () => {
     mockRefusedPlans.mockResolvedValueOnce([PLAN]).mockResolvedValue([]);
     await render(<SyncScreen />);
