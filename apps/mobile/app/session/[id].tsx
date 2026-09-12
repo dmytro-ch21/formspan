@@ -151,6 +151,7 @@ import {
   type Suggestion,
   type SuggestionCode,
   type Volume,
+  lastSetLead,
 } from '@/lib/sessions';
 import { dayString, finishTimestampFor } from '@/lib/calendar';
 import { OptionSelect } from '@/components/ui/OptionSelect';
@@ -2364,7 +2365,7 @@ export default function SessionScreen() {
                             // entirely. This label exists because styles are
                             // silent, so it should not depend on a glyph being
                             // spoken. The visible text keeps the ×.
-                            `Last ${hint.last_reps != null ? `${hint.last_reps} by ` : ''}${formatWeight(hint.last_weight_kg, u)}`,
+                            lastSetLead(hint, u).spoken,
                             hint.last_rir != null
                               ? `reported ${hint.last_rir} RIR`
                               : hint.last_rpe != null
@@ -2377,8 +2378,7 @@ export default function SessionScreen() {
                             .filter(Boolean)
                             .join('. ')}
                         >
-                          Last {hint.last_reps != null ? `${hint.last_reps} × ` : ''}
-                          {formatWeight(hint.last_weight_kg, u)}
+                          {lastSetLead(hint, u).visible}
                           {hint.last_rir != null ? (
                             <Text style={styles.hintReported}> · {hint.last_rir} RIR</Text>
                           ) : null}

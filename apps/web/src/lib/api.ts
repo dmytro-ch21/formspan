@@ -571,6 +571,13 @@ export type Suggestion = {
   last_reps: number | null;
   last_rir: number | null;
   last_rpe: number | null;
+  /**
+   * How many of `last_reps` had help. `last_reps` is the FULL count of that top
+   * set, assisted included, while the progression is measured against the solo
+   * count — so a surface printing the set without this overstates it. Optional
+   * so an older response still parses. F62 (#1165).
+   */
+  last_assisted_reps?: number | null;
   last_min_reps: number | null;
   last_max_reps: number | null;
   working_sets: number;
