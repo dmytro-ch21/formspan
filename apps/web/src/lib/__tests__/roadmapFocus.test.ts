@@ -21,6 +21,7 @@ let n = 0;
 /** A roadmap step. `criteria` non-null is what makes it a step rather than
  *  reading — the distinction the whole feature turns on. */
 const step = (id: string, mastered: boolean): CurriculumItem => ({
+  id: n,
   kind: "technique",
   technique_id: id,
   name: id,
@@ -56,6 +57,7 @@ const reading = (id: string): CurriculumItem => ({
 
 /** A concept — authored text, no technique behind it at all. */
 const concept = (title: string): CurriculumItem => ({
+  id: n,
   kind: "concept",
   title,
   name: "",

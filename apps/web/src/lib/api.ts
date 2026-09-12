@@ -3177,6 +3177,8 @@ export type CurriculumPhase = {
 };
 
 export type CurriculumItem = {
+  /** The item's own id: what `.../items/{itemID}/read` names (N466). */
+  id: number;
   /** A `technique` points into the library and may carry criteria; a `concept`
    *  is authored text and NEVER does — no evidence stream could measure one,
    *  and nothing in this feature is completable by hand. */
@@ -3198,6 +3200,15 @@ export type CurriculumItem = {
   criteria: CurriculumCriteria | null;
   /** Null when the caller is not enrolled, or the item has no criteria. */
   progress: CurriculumProgress | null;
+  /**
+   * N123, rendered on web by N466. When the caller marked this CONCEPT read and
+   * understood: their own claim, never derived. Always null on a technique
+   * (refused by the database) and on an unread concept. A different kind of
+   * thing from `progress`, so nothing that shows mastery may read it.
+   *
+   * Optional because a server older than N123 omits it. Absent reads as unread.
+   */
+  read_at?: string | null;
 };
 
 export type Curriculum = {
@@ -3258,6 +3269,13 @@ export type Curriculum = {
    *  read — a list card that draws a progress bar from it is reading a
    *  placeholder, which is exactly the bug that shipped here once. */
   mastered_items: number;
+  /** N123. How many items are concepts: the concept-side twin of
+   *  `countable_items`, never folded into it. Optional for a pre-N123 server. */
+  concept_items?: number;
+  /** N123. How many of `concept_items` the caller marked read and understood.
+   *  NEVER combined with `mastered_items` into one figure: it renders as its own
+   *  line. Zero on the list response, like `mastered_items`. */
+  read_concepts?: number;
   created_at: string;
   updated_at: string;
   /** Present on a single read, absent from the list — same lazy contract as
@@ -3958,6 +3976,33 @@ export async function enrollInCurriculum(
     getToken,
     `/curricula/${encodeURIComponent(id)}/enrollment?tz=${encodeURIComponent(localZone())}`,
     { method: "PUT" },
+  );
+}
+
+/** N123, used by web since N466. The athlete's own claim to have read and
+ *  understood a CONCEPT item. Idempotent: marking again just moves `read_at`. */
+export async function markCurriculumItemRead(
+  getToken: Token,
+  curriculumID: string,
+  itemID: number,
+): Promise<void> {
+  await request<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(curriculumID)}/items/${itemID}/read`,
+    { method: "PUT" },
+  );
+}
+
+/** Withdraws the claim. Reversible by design, and always 204. */
+export async function unmarkCurriculumItemRead(
+  getToken: Token,
+  curriculumID: string,
+  itemID: number,
+): Promise<void> {
+  await request<void>(
+    getToken,
+    `/curricula/${encodeURIComponent(curriculumID)}/items/${itemID}/read`,
+    { method: "DELETE" },
   );
 }
 

@@ -5,6 +5,7 @@ import { groupByPhase } from "../curriculumPhases";
 
 function item(over: Partial<CurriculumItem>): CurriculumItem {
   return {
+    id: 0,
     kind: "technique",
     technique_id: "x",
     name: "X",

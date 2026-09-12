@@ -11,11 +11,14 @@ import {
   enrollInCurriculum,
   getBjjFocus,
   getCurriculum,
+  markCurriculumItemRead,
   setBjjFocus,
+  unmarkCurriculumItemRead,
   type BjjFocus,
   type Curriculum,
   type CurriculumItem,
 } from "@/lib/api";
+import { conceptsReadLine, readToggleCopy } from "@/lib/conceptRead";
 import { groupByPhase } from "@/lib/curriculumPhases";
 import { proposeFocus } from "@/lib/roadmapFocus";
 
@@ -94,6 +97,27 @@ export default function CurriculumDetailPage() {
     }
   }, [c, getToken, load]);
 
+  // N466. The athlete's own "read and understood" claim on a concept, through its
+  // own subresource: never through anything that touches criteria or progress.
+  // Re-reads the curriculum afterwards, like enrolment does, so `read_at` and
+  // `read_concepts` come back from the server rather than being guessed here.
+  const toggleRead = useCallback(
+    async (item: CurriculumItem) => {
+      if (!c) return;
+      setBusy(true);
+      try {
+        if (item.read_at) await unmarkCurriculumItemRead(getToken, c.id, item.id);
+        else await markCurriculumItemRead(getToken, c.id, item.id);
+        await load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [c, getToken, load],
+  );
+
   const applyFocus = useCallback(async () => {
     if (!c || !focus) return;
     setBusy(true);
@@ -154,6 +178,7 @@ export default function CurriculumDetailPage() {
 
   const items = c.items ?? [];
   const isRoadmap = c.countable_items > 0;
+  const conceptsRead = conceptsReadLine(c);
 
   return (
     <div className="space-y-6">
@@ -247,6 +272,19 @@ export default function CurriculumDetailPage() {
         </p>
       )}
 
+      {conceptsRead && (
+        /* N466. Its own figure, never inside the mastered count above: read
+           state is the athlete's own attestation, and whether it counts toward
+           completion was decided in the open, as "no". Shown whether or not
+           you are working this, as on mobile: reading is not enrolment. */
+        <p
+          data-testid="concepts-read"
+          className="rounded-xl border border-neutral-200 px-4 py-3 text-sm text-neutral-600 dark:border-neutral-800 dark:text-neutral-400"
+        >
+          {conceptsRead}
+        </p>
+      )}
+
       {isRoadmap && c.enrolled && focus && (
         <FocusPanel
           proposal={proposeFocus(c.items ?? [], focus, c.id)}
@@ -287,7 +325,13 @@ export default function CurriculumDetailPage() {
                 )}
                 <ul className="space-y-2">
                   {group.items.map((it) => (
-                    <ItemRow key={it.order} item={it} enrolled={c.enrolled} />
+                    <ItemRow
+                      key={it.order}
+                      item={it}
+                      enrolled={c.enrolled}
+                      busy={busy}
+                      onToggleRead={toggleRead}
+                    />
                   ))}
                 </ul>
               </div>
@@ -336,7 +380,17 @@ function Back() {
   );
 }
 
-function ItemRow({ item, enrolled }: { item: CurriculumItem; enrolled: boolean }) {
+function ItemRow({
+  item,
+  enrolled,
+  busy,
+  onToggleRead,
+}: {
+  item: CurriculumItem;
+  enrolled: boolean;
+  busy: boolean;
+  onToggleRead: (item: CurriculumItem) => void;
+}) {
   const { criteria: crit, progress: p } = item;
   const mastered = p?.mastered ?? false;
 
@@ -352,6 +406,35 @@ function ItemRow({ item, enrolled }: { item: CurriculumItem; enrolled: boolean }
           <p className="mt-1 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
             {item.notes}
           </p>
+        )}
+        {/* N466. A checkbox, not a progress control: neutral, never the lime a
+            mastered technique wears, because reading is the athlete's own note
+            and not evidence. Reversible: clicking again withdraws it, and the
+            label says which state you are in. Gated on `kind` (this branch) and
+            on having an id, since the endpoint names the item by it. */}
+        {typeof item.id === "number" && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={Boolean(item.read_at)}
+            onClick={() => onToggleRead(item)}
+            disabled={busy}
+            title={readToggleCopy(Boolean(item.read_at)).title}
+            data-testid={`concept-read-${item.id}`}
+            className="mt-2 inline-flex items-center gap-2 text-sm text-neutral-700 disabled:opacity-50 dark:text-neutral-300"
+          >
+            <span
+              aria-hidden="true"
+              className={`inline-flex size-4 items-center justify-center rounded border ${
+                item.read_at
+                  ? "border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900"
+                  : "border-neutral-400 dark:border-neutral-600"
+              }`}
+            >
+              {item.read_at ? "✓" : ""}
+            </span>
+            {readToggleCopy(Boolean(item.read_at)).label}
+          </button>
         )}
       </li>
     );
