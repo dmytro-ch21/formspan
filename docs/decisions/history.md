@@ -73257,7 +73257,8 @@ subtract later.
   mid-typing "glass " the hint briefly reads "3 of 6 glass s". Pre-existing
   (the old `+s` did the same), transient, and never stored — `readDraft` trims
   before anything is saved and the server refuses a trailing space. Not fixed
-  here because it is a separate caller's input handling, not the rule.
+  here because it is a separate caller's input handling, not the rule —
+  `frontend-reviewer` agreed. Filed as L19 (#1133).
 - A non-English noun still gets `+s`, as it always did.
 
 
