@@ -122,6 +122,37 @@ async function connect(device: { id: string; name: string }) {
 }
 
 describe('startLiveHR / stopLiveHR are serialized', () => {
+  // F53/#1117 — these tests ask "does the next op wait for the previous one",
+  // and the cancel bound is a DIFFERENT property that also releases the wait.
+  // On a real clock the 40ms bound fired whenever three `setImmediate` turns
+  // took longer than 40ms of wall time — which a host at load ~270 managed
+  // inside `verify` — and the reconnect then appeared exactly as if the ops
+  // had overlapped: a serialization failure with no serialization bug. So the
+  // bound's `setTimeout` runs on a fake clock here and never fires unless a
+  // test advances it; `tick()`'s `setImmediate` stays real. The bound itself
+  // is still tested on a real clock, in `a disconnect the OS never
+  // acknowledges` below.
+  //
+  // `Date` stays real too, and not for tidiness: jest fakes it by default,
+  // a frozen `Date.now()` never lets `starve` return, and a synchronous
+  // loop also blocks jest's own test timeout — the first draft hung the
+  // worker silently for five minutes rather than failing.
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['Date', 'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask'] });
+  });
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  /** Holds the thread, as a loaded host does between event-loop turns. */
+  const starve = (ms: number) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      // busy-wait on purpose
+    }
+  };
+
   it('a background stop and an immediate foreground start do NOT overlap — the reconnect waits for the disconnect', async () => {
     // The sequence `orchestrator.ts` produces on a quick app switch: it
     // fires `void stopLiveHR()` on 'background' and `connectIfRemembered()`
@@ -132,7 +163,16 @@ describe('startLiveHR / stopLiveHR are serialized', () => {
 
     void stopLiveHR();
     void startLiveHR(A);
-    await tick();
+    await tick(1);
+    expect(ble.events).toEqual(['cancel-issued:A']);
+    // The bound is armed, and it is the fake clock holding it — if this
+    // count is 0 the fake timers caught nothing and the stall below is back
+    // to measuring the host.
+    expect(jest.getTimerCount()).toBe(1);
+    // 100ms is 2.5x the bound: on a real clock this stall alone reproduces
+    // the F53 failure at the assertion below, every run.
+    starve(100);
+    await tick(2);
 
     // The reconnect must not have been issued yet — the disconnect is still
     // unacknowledged. This is the assertion that fails when the operations
