@@ -74372,12 +74372,17 @@ finding.
 
 ### Verified
 
-- **Tests.** Web's `deadline.test.ts` (11) covers the wrapper, and
+- **Tests.** Web's `deadline.test.ts` (11) covers the wrapper,
   `requestDeadline.test.ts` (5) drives each web call site against a hung
-  `fetch`. Admin's `deadline.test.ts` (4) covers the copy and `adminFetch`.
-  Whole suites: web 34 files / 378 tests, admin 8 / 76, and both typechecks
-  clean.
-- **17 mutations, each caught as a named test failure** (or, for the parity
+  `fetch`, and `dashboardShell.test.ts` (2) pins the shell's reads. Admin's
+  `deadline.test.ts` (4) covers the copy and `adminFetch`. Both typechecks and
+  both lints are clean.
+- **`verify`: 47 of 48 links pass.** The 48th, `check-expo-compat`, has also
+  failed on `main` itself since 12:50 UTC on 2026-09-12. Expo's SDK 57 patch
+  releases cleared pnpm's 24h release-age window, which is unrelated to this
+  branch and filed as H31 (#1141). `verify` stops at that link, so the 24
+  links after it were run separately on this branch.
+- **18 mutations, each caught as a named test failure** (or, for the parity
   script, its named error), with each restore confirmed by re-running rather
   than by reading the file:
   - 7 on web's wrapper: trusting a late result, answering the deadline before
@@ -74386,7 +74391,8 @@ finding.
   - 4 on web's wiring: each call site unwrapped in turn;
   - 3 on admin's copy and wiring;
   - 3 on the parity script: a drifted web default, a renamed web constant the
-    parser must refuse, and a drifted admin slow budget.
+    parser must refuse, and a drifted admin slow budget;
+  - 1 on the dashboard shell: its two reads awaited one after the other.
 
 **Three pieces of apparatus measured nothing along the way.** Each was caught
 by checking the check:
@@ -74399,15 +74405,45 @@ by checking the check:
   test files printed 0. That they were collected is shown by the file counts
   instead: web 32 → 34, admin 7 → 8.
 
+### What review changed
+
+**`frontend-reviewer` found nothing blocking.** It re-ran the new tests, both
+typechecks and the parity script. It mutated the error's name itself and
+restored it by re-running. It also confirmed there is no web or admin `fetch`
+outside the five wrapped sites. Its three suggestions:
+
+- **The dashboard shell's two reads now start together — taken.** The layout
+  used to await `listModules` and then `fetchUnits`. Now that each ends at the
+  deadline, a hung API cost the shell two deadlines (60s) before it painted.
+  They run together in `lib/dashboardShell.ts`'s `readShell`, which was
+  extracted so it can be tested (the layout is a Server Component calling
+  Clerk). The shell now costs one deadline. Neither read can fail the other,
+  and reading them one after the other fails the test by name.
+- **A timeout branch on admin's error page — declined, and the reason is a
+  measurement.** `app/error.tsx` classifies by substring on `error.message`.
+  But Next 16.3.4's production server-component client replaces that message
+  with "An error occurred in the Server Components render. The specific message
+  is omitted in production builds…" (`resolveErrorProd`, in
+  `react-server-dom-turbopack-client.node.production.js`, absent from the
+  development build). Every admin page reading `@/lib/api` is a Server
+  Component. So a timeout branch would work only in development — see Not done.
+- **`keepalive` with an abort signal on the telemetry flush — measured, in one
+  engine.** In Chromium 152 (the in-app browser, on a real page), a GET with
+  both completed with 200, a POST in the flush's exact shape got its response,
+  and aborting a `keepalive` request rejected with `AbortError`, as did the
+  control without `keepalive`. Safari and Firefox were not measured.
+
 ### Not done
 
 - **The Library page's loaders have no test.** Web has no test that runs a
   page's effects: no jsdom and no testing-library, which its vitest config
   records as deliberate.
-- **The dashboard layout awaits its two reads one after the other**, so a hung
-  backend now costs up to 60s before the dashboard renders. That is bounded
-  where it used to be unbounded. A shorter layout budget would be a product
-  call, not taken here.
+- **Admin's error page cannot tell a timeout, a 401 or a 403 from any other
+  failure in a production build.** Production Next replaces the message it
+  classifies on (measured above), so every failure there reads as "confirm the
+  API is running" — including the `ADMIN_USER_IDS` drift case the page was
+  written for. The 401/403 half predates this ticket, so it is flagged
+  separately rather than changed here.
 - **The two Library loaders now have different budgets**: 10s for techniques,
   30s for exercises.
 
