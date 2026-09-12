@@ -74450,6 +74450,98 @@ outside the five wrapped sites. Its three suggestions:
 - **The two Library loaders now have different budgets**: 10s for techniques,
   30s for exercises.
 
+## 2026-09-12 — N198 (#630): `functional-scenarios.md` checked against the shipped navigation, and every stale scenario marked in place
+
+**What #630 asked for.** A correctness pass over the scenario doc, not a
+rewrite. #630 was filed after two scenarios were found, by accident, describing
+designs the app no longer has. The concern is that a stale scenario is a false
+regression report waiting to happen: someone translates it into a test, runs
+it against a correct app and files a bug.
+
+**The two instances #630 named were already fixed by #585, and one of them had
+gone stale AGAIN.** "Mobile shell" had been corrected from the type-only,
+dot-above-the-label bar to "an icon above an uppercase label, with an underline
+beneath the active tab". N504 (#876) then replaced the whole bar with
+`NativeTabs`, which has no underline, no uppercase label, and does not sit in
+normal flow. N504 wrote its own new section and left the older ones describing
+the old bar. That is the pattern this pass kept finding: **a redesign ticket
+adds a section and does not revisit the sections it contradicts.**
+
+**How the pass found things, rather than reading 23,774 lines cold.**
+
+- Every backticked source path in the doc was resolved against `origin/main`'s
+  tree: 807 path tokens, 31 misses across 28 sections. Most misses were
+  web/admin paths written relative to their own app. The real ones were:
+  - `app/(tabs)/goals.tsx`, `app/(tabs)/train.tsx` and `app/(tabs)/library.tsx`,
+    all moved out of the tab group;
+  - `apps/mobile/app.json`, replaced by `app.config.js` in N482;
+  - two test files, now under `__tests__/app/`;
+  - `components/EnvironmentBadge.tsx`, removed by N529;
+  - `components/today/LiveHRCard.tsx`, removed by W21;
+  - `components/__tests__/swipePhysics.test.ts`, which **never existed**: F45
+    added `lib/__tests__/gesturePhysics.test.ts` and named the wrong file in its
+    own scenario.
+- A search for names later tickets retired: `(tabs)/goals`, `OFF_BAR_ROUTES`,
+  `href: null`, "Goals tab", "Train tab", "Library tab", "underline",
+  "uppercase label". 33 sections matched, and each hit was read in context.
+- The navigation-convergence and N504 sections were read against the code that
+  decides the facts: `app/(tabs)/_layout.tsx`, `lib/tabs.ts`, `app/train.tsx`,
+  `app/goals.tsx`, `components/ScreenHeader.tsx`, `components/ModuleOffNotice.tsx`,
+  `app/library.tsx` and `app/(tabs)/workouts.tsx`.
+
+**What was corrected.**
+
+- **The bar.** The Mobile shell section, N176/N180's accessibility and device
+  checks (the underline, `PROGRESS` in capitals, "one button implementation"),
+  and the accent-theme scenario that recoloured "the underline". Android's tab
+  icons use a fixed colour pair by design, and the accent scenario now says so.
+- **Goals as a tab.**
+  - N70's bar section and #423's nutrition-off section are both marked
+    superseded in part. #423's no-food-log deployment claim was wrong outright:
+    the Food tab is never hidden now.
+  - Seven Goals sections get a location note.
+  - The N56 weight card sits in the folded **Your weight** section at the
+    bottom of Goals, not at the top.
+- **Train.** N177 now opens with a pointer to N182. N182's
+  "still in `OFF_BAR_ROUTES`… a sixth tab titled train" is corrected: that
+  constant is gone, and a route file cannot add a tab. The two scenarios that
+  started from "the Train tab" now start from Today.
+- **The Library, You and Plan.**
+  - The Library is a pushed screen, not a tab.
+  - Its search is kept when you leave for a result.
+  - Units are off You (N181).
+  - Plan's second scope segment is `VOLA Workouts`, not `Shared`.
+- **Later tickets that overturned a scenario outside navigation**, and would
+  have made a test fail against a correct build:
+  - **N459** asserted `UIBackgroundModes` must not contain `location`. W21
+    added it deliberately, so a run records with the screen locked.
+  - **N132's** corner marker is gone. N529 moved the label to Settings' footer.
+  - **N528's** Today heart-rate card and strength/BJJ chips were removed by W21.
+    Live heart rate is running-only.
+
+**How edits were made.** Changes are made in place. Every corrected line says
+what it used to claim, and heavily corrected sections carry a dated N198 note.
+Nothing was deleted; one retired check is struck through. Headings are left as
+written, so references to them by name still resolve. A preamble paragraph
+states the scope, so a reader knows which sections this pass did **not**
+re-verify.
+
+**What this leaves.**
+
+- Sections outside navigation, and the path-drift list above, were not
+  individually re-verified beyond the specific claim corrected. A colour or
+  layout claim elsewhere is still "true when written".
+- Several **code comments** carry the same staleness:
+  - `app/goals.tsx`'s saved-in-place comment still says the screen "is a TAB";
+  - `components/ModuleOffNotice.tsx` still describes the Food and Goals tabs;
+  - `app/food/target.tsx` says the target "moved into the Goals tab".
+
+  A docs-only ticket was not the place to change them, so they are left for a
+  follow-up.
+- Nothing mechanical stops this recurring. The finding above is that each
+  redesign adds its own section; no check reads whether older sections still
+  describe the same screen.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
