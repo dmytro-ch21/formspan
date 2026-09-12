@@ -74802,6 +74802,37 @@ None of this was ever stored: `readDraft` trims the noun before saving, and the 
 
 **Reachability on a phone**: this is the phone — Food → Quick-add → Scan a barcode, on a connection that fails, then tap *Try again* twice quickly.
 
+## 2026-09-12 — F61 (#1161): web's records page says when a PR's reps were assisted, and one wording for the fact
+
+**What was wrong.** F59 (#1156) made mobile say when a personal record's set had spotted reps, on both the share card and the records card ("5 × 100kg (2 assisted)"). **Web's records page still overstated.** `apps/web/src/lib/api.ts`'s `PersonalRecord` had no `assisted_reps`, and `describe()` in `apps/web/src/app/dashboard/records/page.tsx`, which its own comment calls "the mobile twin" of `describeEvidence`, printed "5 × 100kg" for the same PR.
+
+`apps/mobile/lib/__tests__/basisParity.test.ts` has a "web splits the evidence the same way" block that exists to catch exactly this kind of drift between the twins. F59 didn't extend it, so nothing flagged the gap. F59's `frontend-reviewer` found it.
+
+**What changed.**
+- **The type.** Web's `PersonalRecord` declares `assisted_reps?: number | null`. The backend has always sent it.
+- **The records card.** Web's `describe()` appends " (N assisted)" in both rep branches, by the same rule as mobile's `assistedNote`: nothing for null or 0, and only where a rep count is printed. It stays inline rather than in a shared helper, because `describe` is private to a Next.js page file, which may not export arbitrary helpers.
+- **The guard.** The parity block gains a test that web's `describe` computes the note by that rule and appends it in both branches. It matches web's source text, which is how the whole block already works.
+
+**The wording decision the ticket asked for.** One fact had three phrasings:
+- "· 3 assisted" on mobile set rows (F25);
+- "(3 assisted)" on mobile's badge and records card (F59);
+- "(5 alone)", a different number, on web's load-history chart.
+
+The decision, **revised in review:** a record's evidence says "(N assisted)" on web and mobile, and the load-history chart's estimate row now says **both** counts, "(2 assisted, 5 alone)". The first version kept the chart's bare "(5 alone)", reasoning that the row explains a 1RM *estimate* built from the solo count, so the solo number is what makes the estimate add up. `frontend-reviewer` pointed out the flaw: the records card and the chart sit in the same expanded card, very likely showing the same set, so an athlete read "(2 assisted)" and one click below "(5 alone)" and had to do the sum to see the app agreed with itself. That is close to `vola-athlete-ux`'s "two cards answering one question with different arithmetic". The fix keeps the solo count the estimate needs and leads with the card's own words. Mobile set rows keep F25's " · N assisted" part, for the "(60kg total)" reason recorded there. Mobile shows no load-history estimate row, so it has no second phrasing to reconcile.
+
+**Checks.** 3 mutations to web's `describe`, each caught as a test failure by the new parity test, restored byte-identical and re-run to 23/23:
+- **the note dropped from the loaded branch:** fails;
+- **the note dropped from the bodyweight branch:** fails;
+- **zero counted as assisted:** fails.
+
+`pnpm --filter web exec tsc --noEmit` and web eslint on both changed files: clean.
+
+**Also found in review, and filed rather than folded in: F62 (#1165).** A progression suggestion's "last set" line reads as unaided on both web and mobile. The backend sends `last_assisted_reps`, and neither client's `Suggestion` type declares it. The gap is identical on both platforms, so no parity test notices it.
+
+**Not covered.** No test renders web's records page, and none of web's pages has a render test (`docs/testing/device-checks.md`). The parity test reads source text, so a web change that computed the note correctly but never rendered `measured` would pass it. That is the same trade the block already accepts and documents.
+
+**Reachability**: web — `/dashboard/records`, for an exercise whose PR set had assisted reps. Mobile already shows this (F59).
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

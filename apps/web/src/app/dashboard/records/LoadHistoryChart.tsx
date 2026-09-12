@@ -389,9 +389,12 @@ function EvidenceTable({
                       ? `from ${formatWeight(p.best_1rm_weight_kg, units)} × ${p.best_1rm_reps}${
                           // The estimate derives from the SOLO reps, so the
                           // full count only reconciles with it when the
-                          // assistance is shown too.
+                          // assistance is shown too. Both counts, the assisted one first in
+                          // the records card's own words (F61 review): beside a card reading
+                          // "(2 assisted)", a bare "(5 alone)" made the athlete do the sum to
+                          // see the two widgets agree.
                           p.best_1rm_assisted_reps
-                            ? ` (${p.best_1rm_reps - p.best_1rm_assisted_reps} alone)`
+                            ? ` (${p.best_1rm_assisted_reps} assisted, ${p.best_1rm_reps - p.best_1rm_assisted_reps} alone)`
                             : ""
                         }${effortSuffix(p)}`
                       : ""}
