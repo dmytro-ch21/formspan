@@ -21,6 +21,16 @@ export type PersonalRecord = {
   distance_m: number | null;
   rir: number | null;
   rpe: number | null;
+  /**
+   * How many of `reps` had help. The backend sends it with every record,
+   * because `reps` is the FULL count of the set behind the record, assisted
+   * included, and the rep-PR ranking already uses the solo figure.
+   *
+   * Optional so a record cached by an older build still parses. Read through
+   * `assistedNote`, never compared by hand, so the badge and the records card
+   * cannot disagree about when it is worth saying (F59/#1156).
+   */
+  assisted_reps?: number | null;
   achieved_at: string;
   session_id: string;
   /** Set recently enough to still be worth celebrating. */
@@ -255,12 +265,29 @@ export function fetchLoadHistory(
   );
 }
 
+/**
+ * "(2 assisted)", or nothing — the one rule for saying a record's set had help.
+ *
+ * F59/#1156: a record's `reps` is the full count, so a heaviest-weight record
+ * set as 5 reps with 2 spotted read "152kg × 5" on the share card and on the
+ * records card alike, exactly like an unaided 5. Only when some reps were
+ * assisted: `null` is unrecorded and `0` is "none of them", and neither is worth
+ * hearing back. Callers append it only where they print a rep count.
+ *
+ * A parenthesis rather than F25's " · " part: both surfaces already use " · "
+ * to separate independent facts (the badge's exercise from its evidence), and
+ * neither carries a "(60kg total)" for it to collide with.
+ */
+export function assistedNote(r: Pick<PersonalRecord, 'assisted_reps'>): string {
+  return (r.assisted_reps ?? 0) > 0 ? ` (${r.assisted_reps} assisted)` : '';
+}
+
 export function describeEvidence(r: PersonalRecord, u: UnitSystem): Evidence {
   const measured: string[] = [];
   if (r.reps != null && r.weight_kg != null) {
-    measured.push(`${r.reps} × ${formatWeight(r.weight_kg, u)}`);
+    measured.push(`${r.reps} × ${formatWeight(r.weight_kg, u)}${assistedNote(r)}`);
   } else if (r.reps != null) {
-    measured.push(`${r.reps} reps`);
+    measured.push(`${r.reps} reps${assistedNote(r)}`);
   }
 
   // RIR wins where both are present, matching the estimator's own precedence

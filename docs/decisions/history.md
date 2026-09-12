@@ -74708,6 +74708,48 @@ Weight's two surfaces, the Goals card and the full trend screen, both take their
 
 **Reachability on a phone**: this is the phone — Goals → the weight trend card, and its full trend screen.
 
+## 2026-09-12 — F59 (#1156): a PR won with help says so, on the share card and on the records card
+
+**What was wrong.** A personal record's `reps` is the **full** count of the set behind it, assisted included, the same convention as a set's own row. The share card's PR badge printed that as "Back Squat · 152kg × 5 PR", and nothing said two of the five were spotted. It was the same overstatement F25 (#707) fixed on a finished set's row, on the card an athlete shares. F25 found it and filed it rather than folding it in.
+
+**The ticket's first question — can a record carry assistance at all — is yes, for every strength kind.** Measured against `backend/internal/modules/session/postgres.go`'s `Records` query rather than assumed:
+- **`heaviest_weight`** is ranked on weight alone, so a 152kg set of 5 with 2 assisted is the record and carries both.
+- **`most_reps`** is ranked on SOLO reps, "a clean nine beats twelve with four assisted". But the row it returns carries full reps and `assisted_reps` alongside.
+- **`estimated_1rm`** comes from `bestOneRMSets`, estimated from the solo count, and its row carries the count too.
+
+The query's own comment says the split is kept "so … a client can render '8 (5 alone)'". The backend already sent `assisted_reps`; mobile's `PersonalRecord` type never declared it.
+
+**The records card had the same blind spot, and is fixed here too, beyond the ticket's named surface.** `describeEvidence` in `lib/records.ts` builds the records card's set line ("5 × 100kg", "12 reps") from the same record. Fixing only the badge would have left the two surfaces disagreeing about one PR. Both need the same type change, and one rule in one place is what stops them drifting.
+
+**What changed.**
+- **`PersonalRecord`** declares `assisted_reps?: number | null`. It is optional so a record cached by an older build still parses.
+- **`assistedNote(r)`** returns " (N assisted)" when some reps were assisted, and nothing for `null` or `0`.
+- **`prEvidence`** (the badge) and **`describeEvidence`** (the records card's measured half) append it, and only in the branches that already print a rep count. So there is no separate "has reps" guard to go dead.
+- **The note is a parenthesis, not F25's " · " part.** Both surfaces already use " · " between independent facts: the badge between the exercise and its evidence, the records card inside its measured half. And neither has F25's "(60kg total)" for a bracket to collide with. The badge reads "Back Squat · 152kg × 5 (2 assisted) PR".
+- **The assisted count sits in the MEASURED half.** It was logged, not reckoned, and it stays apart from RIR/RPE, which is the separation `describeEvidence`'s two halves exist for.
+
+**This also closes #707.** Its one unmet criterion was the share card, which F25 recorded as F59's. Its celebration card half needs nothing, because that card prints no per-set line.
+
+**Tests.**
+- **`celebration.test.ts`:**
+  - `prEvidence` with assisted reps on a loaded and a bodyweight record;
+  - null, absent and 0 each adding nothing;
+  - `prBadgeFor` carrying it into "Back Squat · 152kg × 5 (2 assisted) PR".
+- **`basisParity.test.ts`:**
+  - `describeEvidence` on a loaded and a bodyweight record;
+  - the count staying out of the reported half beside an RIR;
+  - null and 0 adding nothing.
+
+**Checks.** 4 mutations, each caught as a test failure, restored byte-identical and re-run to 132/132 across `celebration`, `basisParity` and `records`:
+- **the badge dropping the note on a loaded record:** 2 tests fail;
+- **the records card dropping it on a bodyweight record:** 1 fails;
+- **zero counting as assisted:** 11 fail;
+- **the helper never saying anything:** 6 fail.
+
+**Not measured.** On a device, share a session whose PR set had spotted reps and read the badge, then open that exercise's records card.
+
+**Reachability on a phone**: this is the phone — the share card after a session with a PR, and You/Progress → the records card.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -152,6 +152,38 @@ function record(over: Partial<PersonalRecord> = {}): PersonalRecord {
   };
 }
 
+/**
+ * F59/#1156 — the records card reads the same record the share card does, and
+ * printed "5 × 100kg" for a set with two spotted reps, exactly like five
+ * unaided. The assisted count is part of what was logged, so it belongs in the
+ * measured half, beside the reps it qualifies.
+ */
+describe('describeEvidence says when a record\'s reps were assisted', () => {
+  it('on a loaded record', () => {
+    expect(describeEvidence(record({ assisted_reps: 2 }), 'metric').measured).toBe('5 × 100kg (2 assisted)');
+  });
+
+  it('on a bodyweight record', () => {
+    expect(describeEvidence(record({ weight_kg: null, reps: 12, assisted_reps: 4 }), 'metric').measured).toBe(
+      '12 reps (4 assisted)',
+    );
+  });
+
+  it('never in the reported half, which is for what the athlete reckoned', () => {
+    expect(describeEvidence(record({ assisted_reps: 2, rir: 1 }), 'metric')).toEqual({
+      measured: '5 × 100kg (2 assisted)',
+      reported: '1 RIR',
+    });
+  });
+
+  it.each([
+    ['unrecorded (null)', null],
+    ['none of them (0)', 0],
+  ] as const)('adds nothing when assistance is %s', (_label, assisted) => {
+    expect(describeEvidence(record({ assisted_reps: assisted }), 'metric').measured).toBe('5 × 100kg');
+  });
+});
+
 describe('describeEvidence keeps the two halves apart', () => {
   it('puts the logged set in measured and nothing in reported', () => {
     expect(describeEvidence(record(), 'metric')).toEqual({

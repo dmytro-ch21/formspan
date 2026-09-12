@@ -1,4 +1,4 @@
-import type { ExerciseRecords, PersonalRecord } from './records';
+import { assistedNote, type ExerciseRecords, type PersonalRecord } from './records';
 import { hasUnresolvedLoad, type SetType } from './sessions';
 import { formatDistance as formatDistanceMetric, formatPace as formatPaceMetric } from './units';
 
@@ -313,13 +313,16 @@ export function topRecord(records: SessionRecord[]): SessionRecord | null {
  * regardless, since that only needs to know a record exists.
  */
 export function prEvidence(
-  record: Pick<PersonalRecord, 'weight_kg' | 'reps'>,
+  record: Pick<PersonalRecord, 'weight_kg' | 'reps' | 'assisted_reps'>,
   formatWeight: (kg: number) => string,
 ): string | null {
+  // F59/#1156 — `reps` is the full count of the set behind the record, so an
+  // assisted PR must say so or the card an athlete shares overstates what they
+  // did unaided. `assistedNote` is the one rule, shared with the records card.
   if (record.weight_kg != null && record.reps != null) {
-    return `${formatWeight(record.weight_kg)} × ${record.reps}`;
+    return `${formatWeight(record.weight_kg)} × ${record.reps}${assistedNote(record)}`;
   }
-  if (record.reps != null) return `${record.reps} reps`;
+  if (record.reps != null) return `${record.reps} reps${assistedNote(record)}`;
   return null;
 }
 
