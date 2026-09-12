@@ -204,8 +204,14 @@ def call_openai(model: str, system: str, user: str, schema: dict, key: str) -> d
 # ------------------------------------------------------- the app's own pass
 
 
-def postprocess(draft: dict, techniques: dict, families: list[str]) -> dict:
-    """What Go does to the response before the athlete ever sees it."""
+def postprocess(draft: dict, techniques: dict, families: list[str], dictation: str) -> dict:
+    """What Go does to the response before the athlete ever sees it.
+
+    Including the count floor (F29, #785): a count above one that the dictation
+    never says, as a digit or a word, is floored to 1 as `ResolveDraft` does,
+    through the validator's port of `spokenNumber`. Before, the eval scored the
+    invented multiplier the app would never have shown.
+    """
     out = dict(draft)
     tags, unresolved = [], list(draft.get("unresolved") or [])
     for tag in draft.get("tags") or []:
@@ -223,8 +229,10 @@ def postprocess(draft: dict, techniques: dict, families: list[str]) -> dict:
             lib = techniques[tid]
             t["category"] = V.to_tag_category(lib["category"])
             t["position"] = V.family_of(lib.get("position", ""), families)
-        if not isinstance(t.get("count"), int) or t["count"] < 1:
-            t["count"] = 1
+        count, floored = V.floor_count(t.get("count"), dictation)
+        if floored:
+            t["count_floored"] = {"was": t.get("count"), "reason": floored}
+        t["count"] = count
         tags.append(t)
     out["tags"], out["unresolved"] = tags, unresolved
     return out
@@ -393,7 +401,7 @@ def main() -> int:
             print(f"  {i:>2}/{len(cases)} {case['id']:<34} ERROR {r['error'][:80]}")
             results.append({"id": case["id"], "error": r["error"]})
             continue
-        draft = postprocess(r["draft"], techniques, families)
+        draft = postprocess(r["draft"], techniques, families, case["dictation"])
         s = score_case(case, draft)
         results.append(s)
         flag = "INVENTED" if s["inventions"] else "        "
