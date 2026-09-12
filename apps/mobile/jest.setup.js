@@ -283,8 +283,9 @@ jest.mock('react-native-safe-area-context', () => {
  * this hook fails with "Exceeded timeout of 15000 ms for a hook", in whatever
  * test happens to be running. The yield, `cleanup()` and `act`'s own tail each
  * take milliseconds. Across the full suite the unconditional hook's slowest
- * teardown was 260ms; with this change, the 1,445 tests that still take the
- * full path peak at 283ms. The failure is not slow work. It is jest's timeout
+ * teardown was 260ms; with this change, the ~1,450 tests that still take the
+ * full path peaked at 283ms and 282ms in two full-suite runs. The failure is
+ * not slow work. It is jest's timeout
  * timer expiring while the process is not running, then firing first at the
  * next timers phase. A hook that finishes in microtasks never reaches a timers
  * phase, so a stall of any length cannot fail it.
