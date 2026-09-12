@@ -23866,10 +23866,11 @@ for a model or a large body (no web or admin call needs that one yet).
 - **Headers arrive and the body stalls** (a proxy that sends the status line,
   then holds). **Pass:** it still times out at about 30s. **Fail:** it hangs —
   a deadline that stopped at the headers.
-- **The dashboard shell with the API hung.** The layout's two reads (modules,
-  then units) each give up after 30s, so the dashboard renders after up to
-  about 60s, with an ungated navigation and metric/grams. **Pass:** it
-  renders. **Fail:** it never does.
+- **The dashboard shell with the API hung.** The layout's two reads, modules
+  and units, start together and each gives up after 30s. So the dashboard
+  renders after about 30s, with an ungated navigation and metric/grams.
+  **Pass:** it renders at about 30s. **Fail:** it never renders, or it takes
+  about 60s, which means the reads ran one after the other.
 - **Library techniques keep their own 10s budget.** With the API hung, the
   techniques half reports "couldn't load" after about 10s while exercises wait
   30s. That difference is known, not a regression.
@@ -23884,6 +23885,9 @@ for a model or a large body (no web or admin call needs that one yet).
 - `apps/web/src/lib/__tests__/requestDeadline.test.ts` — `request()`,
   `listModules`, `fetchUnits` and the telemetry flush each end against a hung
   fetch.
+- `apps/web/src/lib/__tests__/dashboardShell.test.ts` — the shell's two reads
+  start together and settle after one deadline, and a failed modules read
+  still returns the units.
 - `apps/admin/src/lib/__tests__/deadline.test.ts` — admin's copy and
   `adminFetch`.
 - `scripts/check-timeout-parity.py` — web's, admin's and the phone's budgets
