@@ -74058,6 +74058,21 @@ baseline, each restored and re-run green:
   mounted, lift its mocks into `__tests__/app/support/` the way the running
   screen's were, rather than copying them.
 
+## 2026-09-12 — H31 (#1141): Expo SDK 57's patch releases became installable, and main went red until they were pinned
+
+**What broke.** Expo published patch releases of 24 SDK 57 packages on 2026-09-11 between 11:28 and 11:43 UTC: `expo` 57.0.21 → 57.0.22, `expo-router` 57.0.20 → 57.0.21, and 22 more `expo-*` modules, each one patch up. pnpm's default 24-hour `minimumReleaseAge` held them uninstallable until about 11:43 UTC on 2026-09-12, and `check:expo-compat` tolerates exactly that window (H15, #950). When the window closed, the drift became real. `main`'s `Mobile (Expo)` job failed at "Expo dependency compatibility (expo install --check)", and so did every PR (`ci:checks` exit 2); `pnpm run verify` stopped at `check:expo-compat` before jest or any typecheck. No commit on `main` caused it: `apps/mobile/package.json` still pinned `expo ~57.0.21`.
+
+**The fix** is the pins `expo install --check` wants, in `apps/mobile/package.json` and `pnpm-lock.yaml`, and nothing else. **No `minimumReleaseAgeExclude` entry was added**; `pnpm-workspace.yaml` is untouched. H15 records why an exclusion is the wrong fix: it would disable the supply-chain delay for exactly the packages that most need it.
+
+**`expo install --fix` exited 1, and that was not a failed install.** It installs in two passes: once for all 24 packages, then again, re-checked under the new `expo`, for 23. The second pass then printed "Cannot automatically write to dynamic config at: app.config.js" and suggested registering five config plugins (`expo-audio`, `expo-font`, `expo-secure-store`, `expo-sqlite`, `expo-web-browser`). Whether to register those is its own open decision, N520 (#916), and it is not folded in here. The exit code was not trusted either way; the result was checked directly:
+- `pnpm install --frozen-lockfile`: "Already up to date", so the lockfile agrees with `package.json`.
+- `expo install --check`: "Dependencies are up to date".
+- `check-expo-compat.py` exits 0.
+- Every `expo-*` package's version on disk equals its pin, read from `node_modules/<pkg>/package.json`. `require('<pkg>/package.json')` can't be used for this: `expo-symbols` declares `exports` without it, and reads as "not resolvable" when it is installed.
+- `check:expo-config` and `check:expo-native-config` pass.
+
+**The risk, stated rather than assumed away.** These are native modules. The last JS/native drift of this class (2026-08-09) crashed every installed device at launch while every test stayed green, and CI cannot see it because CI never builds `ios/`. A machine with an existing `apps/mobile/ios/` needs `pod install` (or `expo run:ios`, which runs it) before its next native build. A Release build carrying these modules has **not** been run on a phone as part of this change; that is #1141's `NEEDS HUMAN EVIDENCE` criterion, and the evidence latch will reopen the ticket on merge.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
