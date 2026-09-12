@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { TrendCard } from '@/components/TrendCard';
 import { shortDate } from '@/lib/calendar';
 import type { Projection as PlanProjectionWire } from '@/lib/nutritionApi';
+import { projectionGoal } from '@/lib/trendSeries';
 import { toDisplayWeight, weightUnit } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -36,7 +37,10 @@ export function WeightTrendCard({
   const getToken = useAuthToken();
   const { units } = useUnits();
   const router = useRouter();
-  const { loading, series, goalKg, projection, today } = useWeightTrend(
+  // The goal comes from the projection's own derivation, never from a phase
+  // target fetched on another lifecycle: after a phase edit the two disagree
+  // (N433, #714; N429 did the same for the full screen).
+  const { loading, series, projection, today } = useWeightTrend(
     getToken,
     '1Y',
     WINDOW_DAYS,
@@ -52,7 +56,7 @@ export function WeightTrendCard({
     <TrendCard
       title="WEIGHT"
       series={series}
-      goal={goalKg}
+      goal={projectionGoal(projection)}
       projection={projection}
       format={(kg) => String(Math.round(toDisplayWeight(kg, units) * 10) / 10)}
       unit={weightUnit(units)}

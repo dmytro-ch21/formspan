@@ -13823,6 +13823,11 @@ picture** check; none of them can be answered from a number.
     site reads the projection's own carried `goal`, never the separate
     `useWeightTrend`/`listPhases` value) and should be treated as covering the
     mechanism, with this scenario covering the observable symptom on a device.
+35. **The card's goal survives the same edit (N433).** Make the edit from 34,
+    then go back to Goals instead of opening `/goals/trend`. The weight card's
+    goal marker must show the NEW target, matching the full page one tap away,
+    and never the one that was live a moment ago. `weightTrendCard.test.tsx`
+    pins the mechanism: the card reads the projection's goal, not a phase fetch.
 
 ### W11 — the action pill stays inside the card at accessibility text sizes (`components/TrendCard.tsx`)
 

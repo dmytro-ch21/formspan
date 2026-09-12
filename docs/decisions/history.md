@@ -74869,6 +74869,38 @@ Lint adds nothing: the session screen's two `react-hooks/refs` warnings are the 
 
 **Reachability on a phone**: this is the phone — the session screen's hint under an exercise with history, and Library → an exercise's "Your last session".
 
+## 2026-09-12 — N433 (#714): the weight card on Goals takes its goal line from the projection, as the full trend screen does
+
+**What was wrong.** `components/WeightTrendCard.tsx` passed `goal={goalKg}` to its `TrendCard`. Its two inputs arrived on separate lifecycles:
+- `goalKg` came from `useWeightTrend`: the live phase's `target_weight_kg`, fetched through `listPhases`;
+- `projection` came from the plan payload Goals already holds.
+
+That is the pairing N429 (#690) removed from `app/goals/trend.tsx`. After a phase edit, the card's small chart could draw its goal at a target the projection was never built against, one tap away from a full screen that drew the fresh one.
+
+**Reproduced before the fix.** The new card tests, run against `main`:
+- the stale-target case received "▼ goal 80" (the phase target) where the fresh projection's 75 was expected;
+- the goalless case drew a goal marker where there should be none.
+
+**What changed.**
+- **The card** passes `goal={projectionGoal(projection)}`, the helper N429 put in `lib/trendSeries.ts`.
+- **The hook.** `goalKg` is gone from `useWeightTrend`'s return type and value, because the card was its last reader. Mobile `tsc --noEmit` is clean. A Python scan of `apps/mobile`, with a positive control, agrees: the remaining mentions are comments, plus the untyped mocks in `trendGoalLine.test.tsx` and `trendGoalFigure.test.tsx`, where the stale value stands for the race.
+
+**Tests.** `components/__tests__/weightTrendCard.test.tsx` gains two cases mirroring `trendGoalLine.test.tsx`:
+- a stale phase target of 80 beside a fresh projection of 75 draws the marker at 75;
+- a goalless projection draws no goal at all. The chart is asserted present, so the absence is about the goal, not the chart.
+
+Both failed on `main`, as above.
+
+**Checks.** 2 mutations on the fixed card, each caught by the first case, restored byte-identical and re-run to green (4/4):
+- **the card drawing no goal;**
+- **the card taking 80 from a second source** whenever the projection has a goal.
+
+**Not covered by a test.** The race on a device: which request answers first cannot be forced from the UI. Scenario 35 in `functional-scenarios.md` is that check.
+
+**Known gap, filed as F63 (#1168).** `frontend-reviewer` traced a case that predates this change and is not closed by it. A phase can have a target weight while the nutrition target cannot be derived (a profile gap such as no height). Goals then passes a null projection, `projectionGoal` returns null, and the card draws no goal line. The full screen has behaved the same way since N429. So the card now agrees with the full screen, and what both should show in that case is F63's decision, not this ticket's.
+
+**Reachability on a phone**: this is the phone — the weight card at the top of Goals.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

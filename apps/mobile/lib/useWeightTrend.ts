@@ -36,8 +36,6 @@ export type WeightTrend = {
   /** True until the first fetch settles. Render nothing rather than an absence. */
   loading: boolean;
   series: TrendSeries;
-  /** The live phase's target, or null — a maintenance phase has no number to hit. */
-  goalKg: number | null;
   projection: Projection;
   /** The LOCAL calendar day. Never a UTC date — see below. */
   today: string;
@@ -142,7 +140,6 @@ export function useWeightTrend(
   return {
     loading,
     series,
-    goalKg: phase?.target_weight_kg ?? null,
     projection,
     today,
     checkins: checkins ?? [],
