@@ -71,10 +71,10 @@ import { PressableScale } from '@/components/ui/PressableScale';
  * the promise the accent setting makes.
  */
 
-/** How solid the ring is, by kind. Work is the one you are counting on. */
 /** The ring's progress arc, driven on the UI thread — see `Ring` (F57/#1140). */
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
+/** How solid the ring is, by kind. Work is the one you are counting on. */
 const RING_OPACITY: Record<Countdown['kind'], number> = {
   work: 1,
   ready: 0.85,
@@ -357,6 +357,10 @@ function fractionOf(seconds: number, total: number): number {
  *
  * `active: false` arms nothing and writes nothing, which is what keeps a lone
  * rest (no run) from spending UI-thread animations on a bar that isn't shown.
+ * It also FORGETS that it armed: a set tick with auto-rest on ends a run
+ * without closing the surface, so a second run can bring the run bar back
+ * within one mount, and bridging from the fill the old run left behind would
+ * glide backwards across the bar (found in review). It jumps instead.
  */
 function useCountdownFraction(
   timer: Countdown,
@@ -380,7 +384,11 @@ function useCountdownFraction(
   const armed = useRef(false);
 
   useEffect(() => {
-    if (!active || reduced !== false) return;
+    if (!active) {
+      armed.current = false;
+      return;
+    }
+    if (reduced !== false) return;
     const first = !armed.current;
     armed.current = true;
     const leftMs = remainingAt(timer, Date.now()) * 1000;

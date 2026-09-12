@@ -74463,18 +74463,25 @@ N558 (#1047) made the collapsed bar drain continuously on the UI thread, and F55
 
 **The run bar is a different quantity, armed by the same rules.** It fills across the whole run, measured in time (`runProgress`). A second call of the same hook, with `fractionAt = runProgress(run, ·)`, arms it toward where the run will be when the current step ends. It is now a `scaleX` fill with `transformOrigin: 'left'`, clipped by the track's existing `overflow: hidden`. It is `active` only inside a run, so a lone rest spends no UI-thread animation on a bar that isn't shown, and N558's "armed once" count (two `withTiming` calls per rest) is unchanged.
 
-**Tests** (`components/__tests__/timerContinuity.test.tsx`, 22 → 28):
+**Tests** (`components/__tests__/timerContinuity.test.tsx`, 22 → 29):
 - **The ring rides the one drain.** After a rest arms, the `withTiming` count is still exactly two, and after 30 seconds the arc sits fully unwound: where the drain comes to rest, where a ring computed from `remaining` would sit a third unwound.
 - **Reduced motion.** With Reduce Motion on or unanswered, the ring steps with the digits.
 - **The run bar.** It is armed once, with its linear leg heading for 30 of 90 seconds at the end of the first step. It is a full-width `scaleX` fill growing from the left, it steps with the digits under Reduce Motion, and it doesn't exist on a lone rest.
+- **±15s and pause read the ring itself.** N558's two re-arm tests now also assert the arc, so "the ring re-arms from where it is" is observed rather than inferred from the bar.
+- **A run bar that comes back jumps.** A run ended by a set tick, then a second run within the same mount: exactly one arm jumps, the run bar's, onto the new run's start.
 - **Finding the arc.** The helper reads `strokeDasharray` as the first array entry, because react-native-svg normalises it to an array on the host node; reading it as a number made the expected value NaN on the first run.
 
-**Checks.** 6 mutations, all caught as test failures, each restored byte-identical and re-run green:
+**Checks.** 8 mutations, all caught as test failures, each restored byte-identical and re-run green:
 - **ring:** frozen;
 - **one drain:** the card arming its own copy (caught by N558's arm-count tests);
-- **run bar:** armed with no run; aimed at the wrong moment; animating `width` again; losing its left-edge origin.
+- **run bar:** armed with no run; aimed at the wrong moment; animating `width` again; losing its left-edge origin;
+- **review fixes:** the run bar's armed flag not cleared when its run ends; the ring frozen (caught by the ±15s and pause tests' new arc assertions).
 
 The last one first survived, because no test read the origin, so an assertion was added before it was run.
+
+**Review.** `ac-verifier` found the code and test criteria met, but criterion 3 (±15s and pause re-arm the ring from its current position) only by inference: the ring read the value those tests pinned, and no test read the ring there. Both now assert the arc. Device feel and the owner's motion gate are outstanding by design. `frontend-reviewer` found nothing blocking and made two suggestions, both taken:
+- **A backwards glide the old run bar could not produce.** A set tick with auto-rest on ends a guided run without closing the surface (`startRest` clears `run` but replaces `timer`), so a second run could bring the run bar back inside one mount and bridge from the old run's fill. The hook now forgets that it armed while inactive, so that arm jumps.
+- **A displaced doc comment.** `RING_OPACITY`'s comment had ended up above `AnimatedCircle`; it is back where it belongs.
 
 **Not measured.** Since F55 the card stays mounted while minimised, so its ring now animates while hidden. That is on the UI thread with no React renders, but its cost on a device is unmeasured. Feel is the ticket's `NEEDS HUMAN EVIDENCE`: expanding mid-rest on a Release build shows a ring as smooth as the bar, and a 90-second rest never visibly steps. **The motion gate is the owner's** (`/review-animations`).
 

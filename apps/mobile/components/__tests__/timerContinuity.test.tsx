@@ -230,6 +230,9 @@ describe('defect 3 — the drain is one UI-thread animation per change, not a st
     const [drainTo, drain] = timing.mock.calls[1];
     expect(drainTo).toBe(0);
     expect(drain!.duration).toBeCloseTo(75_000 - MS.control, -2);
+    // F57: the card's ring re-arms with it, from the same value — it IS that value.
+    const arc = ringArc();
+    expect(arc.offset).toBeCloseTo(arc.circumference * (1 - drainScale()), 5);
   });
 
   it('holds its width while paused, and arms nothing further until resumed', async () => {
@@ -246,6 +249,9 @@ describe('defect 3 — the drain is one UI-thread animation per change, not a st
     await advance(10_000);
     expect(timing.mock.calls.length).toBe(1);
     expect(drainScale()).toBeCloseTo(60 / 90, 2);
+    // F57: the card's ring holds exactly where the bar holds.
+    const arc = ringArc();
+    expect(arc.offset).toBeCloseTo(arc.circumference * (1 - 60 / 90), 2);
   });
 
   it('with Reduce Motion ON, animates nothing and steps with the digits', async () => {
@@ -550,6 +556,30 @@ describe('F57 — the expanded ring and the run bar move on the UI thread', () =
     expect(timing).not.toHaveBeenCalled();
     // 10s into the 30s work step: 10 of 90 seconds of the run.
     expect(runFillScale().scaleX).toBeCloseTo(10 / 90, 2);
+  });
+
+  it('a run bar that comes back after its run ended jumps to its start, never glides from the old fill', async () => {
+    answerReduceMotion(false);
+    await startRunOf(RUN);
+    await advance(20_000);
+    // What a set tick does with auto-rest on: the run ends, the timer does not,
+    // so the surface — and the run bar's shared value — stay mounted.
+    await act(async () => {
+      countdown().startRest(60, 'Back squat', 'ex-1');
+    });
+    await act(async () => {});
+
+    const timing = jest.spyOn(Reanimated, 'withTiming');
+    await act(async () => {
+      countdown().startRun(RUN, 'exercise');
+    });
+    const jumps = timing.mock.calls
+      .map(([toValue, config]) => ({ toValue: toValue as number, ...(config as { duration?: number }) }))
+      .filter((c) => c.duration === 0);
+    // Exactly one arm jumps — the run bar's, onto the new run's start. The drain
+    // bridges as before, because its bar never stopped being on screen.
+    expect(jumps).toHaveLength(1);
+    expect(jumps[0].toValue).toBe(0);
   });
 
   it('a lone rest has no run bar, so it arms none', async () => {
