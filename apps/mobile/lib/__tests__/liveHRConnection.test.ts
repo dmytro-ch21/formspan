@@ -99,6 +99,15 @@ const tick = async (n = 3) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
 };
 
+/** Holds the thread, as a loaded host does between event-loop turns. Reads the
+ *  real `Date`, so a fake clock around it must leave `Date` unfaked. */
+const starve = (ms: number) => {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    // busy-wait on purpose
+  }
+};
+
 let ble: ReturnType<typeof fakeManager>;
 
 beforeEach(() => {
@@ -144,14 +153,6 @@ describe('startLiveHR / stopLiveHR are serialized', () => {
     jest.clearAllTimers();
     jest.useRealTimers();
   });
-
-  /** Holds the thread, as a loaded host does between event-loop turns. */
-  const starve = (ms: number) => {
-    const until = Date.now() + ms;
-    while (Date.now() < until) {
-      // busy-wait on purpose
-    }
-  };
 
   it('a background stop and an immediate foreground start do NOT overlap — the reconnect waits for the disconnect', async () => {
     // The sequence `orchestrator.ts` produces on a quick app switch: it
@@ -299,18 +300,44 @@ describe('a dropped link', () => {
   it('a reconnect firing while the app is being backgrounded does not overlap the disconnect', async () => {
     // The reconnect timer is the one connect that does not start life inside
     // a queued operation, so it is the one that could overlap a stop.
-    await connect(A);
-    ble.dropLink('A');
-    await tick();
-    void stopLiveHR(); // athlete backgrounds the app mid-backoff
-    await tick();
-    expect(ble.events.filter((e) => e === 'connect-issued:A')).toHaveLength(1); // only the original
+    //
+    // F54/#1118 — two faults here, found together. The first backoff
+    // (`RECONNECT_DELAYS_MS[0]`, 1_000ms) ran on a real clock, so a host that
+    // stalled past it before `stopLiveHR` fired it first, and the count below
+    // read as an overlap that never happened. And the test could not see the
+    // thing its last comment claims: with `stop` leaving the retry timer AND
+    // `active` in place, a second native connect WAS issued after the stop,
+    // and the status stayed 'off' — a connect in flight dispatches nothing.
+    // So the backoff runs on a fake clock (immediates and `Date` stay real, as
+    // in the serialized block above), and the count is asserted again once the
+    // clock is past it. `try`/`finally` rather than a nested describe keeps
+    // this test's name, which the history entries cite, unchanged.
+    jest.useFakeTimers({ doNotFake: ['Date', 'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask'] });
+    try {
+      await connect(A);
+      ble.dropLink('A');
+      // The backoff is armed, and the fake clock is what holds it — if this
+      // is 0 the stall below is back to measuring the host.
+      expect(jest.getTimerCount()).toBe(1);
+      // Past the first backoff: on a real clock this stall alone reproduces
+      // F54, every run.
+      starve(1_100);
+      await tick();
+      void stopLiveHR(); // athlete backgrounds the app mid-backoff
+      await tick();
+      expect(ble.events.filter((e) => e === 'connect-issued:A')).toHaveLength(1); // only the original
 
-    ble.settleCancel('A');
-    await new Promise((r) => setTimeout(r, 1_200));
-    await tick();
+      ble.settleCancel('A');
+      jest.advanceTimersByTime(1_200); // past where the backoff would have fired
+      await tick();
 
-    // The link is off and stayed off — no stray reconnect resurrected it.
-    expect(getLiveHR().status).toBe('off');
+      // The link is off and stayed off — no stray reconnect resurrected it,
+      // and none was issued. The count is the only thing that can see one.
+      expect(getLiveHR().status).toBe('off');
+      expect(ble.events.filter((e) => e === 'connect-issued:A')).toHaveLength(1);
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   }, 10_000);
 });
