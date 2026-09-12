@@ -3,7 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { isOffline, retryAfterOf } from './apiError';
 import { countBlockedRows, countPendingSessions, countPendingWorkouts, syncSessions } from './sessionStore';
-import { countPendingPlans, syncPlans } from './plan';
+import { countPendingPlans, countRefusedPlans, syncPlans } from './plan';
 import { pendingFoodCount, syncFood } from './foodLog';
 import { pendingSequenceCount, syncSequences } from './sequences';
 import { countRejectedRows } from './rejectedRows';
@@ -69,7 +69,9 @@ export type SyncState = {
    *
    * Sessions and workouts the server refused but the phone still owes
    * (`countBlockedRows`), plus food entries and sequences it refused and has
-   * stopped sending (`countRejectedRows`). Separate from `pending` because
+   * stopped sending (`countRejectedRows`), plus plans in either state
+   * (`countRefusedPlans`, N564/#1106 — a refused plan, and a removal the server
+   * refused and the phone put back). Separate from `pending` because
    * they answer opposite questions: pending is "this resolves itself",
    * needsAttention is "this never will".
    *
@@ -242,13 +244,13 @@ export async function refreshPending(): Promise<void> {
 /**
  * Recount the rows that need a person — N167/#544.
  *
- * Emitted only when BOTH halves were read. Half a count is not a smaller
+ * Emitted only when EVERY part was read (three since N564 added plans). Half a count is not a smaller
  * truth, it is a wrong one: if the half that failed held the only refused row,
  * emitting the other half would paint `0` and the chip would say nothing is
  * wrong. So a failed read leaves the last known value standing — the
  * conservative direction for a number whose job is to keep a problem visible.
- * This is the opposite of the sync screen's two lists, which render
- * independently, and deliberately so: there each list is complete in itself,
+ * This is the opposite of the sync screen's lists (three since N564), which
+ * render independently, and deliberately so: there each list is complete in itself,
  * here one number is the sum.
  */
 async function refreshNeedsAttention(): Promise<void> {
@@ -272,14 +274,21 @@ async function refreshNeedsAttention(): Promise<void> {
   try {
     if (!creds) return;
     const userID = creds.userID;
-    const [blocked, refused] = await Promise.allSettled([
+    const [blocked, refused, plans] = await Promise.allSettled([
       countBlockedRows(userID),
       countRejectedRows(userID),
+      countRefusedPlans(userID),
     ]);
     // An account switch mid-await must not paint the previous athlete's count.
     if (creds?.userID !== userID) return;
-    if (blocked.status !== 'fulfilled' || refused.status !== 'fulfilled') return;
-    emit({ needsAttention: blocked.value + refused.value });
+    if (
+      blocked.status !== 'fulfilled' ||
+      refused.status !== 'fulfilled' ||
+      plans.status !== 'fulfilled'
+    ) {
+      return;
+    }
+    emit({ needsAttention: blocked.value + refused.value + plans.value });
   } catch {
     // Advisory, like `pending`. The last known value stands — the conservative
     // direction for a number whose job is to keep a problem visible.

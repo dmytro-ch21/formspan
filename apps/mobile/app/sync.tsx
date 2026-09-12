@@ -8,12 +8,20 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { triggerBiometricSyncNow } from '@/lib/biometricSync';
 import { useModules } from '@/lib/ModulesProvider';
+import { shortDate } from '@/lib/calendar';
+import {
+  acknowledgeRefusedRemoval,
+  refusedPlans,
+  unplanSession,
+  type RefusedPlan,
+} from '@/lib/plan';
+import { formatPlanTime } from '@/lib/planTime';
 import { discardRejectedRow, rejectedRows, type RejectedRow } from '@/lib/rejectedRows';
 import { blockedRows, retryBlockedRow, type BlockedRow } from '@/lib/sessionStore';
 import { sessionHref } from '@/lib/startSession';
-import { syncNow, useSyncState } from '@/lib/sync';
+import { refreshPending, request, syncNow, useSyncState } from '@/lib/sync';
 import { useAuthToken } from '@/lib/useAuthToken';
-import { fallbackModules, type Module } from '@/lib/modules';
+import { fallbackModules, labelFor, type Module } from '@/lib/modules';
 import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
@@ -58,10 +66,21 @@ import { PressableScale } from '@/components/ui/PressableScale';
  * see" — and this screen read neither. A refused food entry left the pending
  * count, kept its reason, and was invisible.
  *
- * **Which is why "Nothing is stuck" now depends on both lists.** A screen
+ * **Which is why "Nothing is stuck" now depends on every list** — both of
+ * these, and the plans list below since N564 (`nothingListed`). A screen
  * reassuring an athlete while their breakfast sits refused underneath it is
  * the worst state this file can be in: it is the app being confidently wrong
  * about the athlete's own record.
+ *
+ * **PLANS are a third list (N564/#1106), because neither button above fits
+ * them.** A refused plan is still owed, like a blocked session — but a plan has
+ * no edit screen on the phone to "Open" (it is changed by removing it and
+ * planning the day again), and "Try again" replays a create the server has
+ * already refused. So its recovery is the athlete's own Remove. A plan whose
+ * REMOVAL was refused is the other state: the phone put it back, and the only
+ * thing left to decide is to keep it. Before this list both were shown nowhere
+ * — a refused plan counted as "1 to sync" forever, and a refused removal just
+ * reappeared on the calendar.
  *
  * **"Sync now" used to mean only the offline outbox** (`lib/sync.ts`'s
  * `syncNow`) — activities, sessions, workouts. N522/#934: the biometric
@@ -82,6 +101,7 @@ export default function SyncScreen() {
   const state = useSyncState();
   const [rows, setRows] = useState<BlockedRow[] | null>(null);
   const [refused, setRefused] = useState<RejectedRow[]>([]);
+  const [plans, setPlans] = useState<RefusedPlan[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -97,9 +117,10 @@ export default function SyncScreen() {
     // independent reads feed one screen, in `biometricSync.ts`'s words: "a
     // slow or failing VO₂max read must not block session enrichment, and vice
     // versa." Same shape, same answer.
-    const [blocked, rejected] = await Promise.allSettled([
+    const [blocked, rejected, planProblems] = await Promise.allSettled([
       blockedRows(userId),
       rejectedRows(userId),
+      refusedPlans(userId),
     ]);
     // Each list is set on its own. A failed read leaves that half alone rather
     // than becoming an error state on the repair screen — `null` for the
@@ -108,6 +129,7 @@ export default function SyncScreen() {
     // make on a device with nothing refused, which is the safe direction.
     if (blocked.status === 'fulfilled') setRows(blocked.value);
     if (rejected.status === 'fulfilled') setRefused(rejected.value);
+    if (planProblems.status === 'fulfilled') setPlans(planProblems.value);
   }, [userId]);
 
   useFocusEffect(
@@ -141,6 +163,51 @@ export default function SyncScreen() {
       await load();
     }
   }
+
+  /**
+   * Remove a refused plan — the same `unplanSession` the Plan tab's Remove
+   * calls, so there is one delete path and not two. The tombstone leaves this
+   * list at once (`BLOCKED_ROW` excludes tombstones) and becomes pending; the
+   * next run drops a never-sent plan locally without a request, or sends the
+   * delete for one the server holds.
+   */
+  async function removePlan(p: RefusedPlan) {
+    if (!userId) return;
+    setBusy(p.id);
+    try {
+      await unplanSession(userId, p.id);
+      request('plan-removed');
+    } catch {
+      // The list below is re-read either way and reports what is really there.
+    } finally {
+      setBusy(null);
+      // The chip reads `needsAttention` and `pending`, and this just moved a
+      // row from one to the other — recount rather than wait for a run.
+      await refreshPending();
+      await load();
+    }
+  }
+
+  /** Keep a plan whose removal the server refused. Sends nothing. */
+  async function keepPlan(p: RefusedPlan) {
+    if (!userId) return;
+    setBusy(p.id);
+    try {
+      await acknowledgeRefusedRemoval(userId, p.id);
+    } catch {
+      // As above: the re-read is the report.
+    } finally {
+      setBusy(null);
+      await refreshPending();
+      await load();
+    }
+  }
+
+  // "Nothing is stuck" may only be said when EVERY list is empty. Each list
+  // that joined this screen has had to be added here, and a list left out is
+  // the screen reassuring the athlete above the row it forgot.
+  const nothingListed =
+    rows !== null && rows.length === 0 && refused.length === 0 && plans.length === 0;
 
   return (
     <View style={styles.container} testID="sync-screen">
@@ -193,7 +260,7 @@ export default function SyncScreen() {
 
         {rows === null ? (
           <ActivityIndicator accessibilityLabel="Loading" style={styles.spinner} />
-        ) : rows.length === 0 && refused.length === 0 && state.lastError ? (
+        ) : nothingListed && state.lastError ? (
           // N493 — the chip that sends an athlete here reads `lastError` for
           // ANY failure (see `SyncChip.tsx`'s `chipFor`), but this list is
           // deliberately scoped to PERMANENT ones only (this file's own doc
@@ -210,7 +277,7 @@ export default function SyncScreen() {
               Nothing here needs your input yet — this keeps retrying on its own.
             </Text>
           </View>
-        ) : rows.length === 0 && refused.length === 0 ? (
+        ) : nothingListed ? (
           <View style={styles.empty} testID="sync-nothing-stuck">
             <Text style={styles.emptyTitle}>Nothing is stuck</Text>
             <Text style={styles.emptyBody}>
@@ -261,6 +328,61 @@ export default function SyncScreen() {
                 </View>
               </View>
             ))}
+          </View>
+        )}
+
+        {plans.length > 0 && (
+          <View style={styles.list} testID="sync-plans">
+            <Text style={styles.listHeading}>Plans</Text>
+            {plans.map((p) => {
+              const { title, when, spokenWhen } = refusedPlanLabel(p, modules);
+              return (
+                <View key={`plan:${p.id}`} style={styles.row} testID={`plan-${p.id}`}>
+                  <Text style={styles.rowName}>{title}</Text>
+                  <Text style={styles.rowKind}>{when}</Text>
+                  {/* The server's own words, same rule as the lists around it. */}
+                  <Text style={styles.rowError}>{p.reason}</Text>
+                  <Text style={styles.emptyBody}>
+                    {p.refused === 'plan'
+                      ? 'Only on this phone. Remove it, then plan the day again.'
+                      : 'This could not be removed, so it is still on your plan.'}
+                  </Text>
+                  <View style={styles.rowActions}>
+                    {/* One action per state, and never Try again: both states
+                        are answers the server will give identically. */}
+                    {p.refused === 'plan' ? (
+                      <PressableScale
+                        onPress={() => void removePlan(p)}
+                        disabled={busy === p.id}
+                        style={styles.rowAction}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${title} on ${spokenWhen} from your plan`}
+                        accessibilityState={{ busy: busy === p.id, disabled: busy === p.id }}
+                        testID={`remove-plan-${p.id}`}
+                      >
+                        <Text style={[styles.retryText, { color: accent.ink }]}>
+                          {busy === p.id ? 'Removing…' : 'Remove from plan'}
+                        </Text>
+                      </PressableScale>
+                    ) : (
+                      <PressableScale
+                        onPress={() => void keepPlan(p)}
+                        disabled={busy === p.id}
+                        style={styles.rowAction}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Keep ${title} on ${spokenWhen}`}
+                        accessibilityState={{ busy: busy === p.id, disabled: busy === p.id }}
+                        testID={`keep-plan-${p.id}`}
+                      >
+                        <Text style={[styles.retryText, { color: accent.ink }]}>
+                          {busy === p.id ? 'Keeping…' : 'Keep it'}
+                        </Text>
+                      </PressableScale>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -328,6 +450,30 @@ export default function SyncScreen() {
 export function destinationOf(row: BlockedRow, modules: Module[] = fallbackModules()): Href {
   if (row.kind === 'workout') return `/workout/${row.id}`;
   return sessionHref({ id: row.id, sport: row.sport }, modules);
+}
+
+/**
+ * How a refused plan is named on the list: the template when this device knows
+ * it, else the sport's label — and when, as the day and the time if one was
+ * given. `shortDate` reads the `YYYY-MM-DD` as a calendar date, never through
+ * the device's zone.
+ *
+ * `spokenWhen` is the same fact without the middots, for the buttons'
+ * accessibility labels: some screen readers read "·" aloud, and "Remove Push day
+ * on plan dot 15 Sep dot 7:00 PM" is noise in the one sentence that says what a
+ * tap will do (frontend-reviewer, N564).
+ */
+export function refusedPlanLabel(
+  p: RefusedPlan,
+  modules: Module[] = fallbackModules(),
+): { title: string; when: string; spokenWhen: string } {
+  const time = formatPlanTime(p.timeOfDayMinutes);
+  const date = shortDate(p.day);
+  return {
+    title: p.workoutName || labelFor(modules, p.sport),
+    when: `plan · ${date}${time ? ` · ${time}` : ''}`,
+    spokenWhen: `${date}${time ? ` at ${time}` : ''}`,
+  };
 }
 
 const styles = StyleSheet.create({

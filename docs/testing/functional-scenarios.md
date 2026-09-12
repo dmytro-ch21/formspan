@@ -23535,6 +23535,7 @@ only route to the repair screen — sends the athlete there instead of retrying.
 - **A plan the server refuses still counts as pending forever and appears on
   no screen.** Plans are a separate outbox with both defects at once, and are
   split into their own ticket rather than absorbed here — N564, #1106.
+  **Now covered: see "Sync — plans the server refused (N564 / #1106)" below.**
 
 ## N524 — an empty VO₂max chart explains what writes a reading, instead of counting missing ones (`apps/mobile/lib/vo2MaxSource.ts`'s `vo2MaxEmptyCopy`/`vo2MaxReadingOrigin`/`readingAgePhrase`/`latestReadingOn`/`vo2MaxRowDetail`, `apps/mobile/app/vo2max/trend.tsx`, `apps/mobile/app/(tabs)/you.tsx`, #939)
 
@@ -23662,3 +23663,62 @@ most once per screen mount.
   the dialog was ever seen before Sign-in independent of opening a running
   screen (the original report's exact circumstance, which static analysis
   could not reproduce from the code as it stands).
+
+## Sync — plans the server refused (N564 / #1106)
+
+Plans are their own outbox (`apps/mobile/lib/plan.ts`). A plan the server
+refuses no longer counts as "waiting to sync" forever; it is counted as
+**needs attention** and listed on the Sync screen under **Plans**, with the
+server's own reason and one action. A plan is changed on the phone by removing
+it and planning the day again. There is no plan edit screen on mobile.
+
+### Happy path
+
+- **A refused plan reads as needing attention, not as waiting.** Plan a day
+  the server will refuse permanently (a 4xx, for example a sport the server
+  does not know), and let sync run. **Pass:** the chip reads "1 needs
+  attention", tapping it opens Sync, the plan is under "Plans" with its sport
+  (or template name), its day and time, and the server's reason, and "waiting
+  to sync" does not count it. **Fail:** "1 to sync" forever, or "Nothing is
+  stuck", or "Still trying".
+- **Removing it clears it.** Tap "Remove from plan". **Pass:** it leaves the
+  list at once, the chip stops reading "needs attention", the plan is gone from
+  the week, and no request for it reaches the server (it was never saved
+  there). **Fail:** it stays listed, or the badge keeps counting it.
+- **Planning the day again syncs.** After removing it, plan the same day
+  correctly on the Plan tab. **Pass:** the new plan syncs and reaches the
+  server. **Fail:** it is listed as refused, or never sends.
+- **A refused removal is explained.** Remove a plan the server refuses to
+  delete (a 403, for instance). **Pass:** the plan reappears on the week, and
+  Sync lists it under "Plans" saying it could not be removed, with the server's
+  reason and a "Keep it" button. "Waiting to sync" does not count it. **Fail:**
+  it reappears with no word anywhere, or counts as waiting forever.
+- **Keep it.** Tap "Keep it" on a refused removal. **Pass:** it leaves the
+  list and the attention count, the plan stays on the week, and nothing is sent.
+
+### Edge cases and errors
+
+- **Cold start.** Force-quit and reopen with a refused plan on the device.
+  **Pass:** the chip still reads "needs attention" and a tap opens Sync.
+- **Only a refused plan, and the last run failed.** Sync lists the plan. It
+  never shows "Still trying" above it, and never "Nothing is stuck".
+- **A transient failure** (no signal, a 5xx) on a plan is NOT listed. It stays
+  in "waiting to sync" and retries on its own.
+- **A removed plan that still carries an old refusal** (a tombstone with an
+  error) counts as waiting and is not listed. It goes out on its own, and
+  listing it would show a plan the athlete already removed.
+- **Two accounts on one device.** One athlete's refused plans are never listed
+  or counted for the other.
+- **A plan whose template is not cached** is named by its sport rather than
+  left blank.
+
+### Needs a device
+
+- **Steps 1 and 2 of #1106, as written.** Create a plan the server refuses and
+  let sync run: the badge does not count it, the chip reads "1 needs
+  attention", Sync lists it with the reason. Then fix it, which on the phone
+  means Remove and plan the day again: it syncs. No test reaches the real
+  chip, the real server's refusal text, or the real week redrawing.
+- **A refused removal on a real server.** The server currently has no plan
+  delete that refuses with anything but 404, so this may need a staging
+  backend change or a proxy to produce. Record how it was produced.
