@@ -74528,7 +74528,7 @@ The provenance check reports a fact whose row is gone, a fact claiming a fresher
 - `__tests__/app/todayScreen.test.tsx` (+1): Today calls `refreshBody` with the signed-in athlete and its 30-day window.
 - `lib/__tests__/schema.test.ts` (+3): fresh-install shape, a device stamped 42 gains the tables, and re-running is not an error and keeps cached rows.
 
-**Mutation-checked: 34 mutations, all red, none by a suite failing to run.** Each was applied on disk (read back and compared), run against the suites that should catch it, and restored from a byte copy. The five target suites were green before the first mutation (194/194, same session) and green again, re-run, after the last restore (194/194).
+**Mutation-checked: 35 mutations, all red, none by a suite failing to run.** Each was applied on disk (read back and compared), run against the suites that should catch it, and restored from a byte copy. The five target suites were green before the first mutation (194/194, same session) and green again, re-run, after the last restore (194/194).
 
 **The first mutation run measured nothing, and said so only because it was checked.** It invoked `pnpm run test -- --ci --json --outputFile=…`. pnpm handed every flag after `--` to jest as a **test path pattern** (jest's own line: *"Ran all test suites matching /--ci\|--json\|--outputFile=…/"*), so no JSON report was ever written. All 34 results came back as empty errors while the suites really ran and went red underneath. The runner now calls `pnpm exec jest` with `TZ` set at launch, and exits loudly when a report is missing or zero tests ran.
 
@@ -74568,8 +74568,18 @@ The provenance check reports a fact whose row is gone, a fact claiming a fresher
 | M29 | SCHEMA_VERSION left at 42 | a fresh install ends up at the current schema version (+31 more) |
 | M32 | the cache tables are never created (both the unconditional CREATEs and the v43 branch) | a fresh install has the body read cache, holding neither photo links, notes nor an outbox flag (N568/#… (+2 more) |
 | M33 | the weight renders before the unit preference is read | states no weight until the unit preference is read — never kilograms for a frame to a pounds athlete |
+| M34 | the check-in row's accessibility label drops "Last updated" (added after review, run on its own: 10/10 before, 1 red mutated, 10/10 re-run after restore) | a value fetched days ago says when, on the value itself — and nothing in it reads as live |
 
 **Not mutation-tested, and why.** `refreshBody`'s `if (userId)` is redundant with `user_id NOT NULL`: a write filed under no athlete already fails the constraint and is swallowed, so no test can tell it apart. The `current < 43` branch and the unconditional `CREATE`s each cover a stamped-42 device on their own, by design, like every table here. Removing either alone stays green; removing both is M32.
+
+**Review (`/pre-merge`).**
+
+- **`pre-merge-checker`:** `CI=1 pnpm run verify` exited 0 on `16cb98a7`, with 48 links and mobile at 362 suites / 5,871 tests. It flagged a jest "worker process has failed to exit gracefully" warning. It isn't from the new fixture tests: `bodyCache.test.ts` and `dayPanel.test.ts` run clean under `--detectOpenHandles`. Where it does come from was not traced.
+- **`ac-verifier`:** 7 MET, 1 NEEDS HUMAN EVIDENCE (the airplane-mode device check), 0 NOT MET. It graded the mutation criterion from the recorded results JSON and spot-checked the mutated strings against the committed files, rather than re-running them in a tree `verify` was using.
+- **`frontend-reviewer`:** no `[blocking]` findings. It judged the empty-response-after-account-switch gap below acceptable: a false absence under the previous athlete, never a leak.
+- **Its one `[suggestion]` was applied.** A tappable row's accessibility label replaces its children, so VoiceOver never heard "Last updated" on the Body rows — the one line that stops a cached value being heard as live. Both rows' labels now carry the value and its fetched time. A screen-test assertion pins it and went red when the check-in label dropped the time (M34). The panel's other tappable rows keep the file's existing action-only labels; that gap predates this ticket.
+- **`backend-reviewer`:** not run, because nothing under `backend/**` or `contracts/**` changed.
+- **Motion gate:** not applicable. The diff adds no animation, transition, gesture or haptic.
 
 **Gaps this leaves, stated.**
 

@@ -351,6 +351,11 @@ describe('last-known body values, offline (N568, #1129)', () => {
     expect(within(checkin).getByText('82.4kg')).toBeTruthy();
     expect(within(checkin).getByTestId('day-updated-checkin').props.children).toBe(label);
     expect(within(phase).getByTestId('day-updated-phase').props.children).toBe(label);
+    // A screen reader hears the same disclosure: a tappable row's label replaces
+    // its children, so the label itself must carry the fetched time.
+    expect(checkin.props.accessibilityLabel).toContain(label);
+    expect(checkin.props.accessibilityLabel).toContain('82.4kg');
+    expect(phase.props.accessibilityLabel).toContain(label);
 
     // Not worded as today's: no clock-only label, nothing claiming to be current.
     expect(screen.queryByText('Last updated 16:00')).toBeNull();

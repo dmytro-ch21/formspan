@@ -345,20 +345,28 @@ function BodyBlock({
   const { checkin, phase } = panel;
   if (checkin.state === 'unread' && phase.state === 'unread') return null;
 
+  // A tappable row's accessibility label REPLACES what its children say, so the
+  // "Last updated" line would be silent to VoiceOver — and it is the one line on
+  // these rows that stops a cached value being heard as a live one. So the label
+  // carries the value and its fetched time before it names the action. Raised in
+  // review; the other panel rows keep the file's existing shape.
+  const checkinFact = checkin.state === 'ready' ? checkin.value.fact : null;
+  const phaseFact = phase.state === 'ready' ? phase.value.fact : null;
+
   return (
     <RNView style={styles.section}>
       <SectionHeader label="Body" />
 
       {checkin.state === 'unavailable' && <Unavailable what="checkin" />}
-      {checkin.state === 'ready' && checkin.value.fact?.kind === 'last-checkin' && (
+      {checkin.state === 'ready' && checkinFact?.kind === 'last-checkin' && (
         <FactRow
-          fact={checkin.value.fact}
+          fact={checkinFact}
           eyebrow="Last check-in"
-          title={checkinTitle(checkin.value.fact.checkin, units, unitsReady)}
-          meta={`Measured ${shortDate(checkin.value.fact.checkin.measured_on)}`}
+          title={checkinTitle(checkinFact.checkin, units, unitsReady)}
+          meta={`Measured ${shortDate(checkinFact.checkin.measured_on)}`}
           detail={lastUpdatedLabel(checkin.value.fetchedAt, now)}
           detailTestID="day-updated-checkin"
-          actionLabel="Open your weight trend"
+          actionLabel={`Last check-in: ${checkinTitle(checkinFact.checkin, units, unitsReady)}, measured ${shortDate(checkinFact.checkin.measured_on)}. ${lastUpdatedLabel(checkin.value.fetchedAt, now)}. Opens your weight trend.`}
           onPress={() => open('/goals/trend')}
         />
       )}
@@ -376,15 +384,15 @@ function BodyBlock({
       )}
 
       {phase.state === 'unavailable' && <Unavailable what="phase" />}
-      {phase.state === 'ready' && phase.value.fact?.kind === 'phase-goal' && (
+      {phase.state === 'ready' && phaseFact?.kind === 'phase-goal' && (
         <FactRow
-          fact={phase.value.fact}
+          fact={phaseFact}
           eyebrow="Phase goal"
-          title={PHASE_LABELS[phase.value.fact.phase.kind]?.label ?? 'Phase'}
-          meta={phaseMeta(phase.value.fact.phase, units, unitsReady)}
+          title={PHASE_LABELS[phaseFact.phase.kind]?.label ?? 'Phase'}
+          meta={phaseMeta(phaseFact.phase, units, unitsReady)}
           detail={lastUpdatedLabel(phase.value.fetchedAt, now)}
           detailTestID="day-updated-phase"
-          actionLabel="Open your phase"
+          actionLabel={`Phase goal: ${PHASE_LABELS[phaseFact.phase.kind]?.label ?? 'Phase'}, ${phaseMeta(phaseFact.phase, units, unitsReady)}. ${lastUpdatedLabel(phase.value.fetchedAt, now)}. Opens your phase.`}
           onPress={() => open('/phase')}
         />
       )}
