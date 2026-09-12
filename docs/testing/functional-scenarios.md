@@ -10116,6 +10116,14 @@ regular.
 - Finish the session offline, then sync: the value survives. Then EDIT the
   session and save again — `replaceSets` replaces every row, so this is where a
   client shape that forgot the field would silently drop it.
+- **A finished set shows its assistance** (F25, #707). Log 8 reps with 3
+  assisted and finish the session → the completed row reads **"8 reps · 3
+  assisted"**, and a loaded one reads "8 × 30kg (60kg total) · 2 assisted". Check
+  all three places that read it: the row itself, its **VoiceOver** label ("Set 1.
+  8 reps · 3 assisted"), and a **collapsed** exercise group's headline. Before
+  F25 all three said "8 reps", exactly like an unaided set.
+- **Assisted 0, or never recorded, adds nothing** to the row — "0 assisted" is
+  not something an athlete asked to hear back.
 
 ### Drop sets
 
