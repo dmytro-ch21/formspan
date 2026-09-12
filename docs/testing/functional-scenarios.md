@@ -13491,6 +13491,13 @@ phone scenario.
 - A noun longer than 24 characters, one containing a control character, and one
   with a leading or trailing space are refused by the server. The client trims
   before sending, so a trailing space never reaches it.
+- **A noun other than "cup" pluralises the way English does** (L18). Author a
+  tracker whose word for one tap is "glass": Today's card reads "1 of 8
+  glasses", the tracker list "8 glasses a day", the form's preview "3 of 6
+  glasses", and once stopped, "in glasses" — never "glasss". "berry" reads
+  "berries", "day" reads "days", "scoop" reads "scoops". A target of one still
+  reads "1 of 1 glass". Known and accepted misses: "quiz" reads "quizes", and a
+  multi-word noun pluralises its last word ("scoop of proteins").
 
 ### Archiving vs deleting
 

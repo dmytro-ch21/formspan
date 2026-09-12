@@ -73180,6 +73180,87 @@ fresh Simulator install (delete the app first) confirming the dialog no
 longer loops when starting a run, and specifically noting whether it was
 ever seen before Sign-in independent of any running screen.
 
+## 2026-09-11 — L18 (#1125): `pluralise` stops writing "glasss" for an athlete's own noun
+
+**What was wrong.** `apps/mobile/lib/trackerModel.ts`'s `pluralise(noun, n)`
+returned `noun` for one and appended a bare `s` otherwise. That was only ever
+right because every preset in `backend/internal/modules/tracker/presets.go`
+says "cup" — and `Tracker.count_noun` has been **athlete-authored** since N78,
+so a tracker whose word for one tap is "glass" read "1 of 8 glasss" on Today,
+Food and the day panel, "8 glasss a day" in the tracker list, "in glasss" on a
+stopped tracker, and "3 of 6 glasss" in the create form's own preview. Nothing
+athlete-facing had ever pluralised a word that was not "cup"; a `dayPanel.test.ts`
+fixture that happened to say "glass" during N541 tranche 1 (#972) is what showed
+it.
+
+**The rules, and deliberately no more.** A hiss (`-s`, `-ss`, `-sh`, `-ch`,
+`-x`, `-z`) takes `es`; a CONSONANT before `y` takes `ies` (berry → berries,
+day → days); everything else keeps `+s`. This is the set of English endings a
+count noun is actually likely to have, not an inflection library, and the
+misses are written into the doc comment so they read as decided rather than
+overlooked: "quizes", "potatos", "leafs", a hard "ch" getting `es`, and a
+multi-word noun pluralising its last word ("scoop of proteins"). Each is
+cosmetic — the count beside it is still right — and an athlete who minds can
+choose another word. A table of irregulars would have been a bigger surface for
+a smaller gain.
+
+**All-caps, and a vector that could not fail.** The first draft matched
+case-insensitively, left the suffix lower case, and tested the y-rule's `i`
+flag with `pluralise('DAY', 2) === 'DAYs'` under a comment saying the flag was
+what prevented "DAies". Neither held: drop the flag and `Y` stops matching at
+all, so "DAY" reads "DAYs" either way — **the vector passed under the exact
+mutation it was named for**. Caught before the battery ran, by asking what each
+vector would do under its mutation rather than whether it passed. It also
+exposed that the flag on its own produced "BOXes", barely better than "BOXs".
+So an all-caps noun now gets an all-caps suffix ("BOXES", "BERRIES"); "all
+caps" needs at least one cased letter, so an emoji noun keeps a lower-case `s`;
+and the flag's vectors are "BOX" and "BERRY", which is one per rule because
+each rule carries its own flag.
+
+**Callers, checked.** Four, all pluralising at `n = 2` or `n = target`:
+`valueLine`, `describe` in `app/trackers/index.tsx`, the stopped-tracker line in
+`app/trackers/archived.tsx`, and `TrackerForm.tsx`'s preview hint and
+target-field label. Each gains the corrected plural and nothing else changes.
+`glyphLabel`, `addLabel`, `footLine`, `archived.tsx`'s delete confirmation and
+`CaffeineBanner` use the SINGULAR noun and never called it. `apps/web` and
+`apps/admin` render no count noun, and a grep for an inline `${noun}s` across
+all three apps finds only the line this replaced.
+
+**Mutation-checked, 15 of 15 red as test failures.** Baseline 63/63 green
+first; each mutation asserted to match exactly once before running, and each
+result checked for a failing test rather than a suite that failed to run:
+each of `s`/`x`/`z` dropped from `[sxz]`, each of `c`/`s` dropped from `[cs]h`,
+the hiss rule removed, the y rule removed, `[^aeiou]y` → `.y`, the `i` flag
+dropped from each rule, the suffix never shouting, the cased-letter half of
+the all-caps test dropped, `slice(0, -1)` dropped ("berryies"), and the
+`n === 1` and empty-noun guards removed. The five hiss alternatives are why
+there are six hiss vectors: a test that only said "glass" survives four of
+those five deletions. Restored inside a `finally`, then confirmed green by
+re-running — 87/87 across `trackerModel`, `dayPanel` and `trackerForm` — not by
+reading the file.
+
+**An apparatus trap on the way in.** The first baseline on untouched `main`
+reported **10 failures**. Two things were wrong with the run, not the code: the
+worktree had no `apps/mobile/node_modules`, so Node's resolution walked up out
+of `.claude/worktrees/<name>/` and jest ran against the primary checkout's
+install; and `jest` was called directly, which skips the `test` script's
+`TZ=America/Los_Angeles`. The failures were the clock and cutoff cases,
+consistent with the TZ half alone; whether the borrowed install contributed was
+not isolated. `pnpm install` in the worktree plus `pnpm --dir apps/mobile run
+test` gave 56/56. A red baseline is the reason to stop, not a number to
+subtract later.
+
+**Left open.**
+
+- The misses above, by design.
+- `TrackerForm`'s live preview pluralises the draft noun **untrimmed**, so
+  mid-typing "glass " the hint briefly reads "3 of 6 glass s". Pre-existing
+  (the old `+s` did the same), transient, and never stored — `readDraft` trims
+  before anything is saved and the server refuses a trailing space. Not fixed
+  here because it is a separate caller's input handling, not the rule —
+  `frontend-reviewer` agreed. Filed as L19 (#1133).
+- A non-English noun still gets `+s`, as it always did.
+
 
 ## 2026-09-11 — N558 (#1047): starting a rest timer no longer moves the log, the bar drains, and the countdown stops re-rendering the session screen
 

@@ -15,6 +15,7 @@ import {
   loggedAmount,
   loggedCount,
   parseCutoff,
+  pluralise,
   progress,
   resolveRenderStyle,
   targetCount,
@@ -320,6 +321,81 @@ describe('the value line', () => {
     expect(suggestedNoun('dose')).toBe('dose');
     expect(suggestedNoun('count')).toBe('');
     expect(suggestedNoun('')).toBe('');
+  });
+});
+
+/*
+ * L18. The noun is athlete-authored, so `pluralise` meets words no preset ships
+ * — and a bare `+s` read "8 glasss". Every preset says "cup", so the suite had
+ * never pluralised anything else; a `dayPanel` fixture that happened to say
+ * "glass" is what showed it.
+ *
+ * One vector per ALTERNATIVE, not per rule: the hiss rule is five endings, and
+ * a test that only said "glass" would still pass with the other four deleted.
+ */
+describe('pluralise — the athlete\'s own noun, not just "cup" (L18)', () => {
+  it('adds "es" after a hiss, so a glass is never "glasss"', () => {
+    expect(pluralise('glass', 2)).toBe('glasses'); // -ss
+    expect(pluralise('lens', 2)).toBe('lenses'); // -s
+    expect(pluralise('box', 2)).toBe('boxes'); // -x
+    expect(pluralise('spritz', 2)).toBe('spritzes'); // -z
+    expect(pluralise('splash', 2)).toBe('splashes'); // -sh
+    expect(pluralise('pinch', 2)).toBe('pinches'); // -ch
+  });
+
+  it('turns a consonant\'s y into "ies", and leaves a vowel\'s y alone', () => {
+    expect(pluralise('berry', 2)).toBe('berries');
+    expect(pluralise('patty', 2)).toBe('patties');
+    // The vowel exclusion is the half a careless rule drops: "daies".
+    expect(pluralise('day', 2)).toBe('days');
+    expect(pluralise('key', 2)).toBe('keys');
+  });
+
+  it('gives every other word a bare "s", as it always did', () => {
+    expect(pluralise('scoop', 2)).toBe('scoops');
+    expect(pluralise('serving', 2)).toBe('servings');
+    expect(pluralise('cup', 2)).toBe('cups');
+    expect(pluralise('dose', 2)).toBe('doses');
+    expect(pluralise('capsule', 2)).toBe('capsules');
+  });
+
+  it('says the noun itself for exactly one, and pluralises zero', () => {
+    // "0 glasses", not "0 glass" — English pluralises every count but one.
+    expect(pluralise('glass', 1)).toBe('glass');
+    expect(pluralise('berry', 1)).toBe('berry');
+    expect(pluralise('glass', 0)).toBe('glasses');
+  });
+
+  it('stays empty for an empty noun, whatever the count', () => {
+    // Empty is the athlete's "4 of 8". A suffix on nothing would read "4 of 8 es".
+    expect(pluralise('', 2)).toBe('');
+    expect(pluralise('', 1)).toBe('');
+    expect(pluralise('', 0)).toBe('');
+  });
+
+  it('reads the ending whatever its case, and shouts back at an all-caps noun', () => {
+    // Autocapitalisation only touches the first letter, so these pass on the
+    // lower-case rules alone...
+    expect(pluralise('Glass', 2)).toBe('Glasses');
+    expect(pluralise('Berry', 2)).toBe('Berries');
+    // ...and these are what the case-insensitive match and the suffix's case
+    // are for. One vector per rule, because each rule has its own flag: without
+    // them "BOX" is "BOXs" and "BERRY" is "BERRYs" (or "BOXes"/"BERRies").
+    expect(pluralise('BOX', 2)).toBe('BOXES');
+    expect(pluralise('BERRY', 2)).toBe('BERRIES');
+    expect(pluralise('CUP', 2)).toBe('CUPS');
+    // An emoji has no case, so it is not shouting and keeps a lower-case "s".
+    expect(pluralise('💊', 2)).toBe('💊s');
+  });
+
+  it('reaches the value line, which is where "glasss" was on screen', () => {
+    const glass: Tracker = { ...water, count_noun: 'glass' };
+    expect(valueLine(glass, taps(glass, 1))).toBe('1 of 8 glasses');
+    expect(valueLine({ ...glass, target: null }, [])).toBe('0 glasses');
+    // A target of one is still singular, rules or no rules.
+    expect(valueLine({ ...glass, target: 250 }, taps(glass, 1))).toBe('1 of 1 glass');
+    const berries: Tracker = { ...coffee, name: 'Berries', count_noun: 'berry', target: 5 };
+    expect(valueLine(berries, taps(berries, 2))).toBe('2 of 5 berries');
   });
 });
 
