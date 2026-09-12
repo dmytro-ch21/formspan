@@ -332,13 +332,20 @@ function scheduleReconnect(gen: number): void {
   if (a.retryTimer) clearTimeout(a.retryTimer);
   a.retryTimer = setTimeout(() => {
     a.retryTimer = null;
-    // NOT through `serialized`, deliberately. A reconnect that fires after
-    // a stop finds `active` already null (stopLiveHRInner clears it
-    // synchronously) and bails at the top of `connectAttempt`, so queueing
-    // it changes nothing any test can observe — and an unobservable
-    // difference is not worth the extra machinery. The generation guard
-    // there is what does the work, and the "reconnect while backgrounding"
-    // test is what holds it honest.
+    // NOT through `serialized`, deliberately. `stopLiveHRInner` has two
+    // defences against this callback reviving a link after a stop, and each
+    // is enough on its own: it clears `retryTimer`, so the callback normally
+    // never runs; and it nulls `active` and bumps `generation` synchronously,
+    // so a callback that does run bails at the top of `connectAttempt` — on
+    // `!a`, or on the generation check if a newer start has set `active`
+    // again. Queueing it would change nothing any test can observe, and an
+    // unobservable difference is not worth the extra machinery.
+    //
+    // The "reconnect while backgrounding" test pins the pair, not either half:
+    // removing both lets a second connect through and its post-backoff connect
+    // count goes red; removing either alone stays green, correctly. Before
+    // F54/#1118 it asserted status only, which a connect in flight never
+    // changes, so it pinned neither.
     void connectAttempt(gen);
   }, reconnectDelayMs(state.attempt - 1));
 }
