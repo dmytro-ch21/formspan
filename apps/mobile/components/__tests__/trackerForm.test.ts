@@ -1,4 +1,4 @@
-import { formFor, readDraft } from '@/components/TrackerForm';
+import { formFor, nounCopy, readDraft } from '@/components/TrackerForm';
 import type { Tracker } from '@/lib/trackerModel';
 
 /**
@@ -118,5 +118,43 @@ describe('creating, where there is nothing to preserve', () => {
     const d = draftOf(readDraft(form, 'imperial'));
     expect(d.increment).toBeGreaterThan(250);
     expect(d.increment).toBeLessThan(253);
+  });
+});
+
+/**
+ * L19/#1133 — the preview described a card that `readDraft` would never store.
+ *
+ * Mid-typing, "glass " kept its trailing space, so `pluralise` gave it a bare
+ * `s` and the hint read "3 of 6 glass s". A noun of only spaces previewed a card
+ * with an empty word. Both are pinned against the copy the athlete reads, not
+ * against the trim, so a change that trims somewhere else still has to agree.
+ */
+describe('the noun preview reads the noun readDraft will store', () => {
+  it('pluralises a noun still carrying its trailing space', () => {
+    expect(nounCopy('glass ')).toEqual({
+      hint: 'Your card will read "3 of 6 glasses".',
+      targetLabel: 'Daily target, in glasses',
+    });
+  });
+
+  it('pluralises a noun typed after a leading space', () => {
+    expect(nounCopy(' cup').hint).toBe('Your card will read "3 of 6 cups".');
+  });
+
+  it.each([
+    ['empty', ''],
+    ['only spaces', '   '],
+  ])('previews no noun when the draft is %s, matching what readDraft stores', (_label, noun) => {
+    expect(nounCopy(noun)).toEqual({
+      hint: 'Leave it blank and your card reads "3 of 6".',
+      targetLabel: 'Daily target',
+    });
+  });
+
+  it('leaves a clean noun as it was', () => {
+    expect(nounCopy('glass')).toEqual({
+      hint: 'Your card will read "3 of 6 glasses".',
+      targetLabel: 'Daily target, in glasses',
+    });
   });
 });

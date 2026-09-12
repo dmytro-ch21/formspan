@@ -180,6 +180,27 @@ export function formFor(t: Tracker, units: UnitSystem): TrackerFormState {
  *
  * One place, so create and edit reject the same things with the same words.
  */
+/**
+ * The preview hint and the target field's label, from the draft noun as typed.
+ *
+ * L19/#1133 — both used to pluralise the RAW draft. Mid-typing, "glass " has a
+ * trailing space, so it no longer ends in a hiss and `pluralise` gave it a bare
+ * `s`: the hint read "3 of 6 glass s". A noun of only spaces was truthy, so it
+ * previewed a card with an empty word in it. `readDraft` trims before saving, so
+ * neither was ever stored — but the form described a card that would not exist.
+ *
+ * Trimmed here, once, so the hint, the visible label and the spoken label all
+ * describe what `readDraft` will actually store.
+ */
+export function nounCopy(noun: string): { hint: string; targetLabel: string } {
+  const word = noun.trim();
+  const plural = pluralise(word, 2);
+  return {
+    hint: word ? `Your card will read "3 of 6 ${plural}".` : 'Leave it blank and your card reads "3 of 6".',
+    targetLabel: `Daily target${word ? `, in ${plural}` : ''}`,
+  };
+}
+
 export function readDraft(
   f: TrackerFormState,
   units: UnitSystem,
@@ -294,7 +315,7 @@ export function TrackerForm({
     });
 
   const unitLabel = inputUnitLabel({ unit: value.unit } as Tracker, units);
-  const nounPlural = pluralise(value.noun, 2);
+  const copy = nounCopy(value.noun);
 
   return (
     <>
@@ -375,9 +396,7 @@ export function TrackerForm({
           testID="tracker-form-noun"
         />
         <Text style={styles.hint}>
-          {value.noun
-            ? `Your card will read "3 of 6 ${nounPlural}".`
-            : 'Leave it blank and your card reads "3 of 6".'}
+          {copy.hint}
         </Text>
       </Field>
 
@@ -394,7 +413,7 @@ export function TrackerForm({
         />
       </Field>
 
-      <Field label={`Daily target${value.noun ? `, in ${nounPlural}` : ''}`}>
+      <Field label={copy.targetLabel}>
         <SelectAllTextInput
           style={styles.input}
           value={value.countText}
@@ -402,7 +421,7 @@ export function TrackerForm({
           keyboardType="number-pad"
           placeholder="No target"
           placeholderTextColor={vola.textDim}
-          accessibilityLabel={`Daily target${value.noun ? `, in ${nounPlural}` : ''}`}
+          accessibilityLabel={copy.targetLabel}
           testID="tracker-form-target"
         />
         <Text style={styles.hint}>Leave it blank to just count, with nothing to reach.</Text>
