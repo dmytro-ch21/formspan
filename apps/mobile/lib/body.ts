@@ -11,13 +11,27 @@ import type { TokenGetter } from './useAuthToken';
  * `lib/anthropometry.ts` and runs on the phone, so the card works standing on a
  * bathroom scale with no signal. This module only moves the rows.
  *
- * **Online-only, deliberately, and it is the one thing here worth arguing
- * about.** Sessions are offline-first because they are logged mid-workout in a
- * basement; a check-in is thirty seconds by a scale, at home, once a day. The
- * cost of an offline outbox for it is a second sync surface with its own
- * conflict rules, and the benefit is a case that barely occurs. If weighing in
- * at a gym with no signal turns out to be common, this is the note that says
- * the decision was made knowingly rather than overlooked.
+ * **Writes are online-only, deliberately. Reads are cached (N568, #1129).**
+ *
+ * Sessions are offline-first because they are logged mid-workout in a
+ * basement; a check-in is thirty seconds by a scale, at home, once a day. An
+ * offline outbox for it would be a second sync surface with its own conflict
+ * rules, for a case that barely occurs — so `saveCheckin`, `deleteCheckin`,
+ * `uploadCheckinPhoto`, `createPhase` and `endPhase` still need signal, and
+ * that decision stands. If weighing in at a gym with no signal turns out to be
+ * common, this is the note that says it was made knowingly rather than
+ * overlooked.
+ *
+ * What the owner reversed on 2026-09-11 (#972) is READING. The day panel has to
+ * work in a dead spot, and "your last check-in, your phase goal" is exactly
+ * what it should still be able to say there. So the last successful answer to
+ * `listCheckins` and `listPhases` is kept on the phone — `lib/bodyCache.ts`,
+ * written by its `refreshBody` — and read back together with the time it was
+ * fetched. That is a read-through cache and nothing more: nothing in it is ever
+ * pushed, a failed fetch never writes to it, and a cached value is never shown
+ * without its fetched time. The functions in THIS module stay plain fetches;
+ * caching is `refreshBody`'s job, so a caller that must not touch SQLite can
+ * still call them.
  */
 
 export type Checkin = {

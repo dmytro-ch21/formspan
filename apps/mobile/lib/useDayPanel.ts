@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { localCheckinView, localPhaseView, type CheckinCacheView, type PhaseCacheView } from './bodyCache';
 import { dayString } from './calendar';
 import { assembleDay, type DayPanel, type Dated } from './dayPanel';
 import { localEntries as localFoodEntries, localTargetView } from './foodLog';
@@ -38,6 +39,13 @@ import { useSource } from './useTrainBoard';
  * (`localTrackers`, `localEntries` ×2, `localTargetView`) and nothing else. No
  * network, which is the offline criterion as a property of which functions run.
  *
+ * ## The check-in and phase goal are read from the body cache (N568)
+ *
+ * `localCheckinView` and `localPhaseView` read `lib/bodyCache.ts`, which Today's
+ * check-in refresh fills whenever it fetches successfully. The panel still never
+ * fetches: it is opened from Today, so with signal the cache is seconds old, and
+ * without signal it is the last answer, labelled with when that was.
+ *
  * Each read is its own promise, for `useTrainBoard`'s reason: `Promise.all`
  * would let an unreadable tracker table erase a perfectly good food total.
  *
@@ -56,6 +64,8 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
     useSource<Dated<TrackerEntry[]>>();
   const [foodEntries, foodEntriesReady, foodEntriesFailed] = useSource<Dated<Entry[]>>();
   const [target, targetReady, targetFailed] = useSource<Dated<TargetView>>();
+  const [checkins, checkinsReady, checkinsFailed] = useSource<Dated<CheckinCacheView>>();
+  const [phases, phasesReady, phasesFailed] = useSource<PhaseCacheView>();
 
   const { lastSyncAt } = useSyncState();
 
@@ -82,6 +92,14 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
         (view) => alive() && targetReady({ on: day, value: view }),
         () => alive() && targetFailed(),
       );
+      localCheckinView(userId, day).then(
+        (view) => alive() && checkinsReady({ on: day, value: view }),
+        () => alive() && checkinsFailed(),
+      );
+      localPhaseView(userId).then(
+        (view) => alive() && phasesReady(view),
+        () => alive() && phasesFailed(),
+      );
     },
     [
       userId,
@@ -94,6 +112,10 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
       foodEntriesFailed,
       targetReady,
       targetFailed,
+      checkinsReady,
+      checkinsFailed,
+      phasesReady,
+      phasesFailed,
     ],
   );
 
@@ -135,7 +157,18 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
 
   return useMemo(
     () =>
-      assembleDay({ day, board, plans, trackers, trackerEntries, foodEntries, target, modules }),
-    [day, board, plans, trackers, trackerEntries, foodEntries, target, modules],
+      assembleDay({
+        day,
+        board,
+        plans,
+        trackers,
+        trackerEntries,
+        foodEntries,
+        target,
+        checkins,
+        phases,
+        modules,
+      }),
+    [day, board, plans, trackers, trackerEntries, foodEntries, target, checkins, phases, modules],
   );
 }

@@ -22,7 +22,9 @@
  * the first.
  */
 
-import { assembleDay, current, panelFacts, type DayFact, type DayPanel } from '../dayPanel';
+import type { Checkin, Phase } from '../body';
+import { cacheCheckins, cachePhases } from '../bodyCache';
+import { assembleDay, current, lastUpdatedLabel, panelFacts, type DayFact, type DayPanel } from '../dayPanel';
 import { cacheTargets, logFood } from '../foodLog';
 import type { Module } from '../modules';
 import type { Target } from '../nutrition';
@@ -358,10 +360,21 @@ describe('no absence from a read that did not answer', () => {
         trackerEntries: s,
         foodEntries: s,
         target: s,
+        checkins: s,
+        phases: s,
         modules: WITH_FOOD,
       });
       expect(panelFacts(panel)).toEqual([]);
-      for (const section of [panel.plan, panel.logged, panel.next, panel.trackers, panel.food, panel.target]) {
+      for (const section of [
+        panel.plan,
+        panel.logged,
+        panel.next,
+        panel.trackers,
+        panel.food,
+        panel.target,
+        panel.checkin,
+        panel.phase,
+      ]) {
         expect(section.state).toBe(s.state);
       }
     }
@@ -392,8 +405,25 @@ describe('a read made for another day is not an answer about today', () => {
       },
       foodEntries: { state: 'ready', value: { on: YESTERDAY, value: [] } },
       target: { state: 'ready', value: { on: YESTERDAY, value: { state: 'set', target: target() } } },
+      // N568: the check-in read is dated too — yesterday's "latest on or before"
+      // is not an answer about today.
+      checkins: {
+        state: 'ready',
+        value: {
+          on: YESTERDAY,
+          value: {
+            state: 'known',
+            fetchedAt: '2026-09-09T16:00:00.000Z',
+            from: '2026-08-10',
+            to: YESTERDAY,
+            latest: { measured_on: YESTERDAY, weight_kg: 80, fetched_at: '2026-09-09T16:00:00.000Z' },
+          },
+        },
+      },
+      phases: { state: 'unread' },
       modules: WITH_FOOD,
     });
+    expect(panel.checkin).toEqual({ state: 'unread' });
     expect(panel.trackers).toEqual({ state: 'unread' });
     expect(panel.food).toEqual({ state: 'unread' });
     expect(panel.target).toEqual({ state: 'unread' });
@@ -436,5 +466,209 @@ describe('the provenance check can fail', () => {
     expect(problems).toHaveLength(5);
     expect(problems.join('\n')).toMatch(/planned:invented/);
     expect(problems.join('\n')).toMatch(/plan-done:empty: no rows/);
+  });
+});
+
+describe('the last-known check-in and phase goal (N568, #1129)', () => {
+  // A fetch Today made on Monday afternoon, three days before NOW.
+  const FETCHED = new Date(2026, 8, 7, 16, 0, 0).toISOString();
+  // With signal again, Thursday morning.
+  const LATER = new Date(2026, 8, 10, 8, 0, 0).toISOString();
+  // A fetch from early August, before either of the above.
+  const EARLIER = new Date(2026, 7, 1, 9, 0, 0).toISOString();
+
+  function checkinRow(user: string, on: string, kg: number | null): Checkin {
+    return {
+      user_id: user,
+      measured_on: on,
+      weight_kg: kg,
+      neck_cm: null,
+      shoulders_cm: null,
+      chest_cm: null,
+      waist_cm: null,
+      hips_cm: null,
+      thigh_cm: null,
+      calf_cm: null,
+      upper_arm_cm: null,
+      forearm_cm: null,
+      measured_side: 'left',
+      notes: '',
+    };
+  }
+
+  function phaseRow(user: string, id: string, over: Partial<Phase> = {}): Phase {
+    return {
+      id,
+      user_id: user,
+      kind: 'cut',
+      started_on: '2026-08-01',
+      target_on: '2026-11-01',
+      target_weight_kg: 78,
+      ended_on: null,
+      notes: '',
+      ...over,
+    };
+  }
+
+  it('never fetched on this phone: both sections are unavailable — never "none"', async () => {
+    const panel = await readPanel(WITH_FOOD);
+    expect(panel.checkin).toEqual({ state: 'unavailable' });
+    expect(panel.phase).toEqual({ state: 'unavailable' });
+    expect(panelFacts(panel)).toEqual([]);
+  });
+
+  it('fetched earlier, read offline: the cached values, each carrying the time its row was fetched — not now', async () => {
+    await cacheCheckins(USER, '2026-08-08', '2026-09-07', [checkinRow(USER, '2026-09-06', 82.4)], FETCHED);
+    await cachePhases(USER, [phaseRow(USER, 'cut-1')], FETCHED);
+
+    const panel = await readPanel(WITH_FOOD);
+
+    expect(panel.checkin).toEqual({
+      state: 'ready',
+      value: {
+        fetchedAt: FETCHED,
+        since: '2026-08-08',
+        fact: expect.objectContaining({
+          key: 'last-checkin:2026-09-06',
+          refs: [{ table: 'body_checkins_cache', measuredOn: '2026-09-06', fetchedAt: FETCHED }],
+        }),
+      },
+    });
+    expect(panel.phase).toEqual({
+      state: 'ready',
+      value: {
+        fetchedAt: FETCHED,
+        fact: expect.objectContaining({
+          key: 'phase-goal:cut-1',
+          refs: [{ table: 'body_phases_cache', id: 'cut-1', fetchedAt: FETCHED }],
+        }),
+      },
+    });
+    // Drawn last, in the order the screen draws them.
+    expect(keys(panelFacts(panel))).toEqual(['last-checkin:2026-09-06', 'phase-goal:cut-1']);
+    expect(await unbackedFacts(mockFixture, USER, panelFacts(panel))).toEqual([]);
+
+    expect(mockApi).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('fetched and genuinely empty: the real empty state — ready, no fact, the window it covered and when', async () => {
+    await cacheCheckins(USER, '2026-08-08', '2026-09-07', [], FETCHED);
+    await cachePhases(USER, [], FETCHED);
+
+    const panel = await readPanel(WITH_FOOD);
+    expect(panel.checkin).toEqual({ state: 'ready', value: { fetchedAt: FETCHED, since: '2026-08-08', fact: null } });
+    expect(panel.phase).toEqual({ state: 'ready', value: { fetchedAt: FETCHED, fact: null } });
+    expect(panelFacts(panel)).toEqual([]);
+  });
+
+  it("another account's cached check-in and phase goal are never this athlete's", async () => {
+    await cacheCheckins(OTHER, '2026-08-08', '2026-09-07', [checkinRow(OTHER, '2026-09-06', 61)], FETCHED);
+    await cachePhases(OTHER, [phaseRow(OTHER, 'theirs')], FETCHED);
+
+    let panel = await readPanel(WITH_FOOD);
+    expect(panel.checkin).toEqual({ state: 'unavailable' });
+    expect(panel.phase).toEqual({ state: 'unavailable' });
+
+    // This athlete fetches and genuinely has none: empty, still not the other's.
+    await cacheCheckins(USER, '2026-08-11', '2026-09-10', [], LATER);
+    await cachePhases(USER, [], LATER);
+    panel = await readPanel(WITH_FOOD);
+    expect(panel.checkin).toEqual({ state: 'ready', value: { fetchedAt: LATER, since: '2026-08-11', fact: null } });
+    expect(panel.phase).toEqual({ state: 'ready', value: { fetchedAt: LATER, fact: null } });
+    expect(panelFacts(panel)).toEqual([]);
+  });
+
+  it('a cached row the server no longer has: stated with its old time until a fetch covers it, then gone — and a fact still citing it is reported', async () => {
+    await cacheCheckins(USER, '2026-08-08', '2026-09-07', [checkinRow(USER, '2026-09-06', 82.4)], FETCHED);
+    await cachePhases(USER, [phaseRow(USER, 'cut-1')], FETCHED);
+    const stale = panelFacts(await readPanel(WITH_FOOD));
+    expect(keys(stale)).toEqual(['last-checkin:2026-09-06', 'phase-goal:cut-1']);
+
+    // Signal again: the check-in was deleted on the web, and the phase ended.
+    await cacheCheckins(USER, '2026-08-11', '2026-09-10', [], LATER);
+    await cachePhases(USER, [phaseRow(USER, 'cut-1', { ended_on: '2026-09-09' })], LATER);
+
+    const after = await readPanel(WITH_FOOD);
+    expect(after.checkin).toEqual({ state: 'ready', value: { fetchedAt: LATER, since: '2026-08-11', fact: null } });
+    expect(after.phase).toEqual({ state: 'ready', value: { fetchedAt: LATER, fact: null } });
+
+    const problems = await unbackedFacts(mockFixture, USER, stale);
+    expect(problems).toHaveLength(2);
+    expect(problems.join('\n')).toMatch(/last-checkin:2026-09-06/);
+    expect(problems.join('\n')).toMatch(/phase-goal:cut-1/);
+  });
+
+  it('a check-in older than the newest fetch\'s window keeps its OWN older time on the panel', async () => {
+    // Cached by an August fetch whose window held it; the September fetch did
+    // not cover 20 July, so it neither deleted nor re-confirmed it.
+    await cacheCheckins(USER, '2026-07-01', '2026-08-01', [checkinRow(USER, '2026-07-20', 84)], EARLIER);
+    await cacheCheckins(USER, '2026-08-11', '2026-09-10', [], LATER);
+
+    const panel = await readPanel(WITH_FOOD);
+    expect(panel.checkin).toEqual({
+      state: 'ready',
+      value: {
+        fetchedAt: EARLIER,
+        since: '2026-08-11',
+        fact: expect.objectContaining({
+          key: 'last-checkin:2026-07-20',
+          refs: [{ table: 'body_checkins_cache', measuredOn: '2026-07-20', fetchedAt: EARLIER }],
+        }),
+      },
+    });
+    expect(await unbackedFacts(mockFixture, USER, panelFacts(panel))).toEqual([]);
+  });
+
+  it('the provenance check refuses a cached fact claiming a fresher time than its row, an ended phase, or another athlete', async () => {
+    await cacheCheckins(USER, '2026-08-08', '2026-09-07', [checkinRow(USER, '2026-09-06', 82.4)], FETCHED);
+    await cachePhases(USER, [phaseRow(USER, 'ended', { ended_on: '2026-08-31' }), phaseRow(USER, 'live')], FETCHED);
+    const panel = await readPanel(WITH_FOOD);
+    const realCheckin = panel.checkin.state === 'ready' ? panel.checkin.value.fact : null;
+    const realPhase = panel.phase.state === 'ready' ? panel.phase.value.fact : null;
+    if (!realCheckin || !realPhase) throw new Error('expected cached facts to test against');
+    expect(await unbackedFacts(mockFixture, USER, [realCheckin, realPhase])).toEqual([]);
+
+    const fresherCheckin: DayFact = {
+      ...realCheckin,
+      refs: [{ table: 'body_checkins_cache', measuredOn: '2026-09-06', fetchedAt: NOW.toISOString() }],
+    };
+    const fresherPhase: DayFact = {
+      ...realPhase,
+      refs: [{ table: 'body_phases_cache', id: 'live', fetchedAt: NOW.toISOString() }],
+    };
+    // The row exists, with exactly this time — but it ended, so it is no goal.
+    const endedPhase: DayFact = {
+      key: 'phase-goal:ended',
+      kind: 'phase-goal',
+      phase: {
+        id: 'ended',
+        kind: 'cut',
+        started_on: '2026-08-01',
+        target_on: '2026-11-01',
+        target_weight_kg: 78,
+        ended_on: '2026-08-31',
+        fetched_at: FETCHED,
+      },
+      refs: [{ table: 'body_phases_cache', id: 'ended', fetchedAt: FETCHED }],
+    };
+    const problems = await unbackedFacts(mockFixture, USER, [fresherCheckin, fresherPhase, endedPhase]);
+    expect(problems).toEqual([
+      expect.stringMatching(/^last-checkin:2026-09-06: body_checkins_cache@2026-09-06/),
+      expect.stringMatching(/^phase-goal:live: body_phases_cache#live/),
+      expect.stringMatching(/^phase-goal:ended: body_phases_cache#ended/),
+    ]);
+    expect(await unbackedFacts(mockFixture, OTHER, [realCheckin, realPhase])).toHaveLength(2);
+  });
+});
+
+describe('lastUpdatedLabel', () => {
+  it('a time on the same local day, the date and time on another, the year when it is not this one', () => {
+    expect(lastUpdatedLabel(new Date(2026, 8, 10, 9, 5).toISOString(), NOW)).toBe('Last updated 09:05');
+    // 8:30pm Pacific is tomorrow in UTC; it is still today on this phone.
+    expect(lastUpdatedLabel(new Date(2026, 8, 10, 20, 30).toISOString(), NOW)).toBe('Last updated 20:30');
+    expect(lastUpdatedLabel(new Date(2026, 8, 7, 16, 0).toISOString(), NOW)).toBe('Last updated 7 Sep, 16:00');
+    expect(lastUpdatedLabel(new Date(2025, 8, 7, 16, 0).toISOString(), NOW)).toBe('Last updated 7 Sep 2025, 16:00');
+    expect(lastUpdatedLabel('not a time', NOW)).toBe('Last updated at an unknown time');
   });
 });

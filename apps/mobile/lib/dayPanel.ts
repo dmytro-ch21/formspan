@@ -1,10 +1,12 @@
+import type { CachedCheckin, CachedPhase, CheckinCacheView, PhaseCacheView } from './bodyCache';
+import { dayString, shortDate } from './calendar';
 import { hasFoodLog, type Module } from './modules';
 import { dayTotals, type Entry, type Macros, type Target, type TargetView } from './nutrition';
 import type { PlannedSession } from './plan';
 import type { Session } from './sessions';
 import type { TodayBoard } from './todayBoard';
 import { byTracker, type TrackerView } from './trackers';
-import { loggedCount, targetCount, type Tracker, type TrackerEntry } from './trackerModel';
+import { formatClock, loggedCount, targetCount, type Tracker, type TrackerEntry } from './trackerModel';
 import type { PlannedOffer, Source } from './trainBoard';
 
 /**
@@ -58,19 +60,32 @@ import type { PlannedOffer, Source } from './trainBoard';
  *
  * ## Where the panel is honest about what it cannot say
  *
- * Three things the athlete named have **no local row**, so they are not here:
+ * Two things the athlete named have **no local row**, so they are not here:
  *
  * - **Steps.** No table on this device stores a step count, and no read of one
  *   exists anywhere in `apps/mobile`. A "do your steps" line would be the first
  *   fabricated fact, not a missing feature.
- * - **Check-ins and the phase goal (target weight).** `lib/body.ts` is
- *   online-only by recorded decision. The panel's second hard constraint is
- *   that it renders fully offline, so a reminder that exists with signal and
- *   silently vanishes in a gym basement is left out rather than shipped
- *   half-true. Whether to cache them is a product call; see the N541 history
- *   entry.
  * - **Trackers without a target.** A count with no ceiling is not a target, so
  *   it is not something outstanding. Today still draws them.
+ *
+ * ## Last-known facts: the check-in and the phase goal (N568, #1129)
+ *
+ * Tranche 1 left these out because `lib/body.ts` was online-only. The owner
+ * reversed that for READING on 2026-09-11, so they now come from
+ * `lib/bodyCache.ts`: the phone's copy of what the server last said. That makes
+ * them a different kind of fact from everything above — a food entry on this
+ * phone IS the record, a cached check-in is a REPORT of one — and the type says
+ * so. Their sections are {@link LastKnown}, which cannot be built without the
+ * time the copy was fetched, and their {@link RowRef}s carry that time, so the
+ * provenance check refuses a fact that claims to be fresher than its row.
+ *
+ * Three states, never collapsed into one:
+ *
+ * | Cache | Section | Screen |
+ * |---|---|---|
+ * | never fetched for this athlete | `unavailable` | "Not available on this phone yet." |
+ * | fetched, has a row | `ready`, fact + its row's `fetched_at` | the value, "Last updated …" |
+ * | fetched, genuinely empty | `ready`, `fact: null` + when | "No check-in since …", "Last updated …" |
  */
 
 /** A row on this device that a fact is drawn from. */
@@ -81,7 +96,14 @@ export type RowRef =
   | { table: 'tracker_entries'; id: string }
   | { table: 'food_entries'; id: string }
   /** `nutrition_targets` is keyed by `(user_id, effective_on)`, not an id. */
-  | { table: 'nutrition_targets'; effectiveOn: string };
+  | { table: 'nutrition_targets'; effectiveOn: string }
+  /**
+   * N568: the body read cache. These rows are the phone's copy of what the
+   * server last said, so a ref also names WHEN that copy was confirmed — a fact
+   * citing the row must carry exactly that time, never a fresher one.
+   */
+  | { table: 'body_checkins_cache'; measuredOn: string; fetchedAt: string }
+  | { table: 'body_phases_cache'; id: string; fetchedAt: string };
 
 /**
  * One positive claim the panel makes, with the rows behind it.
@@ -108,7 +130,22 @@ export type DayFact = { key: string; refs: RowRef[] } & (
     }
   | { kind: 'food-eaten'; totals: Macros; entries: number }
   | { kind: 'nutrition-target'; target: Target }
+  /** The newest check-in this phone knows of. Last-known, never current — see {@link LastKnown}. */
+  | { kind: 'last-checkin'; checkin: CachedCheckin }
+  /** The phase with no end date, as this phone last heard it. */
+  | { kind: 'phase-goal'; phase: CachedPhase }
 );
+
+/**
+ * A section drawn from the body read cache (N568).
+ *
+ * **`fetchedAt` is required, and that is the rule this type exists to hold.** A
+ * last-known value shown without the time it was known is a current value by
+ * omission — the athlete reads "82.4 kg" in airplane mode and believes the
+ * phone just checked. With a fact it is that row's own `fetched_at`; with
+ * `fact: null` it is when the empty answer arrived.
+ */
+export type LastKnown = { fetchedAt: string; fact: DayFact | null };
 
 /**
  * What today's plan says. `rest` carries no fact: it is an absence.
@@ -146,6 +183,14 @@ export type DayPanel = {
   food: Section<DayFact | null>;
   /** The nutrition target in force today, or null when none is set. */
   target: Section<DayFact | null>;
+  /**
+   * The newest check-in on or before today, as last fetched. `since` is the
+   * start of the range an empty answer covered, so "none" is stated as that
+   * window rather than as all time.
+   */
+  checkin: Source<LastKnown & { since: string }>;
+  /** The active phase and its goal, as last fetched. */
+  phase: Source<LastKnown>;
 };
 
 /**
@@ -196,6 +241,9 @@ export function assembleDay(input: {
   trackerEntries: Source<Dated<TrackerEntry[]>>;
   foodEntries: Source<Dated<Entry[]>>;
   target: Source<Dated<TargetView>>;
+  /** N568: dated like the other day-scoped reads — "on or before today". */
+  checkins: Source<Dated<CheckinCacheView>>;
+  phases: Source<PhaseCacheView>;
   modules: Module[];
 }): DayPanel {
   const { day, board, plans, modules } = input;
@@ -277,7 +325,78 @@ export function assembleDay(input: {
     ? { state: 'off' }
     : targetFact(current(input.target, day));
 
-  return { day, plan, logged, next, trackers, food, target };
+  const checkin = checkinSection(current(input.checkins, day));
+  const phase = phaseSection(input.phases);
+
+  return { day, plan, logged, next, trackers, food, target, checkin, phase };
+}
+
+/**
+ * The last-known check-in. `unknown` becomes `unavailable`, never an empty
+ * answer: a phone that has never fetched check-ins must not tell an athlete who
+ * weighs in daily that they have not.
+ */
+function checkinSection(
+  view: Source<CheckinCacheView>,
+): Source<LastKnown & { since: string }> {
+  if (view.state !== 'ready') return view;
+  const v = view.value;
+  if (v.state === 'unknown') return { state: 'unavailable' };
+  const c = v.latest;
+  if (!c) return { state: 'ready', value: { fetchedAt: v.fetchedAt, since: v.from, fact: null } };
+  return {
+    state: 'ready',
+    value: {
+      // The ROW's time, not the latest fetch's: a check-in older than the last
+      // fetch's window was confirmed by an earlier fetch and must say so.
+      fetchedAt: c.fetched_at,
+      since: v.from,
+      fact: {
+        key: `last-checkin:${c.measured_on}`,
+        kind: 'last-checkin',
+        checkin: c,
+        refs: [{ table: 'body_checkins_cache', measuredOn: c.measured_on, fetchedAt: c.fetched_at }],
+      },
+    },
+  };
+}
+
+/** The last-known phase goal. Same three states as {@link checkinSection}. */
+function phaseSection(view: Source<PhaseCacheView>): Source<LastKnown> {
+  if (view.state !== 'ready') return view;
+  const v = view.value;
+  if (v.state === 'unknown') return { state: 'unavailable' };
+  const p = v.active;
+  if (!p) return { state: 'ready', value: { fetchedAt: v.fetchedAt, fact: null } };
+  return {
+    state: 'ready',
+    value: {
+      fetchedAt: p.fetched_at,
+      fact: {
+        key: `phase-goal:${p.id}`,
+        kind: 'phase-goal',
+        phase: p,
+        refs: [{ table: 'body_phases_cache', id: p.id, fetchedAt: p.fetched_at }],
+      },
+    },
+  };
+}
+
+/**
+ * How the panel words a fetched time: `Last updated 09:14` on the same local
+ * day, `Last updated 8 Sep, 09:14` on another, and with the year when it is
+ * not this one — "8 Sep" from last September would read as this week.
+ *
+ * Always "last updated", never "as of now" or a bare value: this is the label
+ * that keeps a cached number from being read as a live one.
+ */
+export function lastUpdatedLabel(fetchedAt: string, now: Date): string {
+  const at = new Date(fetchedAt);
+  if (Number.isNaN(at.getTime())) return 'Last updated at an unknown time';
+  const on = dayString(at);
+  if (on === dayString(now)) return `Last updated ${formatClock(at)}`;
+  const year = at.getFullYear() === now.getFullYear() ? '' : ` ${at.getFullYear()}`;
+  return `Last updated ${shortDate(on)}${year}, ${formatClock(at)}`;
 }
 
 /**
@@ -372,5 +491,7 @@ export function panelFacts(panel: DayPanel): DayFact[] {
   if (panel.trackers.state === 'ready') out.push(...panel.trackers.value);
   if (panel.food.state === 'ready' && panel.food.value) out.push(panel.food.value);
   if (panel.target.state === 'ready' && panel.target.value) out.push(panel.target.value);
+  if (panel.checkin.state === 'ready' && panel.checkin.value.fact) out.push(panel.checkin.value.fact);
+  if (panel.phase.state === 'ready' && panel.phase.value.fact) out.push(panel.phase.value.fact);
   return out;
 }

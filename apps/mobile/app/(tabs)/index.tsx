@@ -85,7 +85,8 @@ import { useDetectedActivity } from '@/lib/useDetectedActivity';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
-import { listCheckins, listPhases, type Checkin, type Phase } from '@/lib/body';
+import type { Checkin, Phase } from '@/lib/body';
+import { refreshBody } from '@/lib/bodyCache';
 import {
   cacheTargets,
   localEntries,
@@ -761,11 +762,12 @@ export default function TodayScreen() {
     // `dayString`, NOT `toISOString().slice(0,10)` — that is the UTC date, so
     // west of Greenwich an evening weigh-in lands on tomorrow's row.
     const today = dayString(new Date());
-    Promise.all([
-      listCheckins(getToken, { from: shiftDate(today, -30), to: today }),
-      listPhases(getToken),
-    ])
-      .then(([cs, ps]) => {
+    // N568 (#1129): `refreshBody` is the same two fetches, plus keeping what
+    // came back in `lib/bodyCache.ts` — which is what lets the day panel, opened
+    // from this screen's header, state the check-in and phase goal in a dead
+    // spot. A failed fetch writes nothing; this card's behaviour is unchanged.
+    refreshBody(getToken, userId ?? null, { from: shiftDate(today, -30), to: today })
+      .then(({ checkins: cs, phases: ps }) => {
         if (!live) return;
         setCheckins(cs);
         setPhase(ps.find((p) => p.ended_on === null) ?? null);
@@ -781,7 +783,7 @@ export default function TodayScreen() {
     return () => {
       live = false;
     };
-  }, [getToken]);
+  }, [getToken, userId]);
 
   // The clock, on its own effect with NO dependencies.
   //

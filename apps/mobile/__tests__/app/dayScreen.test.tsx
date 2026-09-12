@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import DayScreen from '../../app/day';
 import { DayNarrationSlot } from '@/components/day/DayNarrationSlot';
-import { dayString } from '@/lib/calendar';
+import { shiftDate } from '@/lib/anthropometry';
+import type { Checkin, Phase } from '@/lib/body';
+import { cacheCheckins, cachePhases } from '@/lib/bodyCache';
+import { dayString, shortDate } from '@/lib/calendar';
 import { NO_NARRATION } from '@/lib/dayNarration';
 import { panelFacts } from '@/lib/dayPanel';
 import { cacheTargets, logFood } from '@/lib/foodLog';
@@ -83,6 +86,20 @@ jest.mock('expo-router', () => {
 
 jest.mock('@clerk/clerk-expo', () => ({ useAuth: () => ({ userId: 'u1' }) }));
 
+// Units already read from the phone's cache — the offline case, and the one the
+// Body block's numbers wait for. One test turns it off.
+let mockUnitsReady = true;
+jest.mock('@/lib/UnitsProvider', () => ({
+  useUnits: () => ({
+    units: 'metric',
+    unitsReady: mockUnitsReady,
+    unsynced: false,
+    foodUnit: 'g',
+    setUnits: jest.fn(),
+    setFoodUnit: jest.fn(),
+  }),
+}));
+
 function mod(key: string, over: Partial<Module['capabilities']> = {}, isSport = true): Module {
   return {
     key,
@@ -140,6 +157,38 @@ function today(): string {
 const noonToday = (offsetMin = 0) =>
   new Date(new Date(`${today()}T12:00:00`).getTime() + offsetMin * 60_000).toISOString();
 
+function checkinRow(user: string, on: string, kg: number | null): Checkin {
+  return {
+    user_id: user,
+    measured_on: on,
+    weight_kg: kg,
+    neck_cm: null,
+    shoulders_cm: null,
+    chest_cm: null,
+    waist_cm: null,
+    hips_cm: null,
+    thigh_cm: null,
+    calf_cm: null,
+    upper_arm_cm: null,
+    forearm_cm: null,
+    measured_side: 'left',
+    notes: '',
+  };
+}
+
+function phaseRow(user: string, id: string): Phase {
+  return {
+    id,
+    user_id: user,
+    kind: 'cut',
+    started_on: '2026-08-01',
+    target_on: '2026-11-01',
+    target_weight_kg: 78,
+    ended_on: null,
+    notes: '',
+  };
+}
+
 let fetchSpy: jest.SpyInstance;
 
 beforeEach(async () => {
@@ -147,6 +196,7 @@ beforeEach(async () => {
   mockUuidSeq = 0;
   mockApi.mockClear();
   mockPush.mockClear();
+  mockUnitsReady = true;
   fetchSpy = jest
     .spyOn(global, 'fetch')
     .mockImplementation(() => Promise.reject(new TypeError('Network request failed')));
@@ -188,6 +238,10 @@ async function seedDay() {
     sodium_mg: null,
     cholesterol_mg: null,
   });
+  // N568: what Today's refresh left in the body cache this morning.
+  const fetched = new Date(`${today()}T08:00:00`).toISOString();
+  await cacheCheckins(USER, shiftDate(today(), -30), today(), [checkinRow(USER, today(), 82.4)], fetched);
+  await cachePhases(USER, [phaseRow(USER, 'cut-1')], fetched);
   return { plan, bjj };
 }
 
@@ -209,11 +263,15 @@ describe('offline, the whole day renders from rows', () => {
     expect(screen.getByTestId(`day-fact-logged:${bjj.id}`)).toBeTruthy();
     expect(screen.getByTestId(`day-fact-food-eaten:${today()}`)).toBeTruthy();
     expect(screen.getByTestId(`day-fact-nutrition-target:${today()}`)).toBeTruthy();
+    expect(await screen.findByTestId(`day-fact-last-checkin:${today()}`)).toBeTruthy();
+    expect(screen.getByTestId('day-fact-phase-goal:cut-1')).toBeTruthy();
 
     // The copy states the rows' own numbers, and nothing else.
     expect(screen.getByText('1 of 8 cups')).toBeTruthy();
     expect(screen.getByText('640 kcal · 32 g protein')).toBeTruthy();
     expect(screen.getByText('2,700 kcal a day')).toBeTruthy();
+    expect(screen.getByText('82.4kg')).toBeTruthy();
+    expect(screen.getByText('Target 78kg by 1 Nov')).toBeTruthy();
 
     // No absence is drawn beside the facts that contradict it.
     expect(screen.queryByTestId('day-absent-plan')).toBeNull();
@@ -227,13 +285,15 @@ describe('offline, the whole day renders from rows', () => {
     await seedDay();
     await render(<DayScreen />);
     await waitFor(() => expect(screen.getByTestId('day-fact-tracker:water')).toBeTruthy());
+    await screen.findByTestId('day-fact-phase-goal:cut-1');
+    await screen.findByTestId(`day-fact-last-checkin:${today()}`);
 
     const panel = await readDayPanel(USER, mockModules, new Date());
     const asserted = panelFacts(panel);
 
     // Something to compare — a comparison of two empty lists passes on a
-    // screen that renders nothing.
-    expect(asserted.length).toBe(5);
+    // screen that renders nothing. Five from tranche 1, two cached (N568).
+    expect(asserted.length).toBe(7);
     expect(renderedFactKeys()).toEqual(asserted.map((f) => f.key).sort());
     expect(await unbackedFacts(mockFixture, USER, asserted)).toEqual([]);
   });
@@ -249,6 +309,11 @@ describe('absences only from reads that answered', () => {
     expect(screen.getByTestId('day-unavailable-trackers')).toBeTruthy();
     expect(screen.getByTestId('day-unavailable-target')).toBeTruthy();
     expect(screen.queryByTestId('day-absent-target')).toBeNull();
+    // N568: never fetched check-ins or phases on this phone — the same rule.
+    expect(await screen.findByTestId('day-unavailable-checkin')).toBeTruthy();
+    expect(await screen.findByTestId('day-unavailable-phase')).toBeTruthy();
+    expect(screen.queryByTestId('day-absent-checkin')).toBeNull();
+    expect(screen.queryByTestId('day-absent-phase')).toBeNull();
     expect(renderedFactKeys()).toEqual([]);
   });
 
@@ -264,6 +329,85 @@ describe('absences only from reads that answered', () => {
     // One unreadable table does not take the others with it.
     expect(screen.getByTestId(`day-fact-planned:${plan.id}`)).toBeTruthy();
     expect(screen.getByTestId('day-fact-tracker:water')).toBeTruthy();
+  });
+});
+
+describe('last-known body values, offline (N568, #1129)', () => {
+  it('a value fetched days ago says when, on the value itself — and nothing in it reads as live', async () => {
+    const measured = shiftDate(today(), -4);
+    const fetchedDay = shiftDate(today(), -3);
+    const fetched = new Date(`${fetchedDay}T16:00:00`);
+    await cacheCheckins(USER, shiftDate(fetchedDay, -30), fetchedDay, [checkinRow(USER, measured, 82.4)], fetched.toISOString());
+    await cachePhases(USER, [phaseRow(USER, 'cut-1')], fetched.toISOString());
+
+    await render(<DayScreen />);
+
+    const checkin = await screen.findByTestId(`day-fact-last-checkin:${measured}`);
+    const phase = await screen.findByTestId('day-fact-phase-goal:cut-1');
+    const year = fetched.getFullYear() === new Date().getFullYear() ? '' : ` ${fetched.getFullYear()}`;
+    const label = `Last updated ${shortDate(fetchedDay)}${year}, 16:00`;
+
+    // The label sits inside the row it qualifies, not somewhere nearby.
+    expect(within(checkin).getByText('82.4kg')).toBeTruthy();
+    expect(within(checkin).getByTestId('day-updated-checkin').props.children).toBe(label);
+    expect(within(phase).getByTestId('day-updated-phase').props.children).toBe(label);
+    // A screen reader hears the same disclosure: a tappable row's label replaces
+    // its children, so the label itself must carry the fetched time.
+    expect(checkin.props.accessibilityLabel).toContain(label);
+    expect(checkin.props.accessibilityLabel).toContain('82.4kg');
+    expect(phase.props.accessibilityLabel).toContain(label);
+
+    // Not worded as today's: no clock-only label, nothing claiming to be current.
+    expect(screen.queryByText('Last updated 16:00')).toBeNull();
+    for (const row of [checkin, phase]) {
+      expect(within(row).queryByText(/\b(today|now|current|live)\b/i)).toBeNull();
+    }
+    expect(mockApi).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('fetched and genuinely empty: the real empty state with its fetched time — not "not available"', async () => {
+    const fetchedDay = shiftDate(today(), -1);
+    const fetched = new Date(`${fetchedDay}T07:30:00`).toISOString();
+    await cacheCheckins(USER, shiftDate(fetchedDay, -30), fetchedDay, [], fetched);
+    await cachePhases(USER, [], fetched);
+
+    await render(<DayScreen />);
+
+    const checkin = await screen.findByTestId('day-absent-checkin');
+    expect(within(checkin).getByText(`No check-in since ${shortDate(shiftDate(fetchedDay, -30))}.`)).toBeTruthy();
+    expect(within(checkin).getByTestId('day-updated-checkin')).toBeTruthy();
+    const phase = screen.getByTestId('day-absent-phase');
+    expect(within(phase).getByText('No active phase.')).toBeTruthy();
+    expect(within(phase).getByTestId('day-updated-phase')).toBeTruthy();
+    expect(screen.queryByTestId('day-unavailable-checkin')).toBeNull();
+    expect(screen.queryByTestId('day-unavailable-phase')).toBeNull();
+  });
+
+  it('states no weight until the unit preference is read — never kilograms for a frame to a pounds athlete', async () => {
+    mockUnitsReady = false;
+    await seedDay();
+
+    await render(<DayScreen />);
+
+    const checkin = await screen.findByTestId(`day-fact-last-checkin:${today()}`);
+    expect(within(checkin).getByText('Weight recorded')).toBeTruthy();
+    expect(screen.queryByText('82.4kg')).toBeNull();
+    expect(within(screen.getByTestId('day-fact-phase-goal:cut-1')).getByText('Target set by 1 Nov')).toBeTruthy();
+  });
+
+  it("another account's cached check-in and phase goal never render for the signed-in athlete", async () => {
+    const fetched = new Date(`${today()}T08:00:00`).toISOString();
+    await cacheCheckins('u2', shiftDate(today(), -30), today(), [checkinRow('u2', today(), 61.3)], fetched);
+    await cachePhases('u2', [phaseRow('u2', 'theirs')], fetched);
+
+    await render(<DayScreen />);
+
+    expect(await screen.findByTestId('day-unavailable-checkin')).toBeTruthy();
+    expect(await screen.findByTestId('day-unavailable-phase')).toBeTruthy();
+    expect(screen.queryByText('61.3kg')).toBeNull();
+    expect(screen.queryByTestId(`day-fact-last-checkin:${today()}`)).toBeNull();
+    expect(screen.queryByTestId('day-fact-phase-goal:theirs')).toBeNull();
   });
 });
 
