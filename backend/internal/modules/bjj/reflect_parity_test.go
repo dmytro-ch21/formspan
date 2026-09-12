@@ -274,3 +274,83 @@ func TestTheEvalCountsSpokenNumbersTheWayGoDoes(t *testing.T) {
 		}
 	}
 }
+
+// F64 (#1174): the eval drops an out-of-range or unspoken session scalar the
+// way ResolveDraft's checkedNumber does, with SCALAR_BOUNDS in
+// scripts/check-dictation-evals.py. The bounds are read from ResolveDraft's
+// own call sites rather than restated here, so a changed ceiling, a changed
+// floor, or a fourth checked field all fail this test until the port follows.
+func TestTheEvalChecksSessionScalarsTheWayGoDoes(t *testing.T) {
+	goSrc, err := os.ReadFile(repoFile(t, filepath.Join("backend", "internal", "modules", "bjj", "reflect.go")))
+	if err != nil {
+		t.Fatalf("reading reflect.go: %v", err)
+	}
+	// Every constant a call site may name, by name. A new one fails loudly
+	// below rather than being guessed at.
+	consts := map[string]int{
+		"maxDraftRounds":       maxDraftRounds,
+		"maxDraftRoundMinutes": maxDraftRoundMinutes,
+		"MaxRPE":               MaxRPE,
+	}
+	call := regexp.MustCompile(`checkedNumber\("(\w+)", raw\.\w+, (\d+), (\w+), dictation`)
+	want := map[string][2]int{}
+	for _, m := range call.FindAllStringSubmatch(string(goSrc), -1) {
+		lo, _ := strconv.Atoi(m[2])
+		hi, ok := consts[m[3]]
+		if !ok {
+			if n, err := strconv.Atoi(m[3]); err == nil {
+				hi = n
+			} else {
+				t.Fatalf("checkedNumber for %q is bounded by %s, which this test does not know — add it to consts", m[1], m[3])
+			}
+		}
+		want[m[1]] = [2]int{lo, hi}
+	}
+	if len(want) == 0 {
+		t.Fatal("found no checkedNumber call sites in reflect.go — fix this parser rather than deleting the check")
+	}
+
+	pySrc, err := os.ReadFile(repoFile(t, filepath.Join("scripts", "check-dictation-evals.py")))
+	if err != nil {
+		t.Fatalf("reading the eval validator: %v", err)
+	}
+	const open = "SCALAR_BOUNDS = {\n"
+	src := string(pySrc)
+	i := strings.Index(src, open)
+	if i < 0 {
+		t.Fatal("could not find SCALAR_BOUNDS in check-dictation-evals.py — fix this parser rather than deleting the check")
+	}
+	body := src[i+len(open):]
+	j := strings.Index(body, "\n}")
+	if j < 0 {
+		t.Fatal("SCALAR_BOUNDS is not terminated in check-dictation-evals.py")
+	}
+	entry := regexp.MustCompile(`^\s*"(\w+)":\s*\((\d+),\s*(\d+)\),?\s*$`)
+	port := map[string][2]int{}
+	for _, line := range strings.Split(body[:j], "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		m := entry.FindStringSubmatch(line)
+		if m == nil {
+			t.Fatalf("unparseable SCALAR_BOUNDS line %q — keep one entry per line", line)
+		}
+		lo, _ := strconv.Atoi(m[2])
+		hi, _ := strconv.Atoi(m[3])
+		port[m[1]] = [2]int{lo, hi}
+	}
+
+	for field, b := range want {
+		got, ok := port[field]
+		if !ok {
+			t.Errorf("ResolveDraft checks %q with bounds %v, and the eval's SCALAR_BOUNDS does not check it at all", field, b)
+		} else if got != b {
+			t.Errorf("%q: ResolveDraft bounds it %v, the eval's port %v", field, b, got)
+		}
+	}
+	for field, b := range port {
+		if _, ok := want[field]; !ok {
+			t.Errorf("the eval's SCALAR_BOUNDS checks %q %v, but no checkedNumber call for it was parsed from ResolveDraft — either Go stopped checking it, or the call site changed shape and this parser missed it", field, b)
+		}
+	}
+}

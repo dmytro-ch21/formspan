@@ -507,7 +507,42 @@ the guard fires zero times over the 66 real drafts in `results/`, so no score
 above changes. The eval simply no longer CAN score a draft the app would
 floor.
 
-**Still not mirrored.** `ResolveDraft` also drops an unspoken SCALAR (`rounds`,
-`round_minutes`, `session_rpe`) to null, via `checkedNumber`, and
-`postprocess()` does not. That is the same class of gap, outside this ticket's
-scope, and filed as F64 (#1174).
+**Scalars came next.** `ResolveDraft` also drops an out-of-range or unspoken
+SCALAR (`rounds`, `round_minutes`, `session_rpe`) to null, via `checkedNumber`.
+F64 (#1174), below, mirrors that too.
+
+## F64 (#1174): `run.py` drops an unspoken or out-of-range session scalar the way the app does (2026-09-12)
+
+**The gap F29 left.** `ResolveDraft` passes `rounds`, `round_minutes` and
+`session_rpe` through `checkedNumber`: out of the field's range, or not said in
+the dictation, becomes null (`unknown_value` / `not_spoken`). `postprocess()`
+passed them through untouched, so the eval could score a scalar the app would
+never show.
+
+**The fix.**
+- **The port.** `scripts/check-dictation-evals.py` gains two things.
+  `SCALAR_BOUNDS` holds each field's (lo, hi): 1–30, 1–60 and 1–10.
+  `checked_number` mirrors `checkedNumber`'s order: absent stays absent, out of
+  range becomes None, then unspoken becomes None.
+- **The wiring.** `postprocess()` runs every scalar through it, and records
+  what it dropped under `scalars_dropped`.
+- **The corpus.** The corpus validator's scalar checks read the same table. An
+  expected value outside it is one the app always drops, so no draft could
+  ever score correct against it; that is now an error rather than a silent
+  zero.
+
+**Held in step.** `TestTheEvalChecksSessionScalarsTheWayGoDoes` reads the
+bounds from `ResolveDraft`'s own `checkedNumber` call sites in `reflect.go`,
+resolving the named constants `maxDraftRounds`, `maxDraftRoundMinutes` and
+`MaxRPE`, and compares them with `SCALAR_BOUNDS` in both directions. So each of
+these fails it until the port follows:
+- a changed ceiling;
+- a changed floor;
+- a fourth checked field;
+- a constant the test does not know.
+
+**Not mirrored, on purpose.** `ResolveDraft` also drops an out-of-enum `kind`
+to `""`. `postprocess()` does not, because both the app's draft schema and
+`prompt.py`'s constrain `kind` to the enum under strict structured output. That
+leaves it unreachable from a compliant provider, the same class as the
+tag-category check. `gi` has no normalisation in `ResolveDraft` to mirror.

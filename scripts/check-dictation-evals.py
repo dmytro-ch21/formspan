@@ -123,6 +123,15 @@ NUMBER_WORDS = {
     90: ["ninety", "hour and a half"],
 }
 WORD_SPLIT = re.compile(r"[^a-z0-9]+")
+#: The session scalars `ResolveDraft` passes through `checkedNumber`, with the
+#: (lo, hi) each call site gives it: `maxDraftRounds`, `maxDraftRoundMinutes`
+#: and `MaxRPE` in the bjj package (F64, #1174). `reflect_parity_test.go` reads
+#: those call sites and compares them with this table. Keep one entry per line.
+SCALAR_BOUNDS = {
+    "rounds": (1, 30),
+    "round_minutes": (1, 60),
+    "session_rpe": (1, 10),
+}
 #: `maxTagCount` in backend/internal/modules/bjj/session.go. `ResolveDraft`
 #: floors a count above it even when it WAS spoken. The Go parity test pins it.
 MAX_TAG_COUNT = 1000
@@ -145,6 +154,23 @@ def spoken_number(dictation: str, n: int) -> bool:
         if tens and units and f" {tens[0]} {units[0]} " in joined:
             return True
     return False
+
+
+def checked_number(value, lo: int, hi: int, dictation: str) -> tuple[int | None, str | None]:
+    """`checkedNumber` in reflect.go: keep a scalar only if in range AND spoken.
+
+    Absent stays absent. Out of range, or not an int, becomes None first; then
+    not spoken becomes None. DROPPED, not clamped: a blank is a field the athlete
+    fills in one tap, a clamped number is one they have to notice is wrong. The
+    reasons are eval-local labels, not Go's notice constants.
+    """
+    if value is None:
+        return None, None
+    if not isinstance(value, int) or isinstance(value, bool) or not lo <= value <= hi:
+        return None, "out_of_range"
+    if not spoken_number(dictation, value):
+        return None, "not_spoken"
+    return value, None
 
 
 def floor_count(count, dictation: str) -> tuple[int, str | None]:
@@ -307,13 +333,13 @@ def check_case(case, techniques, families, errors):
         err(f"kind {exp['kind']!r} is not one of {sorted(KINDS)}")
     if exp.get("gi") is not None and not isinstance(exp["gi"], bool):
         err("gi is three-state: true, false or null")
-    for field in ("rounds", "round_minutes"):
+    # Bounded by the same table the app's checkedNumber uses (F64): an expected
+    # value outside it is one the app always drops, so no draft could ever score
+    # correct against it.
+    for field, (lo, hi) in SCALAR_BOUNDS.items():
         v = exp.get(field)
-        if v is not None and (not isinstance(v, int) or v < 1):
-            err(f"{field} must be a positive integer or null, got {v!r}")
-    rpe = exp.get("session_rpe")
-    if rpe is not None and (not isinstance(rpe, int) or not 1 <= rpe <= 10):
-        err(f"session_rpe must be 1-10 or null, got {rpe!r}")
+        if v is not None and (not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi):
+            err(f"{field} must be {lo}-{hi} or null, got {v!r} — the app drops anything outside that")
 
     for i, tag in enumerate(exp.get("tags", [])):
         where = f"tags[{i}]"
@@ -447,6 +473,23 @@ def main() -> int:
     ):
         if floor_count(count, dictation) != want:
             errors.append(f"floor_count({count}, {dictation!r}) = {floor_count(count, dictation)}, want {want}")
+    for value, field, dictation, want in (
+        (5, "rounds", "rolled five rounds", (5, None)),
+        (6, "rounds", "rolled five rounds", (None, "not_spoken")),
+        (31, "rounds", "thirty one rounds", (None, "out_of_range")),
+        (30, "rounds", "thirty rounds", (30, None)),
+        # The floor, which every field shares: without these an off-by-one on
+        # `lo` survived all the cases above (found in review).
+        (1, "rounds", "did one round", (1, None)),
+        (0, "rounds", "zero rounds", (None, "out_of_range")),
+        (61, "round_minutes", "sixty one minute rounds", (None, "out_of_range")),
+        (8, "session_rpe", "rpe of eight", (8, None)),
+        (11, "session_rpe", "an eleven out of ten", (None, "out_of_range")),
+        (None, "session_rpe", "no idea", (None, None)),
+    ):
+        got = checked_number(value, *SCALAR_BOUNDS[field], dictation)
+        if got != want:
+            errors.append(f"checked_number({value}, {field}, {dictation!r}) = {got}, want {want}")
 
     seen: set[str] = set()
     for case in cases:
