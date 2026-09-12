@@ -1,7 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 
-import { shiftDate, trendWeight, type Measured } from './anthropometry';
+import { MIN_TREND_READINGS, shiftDate, TREND_DAYS, trendWeight, type Measured } from './anthropometry';
 import { listCheckins, listPhases, type Checkin, type Phase } from './body';
 import { dayString } from './calendar';
 import type { Projection as PlanProjectionWire } from './nutritionApi';
@@ -122,6 +122,13 @@ export function useWeightTrend(
         // a second mean would be a third number the app could report for the
         // same body.
         smooth: (on) => trendWeight(measured, on),
+        // F26/#710 — the smoother's own threshold, stated. Left unset,
+        // `buildTrend` defaulted `minReadings` to 1, and an athlete weighing in
+        // every five days was told "5 of 1 readings needed" with no chart:
+        // `trendWeight` needs MIN_TREND_READINGS inside ONE TREND_DAYS window,
+        // which no flat count describes.
+        minReadings: MIN_TREND_READINGS,
+        minReadingsWithinDays: TREND_DAYS,
         planFrom: phase?.started_on ?? null,
       }),
     [readings, today, range, measured, phase],
