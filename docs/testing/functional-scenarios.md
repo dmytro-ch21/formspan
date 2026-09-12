@@ -1185,6 +1185,12 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
 **The drain**
 - The bar empties continuously from right to left and reaches empty at the same
   moment the digits read `0:00`.
+- **Expand the timer mid-rest (F57, #1140): the ring unwinds continuously too**,
+  from exactly where the bar was, and never visibly steps. The bar and the ring
+  are one clock; at no moment do they disagree about how much rest is left.
+- In a guided run, the **run bar** under "Set N of M" fills continuously across
+  the whole run, and the last bit of each step fills in step with the ring
+  rather than in 250ms jumps.
 - **±15s** grows or shrinks the fill over ~180ms from where it was, then keeps
   draining. It never snaps back to full.
 - **Pause** freezes the fill where it is; **resume** continues from that width.
@@ -1222,6 +1228,8 @@ suite. Run on a **release** build on a real phone, ideally the slowest supported
    offset is not disturbed and the list does not jump.
 3. Watch a 90-second rest all the way down: the bar **drains** smoothly rather
    than stepping four times a second, and it is still readable from across a gym.
+   Then expand it: the **ring** unwinds just as smoothly (F57, #1140), and in a
+   guided run the run bar fills smoothly too.
 4. Adjust ±15s and pause/resume mid-rest: the fill continues from where it was
    and does not snap.
 5. Minimise and expand several times in a row, including mid-animation: the swap

@@ -1,14 +1,16 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { StyleSheet, View as RNView } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
   FadeOut,
   ReduceMotion,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 
@@ -68,6 +70,9 @@ import { PressableScale } from '@/components/ui/PressableScale';
  * by hue — there is only one hue available, and inventing a second would break
  * the promise the accent setting makes.
  */
+
+/** The ring's progress arc, driven on the UI thread — see `Ring` (F57/#1140). */
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 /** How solid the ring is, by kind. Work is the one you are counting on. */
 const RING_OPACITY: Record<Countdown['kind'], number> = {
@@ -193,6 +198,26 @@ export function TimerSurface({ clock, ...controls }: TimerSurfaceProps) {
   const props: TimerControls = { ...controls, remaining };
   const expanded = !props.minimized;
 
+  /*
+    F57/#1140 — the countdown's fractions are armed HERE, once, and both forms
+    read them. The bar's fill and the card's ring are the same quantity — time
+    left over the total — so two animations of it could only ever disagree.
+    Before F57 the bar drained on the UI thread and the card's ring stepped at
+    4Hz from `remaining`, so expanding a smooth bar revealed a stepping clock.
+  */
+  const total = props.timer.total;
+  const drainAt = useCallback((secondsLeft: number) => fractionOf(secondsLeft, total), [total]);
+  const drain = useCountdownFraction(props.timer, remaining, drainAt, true);
+  const run = props.run;
+  const inRun = run != null && run.steps.length > 1;
+  // The run bar FILLS, over the whole run, measured in time (`runProgress`) —
+  // a different quantity from the drain, armed by the same rules.
+  const runAt = useCallback(
+    (secondsLeft: number) => (run ? runProgress(run, secondsLeft) : 0),
+    [run],
+  );
+  const runFill = useCountdownFraction(props.timer, remaining, runAt, inRun);
+
   // Seeded to the form the surface opens in, so an arrival is the layer's own
   // fade and nothing else — no crossfade playing inside it.
   const swap = useSharedValue(expanded ? 1 : 0);
@@ -255,7 +280,7 @@ export function TimerSurface({ clock, ...controls }: TimerSurfaceProps) {
           style={[styles.swapForm, expanded && styles.swapBehind, barStyle]}
           testID="countdown-form-bar"
         >
-          <TimerBar {...props} />
+          <TimerBar {...props} drain={drain} />
         </Animated.View>
         <Animated.View
           pointerEvents={expanded ? 'box-none' : 'none'}
@@ -264,7 +289,7 @@ export function TimerSurface({ clock, ...controls }: TimerSurfaceProps) {
           style={[styles.swapForm, !expanded && styles.swapBehind, cardStyle]}
           testID="countdown-form-card"
         >
-          <TimerCard {...props} />
+          <TimerCard {...props} drain={drain} runFill={runFill} />
         </Animated.View>
       </RNView>
     </Animated.View>
@@ -318,30 +343,55 @@ function fractionOf(seconds: number, total: number): number {
  * destination — an empty bar for the whole rest, the one failure worse than a
  * stair.
  */
-function Drain({ timer, remaining, color }: { timer: Countdown; remaining: number; color: string }) {
+/**
+ * F57/#1140 — `Drain`'s arming, lifted into a hook so it runs ONCE per surface.
+ *
+ * Everything in the doc comment above still holds, word for word: a transform
+ * on a childless absolute fill, linear to the deadline, armed on a change of
+ * the countdown and never on a tick, the first arm jumping and later arms
+ * bridging from the value on screen, Reduce Motion (and an unanswered OS)
+ * stepping with the digits instead. What changed is WHO reads the value: the
+ * bar's fill, the card's ring, and — through a second call with `runProgress` —
+ * the run bar. `fractionAt(secondsLeft)` is what the fraction is at a given
+ * amount of time left; the animation heads for `fractionAt(0)` at the deadline.
+ *
+ * `active: false` arms nothing and writes nothing, which is what keeps a lone
+ * rest (no run) from spending UI-thread animations on a bar that isn't shown.
+ * It also FORGETS that it armed: a set tick with auto-rest on ends a run
+ * without closing the surface, so a second run can bring the run bar back
+ * within one mount, and bridging from the fill the old run left behind would
+ * glide backwards across the bar (found in review). It jumps instead.
+ */
+function useCountdownFraction(
+  timer: Countdown,
+  remaining: number,
+  fractionAt: (secondsLeft: number) => number,
+  active: boolean,
+): SharedValue<number> {
   const reduced = useReducedMotion();
-  // Seeded from the digits' value so a bar that mounts with a rest already
-  // under way shows its true width on its first frame instead of refilling from
-  // full. (Since F55 the bar stays mounted across a minimise; it mounts with the
-  // surface.)
-  const drain = useSharedValue(fractionOf(remaining, timer.total));
+  // Seeded from the digits' value so a form that mounts with a rest already
+  // under way shows its true position on its first frame.
+  const value = useSharedValue(fractionAt(remaining));
   /*
-    Whether this bar has armed since it mounted. The FIRST arm jumps to the true
-    position instead of bridging, because on a fresh rest the seed above is
+    Whether this has armed since the surface mounted. The FIRST arm jumps to the
+    true position instead of bridging, because on a fresh rest the seed above is
     stale: the countdown's clock publishes in an effect that runs after this
     first render, so `remaining` can still be 0 (or the last rest's value).
     Bridging from that seed would refill the bar from empty over 180ms at the
     start of every rest (found in review). Re-arms after that — ±15s, pause,
-    resume, the next step — bridge from the width that is really on screen.
+    resume, the next step — bridge from the value that is really on screen.
   */
   const armed = useRef(false);
 
   useEffect(() => {
+    if (!active) {
+      armed.current = false;
+      return;
+    }
     if (reduced !== false) return;
     const first = !armed.current;
     armed.current = true;
-    const now = Date.now();
-    const leftMs = remainingAt(timer, now) * 1000;
+    const leftMs = remainingAt(timer, Date.now()) * 1000;
     const bridgeMs = first ? 0 : Math.min(MS.control, leftMs);
     const bridge = {
       duration: first ? 0 : MS.control,
@@ -350,36 +400,37 @@ function Drain({ timer, remaining, color }: { timer: Countdown; remaining: numbe
     };
 
     if (timer.pausedWith != null || leftMs <= 0) {
-      // Frozen, or spent: settle on the true width and stay there.
-      drain.set(withTiming(fractionOf(leftMs / 1000, timer.total), bridge));
+      // Frozen, or spent: settle on the true position and stay there.
+      value.set(withTiming(fractionAt(leftMs / 1000), bridge));
       return;
     }
 
     // Two legs, one assignment: the bridge (zero-length on a first arm), then
-    // the linear drain to the deadline.
-    drain.set(
+    // the linear leg to where the fraction is at the deadline.
+    value.set(
       withSequence(
-        withTiming(fractionOf((leftMs - bridgeMs) / 1000, timer.total), {
-          ...bridge,
-          duration: bridgeMs,
-        }),
-        withTiming(0, {
+        withTiming(fractionAt((leftMs - bridgeMs) / 1000), { ...bridge, duration: bridgeMs }),
+        withTiming(fractionAt(0), {
           duration: leftMs - bridgeMs,
           easing: Easing.linear,
           reduceMotion: ReduceMotion.Never,
         }),
       ),
     );
-  }, [timer, reduced, drain]);
+  }, [timer, reduced, value, active, fractionAt]);
 
   useEffect(() => {
-    // Assigning a plain value also cancels a drain in flight, which is what
-    // makes turning Reduce Motion ON mid-rest stop the glide immediately.
-    if (reduced !== false) drain.set(fractionOf(remaining, timer.total));
-  }, [reduced, remaining, timer.total, drain]);
+    // Assigning a plain value also cancels an animation in flight, which is
+    // what makes turning Reduce Motion ON mid-rest stop the glide immediately.
+    if (active && reduced !== false) value.set(fractionAt(remaining));
+  }, [active, reduced, remaining, value, fractionAt]);
 
+  return value;
+}
+
+/** The collapsed bar's fill: reads the surface's drain, arms nothing itself. */
+function DrainFill({ drain, color }: { drain: SharedValue<number>; color: string }) {
   const fill = useAnimatedStyle(() => ({ transform: [{ scaleX: drain.get() }] }));
-
   return (
     <RNView style={styles.track}>
       <Animated.View
@@ -387,6 +438,22 @@ function Drain({ timer, remaining, color }: { timer: Countdown; remaining: numbe
         testID="countdown-drain"
       />
     </RNView>
+  );
+}
+
+/**
+ * The card's run bar, since F57 a `scaleX` fill read from the surface's
+ * `runFill` rather than an animated `width: %` repainted — and re-laid-out —
+ * on every 250ms tick. A separate component because `useAnimatedStyle` is a
+ * hook and the bar only exists inside a run.
+ */
+function RunFill({ runFill, color }: { runFill: SharedValue<number>; color: string }) {
+  const style = useAnimatedStyle(() => ({ transform: [{ scaleX: runFill.get() }] }));
+  return (
+    <Animated.View
+      style={[styles.runFill, { backgroundColor: color }, style]}
+      testID="countdown-run-fill"
+    />
   );
 }
 
@@ -404,21 +471,26 @@ function Drain({ timer, remaining, color }: { timer: Countdown; remaining: numbe
 function Ring({
   size,
   stroke,
-  progress,
+  drain,
   color,
   opacity,
   children,
 }: {
   size: number;
   stroke: number;
-  progress: number;
+  /** The surface's drain (F57/#1140) — the same value the collapsed bar reads. */
+  drain: SharedValue<number>;
   color: string;
   opacity: number;
   children?: React.ReactNode;
 }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const clamped = Math.max(0, Math.min(1, progress));
+  // On the UI thread: the arc unwinds continuously with the drain instead of
+  // stepping on the 250ms repaint, and React is not asked for a frame.
+  const arc = useAnimatedProps(() => ({
+    strokeDashoffset: c * (1 - Math.max(0, Math.min(1, drain.get()))),
+  }));
   return (
     <RNView style={{ width: size, height: size }}>
       <Svg
@@ -436,7 +508,7 @@ function Ring({
           strokeWidth={stroke}
           fill="none"
         />
-        <Circle
+        <AnimatedCircle
           cx={size / 2}
           cy={size / 2}
           r={r}
@@ -445,11 +517,7 @@ function Ring({
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={c}
-          // Rounded to a tenth of a point: React Native re-renders the SVG on
-          // every distinct value, and the 250ms repaint would otherwise push a
-          // new float through the native bridge four times a second for a
-          // difference nobody can see.
-          strokeDashoffset={Math.round(c * (1 - clamped) * 10) / 10}
+          animatedProps={arc}
           fill="none"
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
@@ -464,19 +532,20 @@ function TimerCard({
   timer,
   remaining,
   run,
+  drain,
+  runFill,
   onMinimize,
   onAdjust,
   onTogglePause,
   onStop,
   onSkip,
-}: TimerControls) {
+}: TimerControls & { drain: SharedValue<number>; runFill: SharedValue<number> }) {
   const accent = useAccent();
   const copy = countdownCopy(timer.kind);
   const done = remaining <= 0;
   const paused = timer.pausedWith != null;
   const step = stepOf(timer);
   const adjustable = isAdjustable(timer.kind);
-  const progress = timer.total > 0 ? remaining / timer.total : 0;
   const inRun = run != null && run.steps.length > 1;
 
   return (
@@ -516,7 +585,7 @@ function TimerCard({
       <Ring
         size={196}
         stroke={12}
-        progress={progress}
+        drain={drain}
         color={accent.accent}
         opacity={RING_OPACITY[timer.kind]}
       >
@@ -538,15 +607,7 @@ function TimerCard({
       )}
       {inRun && (
         <RNView style={styles.runTrack}>
-          <RNView
-            style={[
-              styles.runFill,
-              {
-                width: `${runProgress(run, remaining) * 100}%`,
-                backgroundColor: accent.accent,
-              },
-            ]}
-          />
+          <RunFill runFill={runFill} color={accent.accent} />
         </RNView>
       )}
 
@@ -640,12 +701,13 @@ function TimerBar({
   timer,
   remaining,
   run,
+  drain,
   onExpand,
   onAdjust,
   onTogglePause,
   onStop,
   onSkip,
-}: TimerControls) {
+}: TimerControls & { drain: SharedValue<number> }) {
   const accent = useAccent();
   const copy = countdownCopy(timer.kind);
   const done = remaining <= 0;
@@ -771,7 +833,7 @@ function TimerBar({
       {/* Drains left to right. Readable from across a gym without reading the
           number at all — the one thing the collapsed form kept from the bar it
           replaces. Continuously, on the UI thread, since N558 — see `Drain`. */}
-      <Drain timer={timer} remaining={remaining} color={accent.accent} />
+      <DrainFill drain={drain} color={accent.accent} />
     </View>
   );
 }
@@ -843,7 +905,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
     overflow: 'hidden',
   },
-  runFill: { height: 3, borderRadius: 2 },
+  // F57: absolutely positioned and childless, so scaling it touches no layout;
+  // `transformOrigin: 'left'` makes it grow rightward the way the width did.
+  runFill: { position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%', transformOrigin: 'left' },
 
   controls: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14 },
   adjust: {
