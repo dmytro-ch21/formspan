@@ -236,9 +236,43 @@ export function suggestedNoun(unit: TrackerUnit): string {
   }
 }
 
+/**
+ * The plural of an athlete's count noun — "cups", "glasses", "berries".
+ *
+ * **The noun is ATHLETE-AUTHORED** (see `unitNoun`), so this cannot assume the
+ * seeded "cup". A bare `+s` read "8 glasss" for a tracker somebody named with
+ * "glass" (L18), and nothing noticed for as long as it did only because every
+ * preset in `presets.go` happens to say "cup".
+ *
+ * Three rules, deliberately no more — the English endings a count noun is
+ * actually likely to have:
+ *
+ * - a hiss (`-s`, `-ss`, `-sh`, `-ch`, `-x`, `-z`) takes "es": glass, splash,
+ *   pinch, box, spritz;
+ * - a CONSONANT before `y` takes "ies": berry → berries, but day → days;
+ * - everything else takes "s".
+ *
+ * **Not an inflection library, and the misses are known rather than
+ * overlooked**: "quiz" → "quizes", "potato" → "potatos", "leaf" → "leafs", a
+ * hard "ch" gets "es" ("stomaches"), and a multi-word noun pluralises its last
+ * word ("scoop of proteins"). Each is cosmetic — the number beside it is still
+ * right — and the athlete who minds can pick a different word, which is more
+ * than a table of irregulars would ever offer them.
+ *
+ * Matched case-insensitively, which is for an ALL-CAPS noun rather than an
+ * autocapitalised one — "Glass" ends in lower case and needs no flag. An
+ * all-caps noun gets an all-caps suffix too ("BOXES", "BERRIES"), because the
+ * flag alone gives "BOXes", which is no better than the "BOXs" it replaced.
+ * "All caps" needs at least one cased letter: an emoji noun is not shouting.
+ */
 export function pluralise(noun: string, n: number): string {
   if (!noun) return '';
-  return n === 1 ? noun : `${noun}s`;
+  if (n === 1) return noun;
+  const shouting = noun === noun.toUpperCase() && noun !== noun.toLowerCase();
+  const suffix = (s: string) => (shouting ? s.toUpperCase() : s);
+  if (/(?:[sxz]|[cs]h)$/i.test(noun)) return noun + suffix('es');
+  if (/[^aeiou]y$/i.test(noun)) return noun.slice(0, -1) + suffix('ies');
+  return noun + suffix('s');
 }
 
 /**
