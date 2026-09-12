@@ -6913,6 +6913,13 @@ number would describe something still happening.
   exercise id for its own PR list — a known, separate gap, explicitly out
   of this ticket's scope. Do not conflate a modal screenshot with the share
   PNG when filing a bug against either.
+- **A PR won with help says so** (F59, #1156). Log a new heaviest set of 5 at
+  152kg with 2 assisted, finish and share → the badge reads **"Back Squat ·
+  152kg × 5 (2 assisted) PR"**. Before F59 it read "152kg × 5 PR", exactly like
+  five unaided. A bodyweight rep PR with help reads "12 reps (4 assisted)".
+- **The records card agrees.** Open that exercise's records card: its set line
+  reads "5 × 152kg (2 assisted)" in the measured half, never beside the RIR/RPE.
+- **0 assisted, or never recorded, adds nothing** to the badge or the card.
 
 ### Custom photo background (N449, #747)
 

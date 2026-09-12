@@ -175,6 +175,25 @@ describe('the PR badge (N447/#745)', () => {
     it('is null with neither — the kinds this format does not cover', () => {
       expect(prEvidence({ weight_kg: null, reps: null }, fmt)).toBeNull();
     });
+
+    // F59/#1156 — a record's `reps` is the full count of its set, so an assisted
+    // PR shared as "152kg × 5" claimed five unaided reps.
+    it('says how many of a loaded record\'s reps were assisted', () => {
+      expect(prEvidence({ weight_kg: 152, reps: 5, assisted_reps: 2 }, fmt)).toBe('152kg × 5 (2 assisted)');
+    });
+
+    it('says it on a bodyweight record too', () => {
+      expect(prEvidence({ weight_kg: null, reps: 12, assisted_reps: 4 }, fmt)).toBe('12 reps (4 assisted)');
+    });
+
+    it.each([
+      ['unrecorded (null)', null],
+      ['absent, an older cached record', undefined],
+      ['none of them (0)', 0],
+    ] as const)('adds nothing when assistance is %s', (_label, assisted) => {
+      const r = assisted === undefined ? { weight_kg: 152, reps: 5 } : { weight_kg: 152, reps: 5, assisted_reps: assisted };
+      expect(prEvidence(r, fmt)).toBe('152kg × 5');
+    });
   });
 
   describe('prBadgeFor', () => {
@@ -183,6 +202,11 @@ describe('the PR badge (N447/#745)', () => {
     it('matches the shape the ticket asked for', () => {
       const records = [named('back-squat', 'Back Squat', { weight_kg: 152, reps: 5 })];
       expect(prBadgeFor(records, fmt)).toBe('Back Squat · 152kg × 5 PR');
+    });
+
+    it('carries the assisted count into the badge an athlete shares', () => {
+      const records = [named('back-squat', 'Back Squat', { weight_kg: 152, reps: 5, assisted_reps: 2 })];
+      expect(prBadgeFor(records, fmt)).toBe('Back Squat · 152kg × 5 (2 assisted) PR');
     });
 
     it('is null with no records', () => {
