@@ -211,6 +211,10 @@ def postprocess(draft: dict, techniques: dict, families: list[str], dictation: s
     never says, as a digit or a word, is floored to 1 as `ResolveDraft` does,
     through the validator's port of `spokenNumber`. Before, the eval scored the
     invented multiplier the app would never have shown.
+
+    And the session scalars (F64, #1174): `rounds`, `round_minutes` and
+    `session_rpe` are dropped to None when out of range or not spoken, as
+    `checkedNumber` does, recorded under `scalars_dropped`.
     """
     out = dict(draft)
     tags, unresolved = [], list(draft.get("unresolved") or [])
@@ -235,6 +239,16 @@ def postprocess(draft: dict, techniques: dict, families: list[str], dictation: s
         t["count"] = count
         tags.append(t)
     out["tags"], out["unresolved"] = tags, unresolved
+    dropped = {}
+    for field, (lo, hi) in V.SCALAR_BOUNDS.items():
+        if field not in out:
+            continue
+        value, reason = V.checked_number(out[field], lo, hi, dictation)
+        if reason:
+            dropped[field] = {"was": out[field], "reason": reason}
+        out[field] = value
+    if dropped:
+        out["scalars_dropped"] = dropped
     return out
 
 

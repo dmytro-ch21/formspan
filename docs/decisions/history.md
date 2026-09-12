@@ -75101,6 +75101,50 @@ Its suggestions:
 
 **Reachability on a phone**: no athlete-facing change. This is eval fidelity to what the phone already shows.
 
+## 2026-09-12 — F64 (#1174): the dictation eval drops an unspoken or out-of-range session scalar the way `checkedNumber` does
+
+**What was wrong.** F29 (#785) mirrored `ResolveDraft`'s tag-count guard in `evals/bjj-dictation/run.py`, and left the scalars out of scope. `ResolveDraft` passes `rounds`, `round_minutes` and `session_rpe` through `checkedNumber` in `reflect.go`. Anything outside the field's range, or not said in the dictation, becomes null. `postprocess()` passed them through, so the eval could score, for example, `rounds: 6` for "five rounds", which the app would show as blank.
+
+**What changed.**
+- **The port.** `scripts/check-dictation-evals.py` gains `SCALAR_BOUNDS` (rounds 1–30, round_minutes 1–60, session_rpe 1–10) and `checked_number`. It follows `checkedNumber`'s order: absent stays absent; out of range (or not an int, `bool` included) becomes None; then unspoken becomes None, using F29's `spoken_number`. Dropped, not clamped, as in Go.
+- **The wiring.** `run.py`'s `postprocess()` runs each scalar through it and records `scalars_dropped: {field: {was, reason}}`.
+- **The corpus.** The validator's corpus checks now read the same table. `rounds` and `round_minutes` used to be checked only as positive integers. An expected value above the app's ceiling is one no draft could ever match, because the app always drops it, so it is now an error. The corpus's own values (at most 7 rounds, 5 minutes, RPE 8) all pass.
+
+**Held in step with Go.** `TestTheEvalChecksSessionScalarsTheWayGoDoes`, in `reflect_parity_test.go`, does not restate the bounds. It reads them from `ResolveDraft`'s `checkedNumber("field", raw.X, lo, HI, dictation` call sites, resolves each named constant (`maxDraftRounds`, `maxDraftRoundMinutes`, `MaxRPE`), and compares the result with `SCALAR_BOUNDS` in both directions. So a moved ceiling, a moved floor, a fourth checked field, or a constant it does not know all fail it.
+
+**Checks.** Baseline: `check:evals` passes with 10 `checked_number` cases, and both Go parity tests pass without a database. A live `postprocess` on "rolled five rounds of five minutes", with `rounds: 6`, `round_minutes: 5` and `session_rpe: 11`, gives:
+- `rounds`: None, `not_spoken`;
+- `round_minutes`: 5, kept;
+- `session_rpe`: None, `out_of_range`.
+
+8 mutations, each restored byte-identical and re-run to green:
+
+| Mutation | Python `check:evals` | Go parity test |
+|---|---|---|
+| Go's `maxDraftRounds` moves to 40 | green | **red** |
+| the port's rounds ceiling drifts to 31 | red | red |
+| the port skips the spoken check | red | green |
+| the port skips the range check | red | green |
+| Go's `session_rpe` floor moves to 2 | green | **red** |
+| `run.py` stops calling `checked_number` | green | green |
+| a corpus case expects 31 rounds | red | n/a |
+| `checked_number`'s floor off by one (`lo < value`) | red, since review added the floor cases | n/a |
+
+The `run.py` row is checked only by a live `postprocess`: the 6 and the 11 survived when the call was cut, and were dropped once it was restored. As with F29, nothing runs `run.py` without an API key, so its wiring has no automated check.
+
+**What it does not change, and what it costs.**
+- **The corpus.** Its expected scalars are all spoken and in range, so a model that returns them keeps them.
+- **Where the Go half runs.** As with F29, it lives in CI's Backend job and in an explicit `go test`, not in local `verify`.
+- **What `must_not` can no longer see** (`backend-reviewer`). `must_not: ["rounds"]` can no longer catch a model that invents an unspoken, in-range scalar: `postprocess()` drops it before `_filled` looks. That is the fidelity the ticket asked for (the athlete never sees that number), and F29 already accepted the same trade for counts. No recorded result in `results/` is affected: every recorded output for those cases already has the scalar null.
+
+**Taken from review.** `backend-reviewer` found no blocking issue, and four suggestions were taken:
+- **A lower-bound case.** Two `checked_number` cases at and below `lo` were added. An off-by-one on the floor had survived all 8 original cases, and is now caught (mutation below).
+- **`kind`, recorded as deliberately not mirrored.** `ResolveDraft` drops an out-of-enum `kind` to `""`, which both schemas make unreachable under strict output.
+- **The `must_not` note above.**
+- **A clearer Go error message.** A call site the parser missed now reads as that, not as Go no longer checking the field.
+
+**Reachability on a phone**: no athlete-facing change. This is eval fidelity to what the phone already shows.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
