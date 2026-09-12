@@ -23904,3 +23904,67 @@ for a model or a large body (no web or admin call needs that one yet).
   stay equal.
 - **Not automated:** the Library page's loaders and every screen above — web
   has no test that runs a page's effects.
+
+## N568 — the day panel's last-known check-in and phase goal, offline (`apps/mobile/lib/bodyCache.ts`, the Body block in `apps/mobile/app/day.tsx`, #1129)
+
+A **read cache, not an outbox**: the last successful answer to the check-in and
+phase fetches is kept on the phone and shown in the day panel's **Body** block,
+always with the time it was fetched. Writing a check-in or a phase still needs
+signal, exactly as before. Reachable on a phone: Today → **Your day** → Body.
+
+### Happy path
+
+- **With signal, fill the cache.** Open Today (its check-in card refreshes on
+  focus), then tap **Your day**. Body shows **Last check-in** with the weight in
+  the athlete's units and *Measured <date>*, and **Phase goal** with the phase
+  name and *Target <weight> by <date>*. Both carry *Last updated HH:MM*.
+- **Airplane mode.** Turn signal off, close and reopen the app, open **Your
+  day**. The same two values render with the **same** *Last updated* time — it
+  does not advance to now, and nothing on either row says "today", "now" or
+  "current".
+- **A new weigh-in flows through.** With signal, save a check-in, return to
+  Today, open **Your day**: the new weight, and a new *Last updated* time.
+
+### Edge cases and errors
+
+- **Never fetched on this phone** (fresh install, or signal never available on
+  Today): both rows read *Not available on this phone yet.* — never *No
+  check-in* or *No active phase*.
+- **Fetched and genuinely empty.** No check-in in Today's 30-day window: *No
+  check-in since <date 30 days before the fetch>.* No phase running: *No active
+  phase.* Both still show *Last updated …*.
+- **Fetched yesterday / last year.** The label names the date (*Last updated 7
+  Sep, 16:00*), and the year when it is not this one.
+- **An evening fetch west of Greenwich** (e.g. 8:30pm Pacific) is labelled with
+  today's time, not tomorrow's UTC date.
+- **A check-in deleted on the web**: still shown offline with its old time; the
+  next time Today loads with signal it is gone from the panel.
+- **A phase ended on the web**: same — shown offline as last fetched, gone after
+  the next Today refresh with signal.
+- **Last check-in older than 30 days**: if an earlier refresh cached it, it is
+  shown with **that earlier refresh's** time, not the latest one's.
+- **Today loads while offline**: the failed fetch writes nothing; the panel keeps
+  the previous values and their previous time.
+- **Imperial athlete**: pounds, never a frame of kilograms; before the unit
+  preference is read the row says *Weight recorded* / *Target set*.
+- **Units off the check-in**: a check-in with measurements but no weight reads
+  *No weight recorded*.
+
+### Auth / security
+
+- **Two accounts, one phone.** Sign in as A with signal, open Today and Your day.
+  Sign out, sign in as B **offline**: B sees *Not available on this phone yet.*
+  for both rows — never A's weight or phase. B with signal gets B's own values;
+  switching back to A offline shows A's cached values, not B's.
+- **A response that names another athlete** (landing after an account switch)
+  is refused whole — no rows and no "fetched" marker are written.
+- **Nothing cached is ever sent anywhere**: no outbox, no retry, and neither the
+  progress photo link nor the notes are stored.
+
+### Not covered by this slice
+
+- The panel itself never fetches; it relies on Today having refreshed. If
+  VOLA becomes a centre tab (#1128) that can be opened without passing Today,
+  it needs its own `refreshBody` call.
+- The weight trend, Progress and Goals screens are still online-only for
+  check-ins.

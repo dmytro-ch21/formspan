@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
+import { shiftDate } from '@/lib/anthropometry';
+
 import TodayScreen from '../../app/(tabs)/index';
 import type { Entry, Food } from '@/lib/nutrition';
 import type { Module } from '@/lib/modules';
@@ -124,6 +126,11 @@ jest.mock('@/lib/body', () => ({
   listCheckins: () => Promise.resolve([]),
   listPhases: () => Promise.resolve([]),
 }));
+// N568 (#1129): Today's check-in refresh goes through `refreshBody`, which also
+// keeps the answer for the day panel. Mocked so this file checks the WIRING;
+// the SQLite behaviour has its own fixture test (lib/__tests__/bodyCache.test.ts).
+const mockRefreshBody = jest.fn((..._a: unknown[]) => Promise.resolve({ checkins: [], phases: [] }));
+jest.mock('@/lib/bodyCache', () => ({ refreshBody: (...a: unknown[]) => mockRefreshBody(...a) }));
 jest.mock('@/lib/prefs', () => ({
   ...jest.requireActual('@/lib/prefs'),
   readPref: () => Promise.resolve(null),
@@ -346,6 +353,16 @@ beforeEach(() => {
 });
 
 describe('the way into the day panel (N541 tranche 1, #972)', () => {
+  it("fills the day panel's body cache for the signed-in athlete, over the check-in card's 30 days (N568, #1129)", async () => {
+    mockRefreshBody.mockClear();
+    await render(<TodayScreen />);
+    await waitFor(() => expect(mockRefreshBody).toHaveBeenCalled());
+    const [getToken, userId, range] = mockRefreshBody.mock.calls[0];
+    expect(getToken).toBe(mockGetToken);
+    expect(userId).toBe('u1');
+    expect(range).toEqual({ from: shiftDate(todayKey(), -30), to: todayKey() });
+  });
+
   // One entry point, in the header, and it goes to the panel's route. The
   // panel does not replace this screen — see `app/day.tsx` — so the link is
   // the whole of Today's change, and this is the test that it is wired.

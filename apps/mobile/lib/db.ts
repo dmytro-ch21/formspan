@@ -488,6 +488,62 @@ const CREATE_NUTRITION_TARGETS = `
 `;
 
 /**
+ * N568/#1129: the last-known check-ins and phases, so the day panel can state
+ * them in a dead spot. **A read-through cache, not an outbox** — nothing here
+ * is ever pushed, there is no `dirty`, and the write path in `lib/body.ts`
+ * still needs signal. See `lib/bodyCache.ts` for the rules.
+ *
+ * `fetched_at` is per ROW, not only per fetch: a check-in outside the latest
+ * fetch's window was last confirmed by an older fetch, and its label has to say
+ * that older time rather than borrow a fresher one it was never confirmed at.
+ *
+ * Deliberately narrow. `photo_url` is a presigned link that expires, and
+ * `notes` is free text neither panel fact needs — neither is stored.
+ */
+const CREATE_BODY_CHECKINS_CACHE = `
+  CREATE TABLE IF NOT EXISTS body_checkins_cache (
+    user_id TEXT NOT NULL,
+    measured_on TEXT NOT NULL,
+    weight_kg REAL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, measured_on)
+  );
+`;
+
+const CREATE_BODY_PHASES_CACHE = `
+  CREATE TABLE IF NOT EXISTS body_phases_cache (
+    user_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    started_on TEXT NOT NULL,
+    target_on TEXT,
+    target_weight_kg REAL,
+    ended_on TEXT,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, id)
+  );
+`;
+
+/**
+ * One row per (athlete, read) that has ever ANSWERED. Its absence is what
+ * "never fetched on this phone" means, and its presence with no cached rows is
+ * what "fetched, and genuinely none" means — the two states an empty table
+ * cannot tell apart on its own. `window_from`/`window_to` are the check-in
+ * range that answer covered (null for phases, which are fetched whole), so an
+ * empty answer is stated as the window it was, never as "never".
+ */
+const CREATE_BODY_CACHE_FETCHES = `
+  CREATE TABLE IF NOT EXISTS body_cache_fetches (
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    window_from TEXT,
+    window_to TEXT,
+    PRIMARY KEY (user_id, kind)
+  );
+`;
+
+/**
  * N528/#958: heart-rate samples this app recorded itself from a Bluetooth
  * monitor during a session, kept until uploaded (offline-first, like every
  * other write here). uploaded_at NULL = still owed to the server; the flush
@@ -863,7 +919,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 42;
+const SCHEMA_VERSION = 43;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -883,7 +939,10 @@ type LocalTable =
   | 'healthkit_imports'
   | 'biometric_hr_synced'
   | 'health_connect_enrichment'
-  | 'detected_activities';
+  | 'detected_activities'
+  | 'body_checkins_cache'
+  | 'body_phases_cache'
+  | 'body_cache_fetches';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -971,6 +1030,9 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_HR_MONITOR_SAMPLES);
   await db.execAsync(CREATE_RUN_FIX_QUEUE);
   await db.execAsync(CREATE_RUN_TRACKING_ACTIVE);
+  await db.execAsync(CREATE_BODY_CHECKINS_CACHE);
+  await db.execAsync(CREATE_BODY_PHASES_CACHE);
+  await db.execAsync(CREATE_BODY_CACHE_FETCHES);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -1696,6 +1758,16 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
                         OR (earlier.logged_at = food_entries.logged_at
                             AND earlier.id < food_entries.id))));`,
     );
+  }
+
+  if (current < 43) {
+    // N568/#1129: the body read cache — see CREATE_BODY_CHECKINS_CACHE. Three
+    // new tables and no ALTER, so the unconditional CREATEs above already cover
+    // a stamped-42 device; this branch states the version that introduced them,
+    // matching every other table's, and is a no-op wherever they exist.
+    await db.execAsync(CREATE_BODY_CHECKINS_CACHE);
+    await db.execAsync(CREATE_BODY_PHASES_CACHE);
+    await db.execAsync(CREATE_BODY_CACHE_FETCHES);
   }
 
   // The day query the card runs on every render of Today.

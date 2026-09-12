@@ -74486,6 +74486,99 @@ The first mutation pass ran against the broken name query above and is not count
 
 **Reachability on a phone**: this is the phone — Food → Quick-add → Scan a barcode.
 
+## 2026-09-12 — N568 (#1129): the day panel states the last-known check-in and phase goal offline — a read cache, not an outbox
+
+**What the owner decided, and how narrowly it was read.** On 2026-09-11 (#972's tranche-2 decisions) the owner asked for check-ins and the phase goal to be cached "so the VOLA screen works offline". That reverses a recorded position: `lib/body.ts` kept both online-only on purpose, arguing that an offline check-in outbox would be a second sync surface with its own conflict rules, for a case that barely occurs. The ask was offline **reading**, so that is all this builds. Writes (`saveCheckin`, `deleteCheckin`, `uploadCheckinPhoto`, `createPhase`, `endPhase`) still need signal. `body.ts`'s doc comment now says exactly that: writes online-only and still argued for; reads cached, by `lib/bodyCache.ts`. No outbox, no `dirty`, and nothing cached is ever sent anywhere. A cache turned out to be workable without one, so there was nothing to escalate.
+
+**What was built.**
+
+- **Schema v43** (`SCHEMA_VERSION` 42 → 43). Three tables, all keyed by `user_id`:
+  - `body_checkins_cache (user_id, measured_on, weight_kg, fetched_at)`;
+  - `body_phases_cache (user_id, id, kind, started_on, target_on, target_weight_kg, ended_on, fetched_at)`;
+  - `body_cache_fetches (user_id, kind, fetched_at, window_from, window_to)`.
+  Narrow on purpose: `photo_url` is a presigned link that expires, and `notes` is free text neither fact needs. New tables and no `ALTER`, so they sit in both the unconditional `CREATE`s and a `current < 43` branch, like every other table.
+- **The one writer is `refreshBody`**, which Today's check-in refresh now calls in place of its bare `listCheckins` + `listPhases` pair. The panel is opened from Today's header, so with signal its cache is seconds old. The panel itself still never fetches: #1102's "no network" assertion is unchanged and still green.
+- **The panel's Body block** (`app/day.tsx`) shows **Last check-in** (weight in the athlete's units, measured date) and **Phase goal** (phase, target weight and date). **Every line, empty states included, says "Last updated …"**: the time on the same local day, the date on another, and the year when it isn't this one.
+
+**The three-state rule, carried in the type rather than the copy.**
+
+| Cache for this athlete | Panel section | Screen |
+|---|---|---|
+| no `body_cache_fetches` row | `unavailable` | "Not available on this phone yet." |
+| fetched, with a row | `ready`, the fact + that **row's** `fetched_at` | the value + "Last updated …" |
+| fetched, genuinely empty | `ready`, `fact: null` + the window + when | "No check-in since <from>." / "No active phase." + "Last updated …" |
+
+`LastKnown = { fetchedAt; fact }` cannot be built without a time. "Fetched and empty" names the 30-day window it covered, never all time.
+
+**Provenance, and the rule for a cached row the server no longer has.** `unbackedFacts` now covers both cached tables, and a cached fact's `RowRef` carries the `fetched_at` it claims. The rule:
+
+1. A cached fact is backed by its **cache** row, and says when that row was last confirmed. It never claims to be current.
+2. The next successful fetch that **covers** the row and doesn't return it **deletes** it: inside the fetched window for check-ins, and across the whole list for phases, which are fetched whole. A phase that ended server-side is no longer a phase goal. So a check-in deleted on the web shows offline with its old time, and is gone the next time Today loads with signal.
+3. A row **outside** a later fetch's window is left alone, and keeps its **older** `fetched_at`. It wasn't re-confirmed, so it must not borrow the newer time.
+
+The provenance check reports a fact whose row is gone, a fact claiming a fresher `fetched_at` than its row, an ended phase cited as a goal, and a row belonging to another athlete.
+
+**Keyed by athlete, twice over.** Every read and write is scoped by `user_id`. A write whose rows name another athlete than the one it is filed under is **refused whole**: no rows, no marker. That is the shape of a response landing after an account switch on a shared phone.
+
+**Tests.**
+
+- `lib/__tests__/bodyCache.test.ts` (new, 12 tests): the three states, window reconcile with the older-time rule, whole-list phases, two accounts in one fixture, the foreign-row refusal, and `refreshBody` in four cases (success; a failed fetch writes nothing; a failed cache write doesn't fail the fetch; no athlete means no cache).
+- `lib/__tests__/dayPanel.test.ts` (+8): the three states over migrated SQLite, cross-account, the row-the-server-dropped rule, the older-time rule, provenance refusals, `lastUpdatedLabel`, and the dated-read refusal extended to check-ins.
+- `__tests__/app/dayScreen.test.tsx` (+4 new tests, 3 extended): a stale value labelled on the row itself with nothing reading as live, the genuinely-empty state, cross-account, and units not ready. Rendered-equals-assembled now covers 7 facts.
+- `__tests__/app/todayScreen.test.tsx` (+1): Today calls `refreshBody` with the signed-in athlete and its 30-day window.
+- `lib/__tests__/schema.test.ts` (+3): fresh-install shape, a device stamped 42 gains the tables, and re-running is not an error and keeps cached rows.
+
+**Mutation-checked: 34 mutations, all red, none by a suite failing to run.** Each was applied on disk (read back and compared), run against the suites that should catch it, and restored from a byte copy. The five target suites were green before the first mutation (194/194, same session) and green again, re-run, after the last restore (194/194).
+
+**The first mutation run measured nothing, and said so only because it was checked.** It invoked `pnpm run test -- --ci --json --outputFile=…`. pnpm handed every flag after `--` to jest as a **test path pattern** (jest's own line: *"Ran all test suites matching /--ci\|--json\|--outputFile=…/"*), so no JSON report was ever written. All 34 results came back as empty errors while the suites really ran and went red underneath. The runner now calls `pnpm exec jest` with `TZ` set at launch, and exits loudly when a report is missing or zero tests ran.
+
+| # | Mutation | Went red |
+|---|---|---|
+| M1 | cacheCheckins no longer refuses rows naming another athlete | a write whose rows name another athlete is refused whole — no rows, and no fetched marker either |
+| M2 | cachePhases no longer refuses rows naming another athlete | a write whose rows name another athlete is refused whole — no rows, and no fetched marker either |
+| M3 | never-fetched check-ins read as fetched-and-empty | never fetched: both views are unknown — not empty (+6 more) |
+| M4 | never-fetched phases read as fetched-and-empty | never fetched: both views are unknown — not empty (+6 more) |
+| M5 | panel turns unknown check-ins into an empty answer | never fetched on this phone: both sections are unavailable — never "none" (+3 more) |
+| M6 | panel turns an unknown phase into an empty answer | never fetched on this phone: both sections are unavailable — never "none" (+3 more) |
+| M7 | check-in fact borrows the newest fetch's time instead of its row's | a check-in older than the newest fetch's window keeps its OWN older time on the panel |
+| M8 | check-in fact is stamped now (presented as current) | fetched earlier, read offline: the cached values, each carrying the time its row was fetched — not now (+2 more) |
+| M9 | screen drops the Last updated label from the check-in row | a value fetched days ago says when, on the value itself — and nothing in it reads as live |
+| M9b | screen drops the Last updated label from the phase row | a value fetched days ago says when, on the value itself — and nothing in it reads as live |
+| M10 | label words every fetch as a time today | lastUpdatedLabel a time on the same local day, the date and time on another, the year when it is not t… (+1 more) |
+| M11 | label files the fetch under its UTC date | lastUpdatedLabel a time on the same local day, the date and time on another, the year when it is not t… |
+| M12 | a covering fetch no longer deletes a check-in the server dropped | a cached row the server no longer has: stated with its old time until a fetch covers it, then gone — a… (+1 more) |
+| M13 | a fetch deletes check-ins outside its own window | is deleted by the next fetch that covers it — and a row outside that window keeps its OLDER time (+1 more) |
+| M14 | a phase fetch no longer deletes phases it did not return | phases are fetched whole, so a phase not returned is gone, and an ended phase is not the active one |
+| M15 | an ended phase counts as the active one | phases are fetched whole, so a phase not returned is gone, and an ended phase is not the active one (+2 more) |
+| M16 | the check-in read is not scoped to the athlete | neither athlete's cache answers for the other, and one athlete's fetch never touches the other's rows (+1 more) |
+| M17 | the fetched marker is not scoped to the athlete | neither athlete's cache answers for the other, and one athlete's fetch never touches the other's rows (+2 more) |
+| M18 | the check-in read ignores "on or before the day" | fetched, with rows: the newest on or before the day, carrying the time of the fetch that returned it |
+| M19 | a failed fetch is cached as an empty answer | a failed fetch writes nothing: the last-known values stay, with their older time |
+| M20 | a failed cache write fails the fetch | a cache that cannot be written does not turn a successful fetch into an error |
+| M22 | Today refreshes without filing the answer under the athlete | fills the day panel's body cache for the signed-in athlete, over the check-in card's 30 days (N568, #1… |
+| M23 | a cached absence loses its Last updated label | fetched and genuinely empty: the real empty state with its fetched time — not "not available" |
+| M24 | never-fetched check-ins render nothing instead of "not available" | a fresh device: says nothing is planned or logged, and that trackers and the target are not here yet (+1 more) |
+| M24b | never-fetched phase renders nothing instead of "not available" | a fresh device: says nothing is planned or logged, and that trackers and the target are not here yet (+1 more) |
+| M25 | provenance check ignores a check-in fact's fetched time | the provenance check refuses a cached fact claiming a fresher time than its row, an ended phase, or an… |
+| M26 | provenance check accepts an ended phase as a goal | the provenance check refuses a cached fact claiming a fresher time than its row, an ended phase, or an… |
+| M26b | provenance check ignores a phase fact's fetched time | the provenance check refuses a cached fact claiming a fresher time than its row, an ended phase, or an… |
+| M27 | panelFacts omits the cached check-in | fetched earlier, read offline: the cached values, each carrying the time its row was fetched — not now (+2 more) |
+| M27b | panelFacts omits the cached phase goal | fetched earlier, read offline: the cached values, each carrying the time its row was fetched — not now (+2 more) |
+| M28 | a check-in read made for another day is accepted | yesterday's entries and target, still in state, are unread — not today's |
+| M29 | SCHEMA_VERSION left at 42 | a fresh install ends up at the current schema version (+31 more) |
+| M32 | the cache tables are never created (both the unconditional CREATEs and the v43 branch) | a fresh install has the body read cache, holding neither photo links, notes nor an outbox flag (N568/#… (+2 more) |
+| M33 | the weight renders before the unit preference is read | states no weight until the unit preference is read — never kilograms for a frame to a pounds athlete |
+
+**Not mutation-tested, and why.** `refreshBody`'s `if (userId)` is redundant with `user_id NOT NULL`: a write filed under no athlete already fails the constraint and is swallowed, so no test can tell it apart. The `current < 43` branch and the unconditional `CREATE`s each cover a stamped-42 device on their own, by design, like every table here. Removing either alone stays green; removing both is M32.
+
+**Gaps this leaves, stated.**
+
+- **The panel relies on Today having refreshed.** If VOLA becomes a centre tab (#1128) that opens without passing Today, it needs its own `refreshBody` call.
+- **An EMPTY response landing after an account switch** can't be caught by the foreign-row guard, because it has no rows to name anyone. It would file "none" under the previous athlete until their next refresh. The failure is a false absence, never a leak of one account's values to another. Closing it needs the current account re-read at write time.
+- `useWeightTrend`, Progress and Goals are **not** cache writers or readers; their check-in views stay online-only.
+- **The unit-readiness gate** reuses `UnitsProvider`'s cached preference. Offline it is ready as soon as SQLite answers, so no network is involved.
+- **NEEDS HUMAN EVIDENCE, open on #1129:** with airplane mode on, the VOLA screen shows the last check-in and phase goal with a last-updated time, and nothing reads as live.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

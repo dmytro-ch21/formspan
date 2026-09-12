@@ -1,3 +1,4 @@
+import { localCheckinView, localPhaseView } from '../../bodyCache';
 import { dayString } from '../../calendar';
 import { assembleDay, type DayFact, type DayPanel, type RowRef } from '../../dayPanel';
 import { localEntries as localFoodEntries, localTargetView } from '../../foodLog';
@@ -13,7 +14,7 @@ import type { FixtureDb } from './sqlite';
  * N541 (#972) — every fact the day panel asserts, checked against SQLite.
  *
  * Returns one line per problem, so a passing check is `[]` and a failing one
- * says which fact and which row. Two problems count:
+ * says which fact and which row. Three problems count:
  *
  * - **A fact with no rows at all.** Provenance that is an empty list is not
  *   provenance, and `assembleDay`'s `done` branch has exactly that fallback.
@@ -21,6 +22,11 @@ import type { FixtureDb } from './sqlite';
  *   or tombstoned. A tombstoned plan is the sharp case: the athlete deleted it,
  *   the row still exists, and a panel that still named it would be asserting an
  *   intention they withdrew.
+ * - **A cached fact claiming a fresher time than its row (N568).** A cached
+ *   check-in or phase is only as current as the fetch that last returned it, so
+ *   its ref names that `fetched_at` and must match the row. A cached row the
+ *   server no longer has is DELETED by the next fetch that covers it, and a
+ *   phase that ended is no longer a phase goal — both then report here.
  *
  * **This is the invariant tranche 2's fabricated-fact guard extends**, not a
  * test detail. Narration that cites a key outside `panelFacts`, or a fact whose
@@ -87,14 +93,23 @@ export async function readDayPanel(
     trackerEntries: await dated(localTrackerEntries(userId, day)),
     foodEntries: await dated(localFoodEntries(userId, day)),
     target: await dated(localTargetView(userId, day)),
+    checkins: await dated(localCheckinView(userId, day)),
+    phases: await settle(localPhaseView(userId)),
     modules,
   });
 }
 
 function describe(ref: RowRef): string {
-  return ref.table === 'nutrition_targets'
-    ? `nutrition_targets@${ref.effectiveOn}`
-    : `${ref.table}#${ref.id}`;
+  switch (ref.table) {
+    case 'nutrition_targets':
+      return `nutrition_targets@${ref.effectiveOn}`;
+    case 'body_checkins_cache':
+      return `body_checkins_cache@${ref.measuredOn} fetched ${ref.fetchedAt}`;
+    case 'body_phases_cache':
+      return `body_phases_cache#${ref.id} fetched ${ref.fetchedAt}`;
+    default:
+      return `${ref.table}#${ref.id}`;
+  }
 }
 
 async function rowExists(db: FixtureDb, userId: string, ref: RowRef): Promise<boolean> {
@@ -137,6 +152,22 @@ async function rowExists(db: FixtureDb, userId: string, ref: RowRef): Promise<bo
         `SELECT 1 AS one FROM nutrition_targets WHERE user_id = ? AND effective_on = ?`,
         userId,
         ref.effectiveOn,
+      );
+    case 'body_checkins_cache':
+      return one(
+        `SELECT 1 AS one FROM body_checkins_cache
+          WHERE user_id = ? AND measured_on = ? AND fetched_at = ?`,
+        userId,
+        ref.measuredOn,
+        ref.fetchedAt,
+      );
+    case 'body_phases_cache':
+      return one(
+        `SELECT 1 AS one FROM body_phases_cache
+          WHERE user_id = ? AND id = ? AND fetched_at = ? AND ended_on IS NULL`,
+        userId,
+        ref.id,
+        ref.fetchedAt,
       );
   }
 }
