@@ -1780,9 +1780,10 @@ mobile-specific scenarios are new.
 - **A PR won with help says so on web too** (F61, #1161). For an exercise whose
   record set had assisted reps, `/dashboard/records` reads "5 × 100kg (2
   assisted)" in the evidence line — the same words mobile's records card uses
-  (F59) — and nothing extra for 0 or unrecorded. The load-history chart's "(5
-  alone)" beside an estimated 1RM is deliberately different: it names the solo
-  count the estimate is built from.
+  (F59) — and nothing extra for 0 or unrecorded. Expand the card: the load-history
+  chart's estimate row for that set reads "(2 assisted, 5 alone)", leading with
+  the same words and adding the solo count the estimate is built from, so the two
+  never read as disagreeing.
 - **A missing rating renders as nothing, not as a zero or a dash in a row of numbers.** `TrackEffortProvider` lets an athlete turn effort collection off, so absence is ordinary and must not read as an effort of zero.
 - **A record is never ranked or gated by a rating.** Seed two sets where the heavier one reports a *lower* RPE: the heavier still wins `heaviest_weight`. (Deliberately not true of `estimated_1rm`, which consumes RIR by design — that is what the marking is for.)
 - Every record kind must have a basis. Adding a kind without classifying it fails `TestBasisFor_ClassifiesEveryRecordKind`, and the Go/TypeScript copies are pinned together by `basisParity.test.ts`.

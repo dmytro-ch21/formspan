@@ -74818,7 +74818,7 @@ None of this was ever stored: `readDraft` trims the noun before saving, and the 
 - "(3 assisted)" on mobile's badge and records card (F59);
 - "(5 alone)", a different number, on web's load-history chart.
 
-The decision: **a record's evidence says "(N assisted)" on both web and mobile. The load-history chart keeps "(N alone)", on purpose.** That chart line explains a 1RM *estimate*, and the estimate is built from the solo count ("from 100kg × 8 (5 alone)"). So the solo number is what makes the estimate add up, which is a different job from describing a logged set. Set rows keep F25's " · N assisted" part, for the "(60kg total)" reason recorded there.
+The decision, **revised in review:** a record's evidence says "(N assisted)" on web and mobile, and the load-history chart's estimate row now says **both** counts, "(2 assisted, 5 alone)". The first version kept the chart's bare "(5 alone)", reasoning that the row explains a 1RM *estimate* built from the solo count, so the solo number is what makes the estimate add up. `frontend-reviewer` pointed out the flaw: the records card and the chart sit in the same expanded card, very likely showing the same set, so an athlete read "(2 assisted)" and one click below "(5 alone)" and had to do the sum to see the app agreed with itself. That is close to `vola-athlete-ux`'s "two cards answering one question with different arithmetic". The fix keeps the solo count the estimate needs and leads with the card's own words. Mobile set rows keep F25's " · N assisted" part, for the "(60kg total)" reason recorded there. Mobile shows no load-history estimate row, so it has no second phrasing to reconcile.
 
 **Checks.** 3 mutations to web's `describe`, each caught as a test failure by the new parity test, restored byte-identical and re-run to 23/23:
 - **the note dropped from the loaded branch:** fails;
@@ -74826,6 +74826,8 @@ The decision: **a record's evidence says "(N assisted)" on both web and mobile. 
 - **zero counted as assisted:** fails.
 
 `pnpm --filter web exec tsc --noEmit` and web eslint on both changed files: clean.
+
+**Also found in review, and filed rather than folded in: F62 (#1165).** A progression suggestion's "last set" line reads as unaided on both web and mobile. The backend sends `last_assisted_reps`, and neither client's `Suggestion` type declares it. The gap is identical on both platforms, so no parity test notices it.
 
 **Not covered.** No test renders web's records page, and none of web's pages has a render test (`docs/testing/device-checks.md`). The parity test reads source text, so a web change that computed the note correctly but never rendered `measured` would pass it. That is the same trade the block already accepts and documents.
 
