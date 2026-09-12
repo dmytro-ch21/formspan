@@ -218,6 +218,18 @@ export default function ScanBarcodeScreen() {
   const lookupSeq = useRef(0);
 
   /**
+   * Whether a Try again lookup is still out (L20/#1151).
+   *
+   * Try again called `resolve` directly, and the button only goes away once the
+   * `looking-up` phase re-renders — so two taps landing before React commits both
+   * started a lookup. Both hold the same `lookupSeq` number, since nothing calls
+   * `scanAgain` between them, so F52's guard let both answers through. A ref for
+   * the reason `confirming` is one: the second tap must see the first tap's
+   * decision, not the render that drew the button.
+   */
+  const retrying = useRef(false);
+
+  /**
    * Show the drafted product and let the athlete correct it.
    *
    * Declared BEFORE `resolve`, which calls it. That ordering is enforced —
@@ -318,6 +330,23 @@ export default function ScanBarcodeScreen() {
       handling.current = true;
       setMisread(false);
       void resolve(code);
+    },
+    [resolve],
+  );
+
+  /**
+   * Try the same code again, once. Declared after `resolve`, which it calls —
+   * `react-hooks/immutability` rejects the other order, as `openDraft` notes.
+   * The latch clears when the lookup settles, however it settles, so a failed
+   * retry can be tried again.
+   */
+  const retry = useCallback(
+    (code: string) => {
+      if (retrying.current) return;
+      retrying.current = true;
+      void resolve(code).finally(() => {
+        retrying.current = false;
+      });
     },
     [resolve],
   );
@@ -652,7 +681,7 @@ export default function ScanBarcodeScreen() {
         </Text>
         <Text style={styles.body}>{phase.message}</Text>
         <PressableScale
-          onPress={() => void resolve(phase.code)}
+          onPress={() => retry(phase.code)}
           style={[styles.primary, { backgroundColor: accent.accent }]}
           accessibilityRole="button"
           accessibilityLabel="Try the lookup again"

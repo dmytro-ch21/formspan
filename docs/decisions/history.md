@@ -74776,6 +74776,30 @@ None of this was ever stored: `readDraft` trims the noun before saving, and the 
 
 **Reachability on a phone**: this is the phone — Today → trackers → create or edit a tracker, and type a count word with a trailing space.
 
+## 2026-09-12 — L20 (#1151): a double-tap on the barcode scanner's Try again starts one lookup, not two
+
+**What was wrong.** F52's review (#1114) found the problem, and it predated F52. On `app/food/scan.tsx`'s **Couldn't check this one** screen, *Try again* called `resolve(phase.code)` directly, with no in-flight guard. The button only disappears once the `looking-up` phase re-renders, so two taps landing before React commits both started a lookup.
+- **Why F52's guard didn't catch it.** Both lookups hold the same `lookupSeq` number, because nothing calls `scanAgain` between them. So F52's staleness check let both answers through, and whichever landed last won.
+- **Why it was filed low.** Both lookups ask about the same barcode, so the screen only shows something wrong if the backend answers one code two different ways. Otherwise the cost is a duplicate request.
+
+**The fix is the same shape as `confirming`, one screen earlier.** A `retrying` ref latches when *Try again* starts a lookup and clears in `.finally` when that lookup settles, however it settles. A second tap inside the window returns immediately.
+- **Why a ref and not state.** The second tap has to see the first tap's decision, not the render that drew the button.
+- **Why the callback sits after `resolve`.** `react-hooks/immutability` rejects referencing a `useCallback` binding above its declaration.
+- **Why the latch clears.** A retry that fails again can be tried again; the second test pins that.
+
+**Tests** (`__tests__/app/scanScreen.test.tsx`, new describe "retrying twice"):
+- **Double-tap.** Two presses in the same tick, the "confirming twice" pattern, give exactly one retry lookup: the scan's own plus one.
+- **The latch clears.** After a retry has answered, *Try again* starts another lookup.
+
+**Checks.** 3 mutations, each caught as a test failure, restored byte-identical and re-run to 41/41:
+- **the latch check removed:** the double-tap test fails;
+- **the latch never clearing:** the try-again-after-an-answer test fails;
+- **the button calling `resolve` directly again:** the double-tap test fails.
+
+**Not covered by a test.** Cancelling mid-retry is not pinned here. `scanAgain` does not touch `retrying`, but the latch still clears when the cancelled lookup settles, because `.finally` runs regardless of `current()`.
+
+**Reachability on a phone**: this is the phone — Food → Quick-add → Scan a barcode, on a connection that fails, then tap *Try again* twice quickly.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
