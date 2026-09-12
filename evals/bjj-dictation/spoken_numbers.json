@@ -1,0 +1,24 @@
+{
+  "_help": "Shared vectors for spokenNumber (backend/internal/modules/bjj/reflect.go) and its Python port spoken_number (scripts/check-dictation-evals.py). Both run every vector: reflect_parity_test.go on the Go side, check-dictation-evals.py on the Python side. A form added to one vocabulary and not the other disagrees here, or in the Go test that compares the two maps entry for entry. F29, #785.",
+  "vectors": [
+    {"dictation": "rolled five rounds", "n": 5, "want": true},
+    {"dictation": "rolled 5 rounds", "n": 5, "want": true},
+    {"dictation": "rolled five rounds", "n": 6, "want": false},
+    {"dictation": "rounds were twenty five minutes somehow", "n": 25, "want": true},
+    {"dictation": "we went twenty-five minutes", "n": 25, "want": true},
+    {"dictation": "drilled for half an hour", "n": 30, "want": true},
+    {"dictation": "rolled for an hour and a half", "n": 90, "want": true},
+    {"dictation": "six five-minute rounds", "n": 5, "want": true},
+    {"dictation": "drilled for half an hour", "n": 25, "want": false},
+    {"dictation": "six rounds", "n": 7, "want": false},
+    {"dictation": "a couple of sweeps", "n": 2, "want": true},
+    {"dictation": "a couple of sweeps", "n": 3, "want": true},
+    {"dictation": "Forty Five minutes", "n": 45, "want": true},
+    {"dictation": "often tapped", "n": 10, "want": false},
+    {"dictation": "15 rounds", "n": 1, "want": false},
+    {"dictation": "a dozen sweeps", "n": 12, "want": true},
+    {"dictation": "thirty one guard passes", "n": 31, "want": true},
+    {"dictation": "I did three or four sweeps five passes five submissions", "n": 5, "want": true},
+    {"dictation": "I did three or four sweeps five passes five submissions", "n": 6, "want": false}
+  ]
+}

@@ -80,6 +80,95 @@ def to_tag_category(library_category: str) -> str:
     return LIBRARY_TO_TAG.get(library_category, "control")
 
 
+# `numberWords`, `wordSplit` and `spokenNumber` in
+# backend/internal/modules/bjj/reflect.go, ported so the eval floors an unspoken
+# count the way `ResolveDraft` does (F29, #785). Without it `run.py` scored a
+# draft carrying an invented multiplier (count 6 when nobody said six) that the
+# app would have floored to 1 before the athlete saw it.
+#
+# A port is a second copy of Go logic, which is exactly the drift this file
+# argues against, so it is held in step two ways. `reflect_parity_test.go`
+# parses NUMBER_WORDS and WORD_SPLIT out of THIS file and compares them with the
+# Go values entry for entry; order matters, because the compound rule reads each
+# list's FIRST form. And both languages answer the same vectors in
+# evals/bjj-dictation/spoken_numbers.json. Keep NUMBER_WORDS one entry per line:
+# the Go test's parser reads it that way, and fails rather than guessing.
+NUMBER_WORDS = {
+    0: ["zero", "no"],
+    1: ["one", "once", "a", "an", "single"],
+    2: ["two", "twice", "couple", "pair", "double"],
+    3: ["three", "thrice", "few", "several", "couple"],
+    4: ["four"],
+    5: ["five", "handful"],
+    6: ["six"],
+    7: ["seven"],
+    8: ["eight"],
+    9: ["nine"],
+    10: ["ten"],
+    11: ["eleven"],
+    12: ["twelve", "dozen"],
+    13: ["thirteen"],
+    14: ["fourteen"],
+    15: ["fifteen"],
+    16: ["sixteen"],
+    17: ["seventeen"],
+    18: ["eighteen"],
+    19: ["nineteen"],
+    20: ["twenty"],
+    30: ["thirty", "half an hour", "half hour"],
+    40: ["forty"],
+    45: ["forty five", "fortyfive"],
+    50: ["fifty"],
+    60: ["sixty", "hour"],
+    90: ["ninety", "hour and a half"],
+}
+WORD_SPLIT = re.compile(r"[^a-z0-9]+")
+#: `maxTagCount` in backend/internal/modules/bjj/session.go. `ResolveDraft`
+#: floors a count above it even when it WAS spoken. The Go parity test pins it.
+MAX_TAG_COUNT = 1000
+SPOKEN_VECTORS = ROOT / "evals" / "bjj-dictation" / "spoken_numbers.json"
+
+
+def spoken_number(dictation: str, n: int) -> bool:
+    """`spokenNumber` in reflect.go: does n appear in the dictation, as a digit or a word."""
+    words = WORD_SPLIT.split(dictation.lower())
+    if str(n) in words:
+        return True
+    # A compound like "forty five" matches across tokens, as in Go.
+    joined = " " + " ".join(words) + " "
+    for form in NUMBER_WORDS.get(n, []):
+        if f" {form} " in joined:
+            return True
+    # "twenty five" / "twenty-five": built from each list's FIRST form, as in Go.
+    if 20 < n < 100 and n % 10 != 0:
+        tens, units = NUMBER_WORDS.get((n // 10) * 10, []), NUMBER_WORDS.get(n % 10, [])
+        if tens and units and f" {tens[0]} {units[0]} " in joined:
+            return True
+    return False
+
+
+def floor_count(count, dictation: str) -> tuple[int, str | None]:
+    """`ResolveDraft`'s count guard: the count that survives, and why it changed.
+
+    All three arms of its switch, in its order:
+      - below one (or not an int) becomes 1;
+      - above one and not spoken becomes 1, FLOORED, not dropped, because the
+        tag itself is evidence it happened once;
+      - above MAX_TAG_COUNT becomes 1 even when spoken ("1001 rounds").
+    The reasons are eval-local labels, not Go's notice constants.
+    """
+    # `bool` is a subclass of `int` in Python, so a JSON `true` passes as 1.
+    # The model's schema types `count` as an integer, and the line this replaced
+    # had the same hole; noted rather than guarded.
+    if not isinstance(count, int) or count < 1:
+        return 1, "below_one"
+    if count > 1 and not spoken_number(dictation, count):
+        return 1, "not_spoken"
+    if count > MAX_TAG_COUNT:
+        return 1, "over_ceiling"
+    return count, None
+
+
 # Words that carry no identifying weight and appear on only one side as often as
 # both. "the knee cut" and "knee cut" are the same claim about the catalog; a
 # matcher that disagrees reports the first as matching NOTHING, which reads as
@@ -334,6 +423,31 @@ def main() -> int:
             f"it does not carry, so those tags are written with no position at all."
         )
 
+    # F29: the spoken-number port answers the shared vectors the way Go does,
+    # and the count floor keeps, floors and explains the three shapes it meets.
+    vectors = json.loads(SPOKEN_VECTORS.read_text()).get("vectors", []) if SPOKEN_VECTORS.exists() else []
+    if not vectors:
+        errors.append(
+            "no vectors in evals/bjj-dictation/spoken_numbers.json — the spoken-number "
+            "port would be checked against nothing"
+        )
+    for v in vectors:
+        if spoken_number(v["dictation"], v["n"]) != v["want"]:
+            errors.append(
+                f"spoken_number({v['dictation']!r}, {v['n']}) is {not v['want']}, want "
+                f"{v['want']} — the port has drifted from spokenNumber in reflect.go"
+            )
+    for count, dictation, want in (
+        (5, "rolled five rounds", (5, None)),
+        (6, "rolled five rounds", (1, "not_spoken")),
+        (0, "rolled five rounds", (1, "below_one")),
+        (1, "rolled five rounds", (1, None)),
+        (1001, "did 1001 rounds", (1, "over_ceiling")),
+        (1000, "did 1000 rounds", (1000, None)),
+    ):
+        if floor_count(count, dictation) != want:
+            errors.append(f"floor_count({count}, {dictation!r}) = {floor_count(count, dictation)}, want {want}")
+
     seen: set[str] = set()
     for case in cases:
         cid = case.get("id")
@@ -358,7 +472,8 @@ def main() -> int:
     print(
         f"dictation evals valid: {len(cases)} cases "
         f"({authored} authored, {recorded} recorded), "
-        f"{len(cats)}/{len(CATEGORIES)} categories, {len(evs)}/{len(EVENTS)} events"
+        f"{len(cats)}/{len(CATEGORIES)} categories, {len(evs)}/{len(EVENTS)} events, "
+        f"{len(vectors)} spoken-number vectors agree"
     )
     if uncovered_cat or uncovered_ev:
         print(f"  not yet exercised: categories {uncovered_cat}, events {uncovered_ev}")

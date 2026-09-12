@@ -75060,6 +75060,47 @@ A race between two sessions writing the same head twice only duplicates a log li
 
 **Reachability on a phone**: no athlete-facing change.
 
+## 2026-09-12 — F29 (#785): the dictation eval floors an unspoken count the way `ResolveDraft` does, held in step with Go two ways
+
+**What was wrong.** `evals/bjj-dictation/run.py`'s `postprocess()` says it is "what Go does to the response before the athlete ever sees it". It resolved `technique_id`s against the catalog, and nothing else. `ResolveDraft` in `backend/internal/modules/bjj/reflect.go` also floors to 1 any count above one that the dictation never says, as a digit or a word (`spokenNumber`, recording a `not_spoken` notice). So the eval would score a draft carrying an invented multiplier that the app would never show. N121 (#510) found this and deliberately left it: a port without a parity check is the drift the validator exists to prevent.
+
+**What changed.**
+- **The port.** `scripts/check-dictation-evals.py` gains `NUMBER_WORDS`, `WORD_SPLIT` and `spoken_number`, ported from `numberWords`, `wordSplit` and `spokenNumber`, and `floor_count`, all three arms of the count guard in Go's order: not an int or below one becomes 1; above one and unspoken becomes 1; above `MAX_TAG_COUNT` (1000, Go's `maxTagCount`) becomes 1 even when spoken.
+- **The wiring.** `run.py` already imports the validator as `V`, so it reuses these rather than holding a third copy. `postprocess()` now takes the case's dictation and floors through `V.floor_count`. A floored tag carries `count_floored: {was, reason}`.
+- **The vectors.** New `evals/bjj-dictation/spoken_numbers.json` holds 19 shared vectors: digits, words, hyphenated and spaced compounds, "half an hour" and "hour and a half", "couple" as both 2 and 3, "often" not matching "ten", "15" not matching 1, and N121's own `rec-02` sentence.
+
+**Held in step two ways, because each catches what the other cannot.**
+- **The vocabulary.** `reflect_parity_test.go`'s new `TestTheEvalCountsSpokenNumbersTheWayGoDoes` parses `NUMBER_WORDS` out of the Python file and compares it with `numberWords` entry for entry and in order, because the compound rule reads each list's first form. It also checks that `WORD_SPLIT` is the same regex as `wordSplit`, and that `MAX_TAG_COUNT` is the same number as `maxTagCount`.
+- **The behaviour.** The same test runs every shared vector through `spokenNumber`, and `check:evals` (in `verify` and CI) runs them through the port, together with six `floor_count` cases.
+
+**Checks.** Baseline: `check:evals` reports "19 spoken-number vectors agree", and the three Go tests in the parity file pass without a database. A live `postprocess` on "I did three or four sweeps five passes five submissions" floors an invented 6 to 1 (`not_spoken`), keeps the spoken 5, and floors a 0 to 1 (`below_one`).
+
+8 mutations, each restored byte-identical and re-run to green:
+
+| Mutation | Python `check:evals` | Go parity test |
+|---|---|---|
+| the port drops "couple" from 3 | red (vector) | red (map) |
+| the port loses the compound rule | red (vector) | **green**, so only the vectors catch it |
+| the port splits on whitespace | red (vector) | red (regex) |
+| `floor_count` stops flooring an unspoken count | red (floor case) | green |
+| Go gains a form the port lacks | **green**, so only the comparison catches it | red (map) |
+| `floor_count` loses the ceiling arm | red (floor case) | green |
+| the port's `MAX_TAG_COUNT` drifts to 999 | red (floor case) | red (constant) |
+| `run.py` stops calling `floor_count` | green | green |
+
+The last row is checked only by a live `postprocess`: the invented 6 survived as 6, and 1 once restored. Nothing runs `run.py` without an API key, so its wiring has no automated check. That gap is stated, not closed.
+
+**Taken from review.** `backend-reviewer` found one blocking gap, and it was real. `floor_count` had two of the three arms of `ResolveDraft`'s count switch. It lacked `case t.Count > maxTagCount`, which floors a count to 1 even when it WAS spoken. The reviewer reproduced it in both languages: "did 1001 rounds" is floored by the app (`unknown_value`) and was kept by the eval. Go's own comment calls that arm unreachable in practice, but a port whose docstring claims the whole guard should not silently miss an arm. It is ported now, pinned to `maxTagCount` by the Go test, and a live `postprocess` floors a spoken 1001 to 1.
+
+Its suggestions:
+- **Two comments, added.** One says `%q` spells a Python raw string correctly only while the regex has no backslash or quote. The other says Python's `bool` is an `int`, so a JSON `true` passes as 1; the line this replaced had the same hole.
+- **A Unicode case-folding divergence, recorded, not fixed.** Go's `strings.ToLower` folds `İ` (U+0130) to `i`. Python's `lower()` gives `i` plus a combining dot, which the split then cuts into separate tokens. It matters only with a Turkish dotted İ fused to a number word, which English dictation does not produce.
+- **Local `verify` cannot see a vocabulary drift.** `check:evals`, which `verify` runs, checks the port's behaviour against the vectors. The map and constant comparison lives in the Go test, which runs in CI's Backend job or on an explicit `go test`, like this file's other parity tests.
+
+**What it does not change.** `spokenNumber`'s comment records that the guard fires zero times over the 66 real drafts in `results/`, so no published score moves. **Still not mirrored:** `checkedNumber` drops an unspoken SCALAR (`rounds`, `round_minutes`, `session_rpe`) to null, and `postprocess()` does not. That is the same class of gap, outside this ticket; it is filed as F64 (#1174) and recorded in the eval README.
+
+**Reachability on a phone**: no athlete-facing change. This is eval fidelity to what the phone already shows.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

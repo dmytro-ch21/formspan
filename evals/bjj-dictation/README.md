@@ -304,8 +304,8 @@ spoken and still did not survive.
 **Measured against the real thing, not an authored sentence** — the two
 `recorded` dictations sitting in `pending/` (`rec-01-first-session-was-one`,
 `rec-02-the-session-was-one`), called live against `gpt-5.6-luna` directly
-(not through `run.py`'s scoring, which does not apply the count-floor guard at
-all — see the gap noted below). `rec-02` ends "I did three or four sweeps five
+(not through `run.py`'s scoring, which did not apply the count-floor guard at
+the time; F29 (#785), at the end of this file, closed that). `rec-02` ends "I did three or four sweeps five
 passes five submissions" — one hedge, two definite fives, back to back with no
 punctuation.
 
@@ -396,6 +396,9 @@ the kind of drift CLAUDE.md's module-pattern notes warn about, and fixing it
 properly wants the same treatment `reflect_parity_test.go` gives the prompt
 text, not a rushed addition alongside an unrelated ticket.
 
+*Closed by F29 (#785), at the end of this file: a port with a parity test on
+both the vocabulary and the behaviour.*
+
 ---
 
 ## The format
@@ -463,3 +466,48 @@ It proves each case is **writable**. It cannot tell you the corpus is any good.
 - **Any recorded case.**
 - **Transcription-error coverage.** Every case starts from clean text, so the
   set is blind to the keyboard mishearing "omoplata".
+
+## F29 (#785): `run.py` floors an unspoken count the way the app does (2026-09-12)
+
+**The gap.** `postprocess()` is documented as "what Go does to the response
+before the athlete ever sees it". But it only resolved `technique_id`s: it
+never applied `ResolveDraft`'s count floor, where a count above one that the
+dictation never says, as a digit or a word, becomes 1. So a draft carrying an
+invented multiplier (count 6 when nobody said six) was scored as the model
+returned it, although the app would have shown 1.
+
+**The fix.**
+- **The port.** `scripts/check-dictation-evals.py` gains a port of
+  `numberWords`, `wordSplit` and `spokenNumber` from `reflect.go` (as
+  `NUMBER_WORDS`, `WORD_SPLIT`, `spoken_number`), plus `floor_count`, which
+  mirrors all three arms of the count guard, including the 1000 ceiling a
+  spoken count can still hit.
+- **The wiring.** `run.py` already imports the validator as `V`, so
+  `postprocess()` now takes the case's dictation and floors through
+  `V.floor_count`. A floored tag carries `count_floored: {was, reason}`, the
+  same way an invented id carries `invented_id`.
+
+**How the second copy is kept honest.**
+- **The vocabulary, compared.** `reflect_parity_test.go`'s
+  `TestTheEvalCountsSpokenNumbersTheWayGoDoes` parses `NUMBER_WORDS` and
+  `WORD_SPLIT` out of the validator and compares them with Go's, entry for
+  entry and in order. `MAX_TAG_COUNT` is pinned to `maxTagCount` the same
+  way.
+- **The behaviour, compared.** Both languages run the same 19 vectors in
+  `spoken_numbers.json`. Go runs them through `spokenNumber`, and the
+  validator runs them through the port.
+
+Neither half is enough alone. Removing the port's compound rule changes
+behaviour and leaves the map identical, so only the vectors catch it. Adding a
+form in Go changes the map and none of the vectors, so only the comparison
+catches it.
+
+**What the published numbers mean.** `spokenNumber`'s own comment records that
+the guard fires zero times over the 66 real drafts in `results/`, so no score
+above changes. The eval simply no longer CAN score a draft the app would
+floor.
+
+**Still not mirrored.** `ResolveDraft` also drops an unspoken SCALAR (`rounds`,
+`round_minutes`, `session_rpe`) to null, via `checkedNumber`, and
+`postprocess()` does not. That is the same class of gap, outside this ticket's
+scope, and filed as F64 (#1174).

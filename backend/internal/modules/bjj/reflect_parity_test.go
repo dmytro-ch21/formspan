@@ -1,10 +1,13 @@
 package bjj
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -176,6 +179,98 @@ func TestTheProductionCatalogLoadsWithTheLibraryAndItsFamilies(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("family %q matches no technique's position", f)
+		}
+	}
+}
+
+// F29 (#785): the eval floors an unspoken count the way ResolveDraft does,
+// through a Python port of numberWords, wordSplit and spokenNumber in
+// scripts/check-dictation-evals.py. A port is a second copy, so it is held in
+// step two ways. The vocabulary and the split are compared here, entry for entry
+// and in order, because the compound rule reads each list's FIRST form. And both
+// languages answer the same vectors in evals/bjj-dictation/spoken_numbers.json:
+// this test runs them through spokenNumber, and check-dictation-evals.py runs
+// them through the port.
+func TestTheEvalCountsSpokenNumbersTheWayGoDoes(t *testing.T) {
+	raw, err := os.ReadFile(repoFile(t, filepath.Join("scripts", "check-dictation-evals.py")))
+	if err != nil {
+		t.Fatalf("reading the eval validator: %v", err)
+	}
+	src := string(raw)
+
+	const open = "NUMBER_WORDS = {\n"
+	i := strings.Index(src, open)
+	if i < 0 {
+		t.Fatal("could not find NUMBER_WORDS in check-dictation-evals.py — fix this parser rather than deleting the check")
+	}
+	body := src[i+len(open):]
+	j := strings.Index(body, "\n}")
+	if j < 0 {
+		t.Fatal("NUMBER_WORDS is not terminated in check-dictation-evals.py")
+	}
+	entry := regexp.MustCompile(`^\s*(\d+):\s*\[(.*)\],?\s*$`)
+	port := map[int][]string{}
+	for _, line := range strings.Split(body[:j], "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		m := entry.FindStringSubmatch(line)
+		if m == nil {
+			t.Fatalf("unparseable NUMBER_WORDS line %q — keep one entry per line", line)
+		}
+		n, _ := strconv.Atoi(m[1])
+		var forms []string
+		for _, f := range regexp.MustCompile(`"([^"]*)"`).FindAllStringSubmatch(m[2], -1) {
+			forms = append(forms, f[1])
+		}
+		port[n] = forms
+	}
+	if len(port) == 0 {
+		t.Fatal("NUMBER_WORDS parsed as empty — this check would pass vacuously")
+	}
+	for n, forms := range numberWords {
+		if !slices.Equal(port[n], forms) {
+			t.Errorf("numberWords[%d]: Go says %q, the eval's port says %q", n, forms, port[n])
+		}
+	}
+	for n := range port {
+		if _, ok := numberWords[n]; !ok {
+			t.Errorf("the eval's port has NUMBER_WORDS[%d] = %q, which Go does not", n, port[n])
+		}
+	}
+	// %q is Go quoting, not a Python raw string. The two spell a pattern the same
+	// only while it has no backslash or double quote, which holds for today's
+	// `[^a-z0-9]+`. Change wordSplit to something with `\s` in it and this line
+	// will demand the wrong Python literal: rewrite the comparison then.
+	if want := fmt.Sprintf("WORD_SPLIT = re.compile(r%q)", wordSplit.String()); !strings.Contains(src, want) {
+		t.Errorf("the eval's WORD_SPLIT is not %s — the two tokenise the dictation differently", want)
+	}
+	// The third arm of ResolveDraft's count switch floors a count above
+	// maxTagCount even when it was spoken; the port's floor_count reads this.
+	if want := fmt.Sprintf("MAX_TAG_COUNT = %d\n", maxTagCount); !strings.Contains(src, want) {
+		t.Errorf("the eval's MAX_TAG_COUNT is not %d — a spoken count above the ceiling would be floored by the app and kept by the eval", maxTagCount)
+	}
+
+	rawVectors, err := os.ReadFile(repoFile(t, filepath.Join("evals", "bjj-dictation", "spoken_numbers.json")))
+	if err != nil {
+		t.Fatalf("reading the shared vectors: %v", err)
+	}
+	var file struct {
+		Vectors []struct {
+			Dictation string `json:"dictation"`
+			N         int    `json:"n"`
+			Want      bool   `json:"want"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(rawVectors, &file); err != nil {
+		t.Fatalf("parsing spoken_numbers.json: %v", err)
+	}
+	if len(file.Vectors) == 0 {
+		t.Fatal("spoken_numbers.json has no vectors — this check would pass vacuously")
+	}
+	for _, v := range file.Vectors {
+		if got := spokenNumber(v.Dictation, v.N); got != v.Want {
+			t.Errorf("spokenNumber(%q, %d) = %v, but the shared vector says %v", v.Dictation, v.N, got, v.Want)
 		}
 	}
 }
