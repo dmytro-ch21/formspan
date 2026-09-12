@@ -75261,6 +75261,105 @@ The others are recorded, not taken, with reasons:
 
 **Reachability on a phone**: already there since N123. This is web catching up.
 
+## 2026-09-12 — F47 (#1057), the remaining piece: an act audit that sees what the teardown absorbs
+
+**#1122 left one hole, and it said so.** The in-`act` teardown in `apps/mobile/jest.setup.js` ended the flake. It also absorbs an unawaited async chain whose next step lands in the teardown: the step runs inside `act`, so React prints nothing. So a census of 0 could no longer prove a test awaited its chain. Two mutations measured the cost. **M7** (`speak()` not waiting for the library) read 0, 2 and 1 warnings under RNTL's own cleanup and 0, 0, 0 after #1122. **M8** (N505's two ported waits removed) read 0 under both. The ticket stayed open on one condition: a detector shown to fail on M7 and M8.
+
+**This PR recovers M7. It does not detect M8, and the reason is measured below: in a standalone run M8 leaves nothing in flight for any runtime instrument to see.** The ticket therefore stays open (`part of #1057`), with the M8 finding put to the owner rather than decided here.
+
+### What landed
+
+`apps/mobile/lib/__tests__/support/actAudit.ts`, installed once per test file by `jest.setup.js`. While the teardown runs, it records every **state update that comes from a promise continuation**. `jest.setup.js` then prints one `act audit:` line per distinct finding, naming the test and the nearest app frame:
+
+    act audit: an update from async work the test did not await landed during the teardown's act(...). Test: "…". At: setCatalog (app/bjj/dictate.tsx:254:25)
+
+- **How it sees an update.** React gives nothing public for where an update came from. Two things can be observed. When an update is scheduled inside `act`, React pushes a task onto `ReactSharedInternals.actQueue`. The audit makes `actQueue` an accessor, so every queue React assigns has an instrumented `push`. The stack at that push also answers two questions. Is this a state update (`scheduleUpdateOnFiber`, and not a root render or unmount through `updateContainer`)? And is it running synchronously inside a timer callback (a timer frame below any microtask frame)?
+- **What it exempts, on purpose: an update made synchronously in a timer callback.** That is exactly #1122's benign class: `VirtualizedList`'s re-armed cell-batch timer and `app/library.tsx`'s search debounce. No test can await them and the unmount clears them. A continuation that runs *after* a timer fired, such as a mock resolved on `setTimeout` (M7's shape), is still a continuation and is flagged. The order of frames matters, and a unit test pins it: Node drains microtasks from inside `listOnTimeout` between two timers, so a continuation can carry a timer frame *below* its microtask frame.
+- **The line goes through a `console.error` captured at setup,** so a test that spies on or stubs `console.error` cannot swallow it.
+- **Controls, committed and run in CI** (`components/__tests__/actAudit.test.tsx`). They drive the same teardown `jest.setup.js` runs, mid-test and against real React, and assert on what was recorded. Every one also asserts that its update happened *during* that teardown and not before.
+  1. A hook component updates inside an immediate callback during teardown: no finding.
+  2. A class component's `setState` in one (`VirtualizedList`'s path): no finding.
+  3. A chain nobody awaited, resolved just before the teardown: **one finding**, framed at the test file.
+  4. The same chain, let land inside the test's own `act` first: no finding.
+  5. A test that stubs `console.error` cannot swallow the audit's line, because it prints through the original, bound at setup.
+- **The controls' first version was flaky, and the loop of mutation checks is what caught it.** It let a 1ms timer fall due with a busy-wait. On one **unmutated** re-run, control 3 went red: its chain ran (`onLoaded` called once), but after the unmount, so nothing was recorded. Whether a due timer or the teardown's own `setImmediate` runs first depends on the event-loop phase the test happens to be in. The redesign lets the test decide the order: an immediate queued before the teardown's, or a promise resolved before the teardown starts, can only run one way. The real setTimeout frame shape is covered by the unit test, which uses a real `setTimeout`. **The redesigned controls then ran 25 times in a row: 0 failures.**
+- `lib/__tests__/actAudit.test.ts` pins `readStack`'s reading of each frame shape, the printed line, and the install (armed only during teardown, disarmed on throw, root renders and timer callbacks ignored, each assigned queue instrumented exactly once).
+
+### M7 is visible again
+
+`dictateScreen.test.tsx` with `speak()` defaulting to `waitForCatalog: false`, 29/29 passing in every run:
+
+| arm | runs | `act audit:` lines |
+|---|---|---|
+| audit installed (first design) | 3 | **1, 2, 1** |
+| audit switched off (`ACT_AUDIT=0`, a development switch since removed) | 2 | 0, 0 |
+| audit installed (final design) | 3 | **2, 3, 6** |
+| restored, byte-identical | 1 each | 0 |
+
+Every finding was `setCatalog (app/bjj/dictate.tsx:254:25)`, from seven different tests across the final runs. That matches M7's pre-#1122 signature: the same leak, reached from a different test each time.
+
+### M8 cannot be seen at runtime, and here is the measurement rather than the argument
+
+The first design's three M8 runs read 0, 0, 0, so a diagnostic copy of the test was run with M8 applied, recording where each step of the pill's chain landed. The copy was deleted. After review it was re-created and run twice more, and both runs printed the same trace:
+
+    before press
+    remember called (act env=true)
+    press called, sync
+    push called (act env=true)
+    settle called (act env=true)
+    after press resolved: unsynced-gone
+
+**`rememberActivityChoice`, `setActivityLevel` and `settleActivityChoice` all run inside the press's own `act`, and the chain's last `setActivity` has landed before `await fireEvent.press` returns.** The mocks resolve immediately, and React's async `act` keeps flushing while each turn produces work. So in isolation the two ported waits are no-ops: the state they wait for is already true. The mutated and unmutated tests are indistinguishable to anything that observes the run. That is also why the census never saw M8, under either cleanup.
+
+N505's original sightings were full-suite, under contention. There, a chain can outrun the press's `act`. If its tail lands in the teardown, this audit reports it. If it lands in the test's own later `act` (the `release` below the removed lines), nothing here does, which leads to the next section. **So the honest status of "fail on M8" is: not achievable standalone, by construction.** Whether that closes the condition is the owner's call, and it is put to them on #1057.
+
+### A second rule was built, measured and dropped
+
+The first design also flagged a `fireEvent.press` / `changeText` / `scroll` handler's chain that landed inside a **later** `act` after its event had resolved. This is N505's `(level) => void chooseActivity(level)` shape. It used `AsyncLocalStorage`, which propagates through promise continuations and timers inside jest's vm context (probed first), plus a wrapper around those three `fireEvent` methods.
+
+**On the full suite it reported 8 findings. All 8 were read, and none is a leak.** They fall into two kinds:
+
+- **Six hold a promise on purpose and release it inside `act`.** These are `scanScreen`'s two *retrying twice* tests, `shareCardPreview`'s *disables Share and Not now while a photo is still being resized*, `PromotionForm`'s *Save is disabled while a just-picked photo is still being resized*, `describeReuse`'s *cannot log a stale draft while a fresh estimate is in flight*, and `sessionHistoryScreen`'s *a stale "Show older" response*.
+- **Two wrap the press in the test's own outer `act`**, which is #1122's fix pattern, and the handler's chain finished inside that `act` after the press itself had resolved. These are `PromotionForm`'s *picking a photo uploads it IMMEDIATELY* and `describeCompile`'s *unticking the toggle returns to logging every row separately*.
+
+Both kinds are tests doing the right thing, and the rule could not tell either from a leak. What differs is whether the chain's next step was already runnable when the later `act` began, and nothing observable without delaying the test's own callback answers that. Delaying the callback would change what the double-tap race tests exercise. **So the rule went, and `AsyncLocalStorage` and the `fireEvent` wrapping went with it.** Its one full-suite sample ran 96s against 74s without the audit at load ~130. That is one sample and not a measurement to lean on, but it was a cost with no true positive behind it.
+
+**The `ACT_AUDIT=0` switch went too.** It existed to take the off-arm above. Left in, it is a way to silence the audit, and the controls would have to skip rather than fail under it.
+
+### The audit's own mutation checks
+
+Each mutation of `actAudit.ts` was run against the controls, then restored, confirmed byte-identical, and **re-run**:
+
+| mutation | first controls (timer-based) | final controls |
+|---|---|---|
+| no timer exemption (`timerCallback = false`) | controls 1 and 2 red | controls 1 and 2 red |
+| never armed (`armed = false` in `duringTeardown`) | control 3 red | control 3 red |
+| root renders counted as updates (`updateContainer` exclusion removed) | all 4 red, because the unmount itself is then flagged | all 4 red |
+
+Every restore in the final column re-ran 4/4 green. In the first column, the third restore is the flaky run described above: control 3 was red with the file byte-identical to its backup.
+
+### The full suite with the audit installed
+
+One `CI=1 pnpm run test:mobile` on the final audit, with the first (timer-based) controls, load averages 86 / 102 / 119 (1 / 5 / 15 minutes) when it ended: **exit 0, 5942/5942 passed, 0 `act audit:`, 0 `not wrapped in act`, 0 `not configured to support act`, 0 `Uncaught error`, 71s.** An earlier full run on the first design also recorded 0 teardown findings. Its 8 findings were all from the dropped rule. So on current `main`, no test leaves a continuation for the teardown to absorb. That is the zero the audit makes meaningful, and M7 is the evidence it can move.
+
+That run used the first, timer-based controls. They were redesigned afterwards, and the redesign touches only that one test file, not the audit or the teardown. `check:rntl-awaits` also passes with the new files: 374 test files, 0 unawaited RNTL calls.
+
+### What review added
+
+`frontend-reviewer` found nothing blocking and made two suggestions, and both were taken.
+
+- **The claim that a `console.error` spy cannot swallow the line had no control.** It now has one: control 5. Mutated so the reporter looks up `console.error` at call time instead of binding it at setup, that control goes red. Restored byte-identical, it is green.
+- **A test file that calls `jest.resetModules()` and then renders** gets a fresh `react` the audit never instrumented, and reads 0. That is now listed in the module's limits. No component test does this today: the two files that reset modules render nothing.
+
+`ac-verifier` re-derived every number here from the raw mutation logs and graded M7 met and M8 not met. That grading is why this PR is `part of #1057`.
+
+### Open questions
+
+- **M8, for the owner.** The condition was "fail on M7 and M8". M7 is met. M8 is shown above to leave nothing in flight in isolation. Either accept that measurement as closing the condition, or keep #1057 open for a load-dependent reproduction of N505's full-suite sighting. A later-`act` rule would then have to solve the problem in the section above first.
+- **The census should count three phrases now:** `not wrapped in act`, `not configured to support act` and `act audit:`. The ticket's original command counts only the first.
+- **The audit reads React internals.** A React upgrade that renames `actQueue` or the reconciler functions turns the controls red rather than making the audit silent. That is the intended failure, and it is the only warning there will be.
+- **The six "overlapping act() calls" errors** from `scanScreen`'s double-tap tests (recorded on #1057 by L20's session) are untouched. They are a different message from a different mechanism.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -46,8 +46,9 @@
   as more than it is. This teardown ALSO absorbs an unawaited async chain
   whose next step lands in the teardown yield: it runs inside `act` and
   prints nothing. So a census of 0 cannot prove a test awaited its chain;
-  awaiting the chain's terminal effect is still the fix, and the census no
-  longer enforces it. (A tail not yet due at teardown, a 50ms hop, printed
+  awaiting the chain's terminal effect is still the fix. The act audit below
+  (F47's remaining piece) is what reports that case now, one `act audit:` line
+  per update, so the census can see it again. (A tail not yet due at teardown, a 50ms hop, printed
   nothing in EITHER arm: it lands after unmount, where React does not warn.)
   The pending work still RUNS, inside `act`; nothing is swallowed.
 
@@ -63,6 +64,28 @@ const rntl = require('@testing-library/react-native');
 const { act, cleanup } = rntl;
 // F56 (#1135): whether a test rendered anything for the teardown to unmount.
 const { hasRenderedTree } = require('./lib/__tests__/support/renderedTree');
+
+/*
+  F47 (#1057), the remaining piece: the act audit. The teardown below absorbs
+  an unawaited async chain whose next step lands in it, so React's warnings
+  alone cannot see one. The audit records every state update that lands
+  during the teardown from a promise continuation, and prints one
+  `act audit:` line per update. `lib/__tests__/support/actAudit.ts` says what
+  it exempts and why (a timer's own callback), and where it is blind.
+
+  The line goes through the `console.error` captured here, so a test that
+  spies on or stubs `console.error` cannot swallow it.
+*/
+const {
+  installActAudit,
+  registerActAudit,
+  describeFindings,
+} = require('./lib/__tests__/support/actAudit');
+const actAudit = installActAudit({
+  internals: require('react').__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,
+  root: `${require('path').dirname(require.resolve('./package.json'))}/`,
+});
+const reportActAudit = console.error.bind(console);
 
 /*
   Captured before any test can install fake timers. RNTL's own teardown yields
@@ -313,15 +336,21 @@ jest.mock('react-native-safe-area-context', () => {
  * exactly that; `renderedTree.test.tsx`'s "is false again in the next test"
  * went red on it.
  */
+async function tearDownRendered() {
+  await actAudit.duringTeardown(() =>
+    act(async () => {
+      await new Promise((resolve) => realSetImmediate(resolve));
+      await cleanup();
+    }),
+  );
+}
+registerActAudit(actAudit, tearDownRendered, reportActAudit);
+
 afterEach(async () => {
-  if (!hasRenderedTree(rntl.screen)) {
-    await cleanup();
-    return;
-  }
-  await act(async () => {
-    await new Promise((resolve) => realSetImmediate(resolve));
-    await cleanup();
-  });
+  if (hasRenderedTree(rntl.screen)) await tearDownRendered();
+  else await cleanup();
+  const testName = expect.getState().currentTestName ?? 'an unnamed test';
+  for (const line of describeFindings(actAudit.take(), testName)) reportActAudit(line);
 });
 
 /*
