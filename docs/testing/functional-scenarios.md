@@ -1167,12 +1167,18 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
   (acceptable, as the screen has already changed).
 - A finished session opened from history (no timer possible) has no reserved room.
 
-**Arrival, exit and swap**
-- The bar arrives from just above its slot with a short fade (≈180ms) and leaves
-  upward, faster (≈120ms).
-- Expand and minimise crossfade: the incoming form settles up from 97% scale. At
-  no point are there two fully opaque surfaces, and there is never an empty frame
-  between them.
+**Arrival, exit and swap (as corrected by F55, #1134)**
+- The bar **fades in place** (≈120ms) and fades out in place (≈120ms). It does
+  not slide from anywhere: its 64pt room was already there.
+- Expand and minimise crossfade, the incoming form settling up from 97% scale
+  **from its top edge**, so the card opens downward from where the bar sits.
+  At no point are there two fully opaque surfaces, and there is never an empty
+  frame between them.
+- **Reverse it mid-way:** tap expand and then minimise within a fifth of a
+  second. The fade turns round from wherever it had got to. It must never jump
+  to fully opaque first; that flash was the bug F55 fixed.
+- While the bar is showing, the card behind it takes no taps and is not read by
+  VoiceOver or TalkBack; the reverse holds while the card is showing.
 - Starting a new rest while a finished "Rest done" bar is up does NOT replay the
   arrival. The bar stays and its fill refills.
 
@@ -1192,14 +1198,17 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
   repaint on it.
 - ±15s, pause and resume DO re-render the owner (they change the countdown).
 
-**Reduce Motion**
-- **On**: the bar appears and disappears in place, expand/minimise cut without a
-  crossfade, and the fill STEPS with the digits instead of gliding. Nothing
-  teleports, because the room was already reserved.
-- Turning Reduce Motion **on** with the app open stops the glide on the next
-  repaint. Turning it **off** with the app open resumes gliding from the
-  current width. The arrival/swap builders only pick the change up after a
-  relaunch (Reanimated reads the setting at launch). That is known, not a bug.
+**Reduce Motion (as corrected by F55, #1134)**
+- **On**: the bar still **fades** in and out, and expand/minimise still
+  **crossfade**, just without the scale. Reduced means gentler, not nothing.
+  The fill STEPS with the digits instead of gliding. Nothing teleports, because
+  the room was already reserved.
+- The same holds in the moment before iOS has answered whether Reduce Motion is
+  on: fade, no scale, stepping fill.
+- Turning Reduce Motion **on or off with the app open** takes effect on the next
+  change, for the fade, the scale and the drain alike. There is no relaunch
+  caveat any more: everything follows the live setting, not the one read at
+  launch.
 
 ### Needs a device
 
@@ -1221,12 +1230,15 @@ suite. Run on a **release** build on a real phone, ideally the slowest supported
 6. At scroll top on a live session with no timer: judge whether the 64pt room
    above the first exercise reads as intentional or as a gap. It is the one cost
    of this fix.
-7. With Reduce Motion on in iOS Settings (relaunch the app): nothing slides or
-   crossfades, the fill steps, and the log still does not move.
+7. With Reduce Motion on in iOS Settings (no relaunch needed): the bar and the
+   swap still fade, nothing scales, the fill steps, and the log still does not
+   move.
 8. With **VoiceOver on**, expand and minimise the timer: focus lands on the new
-   form, and is never trapped in the outgoing card during its ~120ms fade.
-   The card is `accessibilityViewIsModal`, and for a moment the outgoing and
-   incoming forms coexist.
+   form, and is never trapped in the outgoing card during its fade. Then, **with
+   the bar showing**, swipe through the screen: VoiceOver reaches the set list,
+   and never lands inside the card. Since F55 the card stays mounted behind the
+   bar, and it is `accessibilityViewIsModal` only while it is the form on
+   screen.
 9. Finish a session **while a rest bar is still up**: the log shifts up 64pt
    once, as the bar fades out and the screen becomes the report. Judge whether
    that single transition reads as part of finishing or as a jump. It is a

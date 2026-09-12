@@ -2,11 +2,8 @@ import { useEffect, useRef } from 'react';
 import { StyleSheet, View as RNView } from 'react-native';
 import Animated, {
   Easing,
-  FadeInDown,
+  FadeIn,
   FadeOut,
-  FadeOutUp,
-  Keyframe,
-  LayoutAnimationConfig,
   ReduceMotion,
   useAnimatedStyle,
   useSharedValue,
@@ -139,47 +136,50 @@ export function timerSpaceFor(session: { finished: boolean; timerShowing: boolea
 }
 
 /*
-  N558/#1047 — the four layout animations, built once at module scope.
+  F55/#1134 — how the timer surface arrives, leaves, and changes size.
 
-  Gate: a rest starts ~20 times a session, which is the "tens of times" band —
-  so nothing here is longer than `MS.control`, exits are faster than entries,
-  and none of it is a spring (no finger carried velocity in). Purpose: spatial
-  consistency. The bar used to materialise between two frames; now it arrives
-  from just above its own slot and leaves the way it came.
+  Gate: a rest starts ~20 times a session and the bar ↔ card swap is a toggle,
+  both in the "tens of times" band — so nothing here is longer than
+  `MS.control`, and none of it is a spring (no finger carried velocity in).
+  Purpose: spatial consistency.
 
-  Every builder carries `ReduceMotion.System`, so with Reduce Motion on each one
-  is skipped outright: the surface appears in place, the space it appears into
-  was already reserved (see `timerSpaceFor`), and so nothing teleports and
-  nothing moves. Note what `System` reads: Reanimated's snapshot of the setting
-  at app launch, not a live subscription. Toggling Reduce Motion with the app
-  open reaches these builders on the next launch. The DRAIN below does not use
-  `System` for exactly that reason — see `Drain`.
+  **Arrival and departure are opacity only, at `MS.press`.** The 64pt the bar
+  appears into is already reserved (see `timerSpaceFor`), so the bar has
+  nowhere to travel FROM, and a translate on an event that happens twenty times
+  a session is decoration. N558 used `FadeInDown` / `FadeOutUp`, which rise 25pt
+  from BELOW the slot — while two comments here said "from above". Removing the
+  travel removes the direction question with it.
 
-  `FadeInDown` rather than the audit's `SlideInUp`: in Reanimated 4.5.1
-  `SlideInUp` starts at `-windowHeight` (measured in
-  `layoutReanimation/defaultAnimations/Slide.ts`), which in 180ms is a
-  ~5,000pt/s fly-in across the header, twenty times a session. `FadeInDown` is a
-  25pt slide into the slot under an opacity ramp — it still reads as "from
-  above", and it is over before the eye goes looking for it.
+  **Every animation here carries `ReduceMotion.Never`, and that is not a
+  bypass.** `ReduceMotion.System` is Reanimated's snapshot of the setting at app
+  launch, and with Reduce Motion on it skips an animation outright — opacity
+  included, so the surface popped in rather than fading. Reduced motion means
+  gentler, not nothing. The decision is made in JavaScript from the LIVE
+  `useReducedMotion()` hook instead, exactly as `Drain` below already does: a
+  fade is kept in every state, and what Reduce Motion (or the OS not having
+  answered yet) removes is the swap's scale, the only movement left here.
 */
 const EASE_OUT = Easing.bezier(...EASE.out);
 
-const ARRIVE = FadeInDown.duration(MS.control).easing(EASE_OUT).reduceMotion(ReduceMotion.System);
-const LEAVE = FadeOutUp.duration(MS.press).easing(EASE_OUT).reduceMotion(ReduceMotion.System);
+const ARRIVE = FadeIn.duration(MS.press).easing(EASE_OUT).reduceMotion(ReduceMotion.Never);
+const LEAVE = FadeOut.duration(MS.press).easing(EASE_OUT).reduceMotion(ReduceMotion.Never);
 
 /**
- * Bar ↔ card. A crossfade, with the incoming form settling up from
- * `SWAP_SCALE`, so it reads as one surface changing size rather than two
- * surfaces cutting. Opacity and scale only: both are compositor properties, and
- * the layer is absolutely positioned, so the log behind never re-lays-out.
+ * Bar ↔ card, as ONE persistent value: 0 is the bar, 1 is the card.
+ *
+ * N558 built the swap from keyed mount/unmount layout animations, and those
+ * cannot retarget: a `Keyframe` always restarts from its frame-0 values, and
+ * `FadeOut` always starts from opacity 1. So expanding and then minimising
+ * within ~180ms faded the card in toward ~30%, SNAPPED it to 100%, and faded it
+ * out again — a flash on a toggle. `/review-animations` blocked on exactly that.
+ *
+ * Assigning a new `withTiming` to a shared value starts from its CURRENT
+ * presentation value, so a reversal continues from wherever the crossfade is.
+ * Both forms stay mounted for that to be possible; the one not being shown is
+ * hidden from touches and from assistive technology, so it exists only as a
+ * fading picture.
  */
-const SWAP_IN = new Keyframe({
-  0: { opacity: 0, transform: [{ scale: SWAP_SCALE }] },
-  100: { opacity: 1, transform: [{ scale: 1 }], easing: EASE_OUT },
-})
-  .duration(MS.control)
-  .reduceMotion(ReduceMotion.System);
-const SWAP_OUT = FadeOut.duration(MS.press).easing(EASE_OUT).reduceMotion(ReduceMotion.System);
+const SWAP_TIMING = { duration: MS.control, easing: EASE_OUT, reduceMotion: ReduceMotion.Never };
 
 /**
  * The surface's props. `remaining` is NOT one of them — the surface subscribes
@@ -191,6 +191,36 @@ export type TimerSurfaceProps = Omit<TimerControls, 'remaining'> & { clock: Rema
 export function TimerSurface({ clock, ...controls }: TimerSurfaceProps) {
   const remaining = useRemaining(clock);
   const props: TimerControls = { ...controls, remaining };
+  const expanded = !props.minimized;
+
+  // Seeded to the form the surface opens in, so an arrival is the layer's own
+  // fade and nothing else — no crossfade playing inside it.
+  const swap = useSharedValue(expanded ? 1 : 0);
+  // The first run has nothing to animate (the seed IS the target), so it arms
+  // nothing: a timing to where the value already is would be one more
+  // UI-thread animation per rest, and it would muddy the drain's own
+  // "armed once" accounting in `timerContinuity.test.tsx`.
+  const swapArmed = useRef(false);
+  useEffect(() => {
+    if (!swapArmed.current) {
+      swapArmed.current = true;
+      return;
+    }
+    swap.set(withTiming(expanded ? 1 : 0, SWAP_TIMING));
+  }, [expanded, swap]);
+
+  // The scale is the one piece of movement, so it is the piece Reduce Motion
+  // removes. `null` — the OS has not answered — holds rather than guesses.
+  const scaled = useReducedMotion() === false;
+  const barStyle = useAnimatedStyle(() => ({
+    opacity: 1 - swap.get(),
+    transform: [{ scale: scaled ? SWAP_SCALE + (1 - SWAP_SCALE) * (1 - swap.get()) : 1 }],
+  }));
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: swap.get(),
+    transform: [{ scale: scaled ? SWAP_SCALE + (1 - SWAP_SCALE) * swap.get() : 1 }],
+  }));
+
   return (
     <Animated.View
       // `box-none` so the area beside the collapsed bar is not a dead zone over
@@ -207,27 +237,36 @@ export function TimerSurface({ clock, ...controls }: TimerSurfaceProps) {
       testID="countdown-layer"
     >
       {/*
-        `skipEntering` / `skipExiting`: when the whole surface arrives or leaves,
-        the layer's own animation is the one that plays. Without this the child's
-        swap animation would run on top of it — a fade inside a fade — on every
-        rest. The swap animations are for the swap, which is a change of child
-        while the layer stays mounted.
+        The form being shown stays in flow and sizes the layer; the other lies
+        over it, absolutely positioned at the same top edge, so switching which
+        one is in flow never moves either. The card renders after the bar, so
+        it is on top while it fades in either direction.
 
-        Keyed so React replaces the child rather than reconciling a bar into a
-        card — the replacement is what lets the outgoing form fade out while the
-        incoming one fades in.
+        The hidden form takes no touches (`pointerEvents="none"`) and is hidden
+        from VoiceOver and TalkBack — a half-faded button that still answered a
+        tap, or a second set of controls read aloud, would be worse than the
+        flash this replaces.
       */}
-      <LayoutAnimationConfig skipEntering skipExiting>
-        {props.minimized ? (
-          <Animated.View key="bar" pointerEvents="box-none" entering={SWAP_IN} exiting={SWAP_OUT}>
-            <TimerBar {...props} />
-          </Animated.View>
-        ) : (
-          <Animated.View key="card" pointerEvents="box-none" entering={SWAP_IN} exiting={SWAP_OUT}>
-            <TimerCard {...props} />
-          </Animated.View>
-        )}
-      </LayoutAnimationConfig>
+      <RNView pointerEvents="box-none">
+        <Animated.View
+          pointerEvents={expanded ? 'none' : 'box-none'}
+          accessibilityElementsHidden={expanded}
+          importantForAccessibility={expanded ? 'no-hide-descendants' : 'auto'}
+          style={[styles.swapForm, expanded && styles.swapBehind, barStyle]}
+          testID="countdown-form-bar"
+        >
+          <TimerBar {...props} />
+        </Animated.View>
+        <Animated.View
+          pointerEvents={expanded ? 'box-none' : 'none'}
+          accessibilityElementsHidden={!expanded}
+          importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
+          style={[styles.swapForm, !expanded && styles.swapBehind, cardStyle]}
+          testID="countdown-form-card"
+        >
+          <TimerCard {...props} />
+        </Animated.View>
+      </RNView>
     </Animated.View>
   );
 }
@@ -281,8 +320,10 @@ function fractionOf(seconds: number, total: number): number {
  */
 function Drain({ timer, remaining, color }: { timer: Countdown; remaining: number; color: string }) {
   const reduced = useReducedMotion();
-  // Seeded from the digits' value so a bar remounted by minimise shows its true
-  // width on its first frame instead of refilling from full.
+  // Seeded from the digits' value so a bar that mounts with a rest already
+  // under way shows its true width on its first frame instead of refilling from
+  // full. (Since F55 the bar stays mounted across a minimise; it mounts with the
+  // surface.)
   const drain = useSharedValue(fractionOf(remaining, timer.total));
   /*
     Whether this bar has armed since it mounted. The FIRST arm jumps to the true
@@ -419,6 +460,7 @@ function Ring({
 }
 
 function TimerCard({
+  minimized,
   timer,
   remaining,
   run,
@@ -446,7 +488,13 @@ function TimerCard({
       // mid-timed-set, which is the one moment the timer IS the screen. The
       // collapsed bar deliberately does not do this — it is a status strip
       // over a list you are still meant to be using.
-      accessibilityViewIsModal
+      //
+      // Modal ONLY while the card is the form on screen (F55/#1134). The card
+      // now stays mounted behind the bar when minimised; its wrapper is hidden
+      // from assistive technology, but a view that stays modal while hidden is
+      // exactly how a screen reader gets trapped, so this does not rely on
+      // iOS resolving the two the right way round.
+      accessibilityViewIsModal={!minimized}
     >
       <RNView style={styles.cardHead}>
         <RNView style={styles.kindRow}>
@@ -730,6 +778,11 @@ function TimerBar({
 
 const styles = StyleSheet.create({
   layer: { position: 'absolute', top: 6, left: 0, right: 0, paddingHorizontal: 10 },
+  // F55: both forms scale from the edge the layer is pinned to, so the card
+  // opens DOWN from where the bar sits rather than growing about its centre
+  // (a 380pt card scaled from the centre moves its top edge ~6pt).
+  swapForm: { transformOrigin: 'top' },
+  swapBehind: { position: 'absolute', top: 0, left: 0, right: 0 },
 
   card: {
     borderRadius: 22,

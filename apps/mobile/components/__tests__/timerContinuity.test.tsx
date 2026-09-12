@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import { useEffect } from 'react';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -27,7 +27,7 @@ import { findAllByType, type TreeNode } from '@/lib/__tests__/support/tree';
  *   ZERO across 30 seconds of a running rest, with a positive control proving
  *   the counter does count (±15s legitimately re-renders it).
  * - **The animation itself is not.** `jest.setup.js`'s Reanimated mock has no
- *   frame clock, so the smoothness of the drain, the 25pt arrival and the
+ *   frame clock, so the smoothness of the drain, the fade-in and the
  *   crossfade are device checks (`docs/testing/functional-scenarios.md`, Rest
  *   timer → needs a device). What IS asserted is how each animation was ARMED:
  *   how often, from which value, with which curve and duration, and whether it
@@ -273,71 +273,171 @@ const animatedViews = () =>
     (n) => n.props.entering != null || n.props.exiting != null,
   );
 
-describe('defect 2 — arrival and the bar ↔ card swap are animated, and respect Reduce Motion', () => {
-  it('arrives from above and leaves the way it came, on the motion scale', async () => {
+/*
+  F55/#1134 — N558 merged with its `/review-animations` findings unfixed, and
+  the review had blocked on the first of these. This block replaces N558's
+  arrival/swap tests, several of which asserted the defects themselves
+  (`FadeInDown`, a `Keyframe` swap, `ReduceMotion.System` everywhere).
+
+  What jest can see is unchanged: no frame clock, so where an animation comes to
+  REST, never a frame along it. For the flash that is not enough — the flashing
+  swap and the fixed one rest at identical values — so the Reanimated mock now
+  logs every shared-value write as ASSIGNED (`__sharedValueWrites`). A reversal
+  that continues from where the crossfade is looks like "an animation assigned
+  to the same value, with no literal start value written first". Anything that
+  restarts a swap has to write one, remount a form, or use a fresh value, and
+  each of those is asserted against here.
+*/
+type SharedValueWrite = { target: unknown; value: unknown };
+const sharedValueWrites = () =>
+  (Reanimated as unknown as { __sharedValueWrites: SharedValueWrite[] }).__sharedValueWrites;
+
+/** A swap form's wrapper — including the one hidden from assistive technology. */
+const form = (which: 'bar' | 'card') =>
+  screen.getByTestId(`countdown-form-${which}`, { includeHiddenElements: true });
+const formStyle = (which: 'bar' | 'card') =>
+  StyleSheet.flatten(form(which).props.style) as {
+    opacity: number;
+    transform: { scale: number }[];
+    transformOrigin?: string;
+    position?: string;
+  };
+
+const REDUCE_MOTION_STATES = [
+  ['on', true],
+  ['off', false],
+  ['not yet answered', 'pending'],
+] as const;
+
+describe('F55 — the surface arrives, leaves and swaps without a flash, and Reduce Motion keeps a fade', () => {
+  it.each(REDUCE_MOTION_STATES)(
+    'arrives and leaves by opacity alone, at MS.press, with Reduce Motion %s',
+    async (_label, answer) => {
+      answerReduceMotion(answer);
+      await startRest(90);
+      const layer = screen.getByTestId('countdown-layer');
+      const entering = layer.props.entering as Builder;
+      const exiting = layer.props.exiting as Builder;
+      // Opacity only: the 64pt is reserved, so there is nowhere to travel from.
+      expect([entering.name, exiting.name]).toEqual(['FadeIn', 'FadeOut']);
+      expect(entering.config.duration).toBe(MS.press);
+      expect(exiting.config.duration).toBe(MS.press);
+      // Never, not System — System is a launch-time snapshot that, with Reduce
+      // Motion on, skips the fade outright. The live hook decides instead.
+      expect(entering.config.reduceMotion).toBe(Reanimated.ReduceMotion.Never);
+      expect(exiting.config.reduceMotion).toBe(Reanimated.ReduceMotion.Never);
+    },
+  );
+
+  it('opens in the form the countdown asks for, with no crossfade inside the arrival', async () => {
     answerReduceMotion(false);
     await startRest(90);
-    const layer = screen.getByTestId('countdown-layer');
-    const entering = layer.props.entering as Builder;
-    const exiting = layer.props.exiting as Builder;
-    expect(entering.name).toBe('FadeInDown');
-    expect(entering.config.duration).toBe(MS.control);
-    expect(exiting.name).toBe('FadeOutUp');
-    // Exits are faster than entries.
-    expect(exiting.config.duration).toBe(MS.press);
+    // A rest opens minimised: the bar fully there on its first frame, the card absent.
+    expect(formStyle('bar').opacity).toBe(1);
+    expect(formStyle('card').opacity).toBe(0);
+    // The only layout animation left in the surface is the layer's own.
+    expect(animatedViews().map((n) => n.props.testID)).toEqual(['countdown-layer']);
   });
 
-  it('skips the swap animation when the whole surface arrives or leaves (no fade inside a fade)', async () => {
+  it('keeps both forms mounted and exposes exactly one, to touches and to assistive technology', async () => {
     answerReduceMotion(false);
     await startRest(90);
-    const config = screen.getByTestId('layout-animation-config');
-    expect(config.props.skipEntering).toBe(true);
-    expect(config.props.skipExiting).toBe(true);
-    // And the swap wrapper is actually inside it, not beside it.
-    const inside = findAllByType(config as TreeNode, 'View').filter((n) => n.props.entering != null);
-    expect(inside).toHaveLength(1);
-  });
+    const exposure = (which: 'bar' | 'card') => ({
+      touches: form(which).props.pointerEvents,
+      hidden: form(which).props.accessibilityElementsHidden,
+      android: form(which).props.importantForAccessibility,
+      behind: formStyle(which).position === 'absolute',
+    });
+    const shown = { touches: 'box-none', hidden: false, android: 'auto', behind: false };
+    const faded = { touches: 'none', hidden: true, android: 'no-hide-descendants', behind: true };
 
-  it('crossfades the swap, the incoming form settling up from SWAP_SCALE', async () => {
-    answerReduceMotion(false);
-    await startRest(90);
+    expect(exposure('bar')).toEqual(shown);
+    expect(exposure('card')).toEqual(faded);
+    // The two forms share six testIDs. Default queries skip hidden elements, so
+    // exactly one set of controls is reachable — never two.
+    expect(screen.getAllByTestId('countdown-remaining')).toHaveLength(1);
+    expect(screen.queryByTestId('countdown-minimize')).toBeNull();
+
     await fireEvent.press(screen.getByTestId('countdown-expand'));
-    // The card is on screen now (the minimise control is card-only).
-    expect(screen.getByTestId('countdown-minimize')).toBeTruthy();
 
-    const swaps = animatedViews().filter((n) => n.props.testID !== 'countdown-layer');
-    expect(swaps).toHaveLength(1);
-    const entering = swaps[0].props.entering as Builder & {
-      config: { frames: Record<number, { opacity: number; transform: { scale: number }[] }> };
-    };
-    expect(entering.name).toBe('Keyframe');
-    expect(entering.config.frames[0].opacity).toBe(0);
-    expect(entering.config.frames[0].transform[0].scale).toBe(SWAP_SCALE);
-    expect(entering.config.frames[100].opacity).toBe(1);
-    expect(entering.config.duration).toBe(MS.control);
-    expect((swaps[0].props.exiting as Builder).config.duration).toBe(MS.press);
+    expect(exposure('card')).toEqual(shown);
+    expect(exposure('bar')).toEqual(faded);
+    expect(screen.getAllByTestId('countdown-remaining')).toHaveLength(1);
+    expect(screen.queryByTestId('countdown-expand')).toBeNull();
   });
 
-  it('carries ReduceMotion.System on every layout animation, in both forms', async () => {
+  it('makes the card modal to VoiceOver only while the card is the form on screen', async () => {
     answerReduceMotion(false);
     await startRest(90);
-    const seen: Builder[] = [];
-    const collect = () => {
-      for (const n of animatedViews()) {
-        for (const b of [n.props.entering, n.props.exiting] as (Builder | undefined)[]) {
-          if (b) seen.push(b);
-        }
-      }
-    };
-    collect();
-    await fireEvent.press(screen.getByTestId('countdown-expand'));
-    collect();
+    // Both forms render a root with testID `countdown-timer`; read the card's.
+    const cardRoot = () =>
+      within(form('card')).getByTestId('countdown-timer', { includeHiddenElements: true });
+    // Minimised: the card is mounted behind the bar, and must not trap focus there.
+    expect(cardRoot().props.accessibilityViewIsModal).toBe(false);
 
-    // Layer in + out, and the swap in + out on each form: nothing may be
-    // missed by a filter that matched fewer views than it should.
-    expect(seen.length).toBeGreaterThanOrEqual(6);
-    for (const b of seen) expect(b.config.reduceMotion).toBe(Reanimated.ReduceMotion.System);
+    await fireEvent.press(screen.getByTestId('countdown-expand'));
+    expect(cardRoot().props.accessibilityViewIsModal).toBe(true);
+
+    await fireEvent.press(screen.getByTestId('countdown-minimize'));
+    expect(cardRoot().props.accessibilityViewIsModal).toBe(false);
   });
+
+  it('reverses a swap mid-flight by retargeting ONE value — nothing restarts from a start value', async () => {
+    answerReduceMotion(false);
+    await startRest(90);
+    // `withTiming` as a recorder: a tagged animation instead of its destination,
+    // so assigning an animation can be told apart from writing a literal.
+    jest
+      .spyOn(Reanimated, 'withTiming')
+      .mockImplementation(((timingTo: number, config: unknown) => ({ timingTo, config })) as never);
+    const writes = sharedValueWrites();
+    const before = writes.length;
+
+    await fireEvent.press(screen.getByTestId('countdown-expand'));
+    // No clock advances between the presses: in jest this IS "within the 180ms".
+    await fireEvent.press(screen.getByTestId('countdown-minimize'));
+
+    const swap = writes.slice(before);
+    // Exactly two writes, one per toggle, to ONE persistent value — no literal
+    // start value in between, no second value for the other form.
+    expect(swap).toHaveLength(2);
+    expect(swap[0].target).toBe(swap[1].target);
+    expect(swap.map((w) => (w.value as { timingTo: number }).timingTo)).toEqual([1, 0]);
+    for (const w of swap) {
+      expect((w.value as { config: object }).config).toEqual(
+        expect.objectContaining({ duration: MS.control, reduceMotion: Reanimated.ReduceMotion.Never }),
+      );
+    }
+    // And no form remounts with its own layout animation — the `Keyframe` and
+    // `FadeOut` that could only restart from frame 0 are gone.
+    expect(animatedViews().map((n) => n.props.testID)).toEqual(['countdown-layer']);
+  });
+
+  it.each(REDUCE_MOTION_STATES)(
+    'fades in every state, and scales from the top edge only when motion is on — Reduce Motion %s',
+    async (_label, answer) => {
+      answerReduceMotion(answer);
+      await startRest(90);
+      const timing = jest.spyOn(Reanimated, 'withTiming');
+      await fireEvent.press(screen.getByTestId('countdown-expand'));
+
+      // The fade is armed whatever Reduce Motion says: gentler, not nothing.
+      expect(timing).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ duration: MS.control, reduceMotion: Reanimated.ReduceMotion.Never }),
+      );
+      // Both forms scale about the top edge the layer is pinned to.
+      expect(formStyle('bar').transformOrigin).toBe('top');
+      expect(formStyle('card').transformOrigin).toBe('top');
+      // At rest: the card shown at full size, the bar faded out behind it.
+      expect(formStyle('card').opacity).toBe(1);
+      expect(formStyle('bar').opacity).toBe(0);
+      expect(formStyle('card').transform[0].scale).toBeCloseTo(1, 10);
+      // The scale is the only movement, so it is what Reduce Motion — and an
+      // unanswered OS — removes.
+      expect(formStyle('bar').transform[0].scale).toBeCloseTo(answer === false ? SWAP_SCALE : 1, 10);
+    },
+  );
 });
 
 describe('defect 1 — the log is not moved by the timer', () => {

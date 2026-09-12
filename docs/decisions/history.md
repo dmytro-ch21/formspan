@@ -74073,6 +74073,57 @@ baseline, each restored and re-run green:
 
 **The risk, stated rather than assumed away.** These are native modules. The last JS/native drift of this class (2026-08-09) crashed every installed device at launch while every test stayed green, and CI cannot see it because CI never builds `ios/`. A machine with an existing `apps/mobile/ios/` needs `pod install` (or `expo run:ios`, which runs it) before its next native build. A Release build carrying these modules has **not** been run on a phone as part of this change; that is #1141's `NEEDS HUMAN EVIDENCE` criterion, and the evidence latch will reopen the ticket on merge.
 
+## 2026-09-12 — F55 (#1134): the rest timer's review findings, fixed — the swap retargets, arrival stops travelling, and Reduce Motion keeps a fade
+
+N558 (#1105) merged the rest timer's new motion with its `/review-animations` findings unfixed. The owner's call was *"merge n558 without it"*, recorded on the PR. The review had returned **Block**. F55 held its four findings, and this entry fixes all four in `apps/mobile/components/Timer.tsx`.
+
+**1. The swap flashed when reversed — the Block.** Bar ↔ card was built from keyed mount/unmount layout animations, and those cannot retarget. A `Keyframe` always restarts from its frame-0 values, and `FadeOut` always starts from opacity 1. So expanding and minimising within ~180ms faded the card toward ~30%, snapped it to 100%, then faded it out.
+
+It is now **one persistent shared value**: 0 is the bar, 1 is the card. Each toggle assigns `withTiming(target, { duration: MS.control, easing: EASE.out, reduceMotion: Never })`, and assigning an animation to a shared value starts from its current presentation value, so a reversal continues. Both forms stay mounted for that to be possible.
+
+- **The hidden form is only a picture.** It has `pointerEvents="none"`, `accessibilityElementsHidden` and `importantForAccessibility="no-hide-descendants"`, and it sits absolutely positioned at the same top edge while the shown form stays in flow. A half-faded button that answered a tap, or two sets of controls read aloud, would be worse than the flash.
+- **Tests stay unambiguous.** The two forms share six testIDs (the digits, ±15s, pause, skip). RNTL 14's `defaultIncludeHiddenElements: false` means default queries still reach exactly one set, which is measured in the test.
+
+- **VoiceOver: the card is modal only while it is shown.** `TimerCard` carried an unconditional `accessibilityViewIsModal`, which was right while the card only existed when expanded. Mounted behind the bar, a view that stays modal while hidden is how a screen reader gets trapped, and the hidden wrapper would have relied on iOS resolving "hidden ancestor, modal descendant" the right way round. It is now `accessibilityViewIsModal={!minimized}`, and the test asserts it both ways.
+
+**2. The surface arrived from the wrong direction.** `FadeInDown` rises 25pt from **below** its slot, while two comments said "from above". Arrival and departure are now `FadeIn` / `FadeOut` at `MS.press`, opacity only: the 64pt is already reserved, so the bar has nowhere to travel from. Both comments were rewritten to say what the code does.
+
+**3. Reduce Motion removed the fade entirely.** Every builder carried `ReduceMotion.System`, Reanimated's launch-time snapshot, which with Reduce Motion on skips an animation outright, opacity included. Everything here now carries `ReduceMotion.Never`, and the decision is made from the **live** `useReducedMotion()` hook, as `Drain` already did. A fade is kept in every state. What Reduce Motion, or an OS that hasn't answered yet (`null`), removes is the swap's scale, the only movement left.
+
+**4. The swap scaled from the centre.** Both forms use `transformOrigin: 'top'`, so the card opens down from where the bar sits.
+
+**One more change the fix needed.** The swap's effect arms nothing on its first run, because the value is seeded to the form the surface opens in. Arming a timing to where the value already is would add a UI-thread animation per rest. It also broke four of N558's drain tests, which spy on `withTiming` and count on the drain being its only caller. Those tests went red, which is how it was found.
+
+**The test apparatus grew a fourth time.** jest has no frame clock, so the flashing swap and the fixed one come to rest at identical values; asserting destinations can't tell them apart. `jest.setup.js`'s Reanimated mock now logs every shared-value write as assigned (`__sharedValueWrites`), before its same-value short-circuit. The reversal test expands and immediately minimises, then asserts:
+- exactly two writes;
+- both to the same value;
+- both animations (`timingTo` 1, then 0);
+- no literal start value between them;
+- no form carrying its own layout animation.
+
+That is the observable shape of "continues rather than restarts". It does **not** show the frames, which are a device check.
+
+N558's arrival and swap tests were replaced, not patched: three of them asserted the defects themselves (`FadeInDown`, a `Keyframe` swap, `ReduceMotion.System` everywhere).
+
+**Checks.** 14 mutations, all caught as assertion failures rather than crashes, each restored byte-identical and re-run green:
+- **arrival:** `System` instead of `Never`; `FadeInDown` back; departure at `MS.control`;
+- **scale:** `null` allowed to scale; scale about the centre;
+- **the hidden form:** exposed to VoiceOver; accepting touches; left in flow;
+- **the swap:** a start value written before the retarget; a second shared value per form; swap duration at `MS.press`;
+- **the card's fade:** removed;
+- **arming on mount:** restored;
+- **VoiceOver:** the card made unconditionally modal again.
+
+That last one was first run against a baseline an edit had broken (`props` is not in scope in `TimerCard`), so its initial 'caught' proved nothing; it was re-run once the baseline was green, and caught.
+
+**What is not fixed, and is filed rather than folded in.** The expanded card's ring still steps at 4Hz: `strokeDashoffset` comes from the 250ms clock, and the run bar still animates `width: %`. So expanding a smooth bar reveals a stepping ring. It predates N558 and needs the `useAnimatedProps` SVG path F46 used, plus `Drain`'s arming rules, which is not cheap. It is **F57 (#1140)**.
+
+**Cost, stated.** Both forms now re-render on the 250ms clock tick where one did, because the surface subscribes to the clock and both forms are its children. The session screen's zero-renders-per-tick invariant is unaffected and still asserted. The hidden form's render cost has not been measured on a device.
+
+**Not verified here.** Feel: a rapid expand/minimise, including mid-animation; the fade-in in place; and Reduce Motion still fading. Those are #1134's `NEEDS HUMAN EVIDENCE` criterion. **The motion gate is the owner's to re-run** (`/review-animations`, which must return **Approve**). An agent cannot invoke it, and this PR does not merge before it.
+
+**Reachability on a phone**: this is the phone — the rest timer on the strength session screen.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
