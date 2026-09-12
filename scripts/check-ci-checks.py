@@ -133,6 +133,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -179,6 +180,44 @@ EXIT_ERROR = 4  # we could not ask GitHub at all — deliberately NOT 1
 # CONFLICTING. Its own code, because it is the one state a human reads as
 # "ready to merge" while it is not: see `diagnose`.
 EXIT_STALE = 5
+
+# --------------------------------------------------------------------------
+# H18's revisit trigger, counted rather than remembered (L17, #1091)
+# --------------------------------------------------------------------------
+#
+# H18 (#983) accepted that `docs/decisions/history.md` conflicts server-side,
+# and wrote down when to stop accepting it: "if a single PR needs four or more
+# rebase cycles again". Nothing counted, so the trigger could only fire if
+# somebody reread CLAUDE.md at the right moment — the same shape as N456's latch
+# that nobody could release.
+#
+# So every time this script sees a pull request CONFLICTING, it records the
+# (pull request, head commit) pair, once. A conflict forces a rebase, a rebase
+# makes a new head, and the next conflict is seen at that new head — so the
+# number of DISTINCT heads a pull request has been seen conflicting at is its
+# rebase-cycle count. Re-running on the same head adds nothing.
+#
+# The log lives in git's COMMON directory, which every worktree of this clone
+# shares and which is never versioned: no credential, no repo setting, no
+# server state, and one count across all worktrees. It is advisory: it never
+# changes the exit code, because a counter that can fail a merge gate would be
+# a gate nobody agreed to.
+#
+# Not counted: H18's other half, "a week's PRs average more than one". That
+# needs every session's observations of every PR, which a local log cannot
+# see, and is still honour-system. Said so here so nobody believes otherwise.
+#
+# And two limits on what it DOES count, found in review:
+#   - OBSERVATION-based. A conflicting head counts only if this script runs
+#     while it is conflicting. A session that sees DIRTY in `gh pr view` and
+#     rebases straight away leaves no record, so the count is a floor.
+#   - CAUSE-agnostic. It cannot tell a history.md append conflict from any
+#     other, so the trigger can fire for a pull request whose conflicts H18
+#     never discussed. In this repo the append conflicts dominate, which is why
+#     the count is still the right signal, but read the conflicting files
+#     before acting on the trigger.
+REBASE_CYCLE_THRESHOLD = 4
+CONFLICT_LOG_NAME = "vola-conflict-cycles.log"
 
 REMEDY = (
     "  git fetch origin && git rebase origin/main && git push --force-with-lease"
@@ -510,6 +549,67 @@ def diagnose(code: int, facts: dict) -> tuple[int, str]:
         )
 
     return code, f"mergeable={mergeable} mergeStateStatus={state}"
+
+
+def record_conflict(log: Path, pr: str, sha: str, when: str) -> int:
+    """Record that `pr` was seen CONFLICTING at head `sha`; return its cycle count.
+
+    Idempotent per (pr, sha): the count is the number of distinct heads.
+    """
+    seen: dict[str, set[str]] = {}
+    if log.exists():
+        for line in log.read_text().splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                seen.setdefault(parts[0], set()).add(parts[1])
+    heads = seen.setdefault(str(pr), set())
+    if sha not in heads:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a") as fh:
+            fh.write(f"{pr}\t{sha}\t{when}\n")
+        heads.add(sha)
+    return len(heads)
+
+
+def cycle_note(pr: str, cycles: int, log: Path) -> str:
+    if cycles >= REBASE_CYCLE_THRESHOLD:
+        return (
+            f"H18 REVISIT TRIGGER REACHED: PR #{pr} has now gone CONFLICTING at "
+            f"{cycles} distinct heads, i.e. {cycles} rebase cycles, against a "
+            f"threshold of {REBASE_CYCLE_THRESHOLD}. H18 (#983) recorded that at "
+            f"this point the history.md conflict cost is no longer accepted and "
+            f"the entries-directory option should be taken — see CLAUDE.md, "
+            f"\"Appending conflicts less than it did\". Say so on the ticket; do "
+            f"not just rebase again. (Counted in {log}.)"
+        )
+    return (
+        f"conflict cycle {cycles} for PR #{pr} (H18's revisit threshold is "
+        f"{REBASE_CYCLE_THRESHOLD}; counted in {log})."
+    )
+
+
+def conflict_log_path() -> Path | None:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return Path(out) / CONFLICT_LOG_NAME if out else None
+
+
+def conflict_followup(facts: dict, log: Path | None, when: str) -> str:
+    """The note `main` adds for a CONFLICTING pull request. Empty otherwise."""
+    if facts.get("mergeable") != "CONFLICTING" or not facts.get("headRefOid"):
+        return ""
+    if log is None:
+        return "(could not locate git's common directory, so this conflict cycle was not counted)"
+    try:
+        cycles = record_conflict(log, str(facts.get("number")), facts["headRefOid"], when)
+    except OSError as err:
+        return f"(could not record this conflict cycle: {err})"
+    return cycle_note(str(facts.get("number")), cycles, log)
 
 
 # --------------------------------------------------------------------------
@@ -1129,6 +1229,36 @@ def self_test() -> int:
             "proves nothing about the guard it covers"
         )
 
+    # L17: the rebase-cycle counter, both sides of its threshold, and the
+    # idempotency that makes "distinct heads" mean rebase cycles.
+    cycle_checks = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / CONFLICT_LOG_NAME
+        conflicting = lambda sha: {"number": 42, "headRefOid": sha, "mergeable": "CONFLICTING"}
+        for i, sha in enumerate(["a1", "b2", "c3"], start=1):
+            note = conflict_followup(conflicting(sha), log, "t")
+            cycle_checks += 1
+            if f"conflict cycle {i} for PR #42" not in note or "REVISIT" in note:
+                failures.append(f"  cycles: head {i} of 3 should count {i} with no trigger, got {note!r}")
+        again = conflict_followup(conflicting("c3"), log, "t")
+        cycle_checks += 1
+        if "conflict cycle 3 for PR #42" not in again:
+            failures.append(f"  cycles: re-running on the same head must not count again, got {again!r}")
+        fourth = conflict_followup(conflicting("d4"), log, "t")
+        cycle_checks += 1
+        if "H18 REVISIT TRIGGER REACHED" not in fourth or "4 distinct heads" not in fourth:
+            failures.append(f"  cycles: the fourth distinct head must reach the trigger, got {fourth!r}")
+        other = conflict_followup({"number": 43, "headRefOid": "a1", "mergeable": "CONFLICTING"}, log, "t")
+        cycle_checks += 1
+        if "conflict cycle 1 for PR #43" not in other:
+            failures.append(f"  cycles: another pull request's count must start at 1, got {other!r}")
+        clean = conflict_followup({"number": 42, "headRefOid": "e5", "mergeable": "MERGEABLE"}, log, "t")
+        cycle_checks += 1
+        if clean:
+            failures.append(f"  cycles: a MERGEABLE pull request must record nothing, got {clean!r}")
+        if log.read_text().count("\n") != 5:
+            failures.append(f"  cycles: expected 5 recorded lines, found {log.read_text().count(chr(10))}")
+
     if failures:
         print("check-ci-checks self-test FAILED:", file=sys.stderr)
         print("\n".join(failures), file=sys.stderr)
@@ -1139,6 +1269,7 @@ def self_test() -> int:
         f"{len(diagnoses)} diagnosis vectors, "
         f"{rest_checks} REST-only checks (H27), "
         f"{null_window_checks} null-window checks (H29), "
+        f"{cycle_checks} rebase-cycle checks (L17), "
         f"{len(names)} check(s) declared by the workflows ({', '.join(names)})"
     )
     return EXIT_OK
@@ -1208,6 +1339,12 @@ def main() -> int:
         # stream is chosen, or the one state a human misreads would be printed
         # to stdout looking like a pass.
         code, note = diagnose(code, facts)
+        # Advisory only: it adds a line, never changes `code`.
+        cycles = conflict_followup(
+            facts, conflict_log_path(), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        )
+        if cycles:
+            note = f"{note}\n\n{cycles}" if note else cycles
 
     stream = sys.stdout if code == EXIT_OK else sys.stderr
     print("\n".join(lines), file=stream)
