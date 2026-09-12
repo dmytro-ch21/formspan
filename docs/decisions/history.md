@@ -74292,6 +74292,164 @@ The measurement build is still installed on that simulator; it replaced a Sep 8
 build that had no dev launcher, which is why the first attempt — pointing it at
 a Metro on another port — measured nothing.
 
+## 2026-09-12 — N159 (#576): every web and admin request runs under a deadline, and a timeout says so
+
+**Before this, no web or admin request had a deadline.** A backend that
+accepted the connection and never answered held the request until the browser
+or the server runtime gave up, minutes later. Then it failed with a message
+about an aborted operation, or, on the Library page, with nothing at all.
+
+### What the code showed, before building
+
+The brief was corrected on the issue first. Five of its assumptions did not
+match the code:
+
+- **"#R-004's note on the 35s/45s AI budget" points at nothing.** There is no
+  #R-004. The budget does exist, in code: the phone's `DEFAULT_TIMEOUT_MS =
+  30_000` and `SLOW_REQUEST_TIMEOUT_MS = 45_000` in
+  `apps/mobile/lib/authedFetch.ts`, and the backend's 35s `estimateTimeout`,
+  already pinned ten seconds under the phone's slow budget by
+  `scripts/check-timeout-parity.py` (N92). Web and admin take the phone's two
+  numbers, not a third.
+- **Web and admin make no model-backed or upload call.** A path grep across
+  both apps finds none (the same grep does find `/nutrition/entries`), and
+  admin's one avatar call is a `DELETE`. So the per-route override has no
+  route to override yet. It exists, at 45s, for the first call that needs it.
+- **The surface was five call sites, not a migration.** Web's `request()`,
+  which every client call goes through; `modules.ts` and `unitSystem.ts`, the
+  private copies the Server Component layout needs because it cannot import the
+  client module `api.ts`; the telemetry flush; and admin's `adminFetch`.
+- **How a timeout surfaces is the load-bearing decision.** Fifteen dashboard
+  call sites ignore errors named `AbortError`, because that is how their own
+  superseded requests end. A deadline that surfaced as an `AbortError` would be
+  swallowed by exactly the screens that need to show it, and they would look
+  hung.
+- **The Library page's exercise loader swallowed its own timeout.** It aborted
+  its own controller after 10s, and its catch then returned silently on
+  `controller.signal.aborted`. A hung response left the blank grid, blank count
+  and no error that its own comment says the deadline was written to prevent.
+  The technique loader beside it tells a supersede from a timeout by asking
+  whether its controller is still current, and was already right.
+
+### What changed
+
+- **`apps/web/src/lib/deadline.ts`, and a copy in `apps/admin/src/lib/`**, the
+  way `trace.ts` is copied: this repo has no shared package. Each holds the
+  phone's two budgets, a `TimeoutError` (named `TimeoutError`, with the phone's
+  copy "VOLA took too long to answer. Try again."), and `withDeadline(caller,
+  opts, run)`. The deadline is composed with the caller's signal, and the
+  caller wins: a request a screen abandoned is not a timeout.
+- **Each of the five call sites wraps its existing body**, so no caller
+  changed. `fetchUnits` still never throws, because a timeout degrades to the
+  defaults. The flush's timeout lands in the catch that counts the batch as
+  lost. `listModules`'s rejection is caught by the layout, which fails open.
+- **The Library exercise loader's own timer is gone.** Its request now ends in
+  a `TimeoutError` on a controller nobody aborted, so its catch shows it. **Its
+  budget therefore moves from 10s to 30s, deliberately:** the phone's reasoning
+  for 30s is to own the classification rather than hurry the athlete. The
+  technique loader keeps its working 10s timer.
+- **`check-timeout-parity.py` also requires the three client copies to be
+  equal**: the phone's, web's and admin's `DEFAULT_TIMEOUT_MS` and
+  `SLOW_REQUEST_TIMEOUT_MS`. A change to one that forgets the others fails the
+  build, and the existing server-under-client ordering keeps reading the
+  phone's copy, which equality now makes speak for all three.
+
+### Where web deliberately differs from the phone
+
+**The deadline bounds the body, not just the headers.** The phone's `netFetch`
+clears its timer when `fetch` resolves. On web that happens when the headers
+arrive, so a response whose body never arrives would still hang. `withDeadline`
+stays armed until `run` settles. **And once the deadline has fired, a resolved
+result is not trusted:** `request()` reads bodies with `res.json().catch(() =>
+null)`, which swallows the abort. Without that rule, a timed-out read would
+hand its caller `null` as though it were the answer. A test covers exactly that
+case.
+
+**Whether the phone has the same gap was not checked.** React Native's `fetch`
+is built on `XMLHttpRequest`, which typically resolves only once the body has
+loaded, so it may not. That is a reason to measure it on a device, not a
+finding.
+
+### Verified
+
+- **Tests.** Web's `deadline.test.ts` (11) covers the wrapper,
+  `requestDeadline.test.ts` (5) drives each web call site against a hung
+  `fetch`, and `dashboardShell.test.ts` (2) pins the shell's reads. Admin's
+  `deadline.test.ts` (4) covers the copy and `adminFetch`. Both typechecks and
+  both lints are clean.
+- **`verify` passes in full on the head this was merged from.** While the
+  branch was open, `check-expo-compat` failed on `main` itself from 12:50 UTC
+  on 2026-09-12: Expo's SDK 57 patch releases cleared pnpm's 24h release-age
+  window. That was filed as H31 (#1141) and pinned by #1143, and this branch
+  was rebased onto it. On the pre-rebase head, `test:mobile` failed once on
+  F56 (#1135)'s known teardown-hook timeout, under a load average of about 440
+  and in a file this branch does not touch. The file passed alone, and the
+  suite passed on re-run.
+- **18 mutations, each caught as a named test failure** (or, for the parity
+  script, its named error), with each restore confirmed by re-running rather
+  than by reading the file:
+  - 7 on web's wrapper: trusting a late result, answering the deadline before
+    the caller, the error's name, the timer, the listener, the default budget,
+    and an already-aborted caller;
+  - 4 on web's wiring: each call site unwrapped in turn;
+  - 3 on admin's copy and wiring;
+  - 3 on the parity script: a drifted web default, a renamed web constant the
+    parser must refuse, and a drifted admin slow budget;
+  - 1 on the dashboard shell: its two reads awaited one after the other.
+
+**Three pieces of apparatus measured nothing along the way.** Each was caught
+by checking the check:
+
+- `\b` in `git grep -E` matched nothing, so a call-site survey reported no
+  call sites.
+- zsh read `$R:a` in `git show $R:apps/...` as a path modifier and asked git
+  for `origin/mainpps/...`.
+- vitest's summary reporter does not name passing files, so a grep for the new
+  test files printed 0. That they were collected is shown by the file counts
+  instead: web 32 → 34, admin 7 → 8.
+
+### What review changed
+
+**`frontend-reviewer` found nothing blocking.** It re-ran the new tests, both
+typechecks and the parity script. It mutated the error's name itself and
+restored it by re-running. It also confirmed there is no web or admin `fetch`
+outside the five wrapped sites. Its three suggestions:
+
+- **The dashboard shell's two reads now start together — taken.** The layout
+  used to await `listModules` and then `fetchUnits`. Now that each ends at the
+  deadline, a hung API cost the shell two deadlines (60s) before it painted.
+  They run together in `lib/dashboardShell.ts`'s `readShell`, which was
+  extracted so it can be tested (the layout is a Server Component calling
+  Clerk). The shell now costs one deadline. Neither read can fail the other,
+  and reading them one after the other fails the test by name.
+- **A timeout branch on admin's error page — declined, and the reason is a
+  measurement.** `app/error.tsx` classifies by substring on `error.message`.
+  But Next 16.3.4's production server-component client replaces that message
+  with "An error occurred in the Server Components render. The specific message
+  is omitted in production builds…" (`resolveErrorProd`, in
+  `react-server-dom-turbopack-client.node.production.js`, absent from the
+  development build). Every admin page reading `@/lib/api` is a Server
+  Component. So a timeout branch would work only in development — see Not done.
+- **`keepalive` with an abort signal on the telemetry flush — measured, in one
+  engine.** In Chromium 152 (the in-app browser, on a real page), a GET with
+  both completed with 200, a POST in the flush's exact shape got its response,
+  and aborting a `keepalive` request rejected with `AbortError`, as did the
+  control without `keepalive`. Safari and Firefox were not measured.
+
+### Not done
+
+- **The Library page's loaders have no test.** Web has no test that runs a
+  page's effects: no jsdom and no testing-library, which its vitest config
+  records as deliberate.
+- **Admin's error page cannot tell a timeout, a 401 or a 403 from any other
+  failure in a production build.** Production Next replaces the message it
+  classifies on (measured above), so every failure there reads as "confirm the
+  API is running" — including the `ADMIN_USER_IDS` drift case the page was
+  written for. The 401/403 half predates this ticket, so it is flagged
+  separately rather than changed here.
+- **The two Library loaders now have different budgets**: 10s for techniques,
+  30s for exercises.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

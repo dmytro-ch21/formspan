@@ -38,6 +38,15 @@ the body has arrived. A photo upload on gym wifi shifts the server's window
 several seconds later, so a server deadline one second under the client's still
 loses. `MIN_MARGIN_MS` is that shift plus room.
 
+# The client copies must be EQUAL (N159, #576)
+
+Web and admin carry their own copies of the phone's two budgets,
+`DEFAULT_TIMEOUT_MS` and `SLOW_REQUEST_TIMEOUT_MS`, the way `trace.ts` is copied.
+**For those, equal is the property**, the way it is for `check-rate-parity`: one
+budget, three files, so a change to one that forgets the others fails here
+rather than on a slow day on one surface. The ordering check above reads the
+phone's copy, and equality is what lets it speak for all three.
+
 # What this cannot promise
 
 It reads the two literals syntactically — stdlib only, no Go toolchain, no Node,
@@ -76,6 +85,49 @@ TS_RE = re.compile(
 
 GO_UNIT_MS = {"Second": 1000, "Millisecond": 1}
 
+#: Every copy of the client budgets, which must all hold the same values.
+BUDGET_COPIES = (
+    ROOT / "apps/mobile/lib/authedFetch.ts",
+    ROOT / "apps/web/src/lib/deadline.ts",
+    ROOT / "apps/admin/src/lib/deadline.ts",
+)
+BUDGET_NAMES = ("DEFAULT_TIMEOUT_MS", "SLOW_REQUEST_TIMEOUT_MS")
+
+
+def budget_re(name: str) -> "re.Pattern[str]":
+    return re.compile(
+        rf"^export\s+const\s+{name}\s*=\s*([\d_]+)\s*;\s*$", re.MULTILINE
+    )
+
+
+def check_copies() -> dict:
+    values: dict = {name: {} for name in BUDGET_NAMES}
+    for path in BUDGET_COPIES:
+        rel = path.relative_to(ROOT)
+        if not path.exists():
+            fail(f"{rel} does not exist")
+        text = path.read_text()
+        for name in BUDGET_NAMES:
+            m = budget_re(name).search(text)
+            if not m:
+                # Same rule as the parsers below: finding nothing must fail, or
+                # a renamed constant would pass this check forever.
+                fail(
+                    f"could not find `export const {name} = N;` in {rel}. It was "
+                    f"renamed, moved or reformatted — fix this parser rather than "
+                    f"deleting the copy from BUDGET_COPIES."
+                )
+            values[name][str(rel)] = int(m.group(1).replace("_", ""))
+    for name, per_file in values.items():
+        if len(set(per_file.values())) != 1:
+            rows = "\n".join(f"  {v:>6} ms  {f}" for f, v in per_file.items())
+            fail(
+                f"{name} differs between the client copies:\n{rows}\n\n"
+                f"These are one budget copied into three files (N159). Change all "
+                f"three together — the phone's authedFetch.ts owns the reasoning."
+            )
+    return values
+
 
 def fail(msg: str) -> None:
     print(f"check-timeout-parity: {msg}", file=sys.stderr)
@@ -83,6 +135,7 @@ def fail(msg: str) -> None:
 
 
 def main() -> None:
+    copies = check_copies()
     for path in (GO, TS):
         if not path.exists():
             fail(f"{path.relative_to(ROOT)} does not exist")
@@ -127,7 +180,10 @@ def main() -> None:
 
     print(
         f"check-timeout-parity: server {server_ms} ms < client {client_ms} ms "
-        f"(margin {margin} ms, need {MIN_MARGIN_MS} ms) — the server answers first"
+        f"(margin {margin} ms, need {MIN_MARGIN_MS} ms) — the server answers first; "
+        f"DEFAULT {next(iter(copies['DEFAULT_TIMEOUT_MS'].values()))} ms and "
+        f"SLOW {next(iter(copies['SLOW_REQUEST_TIMEOUT_MS'].values()))} ms "
+        f"equal across {len(BUDGET_COPIES)} client copies"
     )
 
 

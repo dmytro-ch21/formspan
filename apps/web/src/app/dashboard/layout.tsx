@@ -2,17 +2,15 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 
-// Imported from `@/lib/modules`, NOT `@/lib/api`. api.ts is a "use client"
-// module, and re-exporting through it keeps these client references — a
-// Server Component calling one throws at runtime. Verified by running it:
-// importing the same names via api.ts still threw "Attempted to call
-// listModules() from the server".
-import { listModules, type Module } from "@/lib/modules";
+// `readShell` reads modules and units through `@/lib/modules` and
+// `@/lib/unitSystem`, NOT `@/lib/api`. api.ts is a "use client" module, and
+// re-exporting through it keeps these client references — a Server Component
+// calling one throws at runtime. Verified by running it: importing the same
+// names via api.ts still threw "Attempted to call listModules() from the
+// server". `fetchUnits` lives in its own directiveless module for the same
+// reason: `api.ts`'s `getProfile` is a client reference.
+import { readShell } from "@/lib/dashboardShell";
 import { ModulesProvider } from "@/lib/ModulesProvider";
-// Same server/client boundary reason as `modules` above: `fetchUnits`
-// lives in its own directiveless module because `api.ts`'s `getProfile` is a
-// client reference and calling it from here throws at runtime.
-import { fetchUnits } from "@/lib/unitSystem";
 import { UnitsProvider } from "@/lib/UnitsProvider";
 import { DashboardNav } from "./DashboardNav";
 import { ThemeToggle } from "../ThemeToggle";
@@ -39,18 +37,11 @@ export default async function DashboardLayout({
   // and Records and look like a product decision; falling back to "show
   // everything" degrades toward the pre-gating app, which is merely untidy.
   const { getToken } = await auth();
-  let modules: Module[] = [];
-  try {
-    modules = await listModules(getToken);
-  } catch {
-    /* nav falls back to ungated below */
-  }
-  // Read here for the same reason `modules` is: awaited before anything
-  // renders, so no unit-bearing number is ever painted in a unit we have not
-  // established. `fetchUnits` never throws — it degrades to metric/grams,
-  // which is what a new account gets — so this needs no catch of its own and
-  // must not share the one above, whose `[]` fallback is about the nav.
-  const { units: unitSystem, foodUnit } = await fetchUnits(getToken);
+  // Units are read here for the same reason modules are: awaited before
+  // anything renders, so no unit-bearing number is ever painted in a unit we
+  // have not established. The two reads start together (N159) — `readShell`
+  // says why, and why neither's fallback can cost the other.
+  const { modules, units: unitSystem, foodUnit } = await readShell(getToken);
   return (
     <ModulesProvider initial={modules}>
       <UnitsProvider initial={unitSystem} initialFoodUnit={foodUnit}>

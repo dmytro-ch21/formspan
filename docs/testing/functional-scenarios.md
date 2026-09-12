@@ -23828,3 +23828,69 @@ No animation was added: the fix is when the read starts.
 - Same phone: cold-start onto Today several times. Say whether anything visibly
   moves after the splash has gone — that decides whether Today's arrival needs a
   ticket of its own.
+
+## Web and admin — a hung backend ends in an error the screen shows (N159 / #576)
+
+What an athlete on web, or an operator in admin, sees when the API accepts the
+connection and never answers — a captive portal, a stalled proxy, a wedged
+server. Reproduce it with a proxy that holds requests open, or by pausing the
+API process (`kill -STOP`), rather than by stopping it: a stopped API refuses
+the connection at once, which is a different failure.
+
+Every request now runs under the phone's budgets: **30s** by default, **45s**
+for a model or a large body (no web or admin call needs that one yet).
+
+### Happy path
+
+- **A dashboard screen gives up and says so.** Open Workouts with the API hung.
+  **Pass:** within about 30s the screen shows "VOLA took too long to answer.
+  Try again." **Fail:** a spinner or an empty state that never ends.
+- **The Library's exercise grid.** Open Library with the API hung. **Pass:**
+  after about 30s the grid area shows that error. **Fail:** a blank grid, a
+  blank count and no error — the defect N159 found, where the grid's own 10s
+  timer aborted its request and then swallowed its own timeout.
+- **Screens that ignore their own cancellations still show a timeout.** Class
+  plans, curricula, sequences (list, detail, edit and builder), Friends, a
+  shared item, and "Share to friend", each with the API hung. **Pass:** the
+  timeout error appears. **Fail:** nothing appears, because the timeout was
+  treated as the screen cancelling its own request.
+- **Admin.** Open Users with the API hung. **Pass:** within about 30s the
+  console shows its error page. **Fail:** the page never renders.
+
+### Edge cases and errors
+
+- **Leaving a screen is not a timeout.** Start a load against the hung API and
+  navigate elsewhere before 30s. **Pass:** no timeout error appears anywhere.
+- **A slow but healthy response is untouched.** A large Library list on a
+  throttled link that completes inside 30s loads normally.
+- **Headers arrive and the body stalls** (a proxy that sends the status line,
+  then holds). **Pass:** it still times out at about 30s. **Fail:** it hangs —
+  a deadline that stopped at the headers.
+- **The dashboard shell with the API hung.** The layout's two reads, modules
+  and units, start together and each gives up after 30s. So the dashboard
+  renders after about 30s, with an ungated navigation and metric/grams.
+  **Pass:** it renders at about 30s. **Fail:** it never renders, or it takes
+  about 60s, which means the reads ran one after the other.
+- **Library techniques keep their own 10s budget.** With the API hung, the
+  techniques half reports "couldn't load" after about 10s while exercises wait
+  30s. That difference is known, not a regression.
+- **Telemetry.** A client-error flush against the hung API gives up at about
+  30s, and the next successful send reports that batch as `lost_events`.
+
+### Automated
+
+- `apps/web/src/lib/__tests__/deadline.test.ts` — the wrapper: the default
+  and per-call budgets, the error's name and copy, the body bound, a caller's
+  abort winning.
+- `apps/web/src/lib/__tests__/requestDeadline.test.ts` — `request()`,
+  `listModules`, `fetchUnits` and the telemetry flush each end against a hung
+  fetch.
+- `apps/web/src/lib/__tests__/dashboardShell.test.ts` — the shell's two reads
+  start together and settle after one deadline, and a failed modules read
+  still returns the units.
+- `apps/admin/src/lib/__tests__/deadline.test.ts` — admin's copy and
+  `adminFetch`.
+- `scripts/check-timeout-parity.py` — web's, admin's and the phone's budgets
+  stay equal.
+- **Not automated:** the Library page's loaders and every screen above — web
+  has no test that runs a page's effects.

@@ -243,10 +243,12 @@ export default function LibraryPage() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      // Same reason the technique loader has one: a captive portal accepts the
-      // connection and never answers, and without a deadline `everLoaded` stays
-      // false forever — blank grid, blank count, no error, no spinner.
-      const deadline = setTimeout(() => controller.abort(), 10_000);
+      // No deadline of its own any more (N159, #576). A captive portal accepts
+      // the connection and never answers; `request()` now ends that in a
+      // `TimeoutError`, on a controller nobody here aborted, so the catch below
+      // shows it. The 10s timer this used to set aborted THIS controller, and
+      // the catch's `aborted` check then swallowed its own timeout — leaving the
+      // blank grid, blank count and no error it was written to prevent.
       try {
         const list = await listExercises(
           getToken,
@@ -261,8 +263,6 @@ export default function LibraryPage() {
         if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : String(err));
         setEverLoaded(true);
-      } finally {
-        clearTimeout(deadline);
       }
     }, 200);
     return () => clearTimeout(t);

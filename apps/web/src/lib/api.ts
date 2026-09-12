@@ -1,6 +1,7 @@
 "use client";
 
 import { newTraceId, traceparent } from "@/lib/trace";
+import { withDeadline, type DeadlineOptions } from "@/lib/deadline";
 // libraryTiles is imported for one pure predicate, not for presentation — it
 // has no imports of its own and no React. Reusing it keeps the family prefix
 // rule to one definition per app; the repo already carries three copies of it
@@ -1241,13 +1242,31 @@ export function isConflict(err: unknown): boolean {
 }
 
 /**
- * The one fetch helper.
+ * The one fetch helper, under a deadline (N159, #576).
+ *
+ * The whole exchange — token, request and body — runs inside `withDeadline`,
+ * so a hung backend ends in a `TimeoutError` a screen can show rather than a
+ * request that never settles. `opts.timeoutMs` is for the rare call that needs
+ * `SLOW_REQUEST_TIMEOUT_MS`; nothing on web does yet.
+ */
+async function request<T>(
+  getToken: Token,
+  path: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+  opts: DeadlineOptions = {},
+): Promise<T> {
+  return withDeadline(signal, opts, (s) => requestUnbounded<T>(getToken, path, init, s));
+}
+
+/**
+ * The one fetch helper's body, without the deadline — call `request`.
  *
  * Aliased as `apiRequest` below so a sibling client module can reuse it rather
  * than growing a second copy of it — `modules.ts` has one, and its header says
  * why that is a server-boundary exception rather than a precedent to follow.
  */
-async function request<T>(
+async function requestUnbounded<T>(
   getToken: Token,
   path: string,
   init: RequestInit = {},
