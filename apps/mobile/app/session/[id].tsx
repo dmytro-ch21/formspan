@@ -74,6 +74,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { CardGlass } from '@/components/ui/CardGlass';
 import { Stat, StatRow } from '@/components/ui/Stat';
+import { ElapsedStat } from '@/components/ElapsedStat';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { vola } from '@/constants/Colors';
 import { Radius, Spacing } from '@/constants/Spacing';
@@ -327,24 +328,9 @@ export default function SessionScreen() {
   // did nothing while the commit claimed it worked.
   const { trackEffort: showEffort } = useTrackEffort();
 
-  /**
-   * How long you've been training. Derived from started_at on every tick
-   * rather than accumulated, for the same reason the rest timer is: a
-   * counter stops when the JS thread is throttled, and a session spends most
-   * of its life with the phone in a pocket.
-   */
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!session) return;
-    const from = new Date(session.started_at).getTime();
-    const to = session.ended_at ? new Date(session.ended_at).getTime() : null;
-    const tick = () => setElapsed(((to ?? Date.now()) - from) / 1000);
-    tick();
-    // A finished session's duration is fixed, so there's nothing to tick.
-    if (to !== null) return;
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [session]);
+  // The session clock is NOT held here. It ticks once a second, and state on
+  // this screen re-renders every set row to repaint four digits — so it lives
+  // in `ElapsedStat`, which owns its own interval (N566/#1126).
 
   /**
    * A finished session is a record, so no countdown may outlive it.
@@ -1711,9 +1697,10 @@ export default function SessionScreen() {
             {/* The same discs the Today week row uses, and each a different
                 hue for the same reason: these are unrelated measures, not a
                 ramp, so one accent-coloured set would imply a single scale. */}
-            <Stat
+            <ElapsedStat
+              startedAt={session.started_at}
+              endedAt={session.ended_at}
               label="Time"
-              value={formatElapsed(elapsed)}
               size={22}
               fit
               icon="timer"

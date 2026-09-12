@@ -73835,6 +73835,103 @@ taken rather than argued:
   the network.
 - **Deriving the repository from an installation payload** is #570's.
 
+## 2026-09-11 — N566 (#1126): the session clock stops re-rendering every set row once a second
+
+`app/session/[id].tsx` held `const [elapsed, setElapsed] = useState(0)` and a
+1s `setInterval` whose only job was the **Time** figure in `session-summary`.
+State on that screen re-renders all of it — every exercise group, every set
+row — so a live session paid one full-screen render a second for its whole
+life: ~3,600 in an hour, rests or no rests, to change four digits. It is the
+same shape N558 (#1047, PR #1105) removes for the rest countdown's 250ms tick,
+and the one that PR leaves behind.
+
+### What changed
+
+- **`components/ElapsedStat.tsx`** owns the tick. It is a `Stat` with
+  `startedAt`/`endedAt` in place of `value`, and the screen renders it where the
+  `<Stat label="Time">` was. The screen holds no clock state and no interval.
+- **Still derived from `started_at` on every tick, never accumulated**, and a
+  finished session still arms no interval — both unchanged in behaviour, both
+  now tested (they were not).
+- **Whole seconds in state**, where the screen kept fractional ones.
+  `formatElapsed` floors either way, so nothing on screen differs; what it buys
+  is React's same-value bail-out on a tick that lands inside the same second
+  (the mount tick, a drifted interval).
+- **Every other prop passes straight through to `Stat`, `slots` included.**
+  `StatRow` injects `slots` with `cloneElement`, and a wrapper that named its
+  props and forgot that one would silently lose the four-column fit ladder on a
+  finished session's row. Spreading closes it structurally.
+- **`elapsed` was read nowhere else.** The other `elapsed` identifiers in the
+  screen (`:308`, `:1277`, `:2766`) are countdown locals from `elapsedOf`, not
+  this state, so no handler needed an on-demand read.
+- The import sits beside `Stat`'s rather than beside `Countdown`'s, because
+  #1105 rewrites the `Timer` import line directly below that one and the two
+  PRs would otherwise conflict on adjacent lines for nothing.
+
+### The test renders the real screen, and why that was the whole job
+
+**No suite rendered the strength session screen before this** — everything
+about it was pinned by reading its source text. The obvious test, a stand-in
+that mounts `ElapsedStat` and counts its own renders (#1105's shape), would
+prove the component ticks on its own **and stay green if `setElapsed` went back
+into the screen**. It could not fail on the regression it exists for.
+
+So `__tests__/app/sessionElapsedTick.test.tsx` mounts the real `SessionScreen`,
+mocked at its boundaries only (store, network, router, heart-rate hooks) —
+`support/runningScreen.tsx`'s shape. The probe wraps `Stat` and records each
+render by label. The screen re-creates `<Stat label="Sets">` on every render of
+its own and nothing else does, so the Sets count **is** the screen's render
+count; the Time `Stat` sits inside `ElapsedStat`, so its count is the clock's.
+Asserted together — Sets flat across five seconds, Time up by at least five —
+because either alone passes for the wrong reason: a frozen clock makes the
+screen quiet too. A positive control re-renders the screen and requires the
+Sets count to move.
+
+Mutation-checked, each red as an assertion failure against a green 8/8
+baseline, each restored and re-run green:
+
+- screen-level `setElapsed` tick restored (kept alongside `ElapsedStat`):
+  *ticks without re-rendering the screen* → expected 0, received **5**;
+- screen reverted wholesale to `origin/main`: the same test, 0 vs 5;
+- `ElapsedStat` drops `slots`: *forwards the slot count* → expected 4, received
+  undefined;
+- accumulate (`s + 1`) instead of derive: *catches up after the JS thread was
+  suspended* → expected `13:02`, received `12:02`;
+- `if (endedAt) return;` removed: *arms no interval for a finished session* →
+  expected 0, received 1.
+
+**Three things the apparatus got wrong first, all measured:**
+
+- *Derived vs accumulated* was untested by the first draft. A `+1` counter that
+  starts from a correct value reads identically under fake timers; it only
+  diverges when the wall clock moves and the interval does not — a throttled JS
+  thread — which `jest.setSystemTime` models exactly. That test was added for it.
+- *No interval on a finished session* is invisible through the screen: whole
+  seconds from a fixed `ended_at` make every tick a skipped same-value update, so
+  the render counts stay flat either way. And `jest.getTimerCount()` read **3**
+  for a lone finished `ElapsedStat` (the renderer's own timers), so it could not
+  answer either. It spies `setInterval` for the 1000ms period instead.
+- **That component-level test leaked into the next one.** Left mounted, the
+  open `ElapsedStat` made the following test's screen never render
+  `session-summary`; that test passed in isolation, so it read as its own bug.
+  Removing the `setInterval` spy did not change it; unmounting explicitly did.
+  The first M3 run landed on that already-red test and was discarded and re-run
+  once the baseline was green.
+
+### Left open
+
+- **NEEDS HUMAN EVIDENCE**: on a device, Time counts once a second on a live
+  session, is right after a minute backgrounded, and is fixed on a finished
+  one. Jest has no real clock and no throttled JS thread; the backgrounding test
+  models the property, it does not observe it.
+- **The claim is about render count, not frame time.** Nothing here measured
+  whether logging a set *feels* different with the clock running; on a fast
+  phone it may not. The render count is what was wrong and what is pinned.
+- **The harness is file-local.** If a second test ever needs the strength screen
+  mounted, lift its mocks into `__tests__/app/support/` the way the running
+  screen's were, rather than copying them.
+- Whichever of this and #1105 lands second rebases; the hunks do not overlap.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
