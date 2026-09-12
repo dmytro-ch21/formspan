@@ -73608,6 +73608,123 @@ change.
   `pending`, not to the push loop.
 - Telemetry for stuck rows stays N565, #1108, out of scope.
 
+
+## 2026-09-11 — F54 (#1118): the backgrounding test failed past a 1s stall, and could not see the stray reconnect its own comment names
+
+**Found in passing during F53 (#1117), and it turned out to be two faults, not one.**
+The test is `a dropped link › a reconnect firing while the app is being
+backgrounded does not overlap the disconnect` in
+`apps/mobile/lib/__tests__/liveHRConnection.test.ts`. Its job is to prove that a
+reconnect timer firing mid-background cannot sneak a second connect past
+`stopLiveHR`. It could fail when that did not happen, and pass when it did.
+
+**Fault 1 — a flake, the same class as F53 with a 25x wider margin.**
+- `ble.dropLink('A')` arms the first reconnect backoff, `RECONNECT_DELAYS_MS[0]` —
+  1_000ms on a real clock.
+- The test then flushes three `setImmediate` turns and only then calls
+  `stopLiveHR`, which clears that backoff.
+- A host that stalled past 1s inside those turns fired the backoff first. The
+  resulting second `connect-issued:A` failed `toHaveLength(1)`, reporting an
+  overlap the code did not produce.
+
+Reproduced on the unchanged test, on a branch that already contained F53. The
+tool was an untracked copy with a synchronous busy-wait between `dropLink` and
+`tick()`. The copy first asserts `status === 'reconnecting'`: `dropLink` runs
+`scheduleReconnect` synchronously, so that proves the backoff is armed before
+the stall. F53's first reproduction stalled before its timer existed and
+measured nothing; this assertion is what rules that out here. Results: 0ms
+green; **1100ms red at the count with `["connect-issued:A", "connect-issued:A"]`**.
+Not seen failing in the wild before this.
+
+**Fault 2 — a trap: the test could not see a stray reconnect at all.**
+
+Before touching the test, it was run against six versions of `liveHR.ts`. They
+were untracked mutated copies, imported by untracked copies of the test. The real
+source was never modified, so the runs needed no restore and could go in
+parallel with other work. Every mutation asserted its target matched exactly once.
+
+The mutations:
+- **A** — `stopLiveHRInner` stops clearing `retryTimer`.
+- **B** — `connectAttempt`'s top guard loses `a.generation !== gen`.
+- **C** — `stopLiveHRInner` stops nulling `active` and bumping `generation`.
+
+**NONE, A, B, A+B, C and C+A were all green.** An all-green matrix is exactly
+what a broken apparatus reports, so it was tested both ways:
+- **Positive control D** removed `stop`'s dispatch, and went red at the status
+  assertion (`"reconnecting"`). The copies can fail.
+- **A diagnostic log** of `ble.events` settled what C+A did. The unmutated code
+  ends `[connect, link-dropped, cancel-issued, cancel-acknowledged]`. **C+A ends
+  with a second `connect-issued:A`, issued after the stop.** Yet status stays
+  `'off'`, because a connect in flight dispatches nothing, and the test's last
+  assertion checked status only.
+
+A native connection nobody holds a handle to is precisely the bug `serialized`
+was built for (N528). The test's closing comment — "no stray reconnect
+resurrected it" — was asserting it and checking something else.
+
+**The fix is test-only; `liveHR.ts` is untouched.**
+- **Fake clock.** Only this test runs the backoff on jest's fake clock, with the
+  same `doNotFake` list as F53's block (`Date`, the immediates, `nextTick` and
+  `queueMicrotask` stay real). It is wrapped in `try`/`finally` rather than a
+  nested describe, so the test's name, which history cites, does not change.
+- **Timer-count guard.** It asserts `jest.getTimerCount()` is 1 after `dropLink`:
+  the fake clock holds the backoff.
+- **Standing stall.** It starves the thread for 1_100ms on every run, past the
+  backoff.
+- **Clock advance.** It advances the clock 1_200ms instead of waiting 1_200ms of
+  real time, so wall time is roughly unchanged.
+- **Second count.** It re-asserts the `connect-issued:A` count once the clock is
+  past the backoff.
+- **`starve`.** It moved to file scope from inside F53's block.
+
+**Mutations on the fixed test**, by the same copy method:
+
+| Variant | Result |
+|---|---|
+| NONE, A, B, A+B, A+B′ (the whole top guard reduced to `!m`), C | green |
+| **C+A** | **red at the new post-advance count**, `["connect-issued:A", "connect-issued:A"]` |
+| C+A with that new assertion removed | **green** — the new assertion is exactly what sees the stray connect |
+| D (status dispatch removed) | red at the status assertion |
+| Fake clock removed | red at the timer-count guard (`Received: 0`) |
+| Fake clock AND guard removed | red at the first count, two connects — the standing stall alone reproduces F54 |
+| Stall raised to 5_000ms, fix in place | green |
+
+The fixed suite passed 3/3 at host load ~200.
+
+**The ticket's mutation criterion cannot be met as written, and the reason is the
+design, not the test.** #1118 asked for red on "`stopLiveHRInner` no longer clears
+`retryTimer` AND `connectAttempt`'s generation guard removed". That is A+B, which
+stays green on the fixed test — and so does A+B′. `stopLiveHR` has **two
+independent defences** against the stray reconnect:
+1. it clears the retry timer;
+2. it nulls `active` and bumps `generation`. That is the only reason
+   `connectAttempt`'s guard fires: B removes a check whose input C is what
+   changes.
+
+Remove either defence and the other still prevents the connect. Only removing
+both (C+A) produces one, and that is what the new assertion catches. So the test
+pins the conjunction and cannot pin either half, because each half is sufficient
+alone. That is belt-and-braces, working as intended.
+
+**A comment in production source is wrong, and was left wrong on purpose.**
+`scheduleReconnect` in `liveHR.ts` says "The generation guard there is what does
+the work, and the 'reconnect while backgrounding' test is what holds it honest."
+Measured:
+- before this change, that test held nothing honest;
+- the generation guard does its work only because `stopLiveHRInner` bumps
+  `generation` and nulls `active`.
+
+The ticket forbids a production source change, so the comment is recorded here
+instead of edited.
+
+**Not verified.**
+- The fix was never run at load ~270; the busy-wait is the stand-in, at host load
+  ~200–225.
+- `says so immediately and reconnects on its own` also waits 1_200ms of real
+  time, but only asserts that a connect appeared *by* then. A stall makes that
+  more likely, not less, so it was left on the real clock. That is reasoning,
+  not a measurement.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
