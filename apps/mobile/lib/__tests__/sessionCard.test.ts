@@ -108,10 +108,10 @@ describe('cardFromSummary — the PR badge (N447/#745)', () => {
     const card = cardFromSummary(
       baseInput({
         summary: { title: 'Push Day A', sport: 'strength', records: [{}] },
-        prBadge: 'Back Squat · 152kg × 5 PR',
+        prBadge: { lead: 'Back Squat · ', tail: '152kg × 5 PR' },
       }),
     );
-    expect(card.badges).toEqual(['Back Squat · 152kg × 5 PR']);
+    expect(card.badges).toEqual([{ lead: 'Back Squat · ', tail: '152kg × 5 PR' }]);
   });
 
   it('never falls back to a bare count when there is no badge text', () => {
@@ -147,11 +147,11 @@ describe('cardFromSummary — the PR badge (N447/#745)', () => {
     const card = cardFromSummary(
       baseInput({
         summary: { title: 'Push Day A', sport: 'strength', records: [{}] },
-        prBadge: 'Back Squat · 152kg × 5 PR',
+        prBadge: { lead: 'Back Squat · ', tail: '152kg × 5 PR' },
         streak: { weeks: 4, carried: true },
       }),
     );
-    expect(card.badges).toEqual(['Back Squat · 152kg × 5 PR', '4 weeks unbroken']);
+    expect(card.badges).toEqual([{ lead: 'Back Squat · ', tail: '152kg × 5 PR' }, { tail: '4 weeks unbroken' }]);
   });
 
   it('falls back to the streak highlight when there is no record', () => {
