@@ -11201,6 +11201,16 @@ is the code #319 measured as a real 404.
   failure the whole screen is shaped around.
 - The unreachable screen offers *Try again*, and a retry after signal returns
   resolves normally without re-scanning.
+- **Cancel during a slow lookup stops the lookup, not only the spinner** (F52,
+  #1114). On a throttled connection, scan a packet and tap *Cancel* while it is
+  looking up: the camera comes back, and when the lookup eventually answers —
+  found, not found, or failed — **the screen stays at the camera**. Before F52
+  the late answer moved the athlete to a result for a packet they had walked
+  away from.
+- **An older lookup cannot overwrite a newer scan** (F52). Scan packet A, cancel,
+  scan packet B; let B resolve, then let A's slow answer arrive. The draft must
+  still be B's. This is the dangerous form: A's numbers under B's scan, one
+  confirm away from the log.
 - **A misread code** (a creased packet, a wrong check digit) leaves the scanner
   running and says it did not read cleanly. It must not perform a lookup, since
   a lookup on a misread returns a miss that reads as a missing product.
