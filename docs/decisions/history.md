@@ -74377,11 +74377,14 @@ finding.
   `fetch`, and `dashboardShell.test.ts` (2) pins the shell's reads. Admin's
   `deadline.test.ts` (4) covers the copy and `adminFetch`. Both typechecks and
   both lints are clean.
-- **`verify`: 47 of 48 links pass.** The 48th, `check-expo-compat`, has also
-  failed on `main` itself since 12:50 UTC on 2026-09-12. Expo's SDK 57 patch
-  releases cleared pnpm's 24h release-age window, which is unrelated to this
-  branch and filed as H31 (#1141). `verify` stops at that link, so the 24
-  links after it were run separately on this branch.
+- **`verify` passes in full on the head this was merged from.** While the
+  branch was open, `check-expo-compat` failed on `main` itself from 12:50 UTC
+  on 2026-09-12: Expo's SDK 57 patch releases cleared pnpm's 24h release-age
+  window. That was filed as H31 (#1141) and pinned by #1143, and this branch
+  was rebased onto it. On the pre-rebase head, `test:mobile` failed once on
+  F56 (#1135)'s known teardown-hook timeout, under a load average of about 440
+  and in a file this branch does not touch. The file passed alone, and the
+  suite passed on re-run.
 - **18 mutations, each caught as a named test failure** (or, for the parity
   script, its named error), with each restore confirmed by re-running rather
   than by reading the file:
