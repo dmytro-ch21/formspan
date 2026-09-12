@@ -75024,6 +75024,42 @@ Its other notes are recorded, not fixed: per-file name sets are not scope-aware,
 
 **Reachability on a phone**: no athlete-facing change.
 
+## 2026-09-12 — L17 (#1091): `ci:checks` counts rebase cycles, so H18's revisit trigger can fire
+
+**Why.** H18 (#983) accepted that `docs/decisions/history.md` conflicts server-side, and wrote down when to stop accepting it: "if a single PR needs four or more rebase cycles again, or a week's PRs average more than one". Nothing measured either number. So the trigger could fire only if somebody reread CLAUDE.md at the moment it was breached, which is N456's unreleasable-latch shape. Today's own session was a live example: three of its PRs were forced into rebases by each other's `history.md` appends.
+
+**What was built.** In `scripts/check-ci-checks.py`:
+- **Recording.** Whenever `ci:checks` sees a pull request `CONFLICTING`, `conflict_followup` records the (pull request, head commit) pair once, in `vola-conflict-cycles.log` under git's common directory. It resolves that directory with `git rev-parse --path-format=absolute --git-common-dir`, so every worktree of the clone shares one count and nothing is ever versioned.
+- **Why distinct heads equal rebase cycles.** A conflict forces a rebase, the rebase makes a new head, and the next conflict is seen at that new head. Re-running on the same head adds nothing.
+- **What it prints.** `conflict cycle N for PR #X` every time, and **H18 REVISIT TRIGGER REACHED** at four distinct heads, naming CLAUDE.md's section and asking for it to be said on the ticket rather than rebased a fifth time.
+- **Advisory only.** It never changes the exit code. A counter that could fail a merge gate would be a gate nobody agreed to. A missing common directory or an unwritable log adds a note saying the cycle was not counted, and nothing else.
+- **No credential, no repo setting, no server state,** as the ticket required.
+
+**Two limits on what it does count, from `ac-verifier`.** Both are written into the code comment and CLAUDE.md.
+- **Observation-based.** A conflicting head counts only if `ci:checks` runs while it is conflicting. A session that reads DIRTY off `gh pr view` and rebases straight away leaves no record, so the number is a floor.
+- **Cause-agnostic.** It cannot tell a `history.md` append conflict from any other, so the trigger could fire for conflicts H18 never discussed. The append conflicts dominate here, so the count is still the right signal, but the conflicting files are worth reading before acting on it.
+
+A race between two sessions writing the same head twice only duplicates a log line. The count is a set of heads, so it does not change.
+
+**Not counted, on purpose.** H18's other half, "a week's PRs average more than one", needs every session's observations of every pull request, and a local log cannot see them. It is still honour-system, and CLAUDE.md now says so next to the trigger.
+
+**Checks.**
+- **`--self-test`** (`check:ci-detector`, in `verify`) gains 7 rebase-cycle vectors, run against a temporary log:
+  - three heads count 1, 2 and 3 with no trigger;
+  - re-running on the third head still counts 3;
+  - a fourth head reaches the trigger;
+  - another pull request starts at 1;
+  - a `MERGEABLE` pull request records nothing;
+  - exactly 5 lines were written.
+- **4 mutations**, each caught and restored byte-identical:
+  - **the threshold made strict** (`>` for `>=`): the fourth head no longer triggers, so the self-test fails;
+  - **idempotency removed:** 6 lines are written instead of 5, so the self-test fails;
+  - **`MERGEABLE` counted too:** the self-test fails;
+  - **`main` no longer printing the note:** the offline self-test cannot reach this, so it was checked live. `ci:checks --pr 1148` printed no cycle line, and does again once restored.
+- **Live.** `ci:checks --pr 1148` (F57, genuinely `CONFLICTING`) printed "conflict cycle 1 for PR #1148" and wrote one line. Running it again on the same head wrote nothing, and the exit code stayed 5 (`EXIT_STALE`), as before this change.
+
+**Reachability on a phone**: no athlete-facing change.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

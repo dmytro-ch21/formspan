@@ -942,6 +942,16 @@ fixed.** Three alternatives were considered and rejected:
 PR needs **four or more** rebase cycles again, or a week's PRs average more than
 one, take the entries-directory option. #1081 already hit that number once.
 
+**The per-PR half of that trigger is counted now (L17, #1091).** `pnpm run
+ci:checks` records every (pull request, head commit) it sees `CONFLICTING` in
+`.git/vola-conflict-cycles.log` (git's common directory: every worktree shares
+it, nothing versions it) and prints `conflict cycle N`. At four distinct heads it
+prints **H18 REVISIT TRIGGER REACHED**; say so on the ticket rather than rebasing
+a fifth time. It never changes the exit code. **The weekly-average half is still
+honour-system**: a local log cannot see other sessions' pull requests. And the
+count is a floor that ignores cause: it counts only conflicts `ci:checks` is run
+against, and any conflict, not only `history.md`'s.
+
 **What did improve**: `pnpm run ci:checks` now names this cause in its
 zero-run message, so the next session reads the explanation instead of
 re-deriving it.
