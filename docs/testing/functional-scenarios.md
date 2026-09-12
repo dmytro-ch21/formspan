@@ -11226,6 +11226,15 @@ is the code #319 measured as a real 404.
   scan packet B; let B resolve, then let A's slow answer arrive. The draft must
   still be B's. This is the dangerous form: A's numbers under B's scan, one
   confirm away from the log.
+- **A double-tap on Try again starts one lookup, not two** (L20, #1151). With the
+  lookup failing, reach "Couldn't check this one" and tap **Try again** twice
+  quickly. Exactly one new request goes out, and the screen shows one answer.
+  Once that retry has answered, Try again works again — the guard clears, it
+  does not stick.
+- **Cancel releases Try again** (L20). Tap Try again, Cancel while it is still
+  looking up, scan a different packet with the connection still failing, then
+  tap Try again: it must start a lookup straight away, not sit dead until the
+  first, abandoned request finally times out.
 - **A misread code** (a creased packet, a wrong check digit) leaves the scanner
   running and says it did not read cleanly. It must not perform a lookup, since
   a lookup on a misread returns a miss that reads as a missing product.

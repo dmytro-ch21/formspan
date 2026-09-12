@@ -662,6 +662,94 @@ describe('confirming twice', () => {
   });
 });
 
+/**
+ * L20/#1151 — Try again called `resolve` directly, and the button only goes away
+ * once `looking-up` re-renders. Two taps landing in that window both started a
+ * lookup, with the same `lookupSeq` number, so both answers applied. The same
+ * shape as confirming twice, one screen earlier.
+ */
+describe('retrying twice', () => {
+  it('starts one lookup, not two, when Try again is double-tapped', async () => {
+    mockLookup.mockRejectedValueOnce(new TimeoutError());
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    expect(mockLookup).toHaveBeenCalledTimes(1);
+
+    let release: (v: unknown) => void = () => {};
+    mockLookup.mockReturnValue(new Promise((r) => { release = r; }));
+    await act(async () => {
+      // Both taps in the SAME tick, which is the whole race — see "confirming
+      // twice" for why awaiting the first press would test nothing.
+      const first = fireEvent.press(screen.getByTestId('scan-retry'));
+      const second = fireEvent.press(screen.getByTestId('scan-retry'));
+      await Promise.all([first, second]);
+    });
+    // The first scan's lookup, and ONE retry.
+    expect(mockLookup).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      release({ status: 'unknown', code: CODE });
+    });
+  });
+
+  it('lets the athlete try again once the retry has answered', async () => {
+    mockLookup.mockRejectedValue(new TimeoutError());
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+
+    await fireEvent.press(screen.getByTestId('scan-retry'));
+    await waitFor(() => expect(mockLookup).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    // Let the settled lookup's `finally` run, so the latch is genuinely clear.
+    await act(async () => {});
+
+    await fireEvent.press(screen.getByTestId('scan-retry'));
+    await waitFor(() => expect(mockLookup).toHaveBeenCalledTimes(3));
+  });
+
+  /*
+    Found in review: Cancel during a retry left the latch set until the
+    ABANDONED request settled, so Try again on the next scan's failure did
+    nothing — no spinner, no request. The old lookup is held unanswered for
+    the whole test, which is the state an athlete on one bar is in.
+  */
+  it('Try again works on a new scan while a cancelled retry is still out', async () => {
+    /** A second real EAN-13, so the second scan is not a misread. */
+    const OTHER = '5012345678900';
+    let releaseAbandoned: (v: unknown) => void = () => {};
+    let releaseSecondRetry: (v: unknown) => void = () => {};
+    mockLookup
+      .mockRejectedValueOnce(new TimeoutError())
+      .mockReturnValueOnce(new Promise((r) => { releaseAbandoned = r; }))
+      .mockRejectedValueOnce(new TimeoutError())
+      .mockReturnValueOnce(new Promise((r) => { releaseSecondRetry = r; }));
+
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('scan-retry'));
+    await waitFor(() => expect(screen.getByTestId('scan-looking-up')).toBeTruthy());
+    expect(mockLookup).toHaveBeenCalledTimes(2);
+
+    // Cancel while that retry is still out, then scan another packet, which fails.
+    await fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
+    await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
+    await act(async () => {
+      mockScan!({ data: OTHER });
+    });
+    await waitFor(() => expect(screen.getByTestId('scan-unreachable')).toBeTruthy());
+    expect(mockLookup).toHaveBeenCalledTimes(3);
+
+    // The abandoned retry has still not answered. Try again must still work.
+    await fireEvent.press(screen.getByTestId('scan-retry'));
+    await waitFor(() => expect(mockLookup).toHaveBeenCalledTimes(4));
+
+    await act(async () => {
+      releaseAbandoned({ status: 'unknown', code: CODE });
+      releaseSecondRetry({ status: 'unknown', code: OTHER });
+    });
+  });
+});
+
 describe('a lookup that is taking too long', () => {
   /**
    * There is no request timeout beneath this screen, so on one bar the OS can
