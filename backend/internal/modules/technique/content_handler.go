@@ -383,9 +383,17 @@ func (h *ContentHandler) explainNotFound(w http.ResponseWriter, r *http.Request,
 	apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "technique not found")
 }
 
+// contentIgnoredFields are the server-derived fields a content write may carry
+// and have ignored (N521/#918). A body naming them is not trusted, and not
+// refused either; `TestTheRequestBodyCannotChooseTheActor` pins that. Any
+// other field techniqueRequest does not declare is a 400: every caller of these
+// RequireAdmin routes is this repo's own console, so an unknown field is a
+// console bug or a typo, not a newer client this build cannot know about.
+var contentIgnoredFields = []string{"id", "source", "actor"}
+
 func decodeTechnique(w http.ResponseWriter, r *http.Request) (techniqueRequest, bool) {
 	var body techniqueRequest
-	if err := apihttp.DecodeJSON(w, r, maxContentBody, &body); err != nil {
+	if err := apihttp.DecodeJSONStrict(w, r, maxContentBody, &body, contentIgnoredFields...); err != nil {
 		return techniqueRequest{}, false
 	}
 	return body, true

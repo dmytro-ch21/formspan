@@ -6540,6 +6540,13 @@ components:
         Every field is optional so PATCH can be partial. POST requires `name`,
         and the write is rejected unless `sport`, `movement_pattern` and
         `load_type` end up valid.
+
+
+        **Unknown properties are refused (N521).** A property not listed here
+        is a 400 that names it, `status` included, since visibility has its own
+        endpoint. The exceptions are `id`, `source` and `actor`, matched in any
+        case: they are server-derived, so they are accepted and ignored, never
+        trusted and never refused.
       properties:
         name: { type: string, maxLength: 200 }
         sport:
@@ -6628,6 +6635,13 @@ components:
         The admin-writable surface. `id` and `source` are absent on purpose —
         the id is derived from the name at creation and immutable after, and
         the source is the server's.
+
+
+        **Unknown properties are refused (N521).** A property not listed here
+        is a 400 that names it, `status` included, since visibility has its own
+        endpoints. The exceptions are `id`, `source` and `actor`, matched in any
+        case: they are server-derived, so they are accepted and ignored, never
+        trusted and never refused.
       required: [name, category, position, gi_no_gi]
       properties:
         name: { type: string, example: São Paulo Pass }

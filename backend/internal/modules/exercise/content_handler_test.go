@@ -534,6 +534,26 @@ func TestTheRequestBodyCannotChooseTheActor(t *testing.T) {
 	if repo.stored["editable"].Source != "admin" {
 		t.Errorf("source = %q — the body changed ownership", repo.stored["editable"].Source)
 	}
+
+	// N521/#918: decoding is strict now, and the ignore is exact about which
+	// fields. They are ignored in any case, since JSON field matching is
+	// case-insensitive...
+	rec = patch(t, NewContentHandler(repo), "editable", `{"name":"Again","ACTOR":"impostor","Source":"seed"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch with capitalised ignored fields = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	if repo.lastActor == "impostor" || repo.stored["editable"].Source != "admin" {
+		t.Errorf("a capitalised ignored field was trusted: actor = %q, source = %q",
+			repo.lastActor, repo.stored["editable"].Source)
+	}
+	// ...and they do not launder an unknown field sent alongside them.
+	rec = patch(t, NewContentHandler(repo), "editable", `{"name":"Blocked","actor":"impostor","status":"published"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("an unknown field sent with ignored ones = %d, want 400 — the ignore list laundered it", rec.Code)
+	}
+	if repo.stored["editable"].Name == "Blocked" {
+		t.Error("the refused write was applied anyway")
+	}
 }
 
 func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
@@ -561,5 +581,29 @@ func TestPublishMakesADraftLiveAndRefusesASecondTime(t *testing.T) {
 	}
 	if rec := publish(t, h, "no-such-id"); rec.Code != http.StatusNotFound {
 		t.Errorf("publishing an absent id = %d, want 404", rec.Code)
+	}
+}
+
+// N521/#918: a field the request type does not declare, and is not one of the
+// ignored server-derived ones, is a 400, and nothing is written. `status` is
+// the one worth pinning: visibility is its own endpoint, and a body that tries
+// to set it is now told so rather than quietly dropped.
+func TestAContentWriteRefusesAFieldItDoesNotAccept(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["editable"] = Exercise{
+		ID: "editable", Name: "Editable", Sport: "strength",
+		MovementPattern: "squat", LoadType: LoadTypeReps, Source: "admin",
+	}
+	repo.sources["editable"] = "admin"
+
+	rec := patch(t, NewContentHandler(repo), "editable", `{"name":"Edited","status":"published"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `unknown field \"status\"`) {
+		t.Errorf("body = %s, want it to name the field", rec.Body)
+	}
+	if repo.stored["editable"].Name != "Editable" {
+		t.Errorf("name = %q — a refused write was applied anyway", repo.stored["editable"].Name)
 	}
 }
