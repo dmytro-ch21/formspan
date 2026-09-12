@@ -12741,7 +12741,7 @@ The scenarios that matter are the ones distinguishing three states, not two.
 
 - With BJJ enabled, the belt roadmaps, the Roadmaps strip on Plan and BJJ in
   the session picker all appear, and no "turned off" prompt is shown anywhere.
-- The Sports row in You navigates to the toggles.
+- The What you train row in You (labelled "Sports" before W17/#737) navigates to the toggles.
 
 ### Edge cases & errors
 
@@ -14660,7 +14660,7 @@ grow a second copy of any of them.
   `docs/decisions/history.md`.)
 - The `People` label appears below the whole identity block, and `App` below
   that. Nothing above the name.
-- Tap `Sports` → the profile editor's sport toggles. Tap `Phase` → the phase
+- Tap `What you train` → the profile editor's module toggles. Tap `Phase` → the phase
   screen. Tap `Edit profile` → the profile editor.
 - Tap `Library` → the catalog. Its subtitle names the athlete's own chains, so
   somebody looking for a sequence has a reason to open it.

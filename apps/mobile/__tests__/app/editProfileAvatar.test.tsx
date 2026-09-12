@@ -312,3 +312,24 @@ it('the sport toggles are inert platform switches, not hand-rolled knobs', async
     mockUseModules.mockReturnValue(empty);
   }
 });
+
+/**
+ * W17/#737 — the "What you train" card lists every module, nutrition included,
+ * so its load-failure hint cannot call them "your sports".
+ */
+it('says what failed to load in the card\'s own words, not "sports"', async () => {
+  const empty = { modules: [] as unknown[], ready: true, stale: false, apply: jest.fn() };
+  mockUseModules.mockReturnValue({
+    modules: [{ key: 'nutrition', label: 'Nutrition', enabled: true }] as unknown[],
+    ready: true,
+    stale: true,
+    apply: jest.fn(),
+  });
+  try {
+    await render(<EditProfileScreen />);
+    expect(await screen.findByText(/Couldn.t load what you train just now/)).toBeTruthy();
+    expect(screen.queryByText(/your sports/i)).toBeNull();
+  } finally {
+    mockUseModules.mockReturnValue(empty);
+  }
+});

@@ -194,7 +194,7 @@ export default function SettingsScreen() {
       <Stack.Screen options={{ title: 'Settings' }} />
 
       <Section title="Account">
-        <Row label="Profile" hint="Name, sports, date of birth" onPress={() => router.push('/profile/edit')} testID="settings-profile" />
+        <Row label="Profile" hint="Name, what you train, date of birth" onPress={() => router.push('/profile/edit')} testID="settings-profile" />
         <Row
           label="Sign out"
           danger

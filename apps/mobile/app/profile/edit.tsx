@@ -172,7 +172,7 @@ export default function EditProfileScreen() {
           applyModules(await setModules(getToken, realChanges));
         } catch (err) {
           setError(
-            `Your details saved, but your sports didn't: ${
+            `Your details saved, but your changes to what you train didn't: ${
               err instanceof Error ? err.message : String(err)
             }`,
           );
@@ -452,7 +452,7 @@ export default function EditProfileScreen() {
         <View style={styles.card}>
           {modulesUnavailable && (
             <Text style={styles.hint} accessibilityLiveRegion="polite">
-              Couldn&apos;t load your sports just now. Your other details still save.
+              Couldn&apos;t load what you train just now. Your other details still save.
             </Text>
           )}
           {modules.map((s) => {
