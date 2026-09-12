@@ -260,6 +260,15 @@ describe('web splits the evidence the same way', () => {
     expect(webDescribe).not.toMatch(/measured\.push\([^)]*rpe/i);
   });
 
+  // F61/#1161 — F59 made mobile say when a record's reps were assisted; web's
+  // twin kept printing "5 × 100kg" for the same PR. This is the drift the block
+  // exists to catch, pointed at the new fact.
+  it('says when a record\'s reps were assisted, in both rep branches, as mobile does', () => {
+    expect(webDescribe).toMatch(/\(r\.assisted_reps \?\? 0\) > 0 \? ` \(\$\{r\.assisted_reps\} assisted\)` : ""/);
+    expect(webDescribe).toMatch(/measured\.push\(`\$\{r\.reps\} × \$\{formatWeight\([^`]*\)\}\$\{assisted\}`\)/);
+    expect(webDescribe).toMatch(/measured\.push\(`\$\{r\.reps\} reps\$\{assisted\}`\)/);
+  });
+
   it('prefers RIR over RPE, as Go and mobile do', () => {
     // `if (r.rir != null) … else if (r.rpe != null)` — the else-if is the
     // precedence, and reversing it is the drift worth catching.

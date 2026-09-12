@@ -2794,6 +2794,13 @@ export type PersonalRecord = {
   distance_m: number | null;
   rir: number | null;
   rpe: number | null;
+  /**
+   * How many of `reps` had help. `reps` is the FULL count of the set behind the
+   * record, so without this an assisted PR reads like an unaided one. Optional
+   * so an older response still parses. Mobile's twin is in
+   * `apps/mobile/lib/records.ts` (F59/#1156); this is F61/#1161.
+   */
+  assisted_reps?: number | null;
   achieved_at: string;
   session_id: string;
   is_recent: boolean;

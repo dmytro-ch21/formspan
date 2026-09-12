@@ -530,10 +530,16 @@ function describe(
   units: UnitSystem,
 ): { measured: string; reported: string } {
   const measured: string[] = [];
+  // F61/#1161 — `reps` is the full count, so an assisted PR says how many had
+  // help, exactly as mobile's `assistedNote` does: nothing for null or 0, and
+  // only where a rep count is printed. "(N assisted)" here, deliberately, while
+  // the load-history chart's "(N alone)" stays — that line reconciles a 1RM
+  // ESTIMATE, which is built from the solo count; this one describes a set.
+  const assisted = (r.assisted_reps ?? 0) > 0 ? ` (${r.assisted_reps} assisted)` : "";
   if (r.reps != null && r.weight_kg != null) {
-    measured.push(`${r.reps} × ${formatWeight(r.weight_kg, units)}`);
+    measured.push(`${r.reps} × ${formatWeight(r.weight_kg, units)}${assisted}`);
   } else if (r.reps != null) {
-    measured.push(`${r.reps} reps`);
+    measured.push(`${r.reps} reps${assisted}`);
   }
   // RIR wins where both are present, matching the estimator's own precedence.
   const reported: string[] = [];
