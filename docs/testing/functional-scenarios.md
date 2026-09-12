@@ -916,6 +916,37 @@ screenshot: a mis-tap while logging a set could end the whole session.
   criterion N445 exists to satisfy and nothing in the suite can raise a real
   keyboard to prove it.
 
+### The session clock ticks without re-rendering the log (N566, mobile, `app/session/[id].tsx`)
+
+The Time figure in `session-summary` used to be state on the session screen,
+so its 1s interval re-rendered every exercise group and set row once a second
+for the whole session. It is now `components/ElapsedStat.tsx`, which owns the
+tick. Nothing an athlete sees is meant to change — these scenarios guard that.
+
+- **A live session counts up once a second**, from `started_at`: open a session
+  started twelve minutes ago and Time reads `12:0x`, not `0:00`, on the first
+  frame it is visible.
+- **Past an hour it reads `h:mm:ss`** and still fits its column beside Sets and
+  Reps, without truncating.
+- **Backgrounded, it catches up rather than resuming.** Background the app for
+  a minute mid-session and return: Time is a minute further on, not where it
+  paused. (Same property as the Today card's clock, and the reason it is derived
+  rather than counted.)
+- **A finished session's Time is fixed** at `ended_at − started_at` and does not
+  move while the report is open. With Volume shown, the four figures share the
+  row and a long `1:23:45` shrinks to fit rather than overflowing into Sets.
+- **Correcting a session's end time** (N435/N436) updates Time to the new
+  duration without leaving the screen.
+- **Logging stays as responsive as it was, or better.** Typing weight/reps and
+  ticking sets mid-session, with the clock running, never drops a keystroke or
+  lags a tick. This is the change's actual purpose; it is a device observation.
+- Render cost is pinned in `__tests__/app/sessionElapsedTick.test.tsx`, against
+  the real screen: the Sets figure (re-created only when the screen renders)
+  renders zero times across five seconds while Time renders on every one.
+- **NEEDS HUMAN EVIDENCE — on a device**, the Time figure counts once a second
+  on a live session, is correct after a minute backgrounded, and is fixed on a
+  finished one. Jest has no real clock and no throttled JS thread to prove it.
+
 ## Progression rules — double progression (`GET /v1/sessions/suggestions`, both clients)
 
 Domain: what to load today and for how many reps, computed from the caller's own last few sessions. The thing in the product that advises rather than records, so it follows the standing rule — deterministic, and it always states its evidence.

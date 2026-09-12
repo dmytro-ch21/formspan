@@ -73835,6 +73835,148 @@ taken rather than argued:
   the network.
 - **Deriving the repository from an installation payload** is #570's.
 
+## 2026-09-11 — N566 (#1126): the session clock stops re-rendering every set row once a second
+
+`app/session/[id].tsx` held `const [elapsed, setElapsed] = useState(0)` and a
+1s `setInterval` whose only job was the **Time** figure in `session-summary`.
+State on that screen re-renders all of it — every exercise group, every set
+row — so a live session paid one full-screen render a second for its whole
+life: ~3,600 in an hour, rests or no rests, to change four digits. It is the
+same shape N558 (#1047, PR #1105) removed for the rest countdown's 250ms tick,
+and the one that PR left behind. #1105 merged while this branch was in review;
+the branch was rebased onto it and onto N564, and its test runs against both.
+
+### What changed
+
+- **`components/ElapsedStat.tsx`** owns the tick. It is a `Stat` with
+  `startedAt`/`endedAt` in place of `value`, and the screen renders it where the
+  `<Stat label="Time">` was. The screen holds no clock state and no interval.
+- **Still derived from `started_at` on every tick, never accumulated**, and a
+  finished session still arms no interval — both unchanged in behaviour, both
+  now tested (they were not).
+- **Whole seconds in state**, where the screen kept fractional ones.
+  `formatElapsed` floors either way, so nothing on screen differs; what it buys
+  is React's same-value bail-out on a tick that lands inside the same second
+  (the mount tick, a drifted interval).
+- **Every other prop passes straight through to `Stat`, `slots` included.**
+  `StatRow` injects `slots` with `cloneElement`, and a wrapper that named its
+  props and forgot that one would silently lose the four-column fit ladder on a
+  finished session's row. Spreading closes it structurally.
+- **`elapsed` was read nowhere else.** The other `elapsed` identifiers in the
+  screen (`:308`, `:1277`, `:2766`) are countdown locals from `elapsedOf`, not
+  this state, so no handler needed an on-demand read.
+- The import sits beside `Stat`'s rather than beside `Countdown`'s, because
+  #1105 rewrote the `Timer` import line directly below that one; adjacent edits
+  would have conflicted for nothing. The rebase over it was clean.
+
+### The test renders the real screen, and why that was the whole job
+
+**No suite rendered the strength session screen before this** — everything
+about it was pinned by reading its source text. The obvious test, a stand-in
+that mounts `ElapsedStat` and counts its own renders (#1105's shape), would
+prove the component ticks on its own **and stay green if `setElapsed` went back
+into the screen**. It could not fail on the regression it exists for.
+
+So `__tests__/app/sessionElapsedTick.test.tsx` mounts the real `SessionScreen`,
+mocked at its boundaries only (store, network, router, heart-rate hooks) —
+`support/runningScreen.tsx`'s shape. The probe wraps `Stat` and records each
+render by label. The screen re-creates `<Stat label="Sets">` on every render of
+its own and nothing else does, so the Sets count **is** the screen's render
+count; the Time `Stat` sits inside `ElapsedStat`, so its count is the clock's.
+Asserted together — Sets flat across five seconds, Time up by at least five —
+because either alone passes for the wrong reason: a frozen clock makes the
+screen quiet too. A positive control re-renders the screen and requires the
+Sets count to move.
+
+Mutation-checked, each red as an assertion failure against a green 8/8
+baseline, each restored and re-run green:
+
+- screen-level `setElapsed` tick restored (kept alongside `ElapsedStat`):
+  *ticks without re-rendering the screen* → expected 0, received **5**;
+- screen reverted wholesale to `origin/main`: the same test, 0 vs 5;
+- `ElapsedStat` drops `slots`: *forwards the slot count* → expected 4, received
+  undefined;
+- accumulate (`s + 1`) instead of derive: *catches up after the JS thread was
+  suspended* → expected `13:02`, received `12:02`;
+- `if (endedAt) return;` removed: *arms no interval for a finished session* →
+  expected 0, received 1.
+
+**Three things the apparatus got wrong first, all measured:**
+
+- *Derived vs accumulated* was untested by the first draft. A `+1` counter that
+  starts from a correct value reads identically under fake timers; it only
+  diverges when the wall clock moves and the interval does not — a throttled JS
+  thread — which `jest.setSystemTime` models exactly. That test was added for it.
+- *No interval on a finished session* is invisible through the screen: whole
+  seconds from a fixed `ended_at` make every tick a skipped same-value update, so
+  the render counts stay flat either way. And `jest.getTimerCount()` read **3**
+  for a lone finished `ElapsedStat` (the renderer's own timers), so it could not
+  answer either. It spies `setInterval` for the 1000ms period instead.
+- **That component-level test broke the next one, and the first diagnosis of
+  why was wrong.** The following test's screen never rendered
+  `session-summary`, and passed in isolation. Removing the `setInterval` spy did
+  not change it; adding an explicit unmount of the open `ElapsedStat` did — so
+  the leak was written up, and the frontend reviewer confirmed, as "a mounted
+  component leaking". **It was not.** RNTL 14's `unmount` and `rerender` are
+  async, and the test called `view.unmount()` bare, so it overlapped the next
+  `render`'s `act`. The added unmount was also bare, and happened to rebalance
+  it. Found only because the suite printed a `● Console` block on the rebased
+  branch: **6 `console.error`, every run, with all 8 tests passing** — 2
+  "overlapping act() calls" from that test, 4 "not configured to support act"
+  from later tests' screen teardown (`Countdown`'s `stop`). Isolating each test
+  with `-t` put all of it on that one test. With every unmount and `rerender`
+  awaited (the F47 / #1122 pattern): 0 console output in three solo runs and
+  alongside `timerContinuity`. Then, measured rather than argued: un-awaiting the
+  two unmounts brings back exactly 6 / 2 / 4 with 8/8 still green; deleting the
+  explicit unmount with the awaits in place changes **nothing**. The awaits are
+  load-bearing; the unmount is hygiene. The first M3 run landed on the
+  already-red test and was discarded and re-run once the baseline was green.
+
+### The review gate reported a failure that was a reviewer's mutation
+
+- **The gate's own `verify` went red on a reviewer's mutation, not on this
+  diff.** `pre-merge-checker` ran `verify` while `frontend-reviewer` was
+  mutation-testing the same worktree. The reviewer deleted `open.unmount()` to
+  reproduce the cross-test failure, which left `const open` unused. The lint ratchet,
+  one link after `lint:mobile`, counted **51** warnings where `lint:mobile` had
+  counted 50, and failed on an uncapped `@typescript-eslint/no-unused-vars`.
+  It did not reproduce on re-run.
+
+  **The cause was reproduced, not argued.** Each variant was linted through
+  `eslint --stdin --stdin-filename`, so nothing in the worktree was touched:
+
+  - the committed test file gave 0 warnings;
+  - the same file with that one line deleted gave exactly 1 — `'open' is
+    assigned a value but never used`, L307;
+  - `slots: _dropped`, the other mutation in play, gave 0 (underscore-exempt).
+
+  CLAUDE.md's reviewer-mutation rule names the commit that sweeps a mutation
+  in. This is the same hazard reaching a **check** instead: `/pre-merge`
+  launches the checker and the reviewers in parallel into one tree, so a
+  reviewer answering a mutation criterion can turn the checker's verdict red
+  (or, with a different mutation, green) for a state that was never committed.
+  The `verify` that counts for this PR ran after the rebase, with no reviewer
+  active.
+
+  A first attempt at that reproduction printed four `SyntaxError`s and exited
+  0. The parser, not ESLint, had failed: an escaped quote inside a Python
+  f-string expression. The exit code came from the trailing `diff`. It was
+  discarded and redone with the lint output written to files and a parser
+  that refuses an empty one.
+
+### Left open
+
+- **NEEDS HUMAN EVIDENCE**: on a device, Time counts once a second on a live
+  session, is right after a minute backgrounded, and is fixed on a finished
+  one. Jest has no real clock and no throttled JS thread; the backgrounding test
+  models the property, it does not observe it.
+- **The claim is about render count, not frame time.** Nothing here measured
+  whether logging a set *feels* different with the clock running; on a fast
+  phone it may not. The render count is what was wrong and what is pinned.
+- **The harness is file-local.** If a second test ever needs the strength screen
+  mounted, lift its mocks into `__tests__/app/support/` the way the running
+  screen's were, rather than copying them.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
