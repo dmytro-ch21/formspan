@@ -74833,6 +74833,42 @@ The decision, **revised in review:** a record's evidence says "(N assisted)" on 
 
 **Reachability**: web — `/dashboard/records`, for an exercise whose PR set had assisted reps. Mobile already shows this (F59).
 
+## 2026-09-12 — F62 (#1165): a progression suggestion's last top set says when its reps were assisted, on web and mobile
+
+**What was wrong.** A progression suggestion carries its evidence, the last top set: `last_weight_kg`, `last_reps`, and its effort. `last_reps` is the **full** count of that set, assisted included, while the backend measures the progression against the solo count; `progression.go` says so beside `LastAssistedReps`.
+
+The backend sent `last_assisted_reps`, and neither client's `Suggestion` type declared it. So every surface printing the last set read an assisted one as unaided:
+- **Web:** `ProgressionCard.tsx`'s evidence line, "8 × 100kg · 1 RIR".
+- **Mobile, session screen:** the hint, "Last 8 × 100kg", and its VoiceOver label, "Last 8 by 100kg".
+- **Mobile, exercise screen:** the Reps tile, "8". The ticket did not name this one. The same response feeds it, and the stated rule is "every surface that prints a suggestion's last set".
+
+The gap was identical on both platforms, so no parity test could see it. F61's `frontend-reviewer` found it.
+
+**What changed.**
+- **Both `Suggestion` types** declare `last_assisted_reps?: number | null`.
+- **Mobile.** `lib/sessions.ts` gains `lastSetLead(s, u)`, which returns the visible "Last 8 × 100kg (3 assisted)" and the spoken "Last 8 by 100kg (3 assisted)". It also gains `lastRepsStat(s)` for the Reps tile, which keeps the count as the tile's value and returns the help as a line of its own, "3 assisted". Inline, "8 (3 assisted)" at the tile's 20pt bold in a third of the row would wrap to "8 (3" / "assisted)"; `frontend-reviewer` predicted that from the styles, and it was taken before merge. The hint builds its note with `assistedNote`, the one rule the share card and records card already use (F59); the tile applies the same rule in its own shape: nothing for null or 0, and nothing without a count. The session screen and the exercise screen read from them, so the visible and spoken copy cannot drift.
+- **Web.** `lastSetLine` moved out of `ProgressionCard.tsx` into `lib/lastSet.ts`, because web's vitest is pure-logic and the card is a component file. It gained the same note between the load and the effort.
+- **Wording.** "(N assisted)" is the records' wording, which F61 settled. The set-logging screen gains copy but no motion, so the "nothing on the set-logging path grows a duration" rule is untouched.
+
+**Tests.**
+- **Mobile.** `lib/__tests__/lastSetLead.test.ts` (new, 12 cases) covers the visible text and the spoken label with help; null, absent and 0 adding nothing; no rep count; no weight; and the Reps tile's value and its separate line.
+- **Web.** `lib/__tests__/lastSet.test.ts` (new, 6 cases) covers the note between load and effort; null, 0 and absent; no rep count; and no weight.
+
+**Checks.** 7 mutations, each caught as a test failure, restored byte-identical and re-run to green (mobile 12/12, web 6/6):
+- **mobile's visible text dropping the note:** the visible-text test fails;
+- **mobile's spoken label dropping it:** the VoiceOver test fails;
+- **the Reps tile dropping its line:** its with-help test fails;
+- **the tile showing a line for no help:** the null, absent and 0 cases fail;
+- **the tile putting the note back inline:** the with-help case and the three no-help cases fail;
+- **web dropping it:** "8 × 100kg · 1 RIR" is received where "8 × 100kg (3 assisted) · 1 RIR" is expected;
+- **web showing it with no rep count:** the no-rep-count test fails.
+
+Lint adds nothing: the session screen's two `react-hooks/refs` warnings are the two already on `main`. `pnpm --filter web exec tsc --noEmit` is clean.
+
+**Not covered by a test.** The two mobile screens reading the helpers rather than the raw fields: this suite does not render them. The helpers are the only place the copy is built. On a device, check that the Reps tile's "3 assisted" line sits under its label and the row's three values stay level.
+
+**Reachability on a phone**: this is the phone — the session screen's hint under an exercise with history, and Library → an exercise's "Your last session".
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

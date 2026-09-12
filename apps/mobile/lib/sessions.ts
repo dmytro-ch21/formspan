@@ -8,6 +8,7 @@ import { formatDuration, type DurationUnit } from './duration';
 import type { Exercise } from './exercises';
 import { isDualMode, setModeOf } from './setMode';
 import { newTraceId, traceparent } from './trace';
+import { assistedNote } from './records';
 import { formatDistance, formatWeight, type UnitSystem } from './units';
 import type { WorkoutItem } from './workouts';
 
@@ -412,6 +413,13 @@ export type Suggestion = {
   last_reps: number | null;
   last_rir: number | null;
   last_rpe: number | null;
+  /**
+   * How many of `last_reps` had help. `last_reps` is the FULL count of that top
+   * set, assisted included, while the progression is measured against the solo
+   * count — so a surface printing the set without this overstates it. Optional
+   * so an older response still parses. F62 (#1165).
+   */
+  last_assisted_reps?: number | null;
   last_min_reps: number | null;
   last_max_reps: number | null;
   working_sets: number;
@@ -2217,4 +2225,46 @@ export function isPastLocalDay(iso: string, now: Date = new Date()): boolean {
   // "Correct this session" on something that hasn't happened locally yet.
   const startOfLocalDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   return startOfLocalDay(new Date(iso)) < startOfLocalDay(now);
+}
+
+/**
+ * The start of a suggestion's "Last …" line — what was on the bar last time —
+ * visible and spoken (F62/#1165).
+ *
+ * `last_reps` is the full count of that top set, so "Last 8 × 100kg" for a set
+ * with three spotted reps claimed eight unaided, on the screen an athlete reads
+ * between sets. The note comes from `assistedNote`, the one rule the share card
+ * and records card already use (F59), and only where a rep count is printed.
+ * Spoken says "by" rather than "×": see the session screen's own note on how
+ * VoiceOver handles U+00D7.
+ *
+ * Empty strings when there is no weight, which the caller already gates on.
+ */
+export function lastSetLead(
+  s: Pick<Suggestion, 'last_reps' | 'last_weight_kg' | 'last_assisted_reps'>,
+  u: UnitSystem,
+): { visible: string; spoken: string } {
+  if (s.last_weight_kg == null) return { visible: '', spoken: '' };
+  const w = formatWeight(s.last_weight_kg, u);
+  if (s.last_reps == null) return { visible: `Last ${w}`, spoken: `Last ${w}` };
+  const note = assistedNote({ assisted_reps: s.last_assisted_reps });
+  return {
+    visible: `Last ${s.last_reps} × ${w}${note}`,
+    spoken: `Last ${s.last_reps} by ${w}${note}`,
+  };
+}
+
+/**
+ * The exercise screen's Reps tile. The count stays the tile's value ("8") and
+ * the help goes on a smaller line of its own ("3 assisted"): inline, "8 (3
+ * assisted)" at the tile's 20pt bold in a third of the row wraps to "8 (3" /
+ * "assisted)". `note` is null with no help, and there is no note without a
+ * count to qualify.
+ */
+export function lastRepsStat(
+  s: Pick<Suggestion, 'last_reps' | 'last_assisted_reps'> | null,
+): { value: string; note: string | null } {
+  if (s?.last_reps == null) return { value: '—', note: null };
+  const assisted = s.last_assisted_reps ?? 0;
+  return { value: `${s.last_reps}`, note: assisted > 0 ? `${assisted} assisted` : null };
 }

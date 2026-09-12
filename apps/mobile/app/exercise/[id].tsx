@@ -8,7 +8,7 @@ import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchExercises, pickImage, type Exercise } from '@/lib/exercises';
-import { fetchSuggestions, type Suggestion } from '@/lib/sessions';
+import { fetchSuggestions, lastRepsStat, type Suggestion } from '@/lib/sessions';
 import { cachedExercises } from '@/lib/sessionStore';
 import { formatEstimate, formatWeight } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
@@ -151,7 +151,7 @@ export default function ExerciseDetailScreen() {
               label="Weight"
               value={stats?.last_weight_kg != null ? formatWeight(stats.last_weight_kg, units) : '—'}
             />
-            <Stat label="Reps" value={stats?.last_reps != null ? String(stats.last_reps) : '—'} />
+            <Stat label="Reps" {...lastRepsStat(stats)} />
             <Stat
               label="Effort"
               value={
@@ -251,11 +251,13 @@ export default function ExerciseDetailScreen() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, note }: { label: string; value: string; note?: string | null }) {
   return (
     <View style={styles.stat}>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
+      {/* Below the label, so the three tiles' values and labels stay level. */}
+      {note ? <Text style={styles.statNote}>{note}</Text> : null}
     </View>
   );
 }
@@ -285,6 +287,7 @@ const styles = StyleSheet.create({
   stat: { flex: 1, alignItems: 'center', gap: 2 },
   statValue: { fontSize: 20, fontWeight: '800' },
   statLabel: { fontSize: 11, color: vola.textDim },
+  statNote: { fontSize: 11, color: vola.textMuted },
   oneRm: {
     flexDirection: 'row',
     alignItems: 'baseline',

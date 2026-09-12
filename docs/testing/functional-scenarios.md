@@ -987,6 +987,13 @@ Replaced the earlier single-set rule (`increase`/`repeat_consolidate`, now gone)
 
 **Evidence must describe one real set**
 - `last_weight_kg` / `last_reps` / `last_rir` / `last_rpe` all come from the **same top set**. `last_min_reps` / `last_max_reps` are the session-wide spread.
+- **An assisted top set says so wherever it is printed** (F62, #1165). Log a top
+  set of 8 with 3 assisted, then open the next session: the mobile hint reads
+  "Last 8 × 100kg (3 assisted)" (VoiceOver: "Last 8 by 100kg (3 assisted)"),
+  the exercise screen's Reps tile reads "8" with "3 assisted" on its own line
+  under the label, and web's progression card reads "8 × 100kg (3 assisted) · …". `last_reps` is the full count while
+  the progression is measured against the solo 5, so without the note all three
+  read as eight unaided. 0 or unrecorded assistance adds nothing.
 - Pairing the top set's weight with the session's best rep count describes a set nobody performed — and the 1RM estimate derived from it inherits the fiction. Caught during wiring; pinned by a test where the back-off set carries the most reps.
 
 **Auth & security**

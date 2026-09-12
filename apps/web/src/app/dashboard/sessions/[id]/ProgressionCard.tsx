@@ -1,6 +1,7 @@
 "use client";
 
 import type { Suggestion, SuggestionCode } from "@/lib/api";
+import { lastSetLine } from "@/lib/lastSet";
 import { formatEstimate, formatWeight, type UnitSystem } from "@/lib/units";
 
 /**
@@ -146,19 +147,6 @@ function RepRangeTrack({
       <span className="text-xs tabular-nums text-text-muted">{high}</span>
     </div>
   );
-}
-
-/** "5 × 100 kg · 1 RIR", the top set — one real set, never a composite. */
-function lastSetLine(s: Suggestion, units: UnitSystem): string | null {
-  if (s.last_weight_kg == null) return null;
-  const reps = s.last_reps != null ? `${s.last_reps} × ` : "";
-  const effort =
-    s.last_rir != null
-      ? ` · ${s.last_rir} RIR`
-      : s.last_rpe != null
-        ? ` · RPE ${s.last_rpe}`
-        : "";
-  return `${reps}${formatWeight(s.last_weight_kg, units)}${effort}`;
 }
 
 export default function ProgressionCard({
