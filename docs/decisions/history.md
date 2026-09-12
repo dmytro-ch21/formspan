@@ -73725,6 +73725,116 @@ instead of edited.
   more likely, not less, so it was left on the real clock. That is reasoning,
   not a measurement.
 
+## 2026-09-11 — N174: the repository and the board are read, not written down (#551)
+
+**The ticket asked for three things, and the code supported one of them.** #551
+asked that the engine derive its repository from the webhook installation
+payload, that project and field ids stop being baked into agent prompts, and
+that every remaining hit be justified. Measured before writing anything:
+
+- **The engine has no installation payload to read.** It polls the board
+  (`engine/internal/devengine/github.go`). A webhook path arrives with the
+  gateway, #570 (N146), itself blocked on N145 — so the criterion was proposed
+  there rather than built against nothing here.
+- **The ids were not baked into prompts. They were in no file at all.** A
+  fixed-string grep finds the project id and the Status field id in zero
+  files. Every session that set a Status carried them in its own context.
+  `CLAUDE.md` said the `vola-ticket-sdlc` skill "carries the recipe"; its step
+  12 named the mutation and never the ids.
+- **What was hardcoded was the owner and repository:** `evidence-latch.py`'s
+  `DEFAULT_REPO`, `devengine`'s `--owner`/`--project` defaults (nothing
+  launches it with flags, so those literals were its configuration), four
+  `--repo` flags and one `--owner` in the ticket-manager agent, and two
+  command recipes in `CLAUDE.md`.
+
+An earlier survey of the same tree reported zero hits for the GraphQL
+owner/name form. That was the apparatus, not the tree: `\?` is literal in git
+grep's basic regex, so the pattern could match nothing. Re-run with `-F`, after
+confirming the same form found a line known to be present, it found the
+`CLAUDE.md` recipe.
+
+### What changed
+
+- **`.vola-agent/policy.json` gained a `board` block** — owner, number, URL,
+  project id, Status field id, all six option ids, and the date they were read
+  from the live API (they matched what sessions had been using).
+  `scripts/check-agent-policy.py` validates it, with a self-test mutation for
+  each guard; the self-test's success line now reports a computed mutation
+  count (22) instead of a hardcoded 13.
+- **`devengine` reads the owner and number from it.** `Board.Resolve`: a set
+  flag wins, else the policy, else an error — no literal left to fall back to.
+  The flags moved into `parseFlags` with EMPTY board defaults, because a
+  non-empty default is an override and would silently beat the policy;
+  `TestFlagsDefaultToNoBoard` holds that. `LoadConfig` deliberately does not
+  require the block: the preflight tests load a fixture policy without one,
+  and the block is needed only where the board is polled.
+- **`evidence-latch.py` resolves its repository**: `GH_REPO`, then
+  `GITHUB_REPOSITORY`, then `gh repo view`, then it refuses. Resolution happens
+  after the `--self-test` branch, so the self-test stays network-free. The
+  workflow already passed `GH_REPO`; this is for anyone running it by hand.
+- **The ticket-manager agent** passes no `--repo` (`gh` infers it from the
+  checkout) and derives the owner. **`CLAUDE.md`'s two recipes** use `gh`'s
+  `{owner}`/`{repo}` placeholders — run first against #1109, which returned
+  `[544]` as expected, because placeholders being filled in `-F` field values
+  and not only in endpoint paths was an assumption until then.
+- **The skill's step 12 now carries a runnable Status recipe** that reads the
+  ids from `board`. Verified live on #551 by writing its current value (In
+  Progress over In Progress) and re-reading it.
+- **`docs/architecture/repo-identity.md`** holds the rule and a table of every
+  literal that stays, with its reason: Go module paths, board links, narrative
+  and permalinks, fixtures, reserved usernames, the Open Food Facts contact
+  `User-Agent`, and the Railway and Clerk names that predate the rename. Its
+  counts were computed by a script that refused to write the table if any
+  matching line fitted no row.
+
+### Mutation-verified
+
+Twenty-two mutations, each caught as a named test failure, each restore
+confirmed by re-running rather than by reading the file: six on the latch's
+resolver; nine on the policy validator, mutating the VALIDATOR so that each
+self-test mutation is shown to depend on its own guard; seven on
+`Board.Resolve` and the flag defaults, checked to fail as tests rather than as
+builds.
+
+**The first latch run returned two INVALID results, not catches.** The checks
+called the resolver bare, so a regression that refused a case it should answer
+raised `SystemExit` and ended the self-test with the refusal message — a
+non-zero exit that proved nothing about which guard caught it. The checks now
+turn a refusal into a value, and both re-ran as named catches.
+
+Two guards in the validator are redundant for the obvious bad input and were
+given inputs only they can see: a blank owner is also caught by the URL
+comparison, so its mutation blanks the owner AND rewrites the URL to agree; a
+string project number formats into the same URL, so only the type guard sees
+it.
+
+### What review changed
+
+`backend-reviewer` found nothing blocking. It re-read the board ids from the
+live API, re-derived the identity table's counts from the tree, and reasoned
+each validator guard through against its mutation. Its two suggestions were
+taken rather than argued:
+
+- **The Status recipe printed "not on the board" and then ran the mutation
+  anyway**, with an empty item id. It now branches, and writes nothing. It
+  uses `if`/`else`, not `exit`, because a recipe gets pasted into an
+  interactive shell, and `exit` there closes the terminal. Checked by
+  running the extracted recipe against a `gh` stub both ways: an empty lookup
+  wrote nothing, and a non-empty one reached the mutation. The second run is
+  what shows the first could have caught a call.
+- **The login pattern accepted a trailing hyphen and `--`**, which GitHub
+  forbids. Tightened, with its own self-test mutation whose URL is rewritten to
+  agree, so only the pattern can see it. That is the ninth validator mutation.
+
+### Not done
+
+- **Nothing enforces the identity table.** A new literal passes every check;
+  a `git grep` check using the table as its allowlist is the next step if it
+  drifts.
+- **`run`'s call to `Board.Resolve` is untested** — `run` needs a token and
+  the network.
+- **Deriving the repository from an installation payload** is #570's.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

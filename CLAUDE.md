@@ -548,7 +548,7 @@ bug.
 same either way. Ask GitHub what it parsed:
 
 ```bash
-gh api graphql -f query='{repository(owner:"dmytro-ch21",name:"formspan"){pullRequest(number:NNN){closingIssuesReferences(first:10){nodes{number}}}}}'
+gh api graphql -F owner='{owner}' -F name='{repo}' -F n=NNN -f query='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){closingIssuesReferences(first:10){nodes{number}}}}}'
 ```
 
 An empty list is the only evidence. Check it **after every body edit**, because
@@ -799,7 +799,7 @@ Three things it also fixes, all of which bit:
   `gh pr edit` fails outright in this repo on a deprecated Projects-classic
   GraphQL query and silently changes nothing, so a title still reading
   `[claim] …` after an apparent success was that, not a typo. Use `gh api -X
-  PATCH repos/dmytro-ch21/formspan/pulls/<n>` if you must retitle a PR;
+  PATCH repos/{owner}/{repo}/pulls/<n>` if you must retitle a PR;
   `gh pr ready` and `gh pr create` are unaffected.
 - **A new id is visible immediately.** `gh pr list` shows titles, not diffs, so a
   new id filed inside an open PR's `TASKS.md` used to be invisible to every other
@@ -1290,6 +1290,7 @@ every spawn. The entries below are the ones general enough to stay here.
 - [docs/decisions/history.md](docs/decisions/history.md) — full chronological narrative
 - [docs/architecture/apps.md](docs/architecture/apps.md) — per-app architecture detail (Clerk auth flows, ownership models, the `llm` platform package) that the repo map above only summarizes
 - [docs/architecture/deployment.md](docs/architecture/deployment.md) — environments, Railway topology, migrations
+- [docs/architecture/repo-identity.md](docs/architecture/repo-identity.md) — which repository and board the tooling acts on, where those names live (`.vola-agent/policy.json` → `board`), and why each remaining literal stays
 - [docs/architecture/api-conventions.md](docs/architecture/api-conventions.md) — full REST/OpenAPI conventions
 - [contracts/public.openapi.yaml](contracts/public.openapi.yaml) — the wire contract
 - [docs/testing/functional-scenarios.md](docs/testing/functional-scenarios.md) — recommended functional test scenarios per feature
