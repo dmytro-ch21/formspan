@@ -445,9 +445,18 @@ export default function FoodScreen() {
   // Guarded on the hook's own state, not a ref. While the view is still
   // `unknown` this re-runs until a read lands — so a cancelled one (StrictMode's
   // double effect, a dependency changing) simply tries again — and once it has
-  // landed it never runs again, leaving every later load, and this read's
-  // network half, to the focus effect above. Signed out it does nothing: the
-  // hook would only restate `unknown`.
+  // landed it never runs again, leaving every later load to the focus effect
+  // above. That includes this read's own network half, on purpose: when the
+  // local picture lands the effect cleans up, which cancels the network-then-
+  // reread step. So a tab opened before that answer shows the cached trackers
+  // until its focus read replaces them — what the focus read alone already did
+  // before N557. Signed out it does nothing: the hook would only restate
+  // `unknown`.
+  //
+  // If Food is ever the first screen shown (Today is first in `lib/tabs.ts`,
+  // but a deep link straight here could do it), mount and focus both read once
+  // while the view is `unknown`: same day, same answer, one redundant round
+  // trip.
   const trackersUnread = trackerDay.view.state === 'unknown';
   useEffect(() => {
     if (!userId || !trackersUnread) return;
