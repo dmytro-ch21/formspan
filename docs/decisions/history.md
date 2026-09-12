@@ -73438,6 +73438,155 @@ session screen still carries no animation), `strengthSessionFinishPlacement`,
   `NEEDS HUMAN EVIDENCE` criteria. The checklist is in
   `docs/testing/functional-scenarios.md` under Rest timer → N558.
 
+## 2026-09-11 — N564 (#1106): a plan the server refuses stops counting as pending forever, and is shown on the sync screen
+
+**What was wrong.** Plans are their own outbox (`apps/mobile/lib/plan.ts`), and
+they had both of N167's defects at once. The push loop catches every failure
+with `noteRowError` and never clears `dirty`, and `countPendingPlans` was
+`COUNT(*) WHERE dirty = 1`. So a plan the server refused counted as pending for
+the life of the install. `pending` gates the backoff timer and the foreground
+trigger, so the refused create was re-sent on every app open and the badge never
+reached zero. Nothing outside `plan.ts` ever read `planned_sessions`, so the
+server's reason was stored and shown nowhere.
+
+A second, quieter version of the same defect sat in the delete path.
+`pushRow` already turns a permanently refused DELETE back into a live plan
+(`deleted_at = NULL, dirty = 0`), and `noteRowError` then records why. Correctly
+not pending, but the plan simply reappeared on the week with no explanation
+anywhere.
+
+### The schema, checked before reusing the predicate
+
+`planned_sessions` carries `dirty INTEGER NOT NULL DEFAULT 1`, `remote`,
+`deleted_at TEXT` and `last_error TEXT` (v15). Those are the same columns, with
+the same meanings, as `local_sessions` and `workout_cache`: `dirty = 1` is owed,
+`deleted_at` set is a tombstone, and `last_error` is written only for a
+PERMANENT refusal, because plan's `noteRowError` returns early otherwise, like
+sessions'. So `BLOCKED_ROW`'s text is valid for plans unchanged.
+
+**Decision: one constant, moved, not a function of the table.** `BLOCKED_ROW`
+moved out of `sessionStore.ts` into `lib/outboxPredicates.ts`, text unchanged,
+and both stores import it. A `blockedRow(table)` that ignored its argument would
+look table-aware and not be. The table-awareness lives in
+`OUTBOX_PREDICATE_TABLES` instead. `outboxPredicates.test.ts` asserts the three
+columns' types on every listed table and runs both predicates against each on
+the real migrated schema, so a table whose columns differ fails there rather
+than on a device. What a predicate MEANS on each table is pinned by that table's
+partition test. The sessions refactor is mechanical, and
+`sessionsPendingPartition.test.ts` stays green; one mutation below goes red in
+both suites at once.
+
+Beside it, `REFUSED_ROW` (`last_error IS NOT NULL AND dirty = 0 AND deleted_at
+IS NULL`) names the other state: refused, and no longer owed. `plan.ts`
+combines the two as `PLAN_NEEDS_ATTENTION`, shared by `refusedPlans` and
+`countRefusedPlans`. `countPendingPlans` is `dirty = 1 AND NOT (BLOCKED_ROW)`.
+`food_entries` has the same dirty-0 state as a hand-written copy in
+`rejectedRows.ts`. It was left alone under this ticket's scope fence.
+
+### Every plan edit path, and how each clears `last_error`
+
+Listed from a grep of every `planned_sessions` write in `apps/mobile` (all are in
+`plan.ts`), not assumed:
+
+- **`planSession`**: INSERT of a new id. `last_error` defaults to NULL, and a
+  re-plan after a refusal is a new row.
+- **`unplanSession`**: the tombstone. **Did not clear `last_error`; now does.**
+- **There is no update, move, reschedule or complete path on the phone.** A plan
+  is changed by removing it and planning the day again. `planRefused.test.ts`
+  pins the function exports of `plan.ts` against an explicit edit / not-edit
+  classification, so a third edit path cannot land without somebody deciding
+  whether it clears the refusal.
+- Sync-internal writes are not local edits. The pull upsert already clears
+  `last_error`, the success path clears it through `noteRowError(null)`, and the
+  refused-delete restore is what sets it.
+
+For the record, the issue's step 2 ("edit the plan's offending field") has no
+literal gesture on mobile. The phone's version of it is Remove, then plan again.
+
+### Where a refused TOMBSTONE lands, and why
+
+Two shapes, placed deliberately:
+
+1. **A delete the server refused** never stays a tombstone, because `pushRow`
+   restores it. It lands in **needs attention**, listed as a refused removal,
+   and **not** in pending. It is not owed, and resending would be refused
+   identically; that was already the reason for the restore. It is the case the
+   athlete can see (the plan came back), so it is the one that has to be
+   explained.
+2. **A tombstone still carrying an error** (`dirty = 1`, `deleted_at` set) is
+   **pending** and not listed. It comes from an older install, or from the
+   instant between the restore and `noteRowError`. It goes out on its own
+   (dropped locally if never sent, otherwise the delete is sent), it has nothing
+   to open, and listing it would show a plan already removed. This is identical
+   to sessions and workouts, because it is the same constant.
+
+### The recovery actions, and why neither is "Try again"
+
+- **Refused plan → "Remove from plan"**, which calls `unplanSession`, the Plan
+  tab's own delete. There is no second, subtly different delete, and `plan.ts`'s
+  rule that a hard delete only ever happens inside the serialised sync still
+  holds. Proven by effect: a control test shows that, left alone, the next sync
+  re-sends the refused create; after Remove, the next sync sends no create and
+  no delete, and the row is gone.
+- **Refused removal → "Keep it"** (`acknowledgeRefusedRemoval`). The server
+  still holds the plan and refuses the delete, and a local discard would be
+  undone by the next pull. So the one real decision is to keep it: this clears
+  the reason, compare-and-swap on `REFUSED_ROW`. A test calls it on a refused
+  *create* and asserts nothing changes; clearing that one would push it back
+  into pending and re-send a doomed request. After Keep it, a sync sends
+  nothing and the plan survives.
+
+The sync screen gets a third list, **Plans**. "Nothing is stuck" and "Still
+trying" now require it to be empty. The latter closes the sharper form
+`ac-verifier` found on N167 slice 2: a refused plan could be told it was "still
+trying". `SyncState.needsAttention` adds `countRefusedPlans`, and the rule
+against painting a partial count covers all three parts. `SyncChip` needed no
+change.
+
+### Evidence
+
+- Fixture tests against real SQLite through `migratedFixture()`:
+  `lib/__tests__/planRefused.test.ts` (17) and
+  `lib/__tests__/outboxPredicates.test.ts` (10). Refused creates and refused
+  deletes are produced by the real `syncPlans` against a small coherent fake
+  server, not seeded.
+  **That fake server is itself a fix.** The first invariant test used one-shot
+  mocks, and it failed on its own apparatus: each helper's real sync pushed
+  every earlier dirty row, so a refusal applied once was quietly accepted by
+  the next helper, and an empty server list had the sweep delete a plan the
+  server was supposed to hold.
+- Coverage invariant: a fixture holds a queued plan, a refused plan, a refused
+  tombstone, a refused removal and a clean plan. It asserts `pending +
+  |listed ∩ owed| = |owed|` against an independent `dirty = 1` read, plus the
+  named placement of each row, so the sum cannot balance on two wrong answers.
+- Orchestrator: two tests in `sync.test.ts` (plans join the sum; a failed plan
+  count leaves the last value).
+- Screen: `__tests__/app/syncRefusedPlans.test.tsx` (7). The two existing sync
+  screen suites gained a `@/lib/plan` mock.
+- **19 mutations, 19 caught, 0 invalid.** Each was checked on disk and restored
+  in memory; the restore was confirmed by re-running the five suites (89/89
+  green). They were: pending ignores `BLOCKED_ROW`; `unplanSession` keeps the
+  error; either half of `PLAN_NEEDS_ATTENTION` dropped; acknowledge loses its
+  CAS; acknowledge unscoped; refused kind inverted; list unscoped; `BLOCKED_ROW`
+  admits tombstones (red in the sessions AND plans suites); the sum drops plans;
+  a partial plan count painted; nothing-stuck ignores plans; Remove neither
+  recounts nor requests a sync; the actions swapped per state; the workout name
+  as a JOIN (`ambiguous column name: id`, confirming the doc comment's claim);
+  a predicate naming a missing column; an unclassified export; Keep it does not
+  recount.
+
+### What is left
+
+- **Device evidence, not observed.** The issue's two steps on a real phone
+  against a real server. Also a refused removal, which the current backend
+  cannot produce: its plan delete refuses with nothing but 404, so it needs a
+  staging change or a proxy. Listed in `functional-scenarios.md`'s "Needs a
+  device".
+- A blocked plan is still re-sent whenever a sync runs for some other reason,
+  exactly as blocked sessions are. The fix here was to the triggers gated on
+  `pending`, not to the push loop.
+- Telemetry for stuck rows stays N565, #1108, out of scope.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

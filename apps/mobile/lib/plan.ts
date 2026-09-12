@@ -10,6 +10,7 @@ import {
 } from '@/lib/apiError';
 import { dayString } from '@/lib/calendar';
 import { getDb } from '@/lib/db';
+import { BLOCKED_ROW, REFUSED_ROW } from '@/lib/outboxPredicates';
 import {
   createPlan as createRemotePlan,
   deletePlan as deleteRemotePlan,
@@ -224,12 +225,30 @@ export async function planSession(
  * The hard delete still exists — in `pushRow`, INSIDE the serialised sync,
  * where `remote` is finally trustworthy and no create can be in flight. That
  * is the only place the question can be answered correctly.
+ *
+ * **It also clears `last_error` (N564/#1106).** A recorded refusal describes
+ * the request that was refused — a create, usually — and removing the plan
+ * replaces that request with a different one. Kept, the stale reason would
+ * ride on the tombstone: harmless to the counters (`BLOCKED_ROW` excludes
+ * tombstones, so it is still pending and still sent), but wrong about what the
+ * phone is now trying to do, and a later refusal of the delete would be
+ * indistinguishable from the old one until `noteRowError` overwrote it.
+ *
+ * This is ONE of the two local edits a plan has on this device — the other is
+ * `planSession`, whose INSERT starts every row with `last_error` NULL. There
+ * is no update path: a plan is changed on the phone by removing it and
+ * planning the day again. `planRefused.test.ts` pins that list against this
+ * module's exports, so a third edit path cannot arrive without being asked
+ * whether it clears the refusal.
+ *
+ * It is also the recovery the sync screen offers for a refused plan: the
+ * athlete's own Remove, not a second, subtly different delete.
  */
 export async function unplanSession(userId: string, id: string): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
   await db.runAsync(
-    `UPDATE planned_sessions SET deleted_at = ?, updated_at = ?, dirty = 1
+    `UPDATE planned_sessions SET deleted_at = ?, updated_at = ?, dirty = 1, last_error = NULL
       WHERE id = ? AND user_id = ?`,
     now,
     now,
@@ -249,18 +268,161 @@ export async function tombstonedPlanIDs(userId: string): Promise<Set<string>> {
 }
 
 /**
- * How many plans are owed to the server.
+ * How many plans are owed to the server and will go out on their own.
  *
  * Tombstones count: a delete that has not reached the server is as unsynced as
- * a create that hasn't.
+ * a create that hasn't — including a tombstone that still carries an old
+ * refusal, which `BLOCKED_ROW` deliberately does not class as blocked.
+ *
+ * **Blocked plans do not count (N564/#1106).** This used to be every
+ * `dirty = 1` row, and the push loop never clears `dirty` on a refusal — so a
+ * plan the server refused permanently counted here for the life of the
+ * install. `pending` gates the backoff timer and the foreground trigger, so
+ * the refused request was re-sent on every app open and the badge never
+ * reached zero. Those rows are counted by {@link countRefusedPlans} instead,
+ * into `SyncState.needsAttention`, and the two share `BLOCKED_ROW` so that
+ * pending + blocked covers every owed plan exactly once.
  */
 export async function countPendingPlans(userId: string): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM planned_sessions WHERE user_id = ? AND dirty = 1`,
+    `SELECT COUNT(*) AS n FROM planned_sessions
+      WHERE user_id = ? AND dirty = 1 AND NOT (${BLOCKED_ROW})`,
     userId,
   );
   return row?.n ?? 0;
+}
+
+/**
+ * The plans that need a person — N564/#1106. Shared by {@link refusedPlans} and
+ * {@link countRefusedPlans}, so the list and the number cannot disagree.
+ *
+ * Two states, and a plan is in at most one of them because they differ on
+ * `dirty`:
+ *
+ * - **`BLOCKED_ROW`** — the plan itself was refused (a create, in practice) and
+ *   is still owed. Excluded from pending by the same constant.
+ * - **`REFUSED_ROW`** — the athlete removed the plan and the server refused the
+ *   delete. `pushRow` does not leave that as a tombstone: it puts the plan back
+ *   (`deleted_at = NULL, dirty = 0`) because a tombstone the server will refuse
+ *   forever would hide the plan for the life of the install. So the refusal
+ *   lands on a live, clean row — not owed, so never pending — and before this
+ *   list it was shown nowhere: the plan simply reappeared on the calendar with
+ *   no word about why.
+ *
+ * **Where a refused TOMBSTONE goes, deliberately.** Two shapes, two answers:
+ *
+ * 1. A tombstone whose delete was refused never stays one — it becomes the
+ *    `REFUSED_ROW` state above and is listed here, as a removal that did not
+ *    happen, with the server's reason. That is the case the athlete can see
+ *    (the plan came back), so it is the one that has to be explained.
+ * 2. A tombstone still CARRYING an error (`dirty = 1`, `deleted_at` set) —
+ *    a refusal recorded before the removal on an install older than
+ *    `unplanSession` clearing it, or the athlete removing the plan again in the
+ *    instant between `pushRow`'s restore and `noteRowError` — is PENDING, and
+ *    not listed. It is owed and goes out on its own (`remote = 0`: dropped
+ *    locally; otherwise the delete is sent), it has nothing to open, and
+ *    listing it would show the athlete a plan they have already removed. This
+ *    matches sessions and workouts exactly, because it is the same constant.
+ */
+const PLAN_NEEDS_ATTENTION = `((${BLOCKED_ROW}) OR (${REFUSED_ROW}))`;
+
+/** A plan on the sync screen's repair list. */
+export type RefusedPlan = PlannedSession & {
+  /** The server's own words. Never paraphrased — see `app/sync.tsx`. */
+  reason: string;
+  /**
+   * `'plan'` — the plan was refused and is still queued; the recovery is to
+   * remove it (and plan the day again, correctly). `'removal'` — the athlete
+   * removed it, the server refused, and the plan is back; the recovery is to
+   * keep it, because the phone cannot delete what the server will not.
+   */
+  refused: 'plan' | 'removal';
+  /** The template's name, when the plan names one this device has cached. */
+  workoutName: string | null;
+};
+
+/**
+ * Every plan waiting on a person, soonest day first.
+ *
+ * The workout's name is a correlated subquery rather than a JOIN on purpose:
+ * `workout_cache` shares `id`, `user_id`, `dirty`, `deleted_at` and
+ * `last_error` with this table, so a join makes the unqualified columns here
+ * and in the shared predicates ambiguous. Measured, not assumed: rewritten as a
+ * LEFT JOIN, SQLite refuses the statement with `ambiguous column name: id`
+ * and nine tests in `planRefused.test.ts` go red. See `outboxPredicates.ts`'s
+ * interpolation rule.
+ */
+export async function refusedPlans(userId: string): Promise<RefusedPlan[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    id: string;
+    day: string;
+    sport: string;
+    workout_id: string | null;
+    class_plan_id: string | null;
+    time_of_day_minutes: number | null;
+    notes: string | null;
+    last_error: string;
+    dirty: number;
+    workout_name: string | null;
+  }>(
+    `SELECT id, day, sport, workout_id, class_plan_id, time_of_day_minutes, notes,
+            last_error, dirty,
+            (SELECT w.name FROM workout_cache w
+              WHERE w.id = planned_sessions.workout_id
+                AND w.user_id = planned_sessions.user_id) AS workout_name
+       FROM planned_sessions
+      WHERE user_id = ? AND ${PLAN_NEEDS_ATTENTION}
+      ORDER BY day ASC, created_at ASC`,
+    userId,
+  );
+  return rows.map((r) => ({
+    ...rowToPlan(r),
+    reason: r.last_error,
+    // `dirty` is what separates the two halves of PLAN_NEEDS_ATTENTION.
+    refused: r.dirty === 1 ? ('plan' as const) : ('removal' as const),
+    workoutName: r.workout_name,
+  }));
+}
+
+/**
+ * How many plans {@link refusedPlans} would list — one half of
+ * `SyncState.needsAttention`'s plan share. Built on the same constant.
+ */
+export async function countRefusedPlans(userId: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM planned_sessions WHERE user_id = ? AND ${PLAN_NEEDS_ATTENTION}`,
+    userId,
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Keep a plan whose removal the server refused, and stop listing it.
+ *
+ * The only recovery that exists for that state on this device. The server
+ * still has the plan and will refuse the delete identically, so sending it
+ * again changes nothing; discarding the local row changes nothing either,
+ * because the next pull puts it straight back. What the athlete can decide is
+ * that they have seen it — so this clears the reason and leaves the plan where
+ * it is, which moves it off the repair list and out of `needsAttention`
+ * without sending anything.
+ *
+ * Compare-and-swap on `REFUSED_ROW`: a plan that has moved on since the list
+ * was read (removed again, or overwritten by a newer pull) is left alone.
+ * Returns whether anything changed.
+ */
+export async function acknowledgeRefusedRemoval(userId: string, id: string): Promise<boolean> {
+  const db = await getDb();
+  const r = await db.runAsync(
+    `UPDATE planned_sessions SET last_error = NULL
+      WHERE id = ? AND user_id = ? AND ${REFUSED_ROW}`,
+    id,
+    userId,
+  );
+  return r.changes > 0;
 }
 
 export type PlanSyncResult = {
@@ -576,6 +738,10 @@ async function pushRow(
         // It will refuse identically forever. Keeping the tombstone would hide
         // the plan for the life of the install while `pending` never reached
         // zero. Restore it: the plan was not deleted.
+        //
+        // The caller's `noteRowError` then records why on the restored row,
+        // which is what puts it on the sync screen (`REFUSED_ROW`, see
+        // `PLAN_NEEDS_ATTENTION`) instead of reappearing unexplained.
         await db.runAsync(
           `UPDATE planned_sessions SET deleted_at = NULL, dirty = 0 WHERE id = ? AND user_id = ?`,
           row.id,

@@ -60,6 +60,8 @@ jest.mock('../rejectedRows', () => ({
 // and it happened again when plans did. The two tests below are what catch it.
 jest.mock('../plan', () => ({
   countPendingPlans: jest.fn(async () => 0),
+  // N564/#1106: plans' share of `needsAttention`.
+  countRefusedPlans: jest.fn(async () => 0),
   syncPlans: jest.fn(async () => ({ pushed: 0, pulled: 0, failed: 0, deferred: 0 })),
 }));
 
@@ -147,6 +149,7 @@ beforeEach(async () => {
   mockSync.mockResolvedValue(ok());
   (jest.requireMock('../sessionStore').countBlockedRows as jest.Mock).mockReset().mockResolvedValue(0);
   (jest.requireMock('../rejectedRows').countRejectedRows as jest.Mock).mockReset().mockResolvedValue(0);
+  (jest.requireMock('../plan').countRefusedPlans as jest.Mock).mockReset().mockResolvedValue(0);
 });
 
 it('coalesces a burst into the run in flight plus one', async () => {
@@ -754,6 +757,34 @@ describe('needsAttention — rows waiting on a person (N167/#544)', () => {
     setSyncIdentity('user_1', token);
     await settle();
     expect(syncState().needsAttention).toBe(3);
+  });
+
+  it('includes refused plans — N564/#1106', async () => {
+    // Plans are their own outbox, and until N564 their refusals reached no
+    // count at all: a refused plan inflated `pending` instead, forever.
+    const planCount = jest.requireMock('../plan').countRefusedPlans as jest.Mock;
+    blockedCount().mockResolvedValue(2);
+    refusedCount().mockResolvedValue(1);
+    planCount.mockResolvedValue(4);
+    setSyncIdentity('user_1', token);
+    await settle();
+    expect(planCount).toHaveBeenCalledWith('user_1');
+    expect(syncState().needsAttention).toBe(7);
+  });
+
+  it('a failed PLAN count leaves the last value standing, like the other two', async () => {
+    const planCount = jest.requireMock('../plan').countRefusedPlans as jest.Mock;
+    planCount.mockResolvedValue(1);
+    setSyncIdentity('user_1', token);
+    await settle();
+    expect(syncState().needsAttention).toBe(1);
+
+    // Only the plan half fails. Emitting the other two (0 + 0) would paint 0
+    // while the one refused plan sits on the repair screen.
+    planCount.mockRejectedValue(new Error('read failed'));
+    setSyncIdentity('user_1', token);
+    await settle();
+    expect(syncState().needsAttention).toBe(1);
   });
 
   it('a count that THROWS SYNCHRONOUSLY does not stop the retry ladder', async () => {

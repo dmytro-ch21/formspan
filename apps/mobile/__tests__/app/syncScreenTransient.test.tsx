@@ -39,6 +39,15 @@ jest.mock('@/lib/rejectedRows', () => ({
   discardRejectedRow: jest.fn(),
 }));
 
+// N564/#1106 — the screen reads a THIRD list, refused plans. Empty here, and
+// mocked rather than left to hit the real SQLite layer, for the reason the
+// two mocks above are. `syncRefusedPlans.test.tsx` owns the plan half.
+jest.mock('@/lib/plan', () => ({
+  refusedPlans: jest.fn(async () => []),
+  unplanSession: jest.fn(),
+  acknowledgeRefusedRemoval: jest.fn(),
+}));
+
 let mockSyncState: {
   syncing: boolean;
   pending: number;

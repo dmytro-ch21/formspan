@@ -37,10 +37,15 @@ import {
 import { putDetail as pushBjjDetail, type SessionDetail as BjjDetail } from './bjjSession';
 import { putDetail as pushRunningDetail, type SessionDetail as RunningDetail } from './running';
 import { addDays, localDayDelta } from './calendar';
+import { BLOCKED_ROW } from './outboxPredicates';
 
-/**
+/*
  * What makes a session or workout row BLOCKED: refused permanently by the
  * server, still owed, and not a tombstone — N167/#544.
+ *
+ * `BLOCKED_ROW` itself moved to `outboxPredicates.ts` in N564/#1106, unchanged
+ * in text, so that plans share the SAME definition rather than a copy of it.
+ * What follows is what it means on these two tables.
  *
  * ONE definition, interpolated into `blockedRows`, `countBlockedRows`,
  * `countPendingSessions` and `countPendingWorkouts`, and the sharing is the
@@ -65,7 +70,6 @@ import { addDays, localDayDelta } from './calendar';
  * returns early for anything else. So on these two tables `last_error IS NOT
  * NULL` means refused, not "a request failed once".
  */
-const BLOCKED_ROW = 'last_error IS NOT NULL AND dirty = 1 AND deleted_at IS NULL';
 
 /**
  * Offline-first session storage.
