@@ -342,6 +342,17 @@ jest.mock('react-native-reanimated', () => {
   const React = require('react');
   const { View } = require('react-native');
 
+  /*
+    F55/#1134: every write to every shared value, in order — the value as it was
+    ASSIGNED, before the mock's same-value short-circuit. Exposed as
+    `__sharedValueWrites` so a test can show that reversing the timer's swap
+    assigns a new animation to the SAME value with no start value written in
+    between, which is the whole of what makes a reversal continue rather than
+    restart. Without it the only thing a test could see is where each animation
+    comes to rest, which is identical for the flash and the fix.
+  */
+  const sharedValueWrites = [];
+
   /** A layout-animation builder that remembers every call made on it. See N558 below. */
   const layoutBuilder = (name, config) => {
     const chain = { name, config };
@@ -427,6 +438,7 @@ jest.mock('react-native-reanimated', () => {
         const box = { current: initial };
         const write = (next) => {
           const value = typeof next === 'function' ? next(box.current) : next;
+          sharedValueWrites.push({ target: ref.current, value });
           if (Object.is(value, box.current)) return;
           box.current = value;
           bump((n) => n + 1);
@@ -475,6 +487,7 @@ jest.mock('react-native-reanimated', () => {
       left every test green. Same no-op-builder trap, one component over.
     */
     useAnimatedStyle: (worklet) => worklet(),
+    __sharedValueWrites: sharedValueWrites,
     withSequence: (...animations) => animations[animations.length - 1],
     ReduceMotion: { System: 'system', Always: 'always', Never: 'never' },
     LayoutAnimationConfig: ({ children, skipEntering, skipExiting }) =>
@@ -486,6 +499,8 @@ jest.mock('react-native-reanimated', () => {
     FadeInDown: layoutBuilder('FadeInDown', {}),
     FadeOutUp: layoutBuilder('FadeOutUp', {}),
     FadeOut: layoutBuilder('FadeOut', {}),
+    // F55/#1134: the timer's arrival is opacity-only now.
+    FadeIn: layoutBuilder('FadeIn', {}),
     // A constructor returning an object is how `new Keyframe(frames)` keeps the
     // same recording chain as the preset builders.
     Keyframe: function Keyframe(frames) {
