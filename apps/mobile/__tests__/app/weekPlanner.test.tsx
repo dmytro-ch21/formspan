@@ -471,6 +471,7 @@ describe('the week theme', () => {
     // and is what the synchronous v13 `fireEvent` gave us for free: without it
     // both triggers read the same pre-commit `busy: false` closure and BOTH
     // send.
+    // rntl-await-ok: setTheme never settles by design, so awaiting this press hangs the test (above)
     void fireEvent.press(screen.getByTestId('plan-theme-save'));
     await waitFor(() => expect(screen.getByTestId('plan-theme-save')).toBeDisabled());
     // The Save Pressable's own `disabled={busy}` covers a second TAP once

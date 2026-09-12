@@ -74977,6 +74977,53 @@ The reviewer also read `react-native-health-connect`'s config plugin. It injects
 
 **Reachability on a phone**: no athlete-facing change. This guards the Android build an athlete installs.
 
+## 2026-09-12 — H23 (#1070): a check that fails when a mobile test drops an RNTL 14 promise
+
+**Why.** N550 (#1002) moved the mobile suite to React Native Testing Library 14, where `render`, `renderHook`, `fireEvent` and its members, `act`, `rerender` and `unmount` return promises. A dropped one is not a type error: `fireEvent.press(button);` type-checks the same whether `press` returns `void` or `Promise<void>`. During the migration `tsc --noEmit` read 0 errors with 1,058 call sites still unawaited. The suite is no backstop either. An unawaited event lets the next assertion run before the state it checks is committed, which usually fails and sometimes passes; F51 (#1101) was one of those, and F47 (#1122) awaited the sites it found. Nothing stopped the next one from landing.
+
+**What was built.** `scripts/check-rntl-awaits.mjs`, run as `check:rntl-awaits` in `verify` right after `check:lint-ratchet` and as an `Unawaited RNTL calls in tests` step in the `Mobile (Expo)` CI job. It is a new step, not a new job, so `EXPECTED_CHECK_RUNS` is unchanged. The script uses TypeScript's parser, resolved from `apps/mobile`, without the type checker. It flags an expression statement (a call whose value is thrown away) when the call is:
+- an RNTL import that returns a promise: `render`, `renderHook`, `act`, `waitFor`, `waitForElementToBeRemoved`;
+- `fireEvent(...)` or `fireEvent.<member>(...)`;
+- `screen.rerender/unmount/findBy*`;
+- `rerender/unmount/findBy*` taken from a render result, destructured or as `view.unmount()`;
+- `userEvent.<method>(...)` other than `setup`, and any method of a `userEvent.setup()` session;
+- a named test helper that wraps one of these, i.e. is `async`, or returns such a call. Helpers are resolved to a fixpoint, within a file and across files, including ones exported from another test file and imported relatively.
+
+**Why it is scoped to RNTL and not a floating-promise rule.** A test may leave the APP's own promise pending on purpose. `lib/__tests__/shareCard.test.ts` calls `shareCard(...)` against a `shareAsync` mocked never to settle, and awaiting it would hang the test. `@typescript-eslint/no-floating-promises` would demand exactly that await, and it needs typed linting `apps/mobile` does not have. The check leaves that line alone: it is on the tree and the scan passes.
+
+**The escape hatch needs a reason.** `// rntl-await-ok: <why>`, on the flagged line or the one above. `void` alone does not escape, because it discards the promise just as silently. The one live case was `weekPlanner.test.tsx`'s Save press: `setTheme` is mocked never to settle, so awaiting that press times the test out. It already carried `void` and a paragraph saying so, and now carries the marker too. That was the only site the first scan of `main` reported.
+
+**The apparatus is checked before the answer is believed.** The script runs 21 self-test cases first and refuses to scan if any disagrees: 20 single-file cases, plus a four-hop cross-file helper chain read in dependents-first order.
+- **Flagged:** bare `render`, `fireEvent.press`, `fireEvent(el, ev)`, `act` and `waitFor`; a destructured `rerender`/`unmount`; `view.unmount()`; `screen.unmount`/`findBy*`; a local helper returning `render`; an async helper and a helper calling it; an unawaited `userEvent` session method; a direct `userEvent` call (but not `setup`); a namespace import; `void`; a marker with no reason; a non-async helper whose inner press is flagged.
+- **Left alone:** awaited, returned and assigned calls; the app's own never-settling promise; a same-named `render` from another module; the marker with a reason.
+
+On the real tree it also fails if it recognised no awaited RNTL call at all, so a scan that stopped reading RNTL cannot pass as clean. Today it reports "371 test files, 133 import RNTL, 4144 awaited RNTL calls, 0 unawaited".
+
+**Checks.** 4 mutations on a real test file, `weekPlanner.test.tsx`, each exit 1 naming the exact line, restored byte-identical, then re-run to exit 0:
+- **an unawaited `fireEvent.press`** (the ticket's own mutation): line 449;
+- **an unawaited `render`:** line 444;
+- **the escape-hatch comment removed:** line 474, the `void` press;
+- **an unawaited destructured `rerender` added:** line 500.
+
+`check:verify-chain` still passes: 56 gates, 51 in the chain, after rebasing onto H16's parity check, which landed first.
+
+**Taken from review.** `frontend-reviewer` found one blocking gap, and it was real.
+- **`userEvent` was not tracked at all.** RNTL 14's `userEvent` is async, and `hrPairingContrast.test.tsx` already uses a `userEvent.setup()` session. That test awaits correctly, but an unawaited `user.press(...)` scanned as clean. An earlier draft of this entry even said no test used `userEvent`, which was wrong. The check now tracks both `userEvent.<method>` and the methods of a `setup()` session.
+- **The cross-file pass ran a fixed three rounds, not to a fixpoint.** The reviewer showed that a four-hop helper chain is missed when files are read dependents-first. The deepest real chain is 2 hops, so nothing fired, but nothing would have warned when that changed. It now runs until nothing changes, and fails loudly past 100 passes.
+
+Three more mutations, each caught and restored byte-identical:
+- **dropping the `await` from `hrPairingContrast.test.tsx:101`'s `user.press`:** exit 1, naming that line;
+- **removing the session rule:** the self-test fails ("an unawaited userEvent session method: expected lines [4], flagged []");
+- **breaking the fixpoint back to a single pass:** the self-test fails on the four-hop chain.
+
+Its other notes are recorded, not fixed: per-file name sets are not scope-aware, and a one-character escape-hatch reason passes. Both are sound on today's tree only by its naming choices.
+
+**What it cannot see.** It knows names, not types. A promise laundered through `.then(...)`, an alias (`const press = fireEvent.press`), or a helper passed in as an argument goes unseen. So does a helper defined as an object or class member, and a `findBy*` destructured straight off `screen`. Neither shape exists in the tree today; the reviewer counted.
+
+**F51 (#1101).** Its sixth criterion asked for a guard to be recommended, and this builds one. Its reproduce-before-the-fix criteria are moot, because F47 already landed the fix; that is recorded on the ticket. So this does not close F51.
+
+**Reachability on a phone**: no athlete-facing change.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
