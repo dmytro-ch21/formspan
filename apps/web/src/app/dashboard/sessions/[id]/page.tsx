@@ -27,7 +27,6 @@ import {
   pickImage,
   replaceSets,
   setExerciseUnit,
-  GRIPS,
   offeredGrips,
   SET_TYPES,
   swapSuggestions,
@@ -54,6 +53,7 @@ import {
   weightUnitName,
   type UnitSystem,
 } from "@/lib/units";
+import { heldGripLabel } from "@/lib/heldGrip";
 import { useUnits } from "@/lib/useUnits";
 
 /**
@@ -1048,6 +1048,8 @@ function SetRow({
     };
   }
 
+  const heldGrip = heldGripLabel(set.grip);
+
   return (
     <tr className="border-b border-line-soft last:border-b-0">
       <td className="px-4 py-1.5">
@@ -1126,16 +1128,14 @@ function SetRow({
             ))}
           </select>
         ) : (
-          set.grip && (
-            // `title` because "Neu" alone is announced verbatim by a screen
-            // reader and explains nothing on hover — and unlike the set-type
-            // short beside it, grip has no other surface on this page to read
-            // the full word from. Same treatment the RIR/RPE headers use.
-            <span
-              className="ml-1 text-xs text-text-dim"
-              title={`${GRIPS.find((g) => g.key === set.grip)?.label ?? set.grip} grip`}
-            >
-              {GRIPS.find((g) => g.key === set.grip)?.short ?? set.grip}
+          heldGrip && (
+            // The full word, not the short: a finished session's row is the
+            // only surface on this page that names the grip, and "Rev" beside
+            // a set number went unseen (F27, #715). The hidden " grip" tells a
+            // screen reader what the word is; a `title` only reached a mouse.
+            <span className="ml-1 text-xs text-text-dim">
+              {heldGrip}
+              <span className="sr-only"> grip</span>
             </span>
           )
         )}
