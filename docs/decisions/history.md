@@ -74136,16 +74136,32 @@ That last one was first run against a baseline an edit had broken (`props` is no
 - **E3 — the unchanged hook timed across the whole suite at load ~375.** 5,822/5,822 tests green, zero natural timeouts; teardown p50 1ms, p95 15ms, p99 64ms, **max 260ms**. Legitimate teardown work never comes within 57x of the 15s budget, which is why raising the timeout — which the ticket forbade without this measurement — would only have moved the threshold a freeze has to cross.
 - **Answer to "which step spends the time": none of them.** The time is jest's hook timer expiring while the process is frozen and then firing first at the next timers phase, ahead of the `setImmediate` callback the hook is waiting on.
 
-**The fix.** A test that rendered nothing has nothing for this hook to settle or unmount, so the hook now returns before `act` — resolving in microtasks, reaching no timers phase, and so immune to a freeze of any length. Rendered tests take F47's teardown byte-identically. **This fixes the tests that render nothing, not the freeze**: a component test's teardown is still exposed to a worker frozen past 15s, and the PR says so.
+**The fix.** A test that rendered nothing has no React work for this hook to settle, so it now skips `act` and the real yield — but still runs `cleanup()` — resolving in microtasks, reaching no timers phase, and so immune to a freeze of any length. Rendered tests take F47's teardown byte-identically. **This fixes the tests that render nothing, not the freeze**: a component test's teardown is still exposed to a worker frozen past 15s, and the PR says so.
 
 **Detecting "rendered nothing" took three measurements and one caught bug.**
 
 - `screen.root` THROWS "`render` function has not been called" only when nothing was rendered since the last cleanup. After `renderHook`, a component that renders `null`, and a manual `unmount()`, it returns `undefined` **without throwing** — so truthiness would have skipped `cleanup()` on a still-mounted hook host. The helper (`lib/__tests__/support/renderedTree.ts`) returns false only on that exact error and treats anything else as rendered, so a reworded RNTL message degrades to F47's teardown and never skips a cleanup. (E3's own rendered/not-rendered split used truthiness and therefore overcounted "nothing rendered"; the census below is the corrected one.)
 - **The first draft leaked every rendered tree.** It destructured `screen` from RNTL at module scope. RNTL 14 REASSIGNS that export (`dist/screen.js`: `render` sets `exports.screen = renderResult`, `cleanup` restores a placeholder), so the binding held the placeholder forever, every test looked unrendered, and `cleanup()` never ran. **The guard test's "is false again in the next test" went red on it** — 6/7 against the draft, 7/7 against F47's teardown. The hook now reads `rntl.screen` at call time, with the reassignment cited in its comment. A suite of pure and component tests (24/24, 18/18, 9/9) passed against the broken draft, which is the argument for that ordered guard test existing at all.
 
+**Review found a second leak, and it was real.** `frontend-reviewer` read RNTL's `dist/cleanup.js`: `cleanup()` does not only unmount, it drains a module-level queue — and `waitFor`, with real timers, registers its poll in that queue whether or not anything was rendered (`dist/wait-for.js`: `setInterval(checkRealTimersCallback, interval)`, then `addToCleanupQueue(cleanupQueueCallback)`). The first version of this fix returned before `cleanup()` on the short path, so a test that started an unsettled `waitFor` without rendering would leave it polling into the next test. No test in the suite does that today, which is why the census could not see it. **Measured before anything changed**, with a two-test probe (A starts a never-settling `waitFor`, renders nothing; B counts polls across 60ms of real time): **this branch 9 and 5 polls, plus jest's "did not exit one second after the test run"; F47's teardown 0 and 0.**
+
+The fix keeps `cleanup()` on the short path — `if (!hasRenderedTree(rntl.screen)) { await cleanup(); return; }` — and it stays microtask-only by construction: `cleanupQueueCallback` is `finalizeWaitFor({ rejectOnAbort: true })`, synchronous (dequeue, reject with "waitFor was aborted by cleanup", clear the timeout and interval), and `cleanup()` only awaits each callback. A fresh review of that fix read RNTL's source for every other way into the queue and found none. Only `render` (alongside `setRenderResult`, so never on the short path) and real-timer `waitFor` add to it. `findBy*` and `waitForElementToBeRemoved` delegate to that `waitFor`, and fake-timer `waitFor` never queues at all. The guard test gained an ordered pair pinning it; **it went red against the leaky commit (10 polls where 1 was expected, open handle reported) before the fix, and is 9/9 with no open handle after.** The helper's comment was narrowed to what it checks — rendered or not — and the hook's comment now gives both timing figures (the unconditional hook's 260ms, the fixed path's 283ms), the reviewer's other point.
+
+**Moving `cleanup()` onto the short path made two mutations invisible, so the guard gained a check for what the full path actually buys.**
+
+- **What the rerun showed.** Re-running the mutation matrix on the final code:
+  - a destructured `screen` (M1) passed all nine guard tests;
+  - an always-false detection (M4) produced 0 warnings on F47's control 1.
+- **Why neither was caught.** Neither leaks any more, because the short path unmounts too. All they do is drop `act` and the yield for a test that rendered. That yield is what delivers F47's "nothing is swallowed": work due when the body returns runs inside `act`, before the unmount. Swallowed work warns about nothing, so every warning-based check was blind to it, F47's controls included.
+- **The new check.** An ordered pair: a rendered component's 5ms timer, armed synchronously in the test body and due when it returns, must have fired by the next test. It is armed after `render` returns, so it cannot fire inside `render`'s own `act` on a loaded host.
+- **Probed before committing.**
+  - final code: 11/11;
+  - M1: red, expected 1, received 0;
+  - M4: red, expected 1, received 0.
+
 **Verified both ways.**
 
-A 16s synchronous stall injected at the very start of the teardown hook, at load ~380. The unfixed arm is `origin/main`'s `jest.setup.js`; the fixed arm is the working tree.
+A 16s synchronous stall injected at the very start of the teardown hook. The unfixed arm is `origin/main`'s `jest.setup.js`; the fixed arm is the working tree. Measured at load ~380 on the first version, then **re-measured at load ~395 on the final one** (short path runs `cleanup()`) with identical results. Case b is what shows the added `await cleanup()` never crosses a macrotask boundary.
 
 | case | hook | test | stall | result |
 |---|---|---|---|---|
@@ -74174,15 +74190,18 @@ A 16s synchronous stall injected at the very start of the teardown hook, at load
 
 **Mutations**, each on untracked copies of the setup, helper or guard test so the working tree was never edited:
 
-| # | mutation | what it runs | result |
+| # | mutation | what it runs | result on the final code |
 |---|---|---|---|
-| M1 | `screen` destructured at module scope (the first draft) | the guard test | **red** at "is false again in the next test" — the leak |
+| M1 | `screen` destructured at module scope (the first draft) | the guard test | **red** at "sees that the timer ran in that teardown" (expected 1, received 0) |
 | M2 | detection by truthiness (`!!screen.root`) | the guard test | **red** on `renderHook`, a `null`-rendering component and manual `unmount()` |
-| M3 | detection always `true` | the pure test under the 16s stall | **red** — `Exceeded timeout of 15000 ms for a hook`; the immunity is gone |
-| M4 | detection always `false` in the setup only (guard reads the real helper) | the guard test | **red** at "is false again in the next test" — `cleanup()` never ran |
-| M5 | the early return removed (F47's hook) | the pure test under the 16s stall | **red** — the same hook timeout |
+| M3 | detection always `true` | the pure test under the 16s stall | **red**: `Exceeded timeout of 15000 ms for a hook`, so the immunity is gone |
+| M4 | detection always `false` in the setup only (the guard reads the real helper) | the guard test | **red** at "sees that the timer ran in that teardown" (expected 1, received 0) |
+| M5 | the early path removed (F47's hook) | the pure test under the 16s stall | **red**: the same hook timeout |
+| M6 | the short path without `cleanup()` (the first version of this fix) | the guard test | **red** at "sees no further polls in the next test" |
 
-**Census against E3's baseline.** The full suite ran on the fixed teardown at load ~360–375, and the path each test took was logged with the corrected detection. **360/360 suites and 5,829/5,829 tests passed** — one suite and seven tests more than E3, which are the guard test.
+M1 and M4 were **not caught** before the due-work pair existed: with `cleanup()` on the short path, both passed every other check (above). They are listed here as caught only because that pair was added and they were re-run against it.
+
+**Census against E3's baseline.** The full suite ran on the final code at load ~520–535, and the path each test took was logged with the corrected detection. **360/360 suites and 5,833/5,833 tests passed**: one suite and eleven tests more than E3, all of them the guard test.
 
 | signal | E3 (F47 teardown) | fixed |
 |---|---|---|
@@ -74191,11 +74210,11 @@ A 16s synchronous stall injected at the very start of the teardown hook, at load
 | `overlapping act() calls` | 3 | 3 |
 | uncaught errors | 0 | 0 |
 | timeouts | 0 | 0 |
-| "failed to exit gracefully" | 1 | 1 |
+| "failed to exit gracefully" | 1 | 0 (one run; not claimed as an effect of the fix) |
 
-- **4,384 of 5,829 tests (75.2%) took the early return.** 1,445 took the full teardown.
+- **4,387 of 5,833 tests (75.2%) took the early return.** 1,446 took the full teardown.
 - **By file:** 230 files returned early in every test, 114 took the full teardown in every test, and 16 were mixed.
-- **Full teardowns stayed fast:** p50 2ms, p99 119ms, max 283ms.
+- **Full teardowns stayed fast:** p50 1ms, p99 69ms, max 282ms. The run before the guard additions, at load ~360–375, gave max 283ms.
 
 **Apparatus errors on the way, recorded because each would have been believed.** Two result parsers died on shell quoting and printed `UNKNOWN` rather than a verdict; a timing note claimed a timed-out hook never reaches its log line, which is false (jest rejects the race, the hook function keeps running); the stall check was first run against the leaking draft and was stopped before its fixed-arm results could be read as evidence. Every parser was self-tested against known output before its verdicts were used.
 
