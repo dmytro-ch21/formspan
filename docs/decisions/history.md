@@ -73181,6 +73181,263 @@ longer loops when starting a run, and specifically noting whether it was
 ever seen before Sign-in independent of any running screen.
 
 
+## 2026-09-11 — N558 (#1047): starting a rest timer no longer moves the log, the bar drains, and the countdown stops re-rendering the session screen
+
+Three defects landed on the same frame, roughly twenty times a session, on the
+screen an athlete stares at between sets: the whole workout log teleported 64pt
+when a rest started, the bar and the expanded card swapped between two frames,
+and the progress bar was a 4Hz stair that re-rendered the entire session screen
+to draw each step.
+
+### The anchors, re-verified on `main` @ `c2df4cf5`
+
+The issue verified them at `f00c6a82`. All of them still held in meaning; every
+line number had moved:
+
+- `TimerSurface` mounts at `app/session/[id].tsx:2702` (was 2688).
+- The padding was `timerState.timer && timerState.minimized ? { paddingTop:
+  TIMER_BAR_SPACE } : null` at `:1666` (was 1653).
+- `TIMER_BAR_SPACE` is still `64`, at `components/Timer.tsx:87` (was 86).
+- The swap was `Timer.tsx:102` (was 101); the percentage-width fill `:482-488`
+  (was 481-487); the 250ms interval `components/Countdown.tsx:288-292` (was
+  283-287).
+- The session file is **3,969 lines**, not the ~2,700 the dispatch brief quoted.
+- **The ~360-renders figure is real, and for a reason the issue did not state.**
+  `remainingAt` returns FRACTIONAL seconds, so every 250ms `setRemaining` got a
+  new float and React's same-value bail-out never fired. Had it returned whole
+  seconds the cost would have been ~90.
+
+### Defect 1 — reserved space, not animated padding
+
+The padding is now `timerSpaceFor({ finished, timerShowing })`: **64pt for the
+whole life of a live session**, whether or not a timer is showing. Starting,
+ending, expanding and minimising a timer therefore move nothing. There were
+three honest options and the other two were rejected on the merits:
+
+- **Animate the padding.** It is a Yoga pass over the entire log, every
+  frame, for the length of the animation, on a ~3,900-line screen. It is also
+  still motion under the thumb, only slower. The athlete's thumb is usually on
+  the tick that started the rest, and the ticket's own out-of-scope list rules
+  out moving a target mid-reach: a jump is over before the finger lands, and a
+  slide is not.
+- **FLIP the content** (issue part (b): pad instantly, counter-translate,
+  animate the translate to zero). Transform-only, so cheap. But the ticket's
+  author called it the one recipe that must be device-prototyped before anyone
+  believes it, because translating a scroll view's content while its padding
+  changes interacts with the scroll offset. It also still moves the log under
+  the thumb. **(b) was not built and not prototyped.** Reserving the space
+  makes it unnecessary, and nothing here was run on a device.
+- **Reserve the space** (chosen). It moves nothing, costs no frames, needs no
+  device prototype to trust and no Reduce Motion branch. It also removes the
+  REVERSE jump, which the issue did not list but the old rule produced on three
+  more taps: ending a rest, expanding the bar, minimising the card.
+
+**The price, stated rather than hidden**: 64pt of empty room above the first
+exercise while no timer is showing. It is visible only when scrolled to the very
+top, which is not where a mid-workout athlete is. `timerShowing` keeps the room
+while a bar is still up on a session that has just been finished. A finished
+report with no timer gets it back. If the empty band reads badly on a device, the
+next move is to give it something quiet to hold, not to go back to moving the
+log.
+
+### Defect 2 — arrival, exit and the swap
+
+All four are Reanimated layout-animation builders at module scope in
+`Timer.tsx`, on the motion scale (`constants/Motion.ts`), and every one carries
+`.reduceMotion(ReduceMotion.System)`.
+
+- **Arrive**: `FadeInDown`, `MS.control` (180ms), `EASE.out`. **Leave**:
+  `FadeOutUp`, `MS.press` (120ms). Exits run faster than entries.
+- **Not `SlideInUp`, which the issue proposed.** In Reanimated 4.5.1 it starts
+  at `-windowHeight` (read in `layoutReanimation/defaultAnimations/Slide.ts`).
+  In 180ms that is a ~5,000pt/s fly-in across the header, twenty times a session.
+  `FadeInDown` is a 25pt slide into the slot under an opacity ramp, so it still
+  arrives from above.
+- **Swap**: the incoming form is a `Keyframe` from `opacity 0, scale
+  SWAP_SCALE` to `1, 1` over `MS.control`, with `EASE.out`. The outgoing form
+  runs `FadeOut` over `MS.press`. The two children are keyed, so React replaces
+  one with the other rather than reconciling a bar into a card. That replacement
+  is what lets one fade out while the other fades in. The layer is absolutely
+  positioned, so the log never re-lays-out.
+- `LayoutAnimationConfig skipEntering skipExiting` stops the swap animation
+  playing inside the layer's own arrival or exit, which would be a fade inside
+  a fade on every rest.
+- **`SWAP_SCALE` is new in `Motion.ts`**, deliberately. It is equal to
+  `PRESS_SCALE` (3%) today, named separately so the two can diverge if a device
+  run says they should. No new duration or curve was needed.
+
+### Defect 3 — the drain, and who hears the tick
+
+**The countdown no longer lives in React state.** `useCountdown` holds a
+`RemainingClock`: a three-function store (`subscribe` / `read` / `publish`).
+The **same 250ms interval** publishes to it. Only `TimerSurface` subscribes, via
+`useSyncExternalStore` (`useRemaining`), so a tick re-renders the timer subtree
+and not the screen that owns the hook. The screen's two handlers that need the
+number (`bankRunningWork`, and Stop logging a work set) call `clock.read()`
+when they fire. That is the same last-tick value they used to close over from
+the last render, so the logged seconds are unchanged.
+
+**The digits' cadence is deliberately unchanged at 250ms.** The file's existing
+reasoning still holds: repaint within a quarter second, and catch a completion
+whose timeout was suspended in the background. The expanded card's ring still
+steps with it, and the audit explicitly forbids smoothing the ring. What changed
+is the cost of a tick: the timer subtree (a few dozen views) instead of every
+exercise and set row.
+
+**The bar is `Drain`**: `scaleX` on an absolutely positioned, childless fill
+with `transformOrigin: 'left'`, driven by a shared value on the UI thread. It
+is armed **once per change of the countdown itself** (start, ±15s, pause,
+resume, the next step of a run) and never on a tick. Each arm is ONE assignment
+of a TWO-leg `withSequence`, not a single `withTiming`, and that is stated here
+because the ticket's criterion says "one `Animated.timing`":
+
+- It reads the deadline model (`remainingAt(timer, now)`), the same source as the
+  digits, so both reach zero together.
+- It bridges from wherever the fill currently is on screen to the true position
+  over `MS.control`. Assigning a new animation to a shared value starts from
+  its presentation value, which is what makes this work. +15s therefore visibly
+  grows the bar and resume continues from the paused width; neither restarts
+  from full.
+- It then drains with `Easing.linear` to empty at the deadline. Constant
+  progress is the one place linear is correct: the bar is a clock, and an eased
+  clock lies.
+- **The first arm after the bar mounts does not bridge; it jumps** (a
+  zero-length first leg). On a fresh rest the countdown's clock publishes in an
+  effect that runs after the bar's first render, so the fill can be seeded at 0.
+  Bridging from that seed refilled the bar from empty over 180ms at the start of
+  every rest. `frontend-reviewer` found it from source; it is now pinned by its
+  own test.
+- Paused or spent, it settles on the true width and arms nothing further.
+
+**Reanimated `withTiming`, not the issue's core `Animated.timing` +
+`useNativeDriver`.** Both run off the JS thread, so this is not a performance
+argument. There are three reasons:
+
+- The same 3pt surface already needs Reanimated for the layout animations the
+  ticket asks for, and two animation systems on one element is two mental models
+  for one bar.
+- Re-arming from the presentation value is native to a shared value. With the
+  native driver it is a `stopAnimation` callback round trip through JS.
+- F46 (#1045) already moved `MacroRings` off `Animated.Value` onto shared values
+  for exactly this class of work, and the `animate-expo` skill makes Reanimated
+  the rule.
+
+Every other acceptance-criterion property is kept literally: `scaleX`,
+`Easing.linear` on the drain, absolute childless fill, `transformOrigin:
+'left'`, re-armed from the current value, and one assignment per change of the
+countdown. The one further drift is the two-leg sequence described above. A
+single linear timing from the current value would satisfy the letter, and it
+would under-report a +15s for most of the remaining rest.
+
+### Reduce Motion
+
+- **Layout builders**: `ReduceMotion.System`, so with Reduce Motion on the
+  surface appears and swaps in place. Nothing slides, and because the space was
+  already reserved, nothing teleports either. One caveat: `System` reads
+  Reanimated's **launch-time snapshot** (`ReducedMotionManager`, set from
+  `_REANIMATED_IS_REDUCED_MOTION`), so toggling the setting with the app open
+  reaches these builders on the next launch.
+- **The drain deliberately does NOT use `System`.** A reduced `withTiming` jumps
+  straight to its destination, which here is an empty bar for the whole rest.
+  The drain asks the LIVE `lib/useReducedMotion` hook instead. When the answer is
+  on, or not yet in (`null`), nothing animates and the fill is set to the
+  current fraction on each digit repaint. That is exactly the bar's pre-N558
+  behaviour, minus the screen-wide re-render. When the answer is off, the
+  drain's timings carry `ReduceMotion.Never`, because the decision was already
+  made live. Otherwise an athlete who turned Reduce Motion OFF mid-session would
+  have every drain "reduced" to an empty bar.
+
+### The jest Reanimated mock grew a third time
+
+Added: `useAnimatedStyle`, `withSequence`, `cancelAnimation`, `ReduceMotion`,
+`Easing.linear`, a `LayoutAnimationConfig` that renders a View carrying its skip
+flags, and recording builders for `FadeInDown`, `FadeOutUp`, `FadeOut` and
+`Keyframe`. The config first rendered its children bare, which discarded the
+flags: review deleted `skipEntering skipExiting` from `Timer.tsx` and every test
+stayed green. It now records them, and a test asserts both. Each chained call returns
+a builder that remembers what it was told, so a missing
+`.reduceMotion(ReduceMotion.System)` is observable rather than a no-op. There is
+still no frame clock: tests read how an animation was ARMED (how often, from
+where, with which curve, duration and reduce-motion setting), never a frame of
+it.
+
+One apparatus trap, measured: advancing 30 seconds inside ONE `act` in the
+Reduce Motion path tripped React's nested-update limit. The mock turns each
+shared-value write into a re-render, and 120 ticks with no task boundary between
+them is not a shape a device ever produces. The test advances one second per
+`act`, and says why.
+
+### Verification
+
+`components/__tests__/timerContinuity.test.tsx` has 16 tests. The load-bearing
+one renders a stand-in for the session screen: it calls `useCountdown` and
+mounts `TimerSurface`, and nothing else. It counts its own renders across 30
+seconds of a running rest and asserts **zero**. A positive control proves the
+counter counts (±15s re-renders the owner), and a second test proves the digits
+still repaint.
+
+Fourteen mutations were each applied from a byte-exact backup, confirmed on
+disk, run, restored, and byte-compared. Every one went red on a named assertion
+and none broke the suite. The baseline was green in the same session, and so was
+a final unmutated re-run. M1–M12 ran against the first cut (14/14 green). M13–M14
+cover the two review fixes (16/16 green).
+
+| # | Mutation | Went red |
+|---|---|---|
+| M1 | **The old path restored**: `setRemaining(left)` back in the 250ms interval | the zero-renders test |
+| M2 | Drain re-armed on every tick (`remaining` in the effect deps) | arms-once; re-arm-from-current |
+| M3 | Drain eased instead of `Easing.linear` | arms-once |
+| M4 | Re-arm bridges from full (`1`) instead of the current position | re-arm-from-current |
+| M5 | Unanswered Reduce Motion (`null`) treated as motion-ok | Reduce Motion ON; `null` hold |
+| M6 | `SWAP_OUT` loses `.reduceMotion(ReduceMotion.System)` | every-builder-carries-System |
+| M7 | `timerSpaceFor` reserves only while a timer shows | reserved-space property |
+| M8 | Session padding reverted to `timer && minimized` | session-screen source check |
+| M9 | Reduce Motion stepped path removed | Reduce Motion ON; `null` hold |
+| M10 | A paused countdown still arms a drain | pause-holds-width |
+| M11 | Drain timing on `ReduceMotion.System` (the launch snapshot) | arms-once (config) |
+| M12 | Surface reads the clock once instead of subscribing | digits-repaint (+3) |
+| M13 | First arm bridges from the stale seed again | first-arm-jumps; arms-once (duration) |
+| M14 | `LayoutAnimationConfig` loses `skipEntering skipExiting` | skip-flags test (it passed every test before the mock fix) |
+
+The existing suites that touch what changed still pass: `pressFeedback` (the
+session screen still carries no animation), `strengthSessionFinishPlacement`,
+`strengthSessionCollapse`, `macroRingCaps`, `macroRingSweep`,
+`reducedMotionGating` and `holdToConfirm` — 70/70 against the grown mock.
+
+### Review
+
+- **`frontend-reviewer`: no blocking findings.** It confirmed the diff stays in
+  the timer and scroll-padding regions, clear of N563's report region. Its
+  suggestions and what became of them:
+  - Fixed: the first-arm refill, and the mock discarding the skip flags.
+  - Fixed: an unused `cancelAnimation` removed from the mock.
+  - Added as device checks: the one-off 64pt step when a session is finished
+    while a bar is still up, and VoiceOver focus while the outgoing card (which
+    is `accessibilityViewIsModal`) fades.
+- **`ac-verifier`**: 5 criteria MET. 3 MET WITH STATED REASON: (b) never
+  attempted, `FadeInDown` instead of `SlideInUp`, Reanimated instead of core
+  `Animated`. 5 NEEDS HUMAN EVIDENCE. It reproduced M1 and M6 itself. It asked
+  for the two-leg sequence to be stated rather than glossed, which is done above.
+- **The motion gate (`/pre-merge` step 4, `/review-animations`) is UNMET.** It
+  is the user's command, not an agent's, and it has not been run. Two green
+  reviews do not stand in for it.
+
+### What is not fixed, and is recorded rather than folded in
+
+- **The session screen still re-renders once a second for the whole live
+  session**, from its own `setElapsed` interval for the "Time" stat (`[id].tsx`
+  ~334). N558 takes it from ~5 renders/s during a rest to 1/s, not to zero. It
+  is outside this ticket's region and was flagged as a follow-up rather than
+  folded in.
+- The expanded card's run-progress line (`runFill`) is still a percentage-width
+  flex child at the digits' cadence. It is now confined to the card subtree and
+  sits in the part of the surface the audit told us not to animate.
+- `ClassPlanTimer.tsx`'s own 250ms interval is untouched, as the audit asked.
+- **None of this has been seen on a device.** The feel of the arrival, the
+  swap and the drain, and the absence of any jump, are the ticket's four
+  `NEEDS HUMAN EVIDENCE` criteria. The checklist is in
+  `docs/testing/functional-scenarios.md` under Rest timer → N558.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

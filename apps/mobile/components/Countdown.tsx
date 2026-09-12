@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 
 import {
@@ -21,6 +21,52 @@ import {
 } from '@/lib/intervalRun';
 import { playSound } from '@/lib/sounds';
 import { announce, cuesForTransition, speak, stopSpeaking, voiceEnabled } from '@/lib/voice';
+
+/**
+ * Seconds left on the live countdown, published by the display interval to
+ * whoever SUBSCRIBES — and deliberately not held in React state.
+ *
+ * N558/#1047. `remaining` used to be `useState` in {@link useCountdown}, so the
+ * 250ms interval re-rendered the component that called the hook. That is the
+ * session screen: ~3,900 lines, every exercise and every set row, four times a
+ * second for the whole of every rest. `remainingAt` returns fractional seconds,
+ * so React's same-value bail-out never fired either — a 90-second rest was
+ * ~360 full-screen renders, to repaint two digits and a 3pt bar.
+ *
+ * The interval is unchanged and still drives the digits. What changed is who
+ * hears it: only {@link useRemaining}'s caller — the timer surface — re-renders
+ * on a tick. The screen reads the value on demand, in the handlers that need
+ * it (`read`), which is the same number it used to close over.
+ */
+export type RemainingClock = {
+  subscribe: (listener: () => void) => () => void;
+  /** The value at the last tick. Safe to call from a handler; never re-renders. */
+  read: () => number;
+};
+
+function createRemainingClock(): RemainingClock & { publish: (seconds: number) => void } {
+  let seconds = 0;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    read: () => seconds,
+    publish(next) {
+      if (Object.is(next, seconds)) return;
+      seconds = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+/** Subscribe to the clock. Re-renders its caller on every tick — keep it low in the tree. */
+export function useRemaining(clock: RemainingClock): number {
+  return useSyncExternalStore(clock.subscribe, clock.read, clock.read);
+}
 
 /**
  * The session screen's one countdown — resting, getting ready, or performing a
@@ -68,7 +114,9 @@ export function useCountdown(
   onRunEnd?: (run: Run) => void,
 ) {
   const [timer, setTimer] = useState<Countdown | null>(null);
-  const [remaining, setRemaining] = useState(0);
+  // Held once for the hook's lifetime: a new clock per render would drop every
+  // subscriber on each keystroke. See `RemainingClock` for why it is not state.
+  const [clock] = useState(createRemainingClock);
   const [run, setRun] = useState<Run | null>(null);
   /**
    * Whether the timer is showing as a top bar rather than the full surface.
@@ -256,7 +304,7 @@ export function useCountdown(
 
   useEffect(() => {
     if (!timer) return;
-    setRemaining(remainingAt(timer, Date.now()));
+    clock.publish(remainingAt(timer, Date.now()));
     if (timer.pausedWith != null) return;
 
     const scheduled: ReturnType<typeof setTimeout>[] = [];
@@ -285,16 +333,20 @@ export function useCountdown(
     // 250ms so the seconds repaint promptly rather than up to a second late —
     // the difference between "snappy" and "laggy" at a glance. It also catches a
     // completion whose timeout was suspended while the app was backgrounded.
+    //
+    // It PUBLISHES rather than sets state (N558/#1047): the digits still repaint
+    // on this exact cadence, but only the timer surface hears it — the session
+    // screen that owns this hook does not re-render per tick.
     const id = setInterval(() => {
       const left = remainingAt(timer, Date.now());
-      setRemaining(left);
+      clock.publish(left);
       if (left <= 0 && !firedRef.current) finishRef.current();
     }, 250);
 
     const sub = AppState.addEventListener('change', (s) => {
       if (s !== 'active') return;
       const left = remainingAt(timer, Date.now());
-      setRemaining(left);
+      clock.publish(left);
       if (left <= 0 && !firedRef.current) finishRef.current();
     });
 
@@ -303,7 +355,7 @@ export function useCountdown(
       for (const t of scheduled) clearTimeout(t);
       sub.remove();
     };
-  }, [timer]);
+  }, [timer, clock]);
 
   const startRest = useCallback(
     (seconds: number, label: string, exerciseID?: string, step?: number) => {
@@ -435,7 +487,8 @@ export function useCountdown(
 
   return {
     timer,
-    remaining,
+    /** Subscribe with {@link useRemaining}; read on demand with `clock.read()`. */
+    clock,
     run,
     minimized,
     setMinimized,

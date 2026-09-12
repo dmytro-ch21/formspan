@@ -82,6 +82,21 @@ export const EASE = {
 export const PRESS_SCALE = 0.97;
 
 /**
+ * N558/#1047 — how small a surface starts when it REPLACES another in place.
+ *
+ * The rest timer's bar and card are one timer in two sizes, and swapping them
+ * between two frames read as two surfaces cutting. The incoming one now fades
+ * in from this scale. It is the same 3% as a press on purpose: a surface
+ * appearing from nothing is `scale(0)`, which nothing in the real world does,
+ * and anything past ~5% on a 380pt card reads as a zoom — a separate event —
+ * rather than the same object settling into its new size.
+ *
+ * Named separately rather than reusing `PRESS_SCALE` at the call site so the
+ * two can diverge if a device run says they should; today they agree.
+ */
+export const SWAP_SCALE = PRESS_SCALE;
+
+/**
  * How far a finger may drift off a control before the press cancels.
  *
  * Zero controls in this app set it before F38, so a thumb sliding a few pixels
