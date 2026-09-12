@@ -226,3 +226,100 @@ func assertErrorBody(t *testing.T, w *httptest.ResponseRecorder, wantCode, wantM
 		t.Errorf("error.message = %q, want %q", body.Error.Message, wantMessage)
 	}
 }
+
+// N521/#918.
+type strictTestBody struct {
+	A  string `json:"a"`
+	ID string `json:"id"`
+}
+
+func TestDecodeJSONStrict_RefusesAFieldTheDestinationDoesNotDeclare(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"a":"x","status":"published"}`))
+	w := httptest.NewRecorder()
+
+	var dst strictTestBody
+	if err := DecodeJSONStrict(w, r, 1<<10, &dst, "id"); err == nil {
+		t.Fatal("DecodeJSONStrict returned nil, want an error for an unknown field")
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	assertErrorBody(t, w, CodeInvalidInput, `unknown field "status" — this endpoint does not accept it`)
+}
+
+// The security property: an ignored field is neither refused nor trusted,
+// even when the destination declares it, and in any case, since encoding/json
+// would have matched `ID` to the same field.
+func TestDecodeJSONStrict_IgnoresTheNamedFieldsInAnyCaseAndNeverDecodesThem(t *testing.T) {
+	for _, body := range []string{
+		`{"a":"x","id":"forged"}`,
+		`{"a":"x","ID":"forged"}`,
+		`{"a":"x","Id":"forged","id":"forged-too"}`,
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		var dst strictTestBody
+		if err := DecodeJSONStrict(w, r, 1<<10, &dst, "id"); err != nil {
+			t.Fatalf("%s: DecodeJSONStrict returned %v, want the id ignored", body, err)
+		}
+		if dst.ID != "" {
+			t.Errorf("%s: dst.ID = %q — an ignored field reached the destination", body, dst.ID)
+		}
+		if dst.A != "x" {
+			t.Errorf("%s: dst.A = %q, want %q", body, dst.A, "x")
+		}
+	}
+}
+
+func TestDecodeJSONStrict_KeepsTheCapAndTheOneDocumentRule(t *testing.T) {
+	big := `{"a":"` + strings.Repeat("x", 2048) + `"}`
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(big))
+	w := httptest.NewRecorder()
+	var dst strictTestBody
+	if err := DecodeJSONStrict(w, r, 1<<10, &dst); err == nil || w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized: err = %v, status = %d, want an error and 413", err, w.Code)
+	}
+
+	r = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"a":"x"}{"a":"y"}`))
+	w = httptest.NewRecorder()
+	if err := DecodeJSONStrict(w, r, 1<<10, &dst); err == nil || w.Code != http.StatusBadRequest {
+		t.Errorf("trailing document: err = %v, status = %d, want an error and 400", err, w.Code)
+	}
+
+	r = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`["a"]`))
+	w = httptest.NewRecorder()
+	if err := DecodeJSONStrict(w, r, 1<<10, &dst); err == nil || w.Code != http.StatusBadRequest {
+		t.Errorf("non-object: err = %v, status = %d, want an error and 400", err, w.Code)
+	}
+}
+
+// Plain decoding took the last of `{"a":..,"A":..}` in document order; a map
+// round-trip re-encodes keys sorted and would take a different one. Refused.
+func TestDecodeJSONStrict_RefusesTheSameFieldInTwoCases(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"a":"x","A":"y"}`))
+	w := httptest.NewRecorder()
+	var dst strictTestBody
+	if err := DecodeJSONStrict(w, r, 1<<10, &dst); err == nil {
+		t.Fatal("DecodeJSONStrict returned nil, want an error for one field in two cases")
+	}
+	assertErrorBody(t, w, CodeInvalidInput, `"A" and "a" are the same field in different cases — send it once`)
+}
+
+// An echoed name is capped on a rune boundary: a 65-byte name ending in a
+// two-byte rune must not come back as invalid UTF-8.
+func TestDecodeJSONStrict_CapsAnEchoedNameOnARuneBoundary(t *testing.T) {
+	long := strings.Repeat("x", 63) + "é"
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"`+long+`":1}`))
+	w := httptest.NewRecorder()
+	var dst strictTestBody
+	if err := DecodeJSONStrict(w, r, 1<<10, &dst); err == nil {
+		t.Fatal("DecodeJSONStrict returned nil, want an unknown-field error")
+	}
+	// The EXACT message, not "is it valid UTF-8": a byte cut leaves a stray
+	// 0xC3 that %q escapes as the six characters `\xc3`, which is perfectly
+	// valid UTF-8, so a validity check passes on exactly the bug it is for.
+	// The mutation that disables the rune trim proved that before this line
+	// replaced it.
+	assertErrorBody(t, w, CodeInvalidInput,
+		`unknown field "`+strings.Repeat("x", 63)+`" — this endpoint does not accept it`)
+}

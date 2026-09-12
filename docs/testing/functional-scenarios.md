@@ -3792,6 +3792,13 @@ Every console write leaves a revision. The deploy leaves none.
 - **`actor` comes from the request's claims, never the body.** Send
   `{"actor":"impostor"}` and assert it is not what gets recorded — an audit
   trail the writer can forge records nothing.
+- **An unknown field is refused, a server-derived one is ignored (N521).** On
+  both `PATCH /v1/admin/techniques/{id}` and `/v1/admin/exercises/{id}`, send
+  `{"name":"Edited","status":"published"}`: 400, the message names
+  `status`, and the row is unchanged. Send `{"name":"Edited","id":"x",
+  "source":"seed","actor":"impostor"}`, and `ID` in capitals too: 200, and
+  none of the three is applied. A typo such as `"nmae"` is a 400 rather than a
+  save that silently changed nothing.
 - **A re-seed writes no revisions.** Run `cmd/seed` and assert the count is
   unchanged; 542 rows per release would bury the operator's own edits.
 - **A seeded technique has an empty history**, and that is a 200 with `[]`

@@ -3,6 +3,7 @@ package technique
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -322,6 +323,23 @@ func TestCreateDerivesTheIDAndIgnoresAnyTheClientSends(t *testing.T) {
 	if got.Source != "admin" {
 		t.Errorf("source = %q — a client handed its row to the deploy", got.Source)
 	}
+
+	// N521/#918: decoding is strict now, and the ignore is exact about which
+	// fields. A capitalised `ID` is ignored exactly like `id`...
+	res = post(t, h, `{"name":"Knee Cut Pass","ID":"i-chose-this-too","Source":"seed",
+		"category":"Pass","position":"Half Guard - Top","gi_no_gi":"Both"}`)
+	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
+		t.Fatalf("create with a capitalised ID = %d, want success", res.StatusCode)
+	}
+	if got := decodeTechniqueBody(t, res); got.ID != "knee-cut-pass" || got.Source != "admin" {
+		t.Errorf("id = %q, source = %q — a capitalised ignored field was trusted", got.ID, got.Source)
+	}
+	// ...and an ignored field does not launder an unknown one sent alongside it.
+	res = post(t, h, `{"name":"Toreando Pass","id":"x","status":"published",
+		"category":"Pass","position":"Half Guard - Top","gi_no_gi":"Both"}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("create with an unknown field beside an ignored one = %d, want 400", res.StatusCode)
+	}
 }
 
 // A seeded technique is EDITABLE from the console now, and the write takes
@@ -360,6 +378,24 @@ func TestTheRequestBodyCannotChooseTheActor(t *testing.T) {
 	// ...and `source` is equally not the body's to set.
 	if repo.stored["editable"].Source != "admin" {
 		t.Errorf("source = %q — the body changed ownership", repo.stored["editable"].Source)
+	}
+
+	// N521/#918: the ignore holds in any case, and does not launder an unknown
+	// field sent alongside the ignored ones.
+	res = patch(t, NewContentHandler(repo), "editable", `{"name":"Again","ACTOR":"impostor","Source":"seed"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("patch with capitalised ignored fields = %d, want 200", res.StatusCode)
+	}
+	if repo.lastActor == "impostor" || repo.stored["editable"].Source != "admin" {
+		t.Errorf("a capitalised ignored field was trusted: actor = %q, source = %q",
+			repo.lastActor, repo.stored["editable"].Source)
+	}
+	res = patch(t, NewContentHandler(repo), "editable", `{"name":"Blocked","actor":"impostor","status":"published"}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("an unknown field sent with ignored ones = %d, want 400 — the ignore list laundered it", res.StatusCode)
+	}
+	if repo.stored["editable"].Name == "Blocked" {
+		t.Error("the refused write was applied anyway")
 	}
 }
 
@@ -574,4 +610,26 @@ func idsOf(ts []Technique) []string {
 		out = append(out, t.ID)
 	}
 	return out
+}
+
+// N521/#918: a field the request type does not declare, and is not one of the
+// ignored server-derived ones, is a 400, and nothing is written.
+func TestAContentWriteRefusesAFieldItDoesNotAccept(t *testing.T) {
+	repo := newFakeRepo()
+	repo.stored["editable"] = Technique{
+		ID: "editable", Name: "Editable", Category: "Pass",
+		Position: "Half Guard - Top", GiNoGi: "Both", Source: "admin",
+	}
+	repo.sources["editable"] = "admin"
+
+	res := patch(t, NewContentHandler(repo), "editable", `{"name":"Edited","status":"published"}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("patch = %d, want 400", res.StatusCode)
+	}
+	if raw, _ := io.ReadAll(res.Body); !strings.Contains(string(raw), `unknown field \"status\"`) {
+		t.Errorf("body = %s, want it to name the field", raw)
+	}
+	if repo.stored["editable"].Name != "Editable" {
+		t.Errorf("name = %q — a refused write was applied anyway", repo.stored["editable"].Name)
+	}
 }

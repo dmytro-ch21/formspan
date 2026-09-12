@@ -75145,6 +75145,61 @@ The `run.py` row is checked only by a live `postprocess`: the 6 and the 11 survi
 
 **Reachability on a phone**: no athlete-facing change. This is eval fidelity to what the phone already shows.
 
+## 2026-09-12 — N521 (#918): the admin content writes refuse unknown fields, and still ignore the server-derived ones
+
+**The decision the ticket asked for.** N164 (#541) left `DisallowUnknownFields` unwired, because it measured a real conflict. The exercise and technique admin write endpoints have tests asserting, as a SECURITY property, that a body naming `id`, `source` or `actor` is silently ignored. A plain strict decoder would turn that into a 400. Of the two designs the ticket offered, this takes the second: **keep the silent ignore for exactly those three fields, and refuse every other unknown field.** The security tests keep pinning that property, and now also pin the new contract explicitly (see Tests).
+- **Why not tighten to a 400 for `id`/`source`/`actor` too?** A client naming the id it wants is not an error worth failing a save over. What matters is that the server never trusts it, and the existing tests already pin that.
+
+**Why these two endpoints can take it.** Both are `RequireAdmin` routes, and their only caller is this repo's own console, deployed with the API. Audited before wiring, not assumed:
+- **The console sends only accepted fields.** `apps/admin`'s `bodyFrom` in `content/actions.ts` and in `content/exerciseActions.ts` lists every field explicitly, and each field is in the request struct. Neither spreads a fetched record, so `status`, `media`, `created_at` and `offered_grips` are never sent.
+- **Nothing else sends a body.** A scan of the whole repo found no other writer of those routes. The only other test touching them posts to `/retire`, which decodes no body.
+- **No existing test body breaks.** A static scan of every JSON body posted to these handlers in backend tests (35, including the Postgres-backed ones that only run in CI) found no key outside the request struct or the ignore list. The positive control was the new `status` test.
+
+**What was built.**
+- **`apihttp.DecodeJSONStrict(w, r, maxBytes, dst, ignore...)`.** It caps the body (413) and decodes exactly one JSON object into a `map[string]json.RawMessage`. It deletes the ignored keys, then decodes the rest with `DisallowUnknownFields`.
+  - **Unknown field:** an unknown field is a 400 naming it (`unknown field "status" — this endpoint does not accept it`). The name is the client's own key, and it is capped at 64 bytes so it cannot echo a request.
+  - **Everything else unchanged:** malformed JSON, a type mismatch or a trailing document stays the generic 400.
+- **Ignored keys are matched case-insensitively.** `encoding/json` matches struct fields case-insensitively, so `{"ID": ...}` used to be ignored exactly like `{"id": ...}`. A case-sensitive strip would have made one a 400 while the other stayed ignored.
+- **An ignored key never reaches `dst`, even if `dst` declares it.** It is removed before decoding, not decoded and then discarded.
+- **One field sent in two cases is a 400** (`"A" and "a" are the same field in different cases — send it once`). Plain decoding took the last in document order. A map round-trip re-encodes keys sorted, so it would silently have taken a different one (`backend-reviewer` measured `{"name":"a","Name":"b"}` decoding to `"a"`). A strict endpoint should not guess at an ambiguous body. The exact same key twice still resolves to the last, as before.
+- **An echoed field name is capped at 64 bytes on a rune boundary,** so the message stays valid UTF-8.
+- **The wiring.** `decodeExercise` and `decodeTechnique` call it with `contentIgnoredFields = []string{"id", "source", "actor"}`. Every other decode site in the API is untouched, as the ticket scoped. Widening needs a per-endpoint audit, because mobile and web builds in the wild are not one controlled deploy.
+- **Docs.** `contracts/public.openapi.yaml`'s `ExerciseWrite` and `TechniqueWrite` say so. `additionalProperties: false` is deliberately not set, because it would contradict the three ignored fields. The note in `decode.go` that said nothing enables `DisallowUnknownFields`, and that N521 "tracks" the redesign, now says `DecodeJSONStrict` is that redesign and which two endpoints use it. The first version corrected only the note's opening, and `ac-verifier`'s re-grade caught the stale closing sentence.
+
+**Tests.**
+- **`apihttp`, 5 new:**
+  - an unknown field is a 400 with the exact message;
+  - the ignored field in three casings is neither refused nor decoded into a destination that declares it;
+  - the size cap, the one-document rule and a non-object body all still hold;
+  - one field in two cases is a 400;
+  - an echoed name is capped on a rune boundary.
+- **Each handler, 1 new:** a PATCH with `"status"` is a 400, the body names the field (both handlers now check the message), and the stored row is unchanged.
+- **The three security tests the ticket names, extended.** `TestCreateDerivesTheIDAndIgnoresAnyTheClientSends` and both `TestTheRequestBodyCannotChooseTheActor` keep their original assertions. They now also assert the new contract: a capitalised ignored field (`ID`, `ACTOR`, `Source`) is still ignored, and an unknown field sent beside an ignored one is a 400 with nothing written.
+
+**Checks.** 8 mutations, each failing a named test (as a test, not a build error), restored byte-identical and re-run to green:
+
+| Mutation | Fails |
+|---|---|
+| exercise drops the ignore list | exercise `TestTheRequestBodyCannotChooseTheActor` |
+| technique drops the ignore list | technique `TestCreateDerivesTheID...` and `TestTheRequestBodyCannotChooseTheActor` |
+| case-sensitive strip | `TestDecodeJSONStrict_IgnoresTheNamedFieldsInAnyCase...` |
+| no `DisallowUnknownFields` | the apihttp refusal test, both handler refusal tests, and all three security tests' new "does not launder" assertions |
+| exercise back on `DecodeJSON` | exercise `TestAContentWriteRefusesAFieldItDoesNotAccept` |
+| ignored keys not stripped | the apihttp ignore test, and all three security tests (a stripped-less `id` becomes an unknown field) |
+| one field in two cases accepted | `TestDecodeJSONStrict_RefusesTheSameFieldInTwoCases` |
+| the name cut on a byte, not a rune | `TestDecodeJSONStrict_CapsAnEchoedNameOnARuneBoundary` |
+
+The rune mutation took three attempts, and the middle one is the useful record:
+- **First:** deleting the trim loop left `unicode/utf8` unused, so the build failed instead of a test, which proves nothing.
+- **Second:** disabling the loop while keeping the import **survived**. The test asserted the message was valid UTF-8, but a byte cut leaves a stray `0xC3` that `%q` escapes as the six characters `\xc3`, which is valid UTF-8. The check could never fail on the bug it was written for.
+- **Third:** the test now asserts the exact message, and the same mutation fails it as a test failure.
+
+**Taken from the acceptance check and review.**
+- **`ac-verifier`: criterion 2 not met.** The ticket asked for the two named tests to be UPDATED to assert the new behaviour, and the first version left them byte-identical and added separate tests. It found the coverage real, but the literal ask was not done. The tests are now extended as described above.
+- **`backend-reviewer`: no blocking finding.** Three suggestions were taken: the two-case duplicate refusal, the rune-safe cap, and the technique refusal test checking the message. It also confirmed that the unknown-field message matches Go 1.26.8's `encoding/json` source exactly (there is no typed error, so the exact-message test is the guard), and that large numbers, exponents and escaped keys survive the round trip byte for byte. The nested-object note is now in `DecodeJSONStrict`'s doc comment.
+
+**Reachability on a phone**: no athlete-facing change. These are admin-console writes.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

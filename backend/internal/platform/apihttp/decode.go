@@ -1,10 +1,16 @@
 package apihttp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // N164/#541: at least a dozen decode sites across the modules had no body
@@ -103,8 +109,125 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any)
 	return err
 }
 
-// A note on DisallowUnknownFields, which this file deliberately does NOT
-// wire up anywhere (N164/#541):
+// DecodeJSONStrict is DecodeJSON with DisallowUnknownFields, for an endpoint
+// whose every caller this repo builds and deploys itself (N521/#918).
+//
+// A body naming a field dst does not declare is a 400 that names it, unless
+// the field is listed in ignore. Those are removed before decoding, so they
+// are never refused and never reach dst, even if dst declares them. That is
+// the SECURITY property the note below describes: a server-derived field
+// (`id`, `source`, `actor`) sent by a client is not trusted, and it is not an
+// error to send it either.
+//
+// Ignored keys are matched case-insensitively. encoding/json matches struct
+// fields case-insensitively, so `{"ID": ...}` reached the same field as
+// `{"id": ...}` before this existed; a case-sensitive strip would have turned
+// the one into a 400 and left the other ignored.
+//
+// Everything DecodeJSON guarantees still holds: the body is capped at maxBytes
+// before it is buffered (413), exactly one JSON value (400), and a malformed
+// body or a type mismatch is the generic 400. The body must be a JSON object;
+// `null` decodes to an untouched dst, as it always did.
+//
+// The same field sent twice in different cases (`{"name":..,"Name":..}`) is a
+// 400. Plain decoding took the last one in document order; this decodes through
+// a map, whose keys re-encode sorted, so it would silently take a DIFFERENT one
+// (found in review). A strict endpoint should not guess at an ambiguous body.
+// The exact same key twice is not caught here: the map keeps the last, which is
+// what plain decoding did too.
+//
+// `DisallowUnknownFields` also applies inside nested objects. Neither content
+// request has one today, so a struct that grows one is strict all the way
+// down. That is the intent, but it is worth knowing before reusing this.
+func DecodeJSONStrict(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any, ignore ...string) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	var fields map[string]json.RawMessage
+	if err := DecodeJSONBody(r.Body, &fields); err != nil {
+		WriteDecodeError(w, err)
+		return err
+	}
+	for key := range fields {
+		for _, name := range ignore {
+			if strings.EqualFold(key, name) {
+				delete(fields, key)
+				break
+			}
+		}
+	}
+	folded := make(map[string][]string, len(fields))
+	for key := range fields {
+		k := strings.ToLower(key)
+		folded[k] = append(folded[k], key)
+	}
+	for _, variants := range folded {
+		if len(variants) > 1 {
+			sort.Strings(variants)
+			WriteError(w, http.StatusBadRequest, CodeInvalidInput,
+				fmt.Sprintf("%q and %q are the same field in different cases — send it once",
+					capName(variants[0]), capName(variants[1])))
+			return fmt.Errorf("%w: %s", errDuplicateField, variants[0])
+		}
+	}
+	stripped, err := json.Marshal(fields)
+	if err != nil {
+		WriteDecodeError(w, err)
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(stripped))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		if name, ok := unknownFieldName(err); ok {
+			WriteError(w, http.StatusBadRequest, CodeInvalidInput,
+				fmt.Sprintf("unknown field %q — this endpoint does not accept it", name))
+			return fmt.Errorf("%w: %s", errUnknownField, name)
+		}
+		WriteDecodeError(w, err)
+		return err
+	}
+	return nil
+}
+
+// errUnknownField is what DecodeJSONStrict returns, wrapped, for a body naming
+// a field the destination does not declare.
+var errUnknownField = errors.New("apihttp: request body has a field this endpoint does not accept")
+
+// errDuplicateField is what DecodeJSONStrict returns, wrapped, for a body that
+// sends one field under two casings.
+var errDuplicateField = errors.New("apihttp: request body sends one field in two cases")
+
+// capName caps a client-supplied field name before it is quoted back, on a rune
+// boundary so the message stays valid UTF-8 (a byte cut can split a rune).
+func capName(name string) string {
+	if len(name) <= 64 {
+		return name
+	}
+	name = name[:64]
+	for !utf8.ValidString(name) {
+		name = name[:len(name)-1]
+	}
+	return name
+}
+
+// unknownFieldName pulls the field name out of encoding/json's unknown-field
+// error, which has no typed form, only `json: unknown field "name"`. The name
+// is the client's own key, so quoting it back is not a leak, but it is capped
+// so a pathological key cannot turn the error body into an echo of the request.
+func unknownFieldName(err error) (string, bool) {
+	const prefix = "json: unknown field "
+	msg := err.Error()
+	if !strings.HasPrefix(msg, prefix) {
+		return "", false
+	}
+	name, uerr := strconv.Unquote(strings.TrimPrefix(msg, prefix))
+	if uerr != nil {
+		return "", false
+	}
+	return capName(name), true
+}
+
+// A note on DisallowUnknownFields, which this file deliberately did NOT wire up
+// anywhere at first (N164/#541). DecodeJSONStrict above is the redesign it
+// asked for, used by exactly the two endpoints the note names (N521/#918):
 //
 // The obvious, lowest-risk candidate was audited first: exercise's and
 // technique's admin content-write endpoints (decodeExercise/decodeTechnique,
@@ -128,9 +251,14 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, maxBytes int64, dst any)
 // ticket sets ("only where contract compatibility allows it") without first
 // redesigning those structs (e.g. splitting a client-writable struct from a
 // separate allowlist of consciously-ignored fields) — which is real,
-// separate work, not a decode-layer change. Nothing in this API currently
-// enables DisallowUnknownFields; N521/#918 tracks doing that redesign for
-// these two endpoints if it turns out to be worth it.
+// separate work, not a decode-layer change.
+//
+// That redesign is DecodeJSONStrict above (N521/#918): the ignorable fields are
+// an explicit list stripped before strict decoding, so the security tests hold
+// and every other unknown field is refused. It is used by decodeExercise and
+// decodeTechnique only. Every other decode site still uses DecodeJSON, on
+// purpose: mobile and web builds in the wild are not one controlled deploy, so
+// widening strictness needs its own compatibility audit per endpoint.
 //
 // WriteDecodeError writes the standard response for an error returned by
 // DecodeJSONError or DecodeJSONBody — see DecodeJSON's doc comment for the
