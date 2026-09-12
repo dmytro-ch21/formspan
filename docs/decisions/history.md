@@ -74750,6 +74750,32 @@ The query's own comment says the split is kept "so … a client can render '8 (5
 
 **Reachability on a phone**: this is the phone — the share card after a session with a PR, and You/Progress → the records card.
 
+## 2026-09-12 — L19 (#1133): the tracker form's preview pluralises the noun it will store, not the one mid-typing
+
+**What was wrong.** `components/TrackerForm.tsx` built its preview from the **raw** draft noun, `pluralise(value.noun, 2)`:
+- **A trailing space broke the plural.** Mid-typing, "glass " still carries its space, so it no longer ends in a hiss, and `pluralise` gave it a bare `s`. The hint read **"Your card will read "3 of 6 glass s"."**
+- **A noun of only spaces counted as a noun.** It was truthy, so the preview showed a card with an empty word in it.
+- **The "Daily target, in …" label had the same fault,** both the visible text and the `accessibilityLabel`.
+
+None of this was ever stored: `readDraft` trims the noun before saving, and the server refuses a leading or trailing space. It was a form describing a card that would not exist. L18 (#1125) found it and left it out of scope.
+
+**The fix is one pure function.** `nounCopy(noun)` trims once, pluralises the trimmed word, and returns both the hint and the target label. The component's three sites — the hint, the field label and its spoken label — read from it, so they cannot disagree with each other or with what `readDraft` stores. An empty or whitespace-only draft previews as no noun ("Leave it blank and your card reads "3 of 6"."), which is what `readDraft` will save.
+
+**Tests** (`components/__tests__/trackerForm.test.ts`, the file's pure-logic style), all pinned against the copy the athlete reads rather than against the trim itself:
+- a trailing space: "glasses";
+- a leading space: "cups";
+- empty and only-spaces: no noun;
+- a clean noun unchanged.
+
+**Checks.** 3 mutations, each caught as a test failure, restored byte-identical and re-run to 15/15:
+- **the trim removed:** the trailing-space, leading-space and only-spaces tests fail;
+- **the target label branching on the raw noun:** the only-spaces test fails;
+- **the hint branching on the raw noun:** the only-spaces test fails.
+
+**Not covered by a test, and why.** The component reading `nounCopy` rather than the raw noun is not pinned: the ticket asks for the file's pure-logic style, not a render. A change that bypassed the helper in the component would pass these tests. The helper being the only place the copy is built is what keeps that honest.
+
+**Reachability on a phone**: this is the phone — Today → trackers → create or edit a tracker, and type a count word with a trailing space.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

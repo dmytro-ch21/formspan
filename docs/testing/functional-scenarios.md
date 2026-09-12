@@ -13535,6 +13535,12 @@ phone scenario.
   "berries", "day" reads "days", "scoop" reads "scoops". A target of one still
   reads "1 of 1 glass". Known and accepted misses: "quiz" reads "quizes", and a
   multi-word noun pluralises its last word ("scoop of proteins").
+- **The preview reads the noun that will be saved, not the one mid-typing** (L19,
+  #1133). Type "glass " with a trailing space: the preview reads "3 of 6
+  glasses" and the target field reads "Daily target, in glasses" — never "glass
+  s". Type only spaces: the preview reads "Leave it blank and your card reads "3
+  of 6"" and the label is plain "Daily target", which is what saving stores.
+  VoiceOver's label for the target field says the same.
 
 ### Archiving vs deleting
 
