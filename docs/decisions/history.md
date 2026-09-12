@@ -74633,6 +74633,52 @@ The reviewer's other point, that the longer label may wrap in the two-up grid, i
 
 **Reachability on a phone**: this is the phone — You → What you train, You → Edit profile, Settings → Profile.
 
+## 2026-09-12 — H33 (#1155): apps/mobile comments stop describing Goals as a tab and Food as off the bar
+
+**What.** A comment-only change across 15 files in `apps/mobile`. Four tickets changed navigation after these comments were written:
+
+- N176 (#581) took Food and Goals off the bar.
+- N180 (#585) put Food back in every module state.
+- N182 (#587) turned Train into a redirect.
+- N504 (#876) moved `goals` and `train` out of `app/(tabs)/` to stack screens at the app root.
+
+The comments below still described the old app in the present tense. N198 (#630, PR #1149) fixed the same drift in `functional-scenarios.md` and left three comments for a follow-up. A grep for "Goals tab", "Train tab", `OFF_BAR_ROUTES`, `href: null`, `(tabs)/goals` and "a tab mounts once" found the rest.
+
+**The three N198 named.**
+
+- **`app/goals.tsx`: the in-place "Saved" receipt.** The comment justified it with "this screen is a TAB … a tab has nowhere to go back to". The behaviour stays. The reason is replaced with three that are true for a pushed screen:
+  - the receipt is on this screen, because `accept` reloads the live row;
+  - several screens push here and a deep link falls back to Today, so no screen `router.back()` could land on is a receipt;
+  - accepting is one job among several on the screen.
+- **`components/ModuleOffNotice.tsx`.** It said N176 took both tabs off the bar and Today links to both. It now says:
+  - Food is back in the bar in every state.
+  - Goals is a pushed screen. With nutrition off, Progress's Nutrition row links to it.
+
+  Its "Three states" paragraph claimed nothing links to these screens on a deployment with no food log. Both are linked now, so that state is reached in ordinary use.
+- **`app/food/target.tsx`.** It said the target moved "into the Goals tab".
+
+**What the grep added.**
+
+- **`goals.tsx`**: the N61 line ("this tab stays in the bar") and the reasoning in each focus effect ("a tab mounts once"). Focus is still the right trigger: the screen stays mounted under the phase picker, profile edit, target history and roadmap it pushes, and coming back is a focus, not a mount. The comments now say that, and keep the tab reasoning as history.
+- **The same focus correction** in `goalsScreen.test.tsx`, `RoadmapOffer.tsx` and `roadmapEntryPoints.test.tsx`. The first also fixes a stale `app/(tabs)/goals.tsx` path.
+- **`ScreenHeader.tsx`** said "`phase` sits outside `(tabs)`, unlike `goals`".
+- **`app/phase/index.tsx`** said it is pushed "from `goals.tsx`/`you.tsx`, both tabs".
+- **`app/goals/trend.tsx`**: the `index.tsx` proviso now names `app/goals.tsx` instead of the tab.
+- **`lib/profile.ts`** gave "the Goals tab is a tab" as the reason onboarding can be skipped.
+- **`lib/modules.ts` and `moduleGating.test.ts`** still said N180 had yet to re-home nutrition.
+- **`youScreen.test.tsx`**: tense only.
+- **`lib/tabs.ts`** said "once N504 lands".
+- **`app/(tabs)/food.tsx`** pointed at `(tabs)/_layout.tsx` for reasoning that no longer lives there.
+
+**Left alone on purpose.**
+
+- Comments that are already written as history, such as `train.tsx`, `trainScreen.test.tsx`, `tabBar.test.ts`, `(tabs)/_layout.tsx` and `lib/startSession.ts`'s "N176 gave the Train tab…".
+- Two test titles in `goalsScreen.test.tsx` that still say "tab": the `describe` `'the Goals tab refetches when it is focused again'` and the `it` `'goes away when the tab is focused again'`. They are test names, and this ticket was scoped to comments.
+
+**How "comments only" was checked.** Each changed file was transpiled with TypeScript's `removeComments` at `origin/main` and on the branch, and the two outputs compared. The comparison self-tests first: a comment-only edit must compare equal, and a string change and a JSX-text change must both be caught.
+
+**A gap this records rather than fixes.** `RoadmapOffer` chose the `route` glyph so the offer would not share `goal` with the Goals tab's icon. That collision is gone, and the comment now says so. But `route` has since appeared twice more on the one screen that renders the offer: the ladder's `movement` row and `MovementChoice`'s `light` card. Whether that matters is a design call, not a comment fix.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

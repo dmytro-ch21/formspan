@@ -19,17 +19,20 @@ import { MODULE_TOGGLE_LOCATION, type Module } from '@/lib/modules';
  * would explain itself. The fix there was to restore the links.
  *
  * The Food and Goals tabs were that same link, for nutrition. Restoring them
- * (see `(tabs)/_layout.tsx`) was only half the fix: a tab leading to a target
- * screen that renders a target nobody set would trade a silent absence for a
- * confusing presence. So the two screens gained the off-state their BJJ
- * counterparts already had, and it lives here rather than being hand-written a
- * fifth and sixth time.
+ * (N61) was only half the fix: a tab leading to a target screen that renders a
+ * target nobody set would trade a silent absence for a confusing presence. So
+ * the two screens gained the off-state their BJJ counterparts already had, and
+ * it lives here rather than being hand-written a fifth and sixth time.
  *
- * **N176 (#581) took those two out of the bottom bar** — the routes stay, and
- * Today links to both — so this notice is now reached from a link rather than
- * from a tab. That makes it more load-bearing, not less: it is the only thing
- * on those two screens that distinguishes "turned off" from "broken", and the
- * screens are still resolvable by deep link from anywhere.
+ * **Where those links are now.** N176 (#581) took both tabs out of the bottom
+ * bar. N180 (#585) put **Food** back, in every module state (`lib/tabs.ts`), so
+ * Food's notice is reached from its tab again. **Goals** stayed off the bar and
+ * is `app/goals.tsx`, a stack screen pushed over the tabs since N504 (#876):
+ * with nutrition off, its notice is reached from Progress's Nutrition row,
+ * which links there in every module state. That makes it more load-bearing,
+ * not less: it is the only thing on that screen that distinguishes "turned
+ * off" from "broken", and both screens are still resolvable by deep link from
+ * anywhere.
  *
  * ## Neither dashed nor a card, and that is deliberate
  *
@@ -48,9 +51,11 @@ import { MODULE_TOGGLE_LOCATION, type Module } from '@/lib/modules';
  * `module` is `undefined` when this deployment has no such module AT ALL — the
  * state `moduleOffWithFoodLog` exists to separate — and then there is no offer
  * to make, because promising a feature the server does not have is the same lie
- * as hiding one it does. Nothing links to these screens in that case, so it is
- * only reachable by deep link or a stale back-stack entry, which is exactly the
- * route `bjj/positions` documents for its own copy of this guard.
+ * as hiding one it does. The screens are still LINKED in that case — Food's tab
+ * is in the bar in every module state (N180) and Progress's Nutrition row links
+ * to Goals unconditionally — so this state is reached in ordinary use, not only
+ * by deep link or a stale back-stack entry, the route `bjj/positions` documents
+ * for its own copy of this guard.
  */
 export function ModuleOffNotice({
   module,

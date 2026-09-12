@@ -265,8 +265,10 @@ describe('serverHasFoodLog', () => {
 
   // **The vector that kills the mutation #468 warned about.** Drop the
   // capability half and this becomes "any disabled module exists", which is
-  // true here — putting the Food and Goals tabs in front of an athlete on a
-  // deployment with no food log, merely because they turned Running off.
+  // true here. While this was the tab bar's question (until N176) that put the
+  // Food and Goals tabs in front of an athlete on a deployment with no food log,
+  // merely because they turned Running off. It has no caller today — see its
+  // doc comment in `modules.ts` — and this still pins what it answers.
   it('is false for a disabled module that does not carry the food log', () => {
     expect(serverHasFoodLog([strength, runningOff])).toBe(false);
   });
@@ -306,11 +308,15 @@ describe('serverHasFoodLog', () => {
  * turn something on promises a feature the server does not have. Every other
  * case answered "keep the tab", which was N61's fix.
  *
- * The bar no longer holds those two tabs in any state, so there is nothing left
- * for the predicate to decide. What replaced it is in two files:
+ * N176 took both tabs off the bar, which left the predicate nothing to decide.
+ * N180 (#585) then put Food back in EVERY module state rather than bringing the
+ * predicate back — with no food-log module the Food screen renders
+ * `ModuleOffNotice`'s "Not available" instead — and Goals stayed off the bar,
+ * a pushed screen since N504. What replaced it is in two files:
  *
- *   - `lib/__tests__/tabBar.test.ts` — which five tabs, in what order, and that
- *     Food and Goals are deliberately off the bar rather than missing.
+ *   - `lib/__tests__/tabBar.test.ts` — which five tabs, in what order, that
+ *     nothing in the list is conditional, and that the tab folder holds exactly
+ *     those five, so Goals and Train are off the bar by decision.
  *   - `app/__tests__/tabLayout.test.tsx` — that the bar is IDENTICAL for an
  *     unread module list, a full one and an all-disabled one. That is the same
  *     guarantee the tests above gave, stated as a property instead of a table,
@@ -318,8 +324,8 @@ describe('serverHasFoodLog', () => {
  *
  * The three-state predicates themselves are untouched and still tested above:
  * `serverHasFoodLog` is still the right question for anything that decides
- * whether a food surface should be REACHABLE, which is what N180 (#585) faces
- * when it re-homes nutrition.
+ * whether a food surface should be REACHABLE. N180 (#585) answered that for
+ * the bar without it, so it has no caller today.
  */
 
 /**

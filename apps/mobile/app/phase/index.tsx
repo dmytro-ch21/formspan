@@ -69,7 +69,8 @@ export default function PhaseScreen() {
   const today = dayString(new Date());
 
   // N484 (#835) added `ScreenHeader`'s `leading` slot for exactly this: this
-  // screen is pushed (from `goals.tsx`/`you.tsx`, both tabs), `headerShown` is
+  // screen is pushed (from `goals.tsx`, the You tab and the day screen),
+  // `headerShown` is
   // false below, and until now the only exit was a `Pressable` at the very
   // bottom of the form — under the keyboard while typing a target weight/date,
   // and below the fold on a small device. Same `router.canGoBack()` guard as

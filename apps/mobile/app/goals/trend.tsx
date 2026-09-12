@@ -35,9 +35,11 @@ import { PressableScale } from '@/components/ui/PressableScale';
  * line labelled with the target, a delta against a stated period, the entries
  * behind it — is goal-tracking rendered, and targets live in Goals as of N70.
  * Settled with N70's owner, who verified the route-group question by measuring
- * it: `app/goals/trend.tsx` and the `/goals` tab coexist, PROVIDED this
- * directory never gains an `index.tsx` — one here would fight the tab for
- * `/goals`.
+ * it while Goals was `app/(tabs)/goals.tsx`: `app/goals/trend.tsx` and that tab
+ * coexisted, PROVIDED this directory never gains an `index.tsx`. The proviso
+ * outlived the tab. Since N504 the screen is `app/goals.tsx`, beside this
+ * directory, and an `index.tsx` here would still resolve to the same `/goals`
+ * and fight it.
  *
  * `checkin/trend.tsx` stays as a redirect. Logging your weight and then seeing
  * the line is the natural gesture, the mobile-first rule makes "harder to reach

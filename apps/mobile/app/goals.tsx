@@ -279,9 +279,12 @@ export default function TargetScreen() {
   const getToken = useAuthToken();
   const { units, unitsReady } = useUnits();
 
-  // N61: this tab stays in the bar with nutrition off — see `(tabs)/_layout.tsx`
-  // — so the screen has to say which module is off rather than deriving a
-  // target for a feature the athlete has turned off. Shared with Food through
+  // N61: this screen is REACHABLE with nutrition off — Progress's Nutrition row
+  // links here in every module state, and a deep link resolves from anywhere —
+  // so the screen has to say which module is off rather than deriving a
+  // target for a feature the athlete has turned off. (N61 wrote this when Goals
+  // was a tab kept in the bar; it has been a pushed screen since N504, and the
+  // conclusion did not change.) Shared with Food through
   // `foodLogGate`, whose `ready` half is what stops a cold start claiming
   // "turned off" from a module list nobody has read yet.
   const { modules, ready: modulesReady } = useModules();
@@ -357,14 +360,29 @@ export default function TargetScreen() {
    * a save, so it opens on what is now in force rather than on what was.
    */
   const [manualSeq, setManualSeq] = useState(0);
-  // Saved-in-place, because this screen is a TAB rather than something pushed
-  // from Food. It used to `router.back()` on success, which was the whole
-  // confirmation: the screen you were on returning IS the receipt. A tab has
-  // nowhere to go back to, so the acknowledgement has to be said out loud here.
+  // Saved-in-place. `app/food/target.tsx` used to `router.back()` on success,
+  // which was the whole confirmation: the screen you were on returning IS the
+  // receipt. The reason this comment used to give was that this screen is a
+  // TAB, and a tab has nowhere to go back to. That stopped being true with N504
+  // (#876), which made it a pushed stack screen again — see `goBack` above.
+  // In-place is still right for a pushed screen, for reasons that do not
+  // depend on being a tab:
+  //  - the receipt is on THIS screen. `accept` reloads the live row, so the
+  //    target now in force is stated here, and backing out would leave the
+  //    athlete without seeing it;
+  //  - there is no one screen to go back to. Food's `TargetRow`, Progress,
+  //    Food's rings, the day screen and the `/food/target` redirect all push
+  //    here, and a deep link falls back to Today. None of those is a receipt
+  //    for the number just saved;
+  //  - accepting is not all this screen does. The typed target, the weekly
+  //    adjustment and the target history are on it too, and closing the
+  //    screen on success would take the athlete away from them.
+  // So the acknowledgement is still said out loud here.
   const [saved, setSaved] = useState(false);
   // The day this screen is about, RE-READ ON EVERY FOCUS rather than computed
-  // once at mount — see the focus effect below for why that distinction only
-  // started to matter when this became a tab.
+  // once at mount — see the focus effect below. That distinction started to
+  // matter when N70 made this a tab, and still matters now that it is pushed:
+  // the screen stays mounted underneath whatever it pushes.
   const [on, setOn] = useState(todayString);
 
   /**
@@ -395,16 +413,22 @@ export default function TargetScreen() {
   /**
    * Read the stored level back, ON EVERY FOCUS.
    *
-   * **A tab mounts once and stays mounted for the life of the process**, so a
-   * `useEffect` keyed on `[userId]` would run exactly once, ever — and this
-   * screen's whole ticket is a value that has to survive leaving the tab. The
-   * same mistake is already documented one file over: Today read its suggestion
-   * preferences from a mount effect, and the Settings switches appeared to do
-   * nothing until the app was killed.
+   * Written when this screen was a tab (N93), and **a tab mounts once and stays
+   * mounted for the life of the process**, so a `useEffect` keyed on
+   * `[userId]` would have run exactly once, ever — and this screen's whole
+   * ticket is a value that has to survive leaving the screen. The same mistake
+   * is already documented one file over: Today read its suggestion preferences
+   * from a mount effect, and the Settings switches appeared to do nothing until
+   * the app was killed.
+   *
+   * Since N504 this is a pushed screen, which remounts on every push. That
+   * does not make a mount effect enough: the screen stays mounted underneath
+   * what IT pushes (the phase picker, profile edit, the target history, a
+   * roadmap), and coming back from one of those is a focus, not a mount.
    *
    * It also picks up a level chosen on ANOTHER device — the cache is refreshed
-   * from the server by the derivation below, so coming back to this tab is what
-   * makes the browser's answer appear here.
+   * from the server by the derivation below, so coming back to this screen is
+   * what makes the browser's answer appear here.
    *
    * The value is compared before being stored rather than set unconditionally.
    * `load` is keyed on what this produces, and a fresh object every focus would
@@ -567,9 +591,11 @@ export default function TargetScreen() {
    * NOT `setRoadmaps([])` there, for the identical reason — an unreadable
    * answer is not "you are on no roadmap", and an offer built on that would
    * quietly retract something the athlete already committed to. Read on
-   * FOCUS rather than mount because enrolling happens on a screen pushed over
-   * this tab, which stays mounted for the life of the process — the same
-   * stale-offer shape `RoadmapOffer`'s own tests cover.
+   * FOCUS rather than mount because enrolling happens on a roadmap screen
+   * pushed over this one, and this screen stays mounted underneath it — so a
+   * mount-only read would still be offering the roadmap just started when the
+   * athlete comes back. The same stale-offer shape `RoadmapOffer`'s own tests
+   * cover.
    *
    * Skipped entirely with no catalog to offer from — one fewer request for an
    * athlete who has BJJ off, matching the gate `hasRoadmapCatalog` states.
@@ -637,8 +663,8 @@ export default function TargetScreen() {
         setData(d);
         setFailed(null);
         // The receipt belongs to the numbers that were saved, and these are
-        // different numbers. Moving a movement card, or coming back to the tab
-        // on a new day, produces a fresh and UNSAVED suggestion — leaving
+        // different numbers. Moving a movement card, or coming back to this
+        // screen on a new day, produces a fresh and UNSAVED suggestion — leaving
         // "Saved" under it would attach a confirmation to something that was
         // never stored, which is worse than showing nothing at all.
         setSaved(false);
@@ -664,10 +690,16 @@ export default function TargetScreen() {
   /**
    * FOCUS is the only trigger, and it is deliberately the only one.
    *
-   * A pushed screen got this for free — `food/target.tsx` remounted on every
-   * open. A tab mounts once, lazily, and then stays mounted for the life of the
-   * process: without this it would show the weight, training load and phase it
-   * read the first time it was ever opened.
+   * `food/target.tsx` got this for free by remounting on every open. N70 made
+   * this screen a tab, which mounts once, lazily, and then stays mounted for
+   * the life of the process: without this it showed the weight, training load
+   * and phase it read the first time it was ever opened.
+   *
+   * N504 made it a pushed screen again, so it now remounts on every push too —
+   * but not on the way back from what IT pushes. Change the phase from the
+   * button on this screen, or edit the profile, then pop back: this screen was
+   * never unmounted. Focus fires in both cases, which is why it is still the
+   * only trigger.
    *
    * The date is the half that turns a stale read into a WRONG WRITE. `on` is
    * what `accept` files the target under, so an app left open past midnight
