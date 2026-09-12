@@ -73842,8 +73842,9 @@ taken rather than argued:
 State on that screen re-renders all of it — every exercise group, every set
 row — so a live session paid one full-screen render a second for its whole
 life: ~3,600 in an hour, rests or no rests, to change four digits. It is the
-same shape N558 (#1047, PR #1105) removes for the rest countdown's 250ms tick,
-and the one that PR leaves behind.
+same shape N558 (#1047, PR #1105) removed for the rest countdown's 250ms tick,
+and the one that PR left behind. #1105 merged while this branch was in review;
+the branch was rebased onto it and onto N564, and its test runs against both.
 
 ### What changed
 
@@ -73865,8 +73866,8 @@ and the one that PR leaves behind.
   screen (`:308`, `:1277`, `:2766`) are countdown locals from `elapsedOf`, not
   this state, so no handler needed an on-demand read.
 - The import sits beside `Stat`'s rather than beside `Countdown`'s, because
-  #1105 rewrites the `Timer` import line directly below that one and the two
-  PRs would otherwise conflict on adjacent lines for nothing.
+  #1105 rewrote the `Timer` import line directly below that one; adjacent edits
+  would have conflicted for nothing. The rebase over it was clean.
 
 ### The test renders the real screen, and why that was the whole job
 
@@ -73918,6 +73919,38 @@ baseline, each restored and re-run green:
   The first M3 run landed on that already-red test and was discarded and re-run
   once the baseline was green.
 
+### The review gate reported a failure that was a reviewer's mutation
+
+- **The gate's own `verify` went red on a reviewer's mutation, not on this
+  diff.** `pre-merge-checker` ran `verify` while `frontend-reviewer` was
+  mutation-testing the same worktree. The reviewer deleted `open.unmount()` to
+  confirm the cross-test leak, which left `const open` unused. The lint ratchet,
+  one link after `lint:mobile`, counted **51** warnings where `lint:mobile` had
+  counted 50, and failed on an uncapped `@typescript-eslint/no-unused-vars`.
+  It did not reproduce on re-run.
+
+  **The cause was reproduced, not argued.** Each variant was linted through
+  `eslint --stdin --stdin-filename`, so nothing in the worktree was touched:
+
+  - the committed test file gave 0 warnings;
+  - the same file with that one line deleted gave exactly 1 — `'open' is
+    assigned a value but never used`, L307;
+  - `slots: _dropped`, the other mutation in play, gave 0 (underscore-exempt).
+
+  CLAUDE.md's reviewer-mutation rule names the commit that sweeps a mutation
+  in. This is the same hazard reaching a **check** instead: `/pre-merge`
+  launches the checker and the reviewers in parallel into one tree, so a
+  reviewer answering a mutation criterion can turn the checker's verdict red
+  (or, with a different mutation, green) for a state that was never committed.
+  The `verify` that counts for this PR ran after the rebase, with no reviewer
+  active.
+
+  A first attempt at that reproduction printed four `SyntaxError`s and exited
+  0. The parser, not ESLint, had failed: an escaped quote inside a Python
+  f-string expression. The exit code came from the trailing `diff`. It was
+  discarded and redone with the lint output written to files and a parser
+  that refuses an empty one.
+
 ### Left open
 
 - **NEEDS HUMAN EVIDENCE**: on a device, Time counts once a second on a live
@@ -73930,7 +73963,6 @@ baseline, each restored and re-run green:
 - **The harness is file-local.** If a second test ever needs the strength screen
   mounted, lift its mocks into `__tests__/app/support/` the way the running
   screen's were, rather than copying them.
-- Whichever of this and #1105 lands second rebases; the hunks do not overlap.
 
 ## Open items / known gaps as of this entry
 
