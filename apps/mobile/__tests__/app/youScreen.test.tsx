@@ -4,6 +4,7 @@ import { fireEvent, act, configure, render, screen, waitFor, within } from '@tes
 import YouScreen, { badgeText, friendCountLabel, phaseValue, rowLabelFor } from '../../app/(tabs)/you';
 import type { Phase } from '@/lib/body';
 
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 /**
  * The waiting counts on the You tab.
  *
@@ -91,7 +92,7 @@ jest.mock('@/lib/healthkit', () => ({
 // at first require, so the arrow has to READ the variable rather than close
 // over its value — and `beforeEach` puts it back to the bare account every
 // other test in this file assumes.
-let mockModules: { key: string; enabled: boolean }[] = [];
+let mockModules: { key: string; enabled: boolean; label?: string }[] = [];
 jest.mock('@/lib/ModulesProvider', () => ({
   useModules: () => ({ modules: mockModules, ready: true }),
 }));
@@ -312,7 +313,7 @@ describe('what the Phase row says', () => {
     expect(screen.getByTestId('you-phase').props.accessibilityValue?.text).toBe('Cut');
   });
 
-  it('speaks its own hint, not the Sports row hint', async () => {
+  it('speaks its own hint, not the What you train row hint', async () => {
     // `NavValueRow` hard-coded "Opens your sport toggles" while it had one call
     // site. Harmless then, and silently wrong the moment a second row used it —
     // which is this one.
@@ -320,7 +321,7 @@ describe('what the Phase row says', () => {
     const phase = await screen.findByTestId('you-phase');
     const sports = screen.getByTestId('you-sports');
     expect(phase.props.accessibilityHint).not.toBe(sports.props.accessibilityHint);
-    expect(sports.props.accessibilityHint).toContain('sport');
+    expect(sports.props.accessibilityHint).toContain(MODULE_TOGGLE_LOCATION.toLowerCase());
   });
 });
 
@@ -721,7 +722,7 @@ it('does not let a blurred count land on top of a newer one', async () => {
  * act on it. The user reported the roadmaps as missing from a real phone; they
  * exist and work.
  */
-describe('the Sports row', () => {
+describe('the What you train row', () => {
   it('leads to the toggles rather than only naming them', async () => {
     await render(<YouScreen />);
     const row = await screen.findByTestId('you-sports');
@@ -731,6 +732,25 @@ describe('the Sports row', () => {
     // while they were off, which is why the athlete never reached the screen
     // that would say so.
     expect(mockPush).toHaveBeenCalledWith('/profile/edit');
+  });
+
+  /*
+    W17/#737 — the row was labelled "Sports" and its hint said "Opens your
+    sport toggles", over a value listing every enabled module. With nutrition
+    on, that read "Sports · Strength · Nutrition", and nutrition is not a sport
+    (`is_sport` is false for it). It now names the heading it opens.
+  */
+  it('is named for what it opens, because it lists modules and not only sports', async () => {
+    mockModules = [
+      { key: 'strength', label: 'Strength', enabled: true },
+      { key: 'nutrition', label: 'Nutrition', enabled: true },
+    ];
+    await render(<YouScreen />);
+    const row = await screen.findByTestId('you-sports');
+    expect(row.props.accessibilityValue?.text).toBe('Strength · Nutrition');
+    expect(row.props.accessibilityLabel).toBe(MODULE_TOGGLE_LOCATION);
+    expect(row.props.accessibilityHint).not.toMatch(/sport/i);
+    expect(screen.queryByText('Sports')).toBeNull();
   });
 });
 

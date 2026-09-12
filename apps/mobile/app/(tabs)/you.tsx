@@ -32,6 +32,7 @@ import { getProfile, type Profile } from '@/lib/profile';
 import { useModules } from '@/lib/ModulesProvider';
 import { useAuthToken } from '@/lib/useAuthToken';
 
+import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 /**
  * You — **who am I as an athlete, and how is VOLA configured for me?**
  *
@@ -522,7 +523,7 @@ export default function YouScreen() {
             <RNView style={styles.grid}>
               <NavValueRow
                 icon="workout"
-                label="Sports"
+                label={MODULE_TOGGLE_LOCATION}
                 value={
                   enabledLabels === null
                     ? '—'
@@ -531,7 +532,7 @@ export default function YouScreen() {
                       : 'None chosen yet'
                 }
                 onPress={() => router.push('/profile/edit')}
-                hint="Opens your sport toggles"
+                hint="Opens what you train, in your profile"
                 testID="you-sports"
               />
               {/* A phase is the thing every calorie target points at, and until
@@ -555,7 +556,7 @@ export default function YouScreen() {
               <NavRow
                 icon="pencil"
                 label="Edit profile"
-                detail="Your name, sports and date of birth"
+                detail="Your name, what you train and date of birth"
                 onPress={() => router.push('/profile/edit')}
                 testID="you-edit"
               />
@@ -743,9 +744,10 @@ export default function YouScreen() {
  * TABS. The destination screens explain themselves properly ("BJJ tracking is
  * off, turn it back on under What you train" — N471/#471 corrected this row's
  * own quoted copy, which had drifted to naming a "Sports" section that never
- * existed). This pill's OWN label and hint still say "Sports" over a value
- * that lists every enabled module, nutrition included — the same category
- * error, not fixed here: W17/#737. — but nothing links to them while they are
+ * existed). W17/#737 then fixed this pill's OWN label and hint, which still
+ * said "Sports" over a value listing every enabled module, nutrition included:
+ * both now name `MODULE_TOGGLE_LOCATION`, the heading the pill opens. — but
+ * nothing links to them while they are
  * off, so the athlete never reaches the screen that would say so.
  *
  * This pill already shows the answer — "Strength · Nutrition" — as its

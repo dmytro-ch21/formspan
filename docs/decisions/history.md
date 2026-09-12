@@ -74589,6 +74589,44 @@ The provenance check reports a fact whose row is gone, a fact claiming a fresher
 - **The unit-readiness gate** reuses `UnitsProvider`'s cached preference. Offline it is ready as soon as SQLite answers, so no network is involved.
 - **NEEDS HUMAN EVIDENCE, open on #1129:** with airplane mode on, the VOLA screen shows the last check-in and phase goal with a last-updated time, and nothing reads as live.
 
+## 2026-09-12 — W17 (#737): the You tab's "Sports" row, and three more places, stop calling every module a sport
+
+**What was wrong.** N471 (#471) fixed seven screens that sent the athlete to a "Sports" section that has never existed; the heading is "What you train", now `MODULE_TOGGLE_LOCATION` in `lib/modules.ts`. Its own review found two more places with the same category error, visible on screen rather than pointing somewhere broken:
+- **The You tab.** The pill was labelled "Sports", with the hint "Opens your sport toggles", over a value listing **every** enabled module. With nutrition on it read "Sports · Strength · Nutrition", and nutrition is not a sport: `is_sport` is false for it, and that flag exists to keep module and sport apart.
+- **Edit profile's "What you train" card.** Its load-failure hint said "Couldn't load your sports just now", over a list that includes nutrition.
+
+**What changed.**
+- **The You tab's pill.** Its label is `MODULE_TOGGLE_LOCATION`, the heading it opens, and its hint is "Opens what you train, in your profile".
+- **Edit profile's load-failure hint.** It reads "Couldn't load what you train just now."
+
+The ticket's third criterion asks that no other surface pair sport wording with the all-modules list. That found three more, all changed:
+- **Edit profile's save-failure message:** "Your details saved, but your changes to what you train didn't: …"
+- **The You tab's Edit profile row:** its caption is "Your name, what you train and date of birth".
+- **Settings' Profile row:** its hint is "Name, what you train, date of birth".
+
+The `you-sports` testID stays. It is not seen or spoken, and renaming it would churn five tests for no one.
+
+**How the search was verified, because its first two versions were wrong.**
+- **First:** a `git grep` with filters returned nothing at all, for strings known to be there.
+- **Second:** a Python scan that only matched a word inside a same-line string literal. It found 1 of 2 known strings, missing JSX text on its own line and a template literal that spans lines, which is exactly the shape copy takes.
+- **Third, the one relied on:** every non-comment line where "sport(s)" is a word rather than part of an identifier. It found all three known strings as positive controls.
+
+Across `apps/mobile`, `apps/web/src` and `apps/admin/src`, every remaining "sport" in copy is about a session's actual sport, which is correct: a session's sport label, the exercise-search placeholders, the web sport filters, and admin's Sport field. Web has no equivalent of the You pill.
+
+**Tests.**
+- **`youScreen.test.tsx`.** With strength and nutrition on, the pill's label is `MODULE_TOGGLE_LOCATION`, its value is "Strength · Nutrition", its hint doesn't mention sport, and no "Sports" text renders. The existing hint test now expects the hint to name what you train rather than "sport".
+- **`editProfileAvatar.test.tsx`.** With modules stale, the hint names what you train, and "your sports" doesn't render.
+- **Not covered by a test:** the save-failure message, the Edit profile caption and Settings' hint. Those are copy-only and rest on the verified scan.
+
+**Checks.** 3 mutations, each caught as a test failure, restored byte-identical and re-run to 46/46 green:
+- **the You pill's label back to "Sports":** the new W17 test fails;
+- **its hint back to "Opens your sport toggles":** that test and the hint test fail;
+- **the edit profile load hint back to "your sports":** the new edit-profile test fails.
+
+**Not measured.** "What you train" is longer than "Sports", and the pill's label has no `numberOfLines`, so on a narrow phone or at large text sizes it may wrap to two lines beside the Phase pill. Nothing truncates, but the look is a device check.
+
+**Reachability on a phone**: this is the phone — You → What you train, You → Edit profile, Settings → Profile.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
