@@ -2,6 +2,7 @@
 
 import { DEFAULTS, TelemetryBuffer, type BufferedEvent, type Level, type ReportKind } from "@/lib/telemetry";
 import { newTraceId, traceparent } from "@/lib/trace";
+import { withDeadline } from "@/lib/deadline";
 import { API_BASE } from "@/lib/apiConfig";
 
 /**
@@ -85,7 +86,10 @@ export async function flush(): Promise<void> {
     // below — the mobile copy shipped a version that did not, and ten losses
     // plus a failed flush of five ended at five. Same bug is available here.
     lost = buffer.takeLost();
-    const res = await fetch(`${API_BASE}/client-errors`, {
+    // Under the deadline (N159): a flush that never settles would hold its batch
+    // out of the loss tally forever. A timeout lands in the catch below.
+    const res = await withDeadline(undefined, {}, (signal) => fetch(`${API_BASE}/client-errors`, {
+      signal,
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -133,7 +137,7 @@ export async function flush(): Promise<void> {
           },
         })),
       }),
-    });
+    }));
     if (!res.ok) buffer.recordLoss(batch.length + lost);
   } catch {
     buffer.recordLoss(batch.length + lost);

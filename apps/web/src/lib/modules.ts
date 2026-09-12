@@ -1,4 +1,5 @@
 import { newTraceId, traceparent } from "@/lib/trace";
+import { withDeadline } from "@/lib/deadline";
 import { API_BASE } from "@/lib/apiConfig";
 
 /**
@@ -34,6 +35,16 @@ type Token = (opts?: { template?: string }) => Promise<string | null>;
  * exactly the boundary error this file exists to avoid.
  */
 async function modulesRequest<T>(
+  getToken: Token,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<T> {
+  // Under the same deadline as `api.ts`'s helper (N159). The layout that calls
+  // this fails open to an ungated nav, so a timeout costs the gating, not the page.
+  return withDeadline(signal, {}, (s) => modulesRequestUnbounded<T>(getToken, init, s));
+}
+
+async function modulesRequestUnbounded<T>(
   getToken: Token,
   init: RequestInit = {},
   signal?: AbortSignal,

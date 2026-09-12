@@ -2,6 +2,7 @@ import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { newTraceId, traceparent } from "./trace";
+import { withDeadline } from "./deadline";
 import { API_BASE } from "./apiConfig";
 
 export type AdminUserSummary = {
@@ -46,6 +47,14 @@ export class ApiError extends Error {
 }
 
 /**
+ * `adminFetchUnbounded` under the deadline (N159, #576): a hung backend ends a
+ * render with a `TimeoutError` instead of holding it until the runtime gives up.
+ */
+async function adminFetch<T>(path: string, init?: { method: string; body: unknown }): Promise<T> {
+  return withDeadline(undefined, {}, (signal) => adminFetchUnbounded<T>(path, init, signal));
+}
+
+/**
  * Server-side fetch against the admin-only backend endpoints. The backend
  * independently enforces the ADMIN_USER_IDS allowlist (auth.RequireAdmin) —
  * this app's own gate in users/layout.tsx is defence in depth for the UI,
@@ -54,7 +63,11 @@ export class ApiError extends Error {
  * `cache: "no-store"` because admin views must show current state, never a
  * stale render of someone's account.
  */
-async function adminFetch<T>(path: string, init?: { method: string; body: unknown }): Promise<T> {
+async function adminFetchUnbounded<T>(
+  path: string,
+  init: { method: string; body: unknown } | undefined,
+  signal: AbortSignal,
+): Promise<T> {
   const { getToken } = await auth();
   const token = await getToken();
   if (!token) {
@@ -74,6 +87,7 @@ async function adminFetch<T>(path: string, init?: { method: string; body: unknow
     },
     body: init ? JSON.stringify(init.body) : undefined,
     cache: "no-store",
+    signal,
   });
 
   if (!res.ok) {

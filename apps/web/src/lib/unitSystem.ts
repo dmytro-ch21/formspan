@@ -1,4 +1,5 @@
 import { newTraceId, traceparent } from "@/lib/trace";
+import { withDeadline } from "@/lib/deadline";
 import { defaultFoodUnit, type FoodUnit, type UnitSystem } from "@/lib/units";
 import { API_BASE } from "@/lib/apiConfig";
 
@@ -42,7 +43,7 @@ export type Units = { units: UnitSystem; foodUnit: FoodUnit };
  * second fetch for a second field would reintroduce the cost the `UnitsState`
  * comment on `UnitsProvider.tsx` documents paying once already.
  */
-export async function fetchUnits(getToken: Token, signal?: AbortSignal): Promise<Units> {
+async function fetchUnitsUnbounded(getToken: Token, signal?: AbortSignal): Promise<Units> {
   try {
     const token = await getToken();
     if (!token) return { units: "metric", foodUnit: "g" };
@@ -66,6 +67,22 @@ export async function fetchUnits(getToken: Token, signal?: AbortSignal): Promise
     const foodUnit: FoodUnit =
       body?.food_unit === "g" || body?.food_unit === "oz" ? body.food_unit : defaultFoodUnit(units);
     return { units, foodUnit };
+  } catch {
+    return { units: "metric", foodUnit: "g" };
+  }
+}
+
+/**
+ * `fetchUnitsUnbounded` under the default deadline (N159, #576).
+ *
+ * Still never throws: a timeout degrades to the defaults like every other
+ * failure. The deadline is what makes that true for a backend that accepts the
+ * connection and never answers — before it, the dashboard layout waited on this
+ * read for as long as the server runtime would.
+ */
+export async function fetchUnits(getToken: Token, signal?: AbortSignal): Promise<Units> {
+  try {
+    return await withDeadline(signal, {}, (s) => fetchUnitsUnbounded(getToken, s));
   } catch {
     return { units: "metric", foodUnit: "g" };
   }
