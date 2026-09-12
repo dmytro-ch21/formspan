@@ -74901,6 +74901,47 @@ Both failed on `main`, as above.
 
 **Reachability on a phone**: this is the phone — the weight card at the top of Goals.
 
+## 2026-09-12 — F27 (#715): a finished session on web names the grip each set was held in, in full
+
+**What was reported.** L1's device sweep (#380) found web's finished-session table naming no grip for a set held `reverse`, while mobile's read-only row reads "5 × 70kg · Reverse".
+
+**What the code said.** The fact was reaching the row:
+- the server selects `grip` (`session/postgres.go`), and the page stores `s.sets` as sent;
+- since #268 (N10), `SetRow` in `apps/web/src/app/dashboard/sessions/[id]/page.tsx` renders a picker while the session is editable and, once it is not, a label for any set holding a grip.
+
+What that label printed was the three-letter short: "Rev" in `text-xs` beside the set number, with the word only in a hover `title`. That is what the sweep did not see. Nothing pinned it either: web's vitest is pure logic, and no test rendered the row.
+
+**What changed.**
+- **`apps/web/src/lib/heldGrip.ts` (new).** `heldGripLabel(grip)` returns the full label ("Reverse"), or `null` for a set with no grip. A key this build does not know prints as its own id.
+- **The page.** The read-only branch of `SetRow` reads it and appends a visually hidden " grip" (`sr-only`), so a screen reader hears "Reverse grip". The hover `title` is gone: it only ever reached a mouse (`frontend-reviewer`'s suggestion, taken). The page no longer imports `GRIPS`.
+- **Decision, reversible: the full word over the short in the read-only row.** The editable picker already shows the full word, mobile's row does too, and the only report on record of this surface is somebody who missed the short. The width cost is at most four characters, in a cell that no longer holds a picker.
+
+**Tests.** `apps/web/src/lib/__tests__/heldGrip.test.ts` (new, 4 cases):
+- the full word;
+- every grip the server defines maps to its label, not its short;
+- null and undefined print nothing;
+- an unknown key prints as itself.
+
+`apps/web/src/app/dashboard/sessions/__tests__/finishedGripWiring.test.ts` (new, 4 cases) is a source read in the shape of `targetsPageWiring.test.ts`, because no web test can render the page. It asserts three things:
+- the row computes `heldGripLabel(set.grip)`;
+- it prints that value, with the hidden " grip" and no `title`, in the branch after the editable picker;
+- no hand-rolled `GRIPS.find(` label is left on the page.
+
+`ac-verifier` asked for it: without it, nothing pinned that the page uses the helper.
+
+**Checks.** 6 mutations, each caught as a test failure, restored byte-identical and re-run to green:
+- **the short instead of the label:** 2 tests fail;
+- **no null guard:** 1 fails;
+- **no unknown-key fallback:** 1 fails;
+- **the row printing `set.grip` instead of the helper:** the wiring test fails;
+- **the row losing its hidden " grip":** the wiring test fails.
+
+Web `tsc --noEmit` and eslint are clean.
+
+**Not covered by a test.** The rendered row itself: the wiring test reads the source, and no web test renders the page. On web, open a finished session with a set held in a grip: its SET cell reads the number and then "Reverse". A set with no grip shows only its number.
+
+**Reachability on a phone**: unchanged. Mobile's finished session already names the grip (`describeSet`); this is web catching up.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

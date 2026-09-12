@@ -772,6 +772,10 @@ Domain: a training session that **actually happened**, and the sets in it — re
 - **Back to unrecorded.** Set a grip, then choose the empty option: the set
   must return to no grip, not to "regular". The row summary should then show
   nothing rather than a default.
+- **A finished session still names the grip** (F27, #715). Finish a session
+  with a set held `reverse` and reopen it on web: the picker is gone and the
+  set's cell reads "Reverse" in full (a screen reader: "Reverse grip"). A set with no grip
+  shows nothing beside its number.
 - **A grip outside the movement's subset stays clearable.** A set holding
   `angled` on a hinge (recorded before the subset changed, or by a newer
   server) must still appear in the picker as a selectable option — otherwise it
