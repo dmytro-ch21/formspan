@@ -74124,6 +74124,83 @@ That last one was first run against a baseline an edit had broken (`props` is no
 
 **Reachability on a phone**: this is the phone — the rest timer on the strength session screen.
 
+
+## 2026-09-12 — F56 (#1135): the teardown hook "timed out" because the worker was frozen, not because it was slow — and a test that renders nothing no longer crosses the boundary a freeze can fail
+
+**What failed.** A full `pnpm run verify` on F54's rebased head went red at host load ~320–360 in a suite no branch in flight had touched: `lib/__tests__/detectedActivity.test.ts` › `isAlreadyLogged › ignores a still-running session…`, with `thrown: "Exceeded timeout of 15000 ms for a hook."` at `jest.setup.js:274` — F47's global teardown (one real `setImmediate` yield, then `cleanup()`, both inside `act`). That test is pure and synchronous; its suite passed 3/3 in isolation and `main`'s CI was green.
+
+**The mechanism, measured in four steps before anything changed.**
+
+- **E1 — a 16s synchronous stall at named points, on the failing test.** No stall: pass. Stall in a synchronous `beforeEach` (no macrotask boundary inside its timed region): **pass**. Stall before the yield, inside the yield, or after `cleanup()`: **fail**, each with the exact production message. So every step of the hook is exposed — `act`'s own tail crosses a macrotask boundary too — and a stall that never reaches a timers phase inside a timed region cannot fail anything.
+- **E2 — real OS descheduling instead of a busy-wait.** The process running the hook was `SIGSTOP`ped from outside: **16s → fail with the production message; 5s → pass.** A worker simply not being scheduled for 15s is sufficient; nothing in the hook has to do anything.
+- **E3 — the unchanged hook timed across the whole suite at load ~375.** 5,822/5,822 tests green, zero natural timeouts; teardown p50 1ms, p95 15ms, p99 64ms, **max 260ms**. Legitimate teardown work never comes within 57x of the 15s budget, which is why raising the timeout — which the ticket forbade without this measurement — would only have moved the threshold a freeze has to cross.
+- **Answer to "which step spends the time": none of them.** The time is jest's hook timer expiring while the process is frozen and then firing first at the next timers phase, ahead of the `setImmediate` callback the hook is waiting on.
+
+**The fix.** A test that rendered nothing has nothing for this hook to settle or unmount, so the hook now returns before `act` — resolving in microtasks, reaching no timers phase, and so immune to a freeze of any length. Rendered tests take F47's teardown byte-identically. **This fixes the tests that render nothing, not the freeze**: a component test's teardown is still exposed to a worker frozen past 15s, and the PR says so.
+
+**Detecting "rendered nothing" took three measurements and one caught bug.**
+
+- `screen.root` THROWS "`render` function has not been called" only when nothing was rendered since the last cleanup. After `renderHook`, a component that renders `null`, and a manual `unmount()`, it returns `undefined` **without throwing** — so truthiness would have skipped `cleanup()` on a still-mounted hook host. The helper (`lib/__tests__/support/renderedTree.ts`) returns false only on that exact error and treats anything else as rendered, so a reworded RNTL message degrades to F47's teardown and never skips a cleanup. (E3's own rendered/not-rendered split used truthiness and therefore overcounted "nothing rendered"; the census below is the corrected one.)
+- **The first draft leaked every rendered tree.** It destructured `screen` from RNTL at module scope. RNTL 14 REASSIGNS that export (`dist/screen.js`: `render` sets `exports.screen = renderResult`, `cleanup` restores a placeholder), so the binding held the placeholder forever, every test looked unrendered, and `cleanup()` never ran. **The guard test's "is false again in the next test" went red on it** — 6/7 against the draft, 7/7 against F47's teardown. The hook now reads `rntl.screen` at call time, with the reassignment cited in its comment. A suite of pure and component tests (24/24, 18/18, 9/9) passed against the broken draft, which is the argument for that ordered guard test existing at all.
+
+**Verified both ways.**
+
+A 16s synchronous stall injected at the very start of the teardown hook, at load ~380. The unfixed arm is `origin/main`'s `jest.setup.js`; the fixed arm is the working tree.
+
+| case | hook | test | stall | result |
+|---|---|---|---|---|
+| a | unfixed | the failing pure test | 16s | **fail** — `Exceeded timeout of 15000 ms for a hook` |
+| b | fixed | the same pure test | 16s | **pass** |
+| c | fixed | a test that renders (`renderedTree.test.tsx` › is true after render) | 16s | **fail**, same message — the stated limit |
+| d | fixed | the pure test | none | pass (control) |
+
+**F47's controls, re-run in three arms** (RNTL's automatic cleanup as the positive control, F47's teardown from `origin/main`, and this fix), 3 runs each. Control 3 had to be rebuilt first: built on timer hops and `waitFor`, it measured host load — at load ~400 the hop fired inside the test body and warned in every arm, including F47's. Rebuilt with gates the test releases itself, it measures the teardown window.
+
+| control | RNTL's automatic cleanup | F47's teardown (`origin/main`) | fixed | F47's own record (RNTL / F47) |
+|---|---|---|---|---|
+| 1. a 5ms timer is due when the body returns | warns 3/3 | 0/3 | **0/3** | warns / 0 |
+| 2. a bare synchronous update outside `act` | 3/3 | 3/3 | **3/3** | 3/3 / 3/3 |
+| 3a. unawaited chain, one hop due at teardown | 3/3 | 0/3 | **0/3** | 1/3 / 0/3 |
+| 3b. two hops, the first due at teardown | 3/3 | 0/3 | **0/3** | 3/3 / 0/3 |
+| 3c. the tail lands after unmount | 0/3 | 0/3 | **0/3** | 0/3 / 0/3 |
+
+- **The fixed arm matches F47's in every control and every run.** It should: every control renders, so all of them take F47's teardown path byte-identically.
+- **The positive-control arm warns where F47's did.** 3a warns more reliably than F47 recorded (3/3 against 1/3). That is expected: gates released by the test replace a timer race.
+- **Control 3 took two rebuilds before it measured anything.**
+  - *First build (timer hops plus `waitFor`).* At load ~400 the hop fired inside the test body, so it warned in every arm.
+  - *Second build (awaited the press).* It deadlocked. RNTL 14's `fireEvent` is an `async` function that returns the handler's promise (`dist/fire-event.js`), so awaiting the press waited on a gate the test only releases afterwards.
+  - *The build that measured.* N505's recorded shape: an un-awaited press, `waitFor` on the first state, then a gate released by a timer that is due at teardown.
+- **One run in between was contaminated.** A runner I believed killed was still alive and shared file names with its replacement. Those results were discarded, not reinterpreted. The clean run above gave every file a run id.
+
+**Mutations**, each on untracked copies of the setup, helper or guard test so the working tree was never edited:
+
+| # | mutation | what it runs | result |
+|---|---|---|---|
+| M1 | `screen` destructured at module scope (the first draft) | the guard test | **red** at "is false again in the next test" — the leak |
+| M2 | detection by truthiness (`!!screen.root`) | the guard test | **red** on `renderHook`, a `null`-rendering component and manual `unmount()` |
+| M3 | detection always `true` | the pure test under the 16s stall | **red** — `Exceeded timeout of 15000 ms for a hook`; the immunity is gone |
+| M4 | detection always `false` in the setup only (guard reads the real helper) | the guard test | **red** at "is false again in the next test" — `cleanup()` never ran |
+| M5 | the early return removed (F47's hook) | the pure test under the 16s stall | **red** — the same hook timeout |
+
+**Census against E3's baseline.** The full suite ran on the fixed teardown at load ~360–375, and the path each test took was logged with the corrected detection. **360/360 suites and 5,829/5,829 tests passed** — one suite and seven tests more than E3, which are the guard test.
+
+| signal | E3 (F47 teardown) | fixed |
+|---|---|---|
+| `not wrapped in act` | 0 | 0 |
+| `not configured to support act` | 0 | 0 |
+| `overlapping act() calls` | 3 | 3 |
+| uncaught errors | 0 | 0 |
+| timeouts | 0 | 0 |
+| "failed to exit gracefully" | 1 | 1 |
+
+- **4,384 of 5,829 tests (75.2%) took the early return.** 1,445 took the full teardown.
+- **By file:** 230 files returned early in every test, 114 took the full teardown in every test, and 16 were mixed.
+- **Full teardowns stayed fast:** p50 2ms, p99 119ms, max 283ms.
+
+**Apparatus errors on the way, recorded because each would have been believed.** Two result parsers died on shell quoting and printed `UNKNOWN` rather than a verdict; a timing note claimed a timed-out hook never reaches its log line, which is false (jest rejects the race, the hook function keeps running); the stall check was first run against the leaking draft and was stopped before its fixed-arm results could be read as evidence. Every parser was self-tested against known output before its verdicts were used.
+
+**Not verified.** No run reproduced the production freeze itself — only its mechanism, by busy-wait and by `SIGSTOP`. Rendered tests remain exposed; reducing the oversubscription that freezes a worker (`verify` runs jest with its default worker count on a host shared by many sessions) is a different change and was not attempted here.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
