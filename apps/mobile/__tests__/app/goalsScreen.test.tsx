@@ -13,8 +13,8 @@ import { fetchAdjustment, listTargets, saveTarget, suggestedTarget } from '@/lib
 import { setActivityLevel } from '@/lib/profile';
 
 /**
- * The Goals tab, and the two things that broke when it stopped being a pushed
- * screen (N70).
+ * The Goals screen, and the two things that broke when N70 made it a tab
+ * instead of a pushed screen.
  *
  * `app/food/target.tsx` was opened from Food, so it REMOUNTED on every visit:
  * the fetch ran, the arithmetic ladder was current, and the day it saves
@@ -22,6 +22,11 @@ import { setActivityLevel } from '@/lib/profile';
  * mounted for the life of the process. Neither symptom is visible in a diff and
  * neither is reachable by a test that renders the screen once — they both need
  * a second visit, which is exactly why review found them and the suite did not.
+ *
+ * N504 (#876) made Goals a pushed screen again (`app/goals.tsx`). It remounts
+ * on every push now, but it still stays mounted underneath what it pushes —
+ * the phase picker, profile edit, the target history — so coming back to it is
+ * a refocus, not a remount, and both properties still need that second visit.
  *
  * These are component tests rather than pure ones because the properties are
  * about LIFECYCLE: what a refocus does, and what a stale receipt is still
@@ -309,10 +314,11 @@ beforeEach(() => {
 });
 
 describe('the Goals tab refetches when it is focused again', () => {
-  // A tab mounts once and stays mounted. Without a focus refetch the ladder
-  // keeps describing the weight, training load and phase it read the first time
-  // the tab was ever opened — including after the athlete changes their phase
-  // from a button on this very screen.
+  // The screen stays mounted underneath what it pushes (and, while it was a
+  // tab, for the life of the process). Without a focus refetch the ladder keeps
+  // describing the weight, training load and phase it read on arrival —
+  // including after the athlete changes their phase from a button on this very
+  // screen.
   it('asks again on every focus, not only on mount', async () => {
     await render(<GoalsScreen />);
     await waitFor(() => expect(mockSuggested).toHaveBeenCalledTimes(1));
@@ -830,17 +836,19 @@ describe('the activity pills move the derivation and nothing else', () => {
 });
 
 /**
- * N93 - the level survives leaving the tab.
+ * N93 - the level survives leaving the screen.
  *
  * Reported from a device as "Target doesn't save previously added type of
  * activity": the pills were a `useState('light')`, so they reset on every
  * navigation and the derived calorie target reset with them. The athlete read
  * one number and came back to another, with nothing saying so.
  *
- * **Every case here needs a REFOCUS, not a second render.** A tab mounts once
- * and stays mounted for the life of the process, so a test that renders the
- * screen twice tests a lifecycle this screen does not have - and would pass
- * against the bug.
+ * **Every case here needs a REFOCUS, not a second render.** Written when this
+ * screen was a tab, which mounts once and never unmounts, so rendering it twice
+ * tested a lifecycle it did not have. Since N504 it is pushed, and a fresh push
+ * IS a remount - but a remount re-reads anyway, so that case cannot fail.
+ * Coming back from a screen this one pushed is a refocus with nothing
+ * unmounted, and a test that renders twice would pass against the bug there.
  */
 describe('the activity level is remembered', () => {
   it('is read back on every focus, not only on mount', async () => {
@@ -1233,7 +1241,7 @@ describe('the roadmap offer (N107)', () => {
   // instead, which is a real and separate gate this describe block is not
   // about. The roadmap offer's own reach into a nutrition-off Goals is
   // deliberately NOT this screen's job — see the doc comment at the top of
-  // `app/(tabs)/goals.tsx` and CurriculaStrip's role as the fallback.
+  // `app/goals.tsx` and CurriculaStrip's role as the fallback.
   const nutritionOn: Module = {
     key: 'nutrition',
     label: 'Nutrition',

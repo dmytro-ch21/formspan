@@ -103,9 +103,9 @@ import { Typography } from '@/constants/Typography';
  * exist and only the first says yes:
  *
  *  - **The header IS the boundary** — a sibling directly above the scroller, so
- *    content passes under the header itself. `goals`, `phase`. `phase` sits
- *    outside `(tabs)`, so unlike `goals` it has no tab bar beneath it to
- *    match; the rule still marks a real boundary there.
+ *    content passes under the header itself. `goals`, `phase`. Both sit
+ *    outside `(tabs)` (`goals` since N504 moved it there), so neither has a
+ *    tab bar beneath it to match; the rule still marks a real boundary there.
  *  - **The header scrolls away** — rendered INSIDE the scroll view (or, for
  *    `workouts`, inside the `FlatList`'s `ListHeaderComponent`) as its first
  *    child, so nothing ever passes under it. `index` (Today), `food`, `you`,

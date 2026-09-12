@@ -715,9 +715,9 @@ it('does not let a blurred count land on top of a newer one', async () => {
 /**
  * N61 — the Sports row was the answer to every silent absence, and was inert.
  *
- * Every module gate in this app renders NOTHING when its discipline is off:
+ * Every module gate in this app rendered NOTHING when its discipline was off:
  * the belt roadmaps, the Plan tab's Roadmaps strip, BJJ in the session picker,
- * and the Food and Goals TABS. This row already displayed which disciplines
+ * and the Food and Goals TABS, both then in the bar. This row already displayed which disciplines
  * were on — so it named the cause of all of them — while offering no way to
  * act on it. The user reported the roadmaps as missing from a real phone; they
  * exist and work.

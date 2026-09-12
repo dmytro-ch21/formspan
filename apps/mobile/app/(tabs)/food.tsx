@@ -290,8 +290,10 @@ export default function FoodScreen() {
     };
   }, [userId, menuEntryId, lastSyncAt]);
 
-  // N61: this tab is REACHABLE with nutrition off now — see `(tabs)/_layout.tsx`
-  // for why hiding it was the worse failure — so the screen has to say what
+  // N61: this tab is REACHABLE with nutrition off, and since N180 it is in the
+  // bar in every module state — see `serverHasFoodLog`'s doc comment in
+  // `lib/modules.ts` for why hiding it was the worse failure — so the screen
+  // has to say what
   // state it is in, the way `bjj/log` already does for its own discipline.
   //
   // `foodLogGate` rather than the condition spelled out here: Goals asks the
