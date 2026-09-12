@@ -74450,6 +74450,42 @@ outside the five wrapped sites. Its three suggestions:
 - **The two Library loaders now have different budgets**: 10s for techniques,
   30s for exercises.
 
+## 2026-09-12 — F52 (#1114): Cancel on the barcode scanner stops the lookup, not only the spinner
+
+**What was wrong.** On `app/food/scan.tsx`, Cancel during a lookup changed only what was on screen. `scanAgain` put the camera back, but the request kept running, and `resolve` applied its answer unconditionally when it came. An athlete back at the camera got moved to a result — found, not found, or "couldn't check" — for a packet they had walked away from. F47 (#1057) measured it with a throwaway probe while wrapping that test's trailing release in `act`, and filed it rather than fixing source inside a test-only change.
+
+**The worse form was inferred then and is pinned now.** `scanAgain` also releases `handling`, the frame guard, so a second scan could start while the first lookup was still out, and whichever answered last won. That puts the older packet's numbers under the newer scan, one confirm away from the log.
+
+**The fix is one number in a ref: which lookup the screen is waiting on.**
+- `resolve` notes the number when a lookup starts.
+- After each `await` — the cache read, the network lookup, and its `catch` — it returns without touching the screen if the number has moved.
+- `scanAgain` moves it on.
+
+A new scan cannot start without `scanAgain`, because `handling` stays latched until it runs, so a newer scan always holds a newer number than any older lookup. It is a ref for the reason `handling` already gives: the check runs after an `await` and must see what was decided since, not the value captured by the render that started it.
+
+**Why `resolve` captures the number rather than incrementing it.** The first draft did both: `resolve` incremented and `scanAgain` incremented. The increment in `resolve` was redundant, because `handling` already makes `scanAgain` the only way to a second lookup. A mutation removing it would have survived every test, and would have read as dead code rather than as defence. So `resolve` captures and `scanAgain` alone moves the number, and every line has a test that fails without it.
+
+**Tests** (`__tests__/app/scanScreen.test.tsx`, 35 → 39):
+- the existing "offers a way out of the spinner" test now asserts that the cancelled lookup's late answer changes nothing — the assertion F47 had deliberately left out, pointing at this ticket;
+- a cancelled lookup that finds the food late opens no draft;
+- a cancelled lookup that fails late shows no error;
+- a cancelled cache read that answers late opens nothing and asks the network nothing;
+- an older lookup that answers after a newer scan cannot overwrite it: the draft stays the newer packet's.
+
+**A test that could not fail, caught by its own baseline.** The first version asserted the product with `getByText('Rolled oats')`. The draft renders brand and name as one line under `scan-name` (N426's `displayName`), so that query never matches. The newer-scan test timed out on the fixed code, which is how it surfaced. The same query sat in two "opens nothing" assertions, where it was true of every screen and so proved nothing; the `scan-hint` assertion beside each was the real one. All three now read `scan-name`, the way every other test in the file already did.
+
+**Checks.** 4 mutations, one per guard, all caught as test failures, each restored byte-identical and the file re-run to 39/39 green:
+- **the guard after the cache read:** the late cache-read test fails, and only it;
+- **the guard after the network lookup:** the spinner test, the late-found test and the newer-scan test fail;
+- **the guard in the `catch`:** the late-failure test fails, and only it;
+- **Cancel no longer moving the number on:** all five fail.
+
+The first mutation pass ran against the broken name query above and is not counted — a red baseline makes every mutation result on that test meaningless. It was re-run after the fix.
+
+**Not measured.** The device case is the ticket's `NEEDS HUMAN EVIDENCE`: on a slow connection, scan a packet, tap Cancel while it is looking up, and confirm the screen stays at the camera when the lookup eventually answers. No motion in the diff, so the owner's motion gate does not apply.
+
+**Reachability on a phone**: this is the phone — Food → Quick-add → Scan a barcode.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

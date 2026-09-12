@@ -677,19 +677,97 @@ describe('a lookup that is taking too long', () => {
     await fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
     await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
     expect(screen.queryByTestId('scan-looking-up')).toBeNull();
-    // Released inside `act` (F47, #1057). Bare, the cancelled lookup's
-    // `setPhase` landed after this test's body — outside `act`, and sometimes
-    // against the next test's screen.
-    //
-    // It is released, not asserted on, and that is deliberate: once it lands
-    // the screen LEAVES the camera for an "unknown" result the athlete
-    // cancelled, because `resolve` does not know it was cancelled. That is a
-    // real bug in `app/food/scan.tsx`, filed as F52 (#1114), and a test-only
-    // change is not the place to fix it. When F52 lands, this is where its
-    // assertion goes.
+    // Released inside `act` (F47, #1057), and asserted on since F52 (#1114):
+    // the lookup the athlete cancelled answers, and nothing moves.
     await act(async () => {
       release({ status: 'unknown', code: CODE });
     });
+    expect(screen.getByTestId('scan-hint')).toBeTruthy();
+  });
+
+  /*
+    F52 (#1114) — Cancel stopped the spinner and not the lookup. The request
+    kept running, and its answer was applied when it came: an athlete back at
+    the camera was moved to a result for a packet they had walked away from.
+    Each late path below is one of the guards in `resolve`; each test fails
+    with that guard removed.
+  */
+  async function cancelDuringLookup() {
+    await scan();
+    await waitFor(() => expect(screen.getByTestId('scan-looking-up')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('scan-cancel-lookup'));
+    await waitFor(() => expect(screen.getByTestId('scan-hint')).toBeTruthy());
+  }
+
+  it('a cancelled lookup that FINDS the food late does not open it', async () => {
+    let release: (v: unknown) => void = () => {};
+    mockLookup.mockReturnValue(new Promise((r) => { release = r; }));
+    await cancelDuringLookup();
+
+    await act(async () => {
+      release({ status: 'found', food: OATS, source: 'off' });
+    });
+    expect(screen.getByTestId('scan-hint')).toBeTruthy();
+    expect(screen.queryByTestId('scan-name')).toBeNull();
+  });
+
+  it('a cancelled lookup that FAILS late does not replace the camera with an error', async () => {
+    let fail: (e: unknown) => void = () => {};
+    mockLookup.mockReturnValue(new Promise((_r, reject) => { fail = reject; }));
+    await cancelDuringLookup();
+
+    await act(async () => {
+      fail(new TimeoutError());
+    });
+    expect(screen.getByTestId('scan-hint')).toBeTruthy();
+    expect(screen.queryByTestId('scan-unreachable')).toBeNull();
+  });
+
+  it('a cancelled cache read that answers late opens nothing and asks the network nothing', async () => {
+    let hit: (v: unknown) => void = () => {};
+    mockCached.mockReturnValue(new Promise((r) => { hit = r; }));
+    await cancelDuringLookup();
+
+    await act(async () => {
+      hit({ food: OATS, source: 'off' });
+    });
+    expect(screen.getByTestId('scan-hint')).toBeTruthy();
+    expect(screen.queryByTestId('scan-name')).toBeNull();
+    expect(mockLookup).not.toHaveBeenCalled();
+  });
+
+  it('an older lookup that answers after a newer scan cannot overwrite it', async () => {
+    const CORNFLAKES = { ...OATS, name: 'Corn flakes', brand: 'Kellogg' };
+    /** A second real EAN-13, so the second scan is not a misread. */
+    const OTHER = '5012345678900';
+    let releaseFirst: (v: unknown) => void = () => {};
+    let releaseSecond: (v: unknown) => void = () => {};
+    mockLookup
+      .mockReturnValueOnce(new Promise((r) => { releaseFirst = r; }))
+      .mockReturnValueOnce(new Promise((r) => { releaseSecond = r; }));
+    await cancelDuringLookup();
+
+    // The camera is back, so a second packet decodes and starts its own lookup.
+    await act(async () => {
+      mockScan!({ data: OTHER });
+    });
+    await waitFor(() => expect(screen.getByTestId('scan-looking-up')).toBeTruthy());
+    expect(mockLookup).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      releaseSecond({ status: 'found', food: OATS, source: 'off' });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('scan-name')).toHaveTextContent('Flahavans Rolled oats'),
+    );
+
+    // The first packet's answer arrives last, and is about a packet the athlete
+    // is no longer holding.
+    await act(async () => {
+      releaseFirst({ status: 'found', food: CORNFLAKES, source: 'off' });
+    });
+    expect(screen.getByTestId('scan-name')).toHaveTextContent('Flahavans Rolled oats');
+    expect(screen.getByTestId('scan-name')).not.toHaveTextContent(/Corn flakes/);
   });
 });
 

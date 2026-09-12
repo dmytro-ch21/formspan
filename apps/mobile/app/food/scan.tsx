@@ -196,6 +196,28 @@ export default function ScanBarcodeScreen() {
   const confirming = useRef(false);
 
   /**
+   * Which lookup the screen is waiting on (F52/#1114).
+   *
+   * Cancel used to change only what was on screen: the request kept running,
+   * and when it answered, `resolve` applied the answer anyway — the athlete,
+   * back at the camera, was moved to a result for a barcode they had walked
+   * away from. Worse, `scanAgain` also releases `handling`, so a SECOND scan
+   * could start while the first was still out, and whichever answered last
+   * won: the older packet's numbers under a newer scan, one confirm away from
+   * the log.
+   *
+   * So every lookup notes this number when it starts, and may touch the
+   * screen only while the number is unchanged. `scanAgain` moves it on — and a
+   * new scan cannot start without `scanAgain`, because `handling` stays
+   * latched until it runs — so Cancel invalidates the lookup that was out, and
+   * a newer scan always holds a newer number than any older lookup. A ref, not
+   * state, for the reason `handling` gives: the check runs after an `await`,
+   * and must see the decision made since, not the value captured by the render
+   * that started it.
+   */
+  const lookupSeq = useRef(0);
+
+  /**
    * Show the drafted product and let the athlete correct it.
    *
    * Declared BEFORE `resolve`, which calls it. That ordering is enforced —
@@ -228,6 +250,8 @@ export default function ScanBarcodeScreen() {
         handling.current = false;
         return;
       }
+      const lookup = lookupSeq.current;
+      const current = () => lookupSeq.current === lookup;
       setPhase({ kind: 'looking-up', code });
 
       // The local cache first, and BEFORE the network rather than as a
@@ -236,6 +260,7 @@ export default function ScanBarcodeScreen() {
       // first would make that case wait for a timeout it does not need.
       try {
         const hit = await cachedBarcode(userId, code);
+        if (!current()) return;
         if (hit) {
           // The row's OWN provenance, plus the fact that it came from the
           // cache. An AI-drafted food resolving offline must still say its
@@ -251,6 +276,9 @@ export default function ScanBarcodeScreen() {
 
       try {
         const res = await lookupBarcode(getToken, code);
+        // Cancelled, or overtaken by a newer scan, while it was out. Its answer
+        // is about a packet the athlete is no longer looking at.
+        if (!current()) return;
         if (res.status === 'unknown') {
           setPhase({ kind: 'unknown', code });
           return;
@@ -261,6 +289,7 @@ export default function ScanBarcodeScreen() {
         // time and nothing else, which is why it is not surfaced.
         void rememberBarcode(userId, code, res.food, res.source).catch(() => {});
       } catch (err) {
+        if (!current()) return;
         setPhase({
           kind: 'unreachable',
           code,
@@ -294,6 +323,8 @@ export default function ScanBarcodeScreen() {
   );
 
   const scanAgain = useCallback(() => {
+    // Whatever lookup is still out no longer owns the screen.
+    lookupSeq.current += 1;
     handling.current = false;
     setMisread(false);
     setSaveError(null);
