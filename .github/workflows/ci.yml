@@ -602,6 +602,16 @@ jobs:
       - name: Lint ratchet (mobile + web + admin)
         run: pnpm run check:lint-ratchet
 
+      # RNTL 14 made render, renderHook, fireEvent, act, rerender and unmount
+      # async, and a dropped promise is not a type error: tsc read 0 errors
+      # while 1,058 call sites were unawaited during N550's migration. An
+      # unawaited event lets the next assertion run before the state it checks
+      # is committed, which usually fails and sometimes passes (F51, #1101).
+      # Scoped to RNTL calls and the test helpers that wrap them, so a test may
+      # still leave the APP's own promise pending on purpose. H23 (#1070).
+      - name: Unawaited RNTL calls in tests
+        run: pnpm run check:rntl-awaits
+
       - name: Typecheck
         run: pnpm run typecheck:mobile
 
