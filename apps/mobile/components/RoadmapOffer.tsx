@@ -78,14 +78,15 @@ export function RoadmapOffer() {
     [getToken],
   );
 
-  // ON FOCUS, not on mount. A tab screen stays mounted for the life of the
-  // process, and enrolling happens on the roadmap screen pushed over it — read
-  // once, this would keep offering a roadmap the athlete had already started.
-  // The same bug `CurriculaStrip` documents, in the same place.
+  // ON FOCUS, not on mount. Enrolling happens on the roadmap screen pushed over
+  // the screen that renders this — Goals since N107, Today before it — and
+  // that screen stays mounted underneath it, so read once, this would keep
+  // offering a roadmap the athlete had already started. The same bug
+  // `CurriculaStrip` documents, in the same place.
   //
   // The abort is the OTHER half of that, and it is the same stale-read shape
   // Today's own `planSeq` and the Plan tab's `readSeq` both guard. Blur this
-  // tab mid-request on a slow connection, enrol, come back: two reads are in
+  // screen mid-request on a slow connection, enrol, come back: two reads are in
   // flight and the FIRST one — built from a list where nothing was enrolled —
   // can land last and put the offer back on top of a roadmap the athlete just
   // started. Cancelling on blur means the losing read never reaches `setOffer`
@@ -111,12 +112,15 @@ export function RoadmapOffer() {
         testID="roadmap-offer"
       >
         <RNView style={styles.head}>
-          {/* `route`, NOT `goal` — and this is a real collision rather than a
-              preference. `goal` is the GOALS TAB's icon, which is in the tab
-              bar at the bottom of this very screen, so the same glyph would
-              be pointing at two unrelated destinations eight hundred points
-              apart. `route` is a path through somewhere, which is what a
-              roadmap is, and nothing else in the app claims it. */}
+          {/* `route`, NOT `goal`. Chosen when `goal` was the GOALS TAB's icon,
+              in the tab bar at the bottom of the screen this offer sat on, so
+              the same glyph would have pointed at two unrelated destinations
+              eight hundred points apart. That collision is gone: N176 took
+              Goals off the bar, and this offer renders only on Goals, a pushed
+              screen with no tab bar beneath it. `route` is a path through
+              somewhere, which is what a roadmap is — but it is no longer
+              unclaimed: on Goals it is also the ladder's `movement` row and
+              `MovementChoice`'s `light` card. Recorded by H33, not changed. */}
           <Icon name="route" size={14} color={accent.ink} />
           <Text style={[styles.eyebrow, { color: accent.ink }]}>ROADMAPS</Text>
         </RNView>

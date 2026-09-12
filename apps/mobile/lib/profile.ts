@@ -183,8 +183,9 @@ export function setTrackEffort(
 /**
  * Stores the daily-movement level, creating the profile if there is not one.
  *
- * Goes through `updateProfile` for its 404-then-POST recovery: the Goals tab is
- * a tab, so an athlete can reach it without ever having been through
+ * Goes through `updateProfile` for its 404-then-POST recovery: Goals is one
+ * tap from Food's target row and from Progress, both on tabs that are always
+ * in the bar, so an athlete can reach it without ever having been through
  * onboarding, and "pick how much you move" failing on a row that does not exist
  * yet is a dead end with no explanation.
  */

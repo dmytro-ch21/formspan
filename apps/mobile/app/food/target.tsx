@@ -1,7 +1,11 @@
 import { Redirect } from 'expo-router';
 
 /**
- * The target screen moved into the Goals tab; this keeps its old address alive.
+ * The target screen moved to Goals; this keeps its old address alive.
+ *
+ * Goals was a tab when this redirect was written (N70). It has been
+ * `app/goals.tsx`, a stack screen pushed over the tabs, since N504 (#876) —
+ * still at `/goals`, so the redirect below did not change.
  *
  * A route file rather than a deletion, and it is not ceremony. Three things
  * still point at `/food/target` and none of them is in this repo's control:

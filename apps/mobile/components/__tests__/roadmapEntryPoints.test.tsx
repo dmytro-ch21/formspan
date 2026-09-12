@@ -23,10 +23,10 @@ import type { Criteria, Curriculum, CurriculumItem, Progress } from '@/lib/curri
  * plausible one:
  *
  *  - **The offer must not appear once the athlete is on a roadmap.** It reads
- *    on FOCUS, not on mount, because a tab screen stays mounted for the life
- *    of the process and enrolling happens on a screen pushed over it. Read
- *    once, it would keep offering a roadmap the athlete had already started —
- *    the exact bug `CurriculaStrip` documents having had.
+ *    on FOCUS, not on mount, because enrolling happens on a screen pushed over
+ *    the one rendering the offer, and that screen stays mounted underneath it.
+ *    Read once, it would keep offering a roadmap the athlete had already
+ *    started — the exact bug `CurriculaStrip` documents having had.
  *  - **A failed read must render nothing**, not an empty or broken card. This
  *    is the offline case, and rendering "Start a roadmap" with no name in it
  *    is worse than silence.
@@ -289,9 +289,10 @@ describe('RoadmapOffer — the way in, for an athlete on none', () => {
 
   it('stops offering a roadmap the athlete has since started', async () => {
     // READ ON FOCUS, not on mount. Enrolling happens on the roadmap screen
-    // pushed over the tabs, and this tab stays mounted for the life of the
-    // process — so a mount-only read leaves Today offering something the
-    // athlete is already working. `CurriculaStrip` shipped that bug once.
+    // pushed over Goals, which stays mounted underneath it — so a mount-only
+    // read leaves Goals offering something the athlete is already working.
+    // (This said Today, and a tab, before N107 moved the offer.)
+    // `CurriculaStrip` shipped that bug once.
     mockListCurricula.mockResolvedValue([offerable]);
     await render(<RoadmapOffer />);
     await waitFor(() => expect(screen.getByTestId('roadmap-offer')).toBeTruthy());
