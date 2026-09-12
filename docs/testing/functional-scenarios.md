@@ -17185,6 +17185,15 @@ to prove that claim never collides with either guard.
   the progress card's "N of M concepts read" line increments — while the
   milestone bar/ring directly above it, and the belt's overall percentage,
   are **visibly unchanged** by the tap.
+- **Web marks a concept read and understood too (N466).** On
+  `/dashboard/curricula/{id}` for a curriculum with concept items, each
+  concept row shows a neutral checkbox, "Mark as read and understood". Click
+  it: the label becomes "Read and understood", and the separate "N of M
+  concepts read" line counts up by one. Click again to withdraw it. The
+  mastered figure ("N of M mastered") must not change either way, and no
+  technique row ever shows the checkbox. The same concept marked on the phone
+  shows as read here after a reload. The figure shows whether or not you are
+  working the roadmap, as on mobile.
 - Tap the same toggle again: confirm it reverts to unchecked and the count
   decrements — reversible, matching the ticket's own acceptance criterion
   that marking something read by mistake must not be permanent.

@@ -75200,6 +75200,67 @@ The rune mutation took three attempts, and the middle one is the useful record:
 
 **Reachability on a phone**: no athlete-facing change. These are admin-console writes.
 
+## 2026-09-12 — N466 (#781): web marks a roadmap concept read and understood, as mobile does
+
+**What was missing.** N123 (#512) gave an athlete their own "read and understood" claim on a roadmap's CONCEPT items, and shipped it on mobile only. The endpoints (`PUT`/`DELETE /v1/curricula/{id}/items/{itemID}/read`), `CurriculumItem.read_at` and `Curriculum.concept_items`/`read_concepts` were all on the wire. `apps/web`'s curriculum page rendered none of it, and web's hand-duplicated types did not even declare the fields, nor the item `id` the endpoint names.
+
+**What changed.**
+- **Types (`apps/web/src/lib/api.ts`).** `CurriculumItem` gains `id` (required, as the contract says) and `read_at`. `Curriculum` gains `concept_items` and `read_concepts`, optional because a pre-N123 server omits them.
+- **Client helpers.** `markCurriculumItemRead` (`PUT`) and `unmarkCurriculumItemRead` (`DELETE`), mirroring mobile's.
+- **Copy and figure (`apps/web/src/lib/conceptRead.ts`, new).** Kept out of the page so vitest can reach it:
+  - `conceptsReadLine` gives "22 of 48 concepts read", or null when there are none;
+  - `readToggleCopy` gives the label ("Mark as read and understood" / "Read and understood"), plus a title saying it is your own note, not evidence of mastery.
+- **The page (`dashboard/curricula/[id]/page.tsx`).**
+  - **The toggle** is a neutral `role="checkbox"` button, only in `ItemRow`'s concept branch, so a technique row never has one. It is deliberately not the lime a mastered technique wears.
+  - **Clicking it** marks or unmarks, then re-reads the curriculum, the way enrolment already does, so `read_at` and `read_concepts` come from the server.
+  - **The "N of M concepts read" figure** is its own line, never inside the mastered count. It shows whether or not the athlete is enrolled, as mobile's does: reading is not enrolment, and the backend's mark-read does not require it.
+- **Test fixtures.** Two existing fixtures (`curriculumPhases.test.ts`, `roadmapFocus.test.ts`) built items without an `id`, and `tsc` caught them once it became required. They now carry one.
+
+**Tests.**
+- **`lib/__tests__/conceptRead.test.ts`, new, 5 cases:**
+  - the figure, pluralised;
+  - no figure for zero concepts, or a pre-N123 server;
+  - a missing read count reads as zero read;
+  - the label states the current state;
+  - no copy presents reading as mastery.
+- **`app/dashboard/curricula/__tests__/conceptReadWiring.test.ts`, new, 5 cases.** A source read, like F27's wiring test, because web's tests cannot render a page. It checks:
+  - exactly one checkbox, and only in the concept branch;
+  - the exact branch: unmark when read, mark when not;
+  - each client helper's own function body sends its own method to the read path;
+  - the figure is its own element, not in the mastered paragraph.
+
+**Checks.** 5 mutations, each failing a named test as a test failure, restored byte-identical and re-run to green:
+- **toggle loses `role="checkbox"`:** the concept-branch test fails;
+- **the handler swaps mark and unmark:** the branch test fails;
+- **`markCurriculumItemRead` sends `DELETE`:** the per-helper method test fails;
+- **the figure shows for zero concepts:** the helper test fails;
+- **the toggle label ignores state:** the helper test fails.
+
+**Two of those survived the first version of the wiring test, and the reasons are the useful part:**
+- **The swap passed.** The test checked only that the handler called both helpers, not which one ran on which branch.
+- **`DELETE` passed.** A regex starting at `markCurriculumItemRead` also matches inside `unmarkCurriculumItemRead`, and lazily ran on to the next `method: "PUT"` further down the file (enrolment's), so it could not see the wrong method.
+
+The test now asserts the branch line itself and slices each helper's function body. Both mutations then failed it.
+
+`tsc --noEmit` and eslint are clean on web.
+
+**Not covered by a test.** The rendered page. The wiring test reads source, and no web test renders a page. So on web: mark a concept, watch the figure count up and the mastered figure stay put; withdraw it; and check that a concept marked on the phone shows as read after a reload.
+
+**Review.** `ac-verifier` graded 4 of 4 MET. It confirmed from the backend's own serialisation, not just the contract, that a single curriculum read returns each item's `id` and `read_at`. It also reproduced the swap mutation itself.
+
+`frontend-reviewer` found no blocking issue. One suggestion was taken:
+- **Placement.** The figure was bare text between sections, while every other stat on the page sits in a bordered box, so it read as orphaned. It now has the same box, and stays a separate element.
+
+The others are recorded, not taken, with reasons:
+- **The page-wide `busy` flag.** It disables every toggle during one round trip, which is how enrolment and focus already work on this page.
+- **Re-fetching the whole curriculum per click.** Mobile's toggle and this page's other actions do the same, so it is one fix for both surfaces later.
+- **A native checkbox instead of `role="checkbox"`.** The ARIA pattern is valid and mirrors mobile.
+- **The "not evidence of mastery" copy lives only in `title`.** Mobile puts it only in an accessibility hint too, so the two should change together.
+- **Raw Tailwind neutrals instead of tokens.** The whole file is still in that state, and `vola-design-system` records reconciling web as separate, unstarted work.
+- **A failed refresh after a successful mark leaves the checkbox stale.** `load()` already shows its error, and the PUT is idempotent, so a second click is harmless.
+
+**Reachability on a phone**: already there since N123. This is web catching up.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
