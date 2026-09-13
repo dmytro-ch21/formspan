@@ -191,6 +191,131 @@ func TestPostgresRepository_Summarise(t *testing.T) {
 	}
 }
 
+// F66 (#1200). N565's daily stuck-row reports share the `sync_blocked` kind,
+// and the "Sync blocked" figure has to keep meaning a device gave up pushing.
+// The reports get their own figure instead, built from each athlete's latest
+// report.
+func TestPostgresRepository_SummariseSplitsStuckRowReports(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	record := func(events ...Event) {
+		t.Helper()
+		for _, e := range events {
+			if err := repo.Record(ctx, e); err != nil {
+				t.Fatalf("record: %v", err)
+			}
+		}
+	}
+	// Moves every row recorded so far into the past, so the next ones are newer.
+	age := func(d time.Duration) {
+		t.Helper()
+		if _, err := repo.pool.Exec(ctx,
+			`UPDATE health_events SET occurred_at = occurred_at - make_interval(secs => $1)`,
+			d.Seconds()); err != nil {
+			t.Fatalf("age rows: %v", err)
+		}
+	}
+	report := func(user, entity, state, code string, rows any) Event {
+		details := map[string]any{"reason": "stuck_" + state, "code": code, "rows": rows}
+		if entity != "" {
+			details["entity"] = entity
+		}
+		return Event{
+			Source: SourceClient, Kind: KindSyncBlocked, UserID: strp(user),
+			Message: "stuck rows: " + entity + " " + state + " " + code, Details: details,
+		}
+	}
+
+	// athlete_a's report from yesterday. Its workout group has since cleared,
+	// so it must not be listed, and its food count has since changed.
+	record(
+		report("athlete_a", "food", "refused", "invalid_input", 4.0),
+		report("athlete_a", "workout", "blocked", "unknown", 2.0),
+	)
+	age(20 * time.Hour)
+
+	// The first half of athlete_b's latest pass, 30 seconds before the second
+	// half: a pass with more than ten groups reaches the server as several
+	// requests, and both halves belong to the same report.
+	record(report("athlete_b", "food", "refused", "invalid_input", 1.0))
+	age(30 * time.Second)
+
+	record(
+		// A real give-up. This is the one event "Sync blocked" should count.
+		Event{
+			Source: SourceClient, Kind: KindSyncBlocked, UserID: strp("athlete_a"),
+			Message: "server refused this session", Details: map[string]any{"session_id": "abc"},
+		},
+		Event{Source: SourceAPI, Kind: KindServerError, UserID: strp("athlete_e")},
+		report("athlete_a", "food", "refused", "invalid_input", 3.0),
+		report("athlete_b", "session", "blocked", "no_http_code", 5.0),
+		// The same group again inside one pass. Counted once, not twice.
+		report("athlete_b", "session", "blocked", "no_http_code", 5.0),
+		// A client-written row count that is not a number: counts as zero rather
+		// than failing the whole summary.
+		report("athlete_d", "food", "refused", "invalid_input", "lots"),
+		// Nor does one too large for the total's bigint.
+		report("athlete_f", "food", "refused", "invalid_input", 1e30),
+		// No entity: the athlete counts, the group is not listed.
+		report("athlete_c", "", "refused", "invalid_input", 7.0),
+		// A code that is a number, not a string: the same.
+		Event{
+			Source: SourceClient, Kind: KindSyncBlocked, UserID: strp("athlete_g"),
+			Message: "stuck rows: food refused 42",
+			Details: map[string]any{"reason": "stuck_refused", "entity": "food", "code": 42.0, "rows": 2.0},
+		},
+	)
+
+	s, err := repo.Summarise(ctx, time.Now().Add(-48*time.Hour))
+	if err != nil {
+		t.Fatalf("summarise: %v", err)
+	}
+
+	if got := s.ByKind["sync_blocked"]; got != 1 {
+		t.Errorf("by_kind.sync_blocked = %d, want 1: only the give-up, never a daily report", got)
+	}
+	if s.StuckRowReports != 10 {
+		t.Errorf("stuck_row_reports = %d, want 10", s.StuckRowReports)
+	}
+	if s.Total != 12 {
+		t.Errorf("total = %d, want 12: reports still count as events", s.Total)
+	}
+	sum := s.StuckRowReports
+	for _, n := range s.ByKind {
+		sum += n
+	}
+	if sum != s.Total {
+		t.Errorf("by_kind plus stuck_row_reports = %d, total = %d; they must add up", sum, s.Total)
+	}
+	if s.StuckRowAthletes != 6 {
+		t.Errorf("stuck_row_athletes = %d, want 6 (a, b, c, d, f, g)", s.StuckRowAthletes)
+	}
+
+	want := []StuckRowGroup{
+		{Entity: "food", State: "refused", Code: "invalid_input", Athletes: 4, Rows: 4},
+		{Entity: "session", State: "blocked", Code: "no_http_code", Athletes: 1, Rows: 5},
+	}
+	if len(s.StuckRows) != len(want) {
+		t.Fatalf("stuck_rows = %#v, want %#v", s.StuckRows, want)
+	}
+	for i := range want {
+		if s.StuckRows[i] != want[i] {
+			t.Errorf("stuck_rows[%d] = %#v, want %#v", i, s.StuckRows[i], want[i])
+		}
+	}
+
+	// An empty window still lists `[]`, not `null`, so the screen has one
+	// shape to read.
+	empty, err := repo.Summarise(ctx, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("summarise future: %v", err)
+	}
+	if empty.StuckRows == nil || len(empty.StuckRows) != 0 || empty.StuckRowAthletes != 0 {
+		t.Errorf("future window should have no stuck rows, got %#v", empty)
+	}
+}
+
 func TestNewEventValidate(t *testing.T) {
 	long := make([]byte, MaxMessageLen+1)
 	for i := range long {

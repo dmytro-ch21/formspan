@@ -135,15 +135,45 @@ func (r *PostgresRepository) List(ctx context.Context, f Filter) ([]Event, error
 	return events, nil
 }
 
+// stuckRowReport is the SQL predicate for N565's (#1108) daily stuck-row
+// reports. They reuse the `sync_blocked` kind with `details.reason` set, so a
+// query that counts give-ups has to tell the two apart. One constant, so the
+// count and the stuck-rows figure cannot disagree about what a report is.
+const stuckRowReport = `kind = 'sync_blocked' AND details->>'reason' IN ('stuck_blocked', 'stuck_refused')`
+
+// stuckReportPass is how long before an athlete's newest stuck-row report
+// another of their reports still counts as part of the same pass.
+//
+// One pass does not always arrive as one insert. The device captures one event
+// per group, and its telemetry buffer flushes by itself once it holds ten
+// (`flushAtCount` in `apps/mobile/lib/telemetry.ts`). A pass with more groups
+// therefore lands as several requests, milliseconds apart, each with its own
+// `now()`, and matching on the newest timestamp alone would keep only the last
+// request's groups. Two passes are at least 15 minutes apart on the device
+// (`MIN_CHANGE_INTERVAL_MS` in `apps/mobile/lib/stuckRows.ts`), so five minutes
+// takes in a split pass without reaching back into the one before.
+const stuckReportPass = 5 * time.Minute
+
+// maxStuckRowGroups bounds the stuck-rows figure. The groups come from details
+// a client wrote, so how many there are is not the server's to promise.
+const maxStuckRowGroups = 20
+
 func (r *PostgresRepository) Summarise(ctx context.Context, since time.Time) (Summary, error) {
 	s := Summary{
 		Since:          since,
 		ByKind:         map[string]int{},
 		SlowestPathsMS: map[string]int{},
+		StuckRows:      []StuckRowGroup{},
 	}
 
+	// Stuck-row reports count toward Total but not toward their kind (F66,
+	// #1200). "Sync blocked" means a device gave up pushing, and one athlete
+	// with one stuck row sends a report a day for as long as it stays stuck,
+	// so counting reports there would turn one refused entry into thirty
+	// give-ups a month.
 	rows, err := r.pool.Query(ctx, `
-		SELECT kind, COUNT(*) FROM health_events
+		SELECT kind, COUNT(*), COUNT(*) FILTER (WHERE `+stuckRowReport+`)
+		FROM health_events
 		WHERE occurred_at >= $1 GROUP BY kind`, since)
 	if err != nil {
 		return s, fmt.Errorf("health: summarise kinds: %w", err)
@@ -151,11 +181,12 @@ func (r *PostgresRepository) Summarise(ctx context.Context, since time.Time) (Su
 	defer rows.Close()
 	for rows.Next() {
 		var kind string
-		var n int
-		if err := rows.Scan(&kind, &n); err != nil {
+		var n, reports int
+		if err := rows.Scan(&kind, &n, &reports); err != nil {
 			return s, fmt.Errorf("health: scan kind: %w", err)
 		}
-		s.ByKind[kind] = n
+		s.ByKind[kind] = n - reports
+		s.StuckRowReports += reports
 		s.Total += n
 	}
 	if err := rows.Err(); err != nil {
@@ -194,7 +225,80 @@ func (r *PostgresRepository) Summarise(ctx context.Context, since time.Time) (Su
 	if err := slow.Err(); err != nil {
 		return s, fmt.Errorf("health: summarise slow rows: %w", err)
 	}
+
+	if err := r.summariseStuckRows(ctx, since, &s); err != nil {
+		return s, err
+	}
 	return s, nil
+}
+
+// summariseStuckRows fills in who has stuck rows, from each athlete's latest
+// report (F66, #1200).
+//
+// The latest report rather than every report in the window. A group whose rows
+// got unstuck is missing from the next report, and summing a day of reports
+// would count one stuck row once per report. A device with nothing stuck sends
+// nothing at all, so an athlete whose rows all cleared stays listed until their
+// last report leaves the window.
+//
+// The details were written by a client, so nothing about their shape is
+// trusted: a group needs a string entity and code to be listed, and a row count
+// that is not a number in range counts as zero rather than failing the cast and
+// taking the whole health screen down with it.
+func (r *PostgresRepository) summariseStuckRows(ctx context.Context, since time.Time, s *Summary) error {
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT user_id) FROM health_events
+		WHERE occurred_at >= $1 AND user_id IS NOT NULL AND `+stuckRowReport, since,
+	).Scan(&s.StuckRowAthletes); err != nil {
+		return fmt.Errorf("health: summarise stuck athletes: %w", err)
+	}
+
+	// DISTINCT ON keeps one event per athlete and group, so a group reported
+	// twice inside one pass (a phone clock moved backwards re-reports at once)
+	// is not counted twice.
+	rows, err := r.pool.Query(ctx, `
+		WITH reports AS (
+			SELECT user_id, occurred_at, details FROM health_events
+			WHERE occurred_at >= $1 AND user_id IS NOT NULL AND `+stuckRowReport+`
+		), newest AS (
+			SELECT user_id, MAX(occurred_at) AS at FROM reports GROUP BY user_id
+		), latest AS (
+			SELECT DISTINCT ON (r.user_id, r.details->>'entity', r.details->>'reason', r.details->>'code')
+			       r.details
+			FROM reports r
+			JOIN newest n ON n.user_id = r.user_id
+			WHERE r.occurred_at >= n.at - make_interval(secs => $2)
+			  AND jsonb_typeof(r.details->'entity') = 'string'
+			  AND jsonb_typeof(r.details->'code') = 'string'
+			ORDER BY r.user_id, r.details->>'entity', r.details->>'reason', r.details->>'code', r.occurred_at DESC
+		)
+		SELECT details->>'entity', details->>'reason', details->>'code', COUNT(*),
+		       SUM(CASE
+		             WHEN jsonb_typeof(details->'rows') <> 'number' THEN 0
+		             WHEN (details->'rows')::numeric BETWEEN 0 AND 1000000 THEN floor((details->'rows')::numeric)
+		             ELSE 0
+		           END)::bigint
+		FROM latest
+		GROUP BY 1, 2, 3
+		ORDER BY 4 DESC, 5 DESC, 1, 2, 3
+		LIMIT $3`, since, stuckReportPass.Seconds(), maxStuckRowGroups)
+	if err != nil {
+		return fmt.Errorf("health: summarise stuck rows: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var g StuckRowGroup
+		var reason string
+		if err := rows.Scan(&g.Entity, &reason, &g.Code, &g.Athletes, &g.Rows); err != nil {
+			return fmt.Errorf("health: scan stuck rows: %w", err)
+		}
+		g.State = strings.TrimPrefix(reason, "stuck_")
+		s.StuckRows = append(s.StuckRows, g)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("health: summarise stuck rows: %w", err)
+	}
+	return nil
 }
 
 // nullTime lets one query serve both "since X" and "no lower bound" without a

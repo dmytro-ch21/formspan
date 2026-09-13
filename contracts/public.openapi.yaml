@@ -5651,13 +5651,49 @@ components:
 
     HealthSummary:
       type: object
-      required: [since, total, by_kind, affected_users, slowest_paths_ms]
+      required:
+        [
+          since,
+          total,
+          by_kind,
+          affected_users,
+          slowest_paths_ms,
+          stuck_row_reports,
+          stuck_row_athletes,
+          stuck_rows,
+        ]
       properties:
         since: { type: string, format: date-time }
-        total: { type: integer }
+        total:
+          type: integer
+          description: >
+            Every event in the window, stuck-row reports included. Equals the
+            sum of `by_kind` plus `stuck_row_reports`.
         by_kind:
           type: object
           additionalProperties: { type: integer }
+          description: >
+            Events per kind. `sync_blocked` leaves out the daily stuck-row
+            reports that share its kind (`details.reason` of `stuck_blocked` or
+            `stuck_refused`), so it still counts only devices that gave up
+            pushing. Those reports are counted in `stuck_row_reports` and
+            summarised in `stuck_rows`.
+        stuck_row_reports:
+          type: integer
+          description: How many events in the window were daily stuck-row reports.
+        stuck_row_athletes:
+          type: integer
+          description: Distinct athletes who sent a stuck-row report in the window.
+        stuck_rows:
+          type: array
+          maxItems: 20
+          description: >
+            Stuck rows by domain, state and code, taken from each athlete's
+            latest report in the window rather than every report, so a daily
+            report is not counted once per day. Most athletes first. Groups whose
+            report has no string entity or code are not listed.
+          items:
+            $ref: "#/components/schemas/HealthStuckRowGroup"
         affected_users:
           type: integer
           description: >
@@ -5668,6 +5704,34 @@ components:
           type: object
           additionalProperties: { type: integer }
           description: Worst observed latency per route, so a slow endpoint is named.
+
+    HealthStuckRowGroup:
+      type: object
+      description: >
+        Athletes whose latest stuck-row report has rows stuck in one domain,
+        state and error code. Built from details a client wrote.
+      required: [entity, state, code, athletes, rows]
+      properties:
+        entity:
+          type: string
+          description: The device's sync domain, as the report names it.
+        state:
+          type: string
+          enum: [blocked, refused]
+          description: >
+            From the report's `details.reason`. Only `stuck_blocked` and
+            `stuck_refused` count as reports, so no other value is possible.
+        code:
+          type: string
+          description: >
+            The contract error code the rows were refused with, or one of the
+            device's own buckets: `unknown`, `no_http_code` or `other`.
+        athletes: { type: integer }
+        rows:
+          type: integer
+          description: >
+            Those athletes' row counts added up. A count that is not a number
+            from 0 to 1,000,000 adds nothing.
 
     HealthReport:
       type: object
