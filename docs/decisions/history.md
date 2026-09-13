@@ -77386,6 +77386,31 @@ The ticket asks whether unilateral reps should double into volume, the way `impl
 - **The 6 unilateral exercises measured in time or distance get no "each side".** The ticket is about reps, and whether a timed field needs the same hint is a separate question.
 - **Counting both sides in tonnage** is left for the user to decide, as above.
 
+## 2026-09-13 — H36 (#1205): comments stop describing Train as a live screen, and name who reads each module now
+
+**What was wrong.** Train stopped being a screen in N182 (#587). `app/train.tsx` is a redirect, and its blocks live on Today and Plan. The modules written for Train are still in use, but their comments kept saying "Train" does things: "What Train can offer right now", "Train renders them from the same read". A reader looking for the screen behind `lib/trainBoard.ts` was sent to one that no longer exists. H33's sweep looked only for "Train tab" and H34's only for Goals, so neither caught these.
+
+### What changed
+
+Comments only, in 11 files. Each comment now names the module's current readers:
+
+- **`lib/trainBoard.ts` (`buildTrainBoard`):** Today, through `lib/todayBoard.ts`, and Plan's Later block, through `lib/useTrainBoard.ts`.
+- **`lib/useTrainBoard.ts`:** Plan's Later block. Its `useSource` is also used by Today (`lib/useTodayBoard.ts`), the day panel (`lib/useDayPanel.ts`) and Progress's training history.
+- **`lib/startSession.ts`:** `startSessionHref`'s second caller is now the day panel, `app/day.tsx`, and `sessionHref` has seven callers.
+- **Today's "What left" note:** recent sessions are in the full history, `app/session/history.tsx`, reached from Today's Logged block and from Progress's calendar.
+
+"Train" stays where the text is history (N176, N177, N182), a quote of the user, or the verb ("Train four times a week"). Two lines the ticket listed were already history and are unchanged: `app/(tabs)/workouts.tsx:123` ("for the same reason Train's copy was") and `__tests__/app/planNextUp.test.tsx:11`.
+
+### How it was checked
+
+- **The code is identical with comments stripped.** A script prints every changed file through TypeScript's printer with `removeComments`, once at the merge base and once on the branch, and compares the two. Result: 11 files, 0 with a code change.
+  - Its self-test shows it ignores a comment-only edit and catches a one-token code edit, in plain TypeScript and in JSX.
+  - It also refuses to report success when no files changed. It did exactly that on its first run, when the edits were not yet committed.
+- **Every reader named was checked against the imports,** not taken from the ticket.
+- **The remaining comment lines containing the word "Train" were swept again after the edit.** Each is history, a quote, or the verb.
+
+**Not done:** renaming `trainBoard`, `useTrainBoard`, `buildTrainBoard` or `TrainBoard`. That is a code change touching Today and Plan, and the ticket leaves it out of scope.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
