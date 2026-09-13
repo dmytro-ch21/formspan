@@ -75873,6 +75873,46 @@ legibility steps for a white ground, not copies, and stay out.
 - **The guard reads `GIT_TRACE`'s text,** which git does not promise to keep stable. It holds on 2.49 and 2.55. If a later git rewords the trace line, the first check would pass without meaning anything, but the control would fail, because it requires the trace to show maintenance.
 - **Two other scripts build throwaway repositories with maintenance left on:** `scripts/check-migration-versions.py` and `scripts/check-pr-has-work.py`. They were not measured here and are outside this ticket's criteria, so they are raised as a follow-up.
 
+## 2026-09-13 — F51 (#1101): the un-awaited `render` in `syncRefused.test.tsx`, reproduced deterministically after the fact
+
+**Where the ticket stood.** Two of its criteria were already met by merged work:
+- **All 9 `render(<SyncScreen />)` calls awaited:** F47 (#1122, `8ca583ab`).
+- **A mechanical guard:** H23 (#1070, merged as #1172, `e7076645`) built `check:rntl-awaits`, which runs in `verify` and in CI.
+
+What was left was evidence: a reproduction that does not depend on host load, green after the fix, and a mutation showing the `await` is load-bearing. The ticket's "before" state no longer exists on `main`. So it was rebuilt on a scratch, untracked copy of the test file, and the copy was deleted afterwards.
+
+### The lever
+
+**RNTL 14's `waitFor` gives an un-awaited `render` no chance under a 50 ms budget.**
+- **`waitFor`** (real timers, `dist/wait-for.js`) checks its expectation once immediately, then every 50 ms. On timeout it rejects with the last error and does not check again.
+- **`render`** (`dist/render.js`) sets `screen` only after `await act(() => renderer.render(…))` resolves.
+- **So an un-awaited `render` always fails the immediate check** with "`render` function has not been called". With a budget under 50 ms there is no second check. Load can delay the timeout; it can never move the interval check ahead of it.
+
+The scratch copy sets `configure({ asyncUtilTimeout })` and runs three arms:
+
+| budget | A: all 9 renders un-awaited (the file before F47) | B: the file on `main` | M: only the first render un-awaited |
+|---|---|---|---|
+| 20 ms, 3 runs each | 9 of 9 failed in every run, each with "`render` function has not been called" | 9 of 9 passed in every run | exactly `NEVER says nothing is stuck while a row sits refused` failed in every run, with the same error; the other 8 passed |
+| 1000 ms (RNTL's default), 3 runs each | 9 of 9 passed | 9 of 9 passed | 9 of 9 passed |
+
+- **Criterion 1, a deterministic reproduction:** arm A at 20 ms.
+- **Criterion 3, green after the fix:** arm B at 20 ms.
+- **Criterion 4, the mutation:** arm M. Removing one `await` puts that one test back to red.
+- **The 1000 ms row is why this was a flake.** At the default budget even the pre-fix file passes on this host, whose load average was about 100 at the time. The failure the ticket recorded needed a busier host, where render plus the screen's load outlasted one second.
+
+### The inventory (criterion 5)
+
+**`check:rntl-awaits` on this branch reports none left:** `21 self-test cases agree; 379 test files, 135 import RNTL, 4153 awaited RNTL calls, 0 unawaited`.
+
+**Its positive control is the real file.** With the arm-A copy present, it exits 1 and names all 9 sites by line: 106, 113, 120, 130, 137, 152, 165, 175 and 187.
+
+**The ticket's two silent-zero traps cannot apply.** It uses TypeScript's parser rather than `git grep`, so POSIX ERE's missing `\s` and a non-recursing `**` pathspec do not come into it. It also refuses to report clean if it recognised no awaited call.
+
+### Also
+
+- **No code changed.** This entry is the whole diff. The three-arm harness ran from the session scratchpad and left `git status` empty.
+- **Not user-facing**, so no functional scenarios.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
