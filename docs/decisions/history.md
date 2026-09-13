@@ -76779,6 +76779,116 @@ Each file reported exactly one guard error with its own selector's message. The 
 - **Device checks.** Both remain on #1189 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. Nothing grew, so the likeliest visible change is the slightly tighter leading on the muted notes.
 - **The other three screens** (#1190–#1192) are untouched.
 
+## 2026-09-13 — N575 (#1190): the Plan screen's text on the type scale
+
+**What was wrong.** Plan's route file, `app/(tabs)/workouts.tsx`, has been on the guard since N508 and still set 8 font sizes of its own. Its components had never been converted: WeekPlanner set 17, CurriculaStrip 3. Three of those sizes were below 11.
+
+This is the fourth of N561's six per-screen children (#1050), following Today, Food and Progress. This entry records the numbers and what differs.
+
+### Scope, listed first as the ticket asks
+
+The ticket filed only `workouts.tsx` and said Plan's components "are not in one directory, so the first step is to list them". Listed from the route's own imports on `origin/main`:
+
+- `apps/mobile/app/(tabs)/workouts.tsx`, the route (8 font sizes).
+- `apps/mobile/components/WeekPlanner.tsx` (17).
+- `apps/mobile/components/CurriculaStrip.tsx` (3).
+- `apps/mobile/components/PlanHero.tsx` (no text styles, one radius literal). It joins the guard so its spacing stays tokenised.
+
+All three components are imported only by `workouts.tsx`, which was checked with `git grep`, so converting them touches no other screen. The route's other imports carrying type are N508's shared `ScreenHeader` and `ui/Section`, which are already converted.
+
+### The baseline, before and after
+
+One script measured both: `origin/main` at `85ec86dc`, then this branch. The before-measurement was also taken in the worktree itself and matched.
+
+| Measure | Before | After |
+|---|---|---|
+| files | 4 | 4 |
+| files importing `Typography` | 1 | 3 |
+| `fontSize:` sites (any) | 28 | 2 |
+| raw numeric `fontSize:` sites | 26 | 1 |
+| `fontSize` below 11 | 3 | 0 |
+| numeric `lineHeight:` sites | 2 | 1 |
+| `...Typography.<role>` spreads | 13 | 39 |
+| `fontSize: Typography.<role>.fontSize` | 2 | 1 |
+| spacing literals on the scale | 28 | 0 |
+| radius literals on the scale | 5 | 0 |
+
+- **`workouts.tsx` alone matches the baseline filed on the ticket** (1 file, 1 importing, 8 font sizes, 1 line height, 0 below 11).
+- **"Importing `Typography`" ends at 3 of 4** because PlanHero has no text styles.
+
+### How each style was converted
+
+The rules are the ones the earlier three children used: a role owns size, leading and tracking; the rendered weight is kept, and was checked per entry against `origin/main` (none changed); every exception has a one-line reason.
+
+- **Text inputs.** The workout name field (`workouts.tsx` `input`, 16) stays a literal. The week theme field (`WeekPlanner` `themeInput`, 13) keeps its size as `Typography.meta.fontSize`: 13 is on the guard's size list, so it cannot stay bare. Both style `TextInput`s, where a `lineHeight` shifts typed text on iOS.
+- **N508's two size-only entries become roles.** `nextWhen` (caption size) and `tileMeta` (eyebrow size) now spread `caption` and keep their weight.
+- **Left alone:** `tileName` already spreads `body`, and keeps N508's 18pt leading override for a two-line tile. That is the one remaining numeric `lineHeight`.
+
+### Sizes that changed
+
+11 of the 28 converted entries changed size:
+
+| File | Entry | Before | After | Role |
+|---|---|---|---|---|
+| `workouts.tsx` | `cardTitle` | 17 | 20 | title |
+| `workouts.tsx` | `emptyTitle` | 17 | 20 | title |
+| `workouts.tsx` | `sheetTitle` | 17 | 20 | title |
+| `workouts.tsx` | `nextTitle` | 16 | 15 | emphasis |
+| `workouts.tsx` | `link` | 16 | 15 | emphasis |
+| `workouts.tsx` | `tileMeta` | 11 | 12 | caption |
+| `WeekPlanner.tsx` | `entrySport` | 9 | 11 | eyebrow |
+| `WeekPlanner.tsx` | `gridHeadCell` | 10 | 11 | eyebrow |
+| `WeekPlanner.tsx` | `hint` | 11 | 12 | caption |
+| `CurriculaStrip.tsx` | `eyebrow` | 9 | 11 | eyebrow |
+| `CurriculaStrip.tsx` | `metaText` | 11 | 12 | caption |
+
+The groupings are the same as on the other screens:
+
+- headlines and sheet titles move to `title`;
+- 16pt names and links move to `emphasis`;
+- reading text at 11 moves to `caption`;
+- labels below 11 move to `eyebrow`.
+
+The month grid's day initials now match Food's, which were converted the same way.
+
+Leading changed on 26 entries and tracking on 15. Four entries had their own tracking, which the role replaced:
+
+- WeekPlanner's `weekday` (1), `entrySport` (0.9) and `gridHeadCell` (0.8);
+- CurriculaStrip's `eyebrow` (0.9).
+
+All four become 1.2.
+
+### The guard
+
+`workouts.tsx` was already listed. The three components join `N508_CONVERTED_FILES`, one by one. The 28 spacing and 5 radius literals on the scale are restated as tokens, each value-identical. Literals off the scale stay.
+
+A dry run of the converter on a copy of `origin/main` caught that PlanHero's radius literal was not in the sweep, and it was added before the real run. With it, the after column's spacing and radius counts reach 0.
+
+**Mutation-tested.** A probe style entry was inserted into all four files at once and linted:
+
+- `fontSize: 15` in `workouts.tsx`;
+- `fontSize: 13` in WeekPlanner;
+- `padding: 12` in CurriculaStrip;
+- `borderRadius: 14` in PlanHero.
+
+Each file reported exactly one guard error with its own selector's message. The files were restored byte-identical and linted again: 0 errors. **Negative control:** `app/(tabs)/you.tsx`, not converted yet, contains `fontSize: 12` and reports 0 guard errors.
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- The six suites that cover these files pass, 122 tests: `planNextUp`, `todayScreen`, `weekPlanner`, `workoutsScreen`, `planHero` and `routes`. No test in scope asserts a style value.
+- **Audit for text with no size.** It looks for a `<Text>` whose styles set no size, and found none before or after.
+
+### Not done
+
+- **Device checks.** Both remain on #1190 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. The places most likely to show a problem:
+  - a planned entry in the week planner: its sport tag grew from 9 to 11 above a one-line title;
+  - the curricula strip's label, 9 to 11, above a name that wraps to at most two lines;
+  - card titles that now shrink beside their controls at 20pt;
+  - the "New workout" sheet header.
+- **The last two screens** (#1191, #1192) are untouched.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

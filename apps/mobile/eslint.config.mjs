@@ -63,7 +63,7 @@ const fontSizeSelector = FONT_SIZE_SCALE_VALUES.map(
 
 /**
  * The files converted so far — N508's eight, then one screen per N561 child
- * (N572: Today, N573: Food, N574: Progress). An ALLOWLIST, not a directory
+ * (N572: Today, N573: Food, N574: Progress, N575: Plan). An ALLOWLIST, not a directory
  * glob — ~130 files in this app still mint bare spacing/fontSize literals on
  * purpose (this is the foundational PR, not the full app-wide migration; see
  * this ticket's `docs/decisions/history.md` entry for the follow-up-batch
@@ -117,6 +117,10 @@ const N508_CONVERTED_FILES = [
   "components/progress/ThisWeek.tsx",
   "components/progress/TrainingHistory.tsx",
   "components/progress/WhatChanged.tsx",
+  // N575 (#1190) — Plan; `app/(tabs)/workouts.tsx` is N508's, above.
+  "components/CurriculaStrip.tsx",
+  "components/PlanHero.tsx",
+  "components/WeekPlanner.tsx",
 ];
 
 export default defineConfig([

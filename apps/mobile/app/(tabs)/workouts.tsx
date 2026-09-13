@@ -1095,10 +1095,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   nextText: { flex: 1, gap: 1 },
-  nextTitle: { fontSize: 16, fontWeight: '700' },
+  nextTitle: { ...Typography.emphasis, fontWeight: '700' },
   // textMuted rather than textDim: at 12pt this is small text, and textDim
   // measures 3.96:1 on `bg`, below AA's 4.5:1.
-  nextWhen: { fontSize: Typography.caption.fontSize, color: vola.textMuted },
+  nextWhen: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
   nextDashed: {
     borderWidth: 1,
     borderStyle: 'dashed',
@@ -1184,7 +1184,7 @@ const styles = StyleSheet.create({
   tileName: { ...Typography.body, fontWeight: '700', lineHeight: 18 },
   // Plain small meta text, not the uppercase `eyebrow` role — only its
   // fontSize is shared.
-  tileMeta: { fontSize: Typography.eyebrow.fontSize, color: vola.textDim },
+  tileMeta: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
   // The primary card on this screen's "My workouts" scope — `Card.base` plus
   // the glass wash (`<CardGlass />` at its JSX call site, first child so it
   // paints under the rule/badge/body).
@@ -1206,7 +1206,7 @@ const styles = StyleSheet.create({
   },
   cardBody: { flex: 1, padding: Spacing.cardPadding, gap: Spacing.xs },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardTitle: { fontSize: 17, fontWeight: '700', flexShrink: 1 },
+  cardTitle: { ...Typography.title, flexShrink: 1, fontWeight: '700' },
   cardMeta: { ...Typography.meta, color: vola.textMuted, textTransform: 'capitalize' },
   badge: {
     ...Typography.eyebrow,
@@ -1222,7 +1222,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.xxxl,
     paddingHorizontal: Spacing.xl,
   },
-  emptyTitle: { fontSize: 17, fontWeight: '600' },
+  emptyTitle: { ...Typography.title, fontWeight: '600' },
   muted: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
   // No `paddingHorizontal` of its own (N498, was 16) — it now renders inside
   // `ListHeaderComponent`, inside `styles.list`'s own gutter content padding,
@@ -1285,9 +1285,10 @@ const styles = StyleSheet.create({
   // scrolling body now, not to the fixed shell holding the header.
   sheetBody: { gap: Spacing.md, paddingTop: Spacing.md, paddingBottom: Spacing.xl },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sheetTitle: { fontSize: 17, fontWeight: '700' },
-  link: { fontSize: 16, fontWeight: '600' },
+  sheetTitle: { ...Typography.title, fontWeight: '700' },
+  link: { ...Typography.emphasis },
   linkDisabled: { opacity: 0.35 },
+  // 16, not a role: a TextInput, where lineHeight shifts the typed text on iOS.
   input: {
     borderWidth: 1,
     borderColor: vola.line,
