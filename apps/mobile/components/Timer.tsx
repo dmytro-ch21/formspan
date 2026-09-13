@@ -16,6 +16,8 @@ import { countdownCopy, useRemaining, type RemainingClock } from '@/components/C
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { EASE, MS, SWAP_SCALE } from '@/constants/Motion';
 import { useAccent } from '@/lib/AccentProvider';
 import {
@@ -777,7 +779,7 @@ function TimerBar({
 }
 
 const styles = StyleSheet.create({
-  layer: { position: 'absolute', top: 6, left: 0, right: 0, paddingHorizontal: 10 },
+  layer: { position: 'absolute', top: 6, left: 0, right: 0, paddingHorizontal: Spacing.smPlus },
   // F55: both forms scale from the edge the layer is pinned to, so the card
   // opens DOWN from where the bar sits rather than growing about its centre
   // (a 380pt card scaled from the centre moves its top edge ~6pt).
@@ -789,8 +791,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
     backgroundColor: vola.surface,
-    paddingTop: 12,
-    paddingBottom: 14,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.cardPadding,
     alignItems: 'center',
     // Lifts the card off the list behind it without a scrim — a scrim would
     // dim the log, and the log is what the timer is about.
@@ -804,12 +806,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'stretch',
-    paddingHorizontal: 16,
-    marginBottom: 6,
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.xsPlus,
   },
   kindRow: { flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1 },
   kindDot: { width: 7, height: 7, borderRadius: 4 },
-  kind: { fontSize: 11, fontWeight: '800', letterSpacing: 1.6 },
+  kind: { ...Typography.eyebrow, fontWeight: '800' },
   headButton: { minWidth: 34, minHeight: 34, alignItems: 'center', justifyContent: 'center' },
 
   ring: { position: 'absolute', top: 0, left: 0 },
@@ -824,38 +826,45 @@ const styles = StyleSheet.create({
   },
   // Tabular figures: without them the whole row jitters as digits change,
   // which is the cheapest way to make a timer feel cheap.
+  // 46, not `display`: the rest countdown is read from arm's length between sets.
   clock: { fontSize: 46, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 0.5 },
   clockSub: {
-    fontSize: 12,
+    ...Typography.caption,
     color: vola.textMuted,
-    marginTop: 2,
+    marginTop: Spacing.xxs,
     maxWidth: 140,
     textAlign: 'center',
+    fontWeight: '400',
   },
 
-  runLine: { fontSize: 12, color: vola.textMuted, marginTop: 10, fontWeight: '600' },
+  runLine: { ...Typography.caption, color: vola.textMuted, marginTop: Spacing.smPlus },
   runTrack: {
     height: 3,
     borderRadius: 2,
     backgroundColor: vola.line,
     alignSelf: 'stretch',
     marginHorizontal: 28,
-    marginTop: 8,
+    marginTop: Spacing.sm,
     overflow: 'hidden',
   },
   runFill: { height: 3, borderRadius: 2 },
 
-  controls: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14 },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.cardPadding,
+    marginTop: Spacing.cardPadding,
+  },
   adjust: {
     minWidth: 62,
     minHeight: 46,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: vola.line,
   },
-  adjustText: { fontWeight: '700', fontSize: 15, fontVariant: ['tabular-nums'] },
+  adjustText: { ...Typography.emphasis, fontVariant: ['tabular-nums'], fontWeight: '700' },
   playPause: {
     width: 60,
     height: 60,
@@ -865,20 +874,20 @@ const styles = StyleSheet.create({
   },
   off: { opacity: 0.3 },
 
-  footer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.md },
   footerButton: {
     minHeight: 42,
     paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    borderRadius: Radius.md,
     backgroundColor: vola.surfaceRaised,
   },
-  footerText: { fontWeight: '700', fontSize: 14 },
-  footerStop: { fontWeight: '700', fontSize: 14, color: vola.textMuted },
+  footerText: { ...Typography.body, fontWeight: '700' },
+  footerStop: { ...Typography.body, color: vola.textMuted, fontWeight: '700' },
 
   bar: {
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: vola.line,
     backgroundColor: vola.surface,
@@ -892,15 +901,16 @@ const styles = StyleSheet.create({
   barRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap: Spacing.xsPlus,
+    paddingHorizontal: Spacing.smPlus,
+    paddingVertical: Spacing.sm,
   },
-  barLabel: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  barKind: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
-  barClockTap: { flex: 1, paddingHorizontal: 4 },
+  barLabel: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xsPlus },
+  barKind: { ...Typography.eyebrow, fontWeight: '800' },
+  barClockTap: { flex: 1, paddingHorizontal: Spacing.xs },
+  // 22, not a role: the countdown in the collapsed bar, the bar's one figure.
   barClock: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  barCaption: { fontSize: 10, color: vola.textDim },
+  barCaption: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
   barChip: {
     minWidth: 40,
     minHeight: 34,
@@ -910,17 +920,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
   },
-  barChipText: { fontWeight: '700', fontSize: 12, fontVariant: ['tabular-nums'] },
+  barChipText: { ...Typography.caption, fontVariant: ['tabular-nums'], fontWeight: '700' },
   barPlay: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   barStop: {
     minHeight: 34,
-    paddingHorizontal: 10,
+    paddingHorizontal: Spacing.smPlus,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 10,
     backgroundColor: vola.surfaceRaised,
   },
-  barStopText: { fontWeight: '700', fontSize: 12, color: vola.textMuted },
+  barStopText: { ...Typography.caption, color: vola.textMuted, fontWeight: '700' },
 
   track: { height: 3, backgroundColor: vola.line, width: '100%', overflow: 'hidden' },
   // Absolutely positioned and childless, so animating it touches no layout: the

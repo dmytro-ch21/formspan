@@ -24459,3 +24459,45 @@ This is a visual change only: sizes, leading and tracking. Nothing about what Yo
 - You at the default text size: nothing clipped, truncated or overlapping.
   - Check the masthead and its friends chip, the navigation pills with a count badge, the rank header with its facts, the roadmap summary and its links, and each section label.
 - The same screen at the largest Dynamic Type size.
+
+## N577 — the Session screen's text on the type scale (`apps/mobile/app/session/[id].tsx`, `apps/mobile/components/{Timer,ui/OptionSelect}.tsx`, #1192)
+
+This is a visual change only: sizes, leading and tracking. Nothing about what the session screen shows, when, or how logging a set works has changed. Every spacing and radius change in these files is value-identical, so none of them moves anything.
+
+### Happy path
+
+- **A set row:** the set number, its type badge, the done tick and the chevron are exactly as big as before. The set summary keeps its size and weight.
+- **Exercise group names:** 15pt, where they were 16pt.
+- **The progression hint card:**
+  - the phase label is 11pt and tracked, where it was 10pt;
+  - the rep-range digits (shown when a range is wide) read at 12pt, where they were 10pt;
+  - the reason, last-set and warm-up lines keep their weight and muted tone.
+- **The rest timer:**
+  - the full countdown is unchanged;
+  - in the collapsed bar, the countdown is unchanged and its caption reads at 12pt, where it was 10pt.
+- **Option pickers:** their labels are 11pt, where they were 10pt, and their hints read at 12pt.
+- **Finish button and the empty state's title:** 15pt, where they were 16pt.
+- **Weights:** no text got bolder or lighter.
+
+### Edge cases & errors
+
+- **Logging a set one-handed:** a row whose summary fits on one line sits at the same height, and the done tick and chevron stay where the thumb expects them. A summary long enough to wrap to two lines makes its row slightly taller (about 40pt of text where it was about 36pt).
+- **A drop set's continuation mark** (↳) still sits in the set-number slot with its `D` badge.
+- **The collapsed rest bar with a long caption** stays on one line with an ellipsis beside the countdown.
+- **Typing a weight or reps into a set field:** the digits sit centred, as before. The field was deliberately left off the scale.
+- **The progression hint with an RIR or RPE note:** the italic note still runs inline after the last-set figure.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - no `fontSize` below 11 in scope, and only the recorded exceptions remain;
+  - the ESLint guard refuses a raw on-scale size, spacing or radius in all three files;
+  - the session suites still render and log sets.
+  The first two are measured in the history entry. The guard was mutation-tested.
+- **NOT reachable:** clipping, truncation and overlap at a given text size, and how a row feels under a thumb mid-workout. Those need a device.
+
+### Needs a device
+
+- A real workout at the default text size: nothing clipped, truncated or overlapping.
+  - Check a set row collapsed and expanded, including one whose summary wraps to two lines, the progression hint card, the rest timer full and as a bar, and an option picker.
+- The same screen at the largest Dynamic Type size.

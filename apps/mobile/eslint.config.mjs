@@ -63,7 +63,7 @@ const fontSizeSelector = FONT_SIZE_SCALE_VALUES.map(
 
 /**
  * The files converted so far — N508's eight, then one screen per N561 child
- * (N572: Today, N573: Food, N574: Progress, N575: Plan, N576: You). An ALLOWLIST, not a directory
+ * (N572: Today, N573: Food, N574: Progress, N575: Plan, N576: You, N577: Session). An ALLOWLIST, not a directory
  * glob — ~130 files in this app still mint bare spacing/fontSize literals on
  * purpose (this is the foundational PR, not the full app-wide migration; see
  * this ticket's `docs/decisions/history.md` entry for the follow-up-batch
@@ -125,6 +125,9 @@ const N508_CONVERTED_FILES = [
   "app/(tabs)/you.tsx",
   "components/BjjRankHeader.tsx",
   "components/RoadmapSummary.tsx",
+  // N577 (#1192) — Session; the screen itself is N508's, above.
+  "components/Timer.tsx",
+  "components/ui/OptionSelect.tsx",
 ];
 
 export default defineConfig([
