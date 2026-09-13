@@ -76884,7 +76884,7 @@ Each file reported exactly one guard error with its own selector's message. The 
 
 - **Device checks.** Both remain on #1190 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. The places most likely to show a problem:
   - a planned entry in the week planner: its sport tag grew from 9 to 11 above a one-line title;
-  - the curricula strip's label, 9 to 11, above a one-line name;
+  - the curricula strip's label, 9 to 11, above a name that wraps to at most two lines;
   - card titles that now shrink beside their controls at 20pt;
   - the "New workout" sheet header.
 - **The last two screens** (#1191, #1192) are untouched.

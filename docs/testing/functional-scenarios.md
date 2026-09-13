@@ -24408,7 +24408,7 @@ This is a visual change only: sizes, leading and tracking. Nothing about what Pl
 
 - **A long card title** still shrinks and wraps beside its controls rather than pushing them off the card.
 - **A planned entry with a long title** stays on one line with an ellipsis. Its sport tag above it now takes slightly more height.
-- **A long curriculum name** stays on one line with an ellipsis.
+- **A long curriculum name** wraps to at most two lines and then ends in an ellipsis.
 - **Typing a week theme or a new workout name:** the text sits centred in the field, as before. These fields were deliberately left off the scale.
 
 ### What a test can and cannot reach
