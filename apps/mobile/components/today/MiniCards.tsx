@@ -267,7 +267,6 @@ const styles = StyleSheet.create({
 
   dots: { flexDirection: 'row', justifyContent: 'space-between' },
   dotCol: { alignItems: 'center', gap: 3 },
-  // The scale's floor rather than a role — a single letter over a 13pt dot.
   // 11 is the scale's floor, not a role: a single letter over a 13pt dot.
   dotDow: { fontSize: Typography.eyebrow.fontSize, color: vola.textDim },
   dot: { width: 13, height: 13, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
