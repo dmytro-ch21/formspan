@@ -77289,7 +77289,7 @@ Without the first guard, one report with `"rows": "lots"` failed the cast and th
   - one athlete's report from 20 hours ago, with a group that has since cleared, and their newer report;
   - a report split 30 seconds apart;
   - a group repeated inside one report;
-  - a row count of `"lots"`, one of 1e30, and a report with no entity;
+  - a row count of `"lots"`, one of 1e30, a report with no entity, and one whose code is a number;
   - a server error.
 
   It checks the Sync blocked count, the report count, the total, that they add up, the athlete count and the exact groups. It also checks that an empty window returns `[]` rather than `null`.
@@ -77314,7 +77314,8 @@ Without the first guard, one report with `"rows": "lots"` failed the cast and th
   - **M8** `stuck_rows` left `null`;
   - **M9** the athlete count not limited to reports;
   - **M10** `state` keeping its `stuck_` prefix;
-  - **M11** no upper bound on the row count, which overflows the total.
+  - **M11** no upper bound on the row count, which overflows the total;
+  - **M12** no check that the code is a string, which lists the numeric-code report as a group.
 - **Admin helper:**
   - **A1** any kind with a stuck reason;
   - **A2** any reason starting with "stuck";

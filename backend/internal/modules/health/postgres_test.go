@@ -259,6 +259,12 @@ func TestPostgresRepository_SummariseSplitsStuckRowReports(t *testing.T) {
 		report("athlete_f", "food", "refused", "invalid_input", 1e30),
 		// No entity: the athlete counts, the group is not listed.
 		report("athlete_c", "", "refused", "invalid_input", 7.0),
+		// A code that is a number, not a string: the same.
+		Event{
+			Source: SourceClient, Kind: KindSyncBlocked, UserID: strp("athlete_g"),
+			Message: "stuck rows: food refused 42",
+			Details: map[string]any{"reason": "stuck_refused", "entity": "food", "code": 42.0, "rows": 2.0},
+		},
 	)
 
 	s, err := repo.Summarise(ctx, time.Now().Add(-48*time.Hour))
@@ -269,11 +275,11 @@ func TestPostgresRepository_SummariseSplitsStuckRowReports(t *testing.T) {
 	if got := s.ByKind["sync_blocked"]; got != 1 {
 		t.Errorf("by_kind.sync_blocked = %d, want 1: only the give-up, never a daily report", got)
 	}
-	if s.StuckRowReports != 9 {
-		t.Errorf("stuck_row_reports = %d, want 9", s.StuckRowReports)
+	if s.StuckRowReports != 10 {
+		t.Errorf("stuck_row_reports = %d, want 10", s.StuckRowReports)
 	}
-	if s.Total != 11 {
-		t.Errorf("total = %d, want 11: reports still count as events", s.Total)
+	if s.Total != 12 {
+		t.Errorf("total = %d, want 12: reports still count as events", s.Total)
 	}
 	sum := s.StuckRowReports
 	for _, n := range s.ByKind {
@@ -282,8 +288,8 @@ func TestPostgresRepository_SummariseSplitsStuckRowReports(t *testing.T) {
 	if sum != s.Total {
 		t.Errorf("by_kind plus stuck_row_reports = %d, total = %d; they must add up", sum, s.Total)
 	}
-	if s.StuckRowAthletes != 5 {
-		t.Errorf("stuck_row_athletes = %d, want 5 (a, b, c, d, f)", s.StuckRowAthletes)
+	if s.StuckRowAthletes != 6 {
+		t.Errorf("stuck_row_athletes = %d, want 6 (a, b, c, d, f, g)", s.StuckRowAthletes)
 	}
 
 	want := []StuckRowGroup{
