@@ -77198,15 +77198,12 @@ FRIEND prints percentiles but does not name bands. VOLA splits at the 25th, 50th
   - the period following the range chips.
 - **Totals:** 110 tests across the three suites (31 band, 74 source, 5 screen), all passing.
 
-**A test failure on the first run, and what is and isn't known about it.** The first run of the screen test failed three of five tests.
+**A test failure on the first run, and its real cause.** The first run of the screen test failed three of five tests.
 
-- **One was the test's fault:** RNTL's `toHaveTextContent` matches a plain string against the whole text, and the test passed a phrase.
-- **The first test failed with "render function has not been called"** after about 1.5s, past `waitFor`'s 1s default wait.
-- **The missing-details test showed the female band** its own profile mock did not have.
+- **One was a matcher:** RNTL's `toHaveTextContent` matches a plain string against the whole text, and the test passed a phrase.
+- **The other two came from unawaited calls.** In this repo's RNTL 14, `render` and `fireEvent.press` return promises, and the test did not await them. The first test then failed with "render function has not been called", and the next test showed a band from state it should not have had.
 
-After the wait was raised to 8s and the matcher fixed, all five pass together, and the missing-details test also passes run on its own. A diagnostic in that test confirmed the screen received the profile the test set (`sex: null`).
-
-The likeliest explanation for the wrong band is state left behind by the first test's timeout. That was not proven: the missing-details test was never run alone *before* the fix. What is established is that the screen renders the right sentence for the profile it receives.
+This was diagnosed wrongly at first. A slow first render and leftover state from a timed-out test were both blamed, and `waitFor` was given an 8s timeout. That masked the failures, and verify's `check:rntl-awaits` still caught all six unawaited calls. With the calls awaited, the test was run once more with `waitFor`'s default 1s timeout, and all five passed. So the 8s timeout was removed, and the screen was never wrong.
 
 **Mutation-checked,** each caught as a named test failure and restored byte-identical before a green re-run:
 

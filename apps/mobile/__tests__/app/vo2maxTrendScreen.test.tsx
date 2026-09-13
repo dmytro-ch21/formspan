@@ -69,19 +69,15 @@ beforeEach(() => {
   mockGetProfile.mockReset().mockResolvedValue({ date_of_birth: bornYearsAgo(36), sex: 'female' });
 });
 
-/** The first render of this screen pulls in the chart and the trend layer, and
- *  measured over a second on its own — past `waitFor`'s default. */
-const SETTLE = { timeout: 8000 };
-
 async function settled() {
-  await waitFor(() => expect(screen.getByTestId('vo2max-latest')).toBeTruthy(), SETTLE);
-  await waitFor(() => expect(mockGetProfile).toHaveBeenCalled(), SETTLE);
+  await waitFor(() => expect(screen.getByTestId('vo2max-latest')).toBeTruthy());
+  await waitFor(() => expect(mockGetProfile).toHaveBeenCalled());
   await act(async () => {});
 }
 
 describe('the latest reading and its band', () => {
   it('shows the newest value, how old it is, and its band with the reference', async () => {
-    render(<Vo2MaxTrendScreen />);
+    await render(<Vo2MaxTrendScreen />);
     await settled();
     expect(screen.getByTestId('vo2max-latest-value')).toHaveTextContent('31.0 mL/kg/min');
     expect(screen.getByTestId('vo2max-latest-age')).toHaveTextContent(`Latest reading from ${shortDate(shiftDate(TODAY, -10))}, 10 days ago`);
@@ -92,7 +88,7 @@ describe('the latest reading and its band', () => {
 
   it('asks for the missing detail rather than guessing, and shows no reference line', async () => {
     mockGetProfile.mockResolvedValue({ date_of_birth: bornYearsAgo(36), sex: null });
-    render(<Vo2MaxTrendScreen />);
+    await render(<Vo2MaxTrendScreen />);
     await settled();
     expect(screen.getByTestId('vo2max-band')).toHaveTextContent(
       'Add your sex in your profile to see how this compares with others your age.',
@@ -102,7 +98,7 @@ describe('the latest reading and its band', () => {
 
   it('says nothing about a band when the profile could not be read, rather than claiming details are missing', async () => {
     mockGetProfile.mockRejectedValue(new Error('offline'));
-    render(<Vo2MaxTrendScreen />);
+    await render(<Vo2MaxTrendScreen />);
     await settled();
     expect(screen.getByTestId('vo2max-latest-value')).toHaveTextContent('31.0 mL/kg/min');
     expect(screen.queryByTestId('vo2max-band')).toBeNull();
@@ -111,7 +107,7 @@ describe('the latest reading and its band', () => {
 
   it('says plainly when the age is outside the reference', async () => {
     mockGetProfile.mockResolvedValue({ date_of_birth: bornYearsAgo(82), sex: 'male' });
-    render(<Vo2MaxTrendScreen />);
+    await render(<Vo2MaxTrendScreen />);
     await settled();
     expect(screen.getByTestId('vo2max-band')).toHaveTextContent(
       "The reference covers ages 20 to 79, so there's no band for your age.",
@@ -121,12 +117,12 @@ describe('the latest reading and its band', () => {
 
 describe('the change line names its period', () => {
   it('reads "in the past 6 months" by default and follows the chosen range', async () => {
-    render(<Vo2MaxTrendScreen />);
+    await render(<Vo2MaxTrendScreen />);
     await settled();
     expect(screen.getByTestId('vo2max-delta')).toHaveTextContent('↑ 1.6 mL/kg/min in the past 6 months');
     expect(screen.getByTestId('vo2max-evidence')).toHaveTextContent(`since ${shortDate(shiftDate(TODAY, -40))} · 2 readings`);
 
-    fireEvent.press(screen.getByTestId('vo2max-range-1Y'));
-    await waitFor(() => expect(screen.getByTestId('vo2max-delta')).toHaveTextContent('↑ 1.6 mL/kg/min in the past year'), SETTLE);
+    await fireEvent.press(screen.getByTestId('vo2max-range-1Y'));
+    await waitFor(() => expect(screen.getByTestId('vo2max-delta')).toHaveTextContent('↑ 1.6 mL/kg/min in the past year'));
   });
 });
