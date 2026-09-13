@@ -24,6 +24,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { macroSplit, viewTarget, viewTotals, type EatenView, type TargetView } from '@/lib/nutrition';
 
@@ -94,16 +96,16 @@ function bar(eaten: number, goal: number | null): number {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 14, marginTop: 14 },
+  row: { flexDirection: 'row', gap: Spacing.cardPadding, marginTop: Spacing.cardPadding },
   cell: { flex: 1 },
-  figure: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  goal: { fontSize: 12, fontWeight: '600', color: vola.textMuted },
-  label: { fontSize: 11, marginTop: 1 },
+  figure: { ...Typography.emphasis, fontVariant: ['tabular-nums'], fontWeight: '700' },
+  goal: { ...Typography.caption, color: vola.textMuted },
+  label: { ...Typography.caption, marginTop: 1, fontWeight: '400' },
   track: {
     height: 3,
     borderRadius: 2,
     backgroundColor: vola.surfaceRaised,
-    marginTop: 6,
+    marginTop: Spacing.xsPlus,
     overflow: 'hidden',
   },
   fill: { height: 3, borderRadius: 2 },

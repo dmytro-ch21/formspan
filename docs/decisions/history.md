@@ -76613,6 +76613,107 @@ The nine files are listed one by one, not as `components/today/*`. A card added 
 - **The other five screens** (#1188–#1192) are untouched.
 - **Platform leading remains** on `miniValue` and `date`. They were literals before and stay literals.
 
+## 2026-09-13 — N573 (#1188): the Food screen's text on the type scale
+
+**What was wrong.** 56 text styles on Food set a raw `fontSize`, and none of the screen's 12 files imported the scale. Each rendered at the platform's default leading, which is tighter than the scale specifies.
+
+This is the second of N561's six per-screen children (#1050). It follows N572's rules for Today, so this entry records only what differs and the numbers.
+
+### Scope, file by file
+
+`apps/mobile/app/(tabs)/food.tsx` and `apps/mobile/components/food/{AmountSheet,CatalogCard,EntryMenuSheet,EntryRow,FoodSummaryCard,IngredientPicker,MacroSplit,MealCard,NutritionPanel,RemainingBlock,TargetRow}.tsx`. No other screen is touched.
+
+### The baseline, before and after
+
+One script measured both: `origin/main` at `299e5f2d`, then this branch.
+
+| Measure | Before | After |
+|---|---|---|
+| files | 12 | 12 |
+| files importing `Typography` | 0 | 12 |
+| `fontSize:` sites (any) | 56 | 9 |
+| raw numeric `fontSize:` sites | 55 | 5 |
+| `fontSize` below 11 | 1 | 0 |
+| numeric `lineHeight:` sites | 4 | 1 |
+| `...Typography.<role>` spreads | 0 | 47 |
+| `fontSize: Typography.<role>.fontSize` | 0 | 3 |
+| spacing literals on the scale | 88 | 0 |
+| radius literals on the scale | 12 | 0 |
+
+The before column matches the baseline filed on the ticket (12, 0, 56, 4, 1).
+
+- **The one `fontSize:` site that is not numeric** is RemainingBlock's `fontSize: size`: the hero figure's size is a prop (30 or 34), passed where it renders. It has a reason comment on its style entry.
+- **The remaining `lineHeight`** is CatalogCard's "+", kept with its glyph (below).
+
+### How each style was converted
+
+The rules are N572's:
+
+- a role owns size, leading and tracking;
+- the rendered weight is kept, and was checked per entry against `origin/main` (none changed);
+- every exception carries a one-line reason directly above it.
+
+The exceptions here are of three kinds, and two are new:
+
+- **Hero figure literal:** NutritionPanel's `kcalNumber` at 34.
+- **A glyph keeps its size, written as a role's size** (`fontSize: Typography.<role>.fontSize`): the emoji in EntryRow's leading slot (20, `title`'s size), the tick in a 20pt checkbox disc (12, `caption`'s), and CatalogCard's "+" in a 32pt circle (20, with its 22pt leading kept). The guard refuses these numbers bare, so they are spelled as a reference; they take the size only, not the role's leading.
+- **New: text inputs stay bare.** IngredientPicker's `search` (16), `qtyInput` (22) and `manualInput` (16) style `TextInput`s, not `Text`. On iOS, a `lineHeight` on a single-line `TextInput` shifts the typed text off centre, so a role's leading would break the field. None of the three is on the guard's list of sizes.
+- **Also a literal:** CatalogCard's 26pt emoji glyph, which stands in for a food's photo.
+
+### Sizes that changed
+
+6 of the 55 converted entries changed size:
+
+| File | Entry | Before | After | Role |
+|---|---|---|---|---|
+| `food.tsx` | `gridHeadCell` | 10 | 11 | eyebrow |
+| `EntryMenuSheet.tsx` | `title` | 16 | 20 | title |
+| `IngredientPicker.tsx` | `pickName` | 16 | 15 | emphasis |
+| `IngredientPicker.tsx` | `addText` | 16 | 15 | emphasis |
+| `MacroSplit.tsx` | `label` | 11 | 12 | caption |
+| `TargetRow.tsx` | `value` | 22 | 20 | title |
+
+Why:
+
+- **Sheet titles.** EntryMenuSheet's title joins AmountSheet's, which was already exactly `title`. Two sheets on one screen had two title sizes.
+- **Buttons and names at 16** move to `emphasis`, as on Today.
+- **The month grid's day initials** were the screen's one size below 11. They move to `eyebrow`, the scale's label role.
+- **MacroSplit's label** is reading text at 11, so it moves to `caption`.
+- **The daily target figure** moves to `title`, like Momentum's row figures on Today.
+
+Leading changed on 45 entries and tracking on 30. Two entries had tracking of their own, which the role replaced: `gridHeadCell` 0.8 and TargetRow's `label` 1.1 both become 1.2.
+
+### The guard
+
+The 12 files join `N508_CONVERTED_FILES`, listed one by one. As on Today, the list also guards spacing and radius, so the 88 spacing and 12 radius literals on the scale are restated as `Spacing`/`Radius` tokens, each value-identical. Literals off the scale stay.
+
+**Mutation-tested.** A probe style entry was inserted into five files at once and linted:
+
+- `fontSize: 13` in `food.tsx`, which also tests that the `(tabs)` path matches;
+- `padding: 16` in IngredientPicker;
+- `borderRadius: 12` in MealCard;
+- `fontSize: 11` in TargetRow;
+- `fontSize: 20` in NutritionPanel.
+
+Each file reported exactly one guard error with its own selector's message. The files were restored byte-identical and linted again: 0 errors. **Negative control:** `app/(tabs)/you.tsx`, which is not converted yet, contains `fontSize: 12` and reports 0 guard errors.
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- The 15 jest suites that render Food or its components pass: 143 tests. That is seven `food*` screen suites, `components/food/__tests__/*`, `ingredientPicker` and `sheetTokens`. No test in scope asserts a style value.
+- **Audit for text with no size.** It looks for a `<Text>` whose styles set no size, and found none before or after. Its positive control ran on N572.
+
+### Not done
+
+- **Device checks.** Both remain on #1188 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. The places most likely to show a problem:
+  - EntryMenuSheet's title: now 20pt, `flex: 1`, beside "Done";
+  - catalog and saved-food names: two lines at 20pt leading;
+  - the month grid's day initials: 11pt with 1.2 tracking, in seven equal columns;
+  - MealCard's header row;
+  - the daily target row.
+- **The other four screens** (#1189–#1192) are untouched.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

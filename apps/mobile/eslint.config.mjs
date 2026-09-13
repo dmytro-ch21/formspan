@@ -63,7 +63,7 @@ const fontSizeSelector = FONT_SIZE_SCALE_VALUES.map(
 
 /**
  * The files converted so far — N508's eight, then one screen per N561 child
- * (N572: Today). An ALLOWLIST, not a directory
+ * (N572: Today, N573: Food). An ALLOWLIST, not a directory
  * glob — ~130 files in this app still mint bare spacing/fontSize literals on
  * purpose (this is the foundational PR, not the full app-wide migration; see
  * this ticket's `docs/decisions/history.md` entry for the follow-up-batch
@@ -99,6 +99,19 @@ const N508_CONVERTED_FILES = [
   "components/today/ProgressCard.tsx",
   "components/today/UpNextCard.tsx",
   "components/today/WeekStrip.tsx",
+  // N573 (#1188) — the Food screen, file by file for the same reason.
+  "app/(tabs)/food.tsx",
+  "components/food/AmountSheet.tsx",
+  "components/food/CatalogCard.tsx",
+  "components/food/EntryMenuSheet.tsx",
+  "components/food/EntryRow.tsx",
+  "components/food/FoodSummaryCard.tsx",
+  "components/food/IngredientPicker.tsx",
+  "components/food/MacroSplit.tsx",
+  "components/food/MealCard.tsx",
+  "components/food/NutritionPanel.tsx",
+  "components/food/RemainingBlock.tsx",
+  "components/food/TargetRow.tsx",
 ];
 
 export default defineConfig([

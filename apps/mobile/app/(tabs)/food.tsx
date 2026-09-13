@@ -58,6 +58,8 @@ import { TrackerList } from '@/components/TrackerList';
 import { DayPill } from '@/components/ui/DayPill';
 import { PeriodSwitcher } from '@/components/ui/PeriodSwitcher';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   addDays,
@@ -1166,22 +1168,22 @@ const styles = StyleSheet.create({
   // controls to. At 12 it was ~42, which is the kind of near-miss the glyph
   // row's own note is about.
   manageTrackers: { paddingVertical: 13, alignItems: 'center' },
-  manageTrackersText: { fontSize: 13, fontWeight: '700', color: vola.textMuted },
+  manageTrackersText: { ...Typography.meta, color: vola.textMuted, fontWeight: '700' },
   screen: { flex: 1, backgroundColor: vola.bg },
-  container: { gap: 12 },
-  body: { paddingHorizontal: 20, gap: 16 },
+  container: { gap: Spacing.md },
+  body: { paddingHorizontal: Spacing.gutter, gap: Spacing.lg },
   summary: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     backgroundColor: vola.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.md,
   },
-  slotsAbsent: { fontSize: 13, color: vola.textMuted, marginTop: 18 },
+  slotsAbsent: { ...Typography.meta, color: vola.textMuted, marginTop: 18 },
   // One gap between the four `MealCard`s — the card itself owns everything
   // inside it now (N124/N113); this screen only stacks them.
-  cards: { gap: 12 },
+  cards: { gap: Spacing.md },
 
   // The month-jump sheet — N81/#415. Styling matches `WeekPlanner`'s own
   // month grid exactly (same tokens, same sizes) rather than a fresh set: one
@@ -1192,36 +1194,34 @@ const styles = StyleSheet.create({
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: Spacing.lg,
     paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingVertical: Spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: vola.line,
   },
   sheetClose: { marginLeft: 'auto' },
-  close: { fontSize: 14, fontWeight: '700', color: vola.lime },
-  sheetBody: { padding: 14, gap: 2 },
-  sheetHint: { fontSize: 12, color: vola.textDim, paddingBottom: 10 },
-
-  gridHead: { flexDirection: 'row', paddingBottom: 6 },
-  gridHeadCell: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
+  close: { ...Typography.body, color: vola.lime, fontWeight: '700' },
+  sheetBody: { padding: Spacing.cardPadding, gap: Spacing.xxs },
+  sheetHint: {
+    ...Typography.caption,
     color: vola.textDim,
+    paddingBottom: Spacing.smPlus,
+    fontWeight: '400',
   },
+
+  gridHead: { flexDirection: 'row', paddingBottom: Spacing.xsPlus },
+  gridHeadCell: { ...Typography.eyebrow, flex: 1, textAlign: 'center', color: vola.textDim },
   gridRow: { flexDirection: 'row' },
   gridCell: {
     flex: 1,
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 8,
-    borderRadius: 8,
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.sm,
   },
   gridCellShown: { backgroundColor: vola.surface },
-  gridDate: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  gridDate: { ...Typography.body, fontVariant: ['tabular-nums'], fontWeight: '600' },
   gridSpill: { color: vola.textDim, opacity: 0.5 },
   gridToday: { color: vola.lime, fontWeight: '800' },
   // A day that hasn't happened yet — nothing to correct there. Dimmer than a

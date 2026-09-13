@@ -57,6 +57,8 @@ import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { fmtAmount, type TargetView } from '@/lib/nutrition';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -150,21 +152,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 12,
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: vola.lineSoft,
   },
   text: { flex: 1 },
   label: {
-    fontSize: 11,
-    fontWeight: '600',
+    ...Typography.eyebrow,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
     color: vola.textMuted,
+    fontWeight: '600',
   },
   // Tabular figures so the number does not jitter as the target changes, the
   // same treatment `RemainingBlock` gives its two headline figures.
-  value: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'], marginTop: 2 },
-  note: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
+  value: { ...Typography.title, fontVariant: ['tabular-nums'], marginTop: Spacing.xxs },
+  note: { ...Typography.caption, color: vola.textMuted, marginTop: Spacing.xxs, fontWeight: '400' },
 });

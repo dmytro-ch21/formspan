@@ -29,6 +29,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import type { Macros } from '@/lib/nutrition';
 
 /** `n/a` for null — never `0`, which would be a claim the data does not make. */
@@ -135,14 +137,21 @@ export function NutritionPanel({ macros }: { macros: Macros }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: 'row', gap: 16, paddingVertical: 8 },
+  wrap: { flexDirection: 'row', gap: Spacing.lg, paddingVertical: Spacing.sm },
   kcalCol: { alignItems: 'center', justifyContent: 'center', minWidth: 76 },
+  // 34, not `display`: the panel's one hero figure, the day's calories.
   kcalNumber: { fontSize: 34, fontWeight: '800', color: vola.text },
-  kcalLabel: { fontSize: 12, color: vola.textDim, fontWeight: '600' },
-  breakdown: { flex: 1, borderLeftWidth: 1, borderLeftColor: vola.line, paddingLeft: 14, gap: 2 },
+  kcalLabel: { ...Typography.caption, color: vola.textDim },
+  breakdown: {
+    flex: 1,
+    borderLeftWidth: 1,
+    borderLeftColor: vola.line,
+    paddingLeft: Spacing.cardPadding,
+    gap: Spacing.xxs,
+  },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  label: { fontSize: 13, color: vola.textMuted },
+  label: { ...Typography.meta, color: vola.textMuted },
   labelStrong: { color: vola.text, fontWeight: '700' },
-  value: { fontSize: 13, color: vola.textMuted },
+  value: { ...Typography.meta, color: vola.textMuted },
   valueStrong: { color: vola.text, fontWeight: '700' },
 });

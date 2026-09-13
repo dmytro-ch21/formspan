@@ -41,6 +41,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { withAlpha } from '@/lib/palette';
 
 export function EntryMenuSheet({
@@ -185,30 +187,30 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: withAlpha(vola.text, 0.18),
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   head: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.gutter,
+    paddingVertical: Spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: withAlpha(vola.text, 0.08),
   },
-  title: { flex: 1, fontSize: 16, fontWeight: '800' },
-  done: { fontSize: 14, fontWeight: '700', color: vola.lime },
+  title: { ...Typography.title, flex: 1 },
+  done: { ...Typography.body, color: vola.lime, fontWeight: '700' },
   option: {
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.gutter,
     // 46pt tall, over the 44 the HIG asks — matching the Library's rows.
-    paddingVertical: 14,
-    gap: 2,
+    paddingVertical: Spacing.cardPadding,
+    gap: Spacing.xxs,
   },
   optionPressed: { backgroundColor: withAlpha(vola.text, 0.05) },
   optionOff: { opacity: 0.45 },
-  optionText: { fontSize: 15, fontWeight: '600' },
+  optionText: { ...Typography.emphasis },
   optionDanger: { color: vola.danger },
-  reason: { fontSize: 12, color: vola.textMuted },
+  reason: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
 });

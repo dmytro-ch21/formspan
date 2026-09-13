@@ -64,6 +64,8 @@ import { KeyboardAwareFooter } from '@/components/KeyboardAwareScroll';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { PressableScale } from '@/components/ui/PressableScale';
 
@@ -130,24 +132,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 20,
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.gutter,
     paddingTop: 18,
-    paddingBottom: 12,
+    paddingBottom: Spacing.md,
   },
-  title: { fontSize: 20, fontWeight: '800' },
-  body: { flex: 1, paddingHorizontal: 20 },
+  title: { ...Typography.title },
+  body: { flex: 1, paddingHorizontal: Spacing.gutter },
   footer: {
-    padding: 16,
+    padding: Spacing.lg,
     backgroundColor: vola.bg,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: vola.line,
   },
   done: {
     minHeight: 46,
-    borderRadius: 12,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  doneText: { fontWeight: '700', fontSize: 15 },
+  doneText: { ...Typography.emphasis, fontWeight: '700' },
 });

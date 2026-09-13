@@ -44,6 +44,8 @@ import { CatalogCard, spokenName } from '@/components/food/CatalogCard';
 import { Text } from '@/components/Themed';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   emptySearchMessage,
@@ -470,14 +472,20 @@ export function IngredientPicker({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10, paddingVertical: 8 },
-  back: { fontSize: 15, color: vola.textMuted, paddingVertical: 6 },
+  wrap: { gap: Spacing.smPlus, paddingVertical: Spacing.sm },
+  back: {
+    ...Typography.emphasis,
+    color: vola.textMuted,
+    paddingVertical: Spacing.xsPlus,
+    fontWeight: '400',
+  },
+  // 16, not a role: a TextInput, where lineHeight shifts the typed text on iOS.
   search: {
     fontSize: 16,
     color: vola.text,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.cardPadding,
+    borderRadius: Radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.line,
     backgroundColor: vola.surface,
@@ -485,45 +493,47 @@ const styles = StyleSheet.create({
   savedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingVertical: Spacing.smPlus,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.lineSoft,
     backgroundColor: vola.surface,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
-  savedMain: { flex: 1, gap: 2 },
-  savedName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
-  savedServing: { fontSize: 12, color: vola.textDim },
-  note: { fontSize: 13, color: vola.textMuted, lineHeight: 19, paddingVertical: 8 },
-  pickName: { fontSize: 16, fontWeight: '600' },
-  hint: { fontSize: 13, color: vola.textMuted },
+  savedMain: { flex: 1, gap: Spacing.xxs },
+  savedName: { ...Typography.emphasis },
+  savedServing: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
+  note: { ...Typography.meta, color: vola.textMuted, paddingVertical: Spacing.sm },
+  pickName: { ...Typography.emphasis },
+  hint: { ...Typography.meta, color: vola.textMuted },
+  // 22, not a role: a TextInput, where lineHeight shifts the typed text on iOS.
   qtyInput: {
     fontSize: 22,
     color: vola.text,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: Spacing.smPlus,
+    paddingHorizontal: Spacing.md,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  manualField: { gap: 6, marginBottom: 10 },
-  manualLabel: { fontSize: 13, color: vola.textMuted },
+  manualField: { gap: Spacing.xsPlus, marginBottom: Spacing.smPlus },
+  manualLabel: { ...Typography.meta, color: vola.textMuted },
+  // 16, not a role: a TextInput, where lineHeight shifts the typed text on iOS.
   manualInput: {
     fontSize: 16,
     color: vola.text,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.cardPadding,
+    borderRadius: Radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.line,
     backgroundColor: vola.surface,
   },
-  byHand: { paddingVertical: 14, alignItems: 'center' },
-  byHandText: { fontSize: 14, fontWeight: '600' },
-  add: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  byHand: { paddingVertical: Spacing.cardPadding, alignItems: 'center' },
+  byHandText: { ...Typography.body, fontWeight: '600' },
+  add: { borderRadius: Radius.md, paddingVertical: Spacing.cardPadding, alignItems: 'center' },
   addOff: { opacity: 0.4 },
-  addText: { fontSize: 16, fontWeight: '700' },
+  addText: { ...Typography.emphasis, fontWeight: '700' },
 });
