@@ -4,6 +4,7 @@ import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
+import { Typography } from '@/constants/Typography';
 import {
   activityTypeLabel,
   sourceLabel,
@@ -138,7 +139,7 @@ const styles = StyleSheet.create({
     marginLeft: 9,
   },
   text: { flex: 1, gap: 1 },
-  eyebrow: { fontSize: 10, letterSpacing: 1, fontWeight: '700' },
+  eyebrow: { ...Typography.eyebrow },
   title: { fontSize: 17, fontWeight: '700', color: vola.text },
   meta: { fontSize: 12, color: vola.textMuted },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },

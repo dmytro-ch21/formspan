@@ -294,6 +294,30 @@ body {
   color: var(--c-text-dim);
 }
 
+/*
+  N561 — large display type wants NEGATIVE tracking: letters read too far apart
+  as they grow. Mobile already decided this (`constants/Typography.ts` steps
+  -0.1 → -0.2 → -0.3 from emphasis to display); web had one heading in the
+  app that got it (`tracking-tight`, dashboard/nutrition/layout.tsx).
+
+  Keyed on size here rather than added to 38 call sites. In `@layer base`, so
+  any `tracking-*` utility on a heading still wins — see the layering comment
+  on the form reset below for why an unlayered rule would not.
+*/
+@layer base {
+  h1,
+  .text-4xl,
+  .text-5xl {
+    letter-spacing: -0.02em;
+  }
+
+  h2,
+  .text-2xl,
+  .text-3xl {
+    letter-spacing: -0.01em;
+  }
+}
+
 /* The accent as a rule rather than a fill. Keeps its saturation in both
    themes because it sits on its own, not behind text. */
 .accent-rule {
