@@ -77437,6 +77437,102 @@ Both titles now name the current reader, `buildTrainBoard`, and the `PLAN_WINDOW
     - `trainScreen.test.tsx` describes the redirect;
     - two `youScreen.test.tsx` titles use the verb ("What you train").
 
+## 2026-09-13 — N579 (#1216): the six shared components the screen tickets left out move onto the type scale
+
+**What was left.** N561's six screen tickets (N572–N577) each converted one screen and the components only that screen imports. Components shared between screens were left out, because converting one touches every screen that renders it. This ticket converts those six:
+- `SessionCelebration` and `HRSessionReport`;
+- `SessionShare`, `Avatar`, `SwipeToDelete` and `HoldToConfirm`.
+
+### The baseline, re-measured at `7056dd29`
+
+The ticket's numbers were taken at `9b7e9aaf`. Its `fontSize:` counts still held (16, 14, 6, 1, 1, 1, with one size below 11). Four other figures had moved:
+
+- **`SessionShare` has one motion-keyword line, not none.** It is the word "transition" in a comment.
+- **`Avatar` has two, not none.** One is real motion, `transition={150}` on the photo, and one is a comment. This diff touches neither.
+- **`SessionShare` has a third importer:** `SessionCelebration`.
+- **`SwipeToDelete` has a fourth:** `components/food/MealCard.tsx`.
+
+| Measure (six files) | Before | After |
+|---|---|---|
+| `fontSize:` sites | 39 | 5 |
+| raw numeric `fontSize:` | 38 | 1 |
+| `fontSize` below 11 | 1 | 0 |
+| numeric `lineHeight:` | 6 | 0 |
+| `Typography` role spreads | 0 | 34 |
+| `Typography.<role>.fontSize` references | 0 | 3 |
+| on-scale spacing literals | 42 | 0 |
+| on-scale radius literals | 16 | 0 |
+
+### The rules, the same as N572–N577
+
+- **A role owns the size, leading and tracking.** Each entry keeps its rendered weight, restated whenever the role's weight differs. No weight changed on any entry, and the check script tests that.
+- **A literal needs a one-line reason above it.**
+- **11pt stays as `Typography.eyebrow.fontSize`**, again with a reason.
+- **On-scale spacing and radius values became tokens with the same value.**
+
+Where each component went:
+
+- **Button labels → `emphasis`:**
+  - Share and Done on the celebration;
+  - the share preview's Cancel and Share;
+  - `SessionShare`'s own button;
+  - `HoldToConfirm`'s label;
+  - `SwipeToDelete`'s Delete.
+
+  N577 made the same choice for the session screen's Finish button.
+- **Secondary lines → `meta` or `caption`:** the celebration subtitle, the HR report's sentences and figures, the share preview notes.
+- **The celebration's headline and stat figures → `title`.**
+- **Uppercase stat labels → `eyebrow`.**
+- **Three lowercase 11pt texts keep 11pt through `Typography.eyebrow.fontSize`, not the `eyebrow` role,** because its 1.2 letter-spacing would space out lowercase text:
+  - the celebration's record kind;
+  - the HR report's per-exercise reading count;
+  - the HR report's window note.
+- **Two literals stay, with reasons:**
+  - the celebration's 26pt tick glyph in its 56pt disc;
+  - `Avatar`'s initials, sized from the disc (`size * 0.4`), not from a role.
+
+### What changed visually
+
+**Size changed on 8 of 37 converted entries:**
+- four button labels, 16 → 15 (celebration Share and Done, preview Cancel and Share);
+- `HoldToConfirm`'s label, 16 → 15;
+- the celebration headline, 22 → 20;
+- the celebration's "felt" label, 10 → 11, which removes the only size below 11;
+- the streak line, 12.5 → 12.
+
+**Leading changed on 31 entries and letter-spacing on 21.** The role supplies both now. Three entries had set letter-spacing of their own, and the role replaced it:
+- the celebration badge, 0.6 → 0.2;
+- the celebration's uppercase stat label, 0.5 → 1.2;
+- the celebration's "felt" label, 0.6 → 1.2.
+
+### How the converter changed
+
+- **It reads every `StyleSheet.create` block.** `HRSessionReport` has two, and N577's converter only read the first.
+- **It refuses an entry name that appears in two blocks.**
+- **It wraps a reason comment, and splits any style entry still over 100 columns** after the spacing values become token names.
+- **Two edits were made by hand:**
+  - `SwipeToDelete`'s `deleteText` carries a comment inside the entry, which the converter refuses;
+  - `Avatar`'s size is set inline in JSX, not in a stylesheet.
+
+### Checks
+
+- **The type-invariant check found no failures.** Every reason comment sits directly above its entry, every role entry spreads a role, and no weight changed.
+- **The lint guard now covers all six files** (`N508_CONVERTED_FILES`):
+  - A probe literal planted in `SessionCelebration`, `HRSessionReport`, `SwipeToDelete` and `Avatar` raised exactly one guard error each.
+  - All four files were restored and re-checked clean.
+  - `components/TrackerCard.tsx`, which is not guarded and contains `fontSize: 12`, raised none.
+- **No motion changed.** None of the diff's 239 changed lines matches a motion keyword. The same scan finds 15 such lines in `SwipeToDelete.tsx` itself, so it can see them.
+- **Tests:** the 15 jest suites that render or exercise these components pass, 230 tests. `typecheck:mobile` passes. `lint:mobile` shows 0 errors and the same 49 warnings as before.
+
+### Not done
+
+**Not seen on a device.** Both of the ticket's device criteria stay open: the default text size, and the largest Dynamic Type setting. The routes that render a converted component:
+
+- the strength, BJJ and running session screens (`app/session/[id].tsx`, `app/bjj/session/[id].tsx`, `app/running/[id].tsx`), including the end-of-session celebration and the share preview;
+- You, Friends, Social and Edit profile, for `Avatar`;
+- a recipe, Saved foods, and wherever `MealCard` renders, for `SwipeToDelete`;
+- a workout, the curriculum editor, goal history and archived trackers, for `HoldToConfirm`.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

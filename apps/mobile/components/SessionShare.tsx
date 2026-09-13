@@ -15,6 +15,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { SessionCard } from '@/components/SessionCard';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { prBadgeFor, statsFor, type SessionSummary } from '@/lib/celebration';
 import { cardFromSummary, type CardData } from '@/lib/sessionCard';
@@ -577,13 +579,13 @@ const styles = StyleSheet.create({
   button: {
     alignSelf: 'stretch',
     minHeight: 50,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.line,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonText: { fontSize: 15, fontWeight: '700', color: vola.text },
+  buttonText: { ...Typography.emphasis, color: vola.text, fontWeight: '700' },
   // Far enough left that no phone shows it, still laid out so it can be
   // captured. See the comment on the host.
   offscreen: { position: 'absolute', left: -10000, top: 0 },
@@ -593,17 +595,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: PREVIEW_INSET,
-    gap: 14,
+    gap: Spacing.cardPadding,
   },
-  previewNote: {
-    fontSize: 13,
-    color: vola.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  previewError: { fontSize: 13, color: vola.danger, textAlign: 'center' },
+  previewNote: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
+  previewError: { ...Typography.meta, color: vola.danger, textAlign: 'center' },
   photoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18 },
-  photoAction: { fontSize: 13, fontWeight: '700' },
+  photoAction: { ...Typography.meta, fontWeight: '700' },
   photoClear: { color: vola.textMuted },
   // Same shape as the celebration's action row, and for the same reason: the
   // two buttons have to line up, so the row owns the spacing and `stretch`
@@ -612,26 +609,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignSelf: 'stretch',
     alignItems: 'stretch',
-    gap: 10,
-    marginTop: 4,
+    gap: Spacing.smPlus,
+    marginTop: Spacing.xs,
   },
   previewCancel: {
     flex: 1,
     minHeight: 50,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.line,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  previewCancelText: { fontSize: 16, fontWeight: '700', color: vola.text },
+  previewCancelText: { ...Typography.emphasis, color: vola.text, fontWeight: '700' },
   previewCancelBusy: { opacity: 0.4 },
   previewShare: {
     flex: 1,
     minHeight: 50,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  previewShareText: { fontSize: 16, fontWeight: '800' },
+  previewShareText: { ...Typography.emphasis, fontWeight: '800' },
 });

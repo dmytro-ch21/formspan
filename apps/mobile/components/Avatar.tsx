@@ -79,6 +79,8 @@ export function Avatar({
       testID="avatar-monogram"
     >
       <Text
+        // Sized from the disc, not a Typography role: the initials are a glyph
+        // that has to fit inside `size`.
         style={[styles.initials, { color: ink, fontSize: size * 0.4 }]}
         // The disc is a FIXED size and RN scales text by default, so at
         // accessibility sizes the initials outgrow it and spill — views do

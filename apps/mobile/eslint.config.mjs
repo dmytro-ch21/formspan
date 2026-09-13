@@ -128,6 +128,14 @@ const N508_CONVERTED_FILES = [
   // N577 (#1192) — Session; the screen itself is N508's, above.
   "components/Timer.tsx",
   "components/ui/OptionSelect.tsx",
+  // N579 (#1216) — the shared components the six screen tickets left out,
+  // because each renders on more than one screen.
+  "components/Avatar.tsx",
+  "components/HoldToConfirm.tsx",
+  "components/HRSessionReport.tsx",
+  "components/SessionCelebration.tsx",
+  "components/SessionShare.tsx",
+  "components/SwipeToDelete.tsx",
 ];
 
 export default defineConfig([
