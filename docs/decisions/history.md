@@ -76178,6 +76178,7 @@ The athlete had set a target, and the chart acted as if they had not. N429 (#690
 
 - **Food switched off.** Goals returns early when the food module is off, so the weight card does not render at all, and nothing here changes that.
 - **No reviewer-owned motion:** the diff adds no animation.
+- **A known test gap, named by `ac-verifier`.** No test drives Goals' own `plan={planOutcomeOf(data)}` into the card, so a Goals-only miswiring such as `plan={null}` would pass. It stays open: it is one typed expression, and tsc rejects the old `b?.projection` shape. `goalsScreen.test.tsx` runs the card against the real network module, so mocking the weight-trend fetches there would change the card's state in every other Goals test.
 
 ## Open items / known gaps as of this entry
 

@@ -53,7 +53,7 @@ export function useWeightTrend(
   /**
    * What the plan derivation answered, from the caller's own fetch; see
    * {@link planOutcomeOf}. A PARAMETER rather
-   * than a fetch: Goals already holds `basis.projection`, and fetching it here
+   * than a fetch: Goals already holds the derivation response, and fetching it here
    * made two components on one screen request the same derivation on every
    * focus — six assertions in `goalsScreen.test.tsx` caught it.
    */
