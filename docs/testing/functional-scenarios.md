@@ -24425,3 +24425,37 @@ This is a visual change only: sizes, leading and tracking. Nothing about what Pl
 - Plan at the default text size: nothing clipped, truncated or overlapping.
   - Check the week planner with several planned entries, the month grid, the curricula strip, the saved-workout tiles and the "New workout" sheet.
 - The same screen at the largest Dynamic Type size.
+
+## N576 — the You screen's text on the type scale (`apps/mobile/app/(tabs)/you.tsx`, `apps/mobile/components/{BjjRankHeader,RoadmapSummary}.tsx`, #1191)
+
+This is a visual change only: sizes, leading and tracking. Nothing about what You shows, or when, has changed. Every spacing and radius change in these files is value-identical, so none of them moves anything.
+
+### Happy path
+
+- **Section labels:** 11pt, uppercase and tracked like the app's other labels, at the same regular weight as before. They were 12pt.
+- **Rank header:** the small labels over the rank facts are 11pt, where they were 9pt. The belt's stripe marks read at 15pt, where they were 16pt.
+- **Roadmap summary:** the mastered count keeps its size and weight, and the rest of its card reads on the scale.
+- **Weights:** no text got bolder or lighter.
+- **Unchanged:** the athlete's name, the belt name, the avatar, and the count badge on a navigation pill.
+
+### Edge cases & errors
+
+- **A rank fact whose value wraps to two lines** still sits under its label without overlapping the next fact.
+- **A long curriculum name** in the roadmap links stays on one line with an ellipsis.
+- **The rank fails to load:** the rank header's "Couldn't load your rank just now." line reads correctly at the new size.
+- **An athlete with no roadmaps** sees no mastered-count card, as before.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - no `fontSize` below 11 in scope, and only the recorded exceptions remain;
+  - the ESLint guard refuses a raw on-scale size, spacing or radius in all three files;
+  - the You suites still render.
+  The first two are measured in the history entry. The guard was mutation-tested.
+- **NOT reachable:** clipping, truncation and overlap at a given text size. Those need a device.
+
+### Needs a device
+
+- You at the default text size: nothing clipped, truncated or overlapping.
+  - Check the masthead and its friends chip, the navigation pills with a count badge, the rank header with its facts, the roadmap summary and its links, and each section label.
+- The same screen at the largest Dynamic Type size.

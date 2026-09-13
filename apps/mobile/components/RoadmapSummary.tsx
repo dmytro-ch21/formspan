@@ -5,6 +5,8 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 import { SectionHeader } from '@/components/ui/Section';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { fetchFocus, type Focus } from '@/lib/bjjFocus';
 import { listWorkingCurricula, type Curriculum } from '@/lib/curriculum';
@@ -180,43 +182,43 @@ export function RoadmapSummary() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 8 },
+  wrap: { gap: Spacing.sm },
   card: {
     backgroundColor: vola.surface,
     borderColor: vola.line,
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 6,
+    borderRadius: Radius.card,
+    padding: Spacing.cardPadding,
+    gap: Spacing.xsPlus,
   },
-  cardTitle: { color: vola.text, fontSize: 14, fontWeight: '700' },
-  big: { fontSize: 28, fontWeight: '800' },
-  rest: { color: vola.textMuted, fontSize: 14 },
-  note: { color: vola.textMuted, fontSize: 12, lineHeight: 17 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  cardTitle: { ...Typography.body, color: vola.text, fontWeight: '700' },
+  big: { ...Typography.display },
+  rest: { ...Typography.body, color: vola.textMuted },
+  note: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xsPlus },
   chip: {
     borderColor: vola.line,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.smPlus,
     paddingVertical: 5,
   },
-  chipText: { color: vola.text, fontSize: 13, fontWeight: '600' },
+  chipText: { ...Typography.meta, color: vola.text, fontWeight: '600' },
   link: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: Spacing.smPlus,
     backgroundColor: vola.surface,
     borderColor: vola.line,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.md,
   },
   pressed: { opacity: PRESS_OPACITY },
-  linkMain: { flex: 1, gap: 2 },
-  linkText: { color: vola.text, fontSize: 14, fontWeight: '600' },
-  linkSub: { color: vola.textMuted, fontSize: 12 },
-  linkMeta: { color: vola.textMuted, fontSize: 13, fontVariant: ['tabular-nums'] },
+  linkMain: { flex: 1, gap: Spacing.xxs },
+  linkText: { ...Typography.body, color: vola.text, fontWeight: '600' },
+  linkSub: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
+  linkMeta: { ...Typography.meta, color: vola.textMuted, fontVariant: ['tabular-nums'] },
 });

@@ -10,6 +10,8 @@ import { BeltPhoto } from '@/components/BeltPhoto';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { activeBeltAccent, vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import {
   awardingPromotion,
   describeTimeAtBelt,
@@ -301,13 +303,13 @@ const ARC_BOX = 300;
 const styles = StyleSheet.create({
   placeholder: {
     backgroundColor: vola.surface,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: vola.line,
-    padding: 16,
+    padding: Spacing.lg,
     alignItems: 'center',
   },
-  muted: { color: vola.textMuted, fontSize: 13, textAlign: 'center' },
+  muted: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
 
   /**
    * The belt-themed "no rank yet" card (N509) — a sibling of `card` below
@@ -320,20 +322,20 @@ const styles = StyleSheet.create({
   emptyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: Spacing.lg,
     backgroundColor: 'rgba(23,30,43,0.72)',
     borderRadius: 22,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.07)',
     paddingVertical: 18,
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.gutter,
     overflow: 'hidden',
   },
   // Dimmed, not full brightness — this belt is a picture of the first rung,
   // not a photograph of THIS athlete's rank, and the reduced opacity is what
   // keeps that distinction visible at a glance.
   emptyBeltWrap: { opacity: 0.55 },
-  emptyText: { flex: 1, gap: 2 },
+  emptyText: { flex: 1, gap: Spacing.xxs },
 
   card: {
     // Translucent over the app's ground rather than a solid panel: the wash and
@@ -342,8 +344,8 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.07)',
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingTop: Spacing.gutter,
+    paddingBottom: Spacing.lg,
     paddingLeft: 22,
     paddingRight: 18,
     gap: 18,
@@ -370,14 +372,15 @@ const styles = StyleSheet.create({
   belt: { position: 'absolute', right: -14, top: 2 },
 
   head: { alignSelf: 'stretch', gap: 3 },
-  eyebrow: { fontSize: 11, fontWeight: '800', letterSpacing: 1.3 },
+  eyebrow: { ...Typography.eyebrow, fontWeight: '800' },
+  // 30, not `display`: the belt name is this header's one hero line.
   name: { fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
-  marks: { fontSize: 16, fontWeight: '600' },
+  marks: { ...Typography.emphasis },
   go: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    marginTop: 14,
+    marginTop: Spacing.cardPadding,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.06)',
@@ -393,9 +396,9 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.09)',
-    paddingTop: 14,
+    paddingTop: Spacing.cardPadding,
   },
-  fact: { flex: 1, gap: 3, paddingRight: 10 },
-  factLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.9, color: vola.textMuted },
-  factValue: { fontSize: 13, fontWeight: '700', lineHeight: 17 },
+  fact: { flex: 1, gap: 3, paddingRight: Spacing.smPlus },
+  factLabel: { ...Typography.eyebrow, color: vola.textMuted },
+  factValue: { ...Typography.meta, fontWeight: '700' },
 });
