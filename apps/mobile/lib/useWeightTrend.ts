@@ -4,10 +4,11 @@ import { useCallback, useMemo, useState } from 'react';
 import { MIN_TREND_READINGS, shiftDate, TREND_DAYS, trendWeight, type Measured } from './anthropometry';
 import { listCheckins, listPhases, type Checkin, type Phase } from './body';
 import { dayString } from './calendar';
-import type { Projection as PlanProjectionWire } from './nutritionApi';
+import type { Suggested } from './nutritionApi';
 import {
   buildTrend,
-  fromPlanProjection,
+  fromPlanOutcome,
+  type PlanOutcome,
   type Projection,
   type Reading,
   type TrendRangeKey,
@@ -50,12 +51,13 @@ export function useWeightTrend(
   range: TrendRangeKey,
   windowDays: number,
   /**
-   * The plan projection, from the caller's own derivation. A PARAMETER rather
+   * What the plan derivation answered, from the caller's own fetch; see
+   * {@link planOutcomeOf}. A PARAMETER rather
    * than a fetch: Goals already holds `basis.projection`, and fetching it here
    * made two components on one screen request the same derivation on every
    * focus — six assertions in `goalsScreen.test.tsx` caught it.
    */
-  plan: PlanProjectionWire | null,
+  plan: PlanOutcome,
 ): WeightTrend {
   const [checkins, setCheckins] = useState<Checkin[] | null>(null);
   const [phase, setPhase] = useState<Phase | null>(null);
@@ -132,9 +134,13 @@ export function useWeightTrend(
     [readings, today, range, measured, phase],
   );
 
+  // F63: the phase's target is read only when no target could be derived; see
+  // `fromPlanOutcome`. `phase` is this hook's own fetch, already used for
+  // `planFrom`, so this adds no request.
+  const phaseTarget = phase?.target_weight_kg ?? null;
   const projection = useMemo(
-    () => fromPlanProjection(plan, series.readings[series.readings.length - 1] ?? null),
-    [plan, series.readings],
+    () => fromPlanOutcome(plan, phaseTarget, series.readings[series.readings.length - 1] ?? null),
+    [plan, phaseTarget, series.readings],
   );
 
   return {
@@ -144,4 +150,18 @@ export function useWeightTrend(
     today,
     checkins: checkins ?? [],
   };
+}
+
+/**
+ * The derivation response, reduced to what the weight surfaces need (F63).
+ *
+ * One function for both callers, so Goals and the full trend screen cannot
+ * disagree about which absence a null projection is. `suggestion: null` is the
+ * server's documented answer for an incomplete profile (a 200 naming the
+ * missing fields), not a failure; a failed request is the caller's `null`.
+ */
+export function planOutcomeOf(d: Pick<Suggested, 'suggestion'> | null): PlanOutcome {
+  if (d == null) return null;
+  if (d.suggestion == null) return { kind: 'incomplete' };
+  return { kind: 'derived', projection: d.suggestion.basis?.projection ?? null };
 }

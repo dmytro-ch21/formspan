@@ -76110,6 +76110,75 @@ The ticket's figures (12 of 179 files, 1,247 sites, 83 `lineHeight`) were counte
 
 **Not verified.** Nothing here was looked at on a device. The day initials are 11pt at `textDim` now; whether that reads in gym lighting, and whether the week strip and the mini cards still fit at the largest Dynamic Type size, are the two device criteria on #1050.
 
+## 2026-09-13 — F63 (#1168): the weight goal line keeps the phase's target when the nutrition target can't be derived
+
+**What was wrong.** Take a live phase with a target weight, and a nutrition target that cannot be derived because of a profile gap, such as no height.
+- `suggestedTarget` returns `suggestion: null`, so Goals passed a null projection.
+- `fromPlanProjection(null)` answered `no-goal`.
+- Both the Goals weight card and `/goals/trend` then drew **no goal line**.
+
+The athlete had set a target, and the chart acted as if they had not. N429 (#690) and N433 (#714) removed the direct read of the phase target so a stale target could not race a fresh projection. That removal also covered this case, where there is no projection to race.
+
+### The decision
+
+**Show the phase's target, from one derivation both surfaces share.** A null projection was two different absences, and the derivation response already tells them apart:
+
+| what the derivation answered | goal line | why |
+|---|---|---|
+| nothing yet, or the request failed | none | a projection with a different number may still arrive, and a phase target drawn meanwhile is N433's stale marker again |
+| a suggestion whose `basis.projection` is null | none | the server judged there is no goal (no target weight, or no live phase), and its judgement wins over the phase fetch, as N429 and N433 decided |
+| `suggestion: null`, an incomplete profile | the live phase's target | the server made no judgement about the goal and holds no goal figure, so nothing can disagree with the phase's target |
+
+**The rejected option** was no line plus a sentence saying why. It is honest, but it still hides a number the athlete chose, on the one chart whose job is to show progress toward it.
+
+### What changed
+
+- **`lib/trendSeries.ts`:** `PlanOutcome` (`null`, `derived` or `incomplete`) and `fromPlanOutcome(outcome, phaseTarget, latest)`, the one derivation. `phaseTarget` is read only for `incomplete`. A new refusal reason, `no-plan`, carries that goal.
+- **`lib/useWeightTrend.ts`:**
+  - takes the outcome rather than the projection;
+  - passes in the target from its own `listPhases` result, a fetch it already made for `planFrom`;
+  - exports `planOutcomeOf(response)`, which both callers use to read the derivation response.
+- **`components/WeightTrendCard.tsx`** takes `plan` instead of `projection`, and **`app/goals.tsx`** passes `planOutcomeOf(data)`.
+- **`app/goals/trend.tsx`** stores the outcome. Its projection sentence gains a `no-plan` case: *"Your goal is 75 kg. A date needs your nutrition target first, and your profile doesn't have enough for one yet. Goals shows what to add."* It names no fields, because Goals, one screen back, already lists them.
+
+**How it is reachable on a phone**: this is the phone. It is the weight card on Goals and the full trend screen behind it.
+
+### Tests
+
+- **`lib/__tests__/trendSeries.test.ts`:** the five outcome cases of `fromPlanOutcome`.
+- **`lib/__tests__/weightTrendGoalFallback.test.tsx`:** the REAL hook, with the network mocked.
+  - An incomplete profile draws the phase target.
+  - An incomplete profile with no target draws nothing, and so do a derivation with a null projection and an unanswered one, even beside a phase target.
+  - A derived projection's goal beats a stale phase target.
+  - Also covered: how `planOutcomeOf` reads the response.
+- **The profile-gap case on both surfaces,** with the real hook: `components/__tests__/weightTrendCardProfileGap.test.tsx` for the card and `__tests__/app/trendGoalProfileGap.test.tsx` for the screen. The phase target is drawn on the chart, and a null projection or an unanswered derivation draws none. The screen test also asserts the sentence.
+- **`components/__tests__/weightTrendCard.test.tsx`:** the prop renamed.
+
+**A test-only trap, found on the way.** The new screen test first hung until its 15-second timeout.
+- Its `useAuthToken` mock returned a new function on every render, which re-ran the screen's focus effect on every render. Now that the effect stores a fresh outcome object, the screen never settled.
+- The real hook returns a stable `useCallback`, so the app cannot loop this way. The test mock now returns a stable function too.
+- `trendGoalLine.test.tsx` and `trendGoalFigure.test.tsx` used the same per-render mock with `{ suggestion: null }`, so after this change they re-ran that effect in the background for as long as they ran. They passed only because their assertions finished first, and they get the stable mock as well.
+
+**Mutation checks.** The baseline was green. Each mutation was restored byte-identical and re-run green.
+
+| # | mutation | caught by |
+|---|---|---|
+| M1 | an incomplete profile draws nothing | 4 tests: the unit, hook, card and screen profile-gap cases |
+| M2 | a derived suggestion with a null projection falls back to the phase target | 4: the unit, hook, card and screen "found no goal" cases |
+| M3 | a derivation that has not answered falls back to the phase target | 3: the unit, hook and card "has not answered" cases |
+| M4 | the phase target beats a derived projection | 9, including the hook's "the projection's goal, not a stale phase target" |
+| M5 | `planOutcomeOf` reads a null suggestion as "derived, no goal" | 2: its own test and the screen's profile-gap case |
+| M6 | the hook passes no phase target to `fromPlanOutcome` | 3: the hook, card and screen profile-gap cases. **The unit tests stayed green**, which is why the real-hook tests exist |
+| M7 | the `no-plan` sentence falls through to the default copy | 1: the screen test's sentence assertion |
+| M8 | the screen stores an outcome only when a projection exists | 1: the screen's profile-gap case |
+
+**The first driver run reported all eight as NOT CAUGHT, and that was the driver.** It parsed only jest's `✕` lines, which jest does not print when running several files without `--verbose`, while its own `Tests: 4 failed` counts showed each mutation red. The re-run parses the `●` failure headers too, asserts that a non-zero failure count comes with names, and names the tests above.
+
+### Also
+
+- **Food switched off.** Goals returns early when the food module is off, so the weight card does not render at all, and nothing here changes that.
+- **No reviewer-owned motion:** the diff adds no animation.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

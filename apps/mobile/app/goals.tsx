@@ -127,6 +127,7 @@ import { formatWeight, formatWeightRate, type UnitSystem } from '@/lib/units';
 import { useUnits } from '@/lib/useUnits';
 import { draftFrom, refusalOrWeather, type ManualTargetInput } from '@/lib/manualTarget';
 import { profileGap, todayString, type Target } from '@/lib/nutrition';
+import { planOutcomeOf } from '@/lib/useWeightTrend';
 import {
   fetchAdjustment,
   listTargets,
@@ -1400,7 +1401,7 @@ export default function TargetScreen() {
           onToggle={() => toggleSection('weight')}
           testID="section-weight"
         >
-          <WeightTrendCard projection={b?.projection ?? null} />
+          <WeightTrendCard plan={planOutcomeOf(data)} />
         </CollapsibleSection>
       </KeyboardAwareScrollView>
     </View>

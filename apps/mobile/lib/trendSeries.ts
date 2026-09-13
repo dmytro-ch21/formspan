@@ -415,8 +415,12 @@ export type Projection =
        * - `moving-away` — the trend runs away from the goal. A date computed
        *   here would be in the PAST, which would render as a goal already met.
        * - `reached` — already at or past it.
+       * - `no-plan` — a goal exists but there is no plan to project it from: the
+       *   nutrition target could not be derived (an incomplete profile), so the
+       *   server made no judgement about the goal at all (F63). Carries `goal`
+       *   from the live phase's own target; see {@link fromPlanOutcome}.
        */
-      reason: 'no-goal' | 'no-trend' | 'stalled' | 'moving-away' | 'reached';
+      reason: 'no-goal' | 'no-trend' | 'stalled' | 'moving-away' | 'reached' | 'no-plan';
       /**
        * The refusing party's OWN WORDS for this refusal, when it had any.
        *
@@ -445,7 +449,10 @@ export type Projection =
        * The goal this refusal is ABOUT, carried from the same payload as the
        * reason (N103). Set only by {@link fromPlanProjection}, from
        * `target_weight_kg` — the same response `reason`/`serverReason` came
-       * from, on the same request.
+       * from, on the same request. The one exception is `no-plan` (F63): there
+       * is no projection payload to carry a goal, so {@link fromPlanOutcome}
+       * takes the live phase's target, which is safe only because no other goal
+       * figure exists in that case.
        *
        * **This exists because a caller had a second, INDEPENDENT source for the
        * goal number and used that one instead.** `app/goals/trend.tsx` paired
@@ -635,4 +642,47 @@ export function fromPlanProjection(
       basis: 'smoothed',
     },
   };
+}
+
+/**
+ * What the plan derivation answered, which is more than its projection (F63, #1168).
+ *
+ * {@link fromPlanProjection} takes the projection alone, and a null there meant
+ * two different things. Either the server derived a target and judged there is
+ * no goal (no target weight, or no live phase), or it could not derive a target
+ * at all because the profile is incomplete. The first is a judgement about the
+ * goal; the second is silence about it. Drawing no goal line for both hid a
+ * target the athlete had set, for a reason that has nothing to do with the goal.
+ *
+ * - `null`: the derivation has not answered, or could not be read. No goal
+ *   line. A projection carrying a different number may still arrive, and a
+ *   phase target drawn in the meantime is N433's stale marker again.
+ * - `derived`: the derivation ran. Its projection is the only goal source,
+ *   including when it is null: the server's "no goal" wins over the phase
+ *   fetch, as N429 and N433 decided.
+ * - `incomplete`: no target could be derived. The server holds no goal figure
+ *   that could disagree, so the live phase's target is the one goal there is.
+ */
+export type PlanOutcome =
+  | { kind: 'derived'; projection: PlanProjection | null }
+  | { kind: 'incomplete' }
+  | null;
+
+/**
+ * The one derivation both weight surfaces take their goal from (F63).
+ *
+ * `phaseTarget` is read ONLY for `incomplete`. Anywhere else a second goal
+ * source is the race N103, N429 and N433 each closed once.
+ */
+export function fromPlanOutcome(
+  outcome: PlanOutcome,
+  phaseTarget: number | null | undefined,
+  latest: { on: string; value: number } | null,
+): Projection {
+  if (outcome == null) return { kind: 'none', reason: 'no-goal' };
+  if (outcome.kind === 'derived') return fromPlanProjection(outcome.projection, latest);
+  if (phaseTarget == null || !Number.isFinite(phaseTarget) || phaseTarget <= 0) {
+    return { kind: 'none', reason: 'no-goal' };
+  }
+  return { kind: 'none', reason: 'no-plan', goal: phaseTarget };
 }

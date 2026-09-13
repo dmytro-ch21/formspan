@@ -31,7 +31,10 @@ jest.mock('expo-router', () => ({
   useFocusEffect: (cb: () => void | (() => void)) => mockUseEffect(() => cb(), [cb]),
 }));
 
-jest.mock('@/lib/useAuthToken', () => ({ useAuthToken: () => async () => 'token' }));
+// Stable, as the real hook's `useCallback` is: a fresh function per render
+// re-runs the screen's focus effect on every render (F63).
+const mockGetToken = async () => 'token';
+jest.mock('@/lib/useAuthToken', () => ({ useAuthToken: () => mockGetToken }));
 jest.mock('@/lib/useUnits', () => ({ useUnits: () => ({ units: 'metric' }) }));
 jest.mock('@/lib/AccentProvider', () => ({ useAccent: () => ({ accent: '#8BC34A', on: '#000' }) }));
 
