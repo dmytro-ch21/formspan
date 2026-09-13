@@ -130,3 +130,58 @@ test('a tap that is gone says so rather than showing an empty field', async () =
   await waitFor(() => expect(screen.getByTestId('tracker-entry-missing')).toBeTruthy());
   expect(screen.queryByTestId('tracker-entry-amount')).toBeNull();
 });
+
+// N578: the caffeine banner opens this screen too, for three kinds of dose.
+describe('a caffeine dose', () => {
+  const caffeine: Tracker = {
+    id: 'caf', preset: 'caffeine', name: 'Caffeine', icon: '⚡', color_key: 'amber', unit: 'mg',
+    increment: 80, target: 400, render_style: 'glyphs', sort_order: 30, count_noun: 'cup',
+    provisioned: false, cutoff_minutes: 960,
+  };
+  const { pairedFoodCaffeineEntryId } = jest.requireActual('@/lib/foodCaffeine');
+
+  beforeEach(() => {
+    mockLocalTrackers.mockResolvedValue({ state: 'ready', trackers: [water, coffee, caffeine] });
+  });
+
+  test('a manual dose corrects through the plain edit', async () => {
+    mockId = 'm1';
+    mockLocalEntry.mockResolvedValue(entry('m1', 'caf', 80));
+    await render(<TrackerEntryScreen />);
+    expect((await field()).props.value).toBe('80');
+    expect(screen.queryByTestId('tracker-entry-coffee-caffeine-hint')).toBeNull();
+
+    await fireEvent.changeText(screen.getByTestId('tracker-entry-amount'), '150');
+    await fireEvent.press(screen.getByTestId('tracker-entry-save'));
+
+    await waitFor(() => expect(mockEditTap).toHaveBeenCalledWith('u1', 'm1', 150));
+    expect(mockEditCoffeeTap).not.toHaveBeenCalled();
+  });
+
+  test('a coffee-caused dose corrects directly, and says the cups are untouched', async () => {
+    mockId = 'c1-caf';
+    mockLocalEntry.mockResolvedValue(entry('c1-caf', 'caf', 95));
+    await render(<TrackerEntryScreen />);
+    await field();
+    expect(screen.getByTestId('tracker-entry-coffee-caffeine-hint')).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByTestId('tracker-entry-amount'), '150');
+    await fireEvent.press(screen.getByTestId('tracker-entry-save'));
+
+    await waitFor(() => expect(mockEditTap).toHaveBeenCalledWith('u1', 'c1-caf', 150));
+    expect(mockEditCoffeeTap).not.toHaveBeenCalled();
+  });
+
+  test('a food-caused dose offers no field, says where to change it, and writes nothing', async () => {
+    const id = pairedFoodCaffeineEntryId('food-1', 'abcdef12');
+    mockId = id;
+    mockLocalEntry.mockResolvedValue(entry(id, 'caf', 95));
+    await render(<TrackerEntryScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('tracker-entry-food-caffeine')).toBeTruthy());
+    expect(screen.getByTestId('tracker-entry-food-caffeine').props.children).toContain('in Food');
+    expect(screen.queryByTestId('tracker-entry-amount')).toBeNull();
+    expect(screen.queryByTestId('tracker-entry-save')).toBeNull();
+    expect(mockEditTap).not.toHaveBeenCalled();
+  });
+});

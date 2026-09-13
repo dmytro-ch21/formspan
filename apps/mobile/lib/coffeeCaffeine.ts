@@ -103,5 +103,20 @@ export const COFFEE_ADD_CHOICES: { key: CoffeeDrinkKey; label: string; accessibi
  * `randomUUID()`-length coffee id.
  */
 export function pairedCaffeineEntryId(coffeeEntryId: string): string {
-  return `${coffeeEntryId}-caf`;
+  return `${coffeeEntryId}${COFFEE_CAFFEINE_ID_SUFFIX}`;
+}
+
+const COFFEE_CAFFEINE_ID_SUFFIX = '-caf';
+
+/**
+ * Whether a caffeine entry was caused by a coffee tap — the inverse of
+ * `pairedCaffeineEntryId`. A food-caused entry ends in its random tail, never in
+ * this suffix, so the two kinds cannot be mistaken for each other.
+ *
+ * N578 reads it to tell the athlete what a direct correction of such an entry
+ * does: it changes the caffeine and not the cups. The pairing survives the
+ * correction because `editTap` keeps the id.
+ */
+export function isCoffeeCaffeineEntryId(entryId: string): boolean {
+  return entryId.endsWith(COFFEE_CAFFEINE_ID_SUFFIX);
 }

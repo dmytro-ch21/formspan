@@ -1,5 +1,6 @@
 import { ApiError, OfflineError } from '../apiError';
 import { pairedCaffeineEntryId } from '../coffeeCaffeine';
+import { FOOD_CAFFEINE_REDIRECT_MESSAGE, isFoodCaffeineEntryId } from '../foodCaffeine';
 import type { Tracker } from '../trackerModel';
 import {
   byTracker,
@@ -15,6 +16,7 @@ import {
   removeCoffeeTap,
   removeLastTap,
   removeTap,
+  syncFoodCaffeineEntry,
   syncTrackers,
   updateTrackerLocally,
 } from '../trackers';
@@ -757,6 +759,52 @@ describe('correcting a tap', () => {
     await editCoffeeTap(USER, coffeeId, 2);
     expect(await amountOf(coffeeId)).toBe(2);
     expect(await amountOf(pairedCaffeineEntryId(coffeeId))).toBeUndefined();
+  });
+
+  // N578: the caffeine banner reaches `editTap` too, for three kinds of dose.
+  it('corrects a manual caffeine dose like any tap, and owes the server a PATCH', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    const id = await logTap(USER, caffeine, TODAY);
+    await syncTrackers(USER, token);
+
+    await editTap(USER, id, 150);
+    mockApi.mockClear();
+    await syncTrackers(USER, token);
+    const sent = calls().filter((c) => c.path === `/trackers/t_caffeine/entries/${id}`);
+    expect(sent).toEqual([{ path: `/trackers/t_caffeine/entries/${id}`, method: 'PATCH', body: JSON.stringify({ amount: 150 }) }]);
+  });
+
+  it('corrects a coffee-caused caffeine entry directly, and the pairing survives', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 95, TODAY);
+    const caffeineId = pairedCaffeineEntryId(coffeeId);
+
+    // A strong cold brew, tapped as a drip coffee.
+    await editTap(USER, caffeineId, 150);
+    expect(await amountOf(caffeineId)).toBe(150);
+    expect(await amountOf(coffeeId)).toBe(1);
+
+    // Correcting the cups afterwards scales from the corrected figure.
+    await editCoffeeTap(USER, coffeeId, 2);
+    expect(await amountOf(caffeineId)).toBe(300);
+
+    // And undoing the tap still takes both, because neither id moved.
+    await removeCoffeeTap(USER, coffeeId);
+    expect((await localEntries(USER, TODAY)).map((e) => e.id)).toEqual([]);
+  });
+
+  it('refuses a caffeine entry a logged food caused, because the food re-derives it', async () => {
+    await cacheTrackers(USER, [caffeineWire()]);
+    await syncFoodCaffeineEntry(USER, 'food-1', caffeine, 95, TODAY);
+    const [fromFood] = await localEntries(USER, TODAY);
+    // The apparatus: the row under test really is a food-caused one.
+    expect(isFoodCaffeineEntryId(fromFood.id)).toBe(true);
+    await syncTrackers(USER, token);
+    expect(await row(fromFood.id)).toMatchObject({ dirty: 0 });
+
+    await expect(editTap(USER, fromFood.id, 150)).rejects.toThrow(FOOD_CAFFEINE_REDIRECT_MESSAGE);
+    expect(await amountOf(fromFood.id)).toBe(95);
+    expect(await row(fromFood.id)).toMatchObject({ dirty: 0 });
   });
 });
 

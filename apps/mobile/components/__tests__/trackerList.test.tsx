@@ -270,3 +270,50 @@ it('opens the correction for the tap that was long-pressed', async () => {
   expect(openEntry).toHaveBeenCalledWith('w-1');
 });
 
+// N578: the two surfaces that draw no glyph reach the same correction.
+describe('N578: a tap with no glyph to long-press', () => {
+  it('opens the correction for a caffeine dose from its banner row', async () => {
+    const caffeine = tracker('caf-1', { preset: 'caffeine', name: 'Caffeine', unit: 'mg', target: 400 });
+    const openEntry = jest.fn();
+    await render(<TrackerList day={{ ...day([caffeine], { 'caf-1': 2 }), openEntry }} {...props} />);
+
+    await fireEvent.press(screen.getByTestId('caffeine-entry-edit-caf-1-1'));
+    expect(openEntry).toHaveBeenCalledWith('caf-1-1');
+  });
+
+  it('opens the correction for a tap on a bar-style card, and removes through removeEntry', async () => {
+    // Thirteen of three: past the glyph cap, so this card is a bar.
+    const w = tracker('w', { target: 3, render_style: 'glyphs' });
+    const openEntry = jest.fn();
+    const removeEntry = jest.fn(async () => {});
+    const removeCoffeeTap = jest.fn(async () => {});
+    await render(
+      <TrackerList day={{ ...day([w], { w: 13 }), openEntry, removeEntry, removeCoffeeTap }} {...props} />,
+    );
+    expect(screen.getByTestId('tracker-bar-w')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('tracker-taps-toggle-w'));
+    await fireEvent.press(screen.getByTestId('tracker-tap-edit-w-12'));
+    expect(openEntry).toHaveBeenCalledWith('w-12');
+
+    await fireEvent.press(screen.getByTestId('tracker-tap-remove-w-5'));
+    expect(removeEntry).toHaveBeenCalledWith('w-5', '2026-08-20');
+    expect(removeCoffeeTap).not.toHaveBeenCalled();
+  });
+
+  it('removes a bar-style COFFEE tap through removeCoffeeTap, so its caffeine goes too', async () => {
+    const coffee = tracker('coffee-1', { preset: 'coffee', name: 'Coffee', target: null, render_style: 'bar' });
+    const removeEntry = jest.fn(async () => {});
+    const removeCoffeeTap = jest.fn(async () => {});
+    await render(
+      <TrackerList day={{ ...day([coffee], { 'coffee-1': 2 }), removeEntry, removeCoffeeTap }} {...props} />,
+    );
+    expect(screen.getByTestId('tracker-bar-coffee-1')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('tracker-taps-toggle-coffee-1'));
+    await fireEvent.press(screen.getByTestId('tracker-tap-remove-coffee-1-0'));
+    expect(removeCoffeeTap).toHaveBeenCalledWith('coffee-1-0', '2026-08-20');
+    expect(removeEntry).not.toHaveBeenCalled();
+  });
+});
+

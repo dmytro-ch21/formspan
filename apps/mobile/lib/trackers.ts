@@ -28,7 +28,12 @@ import type { SQLiteBindValue } from 'expo-sqlite';
 import { dayString } from './calendar';
 import { ApiError, isOffline, isPermanentRejection, retryAfterOf } from './apiError';
 import { pairedCaffeineEntryId } from './coffeeCaffeine';
-import { FOOD_CAFFEINE_ID_INFIX, pairedFoodCaffeineEntryId } from './foodCaffeine';
+import {
+  FOOD_CAFFEINE_ID_INFIX,
+  FOOD_CAFFEINE_REDIRECT_MESSAGE,
+  isFoodCaffeineEntryId,
+  pairedFoodCaffeineEntryId,
+} from './foodCaffeine';
 import { getDb, withTransaction } from './db';
 import type { RenderStyle, Tracker, TrackerEntry, TrackerUnit } from './trackerModel';
 import * as api from './trackersApi';
@@ -626,8 +631,17 @@ export async function removeCoffeeTap(userId: string, coffeeEntryId: string): Pr
  *
  * A removed tap is not editable: a correction must not bring back a cup the
  * athlete took away, so the tombstone guard is in the WHERE, not left to the UI.
+ *
+ * A caffeine entry a logged FOOD caused is not editable either (N578), and that
+ * refusal is here for the same reason: it must not be left to the UI.
+ * `syncFoodCaffeineEntry` re-derives that entry from the food whenever the food
+ * is edited, and replaces it when the figures differ. A correction made here
+ * would stand until the athlete next touched the food, and would then vanish
+ * without a word. The throw carries the redirect, so a screen that reaches this
+ * still says where the real control is.
  */
 export async function editTap(userId: string, entryId: string, amount: number): Promise<void> {
+  if (isFoodCaffeineEntryId(entryId)) throw new Error(FOOD_CAFFEINE_REDIRECT_MESSAGE);
   assertAmount(amount);
   const db = await getDb();
   await db.runAsync(

@@ -78077,6 +78077,90 @@ On Android after F68, a second back from Food reaches Today. This belongs to N58
 
 **Left alone on purpose.** Comments already written as history ("used to", "N176 gave the Train tab…", "written when this was a tab"), and comments about the real tabs: Today, Food, Progress, Plan and You.
 
+## 2026-09-13 — N578 (#1203): a caffeine dose and a bar-style tracker's taps can be corrected on the phone
+
+**What the athlete had.** N437 (#724) made a tap correctable by long-pressing its glyph. Two surfaces draw no glyph, and both reviewers of #1202 named them as gaps against #724's "a tap on any day can have its value corrected directly":
+
+- **The caffeine banner** (N468) lists doses with a remove control only. A manual 80 mg dose that was really 150 mg could only be removed and re-added.
+- **A bar-style card** (past twelve glyphs, or `render_style` `bar`) has no per-tap element. A single tap there could be neither corrected nor removed.
+  - The `Bar` doc comment said "the card's own screen removes". It did not: `app/trackers/[id].tsx` has no remove control. The comment is corrected.
+
+Nothing new on the server. Both surfaces reuse N437's path: `openEntry`, then `app/trackers/entry/[id].tsx`, then `editTap`, and the outbox's PATCH.
+
+### Three kinds of caffeine dose, three answers
+
+| kind | id | a direct correction… | why |
+|---|---|---|---|
+| manual | a plain uuid | opens the correction screen, through `editTap` | it is an ordinary tap |
+| coffee-caused | `<coffee id>-caf` | opens it too, through `editTap` | see below |
+| food-caused | `<food id>-fcaf-<tail>` | is refused, with the same redirect to Food that removal gives | the food owns the number |
+
+- **Coffee-caused is correctable, not redirected to the coffee.** Correcting the coffee changes CUPS and scales the caffeine by the ratio. It cannot say "that one cup held 150 mg", because the mg per cup is a Mayo reference figure for the drink type, not a measurement. A direct correction is the only way to say that.
+  - It is safe because `editTap` keeps the id. Removing the coffee still removes the dose. Correcting the cups afterwards scales from the corrected mg, which is now the athlete's own figure per cup. Both are pinned against real SQLite.
+  - The screen says "This changes the caffeine only, not the cups" (`isCoffeeCaffeineEntryId`, new in `coffeeCaffeine.ts`).
+- **Food-caused is refused, in three places:**
+  - **The banner row** shows the removal alert. Its copy moved into `foodCaffeine.ts` so the two say one thing.
+  - **The correction screen** shows the same message and no field. The screen is reachable by route, not only from the banner.
+  - **`editTap` throws**, carrying the message.
+  - **Why the storage layer refuses too, not only the UI:** `syncFoodCaffeineEntry` re-derives the entry whenever the food is edited, and tombstones and replaces it when the figures differ. A correction written here would stand until the athlete next touched that food, then disappear with nothing said. The same reasoning N437 gave for putting the removed-tap guard in the WHERE.
+
+### Bar-style cards: a list of the day's taps
+
+`components/TrackerTapList.tsx`, drawn by `TrackerCard` only when it draws a bar.
+
+- **Closed by default.** One line, "Show all 15 cups", so a thirty-capsule card on Today costs a line until asked. It is an `expanded`-state button. A day switch closes it, because `TrackerList` already keys the card on the day.
+- **Each row** reads amount and time, in the order the glyphs used.
+  - Tapping it opens the correction screen via `onEditEntry`.
+  - Its × calls the card's own `onRemove`, so a coffee row still goes through `removeCoffeeTap` and takes its caffeine with it.
+  - There is no second write path.
+- **A visible "Change" word** on each row, and on the banner's rows, rather than a gesture. N437's long press is the part of that ticket that needed a device check to judge.
+- **A backfilled tap shows no time.** Its `logged_at` is the moment it was entered, on another day. It is the same rule `cutoffLine` follows (`tapTimeLabel`).
+- **No row is drawn before the unit preference is read.** It is the card's own rule for any unit-bearing number.
+- **Rejected: tap targets on the bar itself.** Thirty invisible targets is what `Bar` already refuses.
+- **Rejected: a separate screen.** It would have been a new route for a list the card can show.
+
+**How it is reachable on a phone**: this is the phone. On Today or Food, tap a dose row on the caffeine banner, or open "Show all" under a bar and tap a row.
+
+**No new motion and no haptics.** New controls use the existing `PressableScale`, the app-wide press feedback F48 introduced; the disclosure opens without animation. No `/review-animations` gate applies to that, and this is said here rather than assumed.
+
+### Tests
+
+- **Against real SQLite** (`trackers.test.ts`):
+  - a manual caffeine dose owes a PATCH;
+  - a coffee-caused dose corrects in place, then scales with the cups, then leaves with the coffee;
+  - `editTap` refuses a food-caused entry, leaving its amount and `dirty` untouched.
+- **`trackerTapLabels.test.ts`:** the row copy in each unit kind, the backfilled-time rule, and the no-verdict enumeration over every new string.
+- **`caffeineBanner.test.tsx`:** each of the three kinds, and a banner with no correction wired.
+- **`trackerTapList.test.tsx`,** through `TrackerCard`:
+  - the disclosure's count and `expanded` state;
+  - that a row opens and its × removes THAT tap;
+  - imperial units;
+  - the unit gate;
+  - no list on a glyph card or an empty bar.
+- **`trackerList.test.tsx`:** a banner row reaches `openEntry`; a bar row reaches `openEntry` and `removeEntry`; a bar-style coffee row reaches `removeCoffeeTap`.
+- **`trackerEntryScreen.test.tsx`:** a manual dose, a coffee-caused dose with its hint, and the food-caused refusal with no field and no save.
+
+**Mutation checks.** The baseline was green, 8 suites and 142 tests. Each mutation was applied by exact-match replacement, asserted to have applied exactly once, and required to fail as the named test with the suite still running. Each was restored byte-identical, and all eight suites were re-run green.
+
+| # | mutation | caught by |
+|---|---|---|
+| M1 | `editTap` without the food-caused guard | refuses a caffeine entry a logged food caused |
+| M2 | the screen without its food-caused refusal | a food-caused dose offers no field |
+| M3 | a banner row that does not redirect a food-caused dose | refuses a food-caused dose and says where to change it |
+| M4 | a list row that opens the first tap instead of its own | a row opens the correction for THAT tap |
+| M5 | a row's × that removes the first tap | a row's × removes THAT tap |
+| M6 | the list without its unit gate | no row names an amount before the unit preference is read |
+| M7 | a bar card that offers no list | a bar card offers its taps behind a closed disclosure (six tests failed) |
+| M8 | `TrackerList` not wiring the banner's correction | opens the correction for a caffeine dose from its banner row |
+| M9 | `tapTimeLabel` printing a backfilled tap's clock | is nothing for a backfilled tap |
+| M10 | `isCoffeeCaffeineEntryId` never matching | a coffee-caused dose corrects directly, and says the cups are untouched |
+
+### Not built, and why
+
+- **Web** parity is still N438 (#725).
+- **A food-caused dose's own figure** is still a name-matched estimate (N468's heuristic). Correcting it means editing the food; a per-food `caffeine_mg` field remains N468's named follow-up, not this one.
+- **Two devices correcting the same tap** before either syncs: last arrival wins, unchanged from N437.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
