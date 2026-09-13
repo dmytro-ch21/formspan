@@ -24481,7 +24481,7 @@ This is a visual change only: sizes, leading and tracking. Nothing about what th
 
 ### Edge cases & errors
 
-- **Logging a set one-handed:** the rows sit at the same height, and the done tick and chevron stay where the thumb expects them.
+- **Logging a set one-handed:** a row whose summary fits on one line sits at the same height, and the done tick and chevron stay where the thumb expects them. A summary long enough to wrap to two lines makes its row slightly taller (about 40pt of text where it was about 36pt).
 - **A drop set's continuation mark** (↳) still sits in the set-number slot with its `D` badge.
 - **The collapsed rest bar with a long caption** stays on one line with an ellipsis beside the countdown.
 - **Typing a weight or reps into a set field:** the digits sit centred, as before. The field was deliberately left off the scale.
@@ -24499,5 +24499,5 @@ This is a visual change only: sizes, leading and tracking. Nothing about what th
 ### Needs a device
 
 - A real workout at the default text size: nothing clipped, truncated or overlapping.
-  - Check a set row collapsed and expanded, the progression hint card, the rest timer full and as a bar, and an option picker.
+  - Check a set row collapsed and expanded, including one whose summary wraps to two lines, the progression hint card, the rest timer full and as a bar, and an option picker.
 - The same screen at the largest Dynamic Type size.
