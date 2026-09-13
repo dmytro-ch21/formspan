@@ -1,5 +1,5 @@
 import { fromDisplayFluid, toDisplayFluid, type UnitSystem } from './units';
-import type { TrackerUnit } from './trackerModel';
+import { isFluidUnit, type TrackerUnit } from './trackerModel';
 
 /**
  * The correction screen's one field, as pure functions — N437.
@@ -15,7 +15,7 @@ import type { TrackerUnit } from './trackerModel';
 
 /** What the field shows for a stored amount. Volumes follow the unit preference. */
 export function displayAmount(unit: TrackerUnit, amount: number, units: UnitSystem): string {
-  return unit === 'ml' ? String(toDisplayFluid(amount, units)) : String(amount);
+  return isFluidUnit(unit) ? String(toDisplayFluid(amount, units)) : String(amount);
 }
 
 export type AmountRead = { amount: number; changed: boolean } | { error: string };
@@ -38,6 +38,6 @@ export function readAmount(
   if (typed === '' || !Number.isFinite(n) || n <= 0) {
     return { error: 'Enter an amount greater than zero.' };
   }
-  const amount = unit === 'ml' ? fromDisplayFluid(n, units) : n;
+  const amount = isFluidUnit(unit) ? fromDisplayFluid(n, units) : n;
   return { amount, changed: amount !== original };
 }

@@ -738,6 +738,18 @@ describe('correcting a tap', () => {
     expect((await localEntries(USER, TODAY)).map((e) => e.id)).toEqual([]);
   });
 
+  it('corrects only the coffee when its caffeine entry was already removed, and does not revive it', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 95, TODAY);
+    const caffeineId = pairedCaffeineEntryId(coffeeId);
+    await removeTap(USER, caffeineId);
+
+    await editCoffeeTap(USER, coffeeId, 2);
+    expect(await amountOf(coffeeId)).toBe(2);
+    expect(await amountOf(caffeineId)).toBe(95);
+    expect((await localEntries(USER, TODAY)).map((e) => e.id)).toEqual([coffeeId]);
+  });
+
   it('corrects only the coffee when the tap posted no caffeine', async () => {
     await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
     const coffeeId = await logCoffeeTap(USER, coffee, caffeine, null, TODAY);

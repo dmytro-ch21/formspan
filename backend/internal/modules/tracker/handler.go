@@ -387,6 +387,13 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e, err := h.repo.UpdateEntry(r.Context(), userID, r.PathValue("trackerID"), r.PathValue("entryID"), p)
+	if errors.Is(err, ErrNotFound) {
+		// Not the shared "no such tracker": the tracker usually exists, and
+		// whoever reads this 404 should look at the entry id first. Messages are
+		// not contract; the code is.
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "no such entry")
+		return
+	}
 	if err != nil {
 		writeError(w, r, err)
 		return

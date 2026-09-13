@@ -10,7 +10,7 @@ import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { displayAmount, readAmount } from '@/lib/entryEdit';
 import { request as requestSync } from '@/lib/sync';
-import { inputUnitLabel, type Tracker, type TrackerEntry } from '@/lib/trackerModel';
+import { inputUnitLabel, isMeasuredUnit, type Tracker, type TrackerEntry } from '@/lib/trackerModel';
 import { editCoffeeTap, editTap, localEntry, localTrackers } from '@/lib/trackers';
 import { useUnits } from '@/lib/useUnits';
 import { useAuth } from '@clerk/clerk-expo';
@@ -120,7 +120,7 @@ export default function TrackerEntryScreen() {
   }
 
   // A measured unit is named; a cup, a dose or a count is the number itself.
-  const measured = tracker.unit === 'ml' || tracker.unit === 'g' || tracker.unit === 'mg';
+  const measured = isMeasuredUnit(tracker.unit);
   const label = measured ? `Amount, in ${inputUnitLabel(tracker, units)}` : 'Amount';
 
   return (
@@ -202,6 +202,5 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
   },
-  iconInput: { width: 96, textAlign: 'center' },
   hint: { fontSize: 12, color: vola.textDim },
 });

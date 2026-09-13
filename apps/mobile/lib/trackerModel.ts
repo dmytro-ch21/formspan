@@ -322,6 +322,24 @@ export function amountLine(
   }
 }
 
+/**
+ * Whether an amount in this unit is a volume, shown in the athlete's fluid unit
+ * and stored in millilitres — N437. The storage tag is compared here, in the
+ * data model, so a screen never has to spell a unit out (`check:unit-literals`).
+ */
+export function isFluidUnit(unit: TrackerUnit): boolean {
+  return unit === 'ml';
+}
+
+/**
+ * Whether an amount in this unit is a measurement worth naming — millilitres,
+ * grams, milligrams — rather than the count itself, which a cup, a dose or a
+ * plain count already is. Same split `amountLine` makes.
+ */
+export function isMeasuredUnit(unit: TrackerUnit): boolean {
+  return unit === 'ml' || unit === 'g' || unit === 'mg';
+}
+
 /** The unit an amount is ENTERED in — what a target field should be labelled. */
 export function inputUnitLabel(t: Tracker, units: UnitSystem): string {
   return t.unit === 'ml' ? fluidUnit(units) : t.unit;

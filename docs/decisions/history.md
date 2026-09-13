@@ -76430,6 +76430,20 @@ So the correction has its own route: `PATCH /v1/trackers/{trackerID}/entries/{en
 
 Each went red as exactly the test named, with no suite failing to run.
 
+### Review
+
+- **`check:unit-literals` caught three comparisons against the `'ml'` storage tag,** in `lib/entryEdit.ts` and the correction screen. They moved into `trackerModel.ts` as `isFluidUnit` and `isMeasuredUnit`, which is the file already allowed to branch on the tag. No allowlist entry was added.
+- **`backend-reviewer`: nothing blocking.**
+  - It confirmed the scoping is IDOR-safe in one statement, that `LogEntry` staying `DO NOTHING` is tested, and that NaN and Inf cannot pass JSON decoding.
+  - Two suggestions were taken. A missing entry now answers `no such entry` rather than the shared `no such tracker`. And `UpdateEntry`'s comment states that two devices' corrections resolve last-arrival-wins.
+- **`frontend-reviewer`: nothing blocking.**
+  - It confirmed from React Native's `Pressability` that a long press suppresses `onPress`, so it cannot also remove the tap.
+  - Taken: a dead `iconInput` style copied into the screen was removed, and `openEntry` was added to the eight other tests' tracker-hook fakes, so a future long-press test there does not throw.
+  - Left as it is: the screen resets typed text if it regains focus, exactly as `app/trackers/[id].tsx` does.
+- **`ac-verifier`: all three criteria met.**
+  - It named a gap in coverage: correcting a coffee whose caffeine entry was already removed. That case now has a test, and the caffeine entry stays removed.
+  - It proposed a device check, because the long press has no visible affordance. That was added to #724 as a `NEEDS HUMAN EVIDENCE` criterion, so the ticket stays open for a phone check after merge.
+
 ### Not built, and why
 
 - **The caffeine banner** (N468) has no correction gesture. A caffeine entry changes through the coffee tap that caused it, or through the food that logged it. Correcting a manual caffeine tap directly is not built.

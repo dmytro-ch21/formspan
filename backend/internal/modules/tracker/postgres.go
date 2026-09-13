@@ -657,6 +657,9 @@ func (r *PostgresRepository) LogEntry(ctx context.Context, userID, trackerID str
 // miss is an error: a delete of something already gone has done its job, but an
 // edit of something that is not there has changed nothing, and the phone has to
 // hear that rather than mark the edit as landed.
+//
+// There is no per-entry version: two devices correcting the same tap resolve by
+// whichever PATCH arrives last. Both values were the athlete's own.
 func (r *PostgresRepository) UpdateEntry(ctx context.Context, userID, trackerID, entryID string, p EntryPatch) (*Entry, error) {
 	e, err := scanEntry(r.pool.QueryRow(ctx, `
 		UPDATE tracker_entries SET amount = $4
