@@ -17,7 +17,7 @@ import { PHASE_LABELS } from '@/lib/body';
 import type { CachedCheckin, CachedPhase } from '@/lib/bodyCache';
 import { longDayLabel, shortDate } from '@/lib/calendar';
 import { NO_NARRATION } from '@/lib/dayNarration';
-import { lastUpdatedLabel, type DayFact, type DayPanel } from '@/lib/dayPanel';
+import { lastUpdatedLabel, type DayFact, type DayPanel, type StepsStatus } from '@/lib/dayPanel';
 import { labelFor, type Module } from '@/lib/modules';
 import { useModules } from '@/lib/ModulesProvider';
 import { formatWeight, type UnitSystem } from '@/lib/units';
@@ -25,6 +25,7 @@ import { useUnits } from '@/lib/UnitsProvider';
 import { fmtAmount } from '@/lib/nutrition';
 import { formatPlanTime } from '@/lib/planTime';
 import { sessionHref, startSessionHref } from '@/lib/startSession';
+import { stepsReadLabel, stepsSourceName } from '@/lib/steps';
 import { momentumLogFoodHref, momentumOpenFoodHref } from '@/lib/todayBoard';
 import { footLine, valueLine } from '@/lib/trackerModel';
 import type { PlannedOffer } from '@/lib/trainBoard';
@@ -130,6 +131,7 @@ export default function DayScreen() {
 
         <PlanBlock panel={panel} modules={modules} open={open} />
         <TargetsBlock panel={panel} open={open} />
+        <StepsBlock panel={panel} now={now} open={open} />
         <GoalBlock panel={panel} open={open} />
         <BodyBlock panel={panel} now={now} open={open} />
       </ScrollView>
@@ -293,6 +295,97 @@ function TargetsBlock({ panel, open }: { panel: DayPanel; open: (href: Href) => 
       )}
     </RNView>
   );
+}
+
+/**
+ * Today's steps (N569, #1130). A count — zero included — is a fact; every other
+ * status is a reason there is no count, and none of them renders a number.
+ * "Refused" and "no source" are said as what they are, with where to change
+ * them, and never as "0 steps" or "no steps today".
+ */
+function StepsBlock({ panel, now, open }: { panel: DayPanel; now: Date; open: (href: Href) => void }) {
+  const { steps } = panel;
+  if (steps.state === 'unread') return null;
+  return (
+    <RNView style={styles.section}>
+      <SectionHeader label="Steps" />
+      {steps.state === 'unavailable' && <Unavailable what="steps" />}
+      {steps.state === 'ready' && <StepsLine status={steps.value} now={now} open={open} />}
+    </RNView>
+  );
+}
+
+function StepsLine({ status, now, open }: { status: StepsStatus; now: Date; open: (href: Href) => void }) {
+  const toSettings = () => open('/settings');
+  switch (status.kind) {
+    case 'counted': {
+      const f = status.fact;
+      if (f.kind !== 'steps') return null;
+      return (
+        <FactRow
+          fact={f}
+          title={`${fmtAmount(f.steps)} ${f.steps === 1 ? 'step' : 'steps'}`}
+          meta="Today"
+          detail={`${stepsReadLabel(f.readAt, now)}, from ${stepsSourceName(f.source)}`}
+          detailTestID="day-steps-read-at"
+        />
+      );
+    }
+    case 'not-read-today':
+      return (
+        <Absence
+          text="No step reading yet today."
+          testID="day-absent-steps"
+          detail={lastUpdatedLabel(status.lastReadAt, now)}
+          detailTestID="day-steps-last-read"
+        />
+      );
+    case 'refused':
+      return status.source === 'health_connect' ? (
+        <Absence
+          text="Health Connect isn't giving VOLA access to steps."
+          testID="day-steps-refused"
+          detail="Allow Steps for VOLA in Health Connect, or ask again from Settings."
+          actionLabel="Open Settings"
+          onPress={toSettings}
+        />
+      ) : (
+        <Absence
+          text="Apple Health isn't sharing steps with VOLA."
+          testID="day-steps-refused"
+          detail="To change it, open the Settings app, then Privacy & Security, Health, VOLA, and turn on Steps."
+        />
+      );
+    case 'no-data':
+      return (
+        <Absence
+          text="Health Connect has no step data yet."
+          testID="day-steps-no-data"
+          detail="Steps show here once your phone or a fitness app records them in Health Connect."
+        />
+      );
+    case 'no-source':
+      return (
+        <Absence
+          text="This phone has no Apple Health or Health Connect to read steps from."
+          testID="day-steps-no-source"
+        />
+      );
+    case 'not-connected':
+      return (
+        <Absence
+          text="Steps aren't connected on this phone."
+          testID="day-steps-not-connected"
+          detail={
+            status.reason === 'off'
+              ? `They come from ${stepsSourceName(status.source)}, and Health sync is off.`
+              : `VOLA needs your permission to read them from ${stepsSourceName(status.source)}.`
+          }
+          actionLabel="Connect steps"
+          onPress={toSettings}
+        />
+      );
+  }
 }
 
 function GoalBlock({ panel, open }: { panel: DayPanel; open: (href: Href) => void }) {
@@ -525,10 +618,16 @@ function Absence({
       onPress={onPress}
       style={({ pressed }) => [styles.absenceRow, pressed && styles.pressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${text} ${actionLabel ?? ''}`.trim()}
+      // N569: a detail is part of what the row says, so VoiceOver hears it too.
+      accessibilityLabel={[text, detail, actionLabel].filter(Boolean).join(' ')}
       testID={testID}
     >
       <Text style={styles.absence}>{text}</Text>
+      {detail ? (
+        <Text style={styles.detail} testID={detailTestID}>
+          {detail}
+        </Text>
+      ) : null}
       {actionLabel ? <Text style={styles.absenceAction}>{actionLabel}</Text> : null}
     </Pressable>
   );
@@ -541,7 +640,7 @@ function Absence({
 function Unavailable({
   what,
 }: {
-  what: 'plan' | 'trackers' | 'food' | 'target' | 'checkin' | 'phase';
+  what: 'plan' | 'trackers' | 'food' | 'target' | 'checkin' | 'phase' | 'steps';
 }) {
   return (
     <Text style={styles.absence} testID={`day-unavailable-${what}`}>

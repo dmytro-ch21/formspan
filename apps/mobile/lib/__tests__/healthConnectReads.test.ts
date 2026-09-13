@@ -26,6 +26,10 @@ import {
   queryHeartRateSamples,
   queryOtherExerciseSessions,
   queryVo2MaxReadings,
+  healthConnectReadRecordTypes,
+  queryHealthConnectSteps,
+  requestHealthConnectReadAuthorization,
+  requestHealthConnectStepsAuthorization,
 } from '../healthConnect';
 
 // Real import first, jest.mock calls after — the same shape as
@@ -62,12 +66,21 @@ const mockReadRecords = jest.fn((_recordType: string, _options: unknown) =>
   mockReadRejectsWith ? Promise.reject(mockReadRejectsWith) : Promise.resolve({ records: mockRecords }),
 );
 
+/** N569: what the fake native `aggregateRecord` does next. */
+let mockCountTotal: number | null = 0;
+let mockAggregateRejectsWith: unknown = null;
+const mockAggregate = jest.fn((_request: unknown) =>
+  mockAggregateRejectsWith ? Promise.reject(mockAggregateRejectsWith) : Promise.resolve({ COUNT_TOTAL: mockCountTotal }),
+);
+const mockRequestPermission = jest.fn((perms: { recordType: string }[]) => Promise.resolve(perms));
+
 jest.mock('react-native-health-connect', () => ({
   // `SDK_AVAILABLE` — the literal `lib/healthConnect.ts` compares against.
   getSdkStatus: () => Promise.resolve(3),
   initialize: () => Promise.resolve(true),
-  requestPermission: (perms: unknown[]) => Promise.resolve(perms),
+  requestPermission: (perms: { recordType: string }[]) => mockRequestPermission(perms),
   readRecords: (recordType: string, options: unknown) => mockReadRecords(recordType, options),
+  aggregateRecord: (request: unknown) => mockAggregate(request),
 }));
 
 /** The exact shape the RN bridge hands JS for a rejected native promise:
@@ -82,6 +95,10 @@ beforeEach(() => {
   mockReadRejectsWith = null;
   mockRecords = [];
   mockReadRecords.mockClear();
+  mockCountTotal = 0;
+  mockAggregateRejectsWith = null;
+  mockAggregate.mockClear();
+  mockRequestPermission.mockClear();
 });
 
 describe('isHealthConnectPermissionError — the classification, pinned exactly', () => {
@@ -167,6 +184,101 @@ describe('the three reads, behind the guard, on Android', () => {
         endDate: '2026-09-02T07:30:00.000Z',
         durationSeconds: 1800,
       },
+    ]);
+  });
+});
+
+/**
+ * N569/#1130 — the steps read. Same fake, same contract as the three reads
+ * above for a refusal, and one deliberate difference: EVERY other failure throws
+ * too, because a swallowed failure here would become a step count.
+ */
+describe('the steps read, behind the guard, on Android (N569/#1130)', () => {
+  const window = {
+    dayStart: new Date('2026-09-12T07:00:00.000Z'),
+    lookbackStart: new Date('2026-09-05T07:00:00.000Z'),
+    now: new Date('2026-09-12T21:00:00.000Z'),
+  };
+
+  it('a refused grant THROWS HealthConnectPermissionError naming Steps — never zero', async () => {
+    mockAggregateRejectsWith = bridgeError('PERMISSION_ERROR');
+
+    await expect(queryHealthConnectSteps(window)).rejects.toBeInstanceOf(HealthConnectPermissionError);
+    await expect(queryHealthConnectSteps(window)).rejects.toMatchObject({ recordType: 'Steps' });
+  });
+
+  it('a refusal on the lookback read throws the same way', async () => {
+    mockCountTotal = 0;
+    mockReadRejectsWith = bridgeError('PERMISSION_ERROR');
+
+    await expect(queryHealthConnectSteps(window)).rejects.toMatchObject({ recordType: 'Steps' });
+  });
+
+  it('any other failure also throws, and is not mistaken for a refusal', async () => {
+    mockAggregateRejectsWith = bridgeError('IO_EXCEPTION');
+
+    const err = await queryHealthConnectSteps(window).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toMatchObject({ code: 'IO_EXCEPTION' });
+    expect(err).not.toBeInstanceOf(HealthConnectPermissionError);
+  });
+
+  it("reads today's de-duplicated aggregate, not a sum of records", async () => {
+    mockCountTotal = 8412;
+
+    await expect(queryHealthConnectSteps(window)).resolves.toEqual({ kind: 'steps', steps: 8412 });
+    expect(mockAggregate).toHaveBeenCalledWith({
+      recordType: 'Steps',
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: '2026-09-12T07:00:00.000Z',
+        endTime: '2026-09-12T21:00:00.000Z',
+      },
+    });
+    expect(mockReadRecords).not.toHaveBeenCalled();
+  });
+
+  it('zero today, with Steps recorded this week: a genuine zero', async () => {
+    mockCountTotal = 0;
+    mockRecords = [{ count: 40 }];
+
+    await expect(queryHealthConnectSteps(window)).resolves.toEqual({ kind: 'steps', steps: 0 });
+    expect(mockReadRecords).toHaveBeenCalledWith('Steps', {
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: '2026-09-05T07:00:00.000Z',
+        endTime: '2026-09-12T21:00:00.000Z',
+      },
+      pageSize: 1,
+    });
+  });
+
+  it('zero today, and no app has recorded a step all week: no_data — not zero', async () => {
+    mockCountTotal = 0;
+    mockRecords = [];
+
+    await expect(queryHealthConnectSteps(window)).resolves.toEqual({ kind: 'no_data' });
+  });
+});
+
+describe('asking for Steps (N569/#1130)', () => {
+  it('a sync pass not yet asked for steps never requests Steps — the guard against widening the ask silently', async () => {
+    expect(healthConnectReadRecordTypes(false)).toEqual(['HeartRate', 'Vo2Max', 'ExerciseSession']);
+    expect(healthConnectReadRecordTypes(true)).toEqual(['HeartRate', 'Vo2Max', 'ExerciseSession', 'Steps']);
+
+    await requestHealthConnectReadAuthorization();
+    expect(mockRequestPermission.mock.calls[0][0].map((p) => p.recordType)).not.toContain('Steps');
+  });
+
+  it('once asked, the pass includes Steps, and the explicit ask always does', async () => {
+    await requestHealthConnectReadAuthorization({ includeSteps: true });
+    await requestHealthConnectStepsAuthorization();
+
+    expect(mockRequestPermission.mock.calls.map((c) => c[0].map((p) => p.recordType))).toEqual([
+      ['HeartRate', 'Vo2Max', 'ExerciseSession', 'Steps'],
+      ['HeartRate', 'Vo2Max', 'ExerciseSession', 'Steps'],
     ]);
   });
 });

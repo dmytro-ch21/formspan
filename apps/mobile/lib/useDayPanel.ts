@@ -7,6 +7,7 @@ import { assembleDay, type DayPanel, type Dated } from './dayPanel';
 import { localEntries as localFoodEntries, localTargetView } from './foodLog';
 import type { Module } from './modules';
 import type { Entry, TargetView } from './nutrition';
+import { localStepsView, onStepsChanged, requestStepsRefresh, type StepsView } from './steps';
 import { useSyncState } from './sync';
 import type { TrackerEntry } from './trackerModel';
 import { localEntries as localTrackerEntries, localTrackers, type TrackerView } from './trackers';
@@ -46,6 +47,15 @@ import { useSource } from './useTrainBoard';
  * fetches: it is opened from Today, so with signal the cache is seconds old, and
  * without signal it is the last answer, labelled with when that was.
  *
+ * ## Steps are read from the local store too (N569)
+ *
+ * `localStepsView` reads `daily_steps`, which the Health read passes fill on
+ * sign-in and every foreground return — not Today, so a VOLA opened directly
+ * gets the same count. On focus the panel also ASKS for a fresh read
+ * (`requestStepsRefresh`, at most once a minute, fire-and-forget, a no-op when no
+ * orchestrator owns steps), and re-reads the store when a read lands
+ * (`onStepsChanged`). It still renders only what SQLite says.
+ *
  * Each read is its own promise, for `useTrainBoard`'s reason: `Promise.all`
  * would let an unreadable tracker table erase a perfectly good food total.
  *
@@ -66,6 +76,7 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
   const [target, targetReady, targetFailed] = useSource<Dated<TargetView>>();
   const [checkins, checkinsReady, checkinsFailed] = useSource<Dated<CheckinCacheView>>();
   const [phases, phasesReady, phasesFailed] = useSource<PhaseCacheView>();
+  const [steps, stepsReady, stepsFailed] = useSource<Dated<StepsView>>();
 
   const { lastSyncAt } = useSyncState();
 
@@ -73,9 +84,21 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
   // mints a fresh `Date` on focus, and an object key would re-read every time.
   const day = dayString(now);
 
+  const readSteps = useCallback(
+    (alive: () => boolean) => {
+      if (!userId) return;
+      localStepsView(userId, day).then(
+        (view) => alive() && stepsReady({ on: day, value: view }),
+        () => alive() && stepsFailed(),
+      );
+    },
+    [userId, day, stepsReady, stepsFailed],
+  );
+
   const read = useCallback(
     (alive: () => boolean) => {
       if (!userId) return;
+      readSteps(alive);
       localTrackers(userId).then(
         (view) => alive() && trackersReady(view),
         () => alive() && trackersFailed(),
@@ -116,6 +139,7 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
       checkinsFailed,
       phasesReady,
       phasesFailed,
+      readSteps,
     ],
   );
 
@@ -137,11 +161,22 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
     useCallback(() => {
       let live = true;
       read(() => live);
+      requestStepsRefresh();
       return () => {
         live = false;
       };
     }, [read]),
   );
+
+  // N569: a steps read landed (a foreground pass, or the refresh asked for above).
+  useEffect(() => {
+    let live = true;
+    const off = onStepsChanged(() => readSteps(() => live));
+    return () => {
+      live = false;
+      off();
+    };
+  }, [readSteps]);
 
   // And after a sync completes — a target set on the web, or a meal logged on
   // another device, arrives through the pull. `null` is "no run yet", which the
@@ -167,8 +202,9 @@ export function useDayPanel(userId: string | null, modules: Module[], now: Date)
         target,
         checkins,
         phases,
+        steps,
         modules,
       }),
-    [day, board, plans, trackers, trackerEntries, foodEntries, target, checkins, phases, modules],
+    [day, board, plans, trackers, trackerEntries, foodEntries, target, checkins, phases, steps, modules],
   );
 }

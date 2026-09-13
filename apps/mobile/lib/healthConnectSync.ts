@@ -18,10 +18,12 @@ import {
   HealthConnectPermissionError,
   type HealthConnectRecordType,
   queryExerciseSessionWindows,
+  queryHealthConnectSteps,
   queryHeartRateSamples,
   queryOtherExerciseSessions,
   queryVo2MaxReadings,
   requestHealthConnectReadAuthorization,
+  requestHealthConnectStepsAuthorization,
   sourceFromDataOrigin,
   type HeartRateReading,
 } from './healthConnect';
@@ -30,6 +32,14 @@ import { fetchHRMax, type HRMaxResolution } from './hrMax';
 import { fitHRWindow } from './hrWindowFit';
 import { paddedHRSearchWindow, selectWorkoutWindow, workoutSearchWindow } from './hrWorkoutWindow';
 import { PREF_HEALTH_CONNECT_IMPORT, readPref, writePref } from './prefs';
+import {
+  platformStepSource,
+  readStepsAsked,
+  runStepsRead,
+  setStepsRefresher,
+  writeStepsAsked,
+  type StepsReadState,
+} from './steps';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -291,15 +301,24 @@ export async function syncHealthConnectBiometrics(
 ): Promise<{ attempted: number; notPermitted: HealthConnectRecordType[] }> {
   const stillCurrent = options.stillCurrent ?? (() => true);
 
+  // N569/#1130: steps first, before the early returns, for the reason
+  // `lib/healthkitSync.ts`'s pass gives. Local only and never throws; a refusal
+  // is recorded in the steps state AND reported in `notPermitted` below.
+  const steps = await readHealthConnectSteps(userID);
+
   if (!(await readHealthConnectImportEnabled(userID))) return { attempted: 0, notPermitted: [] };
   if (!(await isHealthConnectSupported())) return { attempted: 0, notPermitted: [] };
 
   // Result deliberately discarded — see this function's own doc comment in
   // `lib/healthConnect.ts` (W15/#944): the read site is where a refused
   // grant is actually detected, and `notPermitted` below is how it reports.
-  await requestHealthConnectReadAuthorization();
+  //
+  // N569/#1130: `Steps` is included only once the athlete asked for it — a new
+  // type in this request opens the permission screen on a foreground return.
+  await requestHealthConnectReadAuthorization({ includeSteps: await readStepsAsked(userID) });
 
   const notPermitted: HealthConnectRecordType[] = [];
+  if (steps === 'refused') notPermitted.push('Steps');
   /** Records a refusal and says whether `err` was one. Everything else
    *  stays the silent, retry-next-pass failure every catch below already was. */
   const noteIfRefused = (err: unknown): boolean => {
@@ -592,10 +611,59 @@ export async function enrichHealthConnectSessionNow(
   }
 }
 
+/**
+ * N569/#1130 — one steps read for `userID`, from Health Connect, into the local
+ * store. The Android twin of `lib/healthkitSync.ts`'s `readHealthKitSteps`: same
+ * triggers, same never-throws contract, on-device so it works offline.
+ *
+ * A refused grant becomes the `refused` state here rather than an exception,
+ * because the refusal IS the answer this read exists to record (W15/#944); any
+ * other failure still throws out of the adapter and `runStepsRead` records
+ * nothing. A no-op off Android — see `platformStepSource`.
+ */
+export function readHealthConnectSteps(userID: string, now?: () => Date): Promise<StepsReadState | null> {
+  if (platformStepSource() !== 'health_connect') return Promise.resolve(null);
+  return runStepsRead(userID, 'health_connect', {
+    supported: () => isHealthConnectSupported(),
+    enabled: () => readHealthConnectImportEnabled(userID),
+    read: async (window) => {
+      try {
+        return await queryHealthConnectSteps(window);
+      } catch (err) {
+        if (err instanceof HealthConnectPermissionError) return { kind: 'refused' };
+        throw err;
+      }
+    },
+    now,
+  });
+}
+
+/**
+ * The "Allow steps" action on Android: the Health Connect permission screen,
+ * the asked marker, then a pass so the answer shows at once.
+ */
+export async function askHealthConnectSteps(userID: string, getToken: TokenGetter): Promise<void> {
+  if (!(await isHealthConnectSupported())) return;
+  await requestHealthConnectStepsAuthorization();
+  await writeStepsAsked(userID);
+  triggerHealthConnectSyncNow(userID, getToken);
+}
+
 // --- orchestration: when a pass runs -------------------------------------
 
 let creds: { userID: string; getToken: TokenGetter } | null = null;
 let running = false;
+let stepsRunning = false;
+
+/** A steps-only read for `requestStepsRefresh` — see `lib/healthkitSync.ts`'s twin. */
+function runStepsOnlyPass(): void {
+  if (!creds || stepsRunning) return;
+  const { userID } = creds;
+  stepsRunning = true;
+  void readHealthConnectSteps(userID).finally(() => {
+    stepsRunning = false;
+  });
+}
 
 /**
  * Who to sync as, and how to authenticate. Cleared on sign-out for the
@@ -650,6 +718,8 @@ let appStateSub: { remove: () => void } | null = null;
  */
 export function startHealthConnectSyncOrchestrator(): () => void {
   appStateSub?.remove();
+  const ownsSteps = platformStepSource() === 'health_connect';
+  if (ownsSteps) setStepsRefresher(runStepsOnlyPass);
   let previous: AppStateStatus = AppState.currentState;
   appStateSub = AppState.addEventListener('change', (next) => {
     const wasAway = previous === 'background' || previous === 'inactive';
@@ -661,5 +731,6 @@ export function startHealthConnectSyncOrchestrator(): () => void {
   return () => {
     appStateSub?.remove();
     appStateSub = null;
+    if (ownsSteps) setStepsRefresher(null);
   };
 }

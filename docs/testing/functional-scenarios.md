@@ -24100,3 +24100,80 @@ Backend only; the screen that calls it is part 2b. A request here is the phone's
 
 - **`day_narration_generations` holds one row per metered call:** user, succeeded, model, `sentences_kept`, and tokens. **Never the facts or the sentences.**
 - **Token columns are NULL for a call that produced no usage,** and numbers for a billed one, including a refusal.
+
+## N569 — today's steps from Apple Health and Health Connect, on VOLA (`apps/mobile/lib/steps.ts`, the Steps block in `apps/mobile/app/day.tsx`, the Steps row in `apps/mobile/app/settings.tsx`, #1130)
+
+Today's step count is read **on the phone** from Apple Health (iOS) or Health
+Connect (Android), stored in local SQLite (`daily_steps`, `steps_read_state`)
+and shown in VOLA's **Steps** block. Nothing is sent to the server. Reachable on
+a phone: Settings → Sync with Apple Health / Health Connect → **Allow steps**,
+then Today → **Your day** → Steps.
+
+**A native rebuild is required before any of this can be tried on a device** —
+the new HealthKit usage copy (`NSHealthShareUsageDescription`) and the Android
+`READ_STEPS` manifest permission do not reach an installed binary through a
+Metro reload.
+
+### Happy path
+
+- **Existing install, sync already on.** Open Settings: under the Health toggle
+  a **Steps** row explains what steps are for, that they stay on the phone, and
+  that the platform will ask once. Nothing has prompted on its own. Tap
+  **Allow steps**: the system sheet lists **Steps** (iOS) or the Health Connect
+  screen includes Steps (Android). Allow. The row changes to *Reading steps from
+  Apple Health / Health Connect.*
+- **VOLA shows today's count.** Open **Your day**: Steps shows *N steps* with
+  *As of HH:MM, from Apple Health* (or Health Connect). The number roughly
+  matches the Health app's own count for today.
+- **It updates.** Walk, background the app, return: the count and its *As of*
+  time move forward.
+- **Airplane mode.** Turn signal off, reopen **Your day**: the last count shows
+  with its original *As of* time. On-device Health reads need no network, so a
+  foreground return offline still refreshes it.
+- **VOLA opened directly** (without visiting Today first): the count is current
+  to the last foreground return or at most a minute before opening.
+
+### Edge cases and errors
+
+- **Never asked.** Sync on, *Allow steps* never tapped: VOLA says *Steps aren't
+  connected on this phone.* with **Connect steps**, which opens Settings. No
+  Health prompt ever appears from a foreground return.
+- **Health sync off.** VOLA says *Steps aren't connected on this phone. They come
+  from Apple Health, and Health sync is off.* — not zero.
+- **Refused, iOS.** Deny Steps in the sheet (or later in Settings → Privacy &
+  Security → Health → VOLA): VOLA says *Apple Health isn't sharing steps with
+  VOLA.* and where to change it. **Never "0 steps", never "no steps".**
+- **Refused, Android.** Deny Steps: *Health Connect isn't giving VOLA access to
+  steps.* with **Open Settings**; the Settings row offers **Ask again**.
+- **A genuine zero-step day.** A phone that has recorded steps this week but
+  none today (e.g. just after midnight): VOLA shows **0 steps**.
+- **Android: no app records steps.** Permission allowed but nothing on the phone
+  writes steps to Health Connect: *Health Connect has no step data yet.* — not 0.
+- **No step source.** A device with no Apple Health / Health Connect: *This phone
+  has no Apple Health or Health Connect to read steps from.*
+- **First day of use / fresh install.** Before any read has run: *Not available
+  on this phone yet.*
+- **Across midnight.** Leave the app closed overnight and open VOLA before a
+  read: *No step reading yet today.* with when it was last read — not
+  yesterday's number under today's date.
+- **Revoke after a reading.** Revoke Steps after a count was shown: the next
+  foreground return shows the refusal, not the old count.
+- **Apple Watch plus iPhone.** Both record the same walk: the count matches the
+  Health app's de-duplicated total, not the sum of both.
+
+### Auth / security
+
+- **Two accounts, one phone.** Allow steps as A. Sign out, sign in as B offline:
+  B's Steps block says *Not available on this phone yet.* — never A's count.
+  (Both accounts read the same phone's Health store once each has allowed it;
+  the store is the phone's, not the account's.)
+- **Nothing leaves the device.** No request to the API is made for steps, online
+  or offline.
+
+### Not covered by this slice
+
+- Steps are not synced to the server, so the web app shows none (decision in
+  `docs/decisions/history.md`'s N569 entry).
+- Only today's count is kept current; no step history or trend.
+- The VOLA narration (N570) cannot state a step count yet: its fabricated-fact
+  guard does not list the steps fact's number, so such a sentence is dropped.

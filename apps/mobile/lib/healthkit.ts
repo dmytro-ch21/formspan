@@ -1,4 +1,5 @@
 import type { WorkoutWindow } from './hrWorkoutWindow';
+import { stepsFromHealthKit, type StepsOutcome } from './steps';
 import {
   averagePaceSecPerKm,
   elevationGainMeters,
@@ -144,6 +145,19 @@ type HealthKitModule = {
       unit?: string;
     },
   ) => Promise<readonly NativeQuantitySample[]>;
+  /** `queryStatisticsForQuantity` — verified against v14.1.0's
+   *  `specs/QuantityTypeModule.nitro.ts` and its Swift implementation: a window
+   *  with no samples RESOLVES with every quantity absent (HealthKit's
+   *  `errorNoData` is mapped to `emptyStatisticsResponse`), it does not reject.
+   *  Narrowed to the one field read. */
+  queryStatisticsForQuantity: (
+    identifier: string,
+    statistics: readonly string[],
+    options?: {
+      filter?: { date?: { startDate?: Date; endDate?: Date } };
+      unit?: string;
+    },
+  ) => Promise<{ readonly sumQuantity?: NativeQuantity }>;
 };
 
 function load(): HealthKitModule | null {
@@ -176,7 +190,31 @@ const READ_TYPES = [
   'HKWorkoutRouteTypeIdentifier',
   'HKQuantityTypeIdentifierHeartRate',
   'HKQuantityTypeIdentifierVO2Max',
+  'HKQuantityTypeIdentifierStepCount',
 ] as const;
+
+/**
+ * N569/#1130 — the one read type NOT asked for up front, and why that reverses
+ * the reasoning above.
+ *
+ * "Ask for everything at once" was right for the types that shipped together.
+ * For a type added to an app already installed, it is wrong: the import pass
+ * re-requests access on every foreground return, and HealthKit shows its sheet
+ * for any type the athlete has not decided on. Putting steps into that request
+ * would pop a Health sheet at an athlete who opened the app to log a set, with
+ * nothing on screen saying why. So steps are asked for only from the explicit
+ * "Allow steps" action (`requestHealthKitStepsAuthorization`), and a pass
+ * includes them only after that (`lib/steps.ts`'s `readStepsAsked`).
+ */
+export const STEPS_READ_TYPE = 'HKQuantityTypeIdentifierStepCount';
+
+/**
+ * What a pass may request. Pure and exported because it is the guard against
+ * widening the ask silently: `includeSteps: false` must never contain steps.
+ */
+export function healthKitReadTypes(includeSteps: boolean): readonly string[] {
+  return includeSteps ? READ_TYPES : READ_TYPES.filter((t) => t !== STEPS_READ_TYPE);
+}
 
 /** Whether this binary has a working HealthKit module linked in. `false` on
  *  Android unconditionally (the package is iOS-only; `load()` throws there
@@ -202,9 +240,62 @@ export function isHealthKitSupported(): boolean {
  * so a query that comes back empty is indistinguishable from "no runs" —
  * `lib/healthkitSync.ts` treats both the same way rather than guessing.
  */
-export async function requestHealthKitReadAuthorization(): Promise<boolean> {
+export async function requestHealthKitReadAuthorization(
+  options: { includeSteps?: boolean } = {},
+): Promise<boolean> {
+  if (!hk) return false;
+  return hk.requestAuthorization({ toRead: healthKitReadTypes(options.includeSteps ?? false) });
+}
+
+/**
+ * N569/#1130 — the deliberate ask. Called only from the "Allow steps" action,
+ * after its copy has said why. Requests every read type, so HealthKit's sheet
+ * lists exactly the ones not yet decided — on an existing install, Steps alone.
+ *
+ * Resolving says the athlete answered, not what they answered: HealthKit never
+ * reports a read denial. `lib/steps.ts`'s `stepsFromHealthKit` is where a
+ * refusal becomes visible, from what the next read returns.
+ */
+export async function requestHealthKitStepsAuthorization(): Promise<boolean> {
   if (!hk) return false;
   return hk.requestAuthorization({ toRead: READ_TYPES });
+}
+
+/**
+ * Today's step count, or a refusal — N569/#1130.
+ *
+ * Uses HealthKit's STATISTICS query, not a sum of samples: an iPhone and a
+ * paired Watch both record steps for the same walk, and the statistics query is
+ * what de-duplicates them by source priority, the way the Health app's own
+ * daily total does. Summing samples here would double-count anyone wearing a
+ * Watch, and the device check compares against the Health app's number.
+ *
+ * **Throws on any native failure**, unlike every other query in this file, and
+ * that is deliberate: those return `[]` because an empty list is harmless to
+ * their callers, but here a swallowed failure would become a step count. The
+ * caller (`lib/steps.ts`'s `runStepsRead`) catches and records nothing.
+ */
+export async function queryHealthKitSteps(window: {
+  dayStart: Date;
+  lookbackStart: Date;
+  now: Date;
+}): Promise<StepsOutcome> {
+  if (!hk) throw new Error('HealthKit is not linked into this build');
+  const stats = await hk.queryStatisticsForQuantity(STEPS_READ_TYPE, ['cumulativeSum'], {
+    filter: { date: { startDate: window.dayStart, endDate: window.now } },
+    unit: 'count',
+  });
+  const sum = stats.sumQuantity?.quantity;
+  if (sum != null && Number.isFinite(sum) && sum > 0) return stepsFromHealthKit(sum, true);
+  // Nothing today. A denied read looks exactly like this, so ask whether
+  // HealthKit has shared ANY step sample in the lookback before calling it zero.
+  const recent = await hk.queryQuantitySamples(STEPS_READ_TYPE, {
+    filter: { date: { startDate: window.lookbackStart, endDate: window.now } },
+    limit: 1,
+    ascending: false,
+    unit: 'count',
+  });
+  return stepsFromHealthKit(sum, recent.length > 0);
 }
 
 /** One HealthKit-recorded run, reduced to plain data — the boundary

@@ -26,6 +26,14 @@ import {
   syncHealthConnectBiometrics,
   writeHealthConnectImportEnabled,
 } from '../healthConnectSync';
+import { dayString } from '../calendar';
+import {
+  localStepsView,
+  recordStepsOutcome,
+  writeStepsAsked,
+  type StepSource,
+  type StepsOutcome,
+} from '../steps';
 
 let mockFixture: FixtureDb;
 jest.mock('../db', () => {
@@ -76,12 +84,26 @@ let mockExerciseWindowsRejectsWith: unknown = null;
 const mockQueryExerciseWindows = jest.fn((_since: string, _until: string) =>
   Promise.resolve(mockExerciseWindows),
 );
+/** N569: what the steps read answers this pass — an outcome, or an Error to throw. */
+let mockStepsOutcome: StepsOutcome | Error = { kind: 'steps', steps: 0 };
+const mockQuerySteps = jest.fn((_window: unknown) =>
+  mockStepsOutcome instanceof Error ? Promise.reject(mockStepsOutcome) : Promise.resolve(mockStepsOutcome),
+);
+/** N569: which platform owns steps. jest-expo runs as iOS, so the Android pass
+ *  would never read steps here without this; one test sets it back to iOS to
+ *  prove the pass then keeps its hands off HealthKit's reading. */
+let mockStepPlatform: StepSource | null = 'health_connect';
+jest.mock('../steps', () => ({
+  ...jest.requireActual('../steps'),
+  platformStepSource: () => mockStepPlatform,
+}));
 jest.mock('../healthConnect', () => {
   const real = jest.requireActual('../healthConnect');
   return {
     ...real,
     isHealthConnectSupported: () => Promise.resolve(mockSupported),
-    requestHealthConnectReadAuthorization: () => mockRequestAuth(),
+    requestHealthConnectReadAuthorization: (options?: { includeSteps?: boolean }) => mockRequestAuth(options),
+    queryHealthConnectSteps: (window: unknown) => mockQuerySteps(window),
     queryHeartRateSamples: (startedAt: string, endedAt: string) =>
       mockHeartRateRejectsWith
         ? Promise.reject(mockHeartRateRejectsWith)
@@ -213,6 +235,9 @@ beforeEach(async () => {
   mockPutSamples.mockClear();
   mockComputeSessionMetrics.mockClear();
   mockComputeSessionMetrics.mockImplementation(defaultComputeSessionMetrics);
+  mockStepsOutcome = { kind: 'steps', steps: 0 };
+  mockStepPlatform = 'health_connect';
+  mockQuerySteps.mockClear();
 });
 
 /**
@@ -807,5 +832,89 @@ describe('enrichHealthConnectSessionNow — W18/#957, the "Sync heart rate" butt
     const outcome = await enrichHealthConnectSessionNow(USER, getToken, { id: 'x', started_at: started, ended_at: null });
     expect(outcome).toEqual({ status: 'error' });
     expect(mockQueryHeartRate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * N569/#1130 — steps ride the Health Connect pass: local-only, never requested
+ * until the athlete asked, and a refused grant reported rather than swallowed.
+ */
+describe('steps ride the Health Connect pass (N569/#1130)', () => {
+  const today = () => dayString(new Date());
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+
+  it('a refused Steps grant is recorded as refused and reported — and heart-rate enrichment still runs', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = new HealthConnectPermissionError('Steps');
+    await seedFinishedRemoteSession('s1', hoursAgo(26), hoursAgo(25));
+    mockHeartRateReadings = [heartRateReading()];
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toContain('Steps');
+    expect(result.attempted).toBe(1);
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'refused', source: 'health_connect' });
+    expect(mockFixture.raw.prepare('SELECT count(*) AS n FROM daily_steps').get()).toEqual({ n: 0 });
+  });
+
+  it('never asked: "not_asked", and the access the pass requests does NOT include Steps', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockRequestAuth).toHaveBeenCalledWith({ includeSteps: false });
+    expect(mockQuerySteps).not.toHaveBeenCalled();
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'not_asked' });
+  });
+
+  it("once asked: requests Steps and stores today's count on the phone", async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = { kind: 'steps', steps: 6120 };
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockRequestAuth).toHaveBeenCalledWith({ includeSteps: true });
+    expect(result.notPermitted).not.toContain('Steps');
+    expect(await localStepsView(USER, today())).toMatchObject({
+      state: 'read',
+      today: { steps: 6120, source: 'health_connect' },
+    });
+  });
+
+  it('permitted, but nothing on the phone records steps: no_data — not zero', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = { kind: 'no_data' };
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'no_data' });
+  });
+
+  it('a transient failure writes nothing and is not reported as a refusal', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = Object.assign(new Error('native'), { code: 'IO_EXCEPTION' });
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).not.toContain('Steps');
+    expect(await localStepsView(USER, today())).toEqual({ state: 'unknown' });
+  });
+
+  it("on an iPhone this pass never touches steps — it cannot overwrite HealthKit's reading with \"no source\"", async () => {
+    mockStepPlatform = 'healthkit';
+    mockSupported = false; // no Health Connect on an iPhone
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 8412 }, new Date());
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockQuerySteps).not.toHaveBeenCalled();
+    expect(await localStepsView(USER, today())).toMatchObject({
+      state: 'read',
+      today: { steps: 8412, source: 'healthkit' },
+    });
   });
 });

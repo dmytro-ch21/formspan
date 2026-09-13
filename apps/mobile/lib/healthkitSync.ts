@@ -6,14 +6,24 @@ import {
   filterNewWorkouts,
   isHealthKitSupported,
   mapWorkoutToRunningDetail,
+  queryHealthKitSteps,
   queryOtherWorkouts,
   queryRunningWorkouts,
   requestHealthKitReadAuthorization,
+  requestHealthKitStepsAuthorization,
 } from './healthkit';
 import { PREF_HEALTHKIT_IMPORT, readPref, writePref } from './prefs';
 import { RUN_EXERCISE_ID } from './running';
 import { emptySet, roundDistanceM } from './sessions';
 import { saveLocalRunningDetail, saveLocalSets, startLocalSession } from './sessionStore';
+import {
+  platformStepSource,
+  readStepsAsked,
+  runStepsRead,
+  setStepsRefresher,
+  writeStepsAsked,
+  type StepsReadState,
+} from './steps';
 import { request as requestSync } from './sync';
 
 /**
@@ -150,12 +160,21 @@ async function detectOtherHealthKitActivity(userID: string): Promise<void> {
  * is no failure mode here that is the athlete's to fix.
  */
 export async function importHealthKitRuns(userID: string): Promise<{ imported: number }> {
+  // N569/#1130: steps ride this pass, FIRST and before the early returns below,
+  // because "sync is off" and "no HealthKit here" are answers the steps state
+  // records. Never throws, and needs no network — see `readHealthKitSteps`.
+  await readHealthKitSteps(userID);
+
   if (!(await readHealthKitImportEnabled(userID))) return { imported: 0 };
   if (!isHealthKitSupported()) return { imported: 0 };
 
   // Safe on every pass, not only the first — see requestHealthKitReadAuthorization's
   // own doc comment for why this never re-prompts once answered.
-  await requestHealthKitReadAuthorization();
+  //
+  // N569/#1130: steps are included only once the athlete has asked for them.
+  // A type never decided on re-opens HealthKit's sheet, and this runs on every
+  // foreground return — see `STEPS_READ_TYPE`.
+  await requestHealthKitReadAuthorization({ includeSteps: await readStepsAsked(userID) });
 
   // N479/#824: notice other activity (a walk, a hike) for Today's own card —
   // best-effort and never allowed to fail the running import this function
@@ -243,10 +262,56 @@ export async function importHealthKitRuns(userID: string): Promise<{ imported: n
   return { imported };
 }
 
+/**
+ * N569/#1130 — one steps read for `userID`, from HealthKit, into the local store.
+ *
+ * Runs inside every import pass (sign-in, every foreground return, the Settings
+ * toggle and "Allow steps"), and on its own when VOLA asks for a fresh count
+ * (`requestStepsRefresh`, at most once a minute). A HealthKit read is on-device,
+ * so this works identically offline. Never throws; a failed read writes nothing.
+ *
+ * A no-op off iOS — see `platformStepSource`.
+ */
+export function readHealthKitSteps(userID: string, now?: () => Date): Promise<StepsReadState | null> {
+  if (platformStepSource() !== 'healthkit') return Promise.resolve(null);
+  return runStepsRead(userID, 'healthkit', {
+    supported: () => isHealthKitSupported(),
+    enabled: () => readHealthKitImportEnabled(userID),
+    read: queryHealthKitSteps,
+    now,
+  });
+}
+
+/**
+ * The "Allow steps" action on iOS. Shows HealthKit's sheet — which, on an
+ * install that already granted workouts and heart rate, lists Steps alone —
+ * records that the athlete was asked, and runs a pass so the answer shows at
+ * once. The copy explaining why is on the screen that calls this.
+ */
+export async function askHealthKitSteps(userID: string): Promise<void> {
+  if (!isHealthKitSupported()) return;
+  await requestHealthKitStepsAuthorization();
+  await writeStepsAsked(userID);
+  triggerHealthKitImportNow(userID);
+}
+
 // --- orchestration: when a pass runs -----------------------------------
 
 let currentUserID: string | null = null;
 let running = false;
+let stepsRunning = false;
+
+/** A steps-only read, for `requestStepsRefresh`. Its own flag, so a screen
+ *  asking twice does not stack reads; racing a full pass is harmless because
+ *  both write the same day's row with an upsert. */
+function runStepsOnlyPass(): void {
+  if (!currentUserID || stepsRunning) return;
+  const userID = currentUserID;
+  stepsRunning = true;
+  void readHealthKitSteps(userID).finally(() => {
+    stepsRunning = false;
+  });
+}
 
 /**
  * Who to import as. Set from `app/_layout.tsx` alongside `setSyncIdentity`,
@@ -307,6 +372,8 @@ let appStateSub: { remove: () => void } | null = null;
  */
 export function startHealthKitImportOrchestrator(): () => void {
   appStateSub?.remove();
+  const ownsSteps = platformStepSource() === 'healthkit';
+  if (ownsSteps) setStepsRefresher(runStepsOnlyPass);
   let previous: AppStateStatus = AppState.currentState;
   appStateSub = AppState.addEventListener('change', (next) => {
     const wasAway = previous === 'background' || previous === 'inactive';
@@ -318,5 +385,6 @@ export function startHealthKitImportOrchestrator(): () => void {
   return () => {
     appStateSub?.remove();
     appStateSub = null;
+    if (ownsSteps) setStepsRefresher(null);
   };
 }

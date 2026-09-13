@@ -12,6 +12,7 @@ import { useAuth as useClerkAuth } from '@clerk/clerk-expo';
 
 import { isHealthKitSupported } from '@/lib/healthkit';
 import {
+  askHealthKitSteps,
   readHealthKitImportEnabled,
   triggerHealthKitImportNow,
   writeHealthKitImportEnabled,
@@ -19,6 +20,7 @@ import {
 import { readBiometricSyncFailureCount, triggerBiometricSyncNow } from '@/lib/biometricSync';
 import { isHealthConnectSupported } from '@/lib/healthConnect';
 import {
+  askHealthConnectSteps,
   readHealthConnectImportEnabled,
   triggerHealthConnectSyncNow,
   writeHealthConnectImportEnabled,
@@ -35,6 +37,7 @@ import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { healthSourceFor } from '@/lib/vo2MaxSource';
 import { HRMonitorPairing } from '@/components/settings/HRMonitorPairing';
+import { StepsPermissionRow } from '@/components/settings/StepsPermissionRow';
 import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
@@ -386,6 +389,12 @@ export default function SettingsScreen() {
           }}
           testID="settings-healthkit-import"
         />
+        {/* N569/#1130: steps are asked for here, deliberately, and only once
+            Health sync is on — see StepsPermissionRow's doc comment for why the
+            toggle above does not simply include them. */}
+        {Platform.OS !== 'android' && healthKitSupported && healthKitImport && userId && (
+          <StepsPermissionRow userId={userId} source="healthkit" onAsk={() => askHealthKitSteps(userId)} />
+        )}
         {/* N478: the Android equivalent — only rendered on Android, the
             same "nothing hides, but a platform-impossible control isn't
             reachability" reasoning `Toggle`'s own `disabled` state uses on
@@ -428,6 +437,13 @@ export default function SettingsScreen() {
               })();
             }}
             testID="settings-health-connect-import"
+          />
+        )}
+        {Platform.OS === 'android' && healthConnectSupported && healthConnectImport && userId && (
+          <StepsPermissionRow
+            userId={userId}
+            source="health_connect"
+            onAsk={() => askHealthConnectSteps(userId, getToken)}
           />
         )}
         {/* N552/#1021: the pairing block also names the two heart-rate

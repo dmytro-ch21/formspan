@@ -30,6 +30,8 @@ import {
   writeHealthKitImportEnabled,
 } from '../healthkitSync';
 import { listLocalSessions, readLocalRunningDetail, readLocalSession } from '../sessionStore';
+import { dayString } from '../calendar';
+import { localStepsView, recordStepsOutcome, writeStepsAsked, type StepSource, type StepsOutcome } from '../steps';
 
 let mockFixture: FixtureDb;
 jest.mock('../db', () => {
@@ -53,12 +55,25 @@ let mockWorkouts: HealthKitRunningWorkout[] = [];
  *  one statement in it, rolls back. */
 let mockThrowMappingFor: string | null = null;
 const mockRequestAuth = jest.fn().mockResolvedValue(true);
+/** N569: what the steps read answers this pass — an outcome, or an Error to throw. */
+let mockStepsOutcome: StepsOutcome | Error = { kind: 'steps', steps: 0 };
+const mockQuerySteps = jest.fn((_window: unknown) =>
+  mockStepsOutcome instanceof Error ? Promise.reject(mockStepsOutcome) : Promise.resolve(mockStepsOutcome),
+);
+/** N569: which platform owns steps — iOS under jest-expo; one test moves it to
+ *  Android to prove this pass then leaves Health Connect's reading alone. */
+let mockStepPlatform: StepSource | null = 'healthkit';
+jest.mock('../steps', () => ({
+  ...jest.requireActual('../steps'),
+  platformStepSource: () => mockStepPlatform,
+}));
 jest.mock('../healthkit', () => {
   const real = jest.requireActual('../healthkit');
   return {
     ...real,
     isHealthKitSupported: () => mockSupported,
-    requestHealthKitReadAuthorization: () => mockRequestAuth(),
+    requestHealthKitReadAuthorization: (options?: { includeSteps?: boolean }) => mockRequestAuth(options),
+    queryHealthKitSteps: (window: unknown) => mockQuerySteps(window),
     queryRunningWorkouts: () => Promise.resolve(mockWorkouts),
     mapWorkoutToRunningDetail: (workout: HealthKitRunningWorkout, sessionID: string) => {
       if (workout.uuid === mockThrowMappingFor) {
@@ -93,6 +108,9 @@ beforeEach(async () => {
   mockThrowMappingFor = null;
   mockRequestAuth.mockClear();
   mockRequestSync.mockClear();
+  mockStepsOutcome = { kind: 'steps', steps: 0 };
+  mockStepPlatform = 'healthkit';
+  mockQuerySteps.mockClear();
 });
 
 describe('the settings toggle', () => {
@@ -242,5 +260,104 @@ describe('importHealthKitRuns', () => {
 
     expect(other.imported).toBe(1);
     expect(await listLocalSessions('another_user')).toHaveLength(1);
+  });
+});
+
+/**
+ * N569/#1130 — steps ride the import pass, local-only, and the pass never asks
+ * for steps until the athlete has.
+ */
+describe('steps ride the import pass (N569/#1130)', () => {
+  const today = () => dayString(new Date());
+
+  it('Health sync off: "off", nothing read and nothing requested', async () => {
+    await importHealthKitRuns(USER);
+
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'off', source: 'healthkit' });
+    expect(mockQuerySteps).not.toHaveBeenCalled();
+    expect(mockRequestAuth).not.toHaveBeenCalled();
+  });
+
+  it('no HealthKit on this phone: "no_source" — not "off", not zero', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    mockSupported = false;
+
+    await importHealthKitRuns(USER);
+
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'no_source' });
+    expect(mockQuerySteps).not.toHaveBeenCalled();
+  });
+
+  it('never asked: "not_asked", and the access the pass requests does NOT include steps', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+
+    await importHealthKitRuns(USER);
+
+    expect(mockRequestAuth).toHaveBeenCalledWith({ includeSteps: false });
+    expect(mockQuerySteps).not.toHaveBeenCalled();
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'not_asked', source: 'healthkit' });
+  });
+
+  it("once asked: the pass includes steps, reads them, and stores today's count on the phone", async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = { kind: 'steps', steps: 8412 };
+
+    await importHealthKitRuns(USER);
+
+    expect(mockRequestAuth).toHaveBeenCalledWith({ includeSteps: true });
+    expect(await localStepsView(USER, today())).toMatchObject({
+      state: 'read',
+      today: { day: today(), steps: 8412, source: 'healthkit' },
+    });
+  });
+
+  it('a refusal is recorded as refused — no row, and no zero', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = { kind: 'refused' };
+
+    await importHealthKitRuns(USER);
+
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'refused', source: 'healthkit' });
+    expect(mockFixture.raw.prepare('SELECT count(*) AS n FROM daily_steps').get()).toEqual({ n: 0 });
+  });
+
+  it('a genuine zero-step day is stored as 0', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = { kind: 'steps', steps: 0 };
+
+    await importHealthKitRuns(USER);
+
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'read', today: { steps: 0 } });
+  });
+
+  it('a failed steps read writes nothing and does not stop the run import', async () => {
+    await writeHealthKitImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = { kind: 'steps', steps: 5000 };
+    await importHealthKitRuns(USER);
+
+    mockStepsOutcome = new Error('native failure');
+    mockWorkouts = [workout()];
+    const result = await importHealthKitRuns(USER);
+
+    expect(result.imported).toBe(1);
+    expect(await localStepsView(USER, today())).toMatchObject({ state: 'read', today: { steps: 5000 } });
+  });
+
+  it("on Android this pass never touches steps — it cannot overwrite Health Connect's reading with \"no source\"", async () => {
+    mockStepPlatform = 'health_connect';
+    mockSupported = false; // no HealthKit on an Android phone
+    await recordStepsOutcome(USER, 'health_connect', { kind: 'steps', steps: 6120 }, new Date());
+
+    await importHealthKitRuns(USER);
+
+    expect(mockQuerySteps).not.toHaveBeenCalled();
+    expect(await localStepsView(USER, today())).toMatchObject({
+      state: 'read',
+      today: { steps: 6120, source: 'health_connect' },
+    });
   });
 });

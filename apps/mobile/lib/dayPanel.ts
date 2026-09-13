@@ -4,6 +4,7 @@ import { hasFoodLog, type Module } from './modules';
 import { dayTotals, type Entry, type Macros, type Target, type TargetView } from './nutrition';
 import type { PlannedSession } from './plan';
 import type { Session } from './sessions';
+import type { StepSource, StepsView } from './steps';
 import type { TodayBoard } from './todayBoard';
 import { byTracker, type TrackerView } from './trackers';
 import { formatClock, loggedCount, targetCount, type Tracker, type TrackerEntry } from './trackerModel';
@@ -60,11 +61,10 @@ import type { PlannedOffer, Source } from './trainBoard';
  *
  * ## Where the panel is honest about what it cannot say
  *
- * Two things the athlete named have **no local row**, so they are not here:
+ * Steps used to be the first item here — no table stored a count, so a "do your
+ * steps" line would have been the first fabricated fact. N569 (#1130) added the
+ * table; see "Steps" below. What still has no fact:
  *
- * - **Steps.** No table on this device stores a step count, and no read of one
- *   exists anywhere in `apps/mobile`. A "do your steps" line would be the first
- *   fabricated fact, not a missing feature.
  * - **Trackers without a target.** A count with no ceiling is not a target, so
  *   it is not something outstanding. Today still draws them.
  *
@@ -86,6 +86,23 @@ import type { PlannedOffer, Source } from './trainBoard';
  * | never fetched for this athlete | `unavailable` | "Not available on this phone yet." |
  * | fetched, has a row | `ready`, fact + its row's `fetched_at` | the value, "Last updated …" |
  * | fetched, genuinely empty | `ready`, `fact: null` + when | "No check-in since …", "Last updated …" |
+ *
+ * ## Steps (N569, #1130)
+ *
+ * Today's count from `daily_steps`, which the Health read passes fill
+ * (`lib/steps.ts`). The panel never reads Health itself. Only a count is a fact,
+ * and a count of zero IS one. Every other answer is a reason there is no count,
+ * and none of them may become a number:
+ *
+ * | Latest read | Section | Screen |
+ * |---|---|---|
+ * | never ran for this athlete | `unavailable` | "Not available on this phone yet." |
+ * | counted, today | `counted`, fact + its row | "8,412 steps", "As of 14:05, from Apple Health" |
+ * | counted, but on an earlier day | `not-read-today` | "No step reading yet today." |
+ * | refused | `refused` | the platform is not giving VOLA steps, and where to change it |
+ * | permitted, no app writes steps | `no-data` | Health Connect has no step data yet |
+ * | no Apple Health / Health Connect | `no-source` | nothing on this phone to read from |
+ * | Health sync off, or never asked | `not-connected` | "Steps aren't connected", with the way in |
  */
 
 /** A row on this device that a fact is drawn from. */
@@ -103,7 +120,13 @@ export type RowRef =
    * citing the row must carry exactly that time, never a fresher one.
    */
   | { table: 'body_checkins_cache'; measuredOn: string; fetchedAt: string }
-  | { table: 'body_phases_cache'; id: string; fetchedAt: string };
+  | { table: 'body_phases_cache'; id: string; fetchedAt: string }
+  /**
+   * N569: today's steps. Names the count and the read time as well as the day,
+   * so a fact stating a different number, or a fresher read, than the row is
+   * refused by the provenance check.
+   */
+  | { table: 'daily_steps'; day: string; readAt: string; steps: number };
 
 /**
  * One positive claim the panel makes, with the rows behind it.
@@ -134,7 +157,21 @@ export type DayFact = { key: string; refs: RowRef[] } & (
   | { kind: 'last-checkin'; checkin: CachedCheckin }
   /** The phase with no end date, as this phone last heard it. */
   | { kind: 'phase-goal'; phase: CachedPhase }
+  /** N569: today's step count as last read. Zero is a count. */
+  | { kind: 'steps'; steps: number; readAt: string; source: StepSource }
 );
+
+/**
+ * What the panel can say about today's steps. Only `counted` carries a fact —
+ * see "Steps" in the module doc for why each of the others is not a number.
+ */
+export type StepsStatus =
+  | { kind: 'counted'; fact: DayFact }
+  | { kind: 'not-read-today'; lastReadAt: string; source: StepSource | null }
+  | { kind: 'refused'; source: StepSource | null }
+  | { kind: 'no-data'; source: StepSource | null }
+  | { kind: 'no-source' }
+  | { kind: 'not-connected'; reason: 'off' | 'not_asked'; source: StepSource | null };
 
 /**
  * A section drawn from the body read cache (N568).
@@ -191,6 +228,8 @@ export type DayPanel = {
   checkin: Source<LastKnown & { since: string }>;
   /** The active phase and its goal, as last fetched. */
   phase: Source<LastKnown>;
+  /** N569: today's steps, or why there is no count. */
+  steps: Source<StepsStatus>;
 };
 
 /**
@@ -244,6 +283,8 @@ export function assembleDay(input: {
   /** N568: dated like the other day-scoped reads — "on or before today". */
   checkins: Source<Dated<CheckinCacheView>>;
   phases: Source<PhaseCacheView>;
+  /** N569: dated like the other day-scoped reads. */
+  steps: Source<Dated<StepsView>>;
   modules: Module[];
 }): DayPanel {
   const { day, board, plans, modules } = input;
@@ -327,8 +368,52 @@ export function assembleDay(input: {
 
   const checkin = checkinSection(current(input.checkins, day));
   const phase = phaseSection(input.phases);
+  const steps = stepsSection(current(input.steps, day), day);
 
-  return { day, plan, logged, next, trackers, food, target, checkin, phase };
+  return { day, plan, logged, next, trackers, food, target, checkin, phase, steps };
+}
+
+/**
+ * Today's steps. `unknown` becomes `unavailable`, never a count: a phone where
+ * no read has run must not tell an athlete who walked all day that they did not.
+ * A row for another day is `not-read-today`, never zero.
+ */
+function stepsSection(view: Source<StepsView>, day: string): Source<StepsStatus> {
+  if (view.state !== 'ready') return view;
+  const v = view.value;
+  switch (v.state) {
+    case 'unknown':
+      return { state: 'unavailable' };
+    case 'read': {
+      const row = v.today;
+      if (!row || row.day !== day) {
+        return { state: 'ready', value: { kind: 'not-read-today', lastReadAt: v.lastReadAt, source: v.source } };
+      }
+      return {
+        state: 'ready',
+        value: {
+          kind: 'counted',
+          fact: {
+            key: `steps:${row.day}`,
+            kind: 'steps',
+            steps: row.steps,
+            readAt: row.read_at,
+            source: row.source,
+            refs: [{ table: 'daily_steps', day: row.day, readAt: row.read_at, steps: row.steps }],
+          },
+        },
+      };
+    }
+    case 'refused':
+      return { state: 'ready', value: { kind: 'refused', source: v.source } };
+    case 'no_data':
+      return { state: 'ready', value: { kind: 'no-data', source: v.source } };
+    case 'no_source':
+      return { state: 'ready', value: { kind: 'no-source' } };
+    case 'off':
+    case 'not_asked':
+      return { state: 'ready', value: { kind: 'not-connected', reason: v.state, source: v.source } };
+  }
 }
 
 /**
@@ -490,6 +575,7 @@ export function panelFacts(panel: DayPanel): DayFact[] {
   if (panel.next.state === 'ready' && panel.next.value) out.push(panel.next.value);
   if (panel.trackers.state === 'ready') out.push(...panel.trackers.value);
   if (panel.food.state === 'ready' && panel.food.value) out.push(panel.food.value);
+  if (panel.steps.state === 'ready' && panel.steps.value.kind === 'counted') out.push(panel.steps.value.fact);
   if (panel.target.state === 'ready' && panel.target.value) out.push(panel.target.value);
   if (panel.checkin.state === 'ready' && panel.checkin.value.fact) out.push(panel.checkin.value.fact);
   if (panel.phase.state === 'ready' && panel.phase.value.fact) out.push(panel.phase.value.fact);

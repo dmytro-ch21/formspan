@@ -30,6 +30,7 @@ import type { Module } from '../modules';
 import type { Target } from '../nutrition';
 import { planSession, unplanSession } from '../plan';
 import { startLocalSession } from '../sessionStore';
+import { recordStepsOutcome, recordStepsState } from '../steps';
 import { buildTodayBoard } from '../todayBoard';
 import type { Tracker } from '../trackerModel';
 import { cacheTrackers, logTap } from '../trackers';
@@ -362,6 +363,7 @@ describe('no absence from a read that did not answer', () => {
         target: s,
         checkins: s,
         phases: s,
+        steps: s,
         modules: WITH_FOOD,
       });
       expect(panelFacts(panel)).toEqual([]);
@@ -374,6 +376,7 @@ describe('no absence from a read that did not answer', () => {
         panel.target,
         panel.checkin,
         panel.phase,
+        panel.steps,
       ]) {
         expect(section.state).toBe(s.state);
       }
@@ -421,8 +424,22 @@ describe('a read made for another day is not an answer about today', () => {
         },
       },
       phases: { state: 'unread' },
+      // N569: steps are dated too — a count read yesterday is not today's.
+      steps: {
+        state: 'ready',
+        value: {
+          on: YESTERDAY,
+          value: {
+            state: 'read',
+            today: { day: YESTERDAY, steps: 9000, source: 'healthkit', read_at: '2026-09-09T20:00:00.000Z' },
+            lastReadAt: '2026-09-09T20:00:00.000Z',
+            source: 'healthkit',
+          },
+        },
+      },
       modules: WITH_FOOD,
     });
+    expect(panel.steps).toEqual({ state: 'unread' });
     expect(panel.checkin).toEqual({ state: 'unread' });
     expect(panel.trackers).toEqual({ state: 'unread' });
     expect(panel.food).toEqual({ state: 'unread' });
@@ -670,5 +687,145 @@ describe('lastUpdatedLabel', () => {
     expect(lastUpdatedLabel(new Date(2026, 8, 7, 16, 0).toISOString(), NOW)).toBe('Last updated 7 Sep, 16:00');
     expect(lastUpdatedLabel(new Date(2025, 8, 7, 16, 0).toISOString(), NOW)).toBe('Last updated 7 Sep 2025, 16:00');
     expect(lastUpdatedLabel('not a time', NOW)).toBe('Last updated at an unknown time');
+  });
+});
+
+describe("today's steps (N569, #1130)", () => {
+  // Read at 2:05pm today, seven hours before NOW.
+  const READ_AT = new Date(2026, 8, 10, 14, 5, 0);
+
+  it('no read has ever run on this phone: unavailable — never zero, never "no steps"', async () => {
+    const panel = await readPanel(WITH_FOOD);
+    expect(panel.steps).toEqual({ state: 'unavailable' });
+    expect(panelFacts(panel).some((f) => f.kind === 'steps')).toBe(false);
+  });
+
+  it('a count, offline: the fact states the row and when it was read, and the row is live', async () => {
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 8412 }, READ_AT);
+
+    const panel = await readPanel(WITH_FOOD);
+
+    const readAt = READ_AT.toISOString();
+    expect(panel.steps).toEqual({
+      state: 'ready',
+      value: {
+        kind: 'counted',
+        fact: {
+          key: `steps:${TODAY}`,
+          kind: 'steps',
+          steps: 8412,
+          readAt,
+          source: 'healthkit',
+          refs: [{ table: 'daily_steps', day: TODAY, readAt, steps: 8412 }],
+        },
+      },
+    });
+    expect(keys(panelFacts(panel))).toEqual([`steps:${TODAY}`]);
+    expect(await unbackedFacts(mockFixture, USER, panelFacts(panel))).toEqual([]);
+    expect(mockApi).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a genuine zero-step day is a count of 0 — a fact, not an absence', async () => {
+    await recordStepsOutcome(USER, 'health_connect', { kind: 'steps', steps: 0 }, READ_AT);
+
+    const panel = await readPanel(WITH_FOOD);
+
+    expect(panel.steps.state).toBe('ready');
+    if (panel.steps.state !== 'ready' || panel.steps.value.kind !== 'counted') throw new Error('expected a count');
+    expect(panel.steps.value.fact).toMatchObject({ kind: 'steps', steps: 0, source: 'health_connect' });
+    expect(await unbackedFacts(mockFixture, USER, panelFacts(panel))).toEqual([]);
+  });
+
+  it('a refusal is not zero and not "no steps": no fact, even with an earlier reading still on disk', async () => {
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 5000 }, new Date(2026, 8, 10, 9, 0, 0));
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'refused' }, READ_AT);
+
+    const panel = await readPanel(WITH_FOOD);
+
+    expect(panel.steps).toEqual({ state: 'ready', value: { kind: 'refused', source: 'healthkit' } });
+    expect(panelFacts(panel).some((f) => f.kind === 'steps')).toBe(false);
+    // The morning's reading is kept, not deleted — it is just no longer asserted.
+    expect(mockFixture.raw.prepare('SELECT steps FROM daily_steps WHERE user_id = ?').get(USER)).toEqual({ steps: 5000 });
+  });
+
+  it('a phone with no step source is its own state — not refused, not zero', async () => {
+    await recordStepsState(USER, 'no_source', null, READ_AT);
+    expect((await readPanel(WITH_FOOD)).steps).toEqual({ state: 'ready', value: { kind: 'no-source' } });
+  });
+
+  it('permitted, but no app records steps: no-data — not zero', async () => {
+    await recordStepsOutcome(USER, 'health_connect', { kind: 'no_data' }, READ_AT);
+    expect((await readPanel(WITH_FOOD)).steps).toEqual({
+      state: 'ready',
+      value: { kind: 'no-data', source: 'health_connect' },
+    });
+  });
+
+  it('Health sync off, or steps never asked for: not connected, and says which', async () => {
+    await recordStepsState(USER, 'not_asked', 'healthkit', READ_AT);
+    expect((await readPanel(WITH_FOOD)).steps).toEqual({
+      state: 'ready',
+      value: { kind: 'not-connected', reason: 'not_asked', source: 'healthkit' },
+    });
+    await recordStepsState(USER, 'off', 'healthkit', READ_AT);
+    expect((await readPanel(WITH_FOOD)).steps).toEqual({
+      state: 'ready',
+      value: { kind: 'not-connected', reason: 'off', source: 'healthkit' },
+    });
+  });
+
+  it("a count read on an earlier day is \"not read yet today\" — not today's count, and not zero", async () => {
+    const lastNight = new Date(2026, 8, 9, 22, 0, 0);
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 11000 }, lastNight);
+
+    const panel = await readPanel(WITH_FOOD);
+
+    expect(panel.steps).toEqual({
+      state: 'ready',
+      value: { kind: 'not-read-today', lastReadAt: lastNight.toISOString(), source: 'healthkit' },
+    });
+    expect(panelFacts(panel)).toEqual([]);
+  });
+
+  it("another account's steps on this phone are never this athlete's", async () => {
+    await recordStepsOutcome(OTHER, 'healthkit', { kind: 'steps', steps: 7777 }, READ_AT);
+
+    expect((await readPanel(WITH_FOOD)).steps).toEqual({ state: 'unavailable' });
+    const theirs = await readPanel(WITH_FOOD, NOW, OTHER);
+    expect(theirs.steps.state === 'ready' && theirs.steps.value.kind).toBe('counted');
+  });
+
+  it('the provenance check refuses a steps fact the store does not back — a different count, a fresher read, another athlete, or a later refusal', async () => {
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 8412 }, READ_AT);
+    await recordStepsOutcome(OTHER, 'healthkit', { kind: 'steps', steps: 7777 }, new Date(2026, 8, 8, 12, 0, 0));
+    const real = panelFacts(await readPanel(WITH_FOOD)).find((f) => f.kind === 'steps');
+    if (!real || real.kind !== 'steps') throw new Error('expected a steps fact');
+    const readAt = READ_AT.toISOString();
+    const theirReadAt = new Date(2026, 8, 8, 12, 0, 0).toISOString();
+
+    const fabricated: DayFact[] = [
+      { ...real, key: 'steps:inflated', steps: 9000, refs: [{ table: 'daily_steps', day: TODAY, readAt, steps: 9000 }] },
+      {
+        ...real,
+        key: 'steps:fresher',
+        readAt: NOW.toISOString(),
+        refs: [{ table: 'daily_steps', day: TODAY, readAt: NOW.toISOString(), steps: 8412 }],
+      },
+      {
+        ...real,
+        key: 'steps:theirs',
+        steps: 7777,
+        refs: [{ table: 'daily_steps', day: '2026-09-08', readAt: theirReadAt, steps: 7777 }],
+      },
+    ];
+    const problems = await unbackedFacts(mockFixture, USER, fabricated);
+    expect(problems).toHaveLength(3);
+    expect(problems.join('\n')).toMatch(/steps:inflated: daily_steps@2026-09-10 9000/);
+    expect(await unbackedFacts(mockFixture, USER, [real])).toEqual([]);
+
+    // The athlete then refuses: the row is still there, and still not assertable.
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'refused' }, NOW);
+    expect(await unbackedFacts(mockFixture, USER, [real])).toHaveLength(1);
   });
 });
