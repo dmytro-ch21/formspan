@@ -7,7 +7,9 @@ import {
   healthSourceLabel,
   healthSyncSettingLabel,
   latestReadingOn,
+  latestVo2MaxReading,
   readingAgePhrase,
+  vo2MaxPeriodPhrase,
   vo2MaxEmptyCopy,
   vo2MaxReadingOrigin,
   VO2MAX_MIN_TREND_READINGS,
@@ -614,5 +616,67 @@ describe('vo2MaxTrendEmpty — the no-trend state is reachable from real data', 
       '1 VO2max reading in this range — a trend line needs 2. The latest is from 21 Aug, 3 weeks ago.\n\n' +
         vo2MaxReadingOrigin('healthkit'),
     );
+  });
+});
+
+describe('latestVo2MaxReading (N546)', () => {
+  const today = '2026-09-13';
+
+  it('returns the newest reading day and its value', () => {
+    expect(
+      latestVo2MaxReading(
+        [
+          { measured_at: '2026-08-01T12:00:00Z', value: 40.0 },
+          { measured_at: '2026-09-01T12:00:00Z', value: 42.5 },
+          { measured_at: '2026-08-20T12:00:00Z', value: 41.0 },
+        ],
+        today,
+      ),
+    ).toEqual({ on: '2026-09-01', value: 42.5 });
+  });
+
+  it('takes the later of two readings on the same day', () => {
+    expect(
+      latestVo2MaxReading(
+        [
+          { measured_at: '2026-09-01T18:00:00Z', value: 43.0 },
+          { measured_at: '2026-09-01T12:00:00Z', value: 42.0 },
+        ],
+        today,
+      ),
+    ).toEqual({ on: '2026-09-01', value: 43.0 });
+  });
+
+  it('skips a future-dated reading and an unparseable timestamp, and returns null with nothing left', () => {
+    expect(
+      latestVo2MaxReading(
+        [
+          { measured_at: '2026-12-01T12:00:00Z', value: 60 },
+          { measured_at: 'not a date', value: 55 },
+          { measured_at: '2026-09-02T12:00:00Z', value: 44 },
+        ],
+        today,
+      ),
+    ).toEqual({ on: '2026-09-02', value: 44 });
+    expect(latestVo2MaxReading([{ measured_at: '2026-12-01T12:00:00Z', value: 60 }], today)).toBeNull();
+    expect(latestVo2MaxReading([], today)).toBeNull();
+  });
+});
+
+describe('vo2MaxPeriodPhrase (N546)', () => {
+  it.each([
+    ['1W', 'past week'],
+    ['1M', 'past month'],
+    ['3M', 'past 3 months'],
+    ['6M', 'past 6 months'],
+    ['1Y', 'past year'],
+    ['All', null],
+    ['Plan', null],
+  ] as const)('%s → %p', (range, phrase) => {
+    expect(vo2MaxPeriodPhrase(range)).toBe(phrase);
+  });
+
+  it('has a phrase for every range this screen offers', () => {
+    for (const r of vo2MaxRanges()) expect(vo2MaxPeriodPhrase(r.key)).not.toBeNull();
   });
 });

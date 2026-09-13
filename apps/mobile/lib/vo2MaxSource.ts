@@ -291,6 +291,52 @@ export function readingAgePhrase(on: string, today: string): string {
   return `from ${date}, ${ago}`;
 }
 
+/**
+ * The newest reading's day AND value — N546 (#989), which shows the band for
+ * it. Same rules as `latestReadingOn`: an unparseable timestamp and a
+ * future-dated reading are skipped. Two readings on the same day resolve to
+ * the later `measured_at`, the value the athlete's device reported last.
+ */
+export function latestVo2MaxReading(
+  samples: readonly { measured_at: string; value: number }[],
+  today: string,
+): { on: string; value: number } | null {
+  let best: { on: string; at: number; value: number } | null = null;
+  for (const s of samples) {
+    const at = new Date(s.measured_at);
+    const ms = at.getTime();
+    if (Number.isNaN(ms)) continue;
+    const on = dayString(at);
+    if (on > today) continue;
+    if (best === null || ms > best.at) best = { on, at: ms, value: s.value };
+  }
+  return best ? { on: best.on, value: best.value } : null;
+}
+
+/**
+ * The period a delta covers, in words — N546's "change over a stated period,
+ * with the period named on screen". The change line already carried the first
+ * reading's date; this names the window the athlete chose, so "↑ 1.2 since
+ * 12 Mar" is read against "past 6 months" rather than guessed at. `null` for
+ * a range with no fixed window (`All`, `Plan`), which this screen never offers.
+ */
+export function vo2MaxPeriodPhrase(range: TrendRangeKey): string | null {
+  switch (range) {
+    case '1W':
+      return 'past week';
+    case '1M':
+      return 'past month';
+    case '3M':
+      return 'past 3 months';
+    case '6M':
+      return 'past 6 months';
+    case '1Y':
+      return 'past year';
+    default:
+      return null;
+  }
+}
+
 /** The newest reading and today, so a no-trend sentence can say how old it is.
  *  `on: null` (or omitting it) drops the age rather than inventing one. */
 export type LatestReading = { on: string | null; today: string };

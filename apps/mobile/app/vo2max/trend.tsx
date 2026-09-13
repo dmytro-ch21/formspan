@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { TrendChart } from '@/components/TrendChart';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { shortDate } from '@/lib/calendar';
 import { isHealthConnectSupported } from '@/lib/healthConnect';
 import { readHealthConnectImportEnabled } from '@/lib/healthConnectSync';
 import { isHealthKitSupported } from '@/lib/healthkit';
@@ -14,6 +15,9 @@ import {
   VO2MAX_FETCH_DAYS,
   healthSourceFor,
   latestReadingOn,
+  latestVo2MaxReading,
+  readingAgePhrase,
+  vo2MaxPeriodPhrase,
   vo2MaxEmptyCopy,
   vo2MaxTrendEmpty,
   vo2MaxRanges,
@@ -21,9 +25,11 @@ import {
   vo2MaxStateCopy,
 } from '@/lib/vo2MaxSource';
 import { readHealthKitImportEnabled } from '@/lib/healthkitSync';
+import { getProfile, type Profile } from '@/lib/profile';
 import { type TrendRangeKey, type TrendSeries } from '@/lib/trendSeries';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useVo2MaxTrend } from '@/lib/useVo2MaxTrend';
+import { VO2MAX_BAND_REFERENCE, classifyVo2Max, vo2MaxBandSentence } from '@/lib/vo2MaxBand';
 import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
@@ -98,6 +104,27 @@ export default function Vo2MaxTrendScreen() {
   const [sourceAvailable, setSourceAvailable] = useState<boolean | null>(
     source === 'health_connect' ? null : source !== null,
   );
+  // N546/#989 — the profile's date of birth and sex place the latest reading
+  // in a FRIEND band. `null` is "not answered yet" and `'failed'` is "could not
+  // ask" (offline, say): in both cases the band line is simply not shown. A
+  // failed read must not become "add your date of birth", which would tell an
+  // athlete who has filled it in that they have not.
+  const [profile, setProfile] = useState<Profile | null | 'failed'>(null);
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      getProfile(getToken)
+        .then((p) => {
+          if (live) setProfile(p);
+        })
+        .catch(() => {
+          if (live) setProfile('failed');
+        });
+      return () => {
+        live = false;
+      };
+    }, [getToken]),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -142,6 +169,15 @@ export default function Vo2MaxTrendScreen() {
   // screen's own answer to "is there a trend to draw"; see `vo2MaxTrendEmpty`.
   const empty = vo2MaxTrendEmpty(series);
   const fmt = (v: number) => v.toFixed(1);
+  // N546 — the newest reading over the whole fetch, like `latestOn`, so the
+  // band describes where the athlete is now whichever range is selected.
+  const latest = latestVo2MaxReading(samples, today);
+  const band =
+    latest && profile && profile !== 'failed'
+      ? classifyVo2Max({ value: latest.value, dateOfBirth: profile.date_of_birth, sex: profile.sex, on: latest.on })
+      : null;
+  const bandSentence = band ? vo2MaxBandSentence(band) : null;
+  const period = vo2MaxPeriodPhrase(range);
 
   return (
     <>
@@ -185,6 +221,27 @@ export default function Vo2MaxTrendScreen() {
           return null;
         })() ?? (
           <>
+            {latest ? (
+              <RNView style={styles.latest} testID="vo2max-latest">
+                <Text style={styles.latestValue} testID="vo2max-latest-value">
+                  {fmt(latest.value)} mL/kg/min
+                </Text>
+                <Text style={styles.latestMeta} testID="vo2max-latest-age">
+                  Latest reading {readingAgePhrase(latest.on, today)}
+                </Text>
+                {bandSentence ? (
+                  <Text style={styles.band} testID="vo2max-band">
+                    {bandSentence}
+                  </Text>
+                ) : null}
+                {band?.kind === 'band' ? (
+                  <Text style={styles.bandReference} testID="vo2max-band-reference">
+                    {VO2MAX_BAND_REFERENCE}
+                  </Text>
+                ) : null}
+              </RNView>
+            ) : null}
+
             <RNView style={styles.ranges}>
               {VO2MAX_RANGES.map((r) => {
                 const on = r.key === range;
@@ -209,9 +266,12 @@ export default function Vo2MaxTrendScreen() {
                 <Text style={styles.delta} testID="vo2max-delta">
                   {series.delta.change > 0 ? '↑' : series.delta.change < 0 ? '↓' : '→'}{' '}
                   {fmt(Math.abs(series.delta.change))} mL/kg/min
-                  <Text style={styles.since}> since {series.delta.from}</Text>
+                  <Text style={styles.since}>
+                    {period ? ` in the ${period}` : ` since ${shortDate(series.delta.from)}`}
+                  </Text>
                 </Text>
                 <Text style={styles.evidence} testID="vo2max-evidence">
+                  {period ? `since ${shortDate(series.delta.from)} · ` : ''}
                   {series.delta.n} {series.delta.n === 1 ? 'reading' : 'readings'}
                 </Text>
               </RNView>
@@ -267,6 +327,11 @@ function Entries({ series }: { series: TrendSeries }) {
 
 const styles = StyleSheet.create({
   page: { padding: 16, gap: 14 },
+  latest: { gap: 2 },
+  latestValue: { fontSize: 28, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  latestMeta: { fontSize: 13, opacity: 0.65 },
+  band: { fontSize: 15, fontWeight: '600', marginTop: 6 },
+  bandReference: { fontSize: 12, opacity: 0.6, lineHeight: 17 },
   ranges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   range: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: vola.line },
   rangeText: { fontSize: 12 },
