@@ -398,7 +398,8 @@ describe('viewDay: the restored day switcher, kept independent of `now`', () => 
 
   it('resolves the template name for a plan on the viewed day', () => {
     // `toPlannedOffer` is the SAME helper `buildTrainBoard`'s own `today` block
-    // calls — this is the guard that a change to naming logic lands on both.
+    // calls — this is the guard that a change to naming logic lands on this
+    // board and on `buildTrainBoard` alike.
     const lead = build({
       plans: ready([plan({ id: 'p1', day: TOMORROW, workoutId: 'w7' })]),
       workouts: ready([{ id: 'w7', name: 'Push A' } as Workout]),

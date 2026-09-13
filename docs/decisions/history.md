@@ -77409,7 +77409,10 @@ Comments only, in 11 files. Each comment now names the module's current readers:
 - **Every reader named was checked against the imports,** not taken from the ticket.
 - **The remaining comment lines containing the word "Train" were swept again after the edit.** Each is history, a quote, or the verb.
 
-**Not done:** renaming `trainBoard`, `useTrainBoard`, `buildTrainBoard` or `TrainBoard`. That is a code change touching Today and Plan, and the ticket leaves it out of scope.
+**Not done:**
+
+- **Renaming `trainBoard`, `useTrainBoard`, `buildTrainBoard` or `TrainBoard`.** That is a code change touching Today and Plan, and the ticket leaves it out of scope.
+- **Two test titles in `lib/__tests__/todayBoard.test.ts` still say Train:** "reaches the same horizon Train uses, so LATER means one thing" and "widens FUTURE to cover viewDay, past Train's own horizon". They are strings, not comments, so renaming them is a code change and would break this diff's comments-only proof. `frontend-reviewer` found them, and they are filed as a follow-up ticket.
 
 ## Open items / known gaps as of this entry
 

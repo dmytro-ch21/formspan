@@ -432,8 +432,8 @@ export default function TodayScreen() {
    * Start what was planned — or, browsing a past day, backfill it.
    *
    * The branch itself lives in `lib/startSession.ts` — the day panel
-   * (`app/day.tsx`) makes the same
-   * decision, and two copies of it is how a technique-shaped discipline ends up
+   * (`app/day.tsx`) makes the same decision, and two copies of it is how a
+   * technique-shaped discipline ends up
    * in the set logger on one surface and not the other. It keys on the CATALOG
    * KIND (`logsAfterwards`), never on `key === 'bjj'`, so a second
    * technique-shaped discipline gets the right screen without this file

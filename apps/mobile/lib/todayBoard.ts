@@ -32,8 +32,8 @@ import type { Workout } from './workouts';
  *
  * So the ordering and the `owedOn` subtraction are not re-derived here.
  * {@link buildTodayBoard} calls {@link buildTrainBoard} for `resume` and
- * `later`, and adds the TWO things `buildTrainBoard` does not produce — see `viewDay` and
- * `done` below.
+ * `later`, and adds the TWO things `buildTrainBoard` does not produce — see
+ * `viewDay` and `done` below.
  *
  * ## `viewDay`: the day being browsed, separate from `now`
  *
@@ -287,8 +287,9 @@ export function buildTodayBoard(input: {
    * `board.today` — which `buildTrainBoard` fixes to `dayString(now)` and can
    * therefore never answer for a browsed day. `owedOn` and {@link
    * toPlannedOffer} are the same two functions `buildTrainBoard`'s own `today`
-   * block uses, so a change to what "owed" means still lands on both from one
-   * place; only the DAY they are asked about differs here.
+   * block uses, so a change to what "owed" means lands on this board and on
+   * `buildTrainBoard` from one place; only the DAY they are asked about differs
+   * here.
    */
   const owed: Source<PlannedOffer[]> = both(input.sessions, input.plans, (logged, allPlans) =>
     owedOn(

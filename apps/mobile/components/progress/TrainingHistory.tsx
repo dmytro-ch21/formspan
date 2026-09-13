@@ -58,8 +58,8 @@ import { useUnits } from '@/lib/useUnits';
  *
  * ## Unread is not empty
  *
- * `useSource` — the same three-state discipline Today, Plan and the day panel use, imported
- * rather than re-implemented. The calendar needs BOTH reads: it draws logged
+ * `useSource` — the same three-state discipline Today, Plan and the day panel
+ * use, imported rather than re-implemented. The calendar needs BOTH reads: it draws logged
  * sessions against planned days, so half an answer renders a week with its
  * plans silently missing, which reads as an athlete who planned nothing.
  */

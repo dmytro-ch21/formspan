@@ -42,9 +42,9 @@ import type { Workout } from './workouts';
  * ## Everything is local
  *
  * All three are SQLite reads. Plan's Later block therefore renders with no
- * network, which is
- * the ticket's offline requirement — and it is a property of *which functions
- * are called*, not of a cache added here. `requestSync` is deliberately NOT
+ * network, which is the ticket's offline requirement — and it is a property
+ * of *which functions are called*, not of a cache added here. `requestSync` is
+ * deliberately NOT
  * fired from this hook: Today already asks the orchestrator on its own focus,
  * and a second screen requesting a run on every focus is a change to sync
  * behaviour that this ticket has no business making.

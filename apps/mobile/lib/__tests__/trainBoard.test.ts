@@ -11,8 +11,8 @@ import {
 import type { Workout } from '../workouts';
 
 /**
- * What `buildTrainBoard` offers, and — the half these tests exist for — what it refuses to
- * claim.
+ * What `buildTrainBoard` offers, and — the half these tests exist for — what
+ * it refuses to claim.
  *
  * Its callers read three local tables. Every one of them can be unread, failed,
  * or answered-and-empty, and this codebase has shipped the collapse of those
@@ -191,9 +191,9 @@ describe("today's plan", () => {
   });
 
   // `owedOn` is `lib/adherence.ts`'s and is not reimplemented here; this pins
-  // that `buildTrainBoard` actually asks it. Offering "Start BJJ" for a class already
-  // logged is the duplicate that subtraction exists to prevent, and it is the
-  // loud kind — the athlete has just come back from the mat.
+  // that `buildTrainBoard` actually asks it. Offering "Start BJJ" for a class
+  // already logged is the duplicate that subtraction exists to prevent, and it
+  // is the loud kind — the athlete has just come back from the mat.
   it('drops a plan a logged session has already met', () => {
     const board = build({
       sessions: ready([session({ id: 's1', sport: 'bjj', started_at: '2026-08-26T19:00:00-07:00' })]),

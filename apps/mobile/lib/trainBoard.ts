@@ -40,8 +40,8 @@ import type { Workout } from './workouts';
  * planned* and *the read failed* are one value there — and on first paint
  * Today asserts "Nothing planned" before it has looked. Plan reads the same
  * table through this module and must not inherit that; `lib/useTrainBoard.ts`
- * is what keeps the three apart on the way in, and this module is what keeps them apart on the
- * way out.
+ * is what keeps the three apart on the way in, and this module is what keeps
+ * them apart on the way out.
  *
  * ## The workout cache is deliberately NOT fatal
  *
