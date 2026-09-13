@@ -238,11 +238,27 @@ export type HealthEvent = {
 
 export type HealthSummary = {
   since: string;
+  /** Every event, stuck-row reports included: `by_kind` plus `stuck_row_reports`. */
   total: number;
+  /** `sync_blocked` here counts give-ups only, never the daily stuck-row reports (F66). */
   by_kind: Record<string, number>;
   /** Distinct people, not events — see the API description for why. */
   affected_users: number;
   slowest_paths_ms: Record<string, number>;
+  stuck_row_reports: number;
+  stuck_row_athletes: number;
+  /** From each athlete's latest report, most athletes first. */
+  stuck_rows: HealthStuckRowGroup[];
+};
+
+export type HealthStuckRowGroup = {
+  /** The device's sync domain, as the report names it. */
+  entity: string;
+  state: "blocked" | "refused";
+  /** A contract error code, or `unknown`, `no_http_code` or `other`. */
+  code: string;
+  athletes: number;
+  rows: number;
 };
 
 export type HealthReport = { summary: HealthSummary; events: HealthEvent[] };

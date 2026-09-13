@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ApiError, fetchHealth, getUserBjjStanding, getUserDetail } from "@/lib/api";
 import type { BjjStanding, HealthEvent } from "@/lib/api";
 import { formatUTC } from "@/lib/format";
+import { isStuckRowReport } from "@/lib/health";
 import { AdminMasthead } from "../../AdminMasthead";
 import { AvatarModeration } from "./AvatarModeration";
 import { BeltSwatch, describeBelt } from "./Belt";
@@ -220,7 +221,8 @@ function ProblemRow({ event, alt }: { event: HealthEvent; alt: boolean }) {
         alt ? "bg-row-alt" : ""
       }`}
     >
-      <span className="font-semibold">{event.kind}</span>
+      {/* A daily stuck-row report is not a give-up, though it shares the kind (F66). */}
+      <span className="font-semibold">{isStuckRowReport(event) ? "stuck rows" : event.kind}</span>
       <span className="text-text-secondary">{formatUTC(event.occurred_at)}</span>
       <span className="text-text-secondary">
         {event.method && event.path ? `${event.method} ${event.path}` : event.message}

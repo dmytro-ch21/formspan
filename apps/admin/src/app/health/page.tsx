@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { fetchHealth, type HealthEvent, type HealthEventKind } from "@/lib/api";
+import { isStuckRowReport, plural } from "@/lib/health";
 import { AdminMasthead } from "../AdminMasthead";
 
 /**
@@ -86,6 +87,46 @@ export default async function HealthPage() {
           </section>
         )}
 
+        {/*
+          F66 (#1200). Stuck-row reports are counted here and not under Sync
+          blocked: a phone sends one a day for as long as a row stays stuck, so
+          counting them there turned one refused entry into thirty give-ups a
+          month. Counted per athlete from their latest report, for the same
+          reason.
+        */}
+        {summary.stuck_row_athletes > 0 && (
+          <section className="flex flex-col gap-3">
+            <h2 className="font-barlow-condensed text-[13px] font-bold tracking-[0.1em] text-text-secondary uppercase">
+              Stuck rows
+            </h2>
+            <p className="text-[13px] text-text-secondary">
+              {plural(summary.stuck_row_athletes, "athlete")} reported rows their phone could not
+              sync. Each is counted from their latest daily report, and none are included in Sync
+              blocked. An athlete whose rows have since synced stays listed until that report is
+              more than {WINDOW_HOURS} hours old.
+            </p>
+            {summary.stuck_rows.length > 0 && (
+              <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card">
+                {summary.stuck_rows.map((g) => (
+                  <div
+                    key={`${g.entity}:${g.state}:${g.code}`}
+                    className="flex items-center justify-between gap-4 px-4 py-3"
+                  >
+                    <span className="flex flex-wrap items-center gap-2 text-[13px]">
+                      <span className="font-semibold">{g.entity}</span>
+                      <span className="text-text-secondary">{g.state}</span>
+                      <code>{g.code}</code>
+                    </span>
+                    <span className="text-[13px] tabular-nums text-text-secondary">
+                      {plural(g.athletes, "athlete")} · {plural(g.rows, "row")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="flex flex-col gap-3">
           <h2 className="font-barlow-condensed text-[13px] font-bold tracking-[0.1em] text-text-secondary uppercase">
             Recent events
@@ -126,13 +167,18 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function EventRow({ event: e }: { event: HealthEvent }) {
+  // A stuck-row report shares the sync_blocked kind but is a daily status, not
+  // a give-up, so it gets its own badge in the neutral tone (F66).
+  const stuck = isStuckRowReport(e);
   return (
     <div className="flex flex-col gap-1.5 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <span
-          className={`rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase ${KIND_TONE[e.kind]}`}
+          className={`rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase ${
+            stuck ? "bg-neutral-bg text-text-secondary" : KIND_TONE[e.kind]
+          }`}
         >
-          {KIND_LABEL[e.kind]}
+          {stuck ? "Stuck rows" : KIND_LABEL[e.kind]}
         </span>
         {/*
           Measured vs claimed. The server saw an `api` event happen; a `client`

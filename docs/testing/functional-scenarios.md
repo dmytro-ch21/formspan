@@ -24534,3 +24534,41 @@ The VO₂max screen (You → VO2max) now shows the newest reading, how old it is
 
 - On an account with VO₂max readings and a full profile, open You → VO2max and check the band against the athlete's age and sex.
 - Remove sex from the profile, return to the screen, and check the missing-details sentence. Add it back and check that the band returns.
+
+## F66 — admin Health: Sync blocked counts give-ups, and stuck-row reports have their own figure (`GET /v1/admin/health`, admin `/health`, #1200)
+
+N565's daily stuck-row reports share the `sync_blocked` kind. They no longer count toward the **Sync blocked** figure. The summary reports them separately, by athlete, from each athlete's latest report.
+
+### Happy path
+
+- **A give-up and a daily report in the window:**
+  - Sync blocked shows 1.
+  - Events counts both.
+  - A Stuck rows section lists the report's group, for example `food_entry`, `refused`, `invalid_input`, "1 athlete · 1 row".
+- **Two athletes stuck on the same domain, state and code** share one line, such as "2 athletes · 4 rows".
+- **In Recent events,** a report's badge reads "Stuck rows" in grey. A give-up keeps the red "Sync blocked" badge.
+- **On an athlete's page,** the Problems list shows "stuck rows" for a report.
+- **The API:** `summary.total` equals the sum of `by_kind` plus `stuck_row_reports`. `stuck_rows` is sorted by athletes, then rows.
+
+### Edge cases & errors
+
+- **The same athlete over several days,** read with `?hours=168`: counted once, with the numbers from their newest report.
+- **A group whose rows have synced** is missing from the athlete's next report, so it is no longer listed.
+- **All of an athlete's rows have synced:** the device sends nothing. The athlete stays listed until their last report is older than the window, as the section's sentence says.
+- **A report with more than ten groups** reaches the server as several requests seconds apart. Every group is still listed.
+- **Malformed details:**
+  - a row count that is a string, negative or above 1,000,000 adds nothing;
+  - a report with no `entity` or `code` counts its athlete but lists no group;
+  - the screen still loads.
+- **No reports in the window:** no Stuck rows section. `stuck_rows` is `[]`, not `null`.
+
+### Auth / security
+
+- **`GET /v1/admin/health` stays admin-only.** An athlete cannot read the figure.
+- **An athlete can post any details** to `/v1/client-errors`. The summary must never fail because of what those details contain.
+
+### Needs a browser
+
+- On staging, with at least one real N565 report and one give-up in the last 24 hours, open admin Health and check:
+  - Sync blocked counts only the give-up;
+  - the Stuck rows lines match the reports' `entity`, `code` and `rows`.

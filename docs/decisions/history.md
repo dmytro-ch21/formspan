@@ -77229,6 +77229,108 @@ This was diagnosed wrongly at first. A slow first render and leftover state from
 - **The You tab's VO2max pill** still carries no band.
 - **Web** was not changed.
 
+## 2026-09-13 — F66 (#1200): admin "Sync blocked" counts give-ups again, and stuck-row reports get their own figure
+
+**What was wrong.** N565 (#1108) sends each athlete's stuck sync rows off the phone as a daily report. Each report is a `sync_blocked` event, the kind that already existed for a device giving up, with `details.reason` set to `stuck_blocked` or `stuck_refused`. The admin Health screen's **Sync blocked** figure counted every `sync_blocked` event, as N565's own entry recorded. So one athlete with one refused food entry for a month added about 30 to a figure that is meant to count give-ups.
+
+### What changed on the server
+
+`Summarise` in `backend/internal/modules/health/postgres.go`:
+
+- **`by_kind.sync_blocked` leaves the reports out,** so it counts give-ups only.
+- **`total` still counts every event.** It now equals the sum of `by_kind` plus the new `stuck_row_reports`, and the test checks that they add up.
+- **`stuck_row_athletes`:** how many athletes sent a report in the window.
+- **`stuck_rows`:** up to 20 groups of domain, state (`blocked` or `refused`) and error code. Each group gives the number of athletes and the rows they reported.
+
+One constant, `stuckRowReport`, holds the SQL test for "this event is a report", so the count and the figure cannot disagree about it.
+
+**No new kind.** The ticket allowed either way. Telling reports apart by `details.reason` needs no migration, no enum change, and no change to either client telemetry allowlist or `check:telemetry-parity`. Reports stored since N565 shipped are split correctly with no backfill. The ticket's criterion for the new-kind route therefore does not apply.
+
+### The figure uses each athlete's latest report
+
+Summing every report in the window would count one stuck row once per report. And when a group's rows sync, that group is simply missing from the next report, so only the latest report says what is still stuck.
+
+**"Latest report" needs a five-minute tolerance, because one report does not always arrive as one insert.**
+
+- A report is one event per group, captured in a loop (`reportStuckRows` in `apps/mobile/lib/stuckRows.ts`).
+- `capture` flushes by itself once the buffer holds `flushAtCount` events, which is 10 (`apps/mobile/lib/telemetry.ts`, `telemetryClient.ts`).
+- So a report with more than ten groups reaches the server as two or more requests, and each insert gets its own `now()`.
+- Keeping only events at the newest timestamp would drop all but the last request's groups.
+
+So every report within five minutes of the athlete's newest one counts as part of it. Two reports are at least 15 minutes apart on the device (`MIN_CHANGE_INTERVAL_MS`), so the window never reaches the previous one.
+
+**A group reported twice inside that window counts once.** `reportDue` reports again straight away when the phone clock has moved backwards past the last report, so a duplicate is possible. `DISTINCT ON` keeps one event per athlete and group.
+
+### Client-written details are not trusted
+
+Any signed-in athlete can post a `sync_blocked` event with any details: the ingest checks the kind and the size and nothing else. So:
+
+- **A group is listed only when its `entity` and `code` are strings.** The athlete is still counted.
+- **A row count adds nothing unless it is a number from 0 to 1,000,000.**
+- **At most 20 groups** come back.
+
+Without the first guard, one report with `"rows": "lots"` failed the cast and the whole summary returned an error, taking the Health screen down (mutation M5 below). A count of 1e30 overflowed the total the same way (M11).
+
+### What the screen shows
+
+`apps/admin/src/app/health/page.tsx`:
+
+- **The Sync blocked stat's code is unchanged.** It reads give-ups now because the server's number changed.
+- **A new Stuck rows section**, shown only when at least one athlete reported. It opens with one sentence: "2 athletes reported rows their phone could not sync. Each is counted from their latest daily report, and none are included in Sync blocked. An athlete whose rows have since synced stays listed until that report is more than 24 hours old." Under it, one line per group: domain, state, code, and "2 athletes · 4 rows".
+- **In Recent events, a report is badged "Stuck rows" in the neutral tone.** A give-up keeps "Sync blocked" in the danger tone. The test for one event is `isStuckRowReport` in `apps/admin/src/lib/health.ts`.
+- **The athlete page's Problems list** (`users/[id]`) shows "stuck rows" for a report instead of `sync_blocked`.
+
+**Contract.** `HealthSummary` gains `stuck_row_reports`, `stuck_row_athletes` and `stuck_rows`, all required. There is a new `HealthStuckRowGroup` schema. The descriptions of `total` and `by_kind` now say what each counts.
+
+### Tests
+
+- **`TestPostgresRepository_SummariseSplitsStuckRowReports`**, against a migrated database. It seeds:
+  - a give-up;
+  - one athlete's report from 20 hours ago, with a group that has since cleared, and their newer report;
+  - a report split 30 seconds apart;
+  - a group repeated inside one report;
+  - a row count of `"lots"`, one of 1e30, and a report with no entity;
+  - a server error.
+
+  It checks the Sync blocked count, the report count, the total, that they add up, the athlete count and the exact groups. It also checks that an empty window returns `[]` rather than `null`.
+- **The whole health package passes against that database:** 42 tests and subtests, none skipped.
+- **`apps/admin/src/lib/__tests__/health.test.ts`:** 4 tests for `isStuckRowReport` and `plural`.
+- **`apps/admin/src/app/health/__tests__/healthRender.test.tsx`:** the first test that renders the Health page. 4 tests:
+  - Sync blocked shows only `by_kind`;
+  - the groups are listed;
+  - the section is absent with no reports;
+  - a report and a give-up get different badges.
+
+**Mutation-checked.** Each was caught as a named test failure, with the file restored byte-identical and re-run green:
+
+- **Server:**
+  - **M1** reports counted under `sync_blocked`;
+  - **M2** a report window of a day, which lists the cleared group;
+  - **M3** a window of one timestamp, which drops the first half of the split report;
+  - **M4** no `DISTINCT ON`, which doubles the repeated group;
+  - **M5** no type check on the row count, which errors the whole summary;
+  - **M6** no entity check, which errors the scan;
+  - **M7** a predicate that ignores the reason, which puts the give-up under reports;
+  - **M8** `stuck_rows` left `null`;
+  - **M9** the athlete count not limited to reports;
+  - **M10** `state` keeping its `stuck_` prefix;
+  - **M11** no upper bound on the row count, which overflows the total.
+- **Admin helper:**
+  - **A1** any kind with a stuck reason;
+  - **A2** any reason starting with "stuck";
+  - **A3** "0 row".
+- **Page:**
+  - **P1** a report badged as its kind;
+  - **P2** the section shown with no reports;
+  - **P3** the reports added back into Sync blocked;
+  - **P4** the rows column showing athletes.
+
+### Not done
+
+- **The page has not been seen in a browser.** The admin console is behind Clerk, so the render test is the check.
+- **An athlete whose rows have all synced stays listed** until their last report leaves the window. A device with nothing stuck sends nothing, so there is no "all clear" to read. The screen says so.
+- **Filtering the event list by `kind=sync_blocked`** still returns reports and give-ups together. Only the badge tells them apart.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

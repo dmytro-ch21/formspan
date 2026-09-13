@@ -159,11 +159,39 @@ func (n *NewEvent) Validate() error {
 // Summary is the shape the health screen opens on — enough to answer "is
 // anything wrong right now?" without reading a single row.
 type Summary struct {
-	Since          time.Time      `json:"since"`
-	Total          int            `json:"total"`
+	Since time.Time `json:"since"`
+	// Total counts every event in the window, stuck-row reports included, so
+	// it is the sum of ByKind and StuckRowReports.
+	Total int `json:"total"`
+	// ByKind counts events per kind, except that `sync_blocked` leaves out
+	// N565's stuck-row reports: it means a device gave up pushing (F66, #1200).
 	ByKind         map[string]int `json:"by_kind"`
 	AffectedUsers  int            `json:"affected_users"`
 	SlowestPathsMS map[string]int `json:"slowest_paths_ms"`
+	// StuckRowReports is how many events in the window were daily stuck-row
+	// reports (`sync_blocked` with `details.reason` `stuck_blocked` or
+	// `stuck_refused`).
+	StuckRowReports int `json:"stuck_row_reports"`
+	// StuckRowAthletes is how many athletes sent one in the window.
+	StuckRowAthletes int `json:"stuck_row_athletes"`
+	// StuckRows breaks those reports down by domain, state and code, from each
+	// athlete's latest report. Never nil.
+	StuckRows []StuckRowGroup `json:"stuck_rows"`
+}
+
+// StuckRowGroup is one line of the stuck-rows figure: athletes whose latest
+// report has rows stuck in this domain, state and code, and how many rows.
+type StuckRowGroup struct {
+	// Entity is the device's sync domain, as the report names it.
+	Entity string `json:"entity"`
+	// State is `blocked` or `refused`.
+	State string `json:"state"`
+	// Code is the contract error code, or one of the device's own buckets:
+	// `unknown`, `no_http_code` or `other`.
+	Code     string `json:"code"`
+	Athletes int    `json:"athletes"`
+	// Rows adds up those athletes' row counts.
+	Rows int `json:"rows"`
 }
 
 // Filter narrows the event list. Every field is optional.
