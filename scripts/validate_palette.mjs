@@ -440,30 +440,47 @@ separation('brand vs tileHold', P.lime, P.tileHold);
 separation('brand vs body text', P.lime, P.text, 8);
 
 /*
-  The brand lime has FOUR homes, and this is the only thing that keeps them
-  equal.
+  The brand lime has THIRTEEN copies, and this is the only thing that keeps
+  them equal.
 
   `assets/brand/design-tokens.json` is the declared source of truth per
-  CLAUDE.md; `apps/mobile/constants/Colors.ts` is what the phone renders;
-  `apps/web/src/app/globals.css`'s dark block is what the web app renders; and
-  `apps/admin/src/app/globals.css` carries the brand set for the console. Before
-  N183 the only thing joining them was a comment in the admin file asking the
-  next person to change all of them — **and that comment was already wrong**: it
-  said the block was "duplicated verbatim in apps/web/src/app/globals.css. See
-  the note there", where there is no such block and no such note.
+  CLAUDE.md. Every other place the brand renders holds a hand copy, because
+  none of them can read that file: `apps/mobile/constants/Colors.ts` is what the
+  phone renders, and both apps' `globals.css` are plain CSS. Before N183 the
+  only thing joining them was a comment in the admin file asking the next person
+  to change all of them — **and that comment was already wrong**: it said the
+  block was "duplicated verbatim in apps/web/src/app/globals.css. See the note
+  there", where there is no such block and no such note.
 
   A comment is not a guarantee. `scripts/check-brand-copies.mjs` exists because
   a hand-copied brand component drifted within one commit, and the mitigation at
-  the time was exactly this kind of comment. So the four are read and compared
-  here instead — three of them by regex over files this script does not own,
-  which is fragile in one direction only: a rename makes the read throw rather
-  than silently pass, the same property `loadPalette` is built on.
+  the time was exactly this kind of comment. So the copies are read and compared
+  here instead — by regex over files this script does not own, which is fragile
+  in one direction only: a rename makes the read throw rather than silently
+  pass, the same property `loadPalette` is built on.
 
-  Only the brand values are joined. The stepped light-mode variants are NOT
-  brand values — `--c-lime: #6f9c00` is a derived dark-lime for a white ground —
-  so they are deliberately outside this check.
+  **N183 joined four of them; N161 (#578) joined the other nine.** Each is the
+  brand by its own comment where it lives:
+  - mobile: the default `accent` and `accentInk`, and the brand theme's
+    `accents.green` `accent` and `ink`;
+  - web: dark `--c-accent-fill`, `--c-lime-ink` and `--c-lime`, `--c-lime-rule`
+    in both themes, and light `--c-accent-on-fill` (the lime written on navy
+    buttons, since light mode never fills with it).
+
+  **Each web copy is read from ITS theme block, never from the whole
+  stylesheet.** The first version of this check found dark `--c-lime` by
+  scanning from the dark selector to the first match. That works while the
+  variable is where it should be. With seven web copies across two blocks that
+  hold two of the same names, a copy deleted from one block would be found in
+  the other, and the check would pass having read the wrong theme. `cssVar`
+  takes the block first, so a missing copy throws.
+
+  Only brand values are joined. The light-mode steps are NOT brand values —
+  `--c-lime: #6f9c00` and `--c-lime-ink: #4a6800` are derived for a white
+  ground — so they are deliberately outside this check. So are the six readings
+  that keep the pre-N183 value (next section), and the brand SVGs' gradient
+  stops, which are artwork rather than app code.
 */
-heading('The brand lime has four homes — they must agree');
 {
   const read = (file, re, what) => {
     const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
@@ -471,16 +488,41 @@ heading('The brand lime has four homes — they must agree');
     if (!m) throw new Error(`validate_palette: could not read ${what} from ${file} — moved or renamed?`);
     return m[1].toLowerCase();
   };
+  const cssVar = (file, selector, name) => {
+    const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    const sel = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const block = src.match(new RegExp(`^${sel}\\s*\\{\\n([\\s\\S]*?)^\\}`, 'm'));
+    if (!block) throw new Error(`validate_palette: no \`${selector} {\` block in ${file} — moved or renamed?`);
+    const m = block[1].match(new RegExp(`^\\s*${name}:\\s*(#[0-9A-Fa-f]{6})\\s*;`, 'm'));
+    if (!m) {
+      throw new Error(
+        `validate_palette: could not read ${name} from ${file}'s \`${selector}\` block — ` +
+          'moved, renamed, or removed from this theme?',
+      );
+    }
+    return m[1].toLowerCase();
+  };
+  const WEB = 'apps/web/src/app/globals.css';
+  const LIGHT = ':root';
+  const DARK = ':root[data-theme="dark"]';
   const homes = {
     'assets/brand/design-tokens.json': read(
       'assets/brand/design-tokens.json', /"lime":\s*"(#[0-9A-Fa-f]{6})"/, 'brand.lime'),
-    'apps/mobile/constants/Colors.ts': P.lime.toLowerCase(),
-    'apps/web (dark --c-lime)': read(
-      'apps/web/src/app/globals.css',
-      /:root\[data-theme="dark"\][\s\S]*?--c-lime:\s*(#[0-9A-Fa-f]{6})/, 'dark --c-lime'),
-    'apps/admin (--color-brand-lime)': read(
+    'mobile vola.lime': P.lime.toLowerCase(),
+    'mobile accent': P.accent.toLowerCase(),
+    'mobile accentInk': P.accentInk.toLowerCase(),
+    'mobile accents.green.accent': ACCENTS.green.accent.toLowerCase(),
+    'mobile accents.green.ink': ACCENTS.green.ink.toLowerCase(),
+    'web dark --c-lime': cssVar(WEB, DARK, '--c-lime'),
+    'web dark --c-lime-ink': cssVar(WEB, DARK, '--c-lime-ink'),
+    'web dark --c-lime-rule': cssVar(WEB, DARK, '--c-lime-rule'),
+    'web dark --c-accent-fill': cssVar(WEB, DARK, '--c-accent-fill'),
+    'web light --c-lime-rule': cssVar(WEB, LIGHT, '--c-lime-rule'),
+    'web light --c-accent-on-fill': cssVar(WEB, LIGHT, '--c-accent-on-fill'),
+    'admin --color-brand-lime': read(
       'apps/admin/src/app/globals.css', /--color-brand-lime:\s*(#[0-9A-Fa-f]{6})/, '--color-brand-lime'),
   };
+  heading(`The brand lime has ${Object.keys(homes).length} copies — they must agree`);
   const values = [...new Set(Object.values(homes))];
   for (const [where, hex] of Object.entries(homes)) {
     const ok = hex === homes['assets/brand/design-tokens.json'];
@@ -488,7 +530,7 @@ heading('The brand lime has four homes — they must agree');
   }
   if (values.length !== 1) {
     failures.push(
-      `${group} — the brand lime differs across its homes: ` +
+      `${group} — the brand lime differs across its copies: ` +
         Object.entries(homes).map(([w, h]) => `${w}=${h}`).join(', ') +
         `. Changing one and not the others is the shape this check exists for.`,
     );

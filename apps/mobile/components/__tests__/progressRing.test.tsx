@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react-native';
 
 import { ProgressRing } from '../ui/ProgressRing';
 import { TrainingCard, TRAINING_WINDOW_DAYS } from '../today/MiniCards';
+import { vola } from '@/constants/Colors';
 
 /**
  * The ring's centre label, and the device bug that produced this file.
@@ -25,7 +26,7 @@ it('rounds a repeating percentage instead of rendering all its digits', async ()
   await render(
     <ProgressRing
       percent={(22 / TRAINING_WINDOW_DAYS) * 100}
-      color="#B8FF2C"
+      color={vola.lime}
       label="Trained on 22 of the last 28 days"
       testID="ring"
     />,
@@ -38,7 +39,7 @@ it('rounds a repeating percentage instead of rendering all its digits', async ()
 });
 
 it('keeps the label on one line, so no value can ever stack again', async () => {
-  await render(<ProgressRing percent={78.57142857142857} color="#B8FF2C" label="x" testID="ring" />);
+  await render(<ProgressRing percent={78.57142857142857} color={vola.lime} label="x" testID="ring" />);
   // Rounding fixes today's value; this is what stops the CLASS coming back —
   // a future caller passing 1000 would round cleanly and still wrap.
   expect(screen.getByText('79%').props.numberOfLines).toBe(1);
@@ -47,13 +48,13 @@ it('keeps the label on one line, so no value can ever stack again', async () => 
 it('still distinguishes nothing-to-report from zero', async () => {
   // `null` is not 0%: a window with nothing counted at all is not a score of
   // zero, and this is the pre-existing rule the rounding must not disturb.
-  await render(<ProgressRing percent={null} color="#B8FF2C" label="x" testID="ring" />);
+  await render(<ProgressRing percent={null} color={vola.lime} label="x" testID="ring" />);
   expect(screen.getByText('—')).toBeTruthy();
   expect(screen.queryByText('0%')).toBeNull();
 });
 
 it('clamps rather than overflowing when a caller passes more than 100', async () => {
-  await render(<ProgressRing percent={140} color="#B8FF2C" label="x" testID="ring" />);
+  await render(<ProgressRing percent={140} color={vola.lime} label="x" testID="ring" />);
   expect(screen.getByText('100%')).toBeTruthy();
 });
 

@@ -81,7 +81,7 @@ const mockTokenGetter = jest.fn(async () => 'token');
 jest.mock('@/lib/useAuthToken', () => ({ useAuthToken: () => mockTokenGetter }));
 jest.mock('@clerk/clerk-expo', () => ({ useAuth: () => ({ userId: 'user_1' }) }));
 jest.mock('@/lib/AccentProvider', () => ({
-  useAccent: () => ({ accent: '#B8FF2C', ink: '#B8FF2C', on: '#0B0F16' }),
+  useAccent: () => jest.requireActual('@/constants/Colors').accents.green,
 }));
 
 const mockRequestSync = jest.fn();

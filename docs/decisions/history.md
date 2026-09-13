@@ -75748,6 +75748,78 @@ The contrast, from the same method: the **wrong** masters measured 25.41% (the b
 - **`logos/` and `splash/`** hold the old mark (the brand README says so). No raster in the app comes from them, so this check does not cover them, and re-cutting them from `logos/source/` remains unstarted.
 - **The favicon's 10% tolerance** is the loosest: 3.3 points above its own measurement, and 75 below the nearest wrong master at the same size. A master edit too small to move the favicon past it still has to pass `icon.png`, which is rendered from the same master and held to 1%.
 
+## 2026-09-12 — N161 (#578): every copy of the brand lime is checked against the token, not just four
+
+**The decision this ticket asked for was made two weeks earlier, by N183
+(2026-08-25).** The brand lime is `#D3EC52`, declared in
+`assets/brand/design-tokens.json`. `#B8FF2C` survives on purpose: N183 found
+the old lime doing seven jobs, only one of which was the brand. The other six
+keep it — the Library tile's `advance` intent, the BJJ RPE ramp's moderate step,
+the progression engine's `add_load`, the consistency grid's top step,
+`sportColors.strength` and `macroColors.carbs` — because moving any of them to
+the brand breaks a colour-vision or contrast gate, and `check:palette` fails if
+one is pointed back at it. So the brief's test, "grep both hexes; only one
+remains", cannot pass by design. The brief was corrected on the issue before
+building.
+
+**What was genuinely missing is a check on the copies.** `check:palette`
+already joined four of them to the token: mobile's `vola.lime`, web's dark
+`--c-lime` and admin's `--color-brand-lime`. Nine more copies of the brand value
+in app code had nothing comparing them. Each is the brand by its own comment:
+
+- mobile: the default `accent` and `accentInk`, and the brand theme's
+  `accents.green` `accent` and `ink`;
+- web: dark `--c-accent-fill` and `--c-lime-ink`, `--c-lime-rule` in both
+  themes, and light `--c-accent-on-fill` (the lime written on navy buttons,
+  because light mode never fills with it).
+
+Web's light `--c-lime` (`#6f9c00`) and `--c-lime-ink` (`#4a6800`) are derived
+legibility steps for a white ground, not copies, and stay out.
+
+### What changed
+
+- **`scripts/validate_palette.mjs` compares all thirteen copies** and fails
+  naming the one that drifted.
+- **Each web copy is read from its own theme block.** The old read found dark
+  `--c-lime` by scanning from the dark selector to the first match, which works
+  only while the variable is where it should be. `--c-lime-rule` appears in both
+  blocks, so a copy deleted from one would have been read from the other, and
+  the check would have passed on the wrong theme. `cssVar` takes the block
+  first, so a missing copy throws.
+- **No test stubs the accent with the pre-N183 lime any more.** Seven
+  `useAccent` mocks returned `#B8FF2C`; they now read the palette. The
+  `ProgressRing` test's colour props read `vola.lime`.
+- **`tabLayout.test` can now tell `accent` from `ink`.** The tab bar passes
+  `accent.accent` for its tint, selected icon and selected label. The old stub's
+  `accent` and `ink` were the same value — and so are the brand theme's — so a
+  swap to `ink` passed unseen. It now stubs the purple theme, whose two differ.
+
+### Verified
+
+- `check:palette` passes, listing thirteen copies. The eight edited jest suites
+  (54 tests) pass, and `typecheck:mobile` is clean.
+- **14 mutations, each caught by name,** with each restore confirmed by
+  re-running rather than by reading the file:
+  - **10 value nudges, one per copy.** The two identical `--c-lime-rule` lines
+    each failed only as their own theme, which is what shows the reads are
+    per-theme.
+  - **Deleting light `--c-lime-rule`** threw naming the light block rather than
+    passing on the dark copy.
+  - **3 swaps of `accent` for `ink` in the tab layout** — tint, selected icon
+    and selected label — each failed `tabLayout.test`.
+
+### Not done
+
+- **The brand SVGs under `assets/brand/logos/` and `splash/`** carry the value
+  as gradient stops, and are not checked: reading "the lime stop" out of SVG by
+  regex is fragile, and they are artwork rather than app code.
+- **`#B8FF2C` remains, deliberately,** in the six roles and their measurement
+  notes, `validate_palette.mjs`'s recorded figures, `macroRings.test`'s
+  colour-difference maths, `holdToConfirm.test`'s comment, the brand README
+  and this file.
+- **Nothing stops a new copy of the brand value being added** somewhere without
+  joining the check. The check covers every copy that exists today.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
