@@ -17,20 +17,22 @@ import {
 import type { Workout } from './workouts';
 
 /**
- * What Today leads with, derived from the same reads Train uses.
+ * What Today leads with, derived from the same reads `lib/trainBoard.ts` uses.
  *
  * ## Why this is built ON `lib/trainBoard.ts` rather than beside it
  *
- * Today and Train ask overlapping questions of the same three local tables —
- * *is a session open?*, *what is owed?*, *what is next?* — and the answer has
- * to be the same on both. It already diverged once in the small: the 24-hour
+ * Today and the other reader of `lib/trainBoard.ts` ask overlapping questions
+ * of the same three local tables — *is a session open?*, *what is owed?*,
+ * *what is next?* — and the answer has to be the same on both. (That reader
+ * was Train when this was written; since N182 retired Train, it is Plan's
+ * Later block.) It already diverged once in the small: the 24-hour
  * staleness boundary was a constant in each file until review noticed that one
  * edit would leave the two screens disagreeing about the word "unfinished"
  * with each looking correct on its own.
  *
  * So the ordering and the `owedOn` subtraction are not re-derived here.
  * {@link buildTodayBoard} calls {@link buildTrainBoard} for `resume` and
- * `later`, and adds the TWO things Train does not need — see `viewDay` and
+ * `later`, and adds the TWO things `buildTrainBoard` does not produce — see `viewDay` and
  * `done` below.
  *
  * ## `viewDay`: the day being browsed, separate from `now`
@@ -52,7 +54,7 @@ import type { Workout } from './workouts';
  *
  * ## The distinction Today adds beyond `viewDay`
  *
- * Train offers what you can still do; a plan that has been met is simply not
+ * `buildTrainBoard` offers what you can still do; a plan that has been met is simply not
  * offered. Today also has to say *how the day went*, and **"you planned two
  * sessions and did both" is not the same day as "you planned nothing"** — the
  * second sentence, shown at the moment an athlete finishes their last session,
@@ -284,8 +286,8 @@ export function buildTodayBoard(input: {
    * `viewDay`'s owed plans, computed directly rather than through
    * `board.today` — which `buildTrainBoard` fixes to `dayString(now)` and can
    * therefore never answer for a browsed day. `owedOn` and {@link
-   * toPlannedOffer} are the same two functions Train's own `today` block uses,
-   * so a change to what "owed" means still lands on both screens from one
+   * toPlannedOffer} are the same two functions `buildTrainBoard`'s own `today`
+   * block uses, so a change to what "owed" means still lands on both from one
    * place; only the DAY they are asked about differs here.
    */
   const owed: Source<PlannedOffer[]> = both(input.sessions, input.plans, (logged, allPlans) =>
@@ -318,8 +320,8 @@ export function buildTodayBoard(input: {
  * second one for the switcher's day, which is two answers to "is Thursday
  * planned" a few hundred points apart — the W2/W4 shape this repo has shipped
  * twice. This still starts at the current week's Monday (so THIS WEEK and this
- * read share rows) and still reaches Train's own horizon ({@link
- * PLAN_WINDOW_DAYS}, so LATER means the same thing on both screens) — and now
+ * read share rows) and still reaches `buildTrainBoard`'s own horizon ({@link
+ * PLAN_WINDOW_DAYS}, so LATER means the same thing here and on Plan) — and now
  * ALSO widens either end to include `viewDay`, so stepping the switcher three
  * weeks back does not silently ask a question the query cannot answer. One
  * bigger query, never a second one.

@@ -6,7 +6,8 @@ import { sessionHref, startSessionHref } from '../startSession';
  *
  * Today has made this decision since sessions existed; N176 gave the Train tab
  * the same action, so the branch moved into `lib/startSession.ts` rather than
- * being written a second time. These pin it, because getting it wrong is not
+ * being written a second time. (Train is retired; the second caller now is the
+ * day panel, `app/day.tsx`.) These pin it, because getting it wrong is not
  * subtle on a device and is completely silent here: a technique-shaped
  * discipline sent to `/session/start` renders a set logger over a session that
  * can never hold a set, and the reflection wizard behind `/bjj/log` becomes
@@ -138,8 +139,9 @@ describe('startSessionHref', () => {
  * Where an EXISTING session opens — the sibling branch, and now a shared one.
  *
  * It lived inline in Today, which was fine while Today was the only screen that
- * opened a session. N177's Train tab has a Resume card and a Recent list, both
- * of which open one, so it moved here beside the start branch. The failure it
+ * opened a session. N177's Train tab had a Resume card and a Recent list, both
+ * of which opened one, so it moved here beside the start branch. Train is
+ * retired (N182); `sessionHref` now has seven callers. The failure it
  * prevents is the same one and is completely silent: the live set logger over a
  * BJJ session renders "Sets 0 · Reps 0 · Volume —" above an empty list, and the
  * reflection wizard — reachable only by `replace` from the log screen —

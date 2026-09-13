@@ -11,10 +11,10 @@ import {
 import type { Workout } from '../workouts';
 
 /**
- * What Train offers, and — the half these tests exist for — what it refuses to
+ * What `buildTrainBoard` offers, and — the half these tests exist for — what it refuses to
  * claim.
  *
- * The screen reads three local tables. Every one of them can be unread, failed,
+ * Its callers read three local tables. Every one of them can be unread, failed,
  * or answered-and-empty, and this codebase has shipped the collapse of those
  * three into one value **three times**: a trend card telling an athlete with two
  * years of weigh-ins to start logging, a tracker screen telling somebody with a
@@ -191,7 +191,7 @@ describe("today's plan", () => {
   });
 
   // `owedOn` is `lib/adherence.ts`'s and is not reimplemented here; this pins
-  // that Train actually asks it. Offering "Start BJJ" for a class already
+  // that `buildTrainBoard` actually asks it. Offering "Start BJJ" for a class already
   // logged is the duplicate that subtraction exists to prevent, and it is the
   // loud kind — the athlete has just come back from the mat.
   it('drops a plan a logged session has already met', () => {

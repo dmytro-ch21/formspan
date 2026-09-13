@@ -11,7 +11,10 @@ import { buildTrainBoard, planWindow, type Source, type TrainBoard } from './tra
 import type { Workout } from './workouts';
 
 /**
- * Train's three local reads, with the loading discipline attached.
+ * The three local reads behind `buildTrainBoard`, with the loading discipline
+ * attached. Written for Train, which N182 (#587) retired; Plan's Later block is
+ * its caller now, and its `useSource` is shared by Today, the day panel and
+ * Progress's training history.
  *
  * ## Why a hook and not a copy of Today's effects
  *
@@ -20,7 +23,7 @@ import type { Workout } from './workouts';
  * *"Record your weight and the trend appears here"* to an athlete with two
  * years of readings, on every cold open. The fix was one hook owning the fetch,
  * the null/`[]`/failed discipline and an explicit unread state. This is that
- * shape, for Train.
+ * shape, written for Train and read by Plan now.
  *
  * It reads through the SAME functions Today does — `listLocalSessions`,
  * `listPlannedBetween`, `cachedWorkouts` — and adds nothing to any of them.
@@ -38,7 +41,8 @@ import type { Workout } from './workouts';
  *
  * ## Everything is local
  *
- * All three are SQLite reads. Train therefore renders with no network, which is
+ * All three are SQLite reads. Plan's Later block therefore renders with no
+ * network, which is
  * the ticket's offline requirement — and it is a property of *which functions
  * are called*, not of a cache added here. `requestSync` is deliberately NOT
  * fired from this hook: Today already asks the orchestrator on its own focus,
@@ -145,7 +149,7 @@ export function useTrainBoard(
 
   // On focus, not on mount: a tab screen stays mounted for the life of the
   // process, so coming back from a session it started must show that the
-  // session now exists — otherwise Train would still be offering to start what
+  // session now exists — otherwise the board would still be offering to start what
   // the athlete has just finished.
   useFocusEffect(
     useCallback(() => {

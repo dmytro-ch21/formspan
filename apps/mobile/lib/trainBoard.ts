@@ -6,15 +6,19 @@ import type { Session } from './sessions';
 import type { Workout } from './workouts';
 
 /**
- * What Train can offer right now — derived, not fetched.
+ * What can be started or resumed right now — derived, not fetched.
+ *
+ * Written for Train, which N182 (#587) retired. Its readers now are Today,
+ * through `lib/todayBoard.ts`, and Plan's Later block, through
+ * `lib/useTrainBoard.ts`.
  *
  * ## Why this is a pure function and not a screen
  *
- * Train answers one question — *what can I do now?* — from three local reads
+ * It answers one question — *what can I do now?* — from three local reads
  * the app already does elsewhere: the session list, the plan, and the workout
  * cache. Every one of those has a caller already (`lib/sessionStore.ts`,
  * `lib/plan.ts`), so nothing here starts a session, writes a plan, or talks to
- * the network. The ticket's hard line is that Train must not become a second
+ * the network. The ticket that built it for Train drew a hard line: no second
  * session engine, and a derivation with no I/O in it cannot become one.
  *
  * It is separate from the screen because the ordering below is the product
@@ -34,9 +38,9 @@ import type { Workout } from './workouts';
  * Today has the live instance of it. Its `viewPlans` and `weekPlan` both start
  * `[]` and `refreshPlan` swallows its own errors, so *unread*, *nothing
  * planned* and *the read failed* are one value there — and on first paint
- * Today asserts "Nothing planned" before it has looked. Train reads the same
- * table and must not inherit that; `lib/useTrainBoard.ts` is what keeps the
- * three apart on the way in, and this module is what keeps them apart on the
+ * Today asserts "Nothing planned" before it has looked. Plan reads the same
+ * table through this module and must not inherit that; `lib/useTrainBoard.ts`
+ * is what keeps the three apart on the way in, and this module is what keeps them apart on the
  * way out.
  *
  * ## The workout cache is deliberately NOT fatal
@@ -150,7 +154,7 @@ function findResume(sessions: Session[], now: Date): ResumeOffer | null {
  * Exported so a caller matching against a day OTHER than the window this
  * module computes can still build a {@link PlannedOffer} through the SAME
  * rule rather than a second one. `lib/todayBoard.ts` is that caller — Today's
- * day switcher lets an athlete browse a day outside Train's own window, and a
+ * day switcher lets an athlete browse a day outside this module's own window, and a
  * second `offer` closure there would be exactly the kind of divergence this
  * epic exists to remove.
  */
