@@ -691,7 +691,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     marginTop: Spacing.xxs,
   },
-  badgeText: { ...Typography.caption, textTransform: 'uppercase', fontWeight: '800' },
+  badgeText: { ...Typography.eyebrow, textTransform: 'uppercase', fontWeight: '800' },
   stats: {
     flexDirection: 'row',
     flexWrap: 'wrap',

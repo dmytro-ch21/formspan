@@ -77482,7 +77482,7 @@ Where each component went:
   N577 made the same choice for the session screen's Finish button.
 - **Secondary lines → `meta` or `caption`:** the celebration subtitle, the HR report's sentences and figures, the share preview notes.
 - **The celebration's headline and stat figures → `title`.**
-- **Uppercase stat labels → `eyebrow`.**
+- **Uppercase labels → `eyebrow`:** the celebration's stat labels and its badge. The badge first went to `caption`. Review moved it, because `Typography.ts` documents `caption` as reading text that is not a label, and `eyebrow` as the uppercase label.
 - **Three lowercase 11pt texts keep 11pt through `Typography.eyebrow.fontSize`, not the `eyebrow` role,** because its 1.2 letter-spacing would space out lowercase text:
   - the celebration's record kind;
   - the HR report's per-exercise reading count;
@@ -77493,15 +77493,16 @@ Where each component went:
 
 ### What changed visually
 
-**Size changed on 8 of 37 converted entries:**
+**Size changed on 9 of 37 converted entries:**
 - four button labels, 16 → 15 (celebration Share and Done, preview Cancel and Share);
 - `HoldToConfirm`'s label, 16 → 15;
 - the celebration headline, 22 → 20;
 - the celebration's "felt" label, 10 → 11, which removes the only size below 11;
-- the streak line, 12.5 → 12.
+- the streak line, 12.5 → 12;
+- the celebration badge, 12 → 11.
 
 **Leading changed on 31 entries and letter-spacing on 21.** The role supplies both now. Three entries had set letter-spacing of their own, and the role replaced it:
-- the celebration badge, 0.6 → 0.2;
+- the celebration badge, 0.6 → 1.2;
 - the celebration's uppercase stat label, 0.5 → 1.2;
 - the celebration's "felt" label, 0.6 → 1.2.
 
@@ -77521,7 +77522,7 @@ Where each component went:
   - A probe literal planted in `SessionCelebration`, `HRSessionReport`, `SwipeToDelete` and `Avatar` raised exactly one guard error each.
   - All four files were restored and re-checked clean.
   - `components/TrackerCard.tsx`, which is not guarded and contains `fontSize: 12`, raised none.
-- **No motion changed.** None of the diff's 239 changed lines matches a motion keyword. The same scan finds 15 such lines in `SwipeToDelete.tsx` itself, so it can see them.
+- **No motion changed.** None of the diff's 239 changed lines (the six components and the lint config) matches a motion keyword. The same scan finds 15 such lines in `SwipeToDelete.tsx` itself, so it can see them.
 - **Tests:** the 15 jest suites that render or exercise these components pass, 230 tests. `typecheck:mobile` passes. `lint:mobile` shows 0 errors and the same 49 warnings as before.
 
 ### Not done
