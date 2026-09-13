@@ -7,6 +7,8 @@ import { Text, View } from '@/components/Themed';
 import { TrainingCalendar } from '@/components/TrainingCalendar';
 import { SectionHeader } from '@/components/ui/Section';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { dayString, weekDays } from '@/lib/calendar';
 import { useModules } from '@/lib/ModulesProvider';
 import { listPlannedBetween, type PlannedSession } from '@/lib/plan';
@@ -140,13 +142,13 @@ export function TrainingHistory() {
 }
 
 const styles = StyleSheet.create({
-  section: { gap: 8, marginTop: 4 },
+  section: { gap: Spacing.sm, marginTop: Spacing.xs },
   dashed: {
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: vola.lineSoft,
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: Radius.card,
+    padding: Spacing.cardPadding,
   },
-  note: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+  note: { ...Typography.meta, color: vola.textMuted },
 });

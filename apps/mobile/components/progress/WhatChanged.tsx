@@ -2,6 +2,8 @@ import { ActivityIndicator, StyleSheet, View as RNView } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import type { ChangeView } from '@/lib/progress';
 
@@ -95,22 +97,22 @@ const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     backgroundColor: vola.surface,
-    padding: 14,
-    gap: 12,
+    padding: Spacing.cardPadding,
+    gap: Spacing.md,
   },
-  insight: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  insight: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.smPlus },
   divided: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: vola.line,
-    paddingTop: 12,
+    paddingTop: Spacing.md,
   },
   // A mark rather than an icon: there is no glyph that means "this changed",
   // and an approximate one would be read as a category.
-  pip: { width: 6, height: 6, borderRadius: 3, marginTop: 6 },
-  body: { flex: 1, gap: 2, backgroundColor: 'transparent' },
-  headline: { fontSize: 15, fontWeight: '700', lineHeight: 20 },
-  detail: { fontSize: 13, color: vola.textMuted, lineHeight: 18 },
-  muted: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
+  pip: { width: 6, height: 6, borderRadius: 3, marginTop: Spacing.xsPlus },
+  body: { flex: 1, gap: Spacing.xxs, backgroundColor: 'transparent' },
+  headline: { ...Typography.emphasis, fontWeight: '700' },
+  detail: { ...Typography.meta, color: vola.textMuted },
+  muted: { ...Typography.meta, color: vola.textMuted },
 });

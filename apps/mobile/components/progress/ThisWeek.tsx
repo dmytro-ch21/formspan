@@ -4,6 +4,8 @@ import { ReadingState, StaleNote } from '@/components/progress/Reading';
 import { Text, View } from '@/components/Themed';
 import { WeekReview } from '@/components/WeekReview';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import type { Module } from '@/lib/modules';
 import type { NutritionWeek, Reading } from '@/lib/progress';
 import type { UnitSystem } from '@/lib/units';
@@ -123,24 +125,19 @@ function NutritionLine({ reading }: { reading: Reading<NutritionWeek> }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10 },
+  wrap: { gap: Spacing.smPlus },
   nutrition: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: Spacing.md,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     backgroundColor: vola.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.md,
   },
-  nutritionLabel: {
-    fontSize: 11,
-    color: vola.textDim,
-    letterSpacing: 0.8,
-    fontWeight: '600',
-  },
-  nutritionValue: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  nutritionLabel: { ...Typography.eyebrow, color: vola.textDim, fontWeight: '600' },
+  nutritionValue: { ...Typography.meta, fontVariant: ['tabular-nums'], fontWeight: '600' },
 });
