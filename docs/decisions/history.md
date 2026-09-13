@@ -75829,8 +75829,8 @@ legibility steps for a white ground, not copies, and stay out.
 **A repack in git's background maintenance, still writing after git had returned.**
 
 - **`git commit` and `git merge` end by starting `git maintenance run --auto --detach`.** `GIT_TRACE` shows it on git 2.49 and on 2.55.
-- **Since git 2.54, unscheduled maintenance defaults to the `geometric` strategy.** Read from `builtin/gc.c` at each tag: 2.50 to 2.53 have no such default; 2.54 and 2.55 do.
-  - Its repack fires when the loose-object estimate exceeds 256, which is a limit of 100 rounded up. Two loose objects in the sampled `objects/17/` produce that.
+- **Since git 2.54, unscheduled maintenance defaults to the `geometric` strategy.** Read from `builtin/gc.c` at each tag: through 2.53 the default runs gc alone (2.50's task table, 2.51's `default_strategy`, 2.52 and 2.53's `gc_strategy`), and 2.54 and 2.55 default to `geometric_strategy`.
+  - Its repack fires when the loose-object estimate exceeds 256, which is a limit of 100 rounded up. git 2.55 estimates by counting the entries in `objects/17/` and multiplying by 256 (`odb/source-loose.c`), so two loose objects there read as 512.
   - gc's threshold, which 2.53 and earlier used, is 6700.
 - **The repack runs in the detached child**, so it writes into `objects/pack/` while `TemporaryDirectory` is deleting the repository.
 
@@ -75841,9 +75841,9 @@ legibility steps for a white ground, not copies, and stay out.
   - Some failures name `.git/objects`, as CI's did; others name `.git` or `objects/pack`.
   - What was left behind was a `tmp_idx_*` or `tmp_rev_*` file in `objects/pack/`.
 - **Unforced:** 0 of 400 runs. A fast loop reuses the same commit ids within a second, so that is roughly ten independent samples, not 400.
-- **Without a repack**, the detached child still removes `objects/maintenance.lock` about 1 ms after `git merge` returns. A deletion cannot fail a cleanup; the repack's new files can.
+- **The lock alone is not the cause.** Without a repack, `objects/maintenance.lock` was still there when `git merge` returned in 2 of 10 watched runs, and the detached child removed it within 1 ms. A deletion cannot fail a cleanup; the repack's new files can.
 
-**Why it can fire unforced.** Five of the self-test's six repositories contain the same blob on every run, and its id starts with `17` (`1721137…`). So a single commit landing in that bucket is enough, and commit ids change with the clock. Their ~20 commits make that roughly one run in 13 (20/256). A run fails only if the repack is still writing at cleanup. That is arithmetic, not a measured rate.
+**Why it can fire unforced.** Five of the self-test's six repositories contain the same blob on every run, and its id starts with `17` (`1721137…`). So a single commit landing in that bucket is enough, and commit ids change with the clock. Their 20 commits (4, 5, 3, 4 and 4: the objects that differ between two runs) make that roughly one run in 13 (20/256). A run fails only if the repack is still writing at cleanup. That is arithmetic, not a measured rate.
 
 **A Mac on git 2.49 or 2.50 cannot hit it,** because their auto maintenance still uses the 6700 threshold. That is why only CI saw it. A local git at 2.54 or later would have hit it in `verify` too.
 
@@ -75852,7 +75852,7 @@ legibility steps for a white ground, not copies, and stay out.
 **`_Repo.git` passes `-c maintenance.auto=false -c gc.auto=0` on every call, `init` included**, so no throwaway repository starts maintenance at all. `gc.auto=0` covers a git old enough to run `gc --auto` instead. There is no `ignore_cleanup_errors`, because that would hide a real leak as well.
 
 - **The same forced reproduction, against the fixed script:** 0 of 150 cleanups failed, and a pack appeared after return in 0 of 5 runs. `--self-test` passes on git 2.55 in that container.
-- **Every `TemporaryDirectory()` user is covered (criterion 4).** The six that build a repository all go through `_Repo`. The other two, `resolve` and `_merge_file_texts`, run `git merge-file` on plain files, and `GIT_TRACE` shows that starts no maintenance.
+- **Every `TemporaryDirectory()` user is covered (criterion 4).** The seven that build a repository, including the new check's own, all go through `_Repo`. The other two, `resolve` and `_merge_file_texts`, run `git merge-file` on plain files, and `GIT_TRACE` shows that starts no maintenance.
 - **A check holds the setting,** because the race is too rare for anything else to notice it gone.
   - `_no_background_maintenance` traces a commit in a `_Repo` and requires no `maintenance run` in the trace.
   - Its control commits again with maintenance switched on and requires the trace to show it.
@@ -75870,6 +75870,7 @@ legibility steps for a white ground, not copies, and stay out.
 
 ### Open questions
 
+- **The guard reads `GIT_TRACE`'s text,** which git does not promise to keep stable. It holds on 2.49 and 2.55. If a later git rewords the trace line, the first check would pass without meaning anything, but the control would fail, because it requires the trace to show maintenance.
 - **Two other scripts build throwaway repositories with maintenance left on:** `scripts/check-migration-versions.py` and `scripts/check-pr-has-work.py`. They were not measured here and are outside this ticket's criteria, so they are raised as a follow-up.
 
 ## Open items / known gaps as of this entry
