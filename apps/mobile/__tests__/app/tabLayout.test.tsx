@@ -2,6 +2,7 @@ import { Text } from 'react-native';
 import { render, screen } from '@testing-library/react-native';
 
 import type { Module } from '@/lib/modules';
+import { accents } from '@/constants/Colors';
 import { TABS } from '@/lib/tabs';
 import { IOS_ICON_RASTER_COLOR, tabIconRequestKey } from '@/lib/tabIconPlan';
 
@@ -72,8 +73,12 @@ jest.mock('expo-router/unstable-native-tabs', () => {
 });
 
 jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => mockModuleState }));
+// The purple theme, not the brand one: its `accent` and `ink` differ, so the
+// assertions below can tell which of the two the tab bar was given. The brand
+// theme's are the same value, and so were this stub's (the pre-N183 lime) —
+// a swap from `accent` to `ink` passed unseen. N161 (#578).
 jest.mock('@/lib/AccentProvider', () => ({
-  useAccent: () => ({ accent: '#B8FF2C', ink: '#B8FF2C', on: '#0B0F16' }),
+  useAccent: () => require('@/constants/Colors').accents.purple,
 }));
 jest.mock('@/lib/tabIconRaster', () => ({ useRasterizedIcons: () => mockRaster.current }));
 
@@ -152,11 +157,11 @@ describe('once ready and every icon has landed', () => {
   it('feeds the navigator the accent for tinting, and vola.textDim for inactive', async () => {
     await declareReady();
     const props = mockNativeTabsProps.current!;
-    expect(props.tintColor).toBe('#B8FF2C');
-    expect(props.iconColor).toEqual({ default: expect.any(String), selected: '#B8FF2C' });
+    expect(props.tintColor).toBe(accents.purple.accent);
+    expect(props.iconColor).toEqual({ default: expect.any(String), selected: accents.purple.accent });
     const labelStyle = props.labelStyle as { default: { color: string }; selected: { color: string } };
-    expect(labelStyle.selected.color).toBe('#B8FF2C');
-    expect(labelStyle.default.color).not.toBe('#B8FF2C');
+    expect(labelStyle.selected.color).toBe(accents.purple.accent);
+    expect(labelStyle.default.color).not.toBe(accents.purple.accent);
   });
 
   it('minimises on scroll down, the iOS 26 behaviour this ticket asked for', async () => {

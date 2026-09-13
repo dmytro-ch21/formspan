@@ -80,7 +80,7 @@ const mockAuth: { userId: string | null } = { userId: 'user_1' };
 jest.mock('@clerk/clerk-expo', () => ({ useAuth: () => ({ userId: mockAuth.userId }) }));
 
 jest.mock('@/lib/AccentProvider', () => ({
-  useAccent: () => ({ accent: '#B8FF2C', ink: '#B8FF2C', on: '#0B0F16' }),
+  useAccent: () => require('@/constants/Colors').accents.green,
 }));
 
 jest.mock('@/lib/sync', () => ({
