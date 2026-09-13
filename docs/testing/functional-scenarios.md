@@ -24501,3 +24501,36 @@ This is a visual change only: sizes, leading and tracking. Nothing about what th
 - A real workout at the default text size: nothing clipped, truncated or overlapping.
   - Check a set row collapsed and expanded, including one whose summary wraps to two lines, the progression hint card, the rest timer full and as a bar, and an option picker.
 - The same screen at the largest Dynamic Type size.
+
+## N546 — VO₂max gets a band and a stated trend (`apps/mobile/app/vo2max/trend.tsx`, `apps/mobile/lib/vo2MaxBand.ts`, #989)
+
+The VO₂max screen (You → VO2max) now shows the newest reading, how old it is, and where it sits for the athlete's age and sex. The bands come from the FRIEND registry's published percentiles. The change line names the period it covers.
+
+### Happy path
+
+- **An athlete with readings, a date of birth and a sex on their profile** sees the newest value and when it was taken ("Latest reading from 3 Sep, 10 days ago"), then a band such as "Above average for women aged 30–39", then one line naming the reference and that the reading is a device estimate.
+- **The band follows the four FRIEND quartiles:** Low (below the 25th percentile), Below average, Above average, and High (the 75th percentile or above). A reading exactly on a cutoff shows the band above.
+- **The change line** reads "↑ 1.6 mL/kg/min in the past 6 months", with "since 3 Aug · 4 readings" under it. Choosing 1Y changes it to "in the past year".
+- **The band describes the newest reading overall,** so it stays the same when the athlete changes the range.
+
+### Edge cases & errors
+
+- **No sex or no date of birth on the profile:** the screen names what is missing ("Add your sex in your profile to see how this compares with others your age.") and shows no band and no reference line.
+- **Profile could not be loaded** (offline): the newest reading still shows, and nothing about a band is said. The screen must not tell the athlete to add details they may already have.
+- **Age under 20 or over 79 on the reading's date:** "The reference covers ages 20 to 79, so there's no band for your age."
+- **A reading taken before a birthday that crosses a decade** is classified by the athlete's age on the day it was taken, not today's age.
+- **One reading, or none:** N524's sentences are unchanged. With one reading, the newest value and its band still show above them.
+- **Two readings on the same day:** the later one is the newest.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - the transcribed table's shape (rising through percentiles, falling with age) and its match with the paper's own medians;
+  - every band boundary, the sex and age selection, and the absent-band reasons;
+  - the rendered screen with only the network mocked: band, missing details, failed profile read, out-of-range age, and the named period.
+- **NOT reachable:** whether the band reads as fair and useful on a real account, and how it sits beside Apple Health's own cardio fitness level. Apple does not publish its cutoffs, so near a boundary the two can differ.
+
+### Needs a device
+
+- On an account with VO₂max readings and a full profile, open You → VO2max and check the band against the athlete's age and sex.
+- Remove sex from the profile, return to the screen, and check the missing-details sentence. Add it back and check that the band returns.

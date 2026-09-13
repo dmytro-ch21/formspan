@@ -77111,6 +77111,127 @@ Each file reported exactly one guard error with its own selector's message. The 
 - **The five shared session components** above are left for a shared-components pass, because converting them touches BJJ, running and food screens too.
 - **N561 (#1050)** now has all six of its per-screen children landed.
 
+## 2026-09-13 — N546 (#989): VO₂max gets a band for the athlete's age and sex, and its change names a period
+
+**What the athlete saw.** VOLA's VO₂max screen showed a number and a sparse chart. The athlete compared it with Zepp: *"vo2max we also need more like here in Zepp app"*. A bare number means little on its own: 31 mL/kg/min is above average for a woman of 36 and low for a man the same age.
+
+### What the screen shows now
+
+At the top of You → VO2max, above the range chips:
+
+- **the newest reading and how old it is:** "31.0 mL/kg/min", "Latest reading from 3 Sep, 10 days ago";
+- **its band** for the athlete's age and sex, such as "Above average for women aged 30–39";
+- **one line naming the reference**, and saying the reading is a device estimate, so the band is a guide rather than a lab result.
+
+The band describes the newest reading overall, not the selected range, so changing the range does not move it.
+
+**The change line now names its period.** "↑ 1.6 mL/kg/min" is followed by "in the past 6 months" (the chosen preset). The exact first-reading date moves to the line under it: "since 3 Aug · 4 readings". Before, the line said only "since 2026-08-03".
+
+### The reference, and how it was sourced
+
+The ticket asks for a band "derived from a published reference rather than invented". The source is the FRIEND registry:
+
+> Kaminsky LA, Arena R, Myers J. Reference Standards for Cardiorespiratory Fitness Measured With Cardiopulmonary Exercise Testing: Data From the Fitness Registry and the Importance of Exercise National Database. *Mayo Clin Proc.* 2015;90(11):1515–1523. doi:10.1016/j.mayocp.2015.07.026. PMCID PMC4919021.
+
+The values are Table 3's measured VO₂max percentiles. They come from 7,783 maximal treadmill tests with gas analysis, in adults aged 20–79 without known cardiovascular disease.
+
+**Why FRIEND, and not ACSM's classification table:**
+
+- **Measured, not predicted.** ACSM's table reprints the Cooper Institute's data, which is predicted rather than measured.
+- **Openly available in full.** The PMC copy carries the whole table.
+- **What Apple reportedly uses.** Secondary reporting says Apple's cardio fitness levels use FRIEND. Apple's own support pages name the levels but not a source, so this is a reason for choosing FRIEND. The screen does not claim it.
+
+**How the numbers were checked, because this is health-adjacent and the table sits beside a different dataset.**
+
+- **The first attempts failed.** The *Mayo Clinic Proceedings* PDF and full-text pages returned 403, and the PubMed page returned a cookie wall.
+- **The table was read from the PMC full text instead.**
+- **Table 3 has a trap.** It prints Cooper Clinic *predicted* percentiles beside the FRIEND ones, and a careless read could take the wrong column.
+- **Every cutoff was read twice.** A first read took the whole table. Two further reads asked for the FRIEND and Cooper columns side by side, and together covered all 36 band cutoffs (the 25th, 50th and 75th percentiles for both sexes and all six decades). Every one matched the first read.
+  - For men aged 20–29 the FRIEND cutoffs are 40.1 / 48.0 / 55.2, and the Cooper values are 39.0 / 43.9 / 48.5.
+- **Outer percentiles were read once.** The 5th, 10th, 90th and 95th are transcribed for completeness and not used for bands.
+- **The test holds the table to the paper.** It checks that values rise through the percentiles and fall with every decade. It also checks the medians against the paper's own results sentence: 48.0 / 37.6 at ages 20–29, and 24.4 / 18.3 at 70–79.
+
+### The four bands
+
+FRIEND prints percentiles but does not name bands. VOLA splits at the 25th, 50th and 75th percentiles:
+
+| Band | Where the reading falls |
+|---|---|
+| Low | below the 25th percentile |
+| Below average | 25th to below the 50th |
+| Above average | 50th to below the 75th |
+| High | 75th or above |
+
+- **Why these names:** they are Apple Health's names for its four cardio fitness levels, so an athlete who reads both sees the same words. Apple does not publish its cutoffs, so the two can differ near an edge, and nothing on screen says they match.
+- **Why not ACSM's "poor":** it reads as a verdict on the athlete rather than a position in a population, which `vola-athlete-ux` rules out.
+- **A reading exactly on a cutoff** takes the band above.
+
+### When there is no band, and what the screen says
+
+- **No date of birth, or a sex other than the two the reference reports:** "Add your sex in your profile to see how this compares with others your age." It names only the detail that is missing, and shows no reference line.
+- **An age outside 20–79** on the reading's date: "The reference covers ages 20 to 79, so there's no band for your age." FRIEND has no percentiles there, and extrapolating one would be inventing a reference.
+- **The profile could not be loaded,** for example offline: nothing about a band is said. A failed read must not become "add your date of birth", which would tell an athlete who has filled it in that they have not.
+- **Age is taken on the reading's date, not today.** A reading from the month before a birthday stays in the decade the athlete was in when it was measured.
+
+### What was not changed
+
+- **N524's (#939) no-reading and one-reading sentences are unchanged.** With one reading, the newest value and band now show above the sentence.
+- **The You tab's VO2max pill is unchanged.** N524 recorded why a caption there is a separate layout decision.
+- **Still one question on this screen.** No metric picker and no date-range picker were added, which keeps it within CLAUDE.md's mobile-chart carve-out.
+
+### Tests
+
+- **`lib/__tests__/vo2MaxBand.test.ts`:**
+  - the table checks above;
+  - every band boundary;
+  - sex selection;
+  - age on the reading date across a birthday;
+  - missing details, and ages 19 and 80;
+  - no reading;
+  - the copy.
+- **`lib/__tests__/vo2MaxSource.test.ts`:** the newest-reading helper (same-day ties, future-dated readings, unparseable timestamps) and the period phrase for every range.
+- **`__tests__/app/vo2maxTrendScreen.test.tsx`:** the first test that renders this screen. The real hook, `buildTrend` and classifier run, and only the network is mocked. It covers:
+  - the band;
+  - missing details;
+  - a failed profile read;
+  - an out-of-range age;
+  - the period following the range chips.
+- **Totals:** 110 tests across the three suites (31 band, 74 source, 5 screen), all passing.
+
+**A test failure on the first run, and what is and isn't known about it.** The first run of the screen test failed three of five tests.
+
+- **One was the test's fault:** RNTL's `toHaveTextContent` matches a plain string against the whole text, and the test passed a phrase.
+- **The first test failed with "render function has not been called"** after about 1.5s, past `waitFor`'s 1s default wait.
+- **The missing-details test showed the female band** its own profile mock did not have.
+
+After the wait was raised to 8s and the matcher fixed, all five pass together, and the missing-details test also passes run on its own. A diagnostic in that test confirmed the screen received the profile the test set (`sex: null`).
+
+The likeliest explanation for the wrong band is state left behind by the first test's timeout. That was not proven: the missing-details test was never run alone *before* the fix. What is established is that the screen renders the right sentence for the profile it receives.
+
+**Mutation-checked,** each caught as a named test failure and restored byte-identical before a green re-run:
+
+- **M1**, the cutoff goes to the band below (`>=` to `>` on the 75th percentile): 2 tests red, including "a reading of 36.1 is high".
+- **M2**, the profile's sex is ignored (the female table is always used): 2 red, including "uses the cutoffs for the sex on the profile".
+- **M3**, age is taken today rather than on the reading's date: 1 red, "takes age on the reading date".
+- **M4**, the reference is stretched past 79: 2 red, including "has no band outside the ages the reference covers".
+- **M5**, any non-empty sex is accepted: 1 red, "asks for what is missing instead of guessing a band".
+- **M6**, one table cell drifts by 0.1 (women 30–39 median 30.2 to 30.3): 7 red, every boundary case for that row.
+- **M7**, a failed profile read is treated like a missing detail: 1 red, "says nothing about a band when the profile could not be read".
+- **M8**, the change line never names its period: 1 red, "names its period".
+- **M9**, the "newest" reading picks the oldest: 4 red across the source and screen suites.
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- **Neighbouring suites still pass:** `youScreen` (which renders the VO2max pill from `vo2MaxSource.ts`), `trainingLoadTrendScreen`, `trendGoalProfileGap`, `useVo2MaxTrend`, `biometric` and `sessionVo2Max`, 131 tests.
+
+### Not done
+
+- **The band has not been seen on a device.** There is no `NEEDS HUMAN EVIDENCE` criterion on the ticket, but the functional scenarios list the device walk.
+- **The You tab's VO2max pill** still carries no band.
+- **Web** was not changed.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
