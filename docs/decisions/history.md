@@ -77332,6 +77332,60 @@ Without the first guard, one report with `"rows": "lots"` failed the cast and th
 - **An athlete whose rows have all synced stays listed** until their last report leaves the window. A device with nothing stuck sends nothing, so there is no "all clear" to read. The screen says so.
 - **Filtering the event list by `kind=sync_blocked`** still returns reports and give-ups together. Only the badge tells them apart.
 
+## 2026-09-13 — N452 (#755): the logging screen says "each side" beside Reps on a unilateral exercise, and reps stay a per-side count
+
+**What the athlete asked.** *"if i do 12 per arm like curls one by one i do 24 what do we enter"*, and for lunges with a dumbbell in each hand, whether 12 steps per leg is what goes in. The catalog already knew which exercises work one limb at a time (`is_unilateral`). The workout template builder and the web session viewer said so: "Per side — 8 reps here means 8 each side." The live logging screen, `apps/mobile/app/session/[id].tsx`, where the number is typed mid-set, said nothing beside Reps.
+
+### What changed
+
+- **On a unilateral exercise, the Reps field reads "Reps each side".** This is the same small hint style the weight field already used for "per hand".
+- **The rule lives in one function, `measureHint` in `apps/mobile/lib/sessions.ts`.** It returns "per hand" for weight on a `per_side` exercise and "each side" for reps on an `is_unilateral` one. The screen's own one-line check for "per hand" moved into it.
+- **The two hints read two separate catalog facts.** `load_mode` says which weight to type, and `is_unilateral` says how many limbs work. The 2026-08-17 entry, "Two implements, one leg", split them for exactly this reason. So:
+  - a dumbbell lunge (unilateral, `per_side`) shows both hints;
+  - a dumbbell bench press (`per_side`, both arms together) shows only "per hand";
+  - a Bulgarian split squat (unilateral, `total`) shows only "each side".
+- **The hint is part of the field's accessible name** ("Reps each side for Set 1 of …"), because the screen already built that name from the label and the hint.
+
+92 of the 762 catalog exercises are unilateral, and 86 of those record reps.
+
+### The decision the ticket asked for: reps stay a per-side count
+
+The ticket asks whether unilateral reps should double into volume, the way `implements` doubles weight. **Decision: no, not in this change. Reps stay the number typed, per side.** The reasons:
+
+- **The same number is a set's effort everywhere else.** 1RM estimates, rep records and the progression engine all read the logged reps. Eight per leg is an eight-rep set. Doubling the stored number would misstate every one of those. Doubling it only inside volume would give one field two meanings.
+- **Doubling volume would rewrite history.** Tonnage is computed on read, `ss.reps * ss.weight_kg * COALESCE(e.implements, 1)` (`SQLTonnage` in `backend/internal/modules/session/postgres.go`), and `s.reps * total` on the phone. Changing it moves every past session's tonnage for 86 exercises at once. The last change like that, `implements`, was made with the user's agreement. This one should be too, so it is not taken unattended.
+
+**What that leaves, said plainly: tonnage for a unilateral exercise counts one side's reps.** A one-arm row of 8 at 30 kg records 240 kg, although both arms together moved 480 kg. A dumbbell lunge of 8 per leg with 25 kg in each hand records 8 × 25 × 2 = 400 kg, for a set of 16 steps.
+
+**This is known and kept, and it is the user's call to change.** It is reversible either way: tonnage is derived on read, so a later decision to count both sides would correct past sessions too, with no data migration.
+
+### Tests
+
+- **`apps/mobile/lib/__tests__/measureHint.test.ts`, 5 tests:**
+  - "each side" beside reps on a unilateral exercise;
+  - no reps hint when both sides work together;
+  - "per hand" beside weight on a per-side exercise;
+  - neither catalog fact produces the other's hint;
+  - time and distance are never hinted, and nothing is hinted without an exercise.
+- **`apps/mobile/__tests__/app/strengthSetHints.test.tsx`, 3 tests.** It renders the real logging screen with a dumbbell lunge and a back squat, opens each set, and reads the fields' accessible names.
+  - **Why a screen test as well.** A test of the helper alone stays green if the screen stops calling it, and the missing hint was always a screen problem.
+  - **The test's catalog fetch returns the same exercises as its cache.** The screen replaces its catalog with whatever the fetch returns. An empty fetch would leave every set without an exercise, and "no hint" would then pass for the wrong reason.
+
+**Mutation-checked.** Each was caught as a named test failure, with the file restored byte-identical and re-run green:
+
+- **N1** the reps hint removed;
+- **N2** a unilateral exercise hinting every measure;
+- **N3** the reps hint keyed on `load_mode` instead of `is_unilateral`;
+- **N4** the "per hand" hint removed;
+- **S1** the screen back to its old weight-only check;
+- **S2** the screen passing no exercise to the helper.
+
+### Not done
+
+- **Not seen on a device.** The ticket's device criterion stays open.
+- **The 6 unilateral exercises measured in time or distance get no "each side".** The ticket is about reps, and whether a timed field needs the same hint is a separate question.
+- **Counting both sides in tonnage** is left for the user to decide, as above.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

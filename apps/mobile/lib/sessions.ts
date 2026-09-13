@@ -519,6 +519,33 @@ export function measuresFor(loadType: Exercise['load_type']): Measure[] {
 }
 
 /**
+ * The word beside a measure's label on the logging form, saying which number
+ * to type — or `undefined` when the label already says enough.
+ *
+ * - **Weight on a `per_side` exercise → "per hand".** What one hand holds, not
+ *   the pair; the server applies the exercise's `implements` afterwards.
+ * - **Reps on an `is_unilateral` exercise → "each side".** N452 (#755): the
+ *   workout template builder and the web session viewer already said "8 reps
+ *   here means 8 each side", and the one screen where the number is actually
+ *   typed said nothing.
+ *
+ * The two keys are independent on purpose. `load_mode` says which weight to
+ * type and `is_unilateral` says how many limbs work, so a dumbbell walking lunge,
+ * which is both, gets both hints (history.md, 2026-08-17, "Two implements, one
+ * leg").
+ *
+ * A hint only. The logged reps are stored and summed exactly as typed.
+ */
+export function measureHint(
+  measure: Measure,
+  exercise: Pick<Exercise, 'load_mode' | 'is_unilateral'> | undefined,
+): string | undefined {
+  if (measure === 'weight' && exercise?.load_mode === 'per_side') return 'per hand';
+  if (measure === 'reps' && exercise?.is_unilateral) return 'each side';
+  return undefined;
+}
+
+/**
  * How long to run a work timer for this set, or null if it cannot be timed.
  *
  * **The duration is already on the set, which is why this is a lookup and not a
