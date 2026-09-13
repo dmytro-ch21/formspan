@@ -76077,6 +76077,39 @@ The mobile-first test holds: an athlete with only a phone gets the whole feature
 - **The Settings screen is not render-tested with the row mounted.** The row component is tested on its own.
 
 
+## 2026-09-13 — N561 (#1050): the Today screen's smallest labels join the type scale, web headings get their tracking, and the rest is six tickets
+
+**What.** Every `fontSize` below 11 in `apps/mobile/components/today/` — fourteen of them across seven files, not the one site the ticket named — now comes from `constants/Typography.ts`, and `apps/web/src/app/globals.css` gives large headings negative tracking. The remaining adoption work is filed as one ticket per screen: **N572 Today (#1187), N573 Food (#1188), N574 Progress (#1189), N575 Plan (#1190), N576 You (#1191), N577 Session (#1192)**, in the ticket's priority order.
+
+**The ticket named `WeekStrip.tsx`'s 9pt day initials; its own criterion said no size below 11 in the directory, and that was fourteen.** Twelve sat at 10pt and one — the day letters over `MiniCards`' week dots — at 8. They split three ways:
+
+- **Uppercase labels → `Typography.eyebrow`** (11/14, tracking 1.2, 700), keeping each colour: the week strip's initials, `DETECTED` / `UP NEXT` / the sport tag / `PROGRESS`, `TRAINING` / `LOGGING`, `PROTEIN` / `CARBS` / `FAT`, and the phase pill. `LoggedCard` already spread the role and then shrank it back to 10pt with its own tracking; the override is gone.
+- **Short sentence-case text → `Typography.caption`** (12/16): "on N days", "Over target", "7-day trend". The role's own doc comment is the reason — small reading text that is not a label.
+- **Three single glyphs stay literals at 11**, with a comment saying why: the spark chart's day letters (a 17pt row, and a 15pt disc for today) and the mini-card week letters over 13pt dots. Neither role fits a glyph in a fixed slot — eyebrow's tracking and caption's 12pt would crowd it — so these take the scale's floor rather than borrowing a role for its number.
+
+**One layout consequence, fixed rather than left to a device.** The phase pill shares a row with "NN% of the way" beside the 132pt spark, and the row did not wrap. The widest label, `MAKING WEIGHT`, plus "100% of the way" was already wider than that column at the old 10pt, and eyebrow's tracking adds about 17pt. The row now wraps, so the percentage drops under the pill instead of running into the chart.
+
+**Web.** Size-keyed negative tracking in a new `@layer base` block: `-0.02em` for `h1`, `.text-4xl`, `.text-5xl`; `-0.01em` for `h2`, `.text-2xl`, `.text-3xl`. In the base layer on purpose, so a `tracking-*` utility on a heading still wins — the same cascade reasoning the file already records for its form reset. Web had 38 of these headings (`text-5xl` 1, `text-4xl` 15, `text-3xl` 4, `text-2xl` 18) and one `tracking-tight`.
+
+**Re-measured, on `origin/main` @ `48bb1d32` and on this branch, the same way both times** (mobile `.ts`/`.tsx` outside tests):
+
+```
+                               main   branch
+files importing Typography       14       20
+raw fontSize: sites            1270     1259
+lineHeight: sites               210      210
+fontSize below 11                59       45
+distinct literal fontSize        29       28
+```
+
+The ticket's figures (12 of 179 files, 1,247 sites, 83 `lineHeight`) were counted over a narrower scope; these are the baseline the six children measure against, and each child re-measures its own screen before starting.
+
+**How the children are scoped, and why not by route file alone.** Each tab's route file hides most of its text in components: Today's `app/(tabs)/index.tsx` plus `components/today/` is 62 sites, Food's route plus `components/food/` is 56 with nothing importing the scale. N508 (#885) already converted Progress, Plan and the session screen's route files, so those three children are mostly the components N508 did not reach, and each extends N508's ESLint allowlist to what it converts. N577 carries the set-logging warning from `CLAUDE.md`'s interface bar.
+
+**Checked.** eslint on the seven files: no findings. `tsc --noEmit`: clean. The ten test files that render Today or its components: 196 pass. The two web tests that read `globals.css`: 15 pass.
+
+**Not verified.** Nothing here was looked at on a device. The day initials are 11pt at `textDim` now; whether that reads in gym lighting, and whether the week strip and the mini cards still fit at the largest Dynamic Type size, are the two device criteria on #1050.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

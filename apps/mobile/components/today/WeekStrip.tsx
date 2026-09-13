@@ -3,6 +3,7 @@ import { StyleSheet, View as RNView } from 'react-native';
 import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Typography } from '@/constants/Typography';
 import { dayString } from '@/lib/calendar';
 import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
   },
   days: { flexDirection: 'row', justifyContent: 'space-between' },
   day: { alignItems: 'center', gap: 4, flex: 1 },
-  dow: { fontSize: 9, letterSpacing: 0.6, color: vola.textDim, fontWeight: '600' },
+  dow: { ...Typography.eyebrow, color: vola.textDim },
   dowToday: { color: vola.lime },
   dateWrap: {
     width: 30,

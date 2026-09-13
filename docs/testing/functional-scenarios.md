@@ -24177,3 +24177,31 @@ Metro reload.
 - Only today's count is kept current; no step history or trend.
 - The VOLA narration (N570) cannot state a step count yet: its fabricated-fact
   guard does not list the steps fact's number, so such a sentence is dropped.
+
+## N561 — the Today screen's smallest labels on the type scale, and web heading tracking (`apps/mobile/components/today/*`, `apps/web/src/app/globals.css`, #1050)
+
+A visual change only: sizes, leading and tracking. Nothing about what Today or the web app shows, or when.
+
+### Happy path
+
+- **Today, week strip:** the day initials (M T W …) are 11pt, bold and tracked, where they were 9pt. Today's initial is still the accent colour.
+- **Today, cards:** the uppercase tags — DETECTED, UP NEXT, the sport name, PROGRESS, TRAINING, LOGGING, PROTEIN / CARBS / FAT — are one consistent 11pt tracked style.
+- **Today, small text:** "on N days" under the training count, "Over target" under a macro bar, and "7-day trend" over the spark read at 12pt.
+- **Today, spark chart and mini-card week dots:** the day letters are 11pt and still sit inside their slots, including today's letter inside its filled disc.
+- **Web:** large headings (`h1`, `h2`, and the `text-2xl`…`text-5xl` sizes) are set slightly tighter.
+
+### Edge cases & errors
+
+- **Phase pill with the longest label** (`MAKING WEIGHT`) and a progress figure ("100% of the way"): the figure wraps below the pill rather than overlapping the spark chart.
+- **A web heading that already carries a `tracking-*` class** keeps that class's tracking — the new rule is in `@layer base`, below utilities.
+- **Largest Dynamic Type size:** the week strip's seven columns and the mini cards' seven week letters still fit on one line each; the cards grow taller rather than clipping.
+
+### What a test can and cannot reach
+
+- **Reachable:** that no `fontSize` below 11 remains in `components/today/` (a grep, recorded in the history entry), and that the screens still render — the existing Today, day-screen, week-planner, momentum-card and up-next-card suites all pass.
+- **NOT reachable:** legibility, clipping and wrapping at a given text size. Those are device checks.
+
+### Needs a device
+
+- Today, at the default text size, in bright light and at arm's length: the day initials are legible.
+- Today at the largest Dynamic Type size: the week strip, the mini cards' week letters and the spark chart's day letters still fit.

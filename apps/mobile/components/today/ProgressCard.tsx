@@ -3,6 +3,7 @@ import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Typography } from '@/constants/Typography';
 import { shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
 import { PHASE_LABELS, type Checkin, type Phase } from '@/lib/body';
 import {
@@ -446,7 +447,7 @@ const styles = StyleSheet.create({
   },
   pressed: { backgroundColor: vola.surfaceHover },
   left: { flex: 1, gap: 3 },
-  eyebrow: { fontSize: 10, letterSpacing: 1, color: vola.textMuted, fontWeight: '700' },
+  eyebrow: { ...Typography.eyebrow, color: vola.textMuted },
   weight: {
     fontSize: 32,
     fontWeight: '800',
@@ -460,7 +461,10 @@ const styles = StyleSheet.create({
   deltaAbsent: { fontSize: 12, color: vola.textDim },
   absent: { fontSize: 13, color: vola.textDim, maxWidth: 190 },
 
-  phaseRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  // Wraps, so the percentage drops under the pill rather than running into the
+  // spark: `MAKING WEIGHT` plus "100% of the way" is wider than this column,
+  // and was before N561 moved the label onto `Typography.eyebrow`'s tracking.
+  phaseRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 },
   phasePill: {
     borderWidth: 1,
     borderColor: vola.lime,
@@ -468,11 +472,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
-  phaseLabel: { fontSize: 10, fontWeight: '700', color: vola.lime, letterSpacing: 0.6 },
+  phaseLabel: { ...Typography.eyebrow, color: vola.lime },
   phasePct: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
 
   spark: { width: SPARK_W, alignItems: 'flex-end', gap: 4, justifyContent: 'center' },
-  sparkLabel: { fontSize: 10, color: vola.textDim },
+  sparkLabel: { ...Typography.caption, color: vola.textDim },
   sparkAbsent: { fontSize: 11, color: vola.textDim },
 
   axis: { width: SPARK_W, height: SPARK_AXIS_H },
@@ -486,7 +490,9 @@ const styles = StyleSheet.create({
   },
   // `textMuted`, not `textDim`: this is the label a value is read against, and
   // the axis on `/goals/trend` is the same weight. Dim is for absences.
-  axisLetter: { fontSize: 10, color: vola.textMuted, fontWeight: '600' },
+  // 11 is the scale's floor, not a role: these are single glyphs in a 17pt row
+  // and a 15pt disc, where `eyebrow`'s tracking or `caption`'s 12pt would crowd.
+  axisLetter: { fontSize: 11, color: vola.textMuted, fontWeight: '600' },
   axisToday: {
     width: 15,
     height: 15,
@@ -497,5 +503,5 @@ const styles = StyleSheet.create({
   },
   // The app's ground on the accent, which is the pairing `accents.green.on`
   // states — the accent is never dark enough for white text.
-  axisTodayLetter: { fontSize: 10, color: vola.bg, fontWeight: '800' },
+  axisTodayLetter: { fontSize: 11, color: vola.bg, fontWeight: '800' },
 });

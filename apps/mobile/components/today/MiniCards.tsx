@@ -4,6 +4,7 @@ import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import { vola } from '@/constants/Colors';
+import { Typography } from '@/constants/Typography';
 import { dayString } from '@/lib/calendar';
 import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
 
@@ -241,7 +242,7 @@ const styles = StyleSheet.create({
   },
   pressed: { backgroundColor: vola.surfaceHover },
   miniHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  miniLabel: { fontSize: 10, letterSpacing: 0.9, color: vola.textMuted, fontWeight: '700' },
+  miniLabel: { ...Typography.eyebrow, color: vola.textMuted },
   miniBody: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   loggingBody: { gap: 10 },
   miniFigures: { flex: 1 },
@@ -254,12 +255,13 @@ const styles = StyleSheet.create({
   miniDenom: { fontSize: 15, fontWeight: '600', color: vola.textDim },
   miniMeta: { fontSize: 11, color: vola.textMuted },
   miniValueRow: { flexDirection: 'row', alignItems: 'baseline' },
-  miniSub: { fontSize: 10, color: vola.textDim },
+  miniSub: { ...Typography.caption, color: vola.textDim },
   miniAbsent: { fontSize: 11, color: vola.textDim },
 
   dots: { flexDirection: 'row', justifyContent: 'space-between' },
   dotCol: { alignItems: 'center', gap: 3 },
-  dotDow: { fontSize: 8, color: vola.textDim },
+  // The scale's floor rather than a role — a single letter over a 13pt dot.
+  dotDow: { fontSize: 11, color: vola.textDim },
   dot: { width: 13, height: 13, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
   dotDone: { backgroundColor: vola.lime },
   dotPending: { borderWidth: 1, borderColor: vola.lineSoft },

@@ -4,6 +4,7 @@ import { Text, View } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { MacroRings } from '@/components/today/MacroRings';
 import { vola } from '@/constants/Colors';
+import { Typography } from '@/constants/Typography';
 import { readRings, ringColor, RING_SHORT, type RingKey } from '@/lib/macroRings';
 import {
   viewTarget,
@@ -506,7 +507,7 @@ const styles = StyleSheet.create({
   row: { gap: 3 },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  rowLabel: { fontSize: 10, letterSpacing: 0.8, color: vola.textMuted, fontWeight: '600' },
+  rowLabel: { ...Typography.eyebrow, color: vola.textMuted },
   rowFigures: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   rowValue: {
     fontSize: 19,
@@ -520,7 +521,7 @@ const styles = StyleSheet.create({
   fill: { height: 3, borderRadius: 2 },
   overWrap: { alignItems: 'flex-end' },
   overPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
-  overLabel: { fontSize: 10, fontWeight: '600' },
+  overLabel: { ...Typography.caption },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {

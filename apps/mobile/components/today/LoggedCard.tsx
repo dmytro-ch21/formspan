@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
   },
   text: { flex: 1, gap: 1 },
-  eyebrow: { ...Typography.eyebrow, fontSize: 10, letterSpacing: 1 },
+  eyebrow: { ...Typography.eyebrow },
   title: { ...Typography.emphasis, color: vola.text, fontWeight: '700' },
   meta: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
   running: { ...Typography.caption, color: vola.warn, fontWeight: '600' },
