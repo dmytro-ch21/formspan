@@ -250,6 +250,12 @@ jobs:
       - name: Brand copies have not drifted
         run: pnpm run check:brand-copies
 
+      # H14 (#948): the brand rasters still depict their SVG masters, and their
+      # bytes are pinned. Beside brand-copies, and it needs this job's install
+      # for sharp. It prints what it measures, so this log records a Linux render.
+      - name: Brand rasters still match their masters
+        run: pnpm run check:brand-rasters
+
       - name: Build
         # Same reasoning as the web job's Build step above.
         env:

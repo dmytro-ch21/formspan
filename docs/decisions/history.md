@@ -75677,6 +75677,77 @@ The first handler wrote its own 400 after `DecodeJSONStrict` failed. That decode
 - **For 2b:** whether a summary cached on the phone is re-guarded against the day's facts on every render, since facts change after generation.
 - **For the owner, after part 3's measurement:** the monthly AI cost ceiling per athlete.
 
+## 2026-09-13 — H14 (#948): the brand rasters are checked against their SVG masters, and their bytes are pinned
+
+**What was wrong.** `check:brand-copies` reads as "the brand assets are guarded", but it compares only the two `Brand.tsx` copies and the belt renders. Meanwhile CLAUDE.md said the PNGs in `apps/mobile/assets/images/` are *generated* from `assets/brand/`. No generator existed, no check existed, and nothing would notice if a raster and its master drifted apart. That matters for `vola-mark.png` in particular, which since #946 is the first thing an athlete sees on Android.
+
+### The decision the ticket asked for, made by measuring
+
+The ticket's first criterion was: are these PNGs really generated (then add the generator and a no-op check), or hand-committed (then narrow the claim)? The history says both. Each raster was rendered from its master, by hand, in `4b80fb02` ("regenerates vola-mark.png at 1024px from the brand source") and `3d19178a` ("the PNGs follow from them"). No script was committed.
+
+**So the question became whether they still match.** Each raster was trimmed to its visible content and compared with its master, rendered at the same content size by sharp 0.35.4 (librsvg 2.62.91) on macOS arm64. The measure is the share of content pixels that differ by more than 48 levels in any channel:
+
+| raster | master | measured |
+|---|---|---|
+| `android-icon-background.png` | `android-adaptive-background.svg` | 0.00% (pixel for pixel) |
+| `icon.png` | `vola-app-icon-dark-1024.svg` | 0.00% (max delta 29) |
+| `android-icon-monochrome.png` | `vola-app-icon-monochrome-1024.svg` | 0.03% |
+| `android-icon-foreground.png` | `android-adaptive-foreground.svg` | 0.07% |
+| `vola-mark.png` | `logos/source/vola-mark-color.svg` | 0.60% |
+| `vola-wordmark.png` | `logos/source/vola-wordmark-white.svg` | 0.83% |
+| `favicon.png` (96px) | `vola-app-icon-dark-1024.svg` | 6.69% (resampling noise dominates at this size) |
+
+The contrast, from the same method: the **wrong** masters measured 25.41% (the black wordmark) and 82.94% (the light icon).
+
+**So the claim is true today. It stays in CLAUDE.md, and it is now enforced.**
+
+**Why there is no generator.** "Re-running it is a no-op" cannot hold byte for byte. Re-rendering a master reproduces its committed raster exactly only for the flat Android background. The rest differ by anti-aliasing, up to 0.83% of content pixels on this machine, and a Linux renderer can differ again. A byte-exact regeneration check would fail on its first run and then flake between macOS and CI. So rendering stays a manual re-export, and the check makes a skipped or botched one visible.
+
+### `check:brand-rasters`, in `verify` and CI's Admin job
+
+`scripts/check-brand-rasters.mjs`, driven by `scripts/brand-rasters.json`, runs three checks:
+
+- **INTEGRITY:** each raster's SHA-256 is pinned, so any byte change fails.
+- **FIDELITY:**
+  - canvas size as recorded;
+  - content aspect within 1% of the master's;
+  - the share of content pixels off by more than 48 levels under a **per-asset tolerance recorded beside its measurement**: 1% for the icons, 2% for the mark and wordmark, 10% for the favicon.
+- **COVERAGE:** every PNG directly in `apps/mobile/assets/images/` must be in the manifest, so a new brand raster cannot arrive unchecked.
+
+**It prints its measurements on every run,** so the first CI log records what a Linux renderer measures.
+
+**Why both integrity and fidelity.** The ticket's mutation criterion is "change a PNG by one pixel and confirm it goes red", and fidelity alone cannot meet it. Renderer noise already moves up to about 1% of edge pixels, so a single changed pixel sits below any tolerance that today's faithful rasters pass. The pin catches that change. Fidelity catches what a pin never can: a master edited without re-exporting, or a manifest naming the wrong master.
+
+**`sharp` became a root devDependency,** pinned to the 0.35.4 that `next` already locked. **The lockfile change moved no package version.** Three entries moved:
+- sharp's new importer entry;
+- `@img/colour`, no longer marked optional;
+- a second peer-context snapshot of the same `eslint-import-resolver-typescript@3.10.1`.
+
+`pnpm install --frozen-lockfile` succeeds against it without changing it.
+
+**Mutation checks.** A Python driver applied each mutation, ran the check, restored the file, confirmed it byte-identical, and re-ran the check green. The baseline was green.
+
+| # | mutation | result |
+|---|---|---|
+| M1 | one pixel inverted at the centre of `icon.png` (`11,18,32` → `244,237,223`) | **INTEGRITY red.** Fidelity did **not** fail: one pixel sits inside the tolerance, which is the case the pin exists for |
+| M2 | `android-adaptive-background.svg` recoloured, raster not re-exported | **FIDELITY red**, 100.00% of content pixels differ. Integrity untouched, since the PNG did not change |
+| M3 | the manifest names the black wordmark as `vola-wordmark.png`'s master | **FIDELITY red**, 25.41% (allowed 2%) |
+| M4 | an unlisted PNG dropped into the images folder | **COVERAGE red** |
+| M5 | the mark's tolerance tightened to 0.1%, under its measured 0.60% | **FIDELITY red**: the tolerance comparison is live, not dead code |
+| M6 | the wordmark's recorded canvas changed to 2048×258 | **FIDELITY red**: size mismatch |
+
+### Also
+
+- **`check:brand-copies` is unchanged, in name and in what it checks** (criterion 3).
+- **Docs.** CLAUDE.md's brand line now names the check. `assets/brand/README.md`'s App Store note points at `icon.png` as that export, and at the manifest for how to re-export.
+- **Not user-facing**, so no functional scenarios.
+
+### Open questions
+
+- **The Linux measurements.** The tolerances were set from macOS numbers; the first CI run prints Linux's. If CI goes red on a tolerance, that is a renderer difference to record in the manifest, not a drawing change.
+- **`logos/` and `splash/`** hold the old mark (the brand README says so). No raster in the app comes from them, so this check does not cover them, and re-cutting them from `logos/source/` remains unstarted.
+- **The favicon's 10% tolerance** is the loosest, and rests on one measurement at 96px.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
