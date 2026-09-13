@@ -64,9 +64,9 @@ import type { IconName } from '@/components/ui/Icon';
  * from the URL — `app/(tabs)/goals.tsx` and `app/goals.tsx` both resolve to
  * `/goals` — so this is a file-location and stack-wiring change only.
  * `vola://train` and `vola://goals` are unaffected, and so is every
- * `router.push('/goals')` call site (they read `/goals`, never
- * `/(tabs)/goals`, once N504 lands — see that ticket's diff for the sites
- * that had to be corrected from the older `/(tabs)/goals` spelling).
+ * `router.push('/goals')` call site (they have read `/goals`, never
+ * `/(tabs)/goals`, since N504 — see that ticket's diff for the sites that
+ * had to be corrected from the older `/(tabs)/goals` spelling).
  *
  * `train.tsx`'s own content (a `<Redirect>` to Today) is untouched by the
  * move — see that file for N180/N182's account of why it exists as a redirect

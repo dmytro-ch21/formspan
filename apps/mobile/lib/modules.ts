@@ -341,14 +341,17 @@ export function moduleOffWithFoodLog(modules: Module[]): Module | undefined {
  * in the off-but-available state that N61 is about.
  *
  * **It was the tab bar's question until N176 (#581), and has no caller today.**
- * Food and Goals left the bottom bar for Train and Progress, so nothing is
- * currently deciding whether to draw a link to the food log — Today's Fuel card
- * asks the narrower `hasFoodLog`, and says in words what it is doing when the
- * answer is no. Kept rather than deleted for two reasons: it is one third of a
- * partition the tests pin as a partition (see the union assertion in
- * `moduleGating.test.ts`, which is what stops the other two drifting apart),
- * and it is the exact question N180 (#585) has to answer when it re-homes
- * nutrition somewhere the bar no longer reaches.
+ * N176 took Food and Goals off the bottom bar for Train and Progress. N180
+ * (#585) put Food back in every module state without asking this — the Food
+ * screen says which module is off, or "Not available" when there is none
+ * (`ModuleOffNotice`) — and Goals stayed off the bar, a pushed screen
+ * (`app/goals.tsx`) since N504. Today's Fuel card asks the narrower
+ * `hasFoodLog`, and says in words what it is doing when the answer is no. Kept
+ * rather than deleted for two reasons: it is one third of a partition the tests
+ * pin as a partition (see the union assertion in `moduleGating.test.ts`, which
+ * is what stops the other two drifting apart), and it is still the right
+ * question for any future link that decides whether a food surface should be
+ * reachable at all.
  *
  * The Food and Goals tabs used to be hidden on `!hasFoodLog`, which erased 40%
  * of the primary navigation with nothing left behind to say why — and the two
