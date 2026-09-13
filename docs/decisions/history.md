@@ -76889,6 +76889,103 @@ Each file reported exactly one guard error with its own selector's message. The 
   - the "New workout" sheet header.
 - **The last two screens** (#1191, #1192) are untouched.
 
+## 2026-09-13 — N576 (#1191): the You screen's text on the type scale
+
+**What was wrong.** The You tab's route file, `app/(tabs)/you.tsx`, set 6 font sizes of its own. Its two You-only components had never been converted: BjjRankHeader set 6 and RoadmapSummary 8. One of those sizes was below 11.
+
+This is the fifth of N561's six per-screen children (#1050), following Today, Food, Progress and Plan. This entry records the numbers and what differs.
+
+### Scope, listed first as the ticket asks
+
+The ticket filed only `you.tsx` and said its components "are not in one directory, so the first step is to list them". Listed from the route's own imports on `origin/main`:
+
+- `apps/mobile/app/(tabs)/you.tsx`, the route (6 font sizes).
+- `apps/mobile/components/BjjRankHeader.tsx` (6).
+- `apps/mobile/components/RoadmapSummary.tsx` (8).
+
+**Both components are imported only by `you.tsx`**, checked with `git grep`.
+
+**Deliberately out of scope:**
+- **`Avatar`** carries one font size, but four routes import it (`you.tsx`, `friends/index.tsx`, `profile/edit.tsx`, `social/index.tsx`). Converting it here would touch other screens, which the ticket forbids.
+- **`ScreenHeader`** is N508's and already converted.
+
+### The baseline, before and after
+
+One script measured both: `origin/main` at `2d47b690`, then this branch.
+
+| Measure | Before | After |
+|---|---|---|
+| files | 3 | 3 |
+| files importing `Typography` | 1 | 3 |
+| `fontSize:` sites (any) | 20 | 3 |
+| raw numeric `fontSize:` sites | 20 | 2 |
+| `fontSize` below 11 | 1 | 0 |
+| numeric `lineHeight:` sites | 2 | 0 |
+| `...Typography.<role>` spreads | 3 | 20 |
+| `fontSize: Typography.<role>.fontSize` | 0 | 1 |
+| spacing literals on the scale | 21 | 0 |
+| radius literals on the scale | 4 | 0 |
+
+`you.tsx` alone matches the baseline filed on the ticket (1 file, 1 importing, 6 font sizes, 0 line heights, 0 below 11).
+
+### How each style was converted
+
+The rules are the ones the earlier four children used: a role owns size, leading and tracking; the rendered weight is kept, and was checked per entry against `origin/main` (none changed); every exception has a one-line reason.
+
+- **Two names stay literals.** The athlete's name in the masthead (`you.tsx` `name`, 26) is sized against the avatar beside it. The belt name in BjjRankHeader (`name`, 30) is that header's one hero line.
+- **The count badge on You's navigation pills** (`pillBadgeText`, 11, the number beside a pill such as "3 waiting") keeps its size as `Typography.eyebrow.fontSize`. The eyebrow role's tracking would widen the badge.
+- **RoadmapSummary's mastered count** (`big`, 28/800) was already `display`'s size and weight, and now spreads that role.
+- **One `<Text>` has no style, on purpose.** RoadmapSummary's "N of M techniques mastered" line is a wrapper around two inline runs, `big` and `rest`, and each run carries its own size.
+
+### Sizes that changed
+
+3 of the 20 converted entries changed size:
+
+| File | Entry | Before | After | Role |
+|---|---|---|---|---|
+| `you.tsx` | `sectionLabel` | 12 | 11 | eyebrow |
+| `BjjRankHeader.tsx` | `marks` | 16 | 15 | emphasis |
+| `BjjRankHeader.tsx` | `factLabel` | 9 | 11 | eyebrow |
+
+Why:
+
+- **Section labels.** You's section labels are uppercase and tracked, which is the label role's job. They join every other screen's labels at 11.
+- **The belt's stripe marks** move to `emphasis`, as 16pt text did on the other screens.
+- **The fact labels** under the rank were the screen's one size below 11.
+
+Leading changed on 17 entries and tracking on 7. Three entries had their own tracking, which the role replaced:
+
+- `sectionLabel` (1) and `factLabel` (0.9) become 1.2;
+- BjjRankHeader's `eyebrow` (1.3) becomes 1.2.
+
+### The guard
+
+`you.tsx`, BjjRankHeader and RoadmapSummary join `N508_CONVERTED_FILES`, one by one. The 21 spacing and 4 radius literals on the scale are restated as tokens, each value-identical. Literals off the scale stay.
+
+**Mutation-tested.** A probe style entry was inserted into all three files at once and linted:
+
+- `fontSize: 13` in `you.tsx`;
+- `padding: 16` in BjjRankHeader;
+- `borderRadius: 14` in RoadmapSummary.
+
+Each file reported exactly one guard error with its own selector's message. The files were restored byte-identical and linted again: 0 errors. **Negative control:** `components/TrackerCard.tsx`, not converted, contains `fontSize: 12` and reports 0 guard errors. (Earlier children used `you.tsx`, which this ticket converts.)
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- The five suites that cover these files pass, 63 tests: `youScreen`, `tabLayout`, `bjjRankHeader`, `roadmapEntryPoints` and `sheetTokens`. No test in scope asserts a style value.
+- **Audit for text with no size.** It looks for a `<Text>` whose styles set no size. Before and after, it reports only the RoadmapSummary wrapper described above.
+
+### Not done
+
+- **Device checks.** Both remain on #1191 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. The places most likely to show a problem:
+  - BjjRankHeader's fact labels, 9 to 11, above values that wrap to two lines;
+  - the section labels, now 11 with 1.2 tracking;
+  - the friends chip, and the navigation pills with a count badge.
+- **`Avatar`'s one font size** is left for whichever screen ticket owns it, or a shared-components pass.
+- **The last screen** (#1192, Session) is untouched.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

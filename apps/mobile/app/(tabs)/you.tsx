@@ -962,12 +962,13 @@ function NavRow({
 }
 
 const styles = StyleSheet.create({
-  scroll: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE },
+  scroll: { gap: Spacing.md, paddingBottom: TAB_BAR_CLEARANCE },
   body: { paddingHorizontal: Spacing.gutter, gap: Spacing.smPlus },
 
   // The masthead (N509): avatar left, name/handle/DOB stacked beside it.
   header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginTop: Spacing.xs },
   headerText: { flex: 1, gap: Spacing.xxs },
+  // 26, not a role: the athlete's name in the masthead, sized against the avatar beside it.
   name: { fontSize: 26, fontWeight: '800' },
   handle: { ...Typography.meta, color: vola.textMuted },
 
@@ -986,14 +987,14 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xsPlus,
     paddingHorizontal: Spacing.md,
   },
-  friendsChipText: { fontWeight: '700', fontSize: 13 },
+  friendsChipText: { ...Typography.meta, fontWeight: '700' },
 
   sectionLabel: {
-    fontSize: 12,
+    ...Typography.eyebrow,
     color: vola.textDim,
     textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 14,
+    marginTop: Spacing.cardPadding,
+    fontWeight: '400',
   },
 
   // The pill/card grid (N509) — Hevy's "Dashboard": two cells per row, each
@@ -1028,14 +1029,19 @@ const styles = StyleSheet.create({
   // seen from across the screen, and the accent is the athlete's own.
   pillBadge: {
     minWidth: 20,
-    paddingHorizontal: 6,
+    paddingHorizontal: Spacing.xsPlus,
     paddingVertical: 1,
     borderRadius: Radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pillBadgeText: { fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  // The eyebrow size, not the role: a count in a pill badge, where tracking would widen the pill.
+  pillBadgeText: {
+    fontSize: Typography.eyebrow.fontSize,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
 
-  muted: { color: vola.textMuted, fontSize: 13 },
-  error: { color: vola.danger, fontSize: 14 },
+  muted: { ...Typography.meta, color: vola.textMuted },
+  error: { ...Typography.body, color: vola.danger },
 });
