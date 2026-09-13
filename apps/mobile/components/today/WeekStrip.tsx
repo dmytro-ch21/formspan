@@ -7,7 +7,7 @@ import { Typography } from '@/constants/Typography';
 import { dayString } from '@/lib/calendar';
 import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { slopFor } from '@/constants/Spacing';
+import { Radius, Spacing, slopFor } from '@/constants/Spacing';
 
 /**
  * The week strip: Mon–Sun, with each day's state as a ring beneath its date.
@@ -218,13 +218,13 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    gap: 10,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.smPlus,
+    paddingVertical: Spacing.md,
+    gap: Spacing.smPlus,
   },
   days: { flexDirection: 'row', justifyContent: 'space-between' },
-  day: { alignItems: 'center', gap: 4, flex: 1 },
+  day: { alignItems: 'center', gap: Spacing.xs, flex: 1 },
   dow: { ...Typography.eyebrow, color: vola.textDim },
   dowToday: { color: vola.lime },
   dateWrap: {
@@ -237,10 +237,17 @@ const styles = StyleSheet.create({
   // Flat ring, no bloom — the reference glows here and the user has said twice
   // that they do not want it.
   dateWrapToday: { borderWidth: 1.5, borderColor: vola.lime },
+  // 16, not a role: one or two digits centred in a fixed 30pt disc, like the chart letters.
   date: { fontSize: 16, fontWeight: '700', color: vola.text, fontVariant: ['tabular-nums'] },
   dateFuture: { color: vola.textDim, fontWeight: '600' },
 
-  mark: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  mark: {
+    width: 16,
+    height: 16,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   markDone: { backgroundColor: vola.lime },
   markToday: { borderWidth: 1.5, borderColor: vola.lime },
   markFuture: { borderWidth: 1, borderColor: vola.line },
@@ -251,7 +258,17 @@ const styles = StyleSheet.create({
   fill: { height: 3, borderRadius: 2, backgroundColor: vola.lime },
 
   foot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  summary: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
-  review: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: REVIEW_PADDING_V },
-  reviewLabel: { fontSize: 12, color: vola.textMuted },
+  summary: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '400',
+  },
+  review: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xxs,
+    paddingVertical: REVIEW_PADDING_V,
+  },
+  reviewLabel: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
 });

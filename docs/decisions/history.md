@@ -76497,6 +76497,122 @@ The comments below still described the old app in the present tense. N198 (#630,
 
 **A gap this records rather than fixes.** `RoadmapOffer` chose the `route` glyph so the offer would not share `goal` with the Goals tab's icon. That collision is gone, and the comment now says so. But `route` has since appeared twice more on the one screen that renders the offer: the ladder's `movement` row and `MovementChoice`'s `light` card. Whether that matters is a design call, not a comment fix.
 
+## 2026-09-13 — N572 (#1187): the Today screen's text on the type scale
+
+**What was wrong.** 62 text styles on Today set a raw `fontSize`. Each rendered at the platform's default leading, which is tighter than the scale specifies. No single card was wrong enough to report.
+
+This is the first of N561's six per-screen children (#1050).
+
+### Scope, file by file
+
+`apps/mobile/app/(tabs)/index.tsx` and `apps/mobile/components/today/{DetectedActivityCard,LoggedCard,MacroRings,MiniCards,MomentumCard,ProgressCard,UpNextCard,WeekStrip}.tsx`. No other screen is touched.
+
+`LoggedCard` and `MacroRings` had no raw sizes. They join the guard anyway, so they stay that way.
+
+### The baseline, before and after
+
+One script measured both: `origin/main` at `2377bbaf`, then this branch.
+
+| Measure | Before | After |
+|---|---|---|
+| files | 9 | 9 |
+| files importing `Typography` | 7 | 8 |
+| raw numeric `fontSize:` sites | 62 | 4 |
+| `fontSize` below 11 | 2 | 0 |
+| numeric `lineHeight:` sites | 3 | 2 |
+| `...Typography.<role>` spreads | 14 | 68 |
+| `fontSize: Typography.eyebrow.fontSize` | 0 | 4 |
+| spacing literals on the scale | 88 | 0 |
+| radius literals on the scale | 23 | 0 |
+
+The before column matches the baseline filed on the ticket, number for number. The four raw sizes left are the literals listed below.
+
+### How each style was converted
+
+- **A role owns size, leading and tracking.**
+- **The rendered weight is kept.** Where the role's weight differs, the entry restates the old weight after the spread. `LoggedCard` already did this.
+  - Without it, every plain 12pt line would turn `caption`'s 600. That would be a second visual change the ticket did not ask for.
+  - Checked per entry against `origin/main`: no weight changed.
+- **Eight entries keep a size that is not a role**, each with a one-line reason directly above it:
+  - three hero figures: `miniValue` 26, `centreBig` 30, `weight` 32;
+  - the week strip's `date` at 16: one or two digits centred in a fixed 30pt disc;
+  - four at 11, the scale's floor, in fixed geometry: `dotDow` (a letter over a 13pt dot), `centreUnit` (one word on the ring plate), and N561's `axisLetter` and `axisTodayLetter`.
+  - The four at 11 are written `Typography.eyebrow.fontSize`. The guard refuses a bare 11, and its message names that form.
+
+### Sizes that changed
+
+The leading change is intended. The ticket asks that no size change silently, so here is every one.
+
+15 of the 62 converted entries changed size:
+
+| File | Entry | Before | After | Role |
+|---|---|---|---|---|
+| `index.tsx` | `themeLabel` | 10 | 11 | eyebrow |
+| `index.tsx` | `suggestionEyebrow` | 10 | 11 | eyebrow |
+| `index.tsx` | `resumeTitle` | 22 | 20 | title |
+| `index.tsx` | `planTitle` | 18 | 20 | title |
+| `DetectedActivityCard.tsx` | `title` | 17 | 20 | title |
+| `UpNextCard.tsx` | `title` | 19 | 20 | title |
+| `MomentumCard.tsx` | `rowValue` | 19 | 20 | title |
+| `index.tsx` | `resumeActionText` | 16 | 15 | emphasis |
+| `index.tsx` | `startText` | 16 | 15 | emphasis |
+| `MomentumCard.tsx` | `title` | 12 | 11 | eyebrow |
+| `MiniCards.tsx` | `miniMeta` | 11 | 12 | caption |
+| `MiniCards.tsx` | `miniAbsent` | 11 | 12 | caption |
+| `MomentumCard.tsx` | `centreMeta` | 11 | 12 | caption |
+| `MomentumCard.tsx` | `entriesLabel` | 11 | 12 | caption |
+| `ProgressCard.tsx` | `sparkAbsent` | 11 | 12 | caption |
+
+Why these groups:
+
+- **Headlines.** Card headlines at 17, 18, 19 and 22 all read at `title`. They are the same kind of text on the same screen, and four sizes for one kind was the drift.
+- **Button labels.** 16 moves to `emphasis`, the role `Typography.ts` names for button text.
+- **Reading text at 11** moves to `caption`. On the scale, 11 is the label size, and there is no 11pt reading role.
+- **Momentum's "MOMENTUM" title** moves to `eyebrow`. It is an uppercase tracked label over a group, which is that role's job, and the other Today cards' labels already use it.
+
+Leading changed on 53 entries, and tracking on 37, because each role carries its own. Four entries had tracking of their own, which the role replaced: `themeLabel` 0.6, `suggestionEyebrow` 1.1 and Momentum's title 1.1 all become 1.2, and `fabText` 0.2 becomes −0.1.
+
+### The guard, and why spacing and radius came too
+
+The criterion names `N508_CONVERTED_FILES`. That list applies three selectors, not one: spacing, radius and `fontSize`.
+
+Probed on `origin/main` (config edited, linted, restored byte-identical): adding the nine files as they were gave 49 `fontSize`, 88 spacing and 23 radius errors.
+
+Two ways through were weighed.
+
+- **A second, typography-only list.** Rejected. The criterion names this list, and N508's entry planned for each batch to widen it. A second list is a second convention, and the five sibling tickets would each have to pick one.
+- **Restate the 111 spacing and radius literals as tokens.** Taken. Every substitution is value-identical, so none of it moves a pixel.
+  - The token values were read from `constants/designTokens.generated.ts`: `SPACING_SCALE` 2–64, `RADIUS_SCALE` 8–24, `PILL_RADIUS` 999.
+  - Literals off the scale stay as they are (3, 5, 13, −6, −8).
+  - Two names read oddly and are harmless: a radius of 8 on a 16pt mark or a 15pt disc is `Radius.sm`, and a gap of 14 is `Spacing.cardPadding`.
+
+The nine files are listed one by one, not as `components/today/*`. A card added later should not join the guard before it is converted.
+
+**The guard was mutation-tested.** Five mutations were applied at once, one per file, and linted.
+
+- The mutations: a bare `fontSize` in `UpNextCard`; a spacing literal in `index.tsx`, which tests that the `(tabs)` path matches; a radius literal in `MomentumCard`; and a `fontSize` in `LoggedCard` and a spacing literal in `MacroRings`, which proves the two already-clean files are really in the list.
+- Result: each file reported exactly one guard error, carrying its own selector's message.
+- The files were restored byte-identical and linted again: 0 errors.
+- **Negative control:** `app/(tabs)/food.tsx` contains `fontSize: 12` and reports 0 guard errors. The list did not widen to other screens.
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- The suites that render Today pass: `todayScreen`, `suggestionPrefsRefocus` and `tabLayout`, 92 tests. No test in scope asserts a style value.
+- **Audit for text with no size.** It looks for a `<Text>` whose styles set no size, which would fall back to the platform default, and found none before or after.
+  - Positive control: a colour-only style and an unstyled `<Text>` were planted in a copy of the files, and it flagged both.
+
+### Not done
+
+- **Device checks.** Both remain on #1187 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. The places most likely to show a problem:
+  - `planTitle`: two lines at 26pt leading;
+  - the Detected-activity and Up-next titles: one line each, now 20pt, so a long name truncates sooner;
+  - the mini cards' 12pt meta lines;
+  - Momentum's `centreMeta` under the rings.
+- **The other five screens** (#1188–#1192) are untouched.
+- **Platform leading remains** on `miniValue` and `date`. They were literals before and stay literals.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

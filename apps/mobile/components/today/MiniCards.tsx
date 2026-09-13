@@ -4,6 +4,7 @@ import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { dayString } from '@/lib/calendar';
 import { viewLoggedDays, type LoggedDaysView } from '@/lib/nutrition';
@@ -235,33 +236,39 @@ const styles = StyleSheet.create({
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 8,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
   },
   pressed: { backgroundColor: vola.surfaceHover },
   miniHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   miniLabel: { ...Typography.eyebrow, color: vola.textMuted },
-  miniBody: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  loggingBody: { gap: 10 },
+  miniBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  loggingBody: { gap: Spacing.smPlus },
   miniFigures: { flex: 1 },
+  // 26, not `display`: the hero figure, sized so its ` / N` denominator fits beside it.
   miniValue: {
     fontSize: 26,
     fontWeight: '800',
     color: vola.text,
     fontVariant: ['tabular-nums'],
   },
-  miniDenom: { fontSize: 15, fontWeight: '600', color: vola.textDim },
-  miniMeta: { fontSize: 11, color: vola.textMuted },
+  miniDenom: { ...Typography.emphasis, color: vola.textDim },
+  miniMeta: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
   miniValueRow: { flexDirection: 'row', alignItems: 'baseline' },
   miniSub: { ...Typography.caption, color: vola.textDim },
-  miniAbsent: { fontSize: 11, color: vola.textDim },
+  miniAbsent: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
 
   dots: { flexDirection: 'row', justifyContent: 'space-between' },
   dotCol: { alignItems: 'center', gap: 3 },
-  // The scale's floor rather than a role — a single letter over a 13pt dot.
-  dotDow: { fontSize: 11, color: vola.textDim },
+  // 11 is the scale's floor, not a role: a single letter over a 13pt dot.
+  dotDow: { fontSize: Typography.eyebrow.fontSize, color: vola.textDim },
   dot: { width: 13, height: 13, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
   dotDone: { backgroundColor: vola.lime },
   dotPending: { borderWidth: 1, borderColor: vola.lineSoft },
@@ -275,5 +282,5 @@ export function MiniCardRow({ children }: { children: React.ReactNode }) {
 }
 
 const row = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 12 },
+  row: { flexDirection: 'row', gap: Spacing.md },
 });

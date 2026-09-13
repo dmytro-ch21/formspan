@@ -24286,3 +24286,38 @@ A logged water, coffee or custom-tracker tap can be corrected in place: long-pre
 - **Reachable:** the outbox's choice of verb, the lost-answer case, the pairing scale, the tombstone and athlete guards (`lib/__tests__/trackers.test.ts`, real SQLite); the glyph wiring (`trackerCardCorrection.test.tsx`); the screen (`trackerEntryScreen.test.tsx`); the API's scoping and the retry property (`backend/internal/modules/tracker`, real Postgres).
 - **NOT reachable:** whether the long press is discoverable and comfortable one-handed, and how VoiceOver speaks the action. Those are device checks.
 
+
+## N572 — the Today screen's text on the type scale (`apps/mobile/app/(tabs)/index.tsx`, `apps/mobile/components/today/*`, #1187)
+
+This is a visual change only: sizes, leading and tracking. Nothing about what Today shows, or when, has changed. Every spacing and radius change in these files is value-identical, so none of them moves anything.
+
+### Happy path
+
+- **Card headlines:** one size across the resume card, the plan row, Detected activity and Up next. They used to be 17, 18, 19 and 22pt.
+- **Buttons:** "Start" and the resume card's action read at 15pt. The floating button's label keeps its weight.
+- **Small text:** the mini cards' meta lines, Momentum's lines under the rings, and the spark chart's "No trend yet" read at 12pt, where they were 11pt.
+- **Labels:** "THIS WEEK" and "WORTH A GO" are the same 11pt tracked style as every other Today label. They were 10pt.
+- **Momentum:** the "MOMENTUM" title uses that label style too. The figure on the ring plate, and its unit word, are unchanged.
+- **Weights:** no text got bolder or lighter.
+
+### Edge cases & errors
+
+- **A long plan title** wraps to at most two lines and still ends in an ellipsis. The row grows taller rather than clipping.
+- **A long workout or activity name** in Up next or Detected activity stays on one line and truncates with an ellipsis. It truncates a little sooner than before, now that the headline is 20pt.
+- **The week strip's dates** still sit centred in their 30pt discs, including today's filled disc.
+- **The sync banner's error line** still sits tight under the banner.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - no `fontSize` below 11 in scope, and only the four recorded literals remain;
+  - the ESLint guard refuses a raw on-scale size, spacing or radius in all nine files;
+  - the Today suites still render.
+  The first two are measured in the history entry. The guard was mutation-tested.
+- **NOT reachable:** clipping, truncation and overlap at a given text size. Those need a device.
+
+### Needs a device
+
+- Today at the default text size: nothing clipped, truncated or overlapping.
+  - Check the resume card, a two-line plan title, the Up next and Detected activity headlines, the mini cards, and Momentum's rings and the lines under them.
+- The same screen at the largest Dynamic Type size. The roles' leading is taller than the platform default, so a row that just fit before may not.

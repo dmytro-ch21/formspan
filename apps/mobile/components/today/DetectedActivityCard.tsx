@@ -4,6 +4,7 @@ import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import {
   activityTypeLabel,
@@ -119,15 +120,15 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     overflow: 'hidden',
     paddingLeft: 0,
-    paddingRight: 12,
-    paddingVertical: 14,
+    paddingRight: Spacing.md,
+    paddingVertical: Spacing.cardPadding,
   },
   rule: { width: 3, alignSelf: 'stretch' },
   disc: {
@@ -140,17 +141,17 @@ const styles = StyleSheet.create({
   },
   text: { flex: 1, gap: 1 },
   eyebrow: { ...Typography.eyebrow },
-  title: { fontSize: 17, fontWeight: '700', color: vola.text },
-  meta: { fontSize: 12, color: vola.textMuted },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  title: { ...Typography.title, color: vola.text, fontWeight: '700' },
+  meta: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.smPlus },
   log: {
     backgroundColor: vola.lime,
     borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.smPlus,
   },
   logPressed: { opacity: PRESS_OPACITY },
-  logLabel: { fontSize: 14, fontWeight: '700', color: vola.bg },
-  dismiss: { padding: 4 },
+  logLabel: { ...Typography.body, color: vola.bg, fontWeight: '700' },
+  dismiss: { padding: Spacing.xs },
   dismissPressed: { opacity: PRESS_OPACITY },
 });

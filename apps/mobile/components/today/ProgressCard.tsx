@@ -3,6 +3,7 @@ import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
 import { PHASE_LABELS, type Checkin, type Phase } from '@/lib/body';
@@ -437,17 +438,18 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.cardPadding,
   },
   pressed: { backgroundColor: vola.surfaceHover },
   left: { flex: 1, gap: 3 },
   eyebrow: { ...Typography.eyebrow, color: vola.textMuted },
+  // 32, not `display`: the card's one hero figure, with its own tight leading.
   weight: {
     fontSize: 32,
     fontWeight: '800',
@@ -455,29 +457,40 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     lineHeight: 36,
   },
-  deltaRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  deltaArrow: { fontSize: 13, color: vola.textMuted },
-  delta: { fontSize: 13, color: vola.textMuted, fontVariant: ['tabular-nums'] },
-  deltaAbsent: { fontSize: 12, color: vola.textDim },
-  absent: { fontSize: 13, color: vola.textDim, maxWidth: 190 },
+  deltaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xxs },
+  deltaArrow: { ...Typography.meta, color: vola.textMuted },
+  delta: { ...Typography.meta, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  deltaAbsent: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
+  absent: { ...Typography.meta, color: vola.textDim, maxWidth: 190 },
 
   // Wraps, so the percentage drops under the pill rather than running into the
   // spark: `MAKING WEIGHT` plus "100% of the way" is wider than this column,
   // and was before N561 moved the label onto `Typography.eyebrow`'s tracking.
-  phaseRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 },
+  phaseRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.xsPlus,
+  },
   phasePill: {
     borderWidth: 1,
     borderColor: vola.lime,
-    borderRadius: 999,
-    paddingHorizontal: 10,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.smPlus,
     paddingVertical: 3,
   },
   phaseLabel: { ...Typography.eyebrow, color: vola.lime },
-  phasePct: { fontSize: 12, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  phasePct: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '400',
+  },
 
-  spark: { width: SPARK_W, alignItems: 'flex-end', gap: 4, justifyContent: 'center' },
+  spark: { width: SPARK_W, alignItems: 'flex-end', gap: Spacing.xs, justifyContent: 'center' },
   sparkLabel: { ...Typography.caption, color: vola.textDim },
-  sparkAbsent: { fontSize: 11, color: vola.textDim },
+  sparkAbsent: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
 
   axis: { width: SPARK_W, height: SPARK_AXIS_H },
   axisSlot: {
@@ -492,16 +505,17 @@ const styles = StyleSheet.create({
   // the axis on `/goals/trend` is the same weight. Dim is for absences.
   // 11 is the scale's floor, not a role: these are single glyphs in a 17pt row
   // and a 15pt disc, where `eyebrow`'s tracking or `caption`'s 12pt would crowd.
-  axisLetter: { fontSize: 11, color: vola.textMuted, fontWeight: '600' },
+  axisLetter: { fontSize: Typography.eyebrow.fontSize, color: vola.textMuted, fontWeight: '600' },
   axisToday: {
     width: 15,
     height: 15,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     backgroundColor: vola.lime,
     alignItems: 'center',
     justifyContent: 'center',
   },
   // The app's ground on the accent, which is the pairing `accents.green.on`
   // states — the accent is never dark enough for white text.
-  axisTodayLetter: { fontSize: 11, color: vola.bg, fontWeight: '800' },
+  // The same 11pt floor as `axisLetter`, for the same reason.
+  axisTodayLetter: { fontSize: Typography.eyebrow.fontSize, color: vola.bg, fontWeight: '800' },
 });
