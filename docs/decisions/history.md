@@ -78043,6 +78043,40 @@ On Android after F68, a second back from Food reaches Today. This belongs to N58
 - **Android device evidence (the ticket's NEEDS HUMAN EVIDENCE criterion).** Nobody on the owner's test team has an Android device, so it stays open. The JS router cannot show whether a native layer takes back first, or what the gesture does.
 - **N580's deferred-mount gap above** is recorded, not fixed.
 
+## 2026-09-13 — H34 (#1197): two test titles and seven comments that H33 missed stop calling Goals a tab
+
+**What.** This change touches only test titles and comments, in six `apps/mobile` files. No code changed. Goals has been `app/goals.tsx` since N504 (#876): a stack screen pushed over the tabs, not a tab. Food has been in the bar in every module state since N180 (#585).
+
+- **Two test titles** in `__tests__/app/goalsScreen.test.tsx`, which H33 could not rename because it was scoped to comments:
+
+  | Before | After |
+  |---|---|
+  | `describe('the Goals tab refetches when it is focused again')` | `describe('the Goals screen refetches when it is focused again')` |
+  | `it('goes away when the tab is focused again')` | `it('goes away when the screen is focused again')` |
+
+- **Seven comments H33 (#1155) missed**, still describing the current app wrongly:
+  - `goalsScreen.test.tsx` has three:
+    - `refocus()` works "the way returning to a tab does";
+    - "coming back to the tab re-asks";
+    - "the tab now reaches this screen with nutrition off". With nutrition off, Progress's Nutrition row is what links to Goals.
+  - `components/__tests__/roadmapEntryPoints.test.tsx`: "as returning to the tab would". `RoadmapOffer` renders only on Goals.
+  - `app/(tabs)/you.tsx`: "every module-gated surface disappears silently … the Food and Goals TABS". This is the app-side twin of the `youScreen.test.tsx` comment H33 did fix. It is now N61's finding in the past tense, with a note that Food and Goals have since changed.
+  - `lib/__tests__/moduleGating.test.ts`: "the route stays resolvable with the tab hidden". Food's tab is never hidden.
+  - `components/ScreenHeader.tsx`: said `leading` had two consumers. It has four, all back buttons: `day.tsx`, `goals.tsx`, `library.tsx` and `phase/index.tsx`. This was checked by reading each call site.
+  - A borderline eighth, `components/__tests__/moduleOffNotice.test.tsx`: "a tab they can now reach" was true for Food and not for Goals.
+
+**Why H33 missed them.** H33's sweep grepped fixed phrases ("Goals tab", "this tab", "tab mounts once" and so on), and none of those match "the tab", "a tab" or "tabs". H34's `frontend-reviewer` found the first one, directly above a renamed test. A targeted sweep of the Goals-related files found the rest, and the gap is recorded on #1155.
+
+**The scope was widened by the owner's decision.** H34 was filed as titles only. The owner chose to fold the misses in instead of opening another ticket; each extra PR is another trip through the `history.md` rebase loop that cost #1157 four cycles. #1197's criterion 2 was amended openly, with the reason in a comment on the issue.
+
+**How "titles and comments only" was checked.** A script maps the two new titles back to the old ones. It then transpiles each changed file with TypeScript's `removeComments`, at the merge base and on the branch, and compares the outputs. All 6 files came out identical. The script self-tests first: an assertion change, a string change, a JSX-text change and a missing rename must each be rejected.
+
+**Tests.**
+- `goalsScreen.test.tsx`: 64 tests before and after, all passing, with both new titles listed by `jest --verbose`.
+- The four touched test files: 101 tests, all passing.
+
+**Left alone on purpose.** Comments already written as history ("used to", "N176 gave the Train tab…", "written when this was a tab"), and comments about the real tabs: Today, Food, Progress, Plan and You.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

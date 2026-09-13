@@ -4,8 +4,9 @@ import { ModuleOffNotice } from '../ModuleOffNotice';
 import type { Module } from '@/lib/modules';
 
 /**
- * N61 / #423 — the sentence an athlete reads when a tab they can now reach
- * leads to a module they have turned off.
+ * N61 / #423 — the sentence an athlete reads when a screen they can reach —
+ * Food from its tab, or Goals, a screen pushed over the tabs — belongs to a
+ * module they have turned off.
  *
  * A component test rather than a pure one because the thing under test IS the
  * copy: which of the two states is being described, and whether the module is

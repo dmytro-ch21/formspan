@@ -350,9 +350,9 @@ describe('foodLogGate', () => {
     expect(foodLogGate([strength, nutritionOn], true).disabled).toBe(false);
   });
 
-  // The third state reaches the screen too — the route stays resolvable with
-  // the tab hidden — and there it must not name a module, because there is
-  // none to name.
+  // The third state reaches the screen too — Food's tab is in the bar in every
+  // module state since N180, and Progress links to Goals unconditionally — and
+  // there it must not name a module, because there is none to name.
   it('draws the off-state with no module to name when the deployment has no food log', () => {
     const g = foodLogGate([strength], true);
     expect(g.disabled).toBe(true);
