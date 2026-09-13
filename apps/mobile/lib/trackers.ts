@@ -616,6 +616,81 @@ export async function removeCoffeeTap(userId: string, coffeeEntryId: string): Pr
 }
 
 /**
+ * Correct one tap's amount in place — N437.
+ *
+ * The row keeps its id. That is what lets the push send a PATCH the server will
+ * honour (see `syncTrackers`), and what keeps every pairing derived from the id,
+ * such as a coffee tap's caffeine entry, pointing at the right row. `dirty = 1`
+ * makes the correction owed; a tap the server has never seen goes up with its
+ * corrected amount on its first PUT.
+ *
+ * A removed tap is not editable: a correction must not bring back a cup the
+ * athlete took away, so the tombstone guard is in the WHERE, not left to the UI.
+ */
+export async function editTap(userId: string, entryId: string, amount: number): Promise<void> {
+  assertAmount(amount);
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE tracker_entries SET amount = ?, dirty = 1, updated_at = ?, last_error = NULL
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    amount, stamp(), entryId, userId,
+  );
+}
+
+/**
+ * Correct a coffee tap's amount, and the caffeine entry it caused by the same
+ * ratio — N437.
+ *
+ * The drink's mg per cup is stored nowhere, and does not need to be: the paired
+ * entry already holds mg per cup times cups, so scaling it by new cups over old
+ * cups keeps whichever drink the athlete tapped. One transaction, for the reason
+ * `logCoffeeTap` gives: a failure between the writes would leave two cups of
+ * coffee carrying one cup's caffeine.
+ *
+ * No paired entry (an "Other" tap, or no caffeine tracker at the time) means only
+ * the coffee changes — the same no-op `removeCoffeeTap` relies on.
+ */
+export async function editCoffeeTap(
+  userId: string,
+  coffeeEntryId: string,
+  amount: number,
+): Promise<void> {
+  assertAmount(amount);
+  const db = await getDb();
+  await withTransaction(db, async () => {
+    const coffee = await db.getFirstAsync<{ amount: number }>(
+      `SELECT amount FROM tracker_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+      coffeeEntryId, userId,
+    );
+    if (!coffee) return;
+    const now = stamp();
+    await db.runAsync(
+      `UPDATE tracker_entries SET amount = ?, dirty = 1, updated_at = ?, last_error = NULL
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+      amount, now, coffeeEntryId, userId,
+    );
+    const caffeineId = pairedCaffeineEntryId(coffeeEntryId);
+    const caffeine = await db.getFirstAsync<{ amount: number }>(
+      `SELECT amount FROM tracker_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+      caffeineId, userId,
+    );
+    if (!caffeine || !(coffee.amount > 0)) return;
+    await db.runAsync(
+      `UPDATE tracker_entries SET amount = ?, dirty = 1, updated_at = ?, last_error = NULL
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+      caffeine.amount * (amount / coffee.amount), now, caffeineId, userId,
+    );
+  });
+}
+
+/** The server refuses an amount that is not above zero; so does the phone, first. */
+function assertAmount(amount: number): void {
+  if (!Number.isFinite(amount) || !(amount > 0)) {
+    throw new Error('An amount has to be more than zero.');
+  }
+}
+
+/**
  * The caffeine entry a logged FOOD item currently has, if any — N468/#792.
  *
  * A `LIKE` lookup on the infix rather than a single derived id, because
@@ -782,6 +857,17 @@ export async function localEntries(userId: string, on: string): Promise<TrackerE
       WHERE user_id = ? AND logged_on = ? AND deleted_at IS NULL
       ORDER BY logged_at, id`,
     userId, on,
+  );
+}
+
+/** One live tap by id, for the correction screen — N437. `null` once it is removed. */
+export async function localEntry(userId: string, entryId: string): Promise<TrackerEntry | null> {
+  const db = await getDb();
+  return db.getFirstAsync<TrackerEntry>(
+    `SELECT id, tracker_id, logged_on, logged_at, amount
+       FROM tracker_entries
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+    entryId, userId,
   );
 }
 
@@ -1005,8 +1091,9 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
         amount: number;
         updated_at: string;
         deleted_at: string | null;
+        remote: number;
       }>(
-        `SELECT id, tracker_id, logged_on, logged_at, amount, updated_at, deleted_at
+        `SELECT id, tracker_id, logged_on, logged_at, amount, updated_at, deleted_at, remote
            FROM tracker_entries WHERE user_id = ? AND dirty = 1 ORDER BY logged_at`,
         userId,
       );
@@ -1018,10 +1105,27 @@ async function push(userId: string, getToken: TokenGetter): Promise<TrackerSyncR
         // Hard-delete only once the server confirms. Until then the tombstone
         // IS the record that a delete is owed.
         await db.runAsync(`DELETE FROM tracker_entries WHERE id = ? AND user_id = ?`, e.id, userId);
+      } else if (e.remote) {
+        // N437: a tap the server already holds, corrected on this device. A PUT
+        // under this id is DO NOTHING server-side and answers with the old
+        // amount, so the correction goes up on its own verb.
+        await api.updateEntry(getToken, e.tracker_id, e.id, e.amount);
+        await db.runAsync(
+          `UPDATE tracker_entries SET dirty = 0, remote = 1, last_error = NULL
+            WHERE id = ? AND user_id = ? AND updated_at = ? AND deleted_at IS NULL`,
+          e.id, userId, e.updated_at,
+        );
       } else {
-        await api.logEntry(getToken, e.tracker_id, e.id, {
+        const stored = await api.logEntry(getToken, e.tracker_id, e.id, {
           logged_on: e.logged_on, logged_at: e.logged_at, amount: e.amount,
         });
+        // N437: a first PUT can land and lose its answer, leaving this row at
+        // `remote = 0` while the server holds it. If the athlete corrected the
+        // amount in between, the retried PUT is answered with the OLD row, and
+        // marking the row pushed would let the next pull put that amount back.
+        if (typeof stored?.amount === 'number' && stored.amount !== e.amount) {
+          await api.updateEntry(getToken, e.tracker_id, e.id, e.amount);
+        }
         await db.runAsync(
           `UPDATE tracker_entries SET dirty = 0, remote = 1, last_error = NULL
             WHERE id = ? AND user_id = ? AND updated_at = ? AND deleted_at IS NULL`,

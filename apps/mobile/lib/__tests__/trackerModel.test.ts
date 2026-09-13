@@ -741,3 +741,24 @@ describe('N431: the cutoff line — a stated fact, never a verdict', () => {
     );
   });
 });
+
+/**
+ * N437: a filled glyph that can be corrected says where the correction is.
+ * VoiceOver lists "Change amount" as an action; an empty glyph has nothing to
+ * correct and keeps its own hint.
+ */
+describe('the glyph hint when a tap can be corrected', () => {
+  it('points a filled or over-target glyph at the Change amount action', () => {
+    expect(glyphHint('filled', false, true)).toBe('Double tap to remove it. Change amount is in actions');
+    expect(glyphHint('over', false, true)).toBe('Double tap to remove it. Change amount is in actions');
+    expect(glyphHint('filled', true, true)).toBe('Double tap to undo it. Change amount is in actions');
+  });
+
+  it('leaves an empty glyph, and a card with no correction, exactly as they were', () => {
+    expect(glyphHint('empty', false, true)).toBe('Double tap to add it');
+    expect(glyphHint('empty', true, true)).toBe('Double tap to mark it taken');
+    expect(glyphHint('filled', false, false)).toBe('Double tap to remove it');
+    expect(glyphHint('filled')).toBe('Double tap to remove it');
+  });
+});
+

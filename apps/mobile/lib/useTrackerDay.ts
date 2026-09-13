@@ -75,6 +75,11 @@ export type TrackerDay = {
   ) => Promise<void>;
   /** Undo a coffee tap and the caffeine entry it caused, if it caused one. */
   removeCoffeeTap: (entryID: string, on: string) => Promise<void>;
+  /**
+   * Open the correction screen for one tap — N437. By id, for the reason
+   * `removeEntry` takes one: the athlete pressed THAT cup, not a position.
+   */
+  openEntry: (entryID: string) => void;
   openSettings: (tracker: Tracker) => void;
 };
 
@@ -208,6 +213,11 @@ export function useTrackerDay(): TrackerDay {
     [router],
   );
 
+  const openEntry = useCallback(
+    (entryID: string) => router.push(`/trackers/entry/${entryID}`),
+    [router],
+  );
+
   return {
     view: loaded.view,
     entriesFor,
@@ -217,5 +227,6 @@ export function useTrackerDay(): TrackerDay {
     addCoffeeTap,
     removeCoffeeTap: removeCoffeeTapEntry,
     openSettings,
+    openEntry,
   };
 }

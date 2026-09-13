@@ -645,6 +645,7 @@ func main() {
 	mux.Handle("DELETE /v1/trackers/{trackerID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Archive)))
 	mux.Handle("POST /v1/trackers/{trackerID}/restore", verifier.RequireAuth(http.HandlerFunc(trackerHandler.Restore)))
 	mux.Handle("PUT /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.LogEntry)))
+	mux.Handle("PATCH /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.UpdateEntry)))
 	mux.Handle("DELETE /v1/trackers/{trackerID}/entries/{entryID}", verifier.RequireAuth(http.HandlerFunc(trackerHandler.DeleteEntry)))
 	// Literal before wildcard, which Go 1.22's mux resolves by specificity
 	// rather than declaration order — the same shape /v1/sessions/suggestions

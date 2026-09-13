@@ -209,3 +209,25 @@ export function deleteEntry(
     method: 'DELETE',
   });
 }
+
+/**
+ * Correct one tap's amount — N437.
+ *
+ * Its own verb, because the PUT above is DO NOTHING on the server: re-sending an
+ * edited amount under the tap's id is answered with the ORIGINAL row, so an edit
+ * pushed that way would read as landed and then be put back by the next pull.
+ * A 404 means the tap no longer exists on the server (removed on another
+ * device), which the push treats as final rather than retrying forever.
+ */
+export function updateEntry(
+  getToken: TokenGetter,
+  trackerID: string,
+  entryID: string,
+  amount: number,
+): Promise<TrackerEntry> {
+  return apiRequest<TrackerEntry>(getToken, `/trackers/${trackerID}/entries/${entryID}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ amount }),
+  });
+}
+

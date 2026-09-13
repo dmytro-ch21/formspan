@@ -6952,6 +6952,13 @@ components:
         logged_on: { type: string, format: date }
         logged_at: { type: string, format: date-time }
         amount: { type: number }
+    TrackerEntryPatch:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: number
+          description: The corrected amount, in the tracker's unit. Greater than zero.
 
   headers:
     ETag:
@@ -14643,6 +14650,31 @@ paths:
       responses:
         "200":
           description: The stored entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateTrackerEntry
+      summary: Correct one tap's amount
+      description: >
+        Changes the amount of one tap already logged, and nothing else: its day
+        and moment stay what they were. A PUT to the same id is still the
+        idempotent retry of the original tap and never edits it, so a stale
+        retry cannot overwrite a correction. An entry that does not exist, or is
+        not the caller's on this tracker, is a 404: unlike a delete, an edit
+        that changed nothing has not done its job.
+      tags: [Trackers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerEntryPatch" }
+      responses:
+        "200":
+          description: The corrected entry.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TrackerEntry" }

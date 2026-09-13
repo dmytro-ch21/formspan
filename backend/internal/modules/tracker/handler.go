@@ -370,6 +370,37 @@ func (h *Handler) LogEntry(w http.ResponseWriter, r *http.Request) {
 	apihttp.WriteJSON(w, http.StatusOK, e)
 }
 
+// UpdateEntry corrects one tap's amount — N437, what a long press on a filled
+// glyph opens. The body carries the amount and nothing else; the day and the
+// moment are not editable here.
+func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFrom(w, r)
+	if !ok {
+		return
+	}
+	var p EntryPatch
+	if !decode(w, r, &p) {
+		return
+	}
+	if err := p.Validate(); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	e, err := h.repo.UpdateEntry(r.Context(), userID, r.PathValue("trackerID"), r.PathValue("entryID"), p)
+	if errors.Is(err, ErrNotFound) {
+		// Not the shared "no such tracker": the tracker usually exists, and
+		// whoever reads this 404 should look at the entry id first. Messages are
+		// not contract; the code is.
+		apihttp.WriteError(w, http.StatusNotFound, apihttp.CodeNotFound, "no such entry")
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	apihttp.WriteJSON(w, http.StatusOK, e)
+}
+
 // DeleteEntry removes one tap — the tap-a-filled-cup gesture.
 func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	userID, ok := userIDFrom(w, r)

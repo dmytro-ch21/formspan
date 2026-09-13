@@ -62,6 +62,7 @@ function day(
     addCoffeeTap: async () => {},
     removeCoffeeTap: async () => {},
     openSettings: () => {},
+    openEntry: () => {},
   };
 }
 
@@ -256,3 +257,16 @@ describe('N432: coffee taps also post to caffeine, when the athlete has one', ()
     expect(removeCoffeeTap).not.toHaveBeenCalled();
   });
 });
+
+// N437: the list is what connects a card's long press to the correction screen.
+// A card test proves the glyph calls its handler; this proves the list hands the
+// card one, and that it opens THAT tap.
+it('opens the correction for the tap that was long-pressed', async () => {
+  const ts = [tracker('w', { target: 3, render_style: 'glyphs' })];
+  const openEntry = jest.fn();
+  await render(<TrackerList day={{ ...day(ts, { w: 2 }), openEntry }} {...props} />);
+
+  await fireEvent(screen.getByTestId('tracker-glyph-w-1'), 'longPress');
+  expect(openEntry).toHaveBeenCalledWith('w-1');
+});
+

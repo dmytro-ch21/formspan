@@ -125,6 +125,7 @@ const mockTrackerDay = {
   addTap: jest.fn(async () => {}),
   removeEntry: jest.fn(async () => {}),
   openSettings: jest.fn(),
+  openEntry: jest.fn(),
 };
 jest.mock('@/lib/useTrackerDay', () => ({ useTrackerDay: () => mockTrackerDay }));
 
