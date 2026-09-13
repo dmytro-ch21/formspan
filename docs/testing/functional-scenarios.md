@@ -24940,7 +24940,7 @@ N437's long press needs a glyph, and two surfaces draw none: the caffeine banner
 
 ### Edge cases & errors
 
-6. **A food-caused dose.** Log a Latte in Food, so the banner shows "95 mg · from a logged food". Tapping the row or its lock explains that it came from a logged food and must be changed in Food; nothing opens and nothing changes. Edit the latte to 2 servings in Food: the dose becomes 190 mg.
+6. **A food-caused dose.** Log a Latte in Food, so the banner shows "95 mg · from a logged food". The row offers no "Change". Tapping its lock explains that the dose came from a logged food and must be changed in Food, and nothing changes. Edit the latte to 2 servings in Food: the dose becomes 190 mg.
 7. **A food-caused dose reached another way.** If the correction screen is opened for a food-caused dose, it shows the same explanation and no amount field.
 8. **A coffee tracker drawn as a bar** (render style set to bar). Removing a coffee row from its list also removes the caffeine it posted.
 9. **Few enough taps for glyphs.** A water card at 3 of 8 shows no "Show all" line. A bar-style card with nothing logged shows none either.

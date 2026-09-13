@@ -56,8 +56,9 @@
  *   way to say a cup held more caffeine than its drink's reference figure.
  *   Correcting the coffee's cups still scales this dose, now from the corrected
  *   mg, and removing the coffee still removes it.
- * - **food-caused** (`-fcaf-`): it refuses, with the same explanation removal
- *   gives, because the food re-derives this number on its next edit.
+ * - **food-caused** (`-fcaf-`): it offers no correction. Its lock explains, as
+ *   it always did for removal, that the food owns this number and re-derives it
+ *   on its next edit. The correction screen and `editTap` refuse it as well.
  */
 
 import { Alert, StyleSheet, View as RNView } from 'react-native';
@@ -124,14 +125,6 @@ export function CaffeineBanner({
       return;
     }
     onRemove(entryID);
-  }
-
-  function handleEdit(entryID: string) {
-    if (isFoodCaffeineEntryId(entryID)) {
-      redirectToFood();
-      return;
-    }
-    onEditEntry?.(entryID);
   }
 
   return (
@@ -202,9 +195,14 @@ export function CaffeineBanner({
             );
             return (
               <RNView key={e.id} style={styles.entryRow}>
-                {onEditEntry ? (
+                {/* A food-caused row gets no correction of its own. Its lock
+                    already says where to change it, and a second button
+                    saying the same thing would be a tap target with nothing
+                    drawn to show it, and a repeated VoiceOver stop
+                    (frontend-reviewer, N578). */}
+                {onEditEntry && !fromFood ? (
                   <PressableScale
-                    onPress={() => handleEdit(e.id)}
+                    onPress={() => onEditEntry(e.id)}
                     style={styles.entryBody}
                     // The row is 8pt of padding around 12pt text. The vertical
                     // slop brings the target to 44pt without drawing a taller
@@ -212,18 +210,14 @@ export function CaffeineBanner({
                     // control sits right beside it.
                     hitSlop={{ top: 8, bottom: 8 }}
                     accessibilityRole="button"
-                    accessibilityLabel={
-                      fromFood
-                        ? `${mg} mg, from a logged food — change it in Food instead`
-                        : `Change ${mg} mg`
-                    }
+                    accessibilityLabel={`Change ${mg} mg`}
                     testID={`caffeine-entry-edit-${e.id}`}
                   >
                     {said}
                     {/* A visible word, not a hidden gesture: the glyph's long
                         press was the part of N437 a device check had to
                         answer, and a row can just say what it does. */}
-                    {fromFood ? null : <Text style={styles.entryChange}>Change</Text>}
+                    <Text style={styles.entryChange}>Change</Text>
                   </PressableScale>
                 ) : (
                   said

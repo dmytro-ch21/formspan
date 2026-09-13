@@ -78093,13 +78093,13 @@ Nothing new on the server. Both surfaces reuse N437's path: `openEntry`, then `a
 |---|---|---|---|
 | manual | a plain uuid | opens the correction screen, through `editTap` | it is an ordinary tap |
 | coffee-caused | `<coffee id>-caf` | opens it too, through `editTap` | see below |
-| food-caused | `<food id>-fcaf-<tail>` | is refused, with the same redirect to Food that removal gives | the food owns the number |
+| food-caused | `<food id>-fcaf-<tail>` | is not offered; the row's lock gives the redirect to Food that removal always gave | the food owns the number |
 
 - **Coffee-caused is correctable, not redirected to the coffee.** Correcting the coffee changes CUPS and scales the caffeine by the ratio. It cannot say "that one cup held 150 mg", because the mg per cup is a Mayo reference figure for the drink type, not a measurement. A direct correction is the only way to say that.
   - It is safe because `editTap` keeps the id. Removing the coffee still removes the dose. Correcting the cups afterwards scales from the corrected mg, which is now the athlete's own figure per cup. Both are pinned against real SQLite.
   - The screen says "This changes the caffeine only, not the cups" (`isCoffeeCaffeineEntryId`, new in `coffeeCaffeine.ts`).
 - **Food-caused is refused, in three places:**
-  - **The banner row** shows the removal alert. Its copy moved into `foodCaffeine.ts` so the two say one thing.
+  - **The banner** offers no correction on that row. Its lock shows the removal alert, whose copy moved into `foodCaffeine.ts` so every refusal says one thing.
   - **The correction screen** shows the same message and no field. The screen is reachable by route, not only from the banner.
   - **`editTap` throws**, carrying the message.
   - **Why the storage layer refuses too, not only the UI:** `syncFoodCaffeineEntry` re-derives the entry whenever the food is edited, and tombstones and replaces it when the figures differ. A correction written here would stand until the athlete next touched that food, then disappear with nothing said. The same reasoning N437 gave for putting the removed-tap guard in the WHERE.
@@ -78146,7 +78146,7 @@ Nothing new on the server. Both surfaces reuse N437's path: `openEntry`, then `a
 |---|---|---|
 | M1 | `editTap` without the food-caused guard | refuses a caffeine entry a logged food caused |
 | M2 | the screen without its food-caused refusal | a food-caused dose offers no field |
-| M3 | a banner row that does not redirect a food-caused dose | refuses a food-caused dose and says where to change it |
+| M3 | a food-caused banner row that offers a correction (the `!fromFood` gate removed) | offers no correction on a food-caused dose |
 | M4 | a list row that opens the first tap instead of its own | a row opens the correction for THAT tap |
 | M5 | a row's × that removes the first tap | a row's × removes THAT tap |
 | M6 | the list without its unit gate | no row names an amount before the unit preference is read |
@@ -78154,6 +78154,15 @@ Nothing new on the server. Both surfaces reuse N437's path: `openEntry`, then `a
 | M8 | `TrackerList` not wiring the banner's correction | opens the correction for a caffeine dose from its banner row |
 | M9 | `tapTimeLabel` printing a backfilled tap's clock | is nothing for a backfilled tap |
 | M10 | `isCoffeeCaffeineEntryId` never matching | a coffee-caused dose corrects directly, and says the cups are untouched |
+
+### Review
+
+- **`frontend-reviewer`: nothing blocking.**
+  - It confirmed that the `-caf` and `-fcaf-` schemes cannot collide, that `editTap` refuses before it validates, and that a bar-style coffee row's × still reaches `removeCoffeeTap`.
+  - **Taken:** a food-caused banner row was first wrapped in a button that did exactly what its lock does. Nothing was drawn to show the row could be tapped, and VoiceOver read the explanation twice. That row is plain text again, and the lock is its only control. The test was rewritten to hold that, M3 was re-pointed at the new gate, and it was re-run.
+  - **Left:** the banner lists every dose with no disclosure, as it did before N578. A day holds a handful of doses. If heavy manual logging becomes real, `TrackerTapList`'s disclosure is the pattern to reuse.
+- **`ac-verifier`: five of six criteria met.** It reproduced M1 and M9 itself. The sixth is the device check, which stays outstanding on #1203.
+- **`pre-merge-checker`:** `verify` exited 0 at the first commit. All 51 links ran, including 384 mobile suites and 6,206 tests.
 
 ### Not built, and why
 

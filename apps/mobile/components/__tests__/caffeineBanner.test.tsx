@@ -195,14 +195,23 @@ describe('correcting a dose', () => {
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it('refuses a food-caused dose and says where to change it, instead of opening anything', async () => {
+  it('offers no correction on a food-caused dose; its lock is the one control, and it redirects', async () => {
     const onEditEntry = jest.fn();
     const foodCaffeineId = pairedFoodCaffeineEntryId('food-1', 'tail');
-    await renderWith([entry({ id: foodCaffeineId, amount: 95 })], onEditEntry);
+    const { onRemove } = await renderWith(
+      [entry({ id: 'manual-1', amount: 80 }), entry({ id: foodCaffeineId, amount: 95 })],
+      onEditEntry,
+    );
 
-    await fireEvent.press(screen.getByTestId(`caffeine-entry-edit-${foodCaffeineId}`));
+    // The apparatus: corrections ARE wired in this render, so the food row's
+    // missing one is a decision, not a banner that offers none at all.
+    expect(screen.getByTestId('caffeine-entry-edit-manual-1')).toBeTruthy();
+    expect(screen.queryByTestId(`caffeine-entry-edit-${foodCaffeineId}`)).toBeNull();
+
+    await fireEvent.press(screen.getByTestId(`caffeine-entry-remove-${foodCaffeineId}`));
 
     expect(onEditEntry).not.toHaveBeenCalled();
+    expect(onRemove).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalledWith(
       expect.stringContaining('logged food'),
       expect.stringContaining('Food'),
