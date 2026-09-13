@@ -36,6 +36,6 @@ The lime moved from `#B8FF2C` to `#D3EC52` on 2026-08-25 (N183):
 ## Notes
 - SVGs are editable in Figma, Illustrator, Sketch, and most code editors.
 - UI icons use `currentColor`, so your app can recolor them through CSS, React Native SVG props, Flutter color filters, or native tinting.
-- Apple App Store requires a 1024×1024 raster icon with no transparency. Export `vola-app-icon-dark-1024.svg` to PNG before submission.
+- Apple App Store requires a 1024×1024 raster icon with no transparency. That export is `apps/mobile/assets/images/icon.png`, rendered from `vola-app-icon-dark-1024.svg`. `pnpm run check:brand-rasters` fails if the two drift apart. To re-export it, or any other app raster, follow `scripts/brand-rasters.json`.
 - Android adaptive icons are split into foreground and background assets.
 - The wordmark uses a system sans-serif fallback. For a final trademark-ready logo, convert the chosen wordmark lettering to vector outlines in Figma or Illustrator.

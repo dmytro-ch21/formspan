@@ -1,0 +1,87 @@
+{
+  "_about": [
+    "H14 (#948). Every PNG directly in apps/mobile/assets/images, the SVG master it was rendered from, and what check:brand-rasters holds it to.",
+    "INTEGRITY: sha256 pins the raster's bytes, so any edit, down to one pixel, fails.",
+    "FIDELITY: the raster, trimmed to its visible content, is compared with the master rendered at the same content size. maxPctOver48 is the share of content pixels allowed to differ by more than 48 levels in any channel: renderer anti-aliasing, not a different drawing. measuredPctOver48 is what it measured on 2026-09-13 with sharp 0.35.4 (librsvg 2.62.91) on macOS arm64. A wrong master measured 25% to 100%.",
+    "To re-export a raster: render it from its master, run `pnpm run check:brand-rasters`, and once fidelity passes, update its sha256 here. Editing a master without re-exporting fails fidelity."
+  ],
+  "rasters": [
+    {
+      "raster": "apps/mobile/assets/images/icon.png",
+      "master": "assets/brand/app-icons/vola-app-icon-dark-1024.svg",
+      "canvas": [
+        1024,
+        1024
+      ],
+      "sha256": "0de05f97e90befa0dd80655bbd7f937f45798d6a80241d54e102ed19919ec476",
+      "measuredPctOver48": 0.0,
+      "maxPctOver48": 1.0
+    },
+    {
+      "raster": "apps/mobile/assets/images/android-icon-foreground.png",
+      "master": "assets/brand/app-icons/android-adaptive-foreground.svg",
+      "canvas": [
+        1024,
+        1024
+      ],
+      "sha256": "21bc68b663f8dabdde1f4ba0e2403bf48fe359c197cd3e604cce75a80b294fe7",
+      "measuredPctOver48": 0.07,
+      "maxPctOver48": 1.0
+    },
+    {
+      "raster": "apps/mobile/assets/images/android-icon-background.png",
+      "master": "assets/brand/app-icons/android-adaptive-background.svg",
+      "canvas": [
+        1024,
+        1024
+      ],
+      "sha256": "242ad974f41aac58534c1bb40edd0d4de1a37da70a77a3c0444a81fee0c30e8a",
+      "measuredPctOver48": 0.0,
+      "maxPctOver48": 1.0
+    },
+    {
+      "raster": "apps/mobile/assets/images/android-icon-monochrome.png",
+      "master": "assets/brand/app-icons/vola-app-icon-monochrome-1024.svg",
+      "canvas": [
+        1024,
+        1024
+      ],
+      "sha256": "2c44fd7deb4a3d2cd7dd55e7c279fb9d88d66b73285fd860f5083001d4ea8bdd",
+      "measuredPctOver48": 0.03,
+      "maxPctOver48": 1.0
+    },
+    {
+      "raster": "apps/mobile/assets/images/vola-mark.png",
+      "master": "assets/brand/logos/source/vola-mark-color.svg",
+      "canvas": [
+        1024,
+        1024
+      ],
+      "sha256": "030e33479fe9c1fe6486ed6028be2f1023fa07595d4b9cd183605eedf6f656d3",
+      "measuredPctOver48": 0.6,
+      "maxPctOver48": 2.0
+    },
+    {
+      "raster": "apps/mobile/assets/images/vola-wordmark.png",
+      "master": "assets/brand/logos/source/vola-wordmark-white.svg",
+      "canvas": [
+        2048,
+        257
+      ],
+      "sha256": "750b2ffe2b568dff0d907fff5adc512bb2be6c7443363cd14592532965880f45",
+      "measuredPctOver48": 0.83,
+      "maxPctOver48": 2.0
+    },
+    {
+      "raster": "apps/mobile/assets/images/favicon.png",
+      "master": "assets/brand/app-icons/vola-app-icon-dark-1024.svg",
+      "canvas": [
+        96,
+        96
+      ],
+      "sha256": "547a7e6a400c2228027c9f28792a3b6abd0f631fc55c810ed44309ecf799e19d",
+      "measuredPctOver48": 6.69,
+      "maxPctOver48": 10.0
+    }
+  ]
+}
