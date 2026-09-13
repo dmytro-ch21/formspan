@@ -77534,6 +77534,23 @@ Where each component went:
 - a recipe, Saved foods, and wherever `MealCard` renders, for `SwipeToDelete`;
 - a workout, the curriculum editor, goal history and archived trackers, for `HoldToConfirm`.
 
+## 2026-09-13 — L10 (#717): a friend or request with no username stays unaddressable, by decision
+
+**The state.** T11 (#708) stopped `GET /v1/friends` and `/friends/requests` returning 500 when a counterpart's `profiles.username` is `NULL`. The card now renders with an empty handle. `Remove` and `Accept` still resolve the counterpart by handle, and `resolve("")` finds nobody, so:
+
+- a friend with no handle can be seen but never removed;
+- an incoming request from someone with no handle can be neither accepted nor declined, and it keeps counting toward `PendingCount`, the notifications badge.
+
+**Only an out-of-band write can produce it.** `Send` requires the caller to hold a handle, and it resolves the target by handle. So this package's own write paths never create a friendship where either side lacks one. Seed data, an admin action or a future migration could.
+
+### Decision: leave it, and revisit only if a real row reaches it
+
+- **The fix would break the package's one rule.** Resolving `Remove` and `Accept` by user id means sending ids over the wire, and `friend.go`'s package doc says ids never cross it in either direction. That rule is what keeps Clerk ids out of client circulation.
+- **The fix belongs on the data.** If a row is ever stuck, give the account a handle, or delete the `friendships` row. Deleting it also clears the stuck request from `PendingCount`, which counts only rows that exist. That satisfies the ticket's second criterion without a code change.
+- **Reversible.** Nothing is migrated or removed. If this is ever hit in practice, the user-id fallback can still be built as a deliberate, documented exception.
+
+**The decision sits next to T11's fix** in `backend/internal/modules/friend/postgres.go`, above `cardSelect`, and replaces the old "Tracked, not fixed here: L10 (#717)" line. A later reader meets the answer where the question arises.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

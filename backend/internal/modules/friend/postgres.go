@@ -177,8 +177,16 @@ func (r *PostgresRepository) Remove(ctx context.Context, callerID, username stri
 // nothing, so a handle-less friend can't be unfriended and a handle-less
 // pending request can't be accepted or declined (and still counts toward
 // PendingCount). Strictly better than the 500 this fix replaces, and — like
-// the NULL itself — reachable only out-of-band. Tracked, not fixed here:
-// L10 (#717).
+// the NULL itself — reachable only out-of-band.
+//
+// DECIDED in L10 (#717): left as it is, revisited only if a real row ever
+// reaches it. The alternative, resolving Remove and Accept by user id, would
+// put an id on the wire, which the package's one rule forbids (friend.go's
+// package doc), to cover a state only an out-of-band write can produce. If a
+// row is ever stuck, the fix belongs on the data rather than in these
+// queries: give the account a handle, or delete the friendships row. Deleting
+// it also takes a stuck incoming request out of PendingCount, which counts
+// only rows that exist.
 const cardSelect = `
 	SELECT p.user_id, COALESCE(p.username, ''), p.display_name, p.has_avatar, %s
 	FROM friendships f
