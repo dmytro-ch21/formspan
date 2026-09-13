@@ -83,6 +83,7 @@ export function TrackerCard({
   now = null,
   onAdd,
   onRemove,
+  onEditEntry,
   onEdit,
   addChoices,
   onAddChoice,
@@ -103,6 +104,12 @@ export function TrackerCard({
   onAdd: () => void;
   /** Remove one logged tap, named by its entry id rather than its position. */
   onRemove: (entryID: string) => void;
+  /**
+   * Open the correction for one logged tap — N437, a long press on a filled
+   * glyph. Absent means the card offers no correction, and the glyph behaves
+   * exactly as before.
+   */
+  onEditEntry?: (entryID: string) => void;
   onEdit: () => void;
   /**
    * A small set of named options offered at the moment of adding, instead of
@@ -235,6 +242,7 @@ export function TrackerCard({
             single={style === 'dose'}
             onAdd={handleAdd}
             onRemove={onRemove}
+            onEditEntry={onEditEntry}
           />
         )}
       </RNView>
@@ -346,6 +354,7 @@ function Glyphs({
   single,
   onAdd,
   onRemove,
+  onEditEntry,
 }: {
   tracker: Tracker;
   entries: TrackerEntry[];
@@ -353,6 +362,7 @@ function Glyphs({
   single: boolean;
   onAdd: () => void;
   onRemove: (entryID: string) => void;
+  onEditEntry?: (entryID: string) => void;
 }) {
   const count = entries.length;
   const slots = single ? 1 : glyphSlots(tracker, count);
@@ -361,6 +371,7 @@ function Glyphs({
     <RNView style={styles.glyphs}>
       {Array.from({ length: slots }, (_, i) => {
         const state = glyphState(tracker, i, count);
+        const editable = state !== 'empty' && onEditEntry != null;
         return (
           <Glyph
             key={i}
@@ -368,7 +379,7 @@ function Glyphs({
             fill={fill}
             size={size}
             label={glyphLabel(tracker, i, slots, state, single)}
-            hint={glyphHint(state, single)}
+            hint={glyphHint(state, single, editable)}
             testID={`tracker-glyph-${tracker.id}-${i}`}
             hitSlop={single ? 4 : GLYPH_SLOP}
             // A filled glyph removes ITS OWN tap; an empty one adds.
@@ -388,6 +399,9 @@ function Glyphs({
             // log normally" is an acceptance criterion, and a cup you cannot
             // untap is not logged normally.
             onPress={state === 'empty' ? onAdd : () => onRemove(entries[i].id)}
+            // N437: a long press corrects THIS tap's amount instead of removing it.
+            // Only a filled glyph has a tap to correct.
+            onLongPress={editable && onEditEntry ? () => onEditEntry(entries[i].id) : undefined}
           />
         );
       })}
@@ -450,6 +464,7 @@ function Glyph({
   label,
   hint,
   onPress,
+  onLongPress,
   testID,
   hitSlop,
 }: {
@@ -459,6 +474,7 @@ function Glyph({
   label: string;
   hint: string;
   onPress: () => void;
+  onLongPress?: () => void;
   testID: string;
   hitSlop: PressableProps['hitSlop'];
 }) {
@@ -495,6 +511,17 @@ function Glyph({
   return (
     <PressableScale
       onPress={onPress}
+      onLongPress={onLongPress}
+      // The long press as a named action, so a VoiceOver or TalkBack user can
+      // reach the correction without a gesture they cannot see (N437).
+      accessibilityActions={onLongPress ? [{ name: 'longpress', label: 'Change amount' }] : undefined}
+      onAccessibilityAction={
+        onLongPress
+          ? (e) => {
+              if (e.nativeEvent.actionName === 'longpress') onLongPress();
+            }
+          : undefined
+      }
       hitSlop={hitSlop}
       accessibilityRole="button"
       accessibilityLabel={label}

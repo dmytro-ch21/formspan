@@ -210,6 +210,7 @@ export function TrackerList({
                 : void day.removeEntry(entryID, dayAtTap())
             }
             onEdit={() => day.openSettings(t)}
+            onEditEntry={(entryID) => day.openEntry(entryID)}
             addChoices={showPicker ? COFFEE_ADD_CHOICES : undefined}
             onAddChoice={
               showPicker

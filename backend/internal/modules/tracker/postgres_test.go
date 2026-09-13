@@ -820,6 +820,70 @@ func TestDeleteEntryIsIdempotent(t *testing.T) {
 	}
 }
 
+// N437: a correction changes the amount and nothing else, only for its owner on
+// its own tracker, never creates a tap, and survives a retried PUT of the
+// original tap. That last property is why LogEntry stays DO NOTHING.
+func TestUpdateEntryChangesOnlyTheAmountAndIsOwnerScoped(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	in := fixture()
+	in.ID = "tr_fx_edit_entry"
+	mustCreate(t, repo, userA, in)
+	other := fixture()
+	other.ID = "tr_fx_edit_other"
+	mustCreate(t, repo, userA, other)
+
+	loggedAt := time.Date(2026, 8, 20, 9, 30, 0, 0, time.UTC)
+	original := NewEntry{ID: "tr_e_edit", LoggedOn: "2026-08-20", LoggedAt: loggedAt, Amount: 250}
+	logged, err := repo.LogEntry(ctx, userA, in.ID, original)
+	if err != nil {
+		t.Fatalf("log: %v", err)
+	}
+
+	// Another athlete cannot correct it, even knowing both ids.
+	if _, err := repo.UpdateEntry(ctx, userB, in.ID, "tr_e_edit", EntryPatch{Amount: 999}); err != ErrNotFound {
+		t.Fatalf("userB edited userA's entry: %v", err)
+	}
+	// Nor can the owner reach it through a different tracker.
+	if _, err := repo.UpdateEntry(ctx, userA, other.ID, "tr_e_edit", EntryPatch{Amount: 999}); err != ErrNotFound {
+		t.Fatalf("an edit through the wrong tracker landed: %v", err)
+	}
+	// An edit never invents a tap.
+	if _, err := repo.UpdateEntry(ctx, userA, in.ID, "tr_e_never_logged", EntryPatch{Amount: 500}); err != ErrNotFound {
+		t.Fatalf("an edit of a missing entry returned %v, want ErrNotFound", err)
+	}
+
+	got, err := repo.UpdateEntry(ctx, userA, in.ID, "tr_e_edit", EntryPatch{Amount: 500})
+	if err != nil {
+		t.Fatalf("owner's edit: %v", err)
+	}
+	if got.Amount != 500 {
+		t.Fatalf("amount %v after the edit, want 500", got.Amount)
+	}
+	if got.LoggedOn != "2026-08-20" || !got.LoggedAt.Equal(loggedAt) || !got.CreatedAt.Equal(logged.CreatedAt) {
+		t.Fatalf("the edit moved more than the amount: on %q at %v created %v", got.LoggedOn, got.LoggedAt, got.CreatedAt)
+	}
+
+	// A retried PUT of the ORIGINAL tap, arriving after the correction, must not
+	// put the old amount back.
+	again, err := repo.LogEntry(ctx, userA, in.ID, original)
+	if err != nil {
+		t.Fatalf("retried log: %v", err)
+	}
+	if again.Amount != 500 {
+		t.Fatalf("a retried PUT of the original tap undid the correction: amount %v", again.Amount)
+	}
+
+	entries, err := repo.Entries(ctx, userA, "2026-08-20", "2026-08-20")
+	if err != nil {
+		t.Fatalf("entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Amount != 500 {
+		t.Fatalf("after the edits: %d entries, want 1 at 500 ml (%+v)", len(entries), entries)
+	}
+}
+
 func TestPresetsAreValid(t *testing.T) {
 	if err := validatePresets(); err != nil {
 		t.Fatal(err)

@@ -3,7 +3,10 @@ import { pairedCaffeineEntryId } from '../coffeeCaffeine';
 import type { Tracker } from '../trackerModel';
 import {
   byTracker,
+  cacheEntries,
   cacheTrackers,
+  editCoffeeTap,
+  editTap,
   localEntries,
   localTrackers,
   logCoffeeTap,
@@ -611,3 +614,137 @@ describe('grouping', () => {
     expect(map.get('nothing')).toBeUndefined();
   });
 });
+
+/**
+ * N437: a tap's amount can be corrected in place.
+ *
+ * The server's PUT is DO NOTHING on a known id, so an edit re-sent that way is
+ * answered with the OLD row and the next pull puts the old amount back. These
+ * pin the verb the push chooses, the lost-answer case, and that the pairing a
+ * coffee tap relies on survives the edit because the id does.
+ */
+describe('correcting a tap', () => {
+  async function amountOf(id: string) {
+    return (await db.getFirstAsync<{ amount: number }>(`SELECT amount FROM tracker_entries WHERE id = ?`, id))?.amount;
+  }
+  const calls = () =>
+    mockApi.mock.calls.map((c) => ({
+      path: String(c[1]),
+      method: String((c[2] as { method?: string } | undefined)?.method ?? 'GET'),
+      body: (c[2] as { body?: string } | undefined)?.body,
+    }));
+
+  it('keeps the id, changes the amount, and owes the server a PATCH for a tap it already has', async () => {
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await syncTrackers(USER, token);
+    expect(await row(id)).toMatchObject({ dirty: 0, remote: 1 });
+
+    await editTap(USER, id, 500);
+    expect(await amountOf(id)).toBe(500);
+    expect(await row(id)).toMatchObject({ dirty: 1, remote: 1 });
+
+    mockApi.mockClear();
+    await syncTrackers(USER, token);
+    const sent = calls().filter((c) => c.path === `/trackers/t_water/entries/${id}`);
+    expect(sent).toEqual([{ path: `/trackers/t_water/entries/${id}`, method: 'PATCH', body: JSON.stringify({ amount: 500 }) }]);
+    expect(await row(id)).toMatchObject({ dirty: 0, remote: 1 });
+  });
+
+  it('sends a correction made before the first push on that PUT, with no PATCH', async () => {
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await editTap(USER, id, 500);
+
+    mockApi.mockClear();
+    await syncTrackers(USER, token);
+    const sent = calls().filter((c) => c.path === `/trackers/t_water/entries/${id}`);
+    expect(sent.map((c) => c.method)).toEqual(['PUT']);
+    expect(JSON.parse(sent[0].body ?? '{}').amount).toBe(500);
+  });
+
+  it('follows a PUT that was answered with the old amount with the correction', async () => {
+    // The first PUT landed and its answer was lost, so this row still reads
+    // remote = 0. The retry is answered with the row the server already had.
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await editTap(USER, id, 500);
+    mockApi.mockImplementation(async (_t: unknown, path: string, init?: { method?: string }) =>
+      init?.method === 'PUT' && path.includes(id) ? { id, tracker_id: 't_water', amount: 250 } : {},
+    );
+
+    await syncTrackers(USER, token);
+    const sent = calls().filter((c) => c.path === `/trackers/t_water/entries/${id}`);
+    expect(sent.map((c) => c.method)).toEqual(['PUT', 'PATCH']);
+    expect(JSON.parse(sent[1].body ?? '{}')).toEqual({ amount: 500 });
+    expect(await row(id)).toMatchObject({ dirty: 0, remote: 1 });
+  });
+
+  it('does not bring back a tap the athlete removed', async () => {
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await syncTrackers(USER, token);
+    await removeTap(USER, id);
+
+    await editTap(USER, id, 500);
+    expect((await row(id))?.deleted_at).not.toBeNull();
+    expect(await amountOf(id)).toBe(250);
+    expect((await localEntries(USER, TODAY)).map((e) => e.id)).not.toContain(id);
+  });
+
+  it('cannot correct another athlete\'s tap on the same device', async () => {
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await editTap(OTHER, id, 500);
+    expect(await amountOf(id)).toBe(250);
+  });
+
+  it('is not undone by a pull that arrives before the correction is pushed', async () => {
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await syncTrackers(USER, token);
+    await editTap(USER, id, 500);
+
+    await cacheEntries(USER, TODAY, TODAY, [
+      { id, tracker_id: 't_water', logged_on: TODAY, logged_at: '2026-08-20T09:00:00.000Z', amount: 250, user_id: USER },
+    ]);
+    expect(await amountOf(id)).toBe(500);
+  });
+
+  it('refuses an amount that is not above zero before anything is written', async () => {
+    await cacheTrackers(USER, [wire()]);
+    const id = await logTap(USER, water, TODAY);
+    await syncTrackers(USER, token);
+    for (const bad of [0, -250, Number.NaN]) {
+      await expect(editTap(USER, id, bad)).rejects.toThrow('An amount has to be more than zero.');
+    }
+    expect(await amountOf(id)).toBe(250);
+    expect(await row(id)).toMatchObject({ dirty: 0 });
+  });
+
+  it('scales a coffee tap\'s caffeine entry by the same ratio, keeping the pairing', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, 95, TODAY);
+    const caffeineId = pairedCaffeineEntryId(coffeeId);
+
+    await editCoffeeTap(USER, coffeeId, 2);
+    expect(await amountOf(coffeeId)).toBe(2);
+    expect(await amountOf(caffeineId)).toBe(190);
+    expect(await row(coffeeId)).toMatchObject({ dirty: 1 });
+    expect(await row(caffeineId)).toMatchObject({ dirty: 1 });
+
+    // And undoing the tap still takes both, because the ids did not move.
+    await removeCoffeeTap(USER, coffeeId);
+    expect((await localEntries(USER, TODAY)).map((e) => e.id)).toEqual([]);
+  });
+
+  it('corrects only the coffee when the tap posted no caffeine', async () => {
+    await cacheTrackers(USER, [coffeeWire(), caffeineWire()]);
+    const coffeeId = await logCoffeeTap(USER, coffee, caffeine, null, TODAY);
+
+    await editCoffeeTap(USER, coffeeId, 2);
+    expect(await amountOf(coffeeId)).toBe(2);
+    expect(await amountOf(pairedCaffeineEntryId(coffeeId))).toBeUndefined();
+  });
+});
+

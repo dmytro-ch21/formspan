@@ -647,6 +647,30 @@ func (r *PostgresRepository) LogEntry(ctx context.Context, userID, trackerID str
 	return nil, translatePgError(err)
 }
 
+// UpdateEntry corrects one tap's amount — N437.
+//
+// LogEntry stays DO NOTHING. A retried PUT is still the identical tap, and an
+// edit arrives on its own verb, so a stale retry of the original can never
+// overwrite a correction that landed after it.
+//
+// Scoped by user AND tracker, exactly like DeleteEntry. Unlike DeleteEntry, a
+// miss is an error: a delete of something already gone has done its job, but an
+// edit of something that is not there has changed nothing, and the phone has to
+// hear that rather than mark the edit as landed.
+func (r *PostgresRepository) UpdateEntry(ctx context.Context, userID, trackerID, entryID string, p EntryPatch) (*Entry, error) {
+	e, err := scanEntry(r.pool.QueryRow(ctx, `
+		UPDATE tracker_entries SET amount = $4
+		 WHERE id = $1 AND user_id = $2 AND tracker_id = $3
+		RETURNING `+entryCols, entryID, userID, trackerID, p.Amount))
+	if err == nil {
+		return e, nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	return nil, translatePgError(err)
+}
+
 // DeleteEntry removes one tap. Deleting something already gone is not an error
 // — a delete retried over a flaky connection is the common case, and a 404 at
 // the second attempt would put a failure on the sync screen for a correction

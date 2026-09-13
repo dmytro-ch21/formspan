@@ -24251,3 +24251,38 @@ Mobile only; no screen changes. What an operator sees is rows in `health_events`
 ### Not covered
 
 - There is no aggregated operator view: "athletes with stuck food entries by code" is a query over `health_events.details`, not a screen.
+
+## N437 — correcting a tracker tap's amount (`app/trackers/entry/[id].tsx`, `PATCH /v1/trackers/{trackerID}/entries/{entryID}`)
+
+A logged water, coffee or custom-tracker tap can be corrected in place: long-press a filled glyph (or use its "Change amount" accessibility action), change the amount, Save. Tapping a filled glyph still removes it.
+
+### Happy path
+
+1. **Water, metric.** On Today, long-press the second filled glass. The correction screen shows 250 in an "Amount, in ml" field. Change it to 500 and Save: back on Today the amount line reads 250 ml more, and the glass count is unchanged.
+2. **Coffee and its caffeine.** Tap Coffee → Drip (95 mg). Long-press that cup, change 1 to 2, Save. The caffeine banner now counts 190 mg for it. Tap the cup to remove it: the coffee and its caffeine both go.
+3. **Offline.** In airplane mode, correct a glass from 250 to 500. The card shows it at once. Pull Today down while still offline: the amount stays 500. Reconnect: the correction reaches the server, and another signed-in device shows 500 after its next pull.
+
+### Edge cases & errors
+
+4. **Imperial, untouched.** With fluid ounces set, open a 250 ml glass (it shows 8.5) and press Save without typing. Nothing changes and nothing is owed: the Sync screen stays empty.
+5. **An amount of zero, or an empty field.** "Enter an amount greater than zero." appears, nothing is saved, and the screen stays open.
+6. **An "Other" coffee, or no caffeine tracker.** Correcting the cup changes only the coffee; no caffeine entry appears.
+7. **Removed on another device.** Remove a glass on device A. On device B, still offline and showing the old day, correct the same glass, then reconnect. The correction is refused as gone, and the glass disappears from B after its next pull rather than coming back.
+8. **Empty glyph.** Long-pressing an empty glass does nothing: there is no tap to correct.
+
+### Accessibility
+
+9. **VoiceOver on a filled glass** reads "… Double tap to remove it. Change amount is in actions", and the actions rotor offers "Change amount", which opens the same screen. An empty glass offers no such action.
+
+### API
+
+10. `PATCH /v1/trackers/{trackerID}/entries/{entryID}` with `{"amount": 500}` returns 200 and the corrected entry, with its day and time unchanged.
+11. The same request for another athlete's entry, through a different tracker id, or for an id that was never logged returns 404 and creates nothing.
+12. `{}` or an amount of zero or less returns 400.
+13. A `PUT` of the same entry id with the original amount, sent after the correction, returns the corrected amount: a retried tap never undoes an edit.
+
+### What a test can and cannot reach
+
+- **Reachable:** the outbox's choice of verb, the lost-answer case, the pairing scale, the tombstone and athlete guards (`lib/__tests__/trackers.test.ts`, real SQLite); the glyph wiring (`trackerCardCorrection.test.tsx`); the screen (`trackerEntryScreen.test.tsx`); the API's scoping and the retry property (`backend/internal/modules/tracker`, real Postgres).
+- **NOT reachable:** whether the long press is discoverable and comfortable one-handed, and how VoiceOver speaks the action. Those are device checks.
+

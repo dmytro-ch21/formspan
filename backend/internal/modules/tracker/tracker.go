@@ -511,6 +511,22 @@ func (e NewEntry) Validate() error {
 	return nil
 }
 
+// EntryPatch corrects one tap's amount (N437).
+//
+// The amount is the only thing an edit may change. The day and the moment are
+// facts about when the tap happened; moving either is a delete and a new tap,
+// not a correction of this one.
+type EntryPatch struct {
+	Amount float64 `json:"amount"`
+}
+
+func (p EntryPatch) Validate() error {
+	if !(p.Amount > 0) {
+		return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
+	}
+	return nil
+}
+
 // IsDate accepts exactly "YYYY-MM-DD".
 //
 // Copied in spirit from body.isDate, and strict for the same reason: dates are
@@ -565,4 +581,9 @@ type Repository interface {
 	// DeleteEntry removes one tap. Deleting one that is already gone is not an
 	// error — a retried delete is the common case on a flaky connection.
 	DeleteEntry(ctx context.Context, userID, trackerID, entryID string) error
+	// UpdateEntry corrects one tap's amount (N437). Only the amount changes. An
+	// entry that is absent, or not this athlete's on this tracker, is
+	// ErrNotFound and is never created: an edit must not be able to invent a
+	// tap.
+	UpdateEntry(ctx context.Context, userID, trackerID, entryID string, p EntryPatch) (*Entry, error)
 }

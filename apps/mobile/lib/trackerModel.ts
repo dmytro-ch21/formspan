@@ -577,9 +577,12 @@ export function glyphLabel(
  * `single` so the verb matches the noun the label just used — you do not "add"
  * a dose you either took or did not.
  */
-export function glyphHint(state: GlyphState, single = false): string {
-  if (single) return state === 'empty' ? 'Double tap to mark it taken' : 'Double tap to undo it';
-  return state === 'empty' ? 'Double tap to add it' : 'Double tap to remove it';
+export function glyphHint(state: GlyphState, single = false, editable = false): string {
+  // N437: a logged tap can also be corrected. VoiceOver lists that as an action,
+  // and the hint says where to find it; an empty glyph has nothing to correct.
+  const edit = editable && state !== 'empty' ? '. Change amount is in actions' : '';
+  if (single) return (state === 'empty' ? 'Double tap to mark it taken' : 'Double tap to undo it') + edit;
+  return (state === 'empty' ? 'Double tap to add it' : 'Double tap to remove it') + edit;
 }
 
 export function addLabel(t: Tracker): string {

@@ -33,6 +33,9 @@ type stubRepo struct {
 	restored  bool
 	// Set when List was asked for the archived side.
 	listedArchived bool
+	// N437: what an entry edit reached storage with.
+	lastEntryID    string
+	lastEntryPatch EntryPatch
 }
 
 func (s *stubRepo) EnsureDefaults(_ context.Context, userID string, presets []New) error {
@@ -86,6 +89,13 @@ func (s *stubRepo) DeleteEntry(_ context.Context, userID, trackerID, _ string) e
 	s.lastUserID, s.lastTrackerI = userID, trackerID
 	return s.err
 }
+func (s *stubRepo) UpdateEntry(_ context.Context, userID, trackerID, entryID string, p EntryPatch) (*Entry, error) {
+	s.lastUserID, s.lastTrackerI, s.lastEntryID, s.lastEntryPatch = userID, trackerID, entryID, p
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &Entry{ID: entryID, TrackerID: trackerID, UserID: userID, Amount: p.Amount}, nil
+}
 
 func signedIn(r *http.Request, userID string) *http.Request {
 	return r.WithContext(auth.ContextWithClaims(r.Context(), &auth.Claims{UserID: userID}))
@@ -119,6 +129,8 @@ func serve(h *Handler, method, target, body string, route string, vars map[strin
 		h.LogEntry(w, req)
 	case "delEntry":
 		h.DeleteEntry(w, req)
+	case "updateEntry":
+		h.UpdateEntry(w, req)
 	}
 	return w
 }
@@ -494,6 +506,7 @@ func TestEveryRouteRequiresAuth(t *testing.T) {
 		{"entries", h.ListEntries},
 		{"log", h.LogEntry},
 		{"deleteEntry", h.DeleteEntry},
+		{"updateEntry", h.UpdateEntry},
 	}
 	for _, rt := range routes {
 		t.Run(rt.name, func(t *testing.T) {
@@ -614,5 +627,51 @@ func TestErrorsMapToContractCodes(t *testing.T) {
 		if body.Error.Code != c.code {
 			t.Errorf("%v: code %q, want %q", c.err, body.Error.Code, c.code)
 		}
+	}
+}
+
+// N437: an entry edit reaches storage with the path's ids and the body's amount,
+// for the signed-in athlete, and with nothing else to say.
+func TestUpdateEntryReachesTheRepositoryWithTheAmountAndThePathIDs(t *testing.T) {
+	repo := &stubRepo{}
+	w := serve(NewHandler(repo), http.MethodPatch, "/v1/trackers/t1/entries/e1",
+		`{"amount": 500}`, "updateEntry", map[string]string{"trackerID": "t1", "entryID": "e1"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if repo.lastUserID != "user_1" || repo.lastTrackerI != "t1" || repo.lastEntryID != "e1" {
+		t.Fatalf("reached storage as user %q, tracker %q, entry %q", repo.lastUserID, repo.lastTrackerI, repo.lastEntryID)
+	}
+	if repo.lastEntryPatch.Amount != 500 {
+		t.Fatalf("amount %v reached storage, want 500", repo.lastEntryPatch.Amount)
+	}
+}
+
+// A correction to nothing, or to a negative amount, is refused before storage
+// is asked. An empty body is the case a client bug would send.
+func TestUpdateEntryRefusesAnAmountThatIsNotPositive(t *testing.T) {
+	for _, body := range []string{`{}`, `{"amount": 0}`, `{"amount": -250}`} {
+		t.Run(body, func(t *testing.T) {
+			repo := &stubRepo{}
+			w := serve(NewHandler(repo), http.MethodPatch, "/v1/trackers/t1/entries/e1",
+				body, "updateEntry", map[string]string{"trackerID": "t1", "entryID": "e1"})
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400", w.Code)
+			}
+			if repo.lastEntryID != "" {
+				t.Fatalf("storage was asked to write entry %q for an invalid amount", repo.lastEntryID)
+			}
+		})
+	}
+}
+
+// An edit of an entry that is not there is a 404, never a quiet 200: the phone
+// must not mark a correction as landed when nothing changed.
+func TestUpdateEntryOfAMissingEntryIsNotFound(t *testing.T) {
+	repo := &stubRepo{err: ErrNotFound}
+	w := serve(NewHandler(repo), http.MethodPatch, "/v1/trackers/t1/entries/gone",
+		`{"amount": 500}`, "updateEntry", map[string]string{"trackerID": "t1", "entryID": "gone"})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", w.Code)
 	}
 }

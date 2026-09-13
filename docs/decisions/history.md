@@ -76361,6 +76361,82 @@ runs both, in order.
   requires one list. Harmless, and the alternative is a per-copy allowlist,
   which is the drift the parity check exists to forbid.
 
+## 2026-09-13 — N437 (#724): a tracker tap's amount can be corrected in place, on the phone
+
+**What the athlete had.** A mistaken water or coffee tap could only be removed and re-added, and re-adding logs the tracker's increment again. A 500 ml bottle tapped as a 250 ml glass had no way to be recorded as what it was.
+
+### A backend verb, not only a phone change
+
+The ticket says "Mobile". A mobile-only version was designed first and rejected, for two reasons.
+
+- **The server ignores an edited amount.** `LogEntry` is `INSERT … ON CONFLICT (id) DO NOTHING`, and its comment says there is no edit path. A phone that re-sent a corrected amount under the same id would be answered with the old row and would mark the edit as pushed. The next pull would then put the old amount back: a silent revert.
+- **Delete-and-re-add underneath was the other option.** It needs no backend change. But a new id breaks the coffee pairing, because `pairedCaffeineEntryId` derives the caffeine entry's id from the coffee entry's. And two devices correcting the same tap before syncing would each create a replacement and count it twice.
+
+So the correction has its own route: `PATCH /v1/trackers/{trackerID}/entries/{entryID}` with `{"amount": n}`.
+
+- **Scoped by user and tracker,** like `DeleteEntry`. Unlike a delete, a miss is a 404: an edit that changed nothing has not done its job. An edit never creates a row.
+- **`LogEntry` stays `DO NOTHING`.** A retried PUT of the original tap that arrives after a correction cannot undo it, and a test holds that.
+
+### The phone
+
+- **`editTap`** updates the amount in place, keeps the id, and marks the row owed. It will not touch a removed tap or another athlete's.
+- **`editCoffeeTap`** also scales the paired caffeine entry by new cups over old cups, in one transaction. The drink's mg per cup is stored nowhere, and does not need to be: the caffeine entry already holds mg per cup times cups.
+- **The outbox** sends a PATCH for an owed row the server already has (`remote = 1`) and a PUT for one it has not.
+  - A PUT can be answered with a different amount. That means the first attempt landed and its answer was lost before the athlete corrected the tap.
+  - In that case a PATCH follows before the row is marked pushed.
+- **The gesture.** A long press on a filled glyph opens `app/trackers/entry/[id].tsx`.
+  - It is also a "Change amount" accessibility action, and the glyph's hint says where to find it.
+  - Tapping a filled glyph still removes it. An empty glyph offers no correction.
+- **The screen** shows the amount in the athlete's unit. It follows `TrackerForm`'s rule that an untouched field writes nothing: an imperial athlete who opens a 250 ml glass and saves without typing does not store 251.37 ml or owe a push (`lib/entryEdit.ts`).
+
+**How it is reachable on a phone**: this is the phone. Long-press a glass or a cup on Today or Food.
+
+### Tests
+
+- **Backend,** against a real Postgres: a throwaway container on this machine, not the shared `vola_test`. The tracker package passed 127 tests and subtests, with 0 skips.
+  - **Handler:** passes the path ids and the amount through; refuses `{}`, 0 and negative amounts; answers a miss with 404.
+  - **Repository:** changes only the amount; is scoped to the owner and the tracker; never creates a row; and a retried PUT of the original tap does not undo the correction.
+- **Phone, against real SQLite:**
+  - the verb the outbox chooses, and the PATCH that follows a PUT answered with the old amount;
+  - the removed-tap and other-athlete guards;
+  - a pull not undoing a correction that has not been pushed;
+  - a refused amount;
+  - the coffee scaling, with and without a paired caffeine entry.
+- **Phone, elsewhere:** `entryEdit.test.ts`, the glyph hint tests, `trackerCardCorrection.test.tsx` and `trackerEntryScreen.test.tsx`.
+
+**Mutation checks, backend.** The baseline was green. Each was restored byte-identical and re-run green.
+
+| # | mutation | caught by |
+|---|---|---|
+| B1 | the update no longer scoped to the athlete | the owner-scoping repository test |
+| B2 | the update no longer scoped to the tracker | the same test, through its wrong-tracker case |
+| B3 | `LogEntry` changed to `DO UPDATE SET amount` | the same test, through its retried-PUT case |
+| B4 | the handler skips validating the amount | the refuses-a-non-positive-amount handler test |
+| B5 | a miss returned as success | the owner-scoping repository test, through its never-creates case |
+
+**Mutation checks, phone.** The baseline was green. Each was restored byte-identical and re-run green.
+
+| # | mutation | caught by |
+|---|---|---|
+| M1 | an owed row the server already has is sent as a PUT | the keeps-the-id-and-sends-a-PATCH test |
+| M2 | a PUT answered with the old amount is not followed by a PATCH | the lost-answer test |
+| M3 | `editTap` without the removed-tap guard | the does-not-bring-back-a-removed-tap test |
+| M4 | `editTap` not scoped to the athlete | the other-athlete test |
+| M5 | `editCoffeeTap` does not scale the caffeine entry | the coffee scaling test |
+| M6 | the glyph offers no accessibility action | the card's accessibility-action test |
+| M7 | the screen writes on an untouched save | the imperial untouched-save screen test |
+| M8 | a coffee correction goes through the plain edit | the screen's coffee test |
+| M9 | `readAmount` loses its untouched-field rule | the `entryEdit` round-trip test and the imperial screen test |
+
+Each went red as exactly the test named, with no suite failing to run.
+
+### Not built, and why
+
+- **The caffeine banner** (N468) has no correction gesture. A caffeine entry changes through the coffee tap that caused it, or through the food that logged it. Correcting a manual caffeine tap directly is not built.
+- **Bar-style trackers** draw no per-tap glyphs, so there is nothing to long-press. Correcting one of their taps is not reachable yet.
+- **Web** parity is N438 (#725).
+- **Two devices correcting the same tap** before either syncs: the PATCH that arrives last wins. There is no per-entry version.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
