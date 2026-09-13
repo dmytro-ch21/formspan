@@ -86,6 +86,7 @@ already provides — reused here rather than duplicated.
 """
 
 import argparse
+import os
 import re
 import subprocess
 import shutil
@@ -190,10 +191,24 @@ def check_duplicates(migs: list[Migration]) -> list[str]:
     return problems
 
 
+# Every git call in this file passes these (H35, the fix H28 made in
+# append-only-merge.py). `git commit` and `git merge` end by starting
+# `git maintenance run --auto --detach`, and since git 2.54 its default
+# strategy repacks once two loose objects share `objects/17/`. The repack runs
+# in a detached child after git has returned, so in the self-test's throwaway
+# repositories it was still writing `objects/info/packs` while the temporary
+# directory was being deleted. The deletion ignored its errors, so the
+# repository was left behind in the temp directory and nothing said so. The
+# real check runs only read-only plumbing, where these settings change nothing.
+# They are on every call anyway, so no call into a throwaway repository can go
+# without them. `gc.auto=0` covers a git old enough to run `gc --auto` instead.
+NO_MAINTENANCE = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
+
+
 def git(*args: str, cwd: Path | None = None) -> str | None:
     try:
         return subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=True, cwd=cwd
+            ["git", *NO_MAINTENANCE, *args], capture_output=True, text=True, check=True, cwd=cwd
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -392,6 +407,12 @@ def self_test() -> int:
     #    exact gap — fails HERE.
     failures += _self_test_post_merge_duplicate_via_run_check()
 
+    # 6. The throwaway repositories above start no background maintenance
+    #    (H35). A detached repack, still writing into one of them while its
+    #    temporary directory was deleted, left the repository behind. The fix
+    #    is a setting, so a check holds it.
+    failures += _self_test_no_background_maintenance()
+
     if failures:
         print("check-migration-versions self-test FAILED:\n", file=sys.stderr)
         for label in failures:
@@ -402,8 +423,10 @@ def self_test() -> int:
     return 0
 
 
-def _run_git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+def _run_git(repo: Path, *args: str, check: bool = True,
+             env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *NO_MAINTENANCE, *args], cwd=repo, check=check,
+                          capture_output=True, text=True, env=env)
 
 
 def _self_test_merge_base() -> list[str]:
@@ -464,7 +487,7 @@ def _self_test_merge_base() -> list[str]:
             failures.append(f"merge-base check: did not go green again after removing the bad migration: {problems3}")
 
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(tmp)
     return failures
 
 
@@ -497,9 +520,7 @@ def _self_test_post_merge_duplicate_via_run_check() -> list[str]:
         _mk(mig_dir, "000001_init.down.sql")
         _run_git(repo, "add", "-A")
         _run_git(repo, "commit", "-q", "-m", "base")
-        base_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
-        ).stdout.strip()
+        base_sha = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
 
         _run_git(repo, "checkout", "-q", "-b", "pr-a", base_sha)
         _mk(mig_dir, "20260907120000_add_foo.up.sql")
@@ -515,10 +536,7 @@ def _self_test_post_merge_duplicate_via_run_check() -> list[str]:
 
         _run_git(repo, "checkout", "-q", "main")
         _run_git(repo, "merge", "-q", "--no-ff", "-m", "merge PR A", "pr-a")
-        merge_b = subprocess.run(
-            ["git", "merge", "--no-ff", "-m", "merge PR B", "pr-b"],
-            cwd=repo, capture_output=True, text=True,
-        )
+        merge_b = _run_git(repo, "merge", "--no-ff", "-m", "merge PR B", "pr-b", check=False)
         if merge_b.returncode != 0:
             failures.append(
                 "post-merge self-test: PR B did not merge cleanly — the fixture "
@@ -550,7 +568,53 @@ def _self_test_post_merge_duplicate_via_run_check() -> list[str]:
                 "the exact gap ac-verifier found would have reopened silently"
             )
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(tmp)
+    return failures
+
+
+def _self_test_no_background_maintenance() -> list[str]:
+    """A traced commit in a throwaway repository starts no maintenance (H35).
+
+    The same check as `_no_background_maintenance` in append-only-merge.py
+    (H28). The race it prevents is too rare for the cases above to notice the
+    settings gone, so this holds them.
+    """
+    failures: list[str] = []
+    traced = {**os.environ, "GIT_TRACE": "1"}
+    tmp = Path(tempfile.mkdtemp(prefix="check-migration-versions-selftest-maintenance-"))
+    try:
+        repo = tmp / "repo"
+        repo.mkdir()
+        _run_git(repo, "init", "-q", "-b", "main")
+        _run_git(repo, "config", "user.email", "test@example.com")
+        _run_git(repo, "config", "user.name", "Test")
+        _mk(repo, "base.sql")
+        _run_git(repo, "add", "-A")
+        trace = _run_git(repo, "commit", "-q", "-m", "traced", env=traced).stderr
+        if "maintenance run" in trace or "gc --auto" in trace:
+            failures.append(
+                "throwaway repos: a commit started background maintenance, whose "
+                "detached repack can still be writing when the temp directory is deleted"
+            )
+
+        # The control, so the check above cannot pass by reading a trace that
+        # never shows maintenance: the same commit with it switched back on.
+        # `maintenance.autoDetach=false` keeps it in the foreground, so the
+        # control cannot cause the race it is checking for.
+        _mk(repo, "control.sql")
+        _run_git(repo, "add", "-A")
+        control = subprocess.run(
+            ["git", "-c", "maintenance.auto=true", "-c", "gc.auto=6700",
+             "-c", "maintenance.autoDetach=false", "commit", "-q", "-m", "control"],
+            cwd=repo, capture_output=True, text=True, env=traced,
+        ).stderr
+        if "maintenance run" not in control:
+            failures.append(
+                "throwaway repos: with maintenance switched on, the trace does not "
+                "show it, so the check above cannot see maintenance here"
+            )
+    finally:
+        shutil.rmtree(tmp)
     return failures
 
 
