@@ -10,16 +10,17 @@ import { useAccent } from '@/lib/AccentProvider';
 import { shiftDate } from '@/lib/anthropometry';
 import { type Checkin } from '@/lib/body';
 import { dayString, shortDate } from '@/lib/calendar';
-import { suggestedTarget, type Projection as PlanProjectionWire } from '@/lib/nutritionApi';
+import { suggestedTarget } from '@/lib/nutritionApi';
 import { plotWindow } from '@/lib/trendChartLayout';
 import {
   RANGES,
   projectionGoal,
+  type PlanOutcome,
   type Projection,
   type TrendRangeKey,
   type TrendSeries,
 } from '@/lib/trendSeries';
-import { useWeightTrend } from '@/lib/useWeightTrend';
+import { planOutcomeOf, useWeightTrend } from '@/lib/useWeightTrend';
 import { toDisplayWeight, weightUnit, type UnitSystem } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -87,7 +88,7 @@ export default function WeightTrendScreen() {
   const accent = useAccent();
 
   const [range, setRange] = useState<TrendRangeKey>('1Y');
-  const [plan, setPlan] = useState<PlanProjectionWire | null>(null);
+  const [plan, setPlan] = useState<PlanOutcome>(null);
 
   // The derivation is fetched here rather than by the hook: this screen has no
   // parent holding it, unlike the card in Goals. It is deliberately NOT fatal —
@@ -98,7 +99,7 @@ export default function WeightTrendScreen() {
       let live = true;
       suggestedTarget(getToken, dayString(new Date()))
         .then((s) => {
-          if (live) setPlan(s.suggestion?.basis?.projection ?? null);
+          if (live) setPlan(planOutcomeOf(s));
         })
         .catch(() => {
           if (live) setPlan(null);
@@ -298,9 +299,9 @@ export function ProjectionLine({
   // sentence's claim, so it says nothing rather than borrowing the copy — the
   // whole point of the discriminator.
   if (projection.kind === 'projected') return null;
-  // `goal` is absent exactly when `p` was null in `fromPlanProjection` — the
-  // `no-goal` case, where there genuinely is no projection to take a number
-  // from. Nothing to say about a goal nobody set.
+  // `goal` is absent exactly in the `no-goal` case, where there genuinely is no
+  // goal to take a number from. Nothing to say about a goal nobody set.
+  // `no-plan` carries the phase's own target, so it does reach a sentence (F63).
   if (projection.goal == null) return null;
   return (
     <Text style={styles.projection} testID="trend-projection-text">
@@ -355,6 +356,10 @@ export function refusalCopy(
       return `Your plan doesn't move toward ${goal} ${unit}, so there's no date to show yet.`;
     case 'stalled':
       return `At your current plan's rate you don't reach ${goal} ${unit} — there's no date to show.`;
+    case 'no-plan':
+      // F63: the goal is the phase's own target, and what is missing is the plan.
+      // Goals, one screen back, names the profile fields that would fix it.
+      return `Your goal is ${goal} ${unit}. A date needs your nutrition target first, and your profile doesn't have enough for one yet. Goals shows what to add.`;
     default:
       // `no-trend`, and anything the server declined to compute. Deliberately
       // NOT "you're on track": we did not check, which is not the same as fine.

@@ -39,14 +39,14 @@ function base() {
  */
 test('renders nothing at all while the first load is in flight', async () => {
   useWeightTrend.mockReturnValue(state({ loading: true }));
-  await render(<WeightTrendCard projection={null} />);
+  await render(<WeightTrendCard plan={null} />);
   expect(screen.queryByTestId('weight-trend-card')).toBeNull();
   expect(screen.queryByTestId('trend-card-empty')).toBeNull();
 });
 
 test('once it has answered, an empty series may say so', async () => {
   useWeightTrend.mockReturnValue(state({ loading: false }));
-  await render(<WeightTrendCard projection={null} />);
+  await render(<WeightTrendCard plan={null} />);
   expect(screen.getByTestId('weight-trend-card')).toBeTruthy();
   expect(screen.getByTestId('trend-card-empty').props.children).toMatch(/record your weight/i);
 });
@@ -86,7 +86,7 @@ test("the card's goal marker follows the fresh projection, not a stale phase tar
   expect(projectionGoal(freshProjection)).toBe(75);
 
   useWeightTrend.mockReturnValue({ ...base(), series: oneReading(), goalKg: 80, projection: freshProjection });
-  await render(<WeightTrendCard projection={null} />);
+  await render(<WeightTrendCard plan={null} />);
 
   const marker = readLabel('trend-goal-offscale');
   expect(marker).toContain('75');
@@ -100,7 +100,7 @@ test('a goalless projection draws no goal on the card, whatever a phase says', a
     goalKg: 80,
     projection: fromPlanProjection(null, null),
   });
-  await render(<WeightTrendCard projection={null} />);
+  await render(<WeightTrendCard plan={null} />);
 
   // The chart is there, so the absence below is about the goal and not the chart.
   expect(screen.getByTestId('trend-card-chart')).toBeTruthy();

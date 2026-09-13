@@ -2,8 +2,7 @@ import { useRouter } from 'expo-router';
 
 import { TrendCard } from '@/components/TrendCard';
 import { shortDate } from '@/lib/calendar';
-import type { Projection as PlanProjectionWire } from '@/lib/nutritionApi';
-import { projectionGoal } from '@/lib/trendSeries';
+import { projectionGoal, type PlanOutcome } from '@/lib/trendSeries';
 import { toDisplayWeight, weightUnit } from '@/lib/units';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { useUnits } from '@/lib/useUnits';
@@ -29,17 +28,18 @@ const WINDOW_DAYS = 365;
 const MIN_SPAN_KG = 1;
 
 export function WeightTrendCard({
-  /** From Goals' own derivation — `basis.projection`. Null when there is none. */
-  projection: plan,
+  /** What Goals' own derivation answered: `planOutcomeOf(data)`. Null until it has. */
+  plan,
 }: {
-  projection: PlanProjectionWire | null;
+  plan: PlanOutcome;
 }) {
   const getToken = useAuthToken();
   const { units } = useUnits();
   const router = useRouter();
   // The goal comes from the projection's own derivation, never from a phase
   // target fetched on another lifecycle: after a phase edit the two disagree
-  // (N433, #714; N429 did the same for the full screen).
+  // (N433, #714; N429 did the same for the full screen). The one exception is an
+  // incomplete profile, where no projection exists to disagree with (F63).
   const { loading, series, projection, today } = useWeightTrend(
     getToken,
     '1Y',

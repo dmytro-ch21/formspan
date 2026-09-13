@@ -1,5 +1,6 @@
 import {
   buildTrend,
+  fromPlanOutcome,
   fromPlanProjection,
   projectToGoal,
   RANGE_DAYS,
@@ -467,3 +468,53 @@ test("a stale phase's goal and a fresh projection's goal can disagree, and the a
   expect(p.kind === 'none' && p.goal).toBe(75);
   expect(p.kind === 'none' && p.goal).not.toBe(stalePhaseGoalKg);
 });
+
+/**
+ * F63 (#1168): a null projection is two different absences, and only one of
+ * them is a judgement about the goal.
+ */
+describe('which absence a null projection is', () => {
+  const PLAN = {
+    reached_on: '',
+    target_weight_kg: 75,
+    kg_to_go: 15,
+    weeks_to_go: 0,
+    already: false,
+    unreachable: false,
+  };
+
+  test('an incomplete profile keeps the phase target, marked as having no plan', () => {
+    expect(fromPlanOutcome({ kind: 'incomplete' }, 75, null)).toEqual({
+      kind: 'none',
+      reason: 'no-plan',
+      goal: 75,
+    });
+  });
+
+  test('an incomplete profile with no usable phase target has no goal at all', () => {
+    for (const target of [null, undefined, 0, Number.NaN]) {
+      expect(fromPlanOutcome({ kind: 'incomplete' }, target, null)).toEqual({
+        kind: 'none',
+        reason: 'no-goal',
+      });
+    }
+  });
+
+  test('the server saying "no goal" wins over the phase fetch', () => {
+    expect(fromPlanOutcome({ kind: 'derived', projection: null }, 80, null)).toEqual({
+      kind: 'none',
+      reason: 'no-goal',
+    });
+  });
+
+  test('a derivation that has not answered draws nothing, whatever the phase says', () => {
+    expect(fromPlanOutcome(null, 80, null)).toEqual({ kind: 'none', reason: 'no-goal' });
+  });
+
+  test('a derived projection translates exactly as before, and its goal beats a stale phase target', () => {
+    const outcome = fromPlanOutcome({ kind: 'derived', projection: PLAN }, 80, null);
+    expect(outcome).toEqual(fromPlanProjection(PLAN, null));
+    expect(outcome).toMatchObject({ goal: 75 });
+  });
+});
+

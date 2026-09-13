@@ -13851,6 +13851,17 @@ picture** check; none of them can be answered from a number.
     goal marker must show the NEW target, matching the full page one tap away,
     and never the one that was live a moment ago. `weightTrendCard.test.tsx`
     pins the mechanism: the card reads the projection's goal, not a phase fetch.
+36. **The goal line survives an incomplete profile (F63).** With a live phase
+    that has a target weight, clear the profile's height (or date of birth).
+    Goals' target section says a target needs a few things first; the weight
+    card below it must still draw the goal line at the phase's target. Open
+    `/goals/trend`: the same goal line, and the sentence *"Your goal is … A date
+    needs your nutrition target first…"*. Fill the height back in and return:
+    the goal and the projection sentence now come from the derivation, with no
+    flash of a different number on the way. Then a maintenance phase (no target
+    weight) with the same gap: no goal line on either surface.
+    `weightTrendCardProfileGap.test.tsx` and `trendGoalProfileGap.test.tsx` pin
+    the mechanism; this checks it reads right on a device.
 
 ### W11 — the action pill stays inside the card at accessibility text sizes (`components/TrendCard.tsx`)
 
