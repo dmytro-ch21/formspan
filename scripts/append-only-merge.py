@@ -137,6 +137,7 @@ place — but it is a different shape from the promise above.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -669,6 +670,12 @@ def self_test() -> int:
     # a real `git merge`.
     _end_to_end()
 
+    # ---- 8b. The throwaway repositories start no background maintenance ---
+    # H28: a detached repack, writing into one of the repositories above while
+    # its temporary directory was being deleted, failed this suite after every
+    # check had passed. The fix is a setting, so a check holds it.
+    _no_background_maintenance()
+
     # ---- 9. Why `merge=union` was rejected, demonstrated -----------------
     # Same repository, same conflict, git's BUILT-IN union driver. It is the
     # obvious answer for an append-only file and it silently corrupts the
@@ -811,9 +818,21 @@ class _Repo:
                  f'python3 "{Path(__file__).resolve()}" %O %A %B %L %P %X %S %Y')
         (self.dir / ".gitattributes").write_text(f"doc.md {driver_attr}\n")
 
-    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["git", *args], cwd=self.dir,
-                              capture_output=True, text=True)
+    # Every call turns git's automatic maintenance off (H28). `git commit` and
+    # `git merge` end by starting `git maintenance run --auto --detach`, and on
+    # git 2.55 its default strategy repacks once the loose-object sample reads
+    # as more than 256, which two objects sharing the `17` prefix are enough
+    # for. The repack runs in a detached child after git has returned, so it
+    # writes into `objects/pack/` while `TemporaryDirectory` is deleting the
+    # repository, and cleanup fails with "Directory not empty" after every
+    # check has passed. A throwaway repository never needs maintenance.
+    # `gc.auto=0` covers a git old enough to run `gc --auto` instead.
+    NO_MAINTENANCE = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
+
+    def git(self, *args: str,
+            env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", *self.NO_MAINTENANCE, *args], cwd=self.dir,
+                              capture_output=True, text=True, env=env)
 
     def commit(self, text: str, message: str) -> None:
         (self.dir / "doc.md").write_text(text, encoding="utf-8")
@@ -927,6 +946,31 @@ def _union_is_wrong() -> None:
 
     # The same two cases through this driver, for contrast, are cases 2 and 3
     # above: both refuse.
+
+
+def _no_background_maintenance() -> None:
+    """A traced commit in a throwaway repository starts no maintenance."""
+    traced = {**os.environ, "GIT_TRACE": "1"}
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _Repo(tmp, "text")
+        (repo.dir / "doc.md").write_text("base\n", encoding="utf-8")
+        repo.git("add", "-A")
+        trace = repo.git("commit", "-q", "-m", "traced", env=traced).stderr
+        check("throwaway repos: a commit starts no background maintenance",
+              "maintenance run" not in trace and "gc --auto" not in trace)
+
+        # The control, so the check above cannot pass by reading a trace that
+        # never shows maintenance: the same commit with it switched back on.
+        # `--no-detach` keeps it in the foreground, so the control cannot
+        # cause the race it is checking for.
+        (repo.dir / "doc.md").write_text("changed\n", encoding="utf-8")
+        repo.git("add", "-A")
+        control = subprocess.run(
+            ["git", "-c", "maintenance.auto=true", "-c", "gc.auto=6700",
+             "-c", "maintenance.autoDetach=false", "commit", "-q", "-m", "control"],
+            cwd=repo.dir, capture_output=True, text=True, env=traced).stderr
+        check("throwaway repos: with maintenance on, the same trace shows it",
+              "maintenance run" in control, "the trace cannot show maintenance here")
 
 
 def _merge_file_texts(base: str, ours: str, theirs: str) -> tuple[str, int]:
