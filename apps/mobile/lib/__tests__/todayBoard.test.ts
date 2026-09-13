@@ -496,7 +496,7 @@ describe('the plan window', () => {
     expect(w.to).toBe('2026-09-09');
   });
 
-  it('widens FUTURE to cover viewDay, past the PLAN_WINDOW_DAYS horizon', () => {
+  it('widens FUTURE to cover viewDay, past the PLAN_WINDOW_DAYS horizon buildTrainBoard uses', () => {
     const w = todayPlanWindow(
       new Date('2026-08-26T12:00:00'),
       new Date('2026-10-01T12:00:00'),

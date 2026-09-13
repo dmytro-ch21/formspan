@@ -77420,10 +77420,10 @@ Comments only, in 11 files. Each comment now names the module's current readers:
 
 ### What changed
 
-Both titles now name what the tests assert, the `PLAN_WINDOW_DAYS` horizon, instead of Train:
+Both titles now name the current reader, `buildTrainBoard`, and the `PLAN_WINDOW_DAYS` horizon their tests assert, instead of Train:
 
 - "reaches the same horizon Train uses, so LATER means one thing" → "reaches the same PLAN_WINDOW_DAYS horizon as buildTrainBoard, so LATER means one thing". The test checks that `todayPlanWindow` ends 14 days out and that `PLAN_WINDOW_DAYS` is 14.
-- "widens FUTURE to cover viewDay, past Train's own horizon" → "widens FUTURE to cover viewDay, past the PLAN_WINDOW_DAYS horizon". This also drops an escaped apostrophe.
+- "widens FUTURE to cover viewDay, past Train's own horizon" → "widens FUTURE to cover viewDay, past the PLAN_WINDOW_DAYS horizon buildTrainBoard uses". It no longer needs an escaped apostrophe. Its first rewrite named only the constant; `ac-verifier` pointed out that the criterion asks for the reader.
 
 ### Checks
 
@@ -77431,7 +77431,7 @@ Both titles now name what the tests assert, the `PLAN_WINDOW_DAYS` horizon, inst
   - The word "Train" appears in the run's output before the rename and not after.
   - The first version of this check looked for the substring and failed, because `buildTrainBoard` contains it. It now matches whole words.
 - **Every `it`, `test` and `describe` title in `apps/mobile` was swept for the word "train".**
-  - The sweep's control is that it finds the 19 titles containing "Today", so it can match titles at all. A first attempt using `git grep -E` found nothing, including for the control, because `\b` is not supported there.
+  - The sweep's control is that it finds the 20 titles containing "Today", so it can match titles at all. An earlier count of 19 came from a pattern that stopped at escaped quotes. A first attempt using `git grep -E` found nothing, including for the control, because `\b` is not supported there.
   - Four titles still contain the word, and each is correct:
     - `tabLayout.test.tsx` asserts that Train is *absent* from the tab bar;
     - `trainScreen.test.tsx` describes the redirect;
