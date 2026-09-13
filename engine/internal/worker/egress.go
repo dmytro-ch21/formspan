@@ -126,6 +126,14 @@ type egressBroker struct {
 	startedWithDBTarget  string
 }
 
+// brokerRunTimeout bounds the `docker run -d` that starts the broker, which
+// runs under its own context rather than the caller's (see
+// ensureEgressBroker). `docker run -d` returns as soon as the container
+// starts. With the default Sandbox.Image, RunSandboxed's mount check has just
+// run a container from the same image, so normally nothing is pulled and this
+// takes about a second. The bound matters only for a wedged daemon or a pull.
+const brokerRunTimeout = 2 * time.Minute
+
 // ensureEgressBroker starts this workspace's broker (network + sidecar
 // container) on first use and returns its internal-network IP AND the
 // internal network's own name on every call, including the first — later
@@ -269,9 +277,32 @@ func (ws *Workspace) ensureEgressBroker(ctx context.Context, allowedHosts []stri
 	// created/started the container, before this process observes success)
 	// still leaves teardownEgressLocked able to find and remove it by name.
 	ws.egress.container = containerName
-	if out, err := exec.CommandContext(ctx, "docker", runArgs...).CombinedOutput(); err != nil {
+	// Run under its own bounded context, NOT the caller's ctx — H20 (#1000).
+	// Recording the name first (above) is enough for the network but not for
+	// the container. Killing the `docker run -d` client on cancel can land
+	// before the daemon has finished creating the container:
+	// teardownEgressLocked then runs `docker rm -f` against a container that
+	// does not exist YET, `exists` truthfully reports it gone, and the daemon
+	// creates it a moment later. It is left in the Created state, never
+	// attached to the network, so the network's own removal succeeds. That is
+	// the residue CI reported: egress containers "engine-egress-broker-44-…",
+	// egress networks "".
+	//
+	// A step in teardown that waits for the container to appear is the design
+	// N470 tried and reverted, because it starved the network's share of the
+	// cleanup budget. So the race is closed where it starts instead: the create
+	// runs to completion, the container then either definitely exists or
+	// definitely does not, and the cancellation is honoured straight after.
+	runCtx, cancelRun := context.WithTimeout(context.Background(), brokerRunTimeout)
+	out, err := exec.CommandContext(runCtx, "docker", runArgs...).CombinedOutput()
+	cancelRun()
+	if err != nil {
 		ws.teardownEgressLocked(ctx)
 		return "", "", fmt.Errorf("egress: start broker container: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if err := ctx.Err(); err != nil {
+		ws.teardownEgressLocked(ctx)
+		return "", "", fmt.Errorf("egress: start broker container: cancelled while starting: %w", err)
 	}
 
 	// The second leg: real internet + host.docker.internal, via Docker's

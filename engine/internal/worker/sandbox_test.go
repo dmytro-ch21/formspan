@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -313,6 +314,47 @@ func TestVerifyMountCatchesAGenuinelyEmptyWorkspace(t *testing.T) {
 	}
 }
 
+// describeResidue turns the three `docker … --format` listings the
+// cancelled-run test takes into one entry per leaked resource, each naming
+// its kind. H20 (#1000): the old failure printed the three raw listings side
+// by side, so telling WHICH resource had leaked meant reading
+// `egress containers: "engine-egress-broker-44-8c3710c4\n"` by eye.
+func describeResidue(sandboxContainers, egressContainers, egressNetworks string) []string {
+	var leaked []string
+	for _, kind := range []struct{ label, listing string }{
+		{"sandbox container", sandboxContainers},
+		{"egress broker container", egressContainers},
+		{"egress network", egressNetworks},
+	} {
+		for _, name := range strings.Fields(kind.listing) {
+			leaked = append(leaked, kind.label+" "+name)
+		}
+	}
+	return leaked
+}
+
+func TestDescribeResidueNamesEachLeakedResource(t *testing.T) {
+	// The state H20 saw on CI: the network removed, the broker container left.
+	got := describeResidue("", "engine-egress-broker-44-8c3710c4\n", "")
+	want := []string{"egress broker container engine-egress-broker-44-8c3710c4"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("describeResidue = %q, want %q", got, want)
+	}
+	if got := describeResidue(" \n", "", "\n"); len(got) != 0 {
+		t.Fatalf("blank listings must read as clean, got %q", got)
+	}
+	got = describeResidue("engine-sandbox-44-1\n", "engine-egress-broker-44-a\nengine-egress-broker-44-b\n", "engine-egress-44-a\n")
+	want = []string{
+		"sandbox container engine-sandbox-44-1",
+		"egress broker container engine-egress-broker-44-a",
+		"egress broker container engine-egress-broker-44-b",
+		"egress network engine-egress-44-a",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("describeResidue = %q, want %q", got, want)
+	}
+}
+
 // TestCancelledRunDoesNotLeaveAnOrphanedContainer is the fix for the
 // blocking finding review raised: exec.CommandContext SIGKILLs the `docker`
 // CLI client on cancel, but the DAEMON keeps a container running regardless
@@ -445,14 +487,12 @@ func TestCancelledRunDoesNotLeaveAnOrphanedContainer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.TrimSpace(string(sandboxOut)) == "" &&
-			strings.TrimSpace(string(egressOut)) == "" &&
-			strings.TrimSpace(string(egressNetOut)) == "" {
+		leaked := describeResidue(string(sandboxOut), string(egressOut), string(egressNetOut))
+		if len(leaked) == 0 {
 			return // clean — the fix worked
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("a cancelled sandboxed run left something behind — sandbox containers: %q, egress containers: %q, egress networks: %q",
-				sandboxOut, egressOut, egressNetOut)
+			t.Fatalf("a cancelled sandboxed run left %d resource(s) behind: %s", len(leaked), strings.Join(leaked, "; "))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

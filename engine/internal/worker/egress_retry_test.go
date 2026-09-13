@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -247,5 +248,136 @@ func TestEnsureEgressBroker_CancelledNetworkCreateStillGetsCleanedUp(t *testing.
 			"cleaned up. This is N470/#799's actual bug: if ws.egress.network is only recorded AFTER "+
 			"the docker command succeeds (rather than before), teardownEgressLocked is called with no "+
 			"idea a network exists at all, and this leaks exactly like it did before that fix", names)
+	}
+}
+
+// writeFakeDockerForBrokerRun installs a fake `docker` for
+// TestEnsureEgressBroker_CancelledBrokerRunStillGetsCleanedUp (H20, #1000).
+// Its `run` models the one thing the real client/daemon split does that a
+// plain script would not: the CONTAINER is created by something that
+// outlives the client. It spawns a detached "daemon" that creates the
+// container marker 300ms later, and only THEN records that `run` started,
+// so a cancel triggered by that record always lands after the creation is
+// already on its way. Killing the client (the script) does not stop it —
+// exactly as killing the real `docker` CLI does not stop the daemon.
+// `inspect <name>` and `rm -f <name>` act on that marker, and the FIRST
+// `rm -f` of a container that exists exits 0 without removing it: the
+// Created-state container N470 measured, where `docker rm -f` reports success
+// and `docker inspect` still finds it. That makes teardown's removal
+// confirmation load-bearing here — trusting the exit code leaves the marker.
+// `network create|inspect|rm` behave as in writeFakeDocker, except create
+// succeeds.
+func writeFakeDockerForBrokerRun(t *testing.T) (binDir, stateDir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake docker script is a POSIX shell script; not attempted on Windows")
+	}
+	binDir = t.TempDir()
+	stateDir = t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+STATE=%q
+case "$1" in
+  network)
+    case "$2" in
+      create) touch "$STATE/net.$4"; exit 0 ;;
+      inspect) test -e "$STATE/net.$3"; exit $? ;;
+      rm) rm -f "$STATE/net.$3"; exit 0 ;;
+    esac
+    ;;
+  run)
+    name=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--name" ]; then name="$a"; fi
+      prev="$a"
+    done
+    ( sleep 0.3; touch "$STATE/ctr.$name"; echo created >> "$STATE/events" ) </dev/null >/dev/null 2>&1 &
+    touch "$STATE/run.started"
+    sleep 0.8
+    exit 0
+    ;;
+  inspect) test -e "$STATE/ctr.$2"; exit $? ;;
+  rm)
+    if [ "$2" = "-f" ]; then
+      if [ -e "$STATE/ctr.$3" ] && [ ! -e "$STATE/rm.deferred" ]; then
+        touch "$STATE/rm.deferred"
+        exit 0
+      fi
+      rm -f "$STATE/ctr.$3"
+      exit 0
+    fi
+    ;;
+esac
+echo "fake docker: unhandled invocation: $*" >&2
+exit 2
+`, stateDir)
+	dockerPath := filepath.Join(binDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker script: %v", err)
+	}
+	return binDir, stateDir
+}
+
+// TestEnsureEgressBroker_CancelledBrokerRunStillGetsCleanedUp reproduces the
+// residue H20 (#1000) saw on CI — egress containers
+// "engine-egress-broker-44-…", egress networks "" — without racing a real
+// daemon. A run is cancelled while `docker run -d` for the broker is in
+// flight, and the "daemon" finishes creating the container after the client
+// has gone. The network must not be the only thing that gets cleaned up.
+func TestEnsureEgressBroker_CancelledBrokerRunStillGetsCleanedUp(t *testing.T) {
+	binDir, stateDir := writeFakeDockerForBrokerRun(t)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ws := &Workspace{RunID: 999998, Dir: filepath.Join(t.TempDir(), "ws")}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(filepath.Join(stateDir, "run.started")); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	_, _, err := ws.ensureEgressBroker(ctx, nil, "")
+	if err == nil {
+		t.Fatal("ensureEgressBroker returned nil error, want the cancellation to surface")
+	}
+	// The cancellation is reported where it was honoured, straight after the
+	// create returned, rather than surfacing later as whichever docker command
+	// happened to run next under the cancelled context.
+	if !strings.Contains(err.Error(), "cancelled while starting") {
+		t.Fatalf("ensureEgressBroker error = %q, want it to say the broker was cancelled while starting", err)
+	}
+	// Well past the fake daemon's 300ms creation delay, so a container it
+	// creates after cleanup has already run is on disk before this looks.
+	time.Sleep(1500 * time.Millisecond)
+
+	events, _ := os.ReadFile(filepath.Join(stateDir, "events"))
+	if !strings.Contains(string(events), "created") {
+		t.Fatalf("the fake daemon never created the broker container (events %q), so this run "+
+			"proves nothing about cleaning one up", events)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "rm.deferred")); statErr != nil {
+		t.Fatalf("teardown never ran `docker rm -f` against an existing broker container (%v), so this "+
+			"run proves nothing about confirming its removal", statErr)
+	}
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatalf("read state dir: %v", err)
+	}
+	var left []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "ctr.") || strings.HasPrefix(e.Name(), "net.") {
+			left = append(left, e.Name())
+		}
+	}
+	if len(left) != 0 {
+		t.Fatalf("left behind after a cancelled broker start: %v. A \"ctr.\" marker with no \"net.\" "+
+			"marker is the H20 residue: cleanup removed the network, but ran `docker rm -f` before the "+
+			"daemon had created the container, so the container outlived it", left)
 	}
 }
