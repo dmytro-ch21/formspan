@@ -24595,3 +24595,4 @@ On the live strength session screen, a unilateral exercise's Reps field reads "R
 ### Needs a device
 
 - Log a set of a dumbbell lunge or a one-arm row on the phone mid-workout. Check that "each side" sits beside Reps and is legible at arm's length.
+- At the largest Dynamic Type size, open a dumbbell lunge set, where Weight and Reps both carry a hint. Check that neither label is cut off and the two fields still sit side by side.
