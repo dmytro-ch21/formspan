@@ -75400,6 +75400,147 @@ That run used the first, timer-based controls. They were redesigned afterwards, 
 - **Device evidence is owed on #1160:** share a PR on "One-Arm Single-Leg Dumbbell Romanian Deadlift" with assisted reps, and confirm that the exported card shows the whole tail and that only the name is shortened.
 - **A very long tail wraps the pill onto a second line.** That is the chosen trade: a taller pill rather than a cut. If it ever reads badly on the card, the next step is a shorter name, never a shorter tail.
 
+## 2026-09-12 — N570 (#1131), part 1: when VOLA may narrate the day, when a model earns the call, and the guard that stops it inventing
+
+**This is the first of three PRs, and it changes nothing an athlete can see.** It lands the pure, tested core the other two build on:
+- the day screen still passes `NO_NARRATION`;
+- no model is called;
+- there is no backend change.
+
+It is `part of #1131`, not `closes`.
+
+### Why split, and why this part first
+
+N570 has ten pieces:
+- a trigger, a debounce and a daily ceiling;
+- a plain-versus-model rule and a fabricated-fact guard;
+- an offline aged summary;
+- an LLM endpoint, metering and an authorization test;
+- a live cost measurement.
+
+One PR holding all of it could not be reviewed well. Its riskiest property, that the model never introduces a fact, would sit in the middle of a large diff. So:
+
+1. **This PR:** the decisions, as pure functions, each held by tests. It needs no device, no network and no money.
+2. **Next:** the backend part.
+   - an endpoint through `platform/llm`;
+   - a metering table and quota shaped like `bjj/reflect_quota.go`;
+   - the OpenAPI entry and the cross-athlete test;
+   - the mobile wiring: `DayNarration` gains its `ready` member, and the aged cached summary appears.
+3. **Last:** the live token measurement, the monthly per-athlete projection, and the owner's cost-ceiling question. The ticket itself says to ask that question once the number exists.
+
+**The aged-cache criterion moves to the second PR, on purpose.** Until a model produces a summary, there is nothing to cache. A `ready` variant with nothing producing it is the placeholder `lib/dayNarration.ts` forbids.
+
+### The owner's cadence, as constants (`lib/narrationTrigger.ts`)
+
+The owner, 2026-09-11: *"when a meal was entered fully when a workout has been done but wait after input at least 10-15 mins and then regenerate i guess. that will go down to 4-5 gens per day."*
+
+- **`NARRATION_DEBOUNCE_MS` is 12 minutes, measured from the LAST input.** A burst of logging therefore produces one generation. It sits inside the owner's range and not at either edge. At 10, the drink logged after the plate lands after a generation. At 15, someone who logs one meal waits longest for nothing.
+- **`DAILY_NARRATIONS` is 5**, the owner's upper figure, over a **rolling** 24 hours.
+  - It is rolling because a calendar day needs a timezone and can be gamed at midnight, the same reason `bjj/reflect_quota.go` gives.
+  - **Nothing calls `narrationSchedule` yet.** "Enforced" here means the enforcing function exists and is tested, not that a live path enforces it. Part 2 wires it in, and the server enforces the real cap there because it owns the spend. (`ac-verifier` asked for this to be said.)
+- **The events.**
+  - A meal fully entered: a successful `logFood`. The add, describe and scan screens call it only on save, so "entered fully" needs no filter of its own. `ac-verifier` confirmed that from those screens.
+  - Edits and removals too. Narration still describing a deleted meal would be a fabricated fact by the guard's own definition.
+  - A workout finished: `finishLocalSession`.
+  - Not a HealthKit import. It arrives already ended and never passes through that function, so a background sync cannot spend a generation nobody asked for.
+  - Not an event stamped in the future. It would hold the debounce open until then.
+- **One clock.** `events`, `generations` and `now` must all come from the phone's clock, and the function cannot detect a skew between them. A generation covers every event stamped at or before it, including one in the same millisecond. That holds if the caller stamps a generation after reading the facts it narrated.
+- **`maxOf`/`minOf` are loops, not `Math.max(...xs)`.** Spreading a long list overflows the stack.
+
+### Algorithm first, AI second (`lib/narrationPolicy.ts`)
+
+The owner: *"that shouldnt be always ai we can do something as an algorithm search and see where and how much should ai be involved."* The rule:
+
+| What changed since the last generation | Decision |
+|---|---|
+| nothing, or only a fact that went away | `none` |
+| the first event of the day | `model`: nothing to compare with, and the day needs ordering |
+| 3 or more facts at once (`MODEL_WHEN_CHANGED_AT_LEAST`) | `model`: several things at once need prioritising, not listing |
+| a session logged, or a new plan, while a planned session is still owed | `model`: "what do I do next" is prioritisation |
+| one or two facts with a plain sentence, including a meal or a tracker while a plan is owed | `deterministic`, e.g. "1,840 of 2,700 kcal eaten today." |
+| one or two facts with none | `none` |
+
+- **A fact going away says nothing.** An absence is not a fact, and removing a meal must not spend a model call on announcing it.
+- **A kcal change that only moves the rounding is not a change.** The fingerprint uses the figure the panel prints.
+- **A target edited only in its macro split is a change,** and its sentence states all four figures. An in-place edit keeps the fact's key, so a kcal-only fingerprint, as in the first draft, would never have noticed a protein change. Found in review.
+- **"Plan owed" escalates only when a session itself moves.** The first draft sent any change to the model while a plan was owed. A plan is commonly owed most of the day, so nearly every glass of water would have spent a model call, which is the opposite of the owner's intent. Found in review.
+- **Every deterministic sentence cites its facts and passes the guard,** and a test asserts it for every plain scenario. "Algorithm" is not an exemption. Dropping the target citation from the food sentence (P2) fails that coupling first, because "2,700" is then unbacked. The same test's literal expectation would catch it too.
+
+### The fabricated-fact guard (`lib/narrationGuard.ts`)
+
+A sentence survives only if all three hold:
+1. **It cites something.** "Great consistency this week" cites nothing, and is dropped.
+2. **Every citation is a real `panelFacts` key.** `logged:ghost-run` is an invented session.
+3. **Every number in it is one the cited facts state.**
+   - "That leaves 860 kcal" citing only what was eaten is arithmetic on a target the model was not pointed at.
+   - A number that is true today still fails if the sentence did not cite the fact behind it.
+
+**A failing sentence is dropped whole, never repaired.** Rewriting a wrong number would be the guard inventing one.
+
+**It extends `unbackedFacts` rather than replacing it.** That check proves each fact's rows are live rows for this athlete. This one proves each sentence rests on those facts. Together: text, then fact keys, then rows.
+
+**A cited fact's own name is not a number.** "5x5 Day logged." quotes a session's name, so the digits inside a cited fact's name (session, tracker, planned workout) are removed before numbers are read. The name must match the cited fact's name exactly, so this is no loophole: "Day 6 logged." citing a session named "5x5 Day" still has an unbacked 6. Before this fix, every plain sentence about a session named like "5K run" was dropped, and the plain path went silent for a real change. Found in review.
+
+**Where it is strict, and fails safe.**
+- **Numbers are matched the way the panel prints them.**
+  - kcal, grams and counts are whole numbers (`fmtAmount`), because nothing in the app prints them with a decimal. The first draft allowed a decimal on them too, which would have let a model state "1,840.4 kcal". Found in review.
+  - Weights also match to one decimal, because a check-in reads "82.4 kg".
+- **Some true sentences are still dropped:**
+  - a date or a clock time;
+  - a session's sets or volume, which no fact states as a number yet;
+  - a weight in pounds, since the cache holds kilograms.
+- Each of those loses a sentence and none keeps a wrong one. When a real model output needs one, it is added to `backedNumbers` with a test, never loosened in the matcher.
+
+**The ticket's "inventing model stub" is `inventingModel()` in `narrationGuard.test.ts`.** It returns two honest sentences and four invented ones, one for each way to invent. The guard keeps the two and reports each dropped sentence with its reason and the offending key or number.
+
+**Mutation checks.** Thirteen: the nine original rules, plus one for each review finding. Each was applied with a count-asserted replace and run against its own suite. It was then restored, confirmed byte-identical, and **re-run** green, all by one Python driver. The nine originals were run again on the revised code, because their first logs described code that has since changed. Baseline: 44/44.
+
+| # | mutation | result |
+|---|---|---|
+| T1 | debounce boundary made inclusive (`now <= dueAt`) | 2 red: *…due exactly then*, and *a burst… timed from the LAST input* |
+| T2 | window boundary made inclusive (`g >= now - window`) | *frees a slot the moment the oldest generation leaves the window, and not a millisecond before* **red** |
+| T3 | a burst timed from its FIRST input (`minOf`) | *turns a burst of logging into one generation, timed from the LAST input* **red** |
+| G1 | no unknown-key check | *drops a session that is not in the facts, naming the invented key* **red**: the invented run is still dropped, but for its "45", so the reported reason is wrong |
+| G2 | numbers backed by the whole day, not only the cited facts | 3 red, including *does not excuse a name's digits when that fact is not cited* |
+| G3 | **the guard switched off** (every sentence kept) | **11 red**, including every inventing-model test. This is the ticket's criterion: the inventing stub goes red without the guard |
+| G4 | a cited fact's names not stripped before reading numbers (review) | 3 red across both suites: *keeps a sentence that quotes a name with digits in it*, *still drops a number added beside the name*, and the policy's *names a session whose name has digits in it, and the guard keeps it* |
+| G5 | kcal backed to one decimal again (review) | 2 red: *refuses kcal or grams to a decimal, a precision the panel never prints*, and *lists what a food fact backs, whole numbers only* |
+| P1 | model threshold 3 → 4 | *when N facts changed at once, and not at one fewer* **red** |
+| P2 | the food sentence drops its target citation | *states lunch against the target, citing both facts it rests on* **red**: the guard coupling fails first |
+| P3 | the plan-owed rule removed | 2 red: *when a session is logged while another planned session is still owed*, and *when the changed fact has no plain sentence of its own* |
+| P4 | the target fingerprint back to kcal only (review) | *sees a target edited only in its macro split, and states all four figures* **red** |
+| P5 | "plan owed" back to escalating on any change (review) | *stays plain for a meal logged while a plan is owed* **red** |
+
+**Verified alongside:** `tsc --noEmit` is clean for the whole mobile app after the review fixes, and eslint is clean on every changed file. The evidence of record is the full `pnpm run verify` on this PR's final commit.
+
+### What review changed
+
+- **`frontend-reviewer`: 4 blocking findings, all fixed in this PR, each now pinned by a mutation.**
+  - one decimal allowed on kcal and grams (G5);
+  - digits inside a name defeating the guard on the policy's own sentences (G4);
+  - a target fingerprint that ignored macros (P4);
+  - "plan owed" escalating on any change (P5).
+- **Suggestions taken:** loops instead of spread `Math.max`, the one-clock and equality contract written down, and a comment on the minimal `PlannedOffer` fixture.
+- **Suggestion noted, not changed:** a fact going away produces no signal. That is the design, and whether a stale cached sentence needs its own check is already an open question for part 2, below.
+- **`ac-verifier`: 4 criteria met, and 5 not addressed by this part, as intended.** It agreed the aged-cache deferral is justified, not an evasion. It found two things, both corrected here:
+  - "enforced" read as live when nothing calls the ceiling yet (now said above);
+  - "tsc and eslint clean" had no log a reviewer could find. Both had passed in a foreground run before the first commit, but the output was only printed, never saved. The evidence of record is now the full `pnpm run verify` on this PR's final commit, whose `lint:mobile` and `typecheck:mobile` links are in the PR.
+
+### What is not here, and where it goes
+
+- **Part 2:**
+  - `DayNarration`'s `ready` member, the slot rendering it, and the aged cached summary;
+  - any model call, the endpoint, metering, the contract, and the cross-athlete authorization test.
+- **Last part:** the tokens-per-generation measurement, the monthly projection, and the owner's ceiling question.
+- **`docs/testing/functional-scenarios.md` gets no entry**, because nothing user-facing changed. Part 2 adds scenarios along with the screen.
+- **The device criterion stays on #1131 until the last part:** over a real day, VOLA regenerates 4–5 times, never mid-entry, and every sentence matches what was logged.
+
+### Open questions
+
+- **For the owner, deliberately after the measurement:** the monthly AI cost ceiling per athlete.
+- **For part 2:** whether a summary a model already produced should be re-guarded against the day's facts on every render. Facts change after generation, so a sentence true at 13:00 can be stale by 15:00 without being invented. The same question covers a fact going away, which this part deliberately does not narrate.
+- The guard's remaining fail-safe drops (dates, sets, pounds) are listed above. Each needs a real model output and a test before it is loosened.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
