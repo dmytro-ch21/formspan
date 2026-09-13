@@ -77589,6 +77589,70 @@ Where each component went:
 
 - **The leak was not reproduced against a real Docker daemon.** On CI it was intermittent and depended on contention. The fake reproduces the ordering deterministically, but only time on CI will show that the real failure has stopped.
 
+## 2026-09-13 — H35 (#1204): two more self-tests turn off git maintenance in their throwaway repositories
+
+**What was open.** H28 (#1112) turned off git's automatic maintenance in `append-only-merge.py`'s throwaway repositories. Its entry left one open question: two more scripts build throwaway repositories with maintenance left on.
+- `scripts/check-migration-versions.py`. Its `--self-test` runs in `verify` and in the `Scripts (Python)` CI job.
+- `scripts/check-pr-has-work.py`. Its `--self-test` runs in `verify` and in `pr-has-work.yml`.
+
+### Both were exposed, measured
+
+**Both scripts commit in their repositories, and `check-migration-versions` merges too**, so both start `git maintenance run --auto --detach`. Measured in `alpine:edge` (git 2.55.0, like the runner), against the unmodified scripts.
+
+- **`GIT_TRACE` on one self-test run:** 9 `maintenance run` trace lines for `check-pr-has-work`, 27 for `check-migration-versions`.
+- **The forced trigger.** The scripts were not edited. A global `init.templateDir` put two valid loose objects whose ids start with `17` into every repository the scripts create. That directory is the sample the geometric repack's estimate reads. With the trigger, the trace shows the repack (3 and 6 lines); without it, the trace shows none.
+
+**`check-migration-versions`: exposed, and nothing said so.**
+- It deleted its repositories with `shutil.rmtree(tmp, ignore_errors=True)`. A failed cleanup therefore never failed the run; it left the repository behind.
+- **Forced, 40 self-test runs:** every run exited 0, and **5 of 80** repositories were left in `/tmp`.
+- **Forced under CPU load, 100 runs** (six busy loops in the container): every run exited 0, and **3 of 200** repositories were left.
+- **What was left:** `.git/info/refs` and `.git/objects/info/packs`. The repack writes both when it updates server info.
+- **Unforced, 40 runs:** 0 of 80 left.
+
+**`check-pr-has-work`: exposed, and a timing margin kept it green.**
+- Its self-test uses `TemporaryDirectory()`, so a failed cleanup would fail the run, as H28's did. In CI, that would fail `pr-has-work.yml`'s self-test step.
+- **The loop did not reproduce it:** 0 of 40 runs failed forced, and 0 of 100 under load.
+- **A direct probe explains why.** It built the self-test's repository with the script's own `_build_repo`, then watched every file under `.git` for 5 s after the call returned. 30 runs, forced:
+  - **In 27 of 30 runs, something under `.git` changed after git had returned:** `objects/pack`, `objects/info`, `info/refs` and `objects/maintenance.lock`. The last change came at a median of 8 ms and at most 92 ms.
+  - **Deleting the directory immediately after `_build_repo` returned failed in 3 of 30 runs.**
+  - **The self-test works in the repository for about 117 ms (median) after its last commit** before it cleans up. That outlasted every repack measured.
+- **So the race is real.** The only thing between it and a red check is how long an unrelated set of assertions takes, and a faster runner or a slower repack would close that margin. It is fixed on the same terms as the other script.
+
+### The fix
+
+**Both files define `NO_MAINTENANCE = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")` and pass it on every git call.** These are the settings H28 put on `_Repo.git`.
+- **That includes the helpers the real check uses:** `git()`, `commit_exists`, and the `merge-base --is-ancestor` call. The self-test runs them against its throwaway repository too. They are read-only plumbing, where the settings change nothing.
+- **No call is left out.** `check-migration-versions` had two raw `subprocess.run` git calls, a `rev-parse` and the second `git merge`. Both now go through `_run_git`.
+- **`check-migration-versions` no longer passes `ignore_errors=True`.** That flag is what hid the leak, and with maintenance off there is nothing left for it to swallow. No `ignore_cleanup_errors` was added anywhere.
+
+**After the fix, same container, same trigger:**
+- **Trace:** 0 `maintenance run` lines and 0 `repack` lines, in both scripts.
+- **`check-migration-versions`:** 0 repositories left behind in 80 runs, and 0 in 100 runs under load. Every run exited 0.
+- **`check-pr-has-work`:** 0 failures in 80 runs, and 0 in 100 under load.
+- **Probe:** 0 of 30 runs showed a change under `.git` after return, and 0 of 30 immediate deletions failed.
+- **Both self-tests exit 0** on git 2.55 unforced, and on the Mac's git 2.49.
+
+**A check in each self-test holds the setting**, following H28's `_no_background_maintenance`:
+- **`check-migration-versions`:** `_self_test_no_background_maintenance`, case 6.
+- **`check-pr-has-work`:** `_no_background_maintenance`, which runs after the fixture checks.
+- **Each check traces a commit made through the file's own helper,** and requires no `maintenance run` or `gc --auto` in the trace.
+- **Its control commits again with `maintenance.auto=true` and `maintenance.autoDetach=false`,** and requires the trace to show maintenance. With `autoDetach=false` the control runs in the foreground, so it cannot cause the race.
+
+**Mutation checks, on git 2.49.** The baseline was green, including under a global config with `maintenance.auto=false`. Each mutation was restored byte-identical (checked with `cmp`) and re-run green.
+
+| # | mutation | `check-migration-versions --self-test` | `check-pr-has-work --self-test` |
+|---|---|---|---|
+| M1 | `NO_MAINTENANCE = ()` | **exit 1**: the new check fails | **exit 1**: the new check fails |
+| M2 | the control without `maintenance.auto=true`, under a global `maintenance.auto=false` | **exit 1**: the control fails | **exit 1**: the control fails |
+
+**Not user-facing**, so no functional scenarios.
+
+### Open questions
+
+- **One probe run is unexplained.** A first version of the probe watched only `objects/pack`, `objects/info` and `info`, for 3 s. On the original script it crashed once, with `[Errno 39] Directory not empty` on `.git` itself, 3 s after git had returned. The instrumented 5 s rerun above saw no change later than 92 ms, and no cleanup failure after the watch in 30 runs. None of the numbers above depend on that run.
+- **The guard reads `GIT_TRACE`'s text,** the same caveat H28 recorded. If a later git rewords the trace line, the control is what would fail.
+- **Nothing makes a fourth script do this.** Three scripts now carry the same tuple and the same check. A new script that builds a throwaway repository would start without either, and no repo-wide check was added. Searching `scripts/` for `git init` is how these three were found.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
