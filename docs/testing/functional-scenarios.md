@@ -24357,3 +24357,34 @@ This is a visual change only: sizes, leading and tracking. Nothing about what Fo
 - Food at the default text size: nothing clipped, truncated or overlapping.
   - Check a meal card with several entries, the catalog, the ingredient picker, the entry menu sheet, the amount sheet, the daily target row and the month grid.
 - The same screen at the largest Dynamic Type size. The roles' leading is taller than the platform default, so a row that just fit before may not.
+
+## N574 — the Progress screen's text on the type scale (`apps/mobile/components/progress/*`, #1189)
+
+This is a visual change only: leading and tracking. No text on Progress changes size, and nothing about what Progress shows, or when, has changed. Every spacing and radius change in these files is value-identical, so none of them moves anything.
+
+### Happy path
+
+- **Reading, What changed and Training history:** their muted notes sit on 18pt lines, where they were 19pt.
+- **What changed:** each headline is the scale's emphasis style, at the same size and weight as before.
+- **This week:** the "FOOD LOGGED" label matches every other uppercase label in the app, with the same tracking. The figure under it keeps its size and weight.
+- **Weights:** no text got bolder or lighter.
+
+### Edge cases & errors
+
+- **A long "What changed" headline or detail** wraps without overlapping the next change.
+- **A stale reading warning** still reads in the warning colour under its reading.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - no raw `fontSize` left in scope;
+  - the ESLint guard refuses a raw on-scale size, spacing or radius in all five files;
+  - the Progress suites still render.
+  The first two are measured in the history entry. The guard was mutation-tested.
+- **NOT reachable:** clipping, truncation and overlap at a given text size. Those need a device.
+
+### Needs a device
+
+- Progress at the default text size: nothing clipped, truncated or overlapping.
+  - Check What changed, Reading, This week and Training history.
+- The same screen at the largest Dynamic Type size.

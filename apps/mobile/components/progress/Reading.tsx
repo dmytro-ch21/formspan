@@ -2,6 +2,8 @@ import { ActivityIndicator, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { MODULE_TOGGLE_LOCATION } from '@/lib/modules';
 import type { Reading } from '@/lib/progress';
 
@@ -108,11 +110,11 @@ const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     backgroundColor: vola.surface,
-    padding: 14,
-    gap: 10,
+    padding: Spacing.cardPadding,
+    gap: Spacing.smPlus,
   },
-  muted: { color: vola.textMuted, fontSize: 13, lineHeight: 19 },
-  stale: { color: vola.warn, fontSize: 12 },
+  muted: { ...Typography.meta, color: vola.textMuted },
+  stale: { ...Typography.caption, color: vola.warn, fontWeight: '400' },
 });

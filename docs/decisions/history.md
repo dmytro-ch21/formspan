@@ -76714,6 +76714,71 @@ Each file reported exactly one guard error with its own selector's message. The 
   - the daily target row.
 - **The other four screens** (#1189–#1192) are untouched.
 
+## 2026-09-13 — N574 (#1189): the Progress screen's text on the type scale
+
+**What was wrong.** Progress's screen file, `app/(tabs)/progress.tsx`, was already on the scale and on the guard since N508. Its four components were not: 8 styles set a raw `fontSize`, and 5 set their own `lineHeight`.
+
+This is the third of N561's six per-screen children (#1050). It follows N572 (Today) and N573 (Food), so this entry records only the numbers and what differs.
+
+### Scope, file by file
+
+`apps/mobile/app/(tabs)/progress.tsx` (measured, not edited) and `apps/mobile/components/progress/{Reading,ThisWeek,TrainingHistory,WhatChanged}.tsx`. No other screen is touched.
+
+### The baseline, before and after
+
+One script measured both: `origin/main` at `b2ad99e7`, then this branch.
+
+| Measure | Before | After |
+|---|---|---|
+| files | 5 | 5 |
+| files importing `Typography` | 1 | 5 |
+| raw numeric `fontSize:` sites | 8 | 0 |
+| `fontSize` below 11 | 0 | 0 |
+| numeric `lineHeight:` sites | 5 | 0 |
+| `...Typography.<role>` spreads | 5 | 13 |
+| spacing literals on the scale | 15 | 0 |
+| radius literals on the scale | 4 | 0 |
+
+The before column matches the baseline filed on the ticket (5, 1, 8, 5, 0). The before-measurement was also taken in the worktree itself and matched the export.
+
+### What changed on screen
+
+- **No text changed size, and every entry spreads a role.** There are no exceptions on this screen, so there are no reason comments.
+- **Weights are kept,** as on Today and Food, and were checked per entry: none changed.
+- **Leading changed on 6 of the 8 entries:**
+  - three muted notes (Reading's and What changed's `muted`, Training history's `note`) move from 19 to `meta`'s 18;
+  - three that set no leading now take their role's: Reading's `stale`, and This week's `nutritionLabel` and `nutritionValue`.
+  - What changed's `headline` (20) and `detail` (18) already matched `emphasis` and `meta`.
+- **Tracking changed on 3:**
+  - This week's "FOOD LOGGED" label had its own 0.8, which `eyebrow` replaces with 1.2;
+  - Reading's `stale` gains `caption`'s 0.2;
+  - What changed's `headline` gains `emphasis`'s −0.1.
+
+### The guard
+
+`progress.tsx` was already listed. The four components join `N508_CONVERTED_FILES`, one by one. As before, the list also guards spacing and radius, so the 15 spacing and 4 radius literals on the scale are restated as tokens, each value-identical. Literals off the scale stay (a pip's 6pt size and 3pt radius).
+
+**Mutation-tested.** A probe style entry was inserted into each component at once and linted:
+
+- `fontSize: 13` in Reading;
+- `padding: 14` in This week;
+- `borderRadius: 14` in Training history;
+- `fontSize: 15` in What changed.
+
+Each file reported exactly one guard error with its own selector's message. The files were restored byte-identical and linted again: 0 errors. **Negative control:** `app/(tabs)/you.tsx`, not converted yet, contains `fontSize: 12` and reports 0 guard errors.
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- The three suites that render these components pass: `progressScreen`, `todayScreen` (which renders This week) and `trainingHistory`, 97 tests. No test in scope asserts a style value.
+- **Audit for text with no size.** It looks for a `<Text>` whose styles set no size, and found none before or after.
+
+### Not done
+
+- **Device checks.** Both remain on #1189 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. Nothing grew, so the likeliest visible change is the slightly tighter leading on the muted notes.
+- **The other three screens** (#1190–#1192) are untouched.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
