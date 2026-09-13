@@ -456,7 +456,7 @@ describe('the plan window', () => {
     expect(todayPlanWindow(new Date('2026-08-26T12:00:00')).from).toBe('2026-08-24');
   });
 
-  it('reaches the same horizon Train uses, so LATER means one thing', () => {
+  it('reaches the same PLAN_WINDOW_DAYS horizon as buildTrainBoard, so LATER means one thing', () => {
     expect(todayPlanWindow(new Date('2026-08-26T12:00:00')).to).toBe('2026-09-09');
     expect(PLAN_WINDOW_DAYS).toBe(14);
   });
@@ -496,7 +496,7 @@ describe('the plan window', () => {
     expect(w.to).toBe('2026-09-09');
   });
 
-  it('widens FUTURE to cover viewDay, past Train\'s own horizon', () => {
+  it('widens FUTURE to cover viewDay, past the PLAN_WINDOW_DAYS horizon buildTrainBoard uses', () => {
     const w = todayPlanWindow(
       new Date('2026-08-26T12:00:00'),
       new Date('2026-10-01T12:00:00'),
