@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 import { vola } from '@/constants/Colors';
+import { Radius } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { drawnOffset, springVelocity } from '@/lib/gesturePhysics';
 import { PressableScale } from '@/components/ui/PressableScale';
 
@@ -283,7 +285,7 @@ const styles = StyleSheet.create({
     // behind the row — a background sliver beside a red button, which is the
     // same defect class `styles.row`'s comment below is about.
     backgroundColor: vola.danger,
-    borderRadius: 12,
+    borderRadius: Radius.md,
   },
   deleteButton: {
     width: ACTION_WIDTH,
@@ -291,7 +293,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: vola.danger,
-    borderRadius: 12,
+    borderRadius: Radius.md,
   },
   deleteText: {
     // `navy`, not white. White on `danger` measures 2.78:1 — below AA's 4.5
@@ -300,8 +302,8 @@ const styles = StyleSheet.create({
     // this app carries a measured ratio in constants/Colors.ts; this one was
     // the first that did not, and it was also the one that failed.
     color: vola.navy,
+    ...Typography.emphasis,
     fontWeight: '700',
-    fontSize: 15,
   },
   row: {
     // Opaque, and shaped EXACTLY like the row it carries (`setRow` is
@@ -310,6 +312,6 @@ const styles = StyleSheet.create({
     // differs from the child's is a red sliver at the row's corner. A square
     // backing would also flatten the rounded corners it sits behind.
     backgroundColor: vola.surface,
-    borderRadius: 12,
+    borderRadius: Radius.md,
   },
 });

@@ -24596,3 +24596,37 @@ On the live strength session screen, a unilateral exercise's Reps field reads "R
 
 - Log a set of a dumbbell lunge or a one-arm row on the phone mid-workout. Check that "each side" sits beside Reps and is legible at arm's length.
 - At the largest Dynamic Type size, open a dumbbell lunge set, where Weight and Reps both carry a hint. Check that neither label is cut off and the two fields still sit side by side.
+
+## N579 — shared components on the type scale: celebration, HR report, share, avatar, swipe-to-delete, hold-to-confirm (#1216)
+
+Typography only; nothing moves, animates or behaves differently. What an athlete could notice:
+
+- button labels one point smaller, 16 → 15 (celebration Share and Done, share-preview Cancel and Share, and every hold-to-confirm button);
+- the celebration headline two points smaller, 22 → 20;
+- the celebration's "felt" label one point larger, 10 → 11;
+- slightly different line spacing on small text.
+
+### Happy path (default text size)
+
+- **Finish a strength session:** the celebration shows the tick, the headline, the stats row with uppercase labels, records and the milestone block. Nothing is clipped, and Share and Done are the same height, side by side.
+- **Open the share preview:** the note, the photo actions, and Cancel and Share, lined up.
+- **A session with heart rate:** the report shows zone labels, minutes and the per-exercise rows. The reading count fits its column, and the window note shows when the window differs.
+- **Swipe a set row left** on the strength session screen: Delete is legible on red.
+- **Hold to finish a session:** the label stays centred while the fill grows. The hold still takes as long as before.
+- **You, Friends and Social:** an avatar without a photo shows its initials centred in the disc.
+
+### Largest Dynamic Type
+
+- The same screens: no label clipped or overlapping.
+  - The celebration's stats row wraps rather than overlapping.
+  - The HR report's fixed-width columns (the zone label, minutes and reading count) do not overlap their neighbours.
+  - The avatar's initials stay inside the disc, which is capped at 1.4× as before.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - each style's effective size, weight, leading and tracking, before and after;
+  - that the lint guard refuses a new raw literal in these files;
+  - that no motion line changed;
+  - that the screens rendering these components still pass their suites.
+- **Not reachable:** clipping, truncation and overlap at a real text size. Those need a device.

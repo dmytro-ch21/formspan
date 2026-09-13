@@ -14,6 +14,8 @@ import {
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { PressableScale } from '@/components/ui/PressableScale';
 
 /**
@@ -242,7 +244,7 @@ export function HoldToConfirm({
 const styles = StyleSheet.create({
   button: {
     minHeight: 52,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -266,5 +268,5 @@ const styles = StyleSheet.create({
     transformOrigin: 'left',
     opacity: 0.28,
   },
-  label: { fontWeight: '700', fontSize: 16 },
+  label: { ...Typography.emphasis, fontWeight: '700' },
 });

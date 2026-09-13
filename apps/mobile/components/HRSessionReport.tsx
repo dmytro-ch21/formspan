@@ -7,6 +7,8 @@ import { HRTimelineChart } from '@/components/ui/HRTimelineChart';
 import { SectionHeader } from '@/components/ui/Section';
 import { Stat, StatRow } from '@/components/ui/Stat';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import {
   buildHRSessionReport,
   hrWindowDiffersFromSession,
@@ -516,46 +518,51 @@ function ExerciseHRRow({ row, testID }: { row: HRExerciseRow; testID: string }) 
 
 /** W18/#957 — the "Sync heart rate" row under the empty card. */
 const syncStyles = StyleSheet.create({
-  row: { marginTop: 10, gap: 8, alignItems: 'flex-start' },
-  outcome: { color: vola.textDim, fontSize: 13, lineHeight: 18 },
+  row: { marginTop: Spacing.smPlus, gap: Spacing.sm, alignItems: 'flex-start' },
+  outcome: { ...Typography.meta, color: vola.textDim },
 });
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10, marginTop: 12, marginBottom: 4 },
+  wrap: { gap: Spacing.smPlus, marginTop: Spacing.md, marginBottom: Spacing.xs },
 
   emptyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: Spacing.smPlus,
     backgroundColor: vola.surface,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    padding: 14,
+    padding: Spacing.cardPadding,
   },
-  emptyText: { flex: 1, fontSize: 13, color: vola.textMuted, lineHeight: 19 },
+  emptyText: { ...Typography.meta, flex: 1, color: vola.textMuted },
 
   limitedCard: {
     backgroundColor: vola.surface,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    padding: 14,
+    padding: Spacing.cardPadding,
   },
-  limitedText: { fontSize: 13, color: vola.textMuted, lineHeight: 19, fontStyle: 'italic' },
-  timelineCaption: { fontSize: 12, color: vola.textMuted, marginBottom: 2 },
+  limitedText: { ...Typography.meta, color: vola.textMuted, fontStyle: 'italic' },
+  timelineCaption: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    marginBottom: Spacing.xxs,
+    fontWeight: '400',
+  },
 
   zones: {
     backgroundColor: vola.surface,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    padding: 14,
-    gap: 10,
+    padding: Spacing.cardPadding,
+    gap: Spacing.smPlus,
   },
-  zoneRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  zoneRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   zoneDot: { width: 8, height: 8, borderRadius: 4 },
-  zoneLabel: { width: 92, fontSize: 12, color: vola.textMuted },
+  zoneLabel: { ...Typography.caption, width: 92, color: vola.textMuted, fontWeight: '400' },
   zoneBarTrack: {
     flex: 1,
     height: 6,
@@ -565,34 +572,54 @@ const styles = StyleSheet.create({
   },
   zoneBarFill: { height: '100%', borderRadius: 3 },
   zoneMinutes: {
+    ...Typography.caption,
     width: 36,
     textAlign: 'right',
-    fontSize: 12,
     fontVariant: ['tabular-nums'],
     color: vola.textMuted,
+    fontWeight: '400',
   },
 
   // Deliberately quieter than the zone card, not louder — this is a reading of
   // the numbers above, not a new measurement, matching this repo's own stance
   // on secondary/corroborating information (`bjj/session/[id].tsx`'s
   // `hr`/`hrCaption` styles, which this report replaces there).
-  effectiveness: { paddingHorizontal: 2, gap: 2 },
-  effectivenessHeadline: { fontSize: 13, fontWeight: '700', color: vola.text },
-  effectivenessDetail: { fontSize: 12, color: vola.textMuted, lineHeight: 18 },
+  effectiveness: { paddingHorizontal: Spacing.xxs, gap: Spacing.xxs },
+  effectivenessHeadline: { ...Typography.meta, color: vola.text, fontWeight: '700' },
+  effectivenessDetail: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
 
-  byExerciseLabel: { fontSize: 12, fontWeight: '700', color: vola.textMuted },
-  exerciseRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  exerciseName: { flex: 1, fontSize: 13, color: vola.text },
+  byExerciseLabel: { ...Typography.caption, color: vola.textMuted, fontWeight: '700' },
+  exerciseRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.sm },
+  exerciseName: { ...Typography.meta, flex: 1, color: vola.text },
   exerciseFigures: {
-    fontSize: 12,
+    ...Typography.caption,
     fontVariant: ['tabular-nums'],
     color: vola.textMuted,
+    fontWeight: '400',
   },
-  exerciseSampleCount: { width: 62, textAlign: 'right', fontSize: 11, color: vola.textDim },
+  // 11, not `eyebrow`: a lowercase reading count in a fixed 62pt column, which eyebrow's tracking
+  // would widen.
+  exerciseSampleCount: {
+    width: 62,
+    textAlign: 'right',
+    fontSize: Typography.eyebrow.fontSize,
+    color: vola.textDim,
+  },
 
   // N522/#934 — deliberately the quietest text on this whole screen: it
   // only ever appears to explain a mismatch, never to assert a normal
   // state, so it reads as a footnote rather than a warning.
-  windowNote: { fontSize: 11, color: vola.textDim, paddingHorizontal: 2 },
-  sourceLine: { fontSize: 12, color: vola.textDim, paddingHorizontal: 2, marginBottom: 6 },
+  // 11, not `eyebrow`: a footnote sentence, which eyebrow's tracking would space out.
+  windowNote: {
+    fontSize: Typography.eyebrow.fontSize,
+    color: vola.textDim,
+    paddingHorizontal: Spacing.xxs,
+  },
+  sourceLine: {
+    ...Typography.caption,
+    color: vola.textDim,
+    paddingHorizontal: Spacing.xxs,
+    marginBottom: Spacing.xsPlus,
+    fontWeight: '400',
+  },
 });

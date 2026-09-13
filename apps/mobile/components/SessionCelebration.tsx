@@ -6,6 +6,8 @@ import MapView, { Polyline } from 'react-native-maps';
 import { Medal } from '@/components/ui/Medal';
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { celebratesMilestone, type Milestone } from '@/lib/milestones';
@@ -620,18 +622,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignSelf: 'stretch',
     alignItems: 'stretch',
-    gap: 10,
+    gap: Spacing.smPlus,
     marginTop: 18,
   },
   share: { flex: 1 },
-  shareText: { fontSize: 16, fontWeight: '800' },
-  shareError: { fontSize: 12, color: vola.textMuted, textAlign: 'center', marginBottom: 8 },
+  shareText: { ...Typography.emphasis, fontWeight: '800' },
+  shareError: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    textAlign: 'center',
+    marginBottom: Spacing.sm,
+    fontWeight: '400',
+  },
   scrim: {
     flex: 1,
     backgroundColor: 'rgba(8,11,18,0.86)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: Spacing.xl,
   },
   card: {
     width: '100%',
@@ -640,9 +648,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
     backgroundColor: vola.surface,
-    padding: 24,
+    padding: Spacing.xl,
     alignItems: 'center',
-    gap: 10,
+    gap: Spacing.smPlus,
   },
   crest: { height: 74, alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch' },
   flareLayer: {
@@ -654,60 +662,66 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  flare: { position: 'absolute', borderRadius: 999 },
+  flare: { position: 'absolute', borderRadius: Radius.pill },
   tick: {
     width: 56,
     height: 56,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // 26, not a role: one tick glyph centred in the 56pt disc.
   tickMark: { fontSize: 26, fontWeight: '800' },
-  title: { fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  subtitle: { fontSize: 13, color: vola.textMuted, textAlign: 'center' },
+  title: { ...Typography.title, textAlign: 'center' },
+  subtitle: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
   routeThumb: {
     alignSelf: 'stretch',
     height: 120,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     overflow: 'hidden',
-    marginTop: 6,
+    marginTop: Spacing.xsPlus,
     borderWidth: 1,
     borderColor: vola.lineSoft,
   },
   badge: {
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.md,
     paddingVertical: 5,
-    marginTop: 2,
+    marginTop: Spacing.xxs,
   },
-  badgeText: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+  badgeText: { ...Typography.eyebrow, textTransform: 'uppercase', fontWeight: '800' },
   stats: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 20,
-    marginTop: 12,
+    gap: Spacing.gutter,
+    marginTop: Spacing.md,
   },
   stat: { alignItems: 'center', minWidth: 64 },
-  statValue: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  statLabel: { fontSize: 11, color: vola.textDim, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statValue: { ...Typography.title, fontVariant: ['tabular-nums'] },
+  statLabel: {
+    ...Typography.eyebrow,
+    color: vola.textDim,
+    textTransform: 'uppercase',
+    fontWeight: '400',
+  },
   felt: {
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: Spacing.smPlus,
+    paddingTop: Spacing.smPlus,
     borderTopWidth: 1,
     borderTopColor: vola.lineSoft,
     alignSelf: 'stretch',
     alignItems: 'center',
   },
   feltLabel: {
-    fontSize: 10,
+    ...Typography.eyebrow,
     color: vola.textDim,
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    fontWeight: '400',
   },
-  feltValue: { fontSize: 13, color: vola.textMuted, marginTop: 2 },
+  feltValue: { ...Typography.meta, color: vola.textMuted, marginTop: Spacing.xxs },
   /*
     Bordered in the accent like `badge`, but a block rather than a pill: it
     carries two lines, and a pill wide enough for "Twenty-six weeks in a row.
@@ -718,33 +732,40 @@ const styles = StyleSheet.create({
   milestone: {
     alignSelf: 'stretch',
     borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    gap: 4,
-    marginTop: 4,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.xs,
+    marginTop: Spacing.xs,
   },
-  milestoneLabel: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
+  milestoneLabel: { ...Typography.emphasis, textAlign: 'center', fontWeight: '800' },
   milestoneBlurb: {
-    fontSize: 12,
+    ...Typography.caption,
     color: vola.textMuted,
     textAlign: 'center',
-    lineHeight: 17,
+    fontWeight: '400',
   },
-  streak: { fontSize: 12.5, color: vola.textDim, marginTop: 10, letterSpacing: 0.2 },
-  records: { alignSelf: 'stretch', gap: 8, marginTop: 12 },
-  recordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  recordName: { flex: 1, fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },
-  recordKind: { fontSize: 11, color: vola.textDim },
+  streak: {
+    ...Typography.caption,
+    color: vola.textDim,
+    marginTop: Spacing.smPlus,
+    fontWeight: '400',
+  },
+  records: { alignSelf: 'stretch', gap: Spacing.sm, marginTop: Spacing.md },
+  recordRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  recordName: { ...Typography.meta, flex: 1, textTransform: 'capitalize', fontWeight: '600' },
+  // 11, not `eyebrow`: a lowercase record kind beside its name, which eyebrow's tracking would
+  // space out.
+  recordKind: { fontSize: Typography.eyebrow.fontSize, color: vola.textDim },
   // No margin and no vertical padding of its own — the row owns the spacing
   // and `alignItems: 'stretch'` owns the height. Both used to live here, which
   // is what put Done 18pt lower than the Share button beside it.
   done: {
     flex: 1,
     minHeight: 50,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  doneText: { fontWeight: '800', fontSize: 16 },
+  doneText: { ...Typography.emphasis, fontWeight: '800' },
 });
