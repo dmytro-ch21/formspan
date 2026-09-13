@@ -24,6 +24,8 @@ import { StyleSheet, View as RNView } from 'react-native';
 import { Text } from '@/components/Themed';
 import { macroLine } from '@/components/food/MealCard';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { fmtAmount, type EatenView } from '@/lib/nutrition';
 
 export function FoodSummaryCard({ eaten, testID }: { eaten: EatenView; testID?: string }) {
@@ -55,14 +57,14 @@ const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     backgroundColor: vola.surface,
-    padding: 14,
-    gap: 8,
+    padding: Spacing.cardPadding,
+    gap: Spacing.sm,
   },
-  header: { fontSize: 15, fontWeight: '700' },
-  macroRow: { flexDirection: 'row', gap: 14, flexWrap: 'wrap' },
+  header: { ...Typography.emphasis, fontWeight: '700' },
+  macroRow: { flexDirection: 'row', gap: Spacing.cardPadding, flexWrap: 'wrap' },
   macroCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  macroText: { fontSize: 12, color: vola.textMuted },
+  macroText: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
 });

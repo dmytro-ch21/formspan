@@ -69,6 +69,8 @@ import { Animated, Easing, PanResponder, StyleSheet, View as RNView } from 'reac
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { EASE, MS } from '@/constants/Motion';
 import { glyphFor } from '@/lib/foodGlyph';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -506,24 +508,25 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surfaceRaised,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.smPlus,
   },
   // The lifted row says so: a hairline in the section accent would tie it to
   // one card, and it is between cards, so the surface itself brightens.
   rowDragging: { borderWidth: 1, borderColor: vola.line, shadowOpacity: 0.3, shadowRadius: 8 },
-  glyph: { fontSize: 20 },
-  rowMain: { flex: 1, gap: 2 },
-  rowName: { fontSize: 14, fontWeight: '600' },
-  rowServing: { fontSize: 12, color: vola.textDim },
-  rowKcal: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  // The title size, not the role: one emoji glyph in the row's leading slot.
+  glyph: { fontSize: Typography.title.fontSize },
+  rowMain: { flex: 1, gap: Spacing.xxs },
+  rowName: { ...Typography.body, fontWeight: '600' },
+  rowServing: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
+  rowKcal: { ...Typography.emphasis, fontVariant: ['tabular-nums'], fontWeight: '700' },
   // The 3-dot: 13 + 18 + 13 = 44 tall, 10 + 18 + 2 = 30 across, and the
   // missing 14 comes from its `hitSlop={7}` above. A `Pressable` may do that;
   // the grip may not (below).
-  more: { paddingVertical: 13, paddingLeft: 10, paddingRight: 2 },
+  more: { paddingVertical: 13, paddingLeft: Spacing.smPlus, paddingRight: Spacing.xxs },
   // N553 — the grip, and the arithmetic is the point: 13 + 18 + 13 = 44 tall,
   // 24 + 18 + 2 = 44 across, over an 18pt icon. It is 44 of REAL PADDING, not
   // 30 of padding and a promise, which is what shipped in the first draft of
@@ -538,7 +541,7 @@ const styles = StyleSheet.create({
   // `Pressable` is a sibling, not an ancestor, so a wider grip SHRINKS it
   // rather than overlapping it — the 14 points are taken from the far end of
   // a full-width row, and nothing else lives there.
-  grip: { paddingVertical: 13, paddingLeft: 24, paddingRight: 2 },
+  grip: { paddingVertical: 13, paddingLeft: Spacing.xl, paddingRight: Spacing.xxs },
 
   checkbox: {
     width: 20,
@@ -549,5 +552,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxTick: { fontSize: 12, fontWeight: '700' },
+  // The caption size, not the role: one tick centred in a 20pt disc.
+  checkboxTick: { fontSize: Typography.caption.fontSize, fontWeight: '700' },
 });

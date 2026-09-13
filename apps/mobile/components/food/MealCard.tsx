@@ -109,6 +109,8 @@ import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { EntryRow, type EntryDragHandlers } from '@/components/food/EntryRow';
 import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { macroColor } from '@/lib/macroModel';
 import { fmtAmount, type Entry, type Macros, type Meal } from '@/lib/nutrition';
@@ -499,15 +501,20 @@ const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     backgroundColor: vola.surface,
-    padding: 14,
-    gap: 10,
+    padding: Spacing.cardPadding,
+    gap: Spacing.smPlus,
   },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  headerToggle: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  header: { fontSize: 15, fontWeight: '700' },
-  combineLink: { fontSize: 13, fontWeight: '600' },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  headerToggle: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
+  header: { ...Typography.emphasis, fontWeight: '700' },
+  combineLink: { ...Typography.meta, fontWeight: '600' },
   // N484 — the empty (`available`) branch's `availableKcal` + `macroRow`
   // used to fight `card`'s own `gap: 10` with negative margins tuned to
   // pull them close under the header, but the RNView wrapping the two of
@@ -517,38 +524,43 @@ const styles = StyleSheet.create({
   // grouped unit. `availableBlock`'s own small positive gap replaces both:
   // still tighter than `card`'s outer rhythm (they belong together), but
   // never overlapping.
-  availableBlock: { gap: 4 },
-  availableKcal: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+  availableBlock: { gap: Spacing.xs },
+  availableKcal: { ...Typography.meta, color: vola.textMuted, fontWeight: '600' },
   // Used both by the populated branch directly (where its own `marginTop`
   // nudges it slightly closer to the header above) and, via
   // `availableMacroRow`, by the empty branch inside `availableBlock` —
   // where that same nudge would double up on `availableBlock`'s own gap.
-  macroRow: { flexDirection: 'row', gap: 14, marginTop: -2 },
+  macroRow: { flexDirection: 'row', gap: Spacing.cardPadding, marginTop: -2 },
   availableMacroRow: { marginTop: 0 },
   macroCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  macroText: { fontSize: 12, color: vola.textMuted },
+  macroText: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
 
   // The row's own styles moved to `EntryRow.tsx` with the row (N531).
   cardLifted: { zIndex: 10, elevation: 10 },
   // N553 — where the lifted row will land. A 2pt rule in the athlete's accent,
   // the colour every "this is the action" affordance on this screen already
   // uses, sized so it reads as a seam opening rather than as a row of its own.
-  dropGap: { height: 2, borderRadius: 1, marginVertical: 2 },
+  dropGap: { height: 2, borderRadius: 1, marginVertical: Spacing.xxs },
 
   add: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 6,
-    paddingVertical: 6,
+    gap: Spacing.xsPlus,
+    paddingVertical: Spacing.xsPlus,
   },
-  addText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+  addText: { ...Typography.meta, color: vola.textMuted, fontWeight: '600' },
 
-  combineBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2 },
-  combineCancel: { paddingVertical: 10, paddingHorizontal: 4 },
-  combineCancelText: { fontSize: 13, fontWeight: '600', color: vola.textMuted },
+  combineBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.smPlus,
+    paddingTop: Spacing.xxs,
+  },
+  combineCancel: { paddingVertical: Spacing.smPlus, paddingHorizontal: Spacing.xs },
+  combineCancelText: { ...Typography.meta, color: vola.textMuted, fontWeight: '600' },
   combineConfirm: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
   combineConfirmOff: { opacity: 0.4 },
-  combineConfirmText: { fontSize: 13, fontWeight: '700' },
+  combineConfirmText: { ...Typography.meta, fontWeight: '700' },
 });

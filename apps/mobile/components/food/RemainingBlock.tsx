@@ -25,6 +25,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import {
   remaining as computeRemaining,
@@ -220,16 +222,22 @@ function pct(eaten: number, target: number): number {
 const styles = StyleSheet.create({
   // Equal weight, side by side. Protein is not subordinate to calories: the
   // design doc calls it the more behaviour-changing of the two.
-  figures: { flexDirection: 'row', gap: 20 },
+  figures: { flexDirection: 'row', gap: Spacing.gutter },
   figure: { flex: 1 },
+  // No role: the hero figure's size is a prop (30 or 34), set where it renders.
   value: { fontWeight: '800', fontVariant: ['tabular-nums'] },
-  unit: { fontSize: 12, color: vola.textMuted, marginTop: 1 },
-  caption: { fontSize: 12, color: vola.textMuted, marginTop: 6 },
+  unit: { ...Typography.caption, color: vola.textMuted, marginTop: 1, fontWeight: '400' },
+  caption: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    marginTop: Spacing.xsPlus,
+    fontWeight: '400',
+  },
   track: {
     height: 4,
     borderRadius: 2,
     backgroundColor: vola.surfaceRaised,
-    marginTop: 10,
+    marginTop: Spacing.smPlus,
     overflow: 'hidden',
   },
   fill: { height: 4, borderRadius: 2 },

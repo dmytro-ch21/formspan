@@ -32,6 +32,8 @@ import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import type { CatalogFood } from '@/lib/catalogApi';
 import { glyphFor } from '@/lib/foodGlyph';
 import { servingBasisGrams } from '@/lib/foodQuantity';
@@ -149,27 +151,29 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    gap: Spacing.md,
+    paddingVertical: Spacing.smPlus,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: vola.lineSoft,
     backgroundColor: vola.surface,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
+  // 26, not a role: one emoji glyph standing in for the food's photo.
   cardGlyph: { fontSize: 26 },
-  cardMain: { flex: 1, gap: 2 },
-  cardName: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
-  cardBrand: { fontSize: 12, color: vola.textMuted },
-  cardServing: { fontSize: 12, color: vola.textDim },
+  cardMain: { flex: 1, gap: Spacing.xxs },
+  cardName: { ...Typography.emphasis },
+  cardBrand: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
+  cardServing: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
   cardAdd: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardAddText: { fontSize: 20, lineHeight: 22, fontWeight: '600' },
+  // The title size, not the role: one "+" centred in a 32pt circle, leading set to fit it.
+  cardAddText: { fontSize: Typography.title.fontSize, lineHeight: 22, fontWeight: '600' },
 });

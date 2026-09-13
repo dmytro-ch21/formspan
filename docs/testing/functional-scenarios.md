@@ -24321,3 +24321,39 @@ This is a visual change only: sizes, leading and tracking. Nothing about what To
 - Today at the default text size: nothing clipped, truncated or overlapping.
   - Check the resume card, a two-line plan title, the Up next and Detected activity headlines, the mini cards, and Momentum's rings and the lines under them.
 - The same screen at the largest Dynamic Type size. The roles' leading is taller than the platform default, so a row that just fit before may not.
+
+## N573 — the Food screen's text on the type scale (`apps/mobile/app/(tabs)/food.tsx`, `apps/mobile/components/food/*`, #1188)
+
+This is a visual change only: sizes, leading and tracking. Nothing about what Food shows, or when, has changed. Every spacing and radius change in these files is value-identical, so none of them moves anything.
+
+### Happy path
+
+- **Sheets:** the entry menu sheet's title and the amount sheet's title are the same size, 20pt.
+- **Buttons and names:** "Add" and a picked food's name in the ingredient picker read at 15pt. They were 16pt.
+- **The daily target row:** its figure is 20pt, where it was 22pt. Its "DAILY TARGET" label matches every other uppercase label.
+- **The month grid:** the day initials are 11pt, bold and tracked. They were 10pt.
+- **Macro split:** the labels under each figure read at 12pt, where they were 11pt.
+- **Weights:** no text got bolder or lighter.
+- **Unchanged:** the day's calorie figure, the remaining figure, food emoji, the checkbox tick, the "+" on a catalog card, and every text field.
+
+### Edge cases & errors
+
+- **A long food name** on a catalog card or a saved food wraps to at most two lines. The card grows taller rather than clipping.
+- **The entry menu sheet's title for a long food name** stays beside "Done" without pushing it off the sheet.
+- **Typing in the search, quantity and by-hand fields:** the text sits centred in each field, exactly as before. These fields were deliberately left off the scale.
+- **The month grid** keeps its seven columns aligned, with each initial centred over its dates.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - no `fontSize` below 11 in scope, and only the five recorded literals remain;
+  - the ESLint guard refuses a raw on-scale size, spacing or radius in all twelve files;
+  - the Food suites still render.
+  The first two are measured in the history entry. The guard was mutation-tested.
+- **NOT reachable:** clipping, truncation and overlap at a given text size, and where typed text sits inside a field. Those need a device.
+
+### Needs a device
+
+- Food at the default text size: nothing clipped, truncated or overlapping.
+  - Check a meal card with several entries, the catalog, the ingredient picker, the entry menu sheet, the amount sheet, the daily target row and the month grid.
+- The same screen at the largest Dynamic Type size. The roles' leading is taller than the platform default, so a row that just fit before may not.
