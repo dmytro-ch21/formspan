@@ -75697,7 +75697,7 @@ The ticket's first criterion was: are these PNGs really generated (then add the 
 | `vola-wordmark.png` | `logos/source/vola-wordmark-white.svg` | 0.83% |
 | `favicon.png` (96px) | `vola-app-icon-dark-1024.svg` | 6.69% (resampling noise dominates at this size) |
 
-The contrast, from the same method: the **wrong** masters measured 25.41% (the black wordmark) and 82.94% (the light icon).
+The contrast, from the same method: the **wrong** masters measured 25.41% (the black wordmark) and 82.94% (the light icon). At the favicon's 96px they measured 84.73% (the light icon) to 100.00% (the monochrome icon), against its own master's 6.69%.
 
 **So the claim is true today. It stays in CLAUDE.md, and it is now enforced.**
 
@@ -75739,14 +75739,14 @@ The contrast, from the same method: the **wrong** masters measured 25.41% (the b
 ### Also
 
 - **`check:brand-copies` is unchanged, in name and in what it checks** (criterion 3).
-- **Docs.** CLAUDE.md's brand line now names the check. `assets/brand/README.md`'s App Store note points at `icon.png` as that export, and at the manifest for how to re-export.
+- **Docs.** CLAUDE.md's brand line now names the check, and says the rasters were exported by hand with no generator script. It used to say *generated … regenerate*, which read as if a script existed. `assets/brand/README.md`'s App Store note points at `icon.png` as that export, and at the manifest for how to re-export.
 - **Not user-facing**, so no functional scenarios.
 
 ### Open questions
 
 - **The Linux measurements.** The tolerances were set from macOS numbers; the first CI run prints Linux's. If CI goes red on a tolerance, that is a renderer difference to record in the manifest, not a drawing change.
 - **`logos/` and `splash/`** hold the old mark (the brand README says so). No raster in the app comes from them, so this check does not cover them, and re-cutting them from `logos/source/` remains unstarted.
-- **The favicon's 10% tolerance** is the loosest, and rests on one measurement at 96px.
+- **The favicon's 10% tolerance** is the loosest: 3.3 points above its own measurement, and 75 below the nearest wrong master at the same size. A master edit too small to move the favicon past it still has to pass `icon.png`, which is rendered from the same master and held to 1%.
 
 ## Open items / known gaps as of this entry
 

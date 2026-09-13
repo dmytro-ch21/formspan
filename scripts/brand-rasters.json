@@ -2,7 +2,7 @@
   "_about": [
     "H14 (#948). Every PNG directly in apps/mobile/assets/images, the SVG master it was rendered from, and what check:brand-rasters holds it to.",
     "INTEGRITY: sha256 pins the raster's bytes, so any edit, down to one pixel, fails.",
-    "FIDELITY: the raster, trimmed to its visible content, is compared with the master rendered at the same content size. maxPctOver48 is the share of content pixels allowed to differ by more than 48 levels in any channel: renderer anti-aliasing, not a different drawing. measuredPctOver48 is what it measured on 2026-09-13 with sharp 0.35.4 (librsvg 2.62.91) on macOS arm64. A wrong master measured 25% to 83%.",
+    "FIDELITY: the raster, trimmed to its visible content, is compared with the master rendered at the same content size. maxPctOver48 is the share of content pixels allowed to differ by more than 48 levels in any channel: renderer anti-aliasing, not a different drawing. measuredPctOver48 is what it measured on 2026-09-13 with sharp 0.35.4 (librsvg 2.62.91) on macOS arm64. A wrong master measured 25% to 100%.",
     "To re-export a raster: render it from its master, run `pnpm run check:brand-rasters`, and once fidelity passes, update its sha256 here. Editing a master without re-exporting fails fidelity."
   ],
   "rasters": [
