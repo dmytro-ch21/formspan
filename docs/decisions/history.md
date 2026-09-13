@@ -77414,6 +77414,29 @@ Comments only, in 11 files. Each comment now names the module's current readers:
 - **Renaming `trainBoard`, `useTrainBoard`, `buildTrainBoard` or `TrainBoard`.** That is a code change touching Today and Plan, and the ticket leaves it out of scope.
 - **Two test titles in `lib/__tests__/todayBoard.test.ts` still say Train:** "reaches the same horizon Train uses, so LATER means one thing" and "widens FUTURE to cover viewDay, past Train's own horizon". They are strings, not comments, so renaming them is a code change and would break this diff's comments-only proof. `frontend-reviewer` found them, and they are filed as a follow-up ticket.
 
+## 2026-09-13 — H37 (#1220): two todayBoard test titles stop naming Train as a current reader
+
+**What was left.** H36 (#1205) corrected the comments that described Train as a live screen. Train was retired in N182 (#587). H36 left two **test titles** in `apps/mobile/lib/__tests__/todayBoard.test.ts` alone, because they are strings, and renaming them would have broken H36's proof that its diff changed comments only. H36's `frontend-reviewer` found them, and this ticket was filed for them.
+
+### What changed
+
+Both titles now name what the tests assert, the `PLAN_WINDOW_DAYS` horizon, instead of Train:
+
+- "reaches the same horizon Train uses, so LATER means one thing" → "reaches the same PLAN_WINDOW_DAYS horizon as buildTrainBoard, so LATER means one thing". The test checks that `todayPlanWindow` ends 14 days out and that `PLAN_WINDOW_DAYS` is 14.
+- "widens FUTURE to cover viewDay, past Train's own horizon" → "widens FUTURE to cover viewDay, past the PLAN_WINDOW_DAYS horizon". This also drops an escaped apostrophe.
+
+### Checks
+
+- **`todayBoard.test.ts` runs 53 tests before and after, all passing.** The verbose run shows both new titles.
+  - The word "Train" appears in the run's output before the rename and not after.
+  - The first version of this check looked for the substring and failed, because `buildTrainBoard` contains it. It now matches whole words.
+- **Every `it`, `test` and `describe` title in `apps/mobile` was swept for the word "train".**
+  - The sweep's control is that it finds the 19 titles containing "Today", so it can match titles at all. A first attempt using `git grep -E` found nothing, including for the control, because `\b` is not supported there.
+  - Four titles still contain the word, and each is correct:
+    - `tabLayout.test.tsx` asserts that Train is *absent* from the tab bar;
+    - `trainScreen.test.tsx` describes the redirect;
+    - two `youScreen.test.tsx` titles use the verb ("What you train").
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
