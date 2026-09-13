@@ -198,9 +198,12 @@ function workingSets(s: Session): number {
  * - **`TrainingCalendar`** → Progress, through that component — the one of the
  *   three that had no equivalent there, and the last surface on the phone that
  *   opens a past session by date.
- * - **Recent sessions** → Train renders them from the same read, and the
- *   calendar above reaches them by date. A second copy on Today is the
- *   divergence this epic exists to remove.
+ * - **Recent sessions** → the full, searchable history
+ *   (`app/session/history.tsx`), reached from this screen's Logged block
+ *   (**All**) and from the calendar above, which also opens a session by date.
+ *   When this moved, Train drew the list from the same read; N182 has since
+ *   retired Train. A second copy on Today is the divergence this epic exists
+ *   to remove.
  *
  * The **day stepper** went too, and that is the one removal that is a product
  * decision rather than a relocation. Today answered *what is on Thursday* with
@@ -428,8 +431,9 @@ export default function TodayScreen() {
   /**
    * Start what was planned — or, browsing a past day, backfill it.
    *
-   * The branch itself lives in `lib/startSession.ts` — Train makes the same
-   * decision, and two copies of it is how a technique-shaped discipline ends up
+   * The branch itself lives in `lib/startSession.ts` — the day panel
+   * (`app/day.tsx`) makes the same decision, and two copies of it is how a
+   * technique-shaped discipline ends up
    * in the set logger on one surface and not the other. It keys on the CATALOG
    * KIND (`logsAfterwards`), never on `key === 'bjj'`, so a second
    * technique-shaped discipline gets the right screen without this file
@@ -1752,7 +1756,8 @@ function LeadBlock({
         there is false, and it sends the athlete looking in the wrong place.
 
       Found in review, on copy that asserted both halves unconditionally.
-      Train draws the same distinction with two separate notes.
+      Train drew the same distinction with two separate notes, before N182
+      retired it.
     */
     return (
       <View style={styles.planEmpty} testID="today-lead-unavailable">

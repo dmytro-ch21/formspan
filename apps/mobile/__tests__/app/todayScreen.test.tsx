@@ -932,8 +932,9 @@ describe('the six blocks', () => {
     expect(screen.queryByTestId('week-review')).toBeNull();
     expect(screen.queryByTestId('today-trend')).toBeNull();
     expect(screen.queryByTestId('training-calendar')).toBeNull();
-    // Recent sessions live on Train, from the same read, and are reachable by
-    // date through the calendar on Progress.
+    // No recent-sessions list here either: the full history is
+    // `app/session/history.tsx`, and the calendar on Progress reaches a session
+    // by date.
     expect(screen.queryByTestId('session-s1')).toBeNull();
   });
 

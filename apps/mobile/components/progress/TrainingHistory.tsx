@@ -47,7 +47,7 @@ import { useUnits } from '@/lib/useUnits';
  * ## It reads for itself
  *
  * Two local SQLite reads, so it renders with no network — the same functions
- * Today and Train call, and nothing here writes anything. That matters
+ * Today and Plan call, and nothing here writes anything. That matters
  * alongside `TrainingSummary`, which is network-backed: in a gym dead-spot this
  * block is what still answers.
  *
@@ -58,8 +58,8 @@ import { useUnits } from '@/lib/useUnits';
  *
  * ## Unread is not empty
  *
- * `useSource` — the same three-state discipline Train and Today use, imported
- * rather than re-implemented. The calendar needs BOTH reads: it draws logged
+ * `useSource` — the same three-state discipline Today, Plan and the day panel
+ * use, imported rather than re-implemented. The calendar needs BOTH reads: it draws logged
  * sessions against planned days, so half an answer renders a week with its
  * plans silently missing, which reads as an athlete who planned nothing.
  */
@@ -71,7 +71,7 @@ export function TrainingHistory() {
 
   // Its own clock, refreshed on focus rather than captured at mount. A tab
   // screen stays mounted for the life of the process, so a `Date` taken once
-  // still says Sunday on Monday morning. Same shape as Train's; deliberately
+  // still says Sunday on Monday morning. Same shape as Plan's; deliberately
   // not ticked, because nothing here draws a running clock.
   const [now, setNow] = useState(() => new Date());
   useFocusEffect(

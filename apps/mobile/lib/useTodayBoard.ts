@@ -41,7 +41,7 @@ import type { Workout } from './workouts';
  * because SQLite's own serial queue already orders it.
  * {@link buildTodayBoard} keeps them apart on the way out.
  *
- * ## It shares `useSource` with Train rather than copying it
+ * ## It shares `useSource` from `lib/useTrainBoard.ts` rather than copying it
  *
  * The rule that matters is inside it: **a refresh that fails must not retract
  * an answer already on screen.** An athlete looking at their real plan who

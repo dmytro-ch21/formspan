@@ -10,7 +10,8 @@ import { logsAfterwards, type Module } from './modules';
  * `PickSessionSheet` returns a `Pick` and leaves navigating to its caller. It
  * had one caller that navigated (Today) and one that did not (the week
  * planner, which writes a plan instead). N176 gave the Train tab the same
- * action, and a second copy of a two-branch route decision is precisely how
+ * action (Train is retired now; the day panel, `app/day.tsx`, is the second
+ * caller that navigates), and a second copy of a two-branch route decision is precisely how
  * this app ended up with three disagreeing sport lists — the thing the module
  * registry exists to stop. So the branch is written once, here.
  *
@@ -88,9 +89,10 @@ export function startSessionHref(
  * class had no surface anywhere that would ever show it back.
  *
  * It lived inline in Today, which was fine while Today was the only screen that
- * opened a session. N177 gives Train a Resume card and a Recent list, both of
- * which open one, and a second copy of this branch is how the two surfaces end
- * up disagreeing about where a BJJ session lives. Moved here beside the start
+ * opened a session. N177 gave Train a Resume card and a Recent list, both of
+ * which opened one, and a second copy of this branch is how two surfaces end
+ * up disagreeing about where a BJJ session lives. Train is retired (N182), and
+ * the reason stands: `sessionHref` now has seven callers. Moved here beside the start
  * branch rather than copied, so the pair can only ever agree.
  *
  * ## The object form is deliberate

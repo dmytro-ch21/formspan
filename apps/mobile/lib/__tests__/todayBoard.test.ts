@@ -139,8 +139,9 @@ describe('resume outranks everything, unconditionally', () => {
   });
 
   it('takes the newest open session when there are two', () => {
-    // Older unfinished sessions are deliberately not hidden — they stay in
-    // Train's Recent list. The lead is the newest, from a newest-first read.
+    // Older unfinished sessions are deliberately not hidden by this rule, which
+    // only picks the lead: the newest, from a newest-first read. (They used to
+    // stay visible in Train's Recent list, which N182 retired.)
     const newer = session({ id: 'newer', ended_at: null, started_at: `${TODAY}T17:00:00` });
     const older = session({ id: 'older', ended_at: null, started_at: `${TODAY}T08:00:00` });
     const board = build({ sessions: ready([newer, older]) });
@@ -396,8 +397,9 @@ describe('viewDay: the restored day switcher, kept independent of `now`', () => 
   });
 
   it('resolves the template name for a plan on the viewed day', () => {
-    // `toPlannedOffer` is the SAME helper Train's own `today` block calls —
-    // this is the guard that a change to naming logic lands on both screens.
+    // `toPlannedOffer` is the SAME helper `buildTrainBoard`'s own `today` block
+    // calls — this is the guard that a change to naming logic lands on this
+    // board and on `buildTrainBoard` alike.
     const lead = build({
       plans: ready([plan({ id: 'p1', day: TOMORROW, workoutId: 'w7' })]),
       workouts: ready([{ id: 'w7', name: 'Push A' } as Workout]),
