@@ -78,7 +78,7 @@ jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => mockModuleState })
 // theme's are the same value, and so were this stub's (the pre-N183 lime) —
 // a swap from `accent` to `ink` passed unseen. N161 (#578).
 jest.mock('@/lib/AccentProvider', () => ({
-  useAccent: () => require('@/constants/Colors').accents.purple,
+  useAccent: () => jest.requireActual('@/constants/Colors').accents.purple,
 }));
 jest.mock('@/lib/tabIconRaster', () => ({ useRasterizedIcons: () => mockRaster.current }));
 

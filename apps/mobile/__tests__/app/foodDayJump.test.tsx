@@ -95,7 +95,7 @@ jest.mock('@/lib/useAuthToken', () => ({ useAuthToken: () => mockTokenGetter }))
 jest.mock('@clerk/clerk-expo', () => ({ useAuth: () => ({ userId: 'user_1' }) }));
 
 jest.mock('@/lib/AccentProvider', () => ({
-  useAccent: () => require('@/constants/Colors').accents.green,
+  useAccent: () => jest.requireActual('@/constants/Colors').accents.green,
 }));
 
 jest.mock('@/lib/sync', () => ({
