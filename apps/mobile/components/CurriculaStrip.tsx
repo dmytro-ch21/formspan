@@ -7,6 +7,8 @@ import { Icon } from '@/components/ui/Icon';
 import { SectionHeader } from '@/components/ui/Section';
 import { Text, View } from '@/components/Themed';
 import { activeBeltAccent, activeStrap, vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import { type Belt } from '@/lib/bjj';
 import { beltOf, roadmapCurricula } from '@/lib/syllabuses';
@@ -221,35 +223,30 @@ function beltTint(belt: Belt): string {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 2 },
-  row: { gap: 10, paddingVertical: 4, paddingRight: 4 },
+  wrap: { gap: Spacing.xxs },
+  row: { gap: Spacing.smPlus, paddingVertical: Spacing.xs, paddingRight: Spacing.xs },
   card: {
     width: 156,
     flexDirection: 'row',
     backgroundColor: vola.surface,
     borderColor: vola.lineSoft,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     overflow: 'hidden',
   },
   pressed: { backgroundColor: vola.surfaceHover },
   rule: { width: 3, alignSelf: 'stretch' },
-  inner: { flex: 1, padding: 10, gap: 2 },
+  inner: { flex: 1, padding: Spacing.smPlus, gap: Spacing.xxs },
   cover: {
     height: 66,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: Spacing.xsPlus,
   },
-  eyebrow: { fontSize: 9, fontWeight: '800', letterSpacing: 0.9 },
+  eyebrow: { ...Typography.eyebrow, fontWeight: '800' },
   eyebrowIdle: { color: vola.textDim },
-  name: { color: vola.text, fontSize: 13, fontWeight: '700', lineHeight: 17 },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  metaText: {
-    color: vola.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
+  name: { ...Typography.meta, color: vola.text, fontWeight: '700' },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginTop: Spacing.xxs },
+  metaText: { ...Typography.caption, color: vola.textMuted, fontVariant: ['tabular-nums'] },
 });

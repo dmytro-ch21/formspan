@@ -24388,3 +24388,40 @@ This is a visual change only: leading and tracking. No text on Progress changes 
 - Progress at the default text size: nothing clipped, truncated or overlapping.
   - Check What changed, Reading, This week and Training history.
 - The same screen at the largest Dynamic Type size.
+
+## N575 — the Plan screen's text on the type scale (`apps/mobile/app/(tabs)/workouts.tsx`, `apps/mobile/components/{WeekPlanner,CurriculaStrip,PlanHero}.tsx`, #1190)
+
+This is a visual change only: sizes, leading and tracking. Nothing about what Plan shows, or when, has changed. Every spacing and radius change in these files is value-identical, so none of them moves anything.
+
+### Happy path
+
+- **Card, empty-state and "New workout" sheet titles:** one size, 20pt. They were 17pt.
+- **"Up next" title and the sheet's Cancel/Create links:** 15pt. They were 16pt.
+- **Week planner:**
+  - the weekday labels, the sport tag on each planned entry, and the expand toggle are one 11pt tracked label style. The sport tag was 9pt.
+  - the month grid's day initials match Food's, at 11pt.
+- **Curricula strip:** its small uppercase label is 11pt, where it was 9pt. The progress line under each name reads at 12pt.
+- **Weights:** no text got bolder or lighter.
+- **Unchanged:** the workout name field, the week theme field and the saved-workout tile names.
+
+### Edge cases & errors
+
+- **A long card title** still shrinks and wraps beside its controls rather than pushing them off the card.
+- **A planned entry with a long title** stays on one line with an ellipsis. Its sport tag above it now takes slightly more height.
+- **A long curriculum name** stays on one line with an ellipsis.
+- **Typing a week theme or a new workout name:** the text sits centred in the field, as before. These fields were deliberately left off the scale.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - no `fontSize` below 11 in scope, and only the recorded exceptions remain;
+  - the ESLint guard refuses a raw on-scale size, spacing or radius in all four files;
+  - the Plan suites still render.
+  The first two are measured in the history entry. The guard was mutation-tested.
+- **NOT reachable:** clipping, truncation and overlap at a given text size. Those need a device.
+
+### Needs a device
+
+- Plan at the default text size: nothing clipped, truncated or overlapping.
+  - Check the week planner with several planned entries, the month grid, the curricula strip, the saved-workout tiles and the "New workout" sheet.
+- The same screen at the largest Dynamic Type size.

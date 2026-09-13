@@ -3,6 +3,7 @@ import { StyleSheet, View as RNView } from 'react-native';
 
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { isMono, vola } from '@/constants/Colors';
+import { Radius } from '@/constants/Spacing';
 
 /**
  * The artwork on a VOLA Workout tile.
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
     right: '-25%',
     width: '75%',
     aspectRatio: 1,
-    borderRadius: 999,
+    borderRadius: Radius.pill,
     backgroundColor: '#FFFFFF',
     opacity: 0.06,
   },

@@ -20,6 +20,8 @@ import { PickSessionSheet } from '@/components/ui/PickSessionSheet';
 import { PlanTimeSheet } from '@/components/ui/PlanTimeSheet';
 import { WeekStepper, weekStepperDayState, type WeekStepperDay } from '@/components/ui/WeekStepper';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { useAccent } from '@/lib/AccentProvider';
 import {
@@ -1036,60 +1038,61 @@ export function WeekThemeRow({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 8 },
+  wrap: { gap: Spacing.sm },
 
   down: { transform: [{ rotate: '90deg' }] },
 
   themeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: Spacing.xsPlus,
     alignSelf: 'flex-start',
-    paddingVertical: 2,
+    paddingVertical: Spacing.xxs,
   },
-  themeSet: { fontSize: 13, fontWeight: '700', color: vola.lime, flexShrink: 1 },
-  themeUnset: { fontSize: 13, color: vola.textDim },
-  themeEditRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  themeSet: { ...Typography.meta, color: vola.lime, flexShrink: 1, fontWeight: '700' },
+  themeUnset: { ...Typography.meta, color: vola.textDim },
+  themeEditRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  // The meta size, not the role: a TextInput, where lineHeight shifts typed text on iOS.
   themeInput: {
     flex: 1,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.smPlus,
     paddingVertical: 7,
-    fontSize: 13,
+    fontSize: Typography.meta.fontSize,
     color: vola.text,
     backgroundColor: vola.surface,
   },
-  themeAction: { fontSize: 13, fontWeight: '700' },
+  themeAction: { ...Typography.meta, fontWeight: '700' },
   themeActionDisabled: { opacity: 0.5 },
-  themeCancel: { fontSize: 13, fontWeight: '600', color: vola.textDim },
+  themeCancel: { ...Typography.meta, color: vola.textDim, fontWeight: '600' },
 
   card: {
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    borderRadius: 14,
-    paddingHorizontal: 14,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.cardPadding,
   },
   day: { paddingVertical: 11, gap: 7 },
   dayDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: vola.line },
   dayHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  dayName: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  weekday: { fontSize: 11, fontWeight: '700', letterSpacing: 1, color: vola.textDim },
+  dayName: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.sm },
+  weekday: { ...Typography.eyebrow, color: vola.textDim },
   weekdayToday: {},
-  date: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  date: { ...Typography.emphasis, fontVariant: ['tabular-nums'], fontWeight: '700' },
   dimmed: { color: vola.textDim, opacity: 0.55 },
-  add: { fontSize: 13, fontWeight: '700' },
-  rest: { fontSize: 13, color: vola.textDim },
+  add: { ...Typography.meta, fontWeight: '700' },
+  rest: { ...Typography.meta, color: vola.textDim },
 
   entry: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: Spacing.smPlus,
     backgroundColor: vola.surfaceRaised,
     borderRadius: 10,
-    paddingRight: 10,
+    paddingRight: Spacing.smPlus,
     overflow: 'hidden',
   },
   entryPressed: { backgroundColor: vola.surfaceHover },
@@ -1106,50 +1109,54 @@ const styles = StyleSheet.create({
     marginLeft: 9,
   },
   entryMain: { flex: 1, paddingVertical: 9, gap: 1 },
-  entrySport: { fontSize: 9, fontWeight: '700', letterSpacing: 0.9, color: vola.textDim },
-  entryTitle: { fontSize: 14, fontWeight: '700' },
+  entrySport: { ...Typography.eyebrow, color: vola.textDim },
+  entryTitle: { ...Typography.body, fontWeight: '700' },
 
-  hint: { fontSize: 11, color: vola.textDim },
+  hint: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
 
   sheet: { flex: 1 },
-  toggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
-  toggleText: { color: vola.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
+  toggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xsPlus,
+    paddingVertical: Spacing.smPlus,
+  },
+  toggleText: { ...Typography.eyebrow, color: vola.textDim, fontWeight: '800' },
   up: { transform: [{ rotate: '-90deg' }] },
   sheetSwitcher: { flex: 1 },
   sheetToday: { minWidth: 52 },
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: Spacing.lg,
     paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingVertical: Spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: vola.line,
   },
   sheetClose: { marginLeft: 'auto' },
-  close: { fontSize: 14, fontWeight: '700', color: vola.lime },
-  sheetBody: { padding: 14, gap: 2 },
-  sheetHint: { fontSize: 12, color: vola.textDim, paddingBottom: 10 },
-
-  gridHead: { flexDirection: 'row', paddingBottom: 6 },
-  gridHeadCell: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
+  close: { ...Typography.body, color: vola.lime, fontWeight: '700' },
+  sheetBody: { padding: Spacing.cardPadding, gap: Spacing.xxs },
+  sheetHint: {
+    ...Typography.caption,
     color: vola.textDim,
+    paddingBottom: Spacing.smPlus,
+    fontWeight: '400',
   },
+
+  gridHead: { flexDirection: 'row', paddingBottom: Spacing.xsPlus },
+  gridHeadCell: { ...Typography.eyebrow, flex: 1, textAlign: 'center', color: vola.textDim },
   gridRow: { flexDirection: 'row' },
   gridCell: {
     flex: 1,
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 8,
-    borderRadius: 8,
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.sm,
   },
   gridCellShown: { backgroundColor: vola.surface },
-  gridDate: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  gridDate: { ...Typography.body, fontVariant: ['tabular-nums'], fontWeight: '600' },
   // 0.5, matching TrainingCalendar. It matters more here: there a spill cell
   // only moves a selection, whereas this one navigates the week — and it is the
   // natural way to reach a week straddling two months.
