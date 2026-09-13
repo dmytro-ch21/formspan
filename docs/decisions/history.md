@@ -76180,6 +76180,187 @@ The athlete had set a target, and the chart acted as if they had not. N429 (#690
 - **No reviewer-owned motion:** the diff adds no animation.
 - **A known test gap, named by `ac-verifier`.** No test drives Goals' own `plan={planOutcomeOf(data)}` into the card, so a Goals-only miswiring such as `plan={null}` would pass. It stays open: it is one typed expression, and tsc rejects the old `b?.projection` shape. `goalsScreen.test.tsx` runs the card against the real network module, so mocking the weight-trend fetches there would change the card's state in every other Goals test.
 
+## 2026-09-13 — N565 (#1108): stuck sync rows report off the device — count, age and error code by domain
+
+**What was missing.** N167/#544 made a stuck row visible ON the phone:
+`SyncState.needsAttention` counts sessions and workouts the server refused but
+are still owed (`BLOCKED_ROW`), food entries and sequences it refused and are no
+longer owed (`rejectedRows.ts`), and — since N564/#1106 — plans in either state.
+Nothing reported any of it OFF the phone. #544's original brief asked for exactly
+that ("blocked-row count and age by domain and error code") and its revised
+criteria dropped it silently; this ticket was split out so the gap stayed on the
+board. An operator could not say how many athletes had stuck rows, in which
+domain, for which server error, or for how long.
+
+**What shipped.**
+
+- **Two columns on each of the five stuck-row outboxes** (`local_sessions`,
+  `workout_cache`, `planned_sessions`, `food_entries`, `sequences`), mobile
+  schema v45: `last_error_code` and `stuck_since`.
+- **`last_error_code` is written beside `last_error` by every refusal writer**
+  (`sessionStore.noteRowError`, `plan.noteRowError`, `foodLog`'s push failure,
+  both `sequences` failure paths), through one function,
+  `apiError.refusalCodeOf`.
+- **`stuck_since` is stamped by SQLite triggers**, not by the writers — see
+  below.
+- **`lib/stuckRows.ts`** groups this athlete's stuck rows by (domain, state,
+  code) and reports each group through the existing telemetry path.
+- **`sync.ts`** asks for a report at the end of every pass that reached the
+  server; `reportStuckRows` decides whether one is due.
+
+**The decisions, made by the coordinator and recorded here because each is
+reversible.**
+
+1. **Channel: the existing telemetry path.** `capture` → `POST
+   /v1/client-errors` → `health_events`, under the kind that already exists for
+   this, `sync_blocked` ("a client has given up pushing something").
+   `details.reason` is `stuck_blocked` or `stuck_refused`, which is what separates
+   the periodic count from the session screen's one-off `sync_blocked` incident.
+   **No backend change was needed and none was made**: the ingest validates
+   `kind` against its CHECK and bounds `details` by size, and accepts any keys.
+   The allowlist lives on the client, and gained three numeric keys — `rows`,
+   `oldest_age_hours`, `rows_age_unknown` — in BOTH copies, because
+   `check:telemetry-parity` compares them name by name. The parity check now also
+   parses `STUCK_ROW_DETAIL_KEYS` from `stuckRows.ts` and fails if any key the
+   report sends is missing from either allowlist: `redact()` drops an unlisted
+   key without a word, so a report whose `rows` fell off the list would still
+   arrive, still read as a report, and carry no numbers.
+   *Considered and not taken*: a new `kind` (`sync_stuck`). Cleaner on the admin
+   Health screen, but a CHECK migration, a handler enum, an OpenAPI enum, an
+   admin type and both `ReportKind` copies, to say something `sync_blocked`
+   already means.
+2. **Age: a timestamp recorded on the phone when a row ENTERS a stuck state.**
+   Not `updated_at` — every edit moves it, and N167 made every edit clear the
+   refusal. **Rows stuck before this migration have no timestamp and none is
+   invented**: the v45 branch backfills nothing, and the report sends those rows
+   as a separate `rows_age_unknown` count and OMITS `oldest_age_hours` when no
+   row in a group has a recorded age (0 would read as "just got stuck").
+3. **Code: the server's `error.code`, stored at refusal time.** `last_error`
+   holds prose; it is never aggregated or sent. Three buckets are not server
+   codes, and each means something different:
+   - `unknown` — no code recorded, i.e. stuck before this shipped;
+   - `no_http_code` — a failure that carried no contract code: a local failure
+     (a corrupt sequence row) or a response body that did not parse;
+   - `other` — codes folded past five per (domain, state), or a stored value
+     not shaped like a code.
+
+   **`'unknown'` from a request helper maps to `no_http_code`.** All four
+   helpers (`apiRequest.ts`, `sessions.ts`, `workouts.ts`, `plansApi.ts`) build
+   `body?.error?.code ?? 'unknown'`, so `'unknown'` on an `ApiError` is the
+   client's own stand-in for a missing envelope. Storing it verbatim would have
+   put parse failures in the same bucket as pre-migration rows.
+4. **Payload: counts, oldest age and codes only.** The grouping query selects
+   `last_error_code`, `COUNT`, `MIN(stuck_since)` and a count of NULL ages —
+   no id, name, note or message is in reach. The message is built from three
+   enumerated words. A test seeds rows whose name, id, note and message all carry
+   a distinctive string and asserts none of it appears in what is captured, and
+   that every details object survives `redact()` unchanged.
+5. **Cadence: at most one report per athlete per day, unless the counts
+   change.** The telemetry path has no scheduler — `capture` only buffers and a
+   30-second timer flushes — so the trigger is the end of a sync pass that
+   reached the server: that is when refusals are written, and when a flush has
+   signal. A report is due the first time; then at most once per 24 hours while
+   the (domain, state, code, rows) signature holds; or when the signature
+   changes, but never twice inside 15 minutes (the telemetry buffer's own cap
+   window). **Ages are not in the signature**, or a report would go out hourly.
+   A device with nothing stuck sends nothing — not even a zero. The marker is a
+   local-only pref (`stuck_rows_reported`, never `owed`), written BEFORE the
+   capture, so a failing write costs a report rather than causing one per pass.
+6. **Domains: sessions, workouts, plans, food entries, sequences.** Plans in
+   both states, matching `countRefusedPlans`.
+
+**Two more decisions this branch made, the conservative way, and flagged in the
+PR.**
+
+- **Ages are whole hours, not seconds.** Enough to tell "this morning" from
+  "last month"; less precision off the device than the question needs.
+- **A contract code is recognised by shape** (`^[a-z]+(_[a-z]+)*$`, at most 40
+  characters), not by a list. A list would bucket every new server code as
+  `other` until someone remembered to extend it; the shape still refuses ids,
+  digits, spaces, upper case and HTML. No athlete content can pass it.
+
+**Why triggers, when `db.ts` had none.** A row leaves a stuck state through
+roughly thirty statements across five modules — every edit, delete, retry and
+successful push that writes `last_error = NULL`. Stamping and clearing the clock
+by hand means touching all of them, and the next clear site forgets. Two
+triggers per table instead:
+
+- `<table>_stuck_since` fires on `UPDATE OF last_error, dirty, deleted_at`
+  (only the columns the predicate names — `sequences` has no `deleted_at`) WHEN
+  the table's stuck predicate changes value between OLD and NEW. Into stuck:
+  stamped with `strftime('%Y-%m-%dT%H:%M:%fZ','now')`, the `toISOString` shape.
+  Out: cleared. Stuck to stuck: untouched.
+- `<table>_error_code_cleared` clears `last_error_code` whenever `last_error`
+  goes NULL, so a later refusal written by a path that forgot the code cannot
+  inherit the previous one.
+
+**The predicate is the shared one, not a copy.** `outboxPredicates.ts` gained
+`REFUSED_SEQUENCE_ROW` and `STUCK_ROW_SOURCES` — one list of (domain, state,
+table, predicate) read by the report AND interpolated (qualified with `NEW.` /
+`OLD.`) into the triggers. `rejectedRows.ts` now reads `REFUSED_ROW` and
+`REFUSED_SEQUENCE_ROW` instead of its two hand-written copies. A test pins that
+the report's totals equal `countBlockedRows + countRejectedRows +
+countRefusedPlans` over the same rows, with a control row for every clause.
+
+**Keyed on the state, not on `last_error`, and that is the trap this would
+otherwise have shipped.** `foodLog.ts` and `sequences.ts` write `last_error` on
+EVERY failure, transient ones included, and clear `dirty` only on a permanent
+one. A clock started when `last_error` first went non-NULL would have measured
+from the athlete's basement, not from the refusal. Mutation-checked: keying the
+trigger on `last_error` fails the food and sequence transition tests.
+
+**No INSERT trigger, deliberately.** Nothing in the app inserts a row already
+stuck; one that ever arrived that way reads "age unknown", which is true.
+
+**A buffered report can swallow a newer one, and the report defends against
+it.** The telemetry buffer coalesces by fingerprint and keeps the FIRST
+occurrence's details. An earlier report still buffered — the flush timer does
+not run while the app is backgrounded — would absorb this pass's report and
+ship the old numbers. So `reportStuckRows` calls `flush()` before capturing
+(`flush` drains synchronously before its first await) and again after. The
+group's domain, state and code are all in the message for the same reason: two
+groups sharing a message would coalesce into one event carrying the first
+group's counts. Both mutation-checked against the REAL telemetry client with a
+stubbed `fetch`.
+
+**Account switches.** The buffer is sent under whichever token is installed when
+it flushes, so a report built for athlete A and captured after a switch to B
+would be filed under B. `reportStuckRows` takes an `isCurrent` from `sync.ts`
+and checks it on both sides of its last await.
+
+**How it is reachable on a phone.** Nothing new is on screen; this is telemetry
+from the phone. The athlete-facing surface is unchanged — `needsAttention` and
+the sync screen's lists.
+
+**Mobile schema version.** v45. This branch was cut when main was at 43 and
+took 44; PR #1193 (N569) merged v44 while this one was in review, so it was
+rebased and renumbered to main's `SCHEMA_VERSION + 1`. `frontend-reviewer`
+had flagged the collision as blocking; the renumber is its resolution. A
+device already stamped 44 by N569 runs only the v45 branch; a fresh install
+runs both, in order.
+
+**Open questions and gaps this leaves.**
+
+- **No operator view aggregates it yet.** The rows are in `health_events`; the
+  admin Health screen lists them and counts them in its "Sync blocked" stat,
+  which now includes these periodic reports as well as incidents — by event, not
+  by athlete. "How many athletes have stuck food entries refused with
+  `invalid_input`" is a SQL query over `details`, not a screen.
+- **A report lost in flight is not retried until the next day or count change.**
+  The marker is written before the send and the telemetry path never retries —
+  `telemetryClient.ts`'s ranking of reports below training data, applied here.
+  The loss is counted in the next batch's `lost_events`.
+- **A device keeps the trigger text it was migrated with.** Changing a stuck
+  predicate needs a version bump whose branch calls `installStuckRowTriggers`
+  again (it drops and recreates). Stated in `db.ts` beside the function.
+- **Ages trust the phone's clock**, which the athlete can set. A clock moved
+  back past the last report costs one extra report rather than silence.
+- **`foods` and trackers are out of scope** — they carry `last_error` too, but
+  neither feeds `needsAttention`.
+- **Web's allowlist carries three keys web never sends**, because parity
+  requires one list. Harmless, and the alternative is a per-copy allowlist,
+  which is the drift the parity check exists to forbid.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

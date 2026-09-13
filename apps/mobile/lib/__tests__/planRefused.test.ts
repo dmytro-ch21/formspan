@@ -177,6 +177,18 @@ describe('a refused plan stops counting as pending and is listed instead', () =>
     expect(listed[0]).toMatchObject({ id: p.id, reason: REFUSED, refused: 'plan', day: '2026-08-05' });
   });
 
+  it('stores the server’s code for both refusals, and when each got stuck — N565/#1108', async () => {
+    const created = await refusedPlan();
+    const removed = await refusedRemoval();
+    const stuckOf = (id: string) =>
+      db.getFirstAsync<{ last_error_code: string | null; stuck_since: string | null }>(
+        `SELECT last_error_code, stuck_since FROM planned_sessions WHERE id = ?`,
+        id,
+      );
+    expect(await stuckOf(created.id)).toEqual({ last_error_code: 'invalid_input', stuck_since: expect.any(String) });
+    expect(await stuckOf(removed.id)).toEqual({ last_error_code: 'forbidden', stuck_since: expect.any(String) });
+  });
+
   it('a merely queued plan is pending and not listed — the control', async () => {
     await planSession(U, '2026-08-05', 'strength', null);
     expect(await countPendingPlans(U)).toBe(1);

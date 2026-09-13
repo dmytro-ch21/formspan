@@ -192,6 +192,12 @@ export const ALLOWED_DETAIL_KEYS = [
   'appVersion',
   'buildVersion',
   'offline',
+  // N565/#1108 — the stuck-row report. Numbers only, by construction of the
+  // one caller that sets them (`apps/mobile/lib/stuckRows.ts`): how many rows,
+  // how old the oldest is, and how many have no recorded age at all.
+  'rows',
+  'oldest_age_hours',
+  'rows_age_unknown',
 ] as const;
 
 const ALLOWED = new Set<string>(ALLOWED_DETAIL_KEYS);

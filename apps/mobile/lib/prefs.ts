@@ -239,6 +239,16 @@ export const PREF_LIBRARY_SPORT = 'library_sport';
  */
 export const PREF_SAVED_FOODS_SORT = 'saved_foods_sort';
 /**
+ * The last stuck-row report this device sent for this athlete, as JSON
+ * `{ at, signature }` — N565/#1108, `lib/stuckRows.ts`.
+ *
+ * `at` is epoch milliseconds; `signature` is the domain/state/code/count
+ * shape, and deliberately no ages. It is what caps the report at once a day
+ * unless the counts change. Local-only, never `owed`: a fact about what THIS
+ * device has already told the server, which a second device must not inherit.
+ */
+export const PREF_STUCK_ROWS_REPORTED = 'stuck_rows_reported';
+/**
  * The Library tab's belt cap for BJJ techniques.
  *
  * Remembered like the sport filter, and deliberately NOT cleared when the

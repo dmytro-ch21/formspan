@@ -100,6 +100,13 @@ jest.mock('../trackers', () => ({
   syncTrackers: jest.fn(async () => ({ pushed: 0, failed: 0 })),
 }));
 
+// N565/#1108: the stuck-row report, attempted after a pass. Mocked for the
+// reason every module above is — the real one opens SQLite — and so the tests
+// below can see WHEN the orchestrator asks for it.
+jest.mock('../stuckRows', () => ({
+  reportStuckRows: jest.fn(async () => false),
+}));
+
 // eslint-disable-next-line import/first -- must follow the jest.mock above
 import { pendingFoodCount, syncFood } from '../foodLog';
 // eslint-disable-next-line import/first -- must follow the jest.mock above
@@ -150,6 +157,7 @@ beforeEach(async () => {
   (jest.requireMock('../sessionStore').countBlockedRows as jest.Mock).mockReset().mockResolvedValue(0);
   (jest.requireMock('../rejectedRows').countRejectedRows as jest.Mock).mockReset().mockResolvedValue(0);
   (jest.requireMock('../plan').countRefusedPlans as jest.Mock).mockReset().mockResolvedValue(0);
+  (jest.requireMock('../stuckRows').reportStuckRows as jest.Mock).mockReset().mockResolvedValue(false);
 });
 
 it('coalesces a burst into the run in flight plus one', async () => {
@@ -191,6 +199,41 @@ it('treats a server refusal as ONLINE — it answered, it just said no', async (
   setSyncIdentity('user_1', token);
   await settle(20);
   expect(syncState().online).toBe(true);
+});
+
+describe('the stuck-row report (N565/#1108)', () => {
+  const mockReport = () => jest.requireMock('../stuckRows').reportStuckRows as jest.Mock;
+
+  it('is attempted after a pass that reached the server, as the athlete the pass ran for', async () => {
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    expect(mockReport()).toHaveBeenCalledWith('user_1', { isCurrent: expect.any(Function) });
+
+    // A refusal is an answer, so a refusing server was reached too.
+    mockReport().mockClear();
+    mockSync.mockResolvedValue(failed('permanent'));
+    await syncNow();
+    expect(mockReport()).toHaveBeenCalledTimes(1);
+  });
+
+  it('is NOT attempted after a pass that could not reach the server', async () => {
+    mockCount.mockResolvedValue(1);
+    mockSync.mockResolvedValue(failed('offline'));
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    // Apparatus: a pass really ran, or "not called" proves nothing.
+    expect(mockSync).toHaveBeenCalled();
+    expect(mockReport()).not.toHaveBeenCalled();
+  });
+
+  it('can tell when the athlete it was built for has signed out', async () => {
+    setSyncIdentity('user_1', token);
+    await settle(20);
+    const { isCurrent } = mockReport().mock.calls[0][1] as { isCurrent: () => boolean };
+    expect(isCurrent()).toBe(true);
+    setSyncIdentity(null, null);
+    expect(isCurrent()).toBe(false);
+  });
 });
 
 describe('retry scheduling', () => {

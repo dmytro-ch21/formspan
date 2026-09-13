@@ -29,7 +29,7 @@
 
 import { randomUUID } from 'expo-crypto';
 
-import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
+import { isPermanentRejection, isTransportFailure, refusalCodeOf, retryAfterOf } from './apiError';
 import { addDays, dayString } from './calendar';
 import { getDb, withTransaction } from './db';
 import { POSITION_STEP } from './entryOrder';
@@ -1565,10 +1565,12 @@ async function push(userId: string, getToken: TokenGetter): Promise<FoodSyncResu
       // row that is now newer than anything the server has, and the correction
       // never leaves the phone. The success branch guarded this from the start;
       // the failure branch did not, which is the quieter half of one bug.
+      // The code rides with the message (N565/#1108): the stuck-row report
+      // groups by it and never reads `last_error`, which is prose.
       await db.runAsync(
-        `UPDATE food_entries SET last_error = ?
+        `UPDATE food_entries SET last_error = ?, last_error_code = ?
           WHERE id = ? AND user_id = ? AND updated_at = ?`,
-        message, r.id, userId, r.updated_at,
+        message, refusalCodeOf(err), r.id, userId, r.updated_at,
       );
       if (kind === 'permanent') {
         // A 4xx will not become a 2xx. Stop owing it; keep the row and the

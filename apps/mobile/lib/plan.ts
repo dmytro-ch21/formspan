@@ -6,6 +6,7 @@ import {
   isNotFound,
   isPermanentRejection,
   isTransportFailure,
+  refusalCodeOf,
   retryAfterOf,
 } from '@/lib/apiError';
 import { dayString } from '@/lib/calendar';
@@ -827,9 +828,14 @@ async function noteRowError(
 ): Promise<void> {
   if (err !== null && !isPermanentRejection(err)) return;
   const message = err === null ? null : err instanceof Error ? err.message : String(err);
+  // The CODE beside the message (N565/#1108): the stuck-row report groups by
+  // it, because the message is prose and never leaves the device. Cleared with
+  // the message; `db.ts`'s trigger also clears it whenever `last_error` goes
+  // NULL, so a clear site that forgets it cannot leave a stale code behind.
   await db.runAsync(
-    `UPDATE planned_sessions SET last_error = ? WHERE id = ? AND user_id = ?`,
+    `UPDATE planned_sessions SET last_error = ?, last_error_code = ? WHERE id = ? AND user_id = ?`,
     message,
+    err === null ? null : refusalCodeOf(err),
     id,
     userId,
   );

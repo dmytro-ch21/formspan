@@ -24216,3 +24216,38 @@ A visual change only: sizes, leading and tracking. Nothing about what Today or t
 
 - Today, at the default text size, in bright light and at arm's length: the day initials are legible.
 - Today at the largest Dynamic Type size: the week strip, the mini cards' week letters and the spark chart's day letters still fit.
+
+## N565 — stuck sync rows reported off the device (`apps/mobile/lib/stuckRows.ts`, #1108)
+
+Mobile only; no screen changes. What an operator sees is rows in `health_events` (admin **Health**), kind `sync_blocked`, with `details.reason` of `stuck_blocked` or `stuck_refused`. Each event is one (domain, state, code) group: `entity` (`session` / `workout` / `plan` / `food_entry` / `sequence`), `code`, `rows`, `rows_age_unknown`, and `oldest_age_hours` when any row has a recorded age.
+
+### Happy path
+
+- **A refused food entry is reported, by code.** Log a food entry the server refuses with `invalid_input` (a 400 on its PUT), with signal. After the sync pass, within about 30 seconds, Health shows one `sync_blocked` row from that athlete: `reason: stuck_refused`, `entity: food_entry`, `code: invalid_input`, `rows: 1`, `rows_age_unknown: 0`, `oldest_age_hours: 0`.
+- **Blocked sessions and a refused plan removal** show up as separate events: `stuck_blocked` / `session`, and `stuck_refused` / `plan` with the plan delete's own code (e.g. `forbidden`).
+- **Two messages, one code:** two sessions refused with different wording under `invalid_input` are ONE event with `rows: 2`.
+
+### Cadence
+
+- **Once a day while the counts hold.** Foreground the app repeatedly, and let several sync passes run: no second report for the same counts until 24 hours after the first.
+- **A change reports again, but not within 15 minutes.** Get a second row refused 5 minutes after the first report: no new event. The first pass 15 minutes or more after that report sends the new counts.
+- **Nothing stuck, nothing sent** — no zero report, ever.
+- **Offline passes never report.** In airplane mode, open and background the app: no event is attempted.
+
+### Edge cases
+
+- **Upgrade from a build before N565, with rows already stuck.** Those rows report under `code: unknown`, counted in `rows_age_unknown`, and with no `oldest_age_hours` for that group. They are never given an age from the upgrade moment.
+- **A refusal with an unparseable body** (a proxy's HTML 413, say) reports as `code: no_http_code`, not `unknown`.
+- **An edit clears the clock.** Edit a refused food entry so it is owed again, then get it refused a second time a day later: its age starts from the second refusal.
+- **A plan whose refused create becomes a refused removal** keeps the age from the first refusal.
+- **More than five codes in one domain** report the five largest, plus `other` carrying the rest.
+
+### Privacy / auth
+
+- **Nothing but counts, ages and codes.** For every stuck-row event, `message` is `stuck rows: <domain> <state> <code>`, and `details` holds only the keys listed above. No row id, session or food name, note, or the server's message text appears anywhere in the row.
+- **Two accounts, one phone.** Athlete A has stuck rows; sign out mid-sync and sign in as B. No stuck-row event for A's rows is ever filed under B's `user_id`.
+- **Report marker is local.** `stuck_rows_reported` in `prefs` has `dirty = 0` and never reaches the profile.
+
+### Not covered
+
+- There is no aggregated operator view: "athletes with stuck food entries by code" is a query over `health_events.details`, not a screen.
