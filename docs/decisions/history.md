@@ -76986,6 +76986,131 @@ Each file reported exactly one guard error with its own selector's message. The 
 - **`Avatar`'s one font size** is left for whichever screen ticket owns it, or a shared-components pass.
 - **The last screen** (#1192, Session) is untouched.
 
+## 2026-09-13 — N577 (#1192): the Session screen's text on the type scale
+
+**What was wrong.** The set-logging screen, `app/session/[id].tsx`, has been on the guard since N508, but it still set 15 font sizes. Nine of them referenced a role's size without taking its leading, and two were below 11. Its two Session-only components had never been converted: the rest `Timer` set 12 font sizes and `ui/OptionSelect` 10, with three more below 11 between them.
+
+This is the last of N561's six per-screen children (#1050). This entry records the numbers and what differs, and **what differs most is where it is**: this is the screen an athlete uses standing up, between sets.
+
+### Scope, listed first
+
+The ticket filed only `session/[id].tsx`. The screen's imported components that carry type, on `origin/main`:
+
+- `components/Timer.tsx` (12) is imported only by `session/[id].tsx`, so it is **in scope**.
+- `components/ui/OptionSelect.tsx` (10) is imported only by `session/[id].tsx`, so it is **in scope**.
+- `HRSessionReport` (14; also `bjj/session/[id].tsx` and `running/[id].tsx`), `SessionCelebration` (16; also BJJ), `SessionShare` (6; also BJJ), `SwipeToDelete` (1; also two food screens) and `HoldToConfirm` (1; seven routes) are shared with other screens, so they are **out of scope**: converting them would touch those screens.
+- `ui/Stat` is N508's and already converted.
+
+### The baseline, before and after
+
+One script measured both: `origin/main` at `9b7e9aaf`, then this branch.
+
+| Measure | Before | After |
+|---|---|---|
+| files | 3 | 3 |
+| files importing `Typography` | 1 | 3 |
+| `fontSize:` sites (any) | 37 | 10 |
+| raw numeric `fontSize:` sites | 28 | 3 |
+| `fontSize` below 11 | 5 | 0 |
+| numeric `lineHeight:` sites | 1 | 0 |
+| `...Typography.<role>` spreads | 21 | 50 |
+| `fontSize: Typography.<role>.fontSize` | 9 | 7 |
+| spacing literals on the scale | 37 | 0 |
+| radius literals on the scale | 6 | 0 |
+
+`session/[id].tsx` alone matches the baseline filed on the ticket (1 file, 1 importing, 15 font sizes, 0 line heights, 2 below 11).
+
+### The set-logging row
+
+CLAUDE.md: "Nothing on the set-logging path may grow a duration." This ticket adds no motion (the motion-keyword check on the diff is 0), but a row that grows taller is the same cost in another channel, so the row was kept deliberately:
+
+- **Unchanged in size, leading and weight:**
+  - the set number or drop mark (`setOrdinal`, 14);
+  - the set-type badge after it (`setBadge`, 11);
+  - the done tick (`tickMark`, 15);
+  - the row's chevron (`disclosure`, 14).
+  They keep their size as `Typography.<role>.fontSize`, not the role, so they take no new leading.
+  - `setOrdinal` and `disclosure` set no size before (they rendered at the platform's 14), so they now state it.
+  - Each has a one-line reason.
+- **The set summary** (`setSummary`, 15) spreads `emphasis`. That is the same size and weight, with 20pt leading.
+  - A one-line summary does not change the row's height: the row is sized by its 34pt tick and timer discs (`tick`, 34×34, with a 10pt `hitSlop`), which are taller than one 20pt line.
+  - A summary long enough to wrap to two lines now takes 40pt instead of roughly 36pt, so that row grows slightly. This is a named target for the device check.
+- **The exercise group name** (`groupName`) moves from 16 to `emphasis`'s 15.
+
+### How each style was converted
+
+The rules are the other five children's:
+
+- a role owns size, leading and tracking;
+- the rendered weight is kept, and was checked per entry against `origin/main` (none of 39 changed);
+- every exception has a one-line reason.
+
+The exceptions:
+
+- **Hero figures stay literals.** The rest countdown (`Timer` `clock`, 46) is read from arm's length between sets. The countdown in the collapsed bar is `barClock` (22).
+- **The set field input stays bare** (`fieldInput`, 17). It styles a `TextInput`, where a `lineHeight` shifts typed text on iOS.
+- **Single glyphs keep their size** as a role reference: the dismiss "×" beside the warm-up flag, and OptionSelect's chevron and tick.
+- **The progression hint's low-hierarchy lines** (`hintLast`, `hintReason`, `hintWarmup`, `hintInSession`) had set only `caption`'s size, not the role. The comment above them said why: the role bundles a 600 weight, and these lines are deliberately the low end of the card. They now spread `caption` with the weight turned back to 400, which keeps that hierarchy exactly. The comment was rewritten to say so rather than deleted.
+- **`hintReported`** is an italic run nested inside a sized hint line, so it inherits that line's size. It is left as is.
+
+### Sizes that changed
+
+10 of the 39 converted entries changed size. (`check.log` lists 12: it also counts `setOrdinal` and `disclosure`, whose before-size it reads as unset. Unset means the platform's 14, which is what they state now, so neither changed.)
+
+| File | Entry | Before | After | Role |
+|---|---|---|---|---|
+| `session/[id].tsx` | `groupName` | 16 | 15 | emphasis |
+| `session/[id].tsx` | `finishText` | 16 | 15 | emphasis |
+| `session/[id].tsx` | `emptyTitle` | 16 | 15 | emphasis |
+| `session/[id].tsx` | `fieldHint` | 11 | 12 | caption |
+| `session/[id].tsx` | `hintPhase` | 10 | 11 | eyebrow |
+| `session/[id].tsx` | `hintRangeText` | 10 | 12 | caption |
+| `Timer.tsx` | `barCaption` | 10 | 12 | caption |
+| `OptionSelect.tsx` | `label` | 10 | 11 | eyebrow |
+| `OptionSelect.tsx` | `cardLabel` | 10 | 11 | eyebrow |
+| `OptionSelect.tsx` | `hint` | 11 | 12 | caption |
+
+The groupings are the ones the other screens used:
+
+- 16pt names and buttons move to `emphasis`;
+- reading text at 10 or 11 moves to `caption`;
+- labels below 11 move to `eyebrow`.
+
+Leading changed on 29 entries and tracking on 23. Five entries had their own tracking, which the role replaced, and all become 1.2:
+
+- `hintPhase` (0.6);
+- Timer's `kind` (1.6) and `barKind` (0.8);
+- OptionSelect's `label` and `cardLabel` (0.8 each).
+
+### The guard
+
+`session/[id].tsx` was already listed. `Timer` and `ui/OptionSelect` join `N508_CONVERTED_FILES`. Their 37 spacing and 6 radius literals on the scale are restated as tokens, each value-identical. Literals off the scale stay.
+
+**Mutation-tested.** A probe style entry was inserted into all three files at once and linted:
+
+- `fontSize: 12` in `session/[id].tsx`, which also tests that the escaped `[id]` path matches;
+- `padding: 10` in Timer;
+- `borderRadius: 8` in OptionSelect.
+
+Each file reported exactly one guard error with its own selector's message. The files were restored byte-identical and linted again: 0 errors. **Negative control:** `components/TrackerCard.tsx`, not converted, contains `fontSize: 12` and reports 0 guard errors.
+
+### Checks
+
+- `lint:mobile`: 0 errors and 49 warnings, which passes the ratchet.
+- `typecheck:mobile` passes.
+- The twelve suites that cover these files pass, 158 tests: `sessionElapsedTick`, `strengthSessionCollapse`, `strengthSessionFinishPlacement`, `endTimeCorrection`, `timerContinuity`, `haptics`, `hrReportWiring`, `imageUpload`, `pressFeedback`, `reportedAggregation`, `routes` and `startSession`. No test in scope asserts a style value.
+- **Audit for text with no size.** It looks for a `<Text>` whose styles set no size. Before, it found `hintReported` (twice, nested), `setOrdinal` and `disclosure`. After, it finds only the nested `hintReported` runs.
+
+### Not done
+
+- **Device checks.** Both remain on #1192 as `NEEDS HUMAN EVIDENCE`, at the default text size and at the largest Dynamic Type. Run them **mid-workout**, because that is where this screen is used:
+  - a set row, collapsed and expanded, including one whose summary wraps to two lines;
+  - the progression hint card, whose phase label grew 10 to 11 and rep-range digits 10 to 12;
+  - the rest timer, both full and collapsed to its bar, whose caption grew 10 to 12 beside the countdown;
+  - an option picker's labels.
+- **The five shared session components** above are left for a shared-components pass, because converting them touches BJJ, running and food screens too.
+- **N561 (#1050)** now has all six of its per-screen children landed.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

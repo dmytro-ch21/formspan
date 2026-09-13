@@ -3594,7 +3594,7 @@ const styles = StyleSheet.create({
     rowGap: Spacing.sm,
     columnGap: Spacing.smPlus,
   },
-  groupName: { flex: 1, minWidth: 140, fontSize: 16, fontWeight: '700' },
+  groupName: { ...Typography.emphasis, flex: 1, minWidth: 140, fontWeight: '700' },
   // A group folded shut by "Done" (N530/#961): name and summary on the left,
   // a chevron on the right, the whole row one tap target. `minHeight` keeps
   // the target the size of the header it replaces so re-expanding is not a
@@ -3722,9 +3722,16 @@ const styles = StyleSheet.create({
   // Same 2.51:1 on the done tint that moved the ordinal.
   disclosureDone: { color: vola.textMuted },
   setHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md },
-  setOrdinal: { width: 34, fontWeight: '700', color: vola.textDim },
+  // The body size, not the role: a set number or drop mark in a fixed 34pt slot.
+  setOrdinal: {
+    fontSize: Typography.body.fontSize,
+    width: 34,
+    fontWeight: '700',
+    color: vola.textDim,
+  },
+  // A size, not a role: the set-type letter runs inline after the set number.
   setBadge: { color: vola.lime, fontSize: Typography.eyebrow.fontSize, fontWeight: '700' },
-  setSummary: { flex: 1, fontSize: Typography.emphasis.fontSize },
+  setSummary: { ...Typography.emphasis, flex: 1, fontWeight: '400' },
   // Same disc as the tick beside it — two controls of equal weight on one
   // row, sized for a thumb rather than a cursor.
   play: {
@@ -3746,14 +3753,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tickDone: { backgroundColor: vola.lime, borderColor: vola.lime },
+  // A size, not a role: one tick centred in the done disc.
   tickMark: { color: vola.textDim, fontWeight: '800', fontSize: Typography.emphasis.fontSize },
   tickMarkDone: { color: vola.navy },
-  disclosure: { color: vola.textDim, width: 16, textAlign: 'center' },
+  // The body size, not the role: one chevron in a fixed 16pt slot.
+  disclosure: {
+    fontSize: Typography.body.fontSize,
+    color: vola.textDim,
+    width: 16,
+    textAlign: 'center',
+  },
   setEditor: { padding: Spacing.md, paddingTop: 0, gap: Spacing.md },
   fieldRow: { flexDirection: 'row', gap: Spacing.smPlus },
   field: { flex: 1, gap: Spacing.xs },
   fieldLabel: { ...Typography.caption, color: vola.textMuted },
-  fieldHint: { color: vola.textDim, fontSize: Typography.eyebrow.fontSize },
+  fieldHint: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
+  // 17, not a role: a TextInput, where lineHeight shifts the typed text on iOS.
   fieldInput: {
     borderWidth: 1,
     borderColor: vola.line,
@@ -3784,19 +3799,25 @@ const styles = StyleSheet.create({
   hintBody: { flex: 1, gap: Spacing.xxs },
   hintPhaseRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xsPlus },
   hintDot: { width: 7, height: 7, borderRadius: Radius.pill },
-  hintPhase: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6, color: vola.text },
+  hintPhase: { ...Typography.eyebrow, color: vola.text, fontWeight: '800' },
   hintPips: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: Spacing.xxs },
   hintPip: { width: 6, height: 6, borderRadius: Radius.pill },
-  hintRangeText: { fontSize: 10, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  hintRangeText: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '400',
+  },
   hintTarget: {
     ...Typography.title,
     color: vola.text,
     fontVariant: ['tabular-nums'],
   },
   hintLast: {
-    fontSize: Typography.caption.fontSize,
+    ...Typography.caption,
     color: vola.textMuted,
     fontVariant: ['tabular-nums'],
+    fontWeight: '400',
   },
   /*
     The colour is set EXPLICITLY, and it has to be.
@@ -3816,32 +3837,34 @@ const styles = StyleSheet.create({
     values `RecordsCard` uses, so the two screens teach one convention.
   */
   hintReported: { color: vola.textMuted, fontStyle: 'italic' },
-  // `fontSize`-only (not the full `caption` role) on these three: `caption`
-  // bundles a 600 weight, and each of these is deliberately the LOW end of
-  // this card's hierarchy — see the comment above and N191's own note below.
-  // Bolding them would work against the exact hierarchy those comments argue
-  // for.
-  hintReason: { fontSize: Typography.caption.fontSize, color: vola.textMuted },
+  // `caption` with its 600 weight turned back to 400 on these lines: each is
+  // deliberately the LOW end of this card's hierarchy — see the comment above
+  // and N191's own note below. Bolding them would work against the exact
+  // hierarchy those comments argue for. (N577 moved them from `caption`'s size
+  // alone onto the whole role, so they gain its leading and tracking too.)
+  hintReason: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
   // N495/#865's ramp line — same low-hierarchy tone as hintReason (this is
   // reference information to glance at, not the headline number), but its
   // own row: it can wrap to two lines on a narrow phone where hintReason
   // never does, and tying its style to that one's would couple two things
   // that change independently.
   hintWarmup: {
-    fontSize: Typography.caption.fontSize,
+    ...Typography.caption,
     color: vola.textMuted,
     fontVariant: ['tabular-nums'],
     marginTop: Spacing.xxs,
+    fontWeight: '400',
   },
   // N191's in-session note — deliberately NOT `hintReason`'s muted tone. It's
   // an FYI the standing prescription above hasn't seen, and reads as one:
   // `vola.text`, the app's primary colour (already load-bearing elsewhere
   // in this file), rather than a second muted line easy to skim past.
   hintInSession: {
-    fontSize: Typography.caption.fontSize,
+    ...Typography.caption,
     color: vola.text,
     fontStyle: 'italic',
     marginTop: Spacing.xxs,
+    fontWeight: '400',
   },
   hintApply: {
     borderRadius: Radius.pill,
@@ -3881,6 +3904,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   warmupFlagButtonText: { ...Typography.caption, color: vola.navy, fontWeight: '700' },
+  // A size, not a role: one close glyph beside the warm-up flag.
   warmupFlagDismiss: {
     fontSize: Typography.title.fontSize,
     fontWeight: '700',
@@ -3965,9 +3989,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     alignItems: 'center',
   },
-  finishText: { color: vola.navy, fontWeight: '700', fontSize: 16 },
+  finishText: { ...Typography.emphasis, color: vola.navy, fontWeight: '700' },
   empty: { alignItems: 'center', gap: Spacing.xsPlus, paddingVertical: Spacing.xl },
-  emptyTitle: { fontSize: 16, fontWeight: '600' },
+  emptyTitle: { ...Typography.emphasis },
   muted: { ...Typography.meta, color: vola.textMuted, textAlign: 'center' },
   share: { marginTop: Spacing.md },
   // N435 — "Done editing" reuses `primary`'s shape but marks itself as the

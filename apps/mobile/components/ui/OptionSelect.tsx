@@ -10,6 +10,8 @@ import {
 
 import { Text, View } from '@/components/Themed';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { useAccent } from '@/lib/AccentProvider';
 import type { GuideEntry } from '@/lib/setGuide';
 
@@ -346,28 +348,29 @@ const styles = StyleSheet.create({
   control: {
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
     minHeight: 48,
     justifyContent: 'center',
-    gap: 2,
+    gap: Spacing.xxs,
   },
-  label: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: vola.textDim },
-  valueRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  value: { flex: 1, fontSize: 14, fontWeight: '600' },
+  label: { ...Typography.eyebrow, color: vola.textDim },
+  valueRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xsPlus },
+  value: { ...Typography.body, flex: 1, fontWeight: '600' },
   valueEmpty: { color: vola.textDim, fontWeight: '500' },
-  chevron: { fontSize: 12, color: vola.textDim },
+  // The caption size, not the role: one chevron glyph at the row's end.
+  chevron: { fontSize: Typography.caption.fontSize, color: vola.textDim },
   scrim: { flex: 1, backgroundColor: 'rgba(8,11,18,0.45)' },
   card: {
     position: 'absolute',
     width: CARD_WIDTH,
     maxHeight: 320,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     borderWidth: 1,
     borderColor: vola.line,
-    paddingVertical: 6,
-    paddingHorizontal: 6,
+    paddingVertical: Spacing.xsPlus,
+    paddingHorizontal: Spacing.xsPlus,
     // A menu floating over content needs to read as floating; the border alone
     // does not do it on a dark ground.
     shadowColor: '#000',
@@ -379,26 +382,42 @@ const styles = StyleSheet.create({
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing.sm,
     minHeight: 44,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingHorizontal: Spacing.smPlus,
+    borderRadius: Radius.sm,
   },
   optionPressed: { backgroundColor: vola.surface },
-  optionText: { flex: 1, fontSize: 14, fontWeight: '600', color: vola.text },
-  tick: { fontSize: 14, fontWeight: '700' },
-  hint: { fontSize: 11, color: vola.textDim, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 },
-  cardTitle: { fontSize: 15, fontWeight: '700', paddingHorizontal: 10, paddingTop: 8 },
-  cardLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
+  optionText: { ...Typography.body, flex: 1, color: vola.text, fontWeight: '600' },
+  // The body size, not the role: one tick beside the chosen option.
+  tick: { fontSize: Typography.body.fontSize, fontWeight: '700' },
+  hint: {
+    ...Typography.caption,
     color: vola.textDim,
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 2,
+    paddingHorizontal: Spacing.smPlus,
+    paddingTop: Spacing.xsPlus,
+    paddingBottom: Spacing.xs,
+    fontWeight: '400',
   },
-  cardBody: { fontSize: 13, lineHeight: 19, color: vola.textMuted, paddingHorizontal: 10, paddingTop: 6 },
-  back: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 10 },
-  backText: { fontSize: 14, fontWeight: '700' },
+  cardTitle: {
+    ...Typography.emphasis,
+    paddingHorizontal: Spacing.smPlus,
+    paddingTop: Spacing.sm,
+    fontWeight: '700',
+  },
+  cardLabel: {
+    ...Typography.eyebrow,
+    color: vola.textDim,
+    paddingHorizontal: Spacing.smPlus,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xxs,
+  },
+  cardBody: {
+    ...Typography.meta,
+    color: vola.textMuted,
+    paddingHorizontal: Spacing.smPlus,
+    paddingTop: Spacing.xsPlus,
+  },
+  back: { minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.smPlus },
+  backText: { ...Typography.body, fontWeight: '700' },
 });
