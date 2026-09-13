@@ -77551,6 +77551,44 @@ Where each component went:
 
 **The decision sits next to T11's fix** in `backend/internal/modules/friend/postgres.go`, above `cardSelect`, and replaces the old "Tracked, not fixed here: L10 (#717)" line. A later reader meets the answer where the question arises.
 
+## 2026-09-13 — H20 (#1000): a cancelled run no longer leaves the egress broker's container behind
+
+**What was seen.** On 2026-09-09, CI for #996 failed `TestCancelledRunDoesNotLeaveAnOrphanedContainer`. The residue was an egress broker container, `engine-egress-broker-44-8c3710c4`, and no network. A rerun passed. N470 (#799) had fixed the same race for the broker's network, and this failure showed that fix working.
+
+### The cause
+
+- `ensureEgressBroker` records the container's name before `docker run -d`, then ran that command under the caller's context.
+- A cancel kills the `docker` client, but the daemon can still be partway through creating the container.
+- Teardown ran `docker rm -f`, then `docker inspect`, against a container that did not exist yet. Both truthfully reported it gone. The daemon finished creating it a moment later.
+- The container stayed in the Created state and was never attached to the network, so removing the network succeeded. That is exactly the residue CI reported.
+- Teardown was already confirming the container's removal (N470's `removeDockerResourceWithRetry` checks `docker inspect`). The confirmation was correct when it looked; the container arrived afterwards.
+
+### What changed
+
+- **`engine/internal/worker/egress.go`:** the broker's `docker run -d` now runs under its own context, bounded by `brokerRunTimeout` (2 minutes), instead of the caller's. When it returns, the container either exists or does not.
+  - Straight afterwards, if the caller's context is cancelled, teardown runs and the error says `egress: start broker container: cancelled while starting`.
+  - A teardown step that waits for the container to appear was not used. N470 tried that design and reverted it, because the wait used up the network's share of the 30-second cleanup budget.
+  - **The cost:** a cancel during broker start now waits for `docker run -d` to return. That is normally about a second, since `RunSandboxed`'s mount check has just run the same image. The 2-minute bound matters only for a wedged daemon or an image pull.
+- **`sandbox_test.go`:** the new `describeResidue` names each leaked resource, as "sandbox container X", "egress broker container X" or "egress network X". `TestCancelledRunDoesNotLeaveAnOrphanedContainer` now fails with that list rather than three raw `docker ps` strings.
+
+### Checks
+
+- **New Docker-free test, `TestEnsureEgressBroker_CancelledBrokerRunStillGetsCleanedUp`.** It installs a fake `docker` and cancels as soon as `run` starts.
+  - The fake's `run` starts a detached "daemon" that creates the container 300ms later, so the creation outlives the killed client.
+  - The fake's first `rm -f` of an existing container exits 0 without removing it. That is the Created-state behaviour N470 measured, and it makes the removal confirmation load-bearing.
+  - It has two positive controls: the fake daemon recorded creating the container, and teardown ran `rm -f` against a container that existed.
+- **It failed before the fix** with `left behind after a cancelled broker start: [ctr.engine-egress-broker-999998-…]`. After the fix, all 7 Docker-free tests in the filter pass.
+- **Five mutations were each caught as a test failure,** then restored and re-run green:
+  - **M1**, `docker run` under the caller's context: the error was `signal: killed`, not "cancelled while starting".
+  - **M2**, teardown skipping the container: the `rm -f` control failed.
+  - **M3**, no context check after the create: the error came from the next docker command instead.
+  - **M4**, the residue labels swapped: `TestDescribeResidueNamesEachLeakedResource` failed.
+  - **M5**, the container's `exists` check always false, so removal is trusted without confirmation: the container marker was left behind.
+
+### Not done
+
+- **The leak was not reproduced against a real Docker daemon.** On CI it was intermittent and depended on contention. The fake reproduces the ordering deterministically, but only time on CI will show that the real failure has stopped.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
