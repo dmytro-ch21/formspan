@@ -133,6 +133,7 @@ import {
   pendingSuggestableIndices,
   fillForward,
   measuresFor,
+  measureHint,
   reorderedIndices,
   timedSetStillAt,
   elapsedBelongsInSeconds,
@@ -3139,8 +3140,11 @@ function SetRow({
               // which the server applies before this screen sees it — so the
               // total on the row summary answers "how much moved" while this
               // answers "what do I type", and neither has to know the other.
-              const hint =
-                m === 'weight' && exercise?.load_mode === 'per_side' ? 'per hand' : undefined;
+              //
+              // Reps get the same treatment from `is_unilateral` ("each side",
+              // N452): the template said "8 reps here means 8 each side", and
+              // this field, where the 8 is typed, said nothing.
+              const hint = measureHint(m, exercise);
               // Converted for display, converted back on input — the stored
               // value is always kilograms, metres or seconds, whatever is on
               // screen. Duration is the third of those and works exactly like

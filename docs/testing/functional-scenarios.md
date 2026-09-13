@@ -24572,3 +24572,26 @@ N565's daily stuck-row reports share the `sync_blocked` kind. They no longer cou
 - On staging, with at least one real N565 report and one give-up in the last 24 hours, open admin Health and check:
   - Sync blocked counts only the give-up;
   - the Stuck rows lines match the reports' `entity`, `code` and `rows`.
+
+## N452 — a unilateral exercise's Reps field says "each side" while logging (`apps/mobile/app/session/[id].tsx`, #755)
+
+On the live strength session screen, a unilateral exercise's Reps field reads "Reps each side", the same guidance the workout template builder already gives. Reps are still stored and summed as typed, per side.
+
+### Happy path
+
+- **Dumbbell lunge** (unilateral, weight per side): open a set. The fields read "Reps each side" and "Weight kg per hand" (or lb).
+- **One-arm dumbbell row:** "Reps each side" and "Weight per hand".
+- **Back squat:** "Reps" and "Weight" with no hint.
+- **Dumbbell bench press** (both arms together, a dumbbell in each hand): "Weight per hand" only. Reps has no hint.
+- **Bulgarian split squat** (one leg, no per-hand load): "Reps each side" only.
+
+### Edge cases
+
+- **An exercise the phone has not cached yet** shows no hints rather than a wrong one. They appear once the catalog loads.
+- **Timed and distance exercises** never show "each side", even when unilateral.
+- **VoiceOver reads the hint:** the Reps field announces "Reps each side for set 1 of Dumbbell lunge".
+- **Volume is unchanged:** log 8 reps at 25 kg on a dumbbell lunge. The session's tonnage is 400 kg (8 × 25 × 2 dumbbells), the same as before this change.
+
+### Needs a device
+
+- Log a set of a dumbbell lunge or a one-arm row on the phone mid-workout. Check that "each side" sits beside Reps and is legible at arm's length.
