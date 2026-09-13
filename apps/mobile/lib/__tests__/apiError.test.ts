@@ -1,4 +1,12 @@
-import { ApiError, parseRetryAfterMs, retryAfterOf, waitPhrase } from '../apiError';
+import {
+  ApiError,
+  NO_HTTP_CODE,
+  OfflineError,
+  parseRetryAfterMs,
+  refusalCodeOf,
+  retryAfterOf,
+  waitPhrase,
+} from '../apiError';
 
 /**
  * `Retry-After` parsing and formatting (F17, #403).
@@ -109,5 +117,39 @@ describe('waitPhrase', () => {
     expect(waitPhrase(90_000)).toBe('Wait about 2 minutes'); // rounds up at the midpoint
     expect(waitPhrase(119_000)).toBe('Wait about 2 minutes');
     expect(waitPhrase(300_000)).toBe('Wait about 5 minutes');
+  });
+});
+
+/**
+ * The code stored on a refused row — N565/#1108.
+ *
+ * The stuck-row report groups by it and sends it off the device, so the one
+ * property that matters is what it can NEVER be: prose, an id, or the client's
+ * own stand-in for a missing envelope dressed up as something the server said.
+ */
+describe('refusalCodeOf', () => {
+  it('keeps a contract code the server sent', () => {
+    expect(refusalCodeOf(new ApiError('bad', 'invalid_input', 400))).toBe('invalid_input');
+    expect(refusalCodeOf(new ApiError('gone', 'not_found', 404))).toBe('not_found');
+    expect(refusalCodeOf(new ApiError('grip', 'invalid_grip', 400))).toBe('invalid_grip');
+  });
+
+  it("maps the client's own 'unknown' — the envelope did not parse — to no_http_code", () => {
+    // Every request helper builds `body?.error?.code ?? 'unknown'`.
+    expect(refusalCodeOf(new ApiError('Request failed (413).', 'unknown', 413))).toBe(NO_HTTP_CODE);
+  });
+
+  it('never stores something that is not shaped like a code', () => {
+    for (const code of ['Internal Server Error', 'set 10 invalid', 'row_42', 'INVALID', '', 'bad__code', '_x', 'x_', 'a'.repeat(41)]) {
+      expect(refusalCodeOf(new ApiError('x', code, 400))).toBe(NO_HTTP_CODE);
+    }
+    // The length bound's edge, from the accepting side.
+    expect(refusalCodeOf(new ApiError('x', 'a'.repeat(40), 400))).toBe('a'.repeat(40));
+  });
+
+  it('a failure that is not an ApiError carries no server code at all', () => {
+    expect(refusalCodeOf(new OfflineError())).toBe(NO_HTTP_CODE);
+    expect(refusalCodeOf(new Error('Network request failed'))).toBe(NO_HTTP_CODE);
+    expect(refusalCodeOf('boom')).toBe(NO_HTTP_CODE);
   });
 });

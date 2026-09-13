@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 
 import { apiRequest } from './apiRequest';
 import { getDb } from './db';
-import { isPermanentRejection, isTransportFailure, retryAfterOf } from './apiError';
+import { NO_HTTP_CODE, isPermanentRejection, isTransportFailure, refusalCodeOf, retryAfterOf } from './apiError';
 import type { TokenGetter } from './useAuthToken';
 
 /**
@@ -270,9 +270,12 @@ async function push(userId: string, getToken: TokenGetter): Promise<SequenceSync
       // Unparseable local JSON will never become parseable by retrying. Mark
       // it clean with an error rather than jamming the outbox behind it
       // forever — the row stays on the device for the athlete to see.
+      // `NO_HTTP_CODE`, never a server code: nothing was sent, so the server
+      // said nothing (N565/#1108).
       await db.runAsync(
-        `UPDATE sequences SET dirty = 0, last_error = ? WHERE id = ?`,
+        `UPDATE sequences SET dirty = 0, last_error = ?, last_error_code = ? WHERE id = ?`,
         'corrupt local copy — could not be sent',
+        NO_HTTP_CODE,
         r.id,
       );
       result.failed += 1;
@@ -305,7 +308,14 @@ async function push(userId: string, getToken: TokenGetter): Promise<SequenceSync
       result.error = result.error ?? message;
       result.errorKind = worseKind(result.errorKind, kind);
       noteRetryAfter(result, err);
-      await db.runAsync(`UPDATE sequences SET last_error = ? WHERE id = ?`, message, r.id);
+      // The code beside the message (N565/#1108) — the stuck-row report groups
+      // by the code and never reads the message.
+      await db.runAsync(
+        `UPDATE sequences SET last_error = ?, last_error_code = ? WHERE id = ?`,
+        message,
+        refusalCodeOf(err),
+        r.id,
+      );
       if (kind === 'permanent') {
         // A 4xx will not become a 2xx. Stop owing it, keep the row and the
         // reason — the alternative is an outbox that never drains and a

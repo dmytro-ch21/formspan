@@ -58,6 +58,14 @@ beforeEach(async () => {
   mockApi.mockReset().mockResolvedValue({ sequences: [] });
 });
 
+/** What the stuck-row report reads: the code and when the row got stuck (N565/#1108). */
+async function stuckOf(id: string) {
+  return db.getFirstAsync<{ last_error_code: string | null; stuck_since: string | null }>(
+    `SELECT last_error_code, stuck_since FROM sequences WHERE id = ?`,
+    id,
+  );
+}
+
 /** The raw row, for asserting on outbox flags the public API hides. */
 async function row(id: string) {
   return db.getFirstAsync<{ dirty: number; remote: number; last_error: string | null; steps_json: string }>(
@@ -162,6 +170,8 @@ describe('pushing', () => {
     // pending badge nags forever about something that can never go.
     expect(r?.dirty).toBe(0);
     expect(r?.last_error).toContain('bad steps');
+    // The code, beside the prose, and the moment it became stuck.
+    expect(await stuckOf(id)).toEqual({ last_error_code: 'invalid_input', stuck_since: expect.any(String) });
     expect(await pendingSequenceCount(USER)).toBe(0);
     // The athlete's row is still on the phone — refusing to send it is not a
     // reason to destroy it. Checked later, with the server reachable again,
@@ -180,6 +190,9 @@ describe('pushing', () => {
     expect(res.errorKind).toBe('transient');
     // Still dirty: a 5xx is exactly what the retry ladder exists for.
     expect((await row(id))?.dirty).toBe(1);
+    // A code is recorded, but the row is still owed, so it is NOT stuck and
+    // has no clock — the basement is not the refusal.
+    expect(await stuckOf(id)).toEqual({ last_error_code: 'internal', stuck_since: null });
     expect(await pendingSequenceCount(USER)).toBe(1);
   });
 
@@ -209,6 +222,8 @@ describe('pushing', () => {
     expect(res.pushed).toBe(1);
     expect((await row(bad))?.dirty).toBe(0);
     expect((await row(bad))?.last_error).toContain('corrupt');
+    // Nothing was sent, so the server said nothing: never a server code.
+    expect(await stuckOf(bad)).toEqual({ last_error_code: 'no_http_code', stuck_since: expect.any(String) });
     expect((await row(good))?.remote).toBe(1);
   });
 });

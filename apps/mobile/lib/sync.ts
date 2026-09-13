@@ -7,6 +7,7 @@ import { countPendingPlans, countRefusedPlans, syncPlans } from './plan';
 import { pendingFoodCount, syncFood } from './foodLog';
 import { pendingSequenceCount, syncSequences } from './sequences';
 import { countRejectedRows } from './rejectedRows';
+import { reportStuckRows } from './stuckRows';
 import { pendingTrackerCount, syncTrackers } from './trackers';
 import type { SyncErrorKind } from './sessionStore';
 import type { TokenGetter } from './useAuthToken';
@@ -339,6 +340,10 @@ async function run(reason: string): Promise<void> {
   // second run.
   running = (async () => {
     let retry = false;
+    // Whether this pass demonstrably reached the server — N565/#1108. Only
+    // then is the stuck-row report worth attempting: it is when refusals get
+    // written, and a flush with no signal only turns a report into a loss.
+    let reachedServer = false;
     try {
       const sessionResult = await syncSessions(userID, getToken);
 
@@ -433,6 +438,7 @@ async function run(reason: string): Promise<void> {
       // The account may have changed while this ran.
       if (creds?.userID !== userID) return;
 
+      reachedServer = result.errorKind !== 'offline';
       emit({ deferred: result.deferred });
 
       if (result.failed > 0) {
@@ -499,6 +505,13 @@ async function run(reason: string): Promise<void> {
       // ago whose count hadn't been refreshed yet still reads as 0.
       await refreshPending();
       if (retry) schedule();
+      // Fire-and-forget, AFTER the retry decision, and unable to reject
+      // (`reportStuckRows` catches everything): a report must never delay or
+      // break the machinery that gets training off the phone. It decides for
+      // itself whether one is due — at most daily unless the counts change.
+      if (reachedServer) {
+        void reportStuckRows(userID, { isCurrent: () => creds?.userID === userID });
+      }
     }
   })();
 

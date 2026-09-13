@@ -220,6 +220,52 @@ export function isPermanentRejection(err: unknown): boolean {
   return isPermanentStatus(err.status);
 }
 
+/**
+ * A failure that carried no contract code — N565/#1108.
+ *
+ * A network failure, a response body that did not parse, or a local failure
+ * such as a corrupt row: none of those is something the SERVER said, so none
+ * may be reported as if it were. Stored in place of a code, so "the server
+ * refused this with `invalid_input`" and "we never got a code at all" stay two
+ * different buckets.
+ */
+export const NO_HTTP_CODE = 'no_http_code';
+
+/**
+ * What a contract error code looks like: lower-case words joined by single
+ * underscores (`invalid_input`, `not_found`, `invalid_grip`). No digits, no
+ * spaces, no upper case — so an id, a sentence or a proxy's HTML can never
+ * pass for one. Bounded well under the server's `MaxErrorCodeLen` (64).
+ */
+const CONTRACT_CODE = /^[a-z]+(?:_[a-z]+)*$/;
+const MAX_CODE_LENGTH = 40;
+
+/** Whether a stored value is shaped like a contract code. */
+export function isContractCode(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_CODE_LENGTH && CONTRACT_CODE.test(value);
+}
+
+/**
+ * The error CODE to store on a row at the moment it is refused — N565/#1108.
+ *
+ * Codes are the contract and messages are not (`api-conventions.md`), so the
+ * stuck-row report groups by this and never by `last_error`, which holds the
+ * server's prose and must never be aggregated or sent.
+ *
+ * **`'unknown'` maps to {@link NO_HTTP_CODE}, and that is not a guess.** Every
+ * request helper here (`apiRequest.ts`, `sessions.ts`, `workouts.ts`,
+ * `plansApi.ts`) builds its `ApiError` with `body?.error?.code ?? 'unknown'` —
+ * so `'unknown'` is the CLIENT's own stand-in for "the envelope did not parse",
+ * never a code the server sent. Storing it verbatim would put a parse failure
+ * in the same bucket as a pre-migration row with no code at all, which the
+ * report calls `unknown` and means something else by.
+ */
+export function refusalCodeOf(err: unknown): string {
+  if (!(err instanceof ApiError)) return NO_HTTP_CODE;
+  if (err.code === 'unknown' || !isContractCode(err.code)) return NO_HTTP_CODE;
+  return err.code;
+}
+
 /** The server understood the request and refused its contents. */
 export function isValidationError(err: unknown): boolean {
   return err instanceof ApiError && err.code === 'invalid_input';

@@ -120,6 +120,25 @@ it('clears the error once the row finally goes through', async () => {
   expect(row?.last_error).toBeNull();
 });
 
+it('stores the server’s CODE beside its words, and when the row got stuck — N565/#1108', async () => {
+  // The stuck-row report groups by the code and never reads the message, so a
+  // refusal that kept only the message would be reported as `unknown` forever.
+  await seedSession();
+  mockPushSets.mockRejectedValue(new ApiError('Session already finished', 'invalid_input', 400));
+  await syncSessions('u1', token);
+
+  const stuckOf = () =>
+    db.getFirstAsync<{ last_error_code: string | null; stuck_since: string | null }>(
+      `SELECT last_error_code, stuck_since FROM local_sessions WHERE id = 's1'`,
+    );
+  expect(await stuckOf()).toEqual({ last_error_code: 'invalid_input', stuck_since: expect.any(String) });
+
+  await db.runAsync(`UPDATE local_sessions SET dirty = 1 WHERE id = 's1'`);
+  mockPushSets.mockResolvedValue(undefined);
+  await syncSessions('u1', token);
+  expect(await stuckOf()).toEqual({ last_error_code: null, stuck_since: null });
+});
+
 it('survives a relaunch — the message is on the row, not in memory', async () => {
   await seedSession();
   mockPushSets.mockRejectedValue(new ApiError('refused', 'invalid_input', 400));

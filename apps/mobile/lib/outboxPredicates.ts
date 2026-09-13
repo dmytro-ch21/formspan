@@ -54,7 +54,72 @@ export const BLOCKED_ROW = 'last_error IS NOT NULL AND dirty = 1 AND deleted_at 
  * not pending, and without a list reading this it would be shown nowhere.
  * Plans are the table that uses it today: a plan whose delete the server
  * refused is put back (`plan.ts`'s `pushRow`) and lands here. `food_entries`
- * carries the same state with its own hand-written copy in `rejectedRows.ts`,
- * which predates this module and is not listed above.
+ * carries the same state, and since N565/#1108 `rejectedRows.ts` reads it with
+ * this constant rather than its own hand-written copy.
  */
 export const REFUSED_ROW = 'last_error IS NOT NULL AND dirty = 0 AND deleted_at IS NULL';
+
+/**
+ * REFUSED, on `sequences` — N565/#1108.
+ *
+ * `REFUSED_ROW` minus the tombstone clause, because `sequences` has no
+ * `deleted_at`: it is created and pushed, never tombstoned locally. Before
+ * this it was a hand-written copy inside `rejectedRows.ts`; it lives here now
+ * so the repair list, the attention count and the stuck-row report read one
+ * definition.
+ */
+export const REFUSED_SEQUENCE_ROW = 'last_error IS NOT NULL AND dirty = 0';
+
+/** The athlete-facing name of each outbox that can hold a stuck row. */
+export type StuckDomain = 'session' | 'workout' | 'plan' | 'food_entry' | 'sequence';
+/** Blocked is still owed; refused is not. See the two predicates above. */
+export type StuckState = 'blocked' | 'refused';
+export type StuckTable = 'local_sessions' | 'workout_cache' | 'planned_sessions' | 'food_entries' | 'sequences';
+
+/**
+ * Every (domain, state) that feeds `SyncState.needsAttention`, and the
+ * predicate that defines it — N565/#1108.
+ *
+ * ONE list, read by two things that must agree: the stuck-row report
+ * (`stuckRows.ts`), and the SQLite triggers in `db.ts` that stamp
+ * `stuck_since` when a row enters one of these states. Each entry mirrors the
+ * counter that already counts it:
+ *
+ * - sessions and workouts: `countBlockedRows` (`BLOCKED_ROW` only — neither
+ *   table clears `dirty` on a refusal, so neither has a refused state);
+ * - plans: `countRefusedPlans` (`BLOCKED_ROW` OR `REFUSED_ROW`);
+ * - food entries and sequences: `countRejectedRows` (refused only — both clear
+ *   `dirty` on a permanent refusal).
+ *
+ * `stuckRows.test.ts` pins that the report's totals equal those three counters
+ * on the same rows, so an entry added here without a counter, or a counter
+ * widened without an entry, fails there.
+ */
+export const STUCK_ROW_SOURCES: readonly {
+  domain: StuckDomain;
+  state: StuckState;
+  table: StuckTable;
+  predicate: string;
+}[] = [
+  { domain: 'session', state: 'blocked', table: 'local_sessions', predicate: BLOCKED_ROW },
+  { domain: 'workout', state: 'blocked', table: 'workout_cache', predicate: BLOCKED_ROW },
+  { domain: 'plan', state: 'blocked', table: 'planned_sessions', predicate: BLOCKED_ROW },
+  { domain: 'plan', state: 'refused', table: 'planned_sessions', predicate: REFUSED_ROW },
+  { domain: 'food_entry', state: 'refused', table: 'food_entries', predicate: REFUSED_ROW },
+  { domain: 'sequence', state: 'refused', table: 'sequences', predicate: REFUSED_SEQUENCE_ROW },
+];
+
+/** The tables that can hold a stuck row, each once. */
+export const STUCK_ROW_TABLES: readonly StuckTable[] = [...new Set(STUCK_ROW_SOURCES.map((s) => s.table))];
+
+/**
+ * "Is this row stuck in ANY state" on one table: the OR of its sources.
+ *
+ * A plan moving from blocked to refused is still stuck, so it must not restart
+ * its clock — which is why the trigger reads this union rather than one state.
+ */
+export function stuckPredicateFor(table: StuckTable): string {
+  const parts = STUCK_ROW_SOURCES.filter((s) => s.table === table).map((s) => `(${s.predicate})`);
+  if (parts.length === 0) throw new Error(`no stuck-row source for ${table}`);
+  return parts.join(' OR ');
+}

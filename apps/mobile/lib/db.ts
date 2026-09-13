@@ -1,5 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 
+import { STUCK_ROW_TABLES, stuckPredicateFor, type StuckTable } from './outboxPredicates';
+
 /**
  * Local SQLite store — the offline half of the offline-first sync design
  * (local write first, push to the API when connectivity allows).
@@ -224,7 +226,10 @@ const CREATE_PLANNED = `
     dirty INTEGER NOT NULL DEFAULT 1,
     remote INTEGER NOT NULL DEFAULT 0,
     deleted_at TEXT,
-    last_error TEXT
+    last_error TEXT,
+    -- N565/#1108: see the stuck-row triggers in migrate().
+    last_error_code TEXT,
+    stuck_since TEXT
   );
 `;
 
@@ -259,7 +264,10 @@ const CREATE_SEQUENCES = `
     created_at TEXT NOT NULL,
     dirty INTEGER NOT NULL DEFAULT 1,
     remote INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT
+    last_error TEXT,
+    -- N565/#1108: see the stuck-row triggers in migrate().
+    last_error_code TEXT,
+    stuck_since TEXT
   );
 `;
 
@@ -322,7 +330,10 @@ const CREATE_FOOD_ENTRIES = `
     dirty INTEGER NOT NULL DEFAULT 1,
     remote INTEGER NOT NULL DEFAULT 0,
     deleted_at TEXT,
-    last_error TEXT
+    last_error TEXT,
+    -- N565/#1108: see the stuck-row triggers in migrate().
+    last_error_code TEXT,
+    stuck_since TEXT
   );
 `;
 
@@ -959,7 +970,7 @@ const CREATE_STEPS_READ_STATE = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 44;
+const SCHEMA_VERSION = 45;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -1026,6 +1037,98 @@ async function addColumnIfMissing(
   const cols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table});`);
   if (cols.some((c) => c.name === column)) return;
   await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+}
+
+/** The outbox columns a stuck-row predicate may name. */
+const STUCK_PREDICATE_COLUMNS = ['last_error', 'dirty', 'deleted_at'] as const;
+
+/** A shared, unqualified predicate rewritten against a trigger's NEW or OLD row. */
+function qualifyPredicate(predicate: string, row: 'NEW' | 'OLD'): string {
+  return predicate.replace(/\b(last_error|dirty|deleted_at)\b/g, `${row}.$1`);
+}
+
+/**
+ * The two triggers that keep `stuck_since` and `last_error_code` honest on one
+ * table — N565/#1108.
+ *
+ * ## Why triggers, when this file has none
+ *
+ * A row leaves a stuck state through roughly thirty statements across five
+ * modules — every edit, delete, retry and successful push that writes
+ * `last_error = NULL`. Stamping and clearing the timestamp by hand would mean
+ * touching every one of them, and the NEXT clear site would forget, reporting
+ * a row fixed yesterday as stuck for a month. A trigger watches the columns
+ * that define the state, so there is no site to forget.
+ *
+ * ## `stuck_since` follows the STATE, not `last_error`
+ *
+ * The WHEN clause is the table's stuck predicate from `outboxPredicates.ts`,
+ * the same text the counters and the report read, evaluated on the row before
+ * and after. It fires only on a CHANGE of state:
+ *
+ * - into stuck: stamped with this device's clock, in the `toISOString` shape;
+ * - out of stuck: cleared;
+ * - stuck to stuck (a plan whose refused create becomes a refused removal, a
+ *   refusal rewritten with a new message): untouched, so the clock keeps the
+ *   moment the row FIRST got stuck.
+ *
+ * Keyed on the state rather than on `last_error` because food entries and
+ * sequences write `last_error` on EVERY failure, transient ones included, and
+ * only clear `dirty` on a permanent one. A timestamp taken when an offline
+ * failure first wrote a message would overstate the age by however long the
+ * athlete was in the basement.
+ *
+ * No INSERT trigger, deliberately: nothing in the app inserts a row already
+ * stuck, and a row that ever arrived that way reads as "age unknown", which is
+ * true, rather than "stuck since this insert", which might not be.
+ *
+ * ## `last_error_code` follows `last_error`
+ *
+ * The refusal writers set both together. The clear sites set only
+ * `last_error = NULL`, so this clears the code with it — otherwise a later
+ * refusal written by a path that forgot the code would be reported under the
+ * previous refusal's code.
+ *
+ * ## If a predicate ever changes
+ *
+ * These are created in the v45 branch, so a device that is already past it
+ * keeps the text it was created with. Changing a stuck predicate therefore
+ * needs a version bump whose branch calls this again — it drops and recreates,
+ * so that call is all the branch needs.
+ */
+function stuckRowTriggerStatements(table: StuckTable): string[] {
+  const predicate = stuckPredicateFor(table);
+  const watched = STUCK_PREDICATE_COLUMNS.filter((c) => new RegExp(`\\b${c}\\b`).test(predicate));
+  const isStuck = qualifyPredicate(predicate, 'NEW');
+  const wasStuck = qualifyPredicate(predicate, 'OLD');
+  return [
+    `DROP TRIGGER IF EXISTS ${table}_stuck_since;`,
+    `CREATE TRIGGER ${table}_stuck_since
+       AFTER UPDATE OF ${watched.join(', ')} ON ${table}
+       FOR EACH ROW WHEN (${isStuck}) IS NOT (${wasStuck})
+     BEGIN
+       UPDATE ${table}
+          SET stuck_since = CASE WHEN (${isStuck})
+                                 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                                 ELSE NULL END
+        WHERE rowid = NEW.rowid;
+     END;`,
+    `DROP TRIGGER IF EXISTS ${table}_error_code_cleared;`,
+    `CREATE TRIGGER ${table}_error_code_cleared
+       AFTER UPDATE OF last_error ON ${table}
+       FOR EACH ROW WHEN NEW.last_error IS NULL AND NEW.last_error_code IS NOT NULL
+     BEGIN
+       UPDATE ${table} SET last_error_code = NULL WHERE rowid = NEW.rowid;
+     END;`,
+  ];
+}
+
+async function installStuckRowTriggers(db: SQLite.SQLiteDatabase): Promise<void> {
+  for (const table of STUCK_ROW_TABLES) {
+    for (const statement of stuckRowTriggerStatements(table)) {
+      await db.execAsync(statement);
+    }
+  }
 }
 
 /**
@@ -1823,6 +1926,36 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // `schema.test.ts`'s stamped-43 case catches.
     await db.execAsync(CREATE_DAILY_STEPS);
     await db.execAsync(CREATE_STEPS_READ_STATE);
+  }
+
+  if (current < 45) {
+    // N565/#1108: when a row got stuck, and what the server said, as a CODE.
+    //
+    // `last_error_code` holds the contract `error.code` (or `no_http_code`)
+    // written beside `last_error` at refusal time, because `last_error` is the
+    // server's prose and the stuck-row report must never aggregate or send it.
+    //
+    // `stuck_since` is when the row ENTERED a stuck state. Not `updated_at`:
+    // every edit changes that, and N167 made every edit clear the refusal, so
+    // it measures the last touch rather than how long the row has been stuck.
+    //
+    // Real ALTERs, same reason as every branch above: `CREATE TABLE IF NOT
+    // EXISTS` is a no-op against an existing table. local_sessions and
+    // workout_cache never carried `last_error` in their CREATE either (it
+    // arrived by ALTER in v11), so these two columns follow it the same way.
+    for (const table of STUCK_ROW_TABLES) {
+      await addColumnIfMissing(db, table, 'last_error_code', 'TEXT');
+      await addColumnIfMissing(db, table, 'stuck_since', 'TEXT');
+    }
+
+    // NOTHING IS BACKFILLED, and that is the decision rather than an omission.
+    // A row already stuck on an upgrading device was refused at some moment
+    // this device never wrote down, and with no code the server sent that it
+    // never kept. Stamping it "now" would report a months-old refusal as
+    // minutes old, and inventing a code would put it in a bucket it may not
+    // belong in. So both stay NULL, and `stuckRows.ts` reports those rows as
+    // an explicit `unknown` code and as a separate unknown-age count.
+    await installStuckRowTriggers(db);
   }
 
   // The day query the card runs on every render of Today.

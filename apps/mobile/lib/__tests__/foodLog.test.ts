@@ -431,6 +431,28 @@ describe('pushing', () => {
     // survive so the sync screen can explain it.
     expect(r?.dirty).toBe(0);
     expect(r?.last_error).toContain('servings');
+    // N565/#1108: the CODE is kept beside the prose, and the clock starts at
+    // the refusal.
+    expect(
+      await db.getFirstAsync(`SELECT last_error_code, stuck_since FROM food_entries WHERE id = ?`, id),
+    ).toEqual({ last_error_code: 'invalid_input', stuck_since: expect.any(String) });
+  });
+
+  it('a refusal whose body did not parse is stored as no_http_code, not the client’s own "unknown" — N565/#1108', async () => {
+    // Every request helper builds `body?.error?.code ?? 'unknown'`, so
+    // 'unknown' here means "no envelope" — a different bucket from a row
+    // refused before codes were recorded at all.
+    const id = await logFood(USER, meal());
+    mockApi.mockImplementation(async (_t: unknown, _path: string, init?: { method?: string }) => {
+      if (init?.method === 'PUT') throw new ApiError('Request failed (413).', 'unknown', 413);
+      return {};
+    });
+
+    await syncFood(USER, token);
+
+    expect(
+      await db.getFirstAsync(`SELECT dirty, last_error_code FROM food_entries WHERE id = ?`, id),
+    ).toEqual({ dirty: 0, last_error_code: 'no_http_code' });
   });
 
   it('offline stops the queue rather than walking it', async () => {

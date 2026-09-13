@@ -54,6 +54,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 MOBILE = ROOT / "apps/mobile/lib/telemetry.ts"
 WEB = ROOT / "apps/web/src/lib/telemetry.ts"
+# The one caller that adds detail keys of its own (N565/#1108).
+STUCK_ROWS = ROOT / "apps/mobile/lib/stuckRows.ts"
 
 # Where the shared body starts. Above this each copy explains itself, and those
 # headers are SUPPOSED to differ.
@@ -104,6 +106,23 @@ def parse_allowlist(text: str, path: Path) -> list[str]:
     return keys
 
 
+def parse_stuck_row_keys(text: str, path: Path) -> list[str]:
+    """The detail keys the stuck-row report sends (N565/#1108).
+
+    Checked against BOTH allowlists, because `redact()` drops a key it does not
+    permit without a word: a report whose `rows` key fell off the allowlist
+    would still arrive, still read as a report, and carry no numbers. Missing
+    or empty raises, for the same reason `parse_allowlist` does.
+    """
+    m = re.search(r"STUCK_ROW_DETAIL_KEYS\s*=\s*\[(.*?)\]\s*as const", text, re.S)
+    if not m:
+        raise SystemExit(f"{path}: STUCK_ROW_DETAIL_KEYS not found — see this script's docstring.")
+    keys = re.findall(r"['\"]([^'\"]+)['\"]", m.group(1))
+    if not keys:
+        raise SystemExit(f"{path}: STUCK_ROW_DETAIL_KEYS parsed as empty, which is never correct.")
+    return keys
+
+
 def parse_consts(text: str) -> dict[str, str]:
     """The tuning constants that decide how much leaves a device."""
     out: dict[str, str] = {}
@@ -144,6 +163,17 @@ def main() -> int:
             problems.append(f"  only in web:    {', '.join(only_w)}")
         if not only_m and not only_w:
             problems.append(f"  same keys, different ORDER:\n    mobile: {m_keys}\n    web:    {w_keys}")
+
+    # 1b. Every key the stuck-row report sends is allowlisted, on both copies
+    #     (N565/#1108). An unlisted key is dropped by `redact()` without a word.
+    stuck_keys = parse_stuck_row_keys(STUCK_ROWS.read_text(), STUCK_ROWS)
+    for name, keys in (("mobile", m_keys), ("web", w_keys)):
+        missing = [k for k in stuck_keys if k not in keys]
+        if missing:
+            problems.append(
+                f"stuck-row report keys not allowlisted in {name}: {', '.join(missing)} "
+                f"(sent by {STUCK_ROWS.relative_to(ROOT)}, dropped by redact())"
+            )
 
     # 2. The tuning constants, by name.
     m_consts, w_consts = parse_consts(mobile_text), parse_consts(web_text)

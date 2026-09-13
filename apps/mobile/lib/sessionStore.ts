@@ -8,6 +8,7 @@ import {
   isPermanentRejection,
   isTransportFailure,
   isUnknownGrip,
+  refusalCodeOf,
   retryAfterOf,
 } from './apiError';
 import { getDb, withTransaction } from './db';
@@ -1613,9 +1614,15 @@ async function noteRowError(
   const message = err === null ? null : err instanceof Error ? err.message : String(err);
   // The table name is interpolated, never the values: it comes from this
   // function's own literal union, so there is no path from user input to it.
+  //
+  // The CODE is written beside the message (N565/#1108): the stuck-row report
+  // groups by it, because the message is the server's prose and never leaves
+  // the device. `db.ts`'s trigger also clears it whenever `last_error` goes
+  // NULL, so the many edit paths that clear only the message cannot strand one.
   await db.runAsync(
-    `UPDATE ${table} SET last_error = ? WHERE id = ? AND user_id = ?`,
+    `UPDATE ${table} SET last_error = ?, last_error_code = ? WHERE id = ? AND user_id = ?`,
     message,
+    err === null ? null : refusalCodeOf(err),
     id,
     userID,
   );

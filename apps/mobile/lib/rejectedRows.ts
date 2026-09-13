@@ -1,4 +1,5 @@
 import { getDb } from './db';
+import { REFUSED_ROW, REFUSED_SEQUENCE_ROW } from './outboxPredicates';
 
 /**
  * Rows the server REFUSED and this phone has stopped sending — N167/#544.
@@ -83,8 +84,7 @@ export async function rejectedRows(userId: string): Promise<RejectedRow[]> {
 
   const entries = await db.getAllAsync<{ id: string; name: string; last_error: string; eaten_on: string }>(
     `SELECT id, name, last_error, eaten_on FROM food_entries
-      WHERE user_id = ? AND deleted_at IS NULL
-        AND dirty = 0 AND last_error IS NOT NULL
+      WHERE user_id = ? AND ${REFUSED_ROW}
       ORDER BY eaten_on DESC, logged_at DESC`,
     userId,
   );
@@ -94,7 +94,7 @@ export async function rejectedRows(userId: string): Promise<RejectedRow[]> {
   // which is what every other read of it does.
   const seqs = await db.getAllAsync<{ id: string; name: string; last_error: string }>(
     `SELECT id, name, last_error FROM sequences
-      WHERE user_id = ? AND dirty = 0 AND last_error IS NOT NULL
+      WHERE user_id = ? AND ${REFUSED_SEQUENCE_ROW}
       ORDER BY created_at DESC`,
     userId,
   );
@@ -124,10 +124,8 @@ export async function countRejectedRows(userId: string): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>(
     `SELECT
-       (SELECT COUNT(*) FROM food_entries
-         WHERE user_id = ? AND deleted_at IS NULL AND dirty = 0 AND last_error IS NOT NULL)
-     + (SELECT COUNT(*) FROM sequences
-         WHERE user_id = ? AND dirty = 0 AND last_error IS NOT NULL) AS n`,
+       (SELECT COUNT(*) FROM food_entries WHERE user_id = ? AND ${REFUSED_ROW})
+     + (SELECT COUNT(*) FROM sequences WHERE user_id = ? AND ${REFUSED_SEQUENCE_ROW}) AS n`,
     userId, userId,
   );
   return row?.n ?? 0;
