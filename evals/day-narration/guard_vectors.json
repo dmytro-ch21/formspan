@@ -1,0 +1,30 @@
+{
+  "_about": "N570 (#1131): cases both fabricated-fact guards must answer identically. Read by backend/internal/modules/narration/guard_test.go and apps/mobile/lib/__tests__/narrationGuardVectors.test.ts. A fact here is what the phone sends: its key, the numbers it states (backedNumbers) and the names it quotes (namesOf). Change a case only with both tests green.",
+  "facts": [
+    { "key": "food-eaten:2026-09-12", "numbers": ["1840", "122", "3"], "names": [] },
+    { "key": "plan-done:2026-09-12", "numbers": ["2"], "names": [] },
+    { "key": "logged:s9", "numbers": [], "names": ["5x5 Day"] },
+    { "key": "last-checkin:2026-09-12", "numbers": ["82", "82.4"], "names": [] },
+    { "key": "next:p2", "numbers": [], "names": ["5x5 Day 2"] },
+    { "key": "tracker:emoji", "numbers": [], "names": ["💧💧💧💧💧💧 5"] },
+    { "key": "tracker:runs", "numbers": [], "names": ["5 2 runs!"] }
+  ],
+  "cases": [
+    { "name": "an honest food sentence", "sentence": { "text": "1,840 kcal eaten so far, across 3 entries.", "cites": ["food-eaten:2026-09-12"] }, "kept": true },
+    { "name": "an honest plan sentence", "sentence": { "text": "Both planned sessions are done, 2 of 2.", "cites": ["plan-done:2026-09-12"] }, "kept": true },
+    { "name": "an invented session", "sentence": { "text": "You also finished a 45-minute run.", "cites": ["logged:ghost-run"] }, "kept": false, "reason": "unknown-key", "detail": "logged:ghost-run" },
+    { "name": "an invented remainder", "sentence": { "text": "That leaves 860 kcal for dinner.", "cites": ["food-eaten:2026-09-12"] }, "kept": false, "reason": "unbacked-number", "detail": "860" },
+    { "name": "an uncited opinion", "sentence": { "text": "Great consistency this week.", "cites": [] }, "kept": false, "reason": "no-citation", "detail": "cites no fact" },
+    { "name": "a true number under the wrong citation", "sentence": { "text": "Sessions done: 2, on 1,840 kcal.", "cites": ["plan-done:2026-09-12"] }, "kept": false, "reason": "unbacked-number", "detail": "1840" },
+    { "name": "a name with digits in it", "sentence": { "text": "5x5 Day logged.", "cites": ["logged:s9"] }, "kept": true },
+    { "name": "a number added beside the name", "sentence": { "text": "5x5 Day logged: 6 sets.", "cites": ["logged:s9"] }, "kept": false, "reason": "unbacked-number", "detail": "6" },
+    { "name": "a name's digits when that fact is not cited", "sentence": { "text": "5x5 Day logged.", "cites": ["food-eaten:2026-09-12"] }, "kept": false, "reason": "unbacked-number", "detail": "5, 5" },
+    { "name": "a weight to one decimal", "sentence": { "text": "Weighed 82.4 kg.", "cites": ["last-checkin:2026-09-12"] }, "kept": true },
+    { "name": "kcal to a decimal the panel never prints", "sentence": { "text": "1840.4 kcal eaten.", "cites": ["food-eaten:2026-09-12"] }, "kept": false, "reason": "unbacked-number", "detail": "1840.4" },
+    { "name": "trailing zeros and commas across two cited facts", "sentence": { "text": "82.40 kg, and 1,840 kcal.", "cites": ["last-checkin:2026-09-12", "food-eaten:2026-09-12"] }, "kept": true },
+    { "name": "one citation real and one invented", "sentence": { "text": "1,840 kcal, and a run.", "cites": ["food-eaten:2026-09-12", "logged:ghost-run"] }, "kept": false, "reason": "unknown-key", "detail": "logged:ghost-run" },
+    { "name": "two cited names, one inside the other: the longer is removed first", "sentence": { "text": "5x5 Day 2 is next, after 5x5 Day.", "cites": ["logged:s9", "next:p2"] }, "kept": true },
+    { "name": "names sorted by code points, not UTF-16 units: an emoji name", "sentence": { "text": "💧💧💧💧💧💧 5 2 runs!", "cites": ["tracker:emoji", "tracker:runs"] }, "kept": true },
+    { "name": "a repeated unbacked number is reported each time", "sentence": { "text": "6 sets and 6 reps.", "cites": ["food-eaten:2026-09-12"] }, "kept": false, "reason": "unbacked-number", "detail": "6, 6" }
+  ]
+}

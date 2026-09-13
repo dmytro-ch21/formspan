@@ -227,7 +227,11 @@ func unknownFieldName(err error) (string, bool) {
 
 // A note on DisallowUnknownFields, which this file deliberately did NOT wire up
 // anywhere at first (N164/#541). DecodeJSONStrict above is the redesign it
-// asked for, used by exactly the two endpoints the note names (N521/#918):
+// asked for, used by the two endpoints the note names (N521/#918) and, since
+// N570, by POST /v1/day/narration. That one needed no compatibility audit: it
+// had no client in the wild when it shipped, so strictness was its contract from
+// its first request, and refusing a body-supplied `user_id` outright is part of
+// its cross-athlete design. For the first two:
 //
 // The obvious, lowest-risk candidate was audited first: exercise's and
 // technique's admin content-write endpoints (decodeExercise/decodeTechnique,
@@ -256,7 +260,7 @@ func unknownFieldName(err error) (string, bool) {
 // That redesign is DecodeJSONStrict above (N521/#918): the ignorable fields are
 // an explicit list stripped before strict decoding, so the security tests hold
 // and every other unknown field is refused. It is used by decodeExercise and
-// decodeTechnique only. Every other decode site still uses DecodeJSON, on
+// decodeTechnique, and by narration's handler (see above). Every other decode site still uses DecodeJSON, on
 // purpose: mobile and web builds in the wild are not one controlled deploy, so
 // widening strictness needs its own compatibility audit per endpoint.
 //

@@ -1790,6 +1790,66 @@ components:
             a client can still ask rather than show a silently confident 1
             (N121/#510).
 
+    DayNarrationFact:
+      type: object
+      additionalProperties: false
+      required: [key, kind, label]
+      description: One day-panel fact, as the phone states it (N570).
+      properties:
+        key:
+          type: string
+          maxLength: 120
+          example: "food-eaten:2026-09-12"
+        kind:
+          type: string
+          enum: [session-open, planned, plan-done, logged, next-planned, tracker, food-eaten, nutrition-target, last-checkin, phase-goal]
+        label:
+          type: string
+          maxLength: 200
+          description: The fact in words, built by the phone. Every number in it, its names aside, must also be in `numbers`.
+          example: "Eaten today: 1,840 kcal across 3 entries"
+        numbers:
+          type: array
+          maxItems: 12
+          description: Every number the fact states, whole or to one decimal. Omitted means none.
+          items:
+            type: string
+            maxLength: 12
+            pattern: '^\d+(\.\d)?$'
+          example: ["1840", "3"]
+        names:
+          type: array
+          maxItems: 4
+          description: Names the fact quotes (a session's, a tracker's). The athlete wrote these, and digits inside them are not numbers. Omitted means none.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+    DayNarrationSentence:
+      type: object
+      required: [text, cites]
+      properties:
+        text: { type: string }
+        cites:
+          type: array
+          minItems: 1
+          description: Keys of the facts this sentence rests on.
+          items: { type: string }
+    DayNarrationQuota:
+      type: object
+      required: [used, limit, remaining, resets_at]
+      description: Usage of the narration endpoint, over a rolling 24 hours.
+      properties:
+        used: { type: integer }
+        limit: { type: integer, description: "5 per athlete per rolling day." }
+        remaining:
+          type: integer
+          description: Clamped at zero, never negative.
+        resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the oldest call in the window ages out. Null when nothing is used.
     BjjDraftQuota:
       type: object
       required: [used, limit, remaining, resets_at]
@@ -9625,6 +9685,116 @@ paths:
             retry the identical request once service returns. `internal` means
             the call did complete and was charged, or that this deploy has no
             API key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /day/narration:
+    post:
+      operationId: narrateDay
+      summary: Narrate the athlete's day from facts the phone sends
+      tags: [Day]
+      description: >
+        A few plain sentences about today, written by a model from the day
+        panel's facts, and never containing a fact that was not sent (N570,
+        #1131).
+
+
+        **The phone sends the facts; this endpoint reads no athlete table.**
+        Each fact is the day panel's own: a key, a kind, a label in words, the
+        numbers it states and the names it quotes. The server narrates exactly
+        those, so only the caller's own data can reach the prompt.
+
+
+        **Nothing is stored but metering**: a count, a model id, how many
+        sentences survived, and token usage. Neither the facts nor the
+        sentences are kept or logged. The facts are forwarded to the model
+        provider and discarded, and a client must say so before the first
+        narration.
+
+
+        **Every returned sentence has passed the fabricated-fact guard,
+        server-side.** It cites at least one fact that was sent, and every
+        number in it, a cited fact's own names aside, is a number one of the
+        cited facts states. A sentence that fails is dropped whole, never
+        repaired, and `dropped` counts them. The phone runs the same guard, and
+        both answer the cases in `evals/day-narration/guard_vectors.json`.
+
+
+        Metered per athlete over a rolling 24 hours, and checked before the
+        model is called. A request that cannot succeed (a malformed body, an
+        unknown field, or a label stating a number its `numbers` do not) is
+        refused before the quota and costs nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [facts]
+              properties:
+                facts:
+                  type: array
+                  minItems: 1
+                  maxItems: 60
+                  items: { $ref: "#/components/schemas/DayNarrationFact" }
+      responses:
+        "200":
+          description: The guarded narration, and the athlete's remaining quota.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [narration, quota]
+                properties:
+                  narration:
+                    type: object
+                    required: [sentences, dropped]
+                    properties:
+                      sentences:
+                        type: array
+                        maxItems: 3
+                        items: { $ref: "#/components/schemas/DayNarrationSentence" }
+                      dropped:
+                        type: integer
+                        minimum: 0
+                        description: How many sentences the server-side guard refused. Their text is not returned.
+                  quota: { $ref: "#/components/schemas/DayNarrationQuota" }
+        "400":
+          description: >
+            A malformed body, an unknown field (a `user_id` included: whose day
+            this is comes from the token alone), or facts that fail validation.
+            All are detected before the quota, so none costs a narration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: >
+            The model declined, or its output was truncated. Billed and metered,
+            like `draftBjjReflection`'s 422. A client may retry once, and each
+            try counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: The rolling daily cap is used up.
+          headers:
+            Retry-After:
+              description: Whole seconds until one more narration is available, rounded up. Never zero.
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: >
+            Narration is not configured on this deploy, or the provider is
+            unavailable. Read the `code`, and only the code. `unavailable` means
+            the provider never answered: nothing was spent, and this call did
+            not use a narration. `internal` means the call completed and was
+            charged, or that this deploy has no API key.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

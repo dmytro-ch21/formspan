@@ -32,6 +32,7 @@ import (
 	"github.com/dmytro-ch21/vola/backend/internal/modules/food"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/friend"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/health"
+	"github.com/dmytro-ch21/vola/backend/internal/modules/narration"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/notification"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/nutrition"
 	"github.com/dmytro-ch21/vola/backend/internal/modules/plan"
@@ -526,6 +527,37 @@ func main() {
 	}
 	reflectHandler := bjj.NewDraftHandler(reflectionDrafter, bjj.NewPostgresDraftUsage(pool))
 
+	// Day narration (N570, #1131). The fourth feature on `internal/platform/llm`,
+	// in the same nil-safe shape as the three above: no key means a nil Narrator,
+	// a 503 from this one route, and every other route running normally. A
+	// misspelled provider fails the boot. The model tier is not yet measured for
+	// this task; see `narration.DefaultModels`.
+	narrationProvider := narration.Provider(os.Getenv("NARRATION_PROVIDER"))
+	if narrationProvider == "" {
+		narrationProvider = narration.DefaultProvider
+	}
+	narrationKey := ""
+	if env := narrationProvider.APIKeyEnv(); env != "" {
+		narrationKey = os.Getenv(env)
+	}
+	dayNarrator, err := narration.NewNarrator(narration.Config{
+		Provider: narrationProvider,
+		Model:    os.Getenv("NARRATION_MODEL"),
+		APIKey:   narrationKey,
+	})
+	if err != nil {
+		logger.Error("narration: config", "err", err)
+		os.Exit(1)
+	}
+	if dayNarrator == nil {
+		logger.Info("narration: disabled", "reason", "no "+narrationProvider.APIKeyEnv())
+	} else {
+		logger.Info("narration: enabled",
+			"provider", string(narrationProvider),
+			"model", narration.ResolveModel(narrationProvider, os.Getenv("NARRATION_MODEL")))
+	}
+	narrationHandler := narration.NewHandler(dayNarrator, narration.NewPostgresUsage(pool))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/healthz", handleHealthz)
 	// DB-aware readiness — see readyz.go and the readiness comment above.
@@ -697,6 +729,9 @@ func main() {
 	// gate runs inside the handler because it has to run BEFORE the model call
 	// and its refusal needs the quota's own numbers in the message.
 	mux.Handle("POST /v1/bjj/reflect/draft", verifier.RequireAuth(http.HandlerFunc(reflectHandler.Draft)))
+	// N570: narrates the facts the phone sends. Reads no athlete table, and stores
+	// only a metering row per call.
+	mux.Handle("POST /v1/day/narration", verifier.RequireAuth(http.HandlerFunc(narrationHandler.Narrate)))
 
 	// What the athlete has actually achieved on the mat and in competition,
 	// DERIVED from evidence that already exists -- contests and the tag stream
