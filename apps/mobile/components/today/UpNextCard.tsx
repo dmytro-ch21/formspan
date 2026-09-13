@@ -4,6 +4,7 @@ import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { sportColor, sportIcon, sportTint } from '@/components/ui/sport';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { PRESS_OPACITY } from '@/constants/Motion';
 
@@ -156,15 +157,15 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
+    borderRadius: Radius.card,
     overflow: 'hidden',
     paddingLeft: 0,
-    paddingRight: 12,
-    paddingVertical: 14,
+    paddingRight: Spacing.md,
+    paddingVertical: Spacing.cardPadding,
   },
   pressed: { backgroundColor: vola.surfaceHover },
   rule: { width: 3, alignSelf: 'stretch' },
@@ -178,16 +179,16 @@ const styles = StyleSheet.create({
   },
   text: { flex: 1, gap: 1 },
   eyebrow: { ...Typography.eyebrow },
-  title: { fontSize: 19, fontWeight: '700', color: vola.text },
-  when: { fontSize: 12, color: vola.textMuted },
-  hint: { fontSize: 12, color: vola.textDim, marginTop: 2 },
+  title: { ...Typography.title, color: vola.text, fontWeight: '700' },
+  when: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
+  hint: { ...Typography.caption, color: vola.textDim, marginTop: Spacing.xxs, fontWeight: '400' },
   log: {
     backgroundColor: vola.lime,
     borderRadius: 10,
     paddingHorizontal: 18,
-    paddingVertical: 10,
+    paddingVertical: Spacing.smPlus,
   },
   logPressed: { opacity: PRESS_OPACITY },
-  logLabel: { fontSize: 14, fontWeight: '700', color: vola.bg },
-  missed: { fontSize: 13, color: vola.warn },
+  logLabel: { ...Typography.body, color: vola.bg, fontWeight: '700' },
+  missed: { ...Typography.meta, color: vola.warn },
 });

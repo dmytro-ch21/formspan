@@ -39,6 +39,8 @@ import {
 import { parseRings, type RingKey, DEFAULT_RINGS } from '@/lib/macroRings';
 import { TrackerList } from '@/components/TrackerList';
 import { vola } from '@/constants/Colors';
+import { Radius, Spacing } from '@/constants/Spacing';
+import { Typography } from '@/constants/Typography';
 import { addDays, dayPillLabel, dayString, weekDays } from '@/lib/calendar';
 import { fetchThemes, type Theme } from '@/lib/themes';
 import { formatElapsed } from '@/lib/rest';
@@ -2108,23 +2110,28 @@ const styles = StyleSheet.create({
   themeCard: {
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 2,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.md,
+    gap: Spacing.xxs,
   },
   themeLabel: {
-    fontSize: 10,
+    ...Typography.eyebrow,
     color: vola.textDim,
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    fontWeight: '400',
   },
-  themeTitle: { fontSize: 15, fontWeight: '700' },
-  themeNotes: { fontSize: 12, color: vola.textMuted, marginTop: 2 },
-  container: { gap: 12 },
+  themeTitle: { ...Typography.emphasis, fontWeight: '700' },
+  themeNotes: {
+    ...Typography.caption,
+    color: vola.textMuted,
+    marginTop: Spacing.xxs,
+    fontWeight: '400',
+  },
+  container: { gap: Spacing.md },
   dayLink: { minHeight: 32, justifyContent: 'center' },
   dayLinkPressed: { opacity: PRESS_OPACITY },
-  dayLinkText: { fontSize: 14, fontWeight: '700' },
+  dayLinkText: { ...Typography.body, fontWeight: '700' },
 
   // The workouts tab's pill, to the point: same radius, same padding, same
   // `bottom`, same accent shadow. Two floating primary actions that sat at
@@ -2135,9 +2142,9 @@ const styles = StyleSheet.create({
     bottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    paddingVertical: 12,
+    gap: Spacing.sm,
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.md,
     paddingHorizontal: 18,
     // NO GLOW (N108). The user has said twice that they do not want haze
     // anywhere on this screen. Removing the `accentGlow` call alone would not
@@ -2145,35 +2152,40 @@ const styles = StyleSheet.create({
     // `elevation` regardless of colour.
   },
   fabPressed: { opacity: PRESS_OPACITY },
-  fabText: { fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
-  body: { paddingHorizontal: 20, gap: 16 },
+  fabText: { ...Typography.emphasis, fontWeight: '800' },
+  body: { paddingHorizontal: Spacing.gutter, gap: Spacing.lg },
 
   resumeCard: {
     backgroundColor: vola.surfaceRaised,
-    borderRadius: 16,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     padding: 18,
-    gap: 4,
+    gap: Spacing.xs,
   },
   // Stale sessions drop the lime entirely: lime is this app's "act on this
   // now", and a workout from last Tuesday is not that.
   resumeCardStale: { borderColor: vola.line, backgroundColor: vola.surface },
-  resumeEyebrow: { fontSize: 11, letterSpacing: 1.2, fontWeight: '700' },
+  resumeEyebrow: { ...Typography.eyebrow },
   resumeEyebrowStale: { color: vola.warn },
   resumeActionStale: { backgroundColor: 'transparent', borderWidth: 1, borderColor: vola.line },
   resumeActionTextStale: { color: vola.text },
-  resumeTitle: { fontSize: 22, fontWeight: '700' },
+  resumeTitle: { ...Typography.title, fontWeight: '700' },
   // Tabular figures so a ticking clock doesn't shuffle the text beside it.
-  resumeMeta: { color: vola.textMuted, fontSize: 14, fontVariant: ['tabular-nums'] },
-  resumeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 2 },
+  resumeMeta: { ...Typography.body, color: vola.textMuted, fontVariant: ['tabular-nums'] },
+  resumeMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.cardPadding,
+    marginTop: Spacing.xxs,
+  },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   resumeAction: {
-    marginTop: 12,
+    marginTop: Spacing.md,
     borderRadius: 10,
     paddingVertical: 13,
     alignItems: 'center',
   },
-  resumeActionText: { fontWeight: '700', fontSize: 16 },
+  resumeActionText: { ...Typography.emphasis, fontWeight: '700' },
 
   // Planned and finished. A statement, not a control — there is nothing left
   // to press, and a card that looks pressable and is not is worse than a flat
@@ -2181,27 +2193,27 @@ const styles = StyleSheet.create({
   planDone: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
   },
-  planDoneTitle: { color: vola.text, fontSize: 15, fontWeight: '700' },
+  planDoneTitle: { ...Typography.emphasis, color: vola.text, fontWeight: '700' },
 
   // LATER. Flat and buttonless on purpose — see `LaterBlock`.
   later: {
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.lineSoft,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 2,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.cardPadding,
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.xxs,
   },
-  laterTitle: { fontSize: 15, fontWeight: '700' },
+  laterTitle: { ...Typography.emphasis, fontWeight: '700' },
 
   // Quieter than a plan card and louder than the empty state: a solid surface
   // with no accent fill and no button. The plan is the thing to act on; this
@@ -2209,44 +2221,44 @@ const styles = StyleSheet.create({
   suggestion: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.cardPadding,
+    paddingHorizontal: Spacing.lg,
   },
-  suggestionEyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 1.1 },
+  suggestionEyebrow: { ...Typography.eyebrow, fontWeight: '800' },
   // `textMuted` (6.85:1 here), not `textDim` (3.67:1, under AA at 12pt). This
   // line carries the card's entire justification — it is the evidence, not
   // decoration, and a card that asks to be judged on its reasoning has to let
   // it be read.
-  suggestionMeta: { color: vola.textMuted, fontSize: 12, lineHeight: 16 },
+  suggestionMeta: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
   // 44pt of touch with `hitSlop`, so the one control on this card that cannot
   // be undone is not the fiddliest thing on the screen.
-  dismiss: { padding: 6, marginRight: -6, borderRadius: 14 },
+  dismiss: { padding: Spacing.xsPlus, marginRight: -6, borderRadius: Radius.card },
   // Opacity, not a square fill — a hard 27pt square flashing inside a 14pt-
   // radius card reads as a rendering fault.
   dismissPressed: { opacity: 0.5 },
 
   planCardPressed: { backgroundColor: vola.surfaceHover },
-  planMain: { flex: 1, gap: 2, marginLeft: 13 },
-  planTitle: { fontSize: 18, fontWeight: '700' },
+  planMain: { flex: 1, gap: Spacing.xxs, marginLeft: 13 },
+  planTitle: { ...Typography.title, fontWeight: '700' },
 
   planEmpty: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Spacing.md,
     borderWidth: 1,
     borderColor: vola.lineSoft,
     borderStyle: 'dashed',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.cardPadding,
   },
-  planEmptyTitle: { fontSize: 15, fontWeight: '700', color: vola.textMuted },
-  planEmptyMeta: { fontSize: 12, color: vola.textDim },
+  planEmptyTitle: { ...Typography.emphasis, color: vola.textMuted, fontWeight: '700' },
+  planEmptyMeta: { ...Typography.caption, color: vola.textDim, fontWeight: '400' },
 
   // Outlined, never filled — see the comment at its call site.
   startButton: {
@@ -2254,13 +2266,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
     borderStyle: 'dashed',
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: Radius.card,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: Spacing.md,
   },
-  startText: { color: vola.text, fontWeight: '600', fontSize: 16 },
+  startText: { ...Typography.emphasis, color: vola.text },
 
   // The Fuel slot when nutrition is off. Dashed and unfilled, matching
   // `startButton` above rather than MomentumCard — it marks an absence, and a
@@ -2269,29 +2281,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vola.line,
     borderStyle: 'dashed',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 2,
+    borderRadius: Radius.card,
+    paddingHorizontal: Spacing.cardPadding,
+    paddingVertical: Spacing.cardPadding,
+    gap: Spacing.xxs,
   },
   fuelOffPressed: { opacity: PRESS_OPACITY },
-  fuelOffTitle: { color: vola.text, fontWeight: '600', fontSize: 14 },
+  fuelOffTitle: { ...Typography.body, color: vola.text, fontWeight: '600' },
   // textMuted, not textDim: at 12pt this is small text, and textDim measures
   // 3.96:1 on `bg` — below AA's 4.5:1. This sits on `bg` rather than a card, so
   // textMuted here is 7.38:1.
-  fuelOffNote: { color: vola.textMuted, fontSize: 12 },
+  fuelOffNote: { ...Typography.caption, color: vola.textMuted, fontWeight: '400' },
 
   // The cards space themselves; the header sits a touch closer to the first
   // one than the gap between cards, so the label reads as belonging to them.
-  section: { gap: 8, marginTop: 4 },
+  section: { gap: Spacing.sm, marginTop: Spacing.xs },
 
   pendingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: Spacing.md,
   },
-  pendingText: { color: vola.warn, fontSize: 13 },
-  retryText: { fontWeight: '600', fontSize: 14 },
-  syncError: { color: vola.danger, fontSize: 13, marginTop: -8 },
+  pendingText: { ...Typography.meta, color: vola.warn },
+  retryText: { ...Typography.body, fontWeight: '600' },
+  syncError: { ...Typography.meta, color: vola.danger, marginTop: -8 },
 });

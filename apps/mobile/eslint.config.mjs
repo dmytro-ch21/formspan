@@ -62,7 +62,8 @@ const fontSizeSelector = FONT_SIZE_SCALE_VALUES.map(
 ).join(", ");
 
 /**
- * The eight files N508 actually converted. An ALLOWLIST, not a directory
+ * The files converted so far — N508's eight, then one screen per N561 child
+ * (N572: Today). An ALLOWLIST, not a directory
  * glob — ~130 files in this app still mint bare spacing/fontSize literals on
  * purpose (this is the foundational PR, not the full app-wide migration; see
  * this ticket's `docs/decisions/history.md` entry for the follow-up-batch
@@ -87,6 +88,17 @@ const N508_CONVERTED_FILES = [
   "app/running/\\[id\\].tsx",
   "app/bjj/session/\\[id\\].tsx",
   "app/session/\\[id\\].tsx",
+  // N572 (#1187) — the Today screen, listed file by file rather than as
+  // `components/today/*` so a new card does not join the guard unconverted.
+  "app/(tabs)/index.tsx",
+  "components/today/DetectedActivityCard.tsx",
+  "components/today/LoggedCard.tsx",
+  "components/today/MacroRings.tsx",
+  "components/today/MiniCards.tsx",
+  "components/today/MomentumCard.tsx",
+  "components/today/ProgressCard.tsx",
+  "components/today/UpNextCard.tsx",
+  "components/today/WeekStrip.tsx",
 ];
 
 export default defineConfig([
@@ -167,8 +179,8 @@ export default defineConfig([
   },
   {
     // N508 — see the constants and comment above this file's `export
-    // default` for the full argument. Scoped to exactly the eight files this
-    // ticket converted; widen this list as future migration batches land.
+    // default` for the full argument. Scoped to exactly the files converted so
+    // far; widen the list as each migration batch lands.
     files: N508_CONVERTED_FILES,
     rules: {
       "no-restricted-syntax": [
