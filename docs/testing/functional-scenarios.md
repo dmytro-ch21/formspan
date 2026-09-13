@@ -24630,3 +24630,20 @@ Typography only; nothing moves, animates or behaves differently. What an athlete
   - that no motion line changed;
   - that the screens rendering these components still pass their suites.
 - **Not reachable:** clipping, truncation and overlap at a real text size. Those need a device.
+## F67 — a refused food entry stops asking for attention once the server's copy is pulled back (`apps/mobile/lib/foodLog.ts` `cacheEntries`, #1201)
+
+### Happy path
+
+- **An entry the server already holds is corrected on the phone, and the server refuses the correction permanently** (e.g. servings set to 0): the phone shows the entry as needing attention, with the server's reason.
+- **A pull then brings back the server's copy** (today: the fresh-install backfill; later: any web writer): the entry shows the server's values from before the refused correction, the attention count drops by one, and it is no longer listed as refused or reported as stuck.
+
+### Edge cases & errors
+
+- **The refused correction itself is not kept.** The server's copy replaces it and the athlete is not told — the same rule saved foods already follow. The owner chose this on 2026-09-13; letting the athlete decide instead would mean excluding refused rows from the pull.
+- **The athlete makes a further edit after the refusal, before the pull:** that edit is kept and owed to the server; the pull does not overwrite it, and the entry is not counted as refused.
+- **A refused delete** is not touched by the pull.
+
+### What a test can and cannot reach
+
+- **Reachable, and covered** (`lib/__tests__/foodLog.test.ts`, "a pull that brings back a refused entry"): both cases above against real SQLite, starting from a real permanent rejection of an edit; two mutations, each red.
+- **NOT reachable:** producing a refused edit and then a backfill on a device.

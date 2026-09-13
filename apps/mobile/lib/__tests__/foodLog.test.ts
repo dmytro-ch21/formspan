@@ -42,6 +42,8 @@ import {
   localEntries as localTrackerEntries,
 } from '../trackers';
 import type { Tracker } from '../trackerModel';
+import { countRejectedRows } from '../rejectedRows';
+import { stuckRowGroups } from '../stuckRows';
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 let db: FixtureDb;
@@ -1381,5 +1383,88 @@ describe('order inside a meal (N553/#1019)', () => {
 
     expect(await positions()).toEqual(before);
     expect(await row(id)).toMatchObject({ dirty: 0 });
+  });
+});
+
+/**
+ * F67 (#1201) — a refused food entry, and a pull that brings back the server's
+ * copy of it.
+ *
+ * The reachable way into this state is a refused EDIT: an entry the server
+ * already holds (`remote = 1`) is corrected on the phone, and the server refuses
+ * the correction permanently, which leaves the row `dirty = 0` with its refusal
+ * set and the rejected values still in its columns. (A refused CREATE is not a
+ * path here: the server never stored that id, so no pull can bring one back.)
+ *
+ * `cacheEntries` then overwrites the row with the server's copy — the version
+ * from before the refused edit. Before F67 it left the refusal in place, so the
+ * row went on matching `REFUSED_ROW`: counted by `countRejectedRows`, reported
+ * as stuck, while showing values the refusal did not describe. Now the server's
+ * copy wins and the refusal goes with it, which is the rule `cacheFoods` already
+ * records for foods: after a permanent rejection the server's copy is the truth.
+ * The cost, stated here because it is a choice: the refused correction is not
+ * kept, and nothing tells the athlete it was replaced.
+ *
+ * Every case starts from a REAL refusal (the edit's PUT rejected permanently
+ * through `syncFood`), so the error code and `stuck_since` are the ones the
+ * shipped writers and triggers produce.
+ */
+describe('a pull that brings back a refused entry (F67/#1201)', () => {
+  /** An entry the server holds, whose correction the server then refused. */
+  async function refusedEdit(): Promise<string> {
+    const id = await logFood(USER, meal());
+    await db.runAsync(`UPDATE food_entries SET dirty = 0, remote = 1 WHERE id = ?`, id);
+    await editEntry(USER, id, meal({ servings: 0, kcal: 0 }));
+    mockApi.mockImplementation(async (_t: unknown, _path: string, init?: { method?: string }) => {
+      if (init?.method === 'PUT') throw new ApiError('servings must be more than 0', 'invalid_input', 400);
+      return {};
+    });
+    await syncFood(USER, token);
+    mockApi.mockReset().mockResolvedValue({});
+    // The precondition, asserted rather than assumed: a row the server holds,
+    // refused, still carrying the rejected values, and counted and reported.
+    expect(
+      await db.getFirstAsync(
+        `SELECT dirty, remote, kcal, last_error IS NOT NULL AS refused, last_error_code, stuck_since IS NOT NULL AS aged FROM food_entries WHERE id = ?`,
+        id,
+      ),
+    ).toEqual({ dirty: 0, remote: 1, kcal: 0, refused: 1, last_error_code: 'invalid_input', aged: 1 });
+    expect(await countRejectedRows(USER)).toBe(1);
+    expect((await stuckRowGroups(USER)).map((g) => [g.domain, g.state, g.code, g.rows])).toEqual([
+      ['food_entry', 'refused', 'invalid_input', 1],
+    ]);
+    return id;
+  }
+
+  it('the server’s copy wins over a refused edit, and the refusal, its code and its clock go with it', async () => {
+    const id = await refusedEdit();
+
+    // The server still holds the version from before the refused edit.
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal(), id, source_food_id: null, category: null, notes: '' },
+    ]);
+
+    expect(
+      await db.getFirstAsync(
+        `SELECT dirty, remote, servings, kcal, last_error, last_error_code, stuck_since FROM food_entries WHERE id = ?`,
+        id,
+      ),
+    ).toEqual({ dirty: 0, remote: 1, servings: 1, kcal: 180, last_error: null, last_error_code: null, stuck_since: null });
+    expect(await countRejectedRows(USER)).toBe(0);
+    expect(await stuckRowGroups(USER)).toEqual([]);
+  });
+
+  it('a further edit made after the refusal wins over the pull, and is owed rather than refused', async () => {
+    const id = await refusedEdit();
+    await editEntry(USER, id, meal({ servings: 2, kcal: 360 }));
+
+    await cacheEntries(USER, TODAY, TODAY, [
+      { ...meal(), id, source_food_id: null, category: null, notes: '' },
+    ]);
+
+    // The pull's `dirty = 0` guard keeps the athlete's new correction: it is
+    // what the next push sends, and it is not in the refused count.
+    expect(await row(id)).toMatchObject({ dirty: 1, kcal: 360, last_error: null });
+    expect(await countRejectedRows(USER)).toBe(0);
   });
 });
