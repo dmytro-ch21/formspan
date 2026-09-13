@@ -2,8 +2,9 @@ import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
 import { newTraceId, traceparent } from "./trace";
-import { withDeadline } from "./deadline";
+import { isTimeout, withDeadline } from "./deadline";
 import { API_BASE } from "./apiConfig";
+import { failureDigest, kindForStatus, withFailureDigest } from "./adminFailure";
 
 export type AdminUserSummary = {
   user_id: string;
@@ -28,6 +29,15 @@ export type AdminUserSummary = {
 
 /** Carries the HTTP status so the error boundary can tell 403 from 5xx. */
 export class ApiError extends Error {
+  /**
+   * How `error.tsx` tells 403 from 5xx — F65 (#1182). It used to find the
+   * status in `message`, and a production build never sends a Server Component
+   * error's message to the browser, so every failure there read as "confirm the
+   * API is running". `digest` is the field that crosses; `adminFailure.ts` has
+   * the measurement and the format.
+   */
+  readonly digest: string;
+
   constructor(
     public readonly status: number,
     path: string,
@@ -36,13 +46,12 @@ export class ApiError extends Error {
     /** The backend's own message, when it sent one worth showing. */
     public readonly detail = "",
   ) {
-    // The status stays IN the message even when there is a detail. The error
-    // boundary detects 401/403 by substring — it receives a plain Error across
-    // the boundary, not this class — so replacing the message with the detail
-    // alone silently broke the ADMIN_USER_IDS-drift case, which is the most
-    // likely failure in practice. Callers that want clean copy read `detail`.
+    // The status stays in the message for the server log, which is where the
+    // message still arrives. The boundary no longer reads it (see `digest`).
+    // Callers that want clean copy read `detail`.
     super(detail ? `API responded ${status} for ${path}: ${detail}` : `API responded ${status} for ${path}`);
     this.name = "ApiError";
+    this.digest = failureDigest(kindForStatus(status), status);
   }
 }
 
@@ -51,7 +60,15 @@ export class ApiError extends Error {
  * render with a `TimeoutError` instead of holding it until the runtime gives up.
  */
 async function adminFetch<T>(path: string, init?: { method: string; body: unknown }): Promise<T> {
-  return withDeadline(undefined, {}, (signal) => adminFetchUnbounded<T>(path, init, signal));
+  try {
+    return await withDeadline(undefined, {}, (signal) => adminFetchUnbounded<T>(path, init, signal));
+  } catch (err) {
+    // F65: `ApiError` stamps its own digest. A `TimeoutError` is deadline.ts's
+    // class — a copy of web's, kept free of admin-only concerns — so it is
+    // classified here, at the one door every admin read goes through.
+    if (isTimeout(err)) throw withFailureDigest(err, "timeout");
+    throw err;
+  }
 }
 
 /**
@@ -76,19 +93,29 @@ async function adminFetchUnbounded<T>(
     throw new ApiError(401, path);
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: init?.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      // Correlates this admin read with the API's structured logs, same as
-      // apps/web and apps/mobile already do for their own calls.
-      traceparent: traceparent(newTraceId()),
-      ...(init ? { "Content-Type": "application/json" } : {}),
-    },
-    body: init ? JSON.stringify(init.body) : undefined,
-    cache: "no-store",
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: init?.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        // Correlates this admin read with the API's structured logs, same as
+        // apps/web and apps/mobile already do for their own calls.
+        traceparent: traceparent(newTraceId()),
+        ...(init ? { "Content-Type": "application/json" } : {}),
+      },
+      body: init ? JSON.stringify(init.body) : undefined,
+      cache: "no-store",
+      signal,
+    });
+  } catch (err) {
+    // The deadline's own abort lands here too, and `withDeadline` names that
+    // one a TimeoutError. Anything else is the connection failing — refused,
+    // DNS, TLS — which is the one failure "confirm the API is running" is the
+    // right advice for (F65).
+    if (signal.aborted) throw err;
+    throw withFailureDigest(err, "unreachable");
+  }
 
   if (!res.ok) {
     throw await apiErrorFrom(res, path);

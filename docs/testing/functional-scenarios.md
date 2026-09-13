@@ -24006,6 +24006,61 @@ for a model or a large body (no web or admin call needs that one yet).
 - **Not automated:** the Library page's loaders and every screen above — web
   has no test that runs a page's effects.
 
+## Admin — the error page names the right cause in a production build (F65 / #1182)
+
+What an operator reads when an admin screen fails. **Run every scenario against
+a production build** (`pnpm --filter admin build`, then `pnpm --filter admin
+start`), never `next dev` alone. The defect lived only in production: a
+production build does not send a Server Component error's message to the
+browser, so the old page classified nothing there, while `next dev` looked
+correct. Each case below should read the same in both.
+
+Every error page also shows a `Reference`. Search the admin server's log for it:
+the full error, with message, sits beside that digest.
+
+### Happy path
+
+- **ADMIN_USER_IDS drift.** Sign in as a user on admin's `ADMIN_USER_IDS` but
+  not the API's, then open Users. **Pass:** "The API rejected this account as
+  not-an-admin…", pointing at the API's own `ADMIN_USER_IDS`. **Fail:** "Couldn't
+  reach the API" or "Confirm it's running": the page sent you to check a
+  healthy API.
+- **A rejected session.** Make the API refuse the token (a different Clerk
+  instance's keys on the API, for example) and open Users. **Pass:** "The API
+  rejected the session token. Try signing out and back in."
+- **A hung API.** Pause the API process (`kill -STOP`) and open Users.
+  **Pass:** after about 30s, "The API took too long to answer…". **Fail:** the
+  refused-connection copy, which is a different failure.
+- **An API that is down.** Stop the API outright and open Users. **Pass:**
+  "Couldn't reach the API. Confirm it's running and reachable at
+  `NEXT_PUBLIC_API_URL`." This is the only case that says so.
+
+### Edge cases and errors
+
+- **Any other status.** Make the API answer 500 (or 502 through a proxy).
+  **Pass:** "The API answered with an error (HTTP 500)." with no guess at the
+  cause.
+- **A failure that is not the API's.** A page that throws while rendering, with
+  the API healthy. **Pass:** "…it wasn't an API response this console
+  recognises", and a numeric reference. **Fail:** any copy about the API.
+- **The reference finds the log line.** For each case above, the reference on
+  screen appears in the admin server's log next to the original error
+  (`API responded 403 for /admin/users: …`, and so on).
+- **A 404 still reaches a real not-found.** Open `/users/nobody`. **Pass:**
+  the not-found page, not this error page. The per-page 404 handling is
+  unchanged.
+
+### Automated
+
+- `apps/admin/src/app/__tests__/errorBoundary.test.tsx`: 403, 401, timeout,
+  unreachable, HTTP 500 and unclassified failures from the real `listUsers()`,
+  handed to `error.tsx` the way production delivers them (message replaced,
+  digest only). Also Next's own error handlers keeping the stamped digest, and
+  the digest format.
+- **Not automated:** the production Flight transport itself, meaning that the
+  digest reaches the browser. It was measured on `next start` for F65, and is
+  worth re-measuring after a Next upgrade.
+
 ## N568 — the day panel's last-known check-in and phase goal, offline (`apps/mobile/lib/bodyCache.ts`, the Body block in `apps/mobile/app/day.tsx`, #1129)
 
 A **read cache, not an outbox**: the last successful answer to the check-in and
