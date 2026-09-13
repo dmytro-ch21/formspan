@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { heartRateSamplesInWindow, type BiometricSource, type RawHeartRateSample } from './biometric';
+import { stepsFromHealthConnect, type StepsOutcome } from './steps';
 
 /**
  * `react-native-health-connect`, imported the same defensive way
@@ -64,6 +65,8 @@ type NativeExerciseSessionRecord = {
 
 type ReadRecordsOptions = {
   timeRangeFilter: { operator: 'between'; startTime: string; endTime: string };
+  /** Verified present on the package's own `ReadRecordsOptions` (v4.1.3). */
+  pageSize?: number;
 };
 
 type Permission = { accessType: 'read' | 'write'; recordType: string };
@@ -76,9 +79,18 @@ type HealthConnectModule = {
    *  specific shape it asked for by `recordType`, rather than this type
    *  trying to encode the real package's generic/overloaded signature. */
   readRecords: (
-    recordType: 'HeartRate' | 'Vo2Max' | 'ExerciseSession',
+    recordType: 'HeartRate' | 'Vo2Max' | 'ExerciseSession' | 'Steps',
     options: ReadRecordsOptions,
   ) => Promise<{ records: unknown[] }>;
+  /** N569. `aggregateRecord` for `Steps` resolves `{ COUNT_TOTAL }`, and an
+   *  empty window resolves `COUNT_TOTAL: 0` rather than rejecting — verified
+   *  against `ReactStepsRecord.kt`'s `parseAggregationResult` (`?: 0.0`). It
+   *  rejects through the same `rejectWithException` as `readRecords`, so a
+   *  refusal arrives as `PERMISSION_ERROR` here too. */
+  aggregateRecord: (request: {
+    recordType: 'Steps';
+    timeRangeFilter: ReadRecordsOptions['timeRangeFilter'];
+  }) => Promise<{ COUNT_TOTAL?: number | null }>;
 };
 
 /** `SdkAvailabilityStatus.SDK_AVAILABLE` — a numeric literal for the same
@@ -112,9 +124,24 @@ const hc = load();
  * comment gives: Health Connect shows one consent screen regardless, so an
  * athlete who already granted heart rate never sees a second prompt when
  * walk/hike detection shipped after it. */
-const READ_RECORD_TYPES = ['HeartRate', 'Vo2Max', 'ExerciseSession'] as const;
+const READ_RECORD_TYPES = ['HeartRate', 'Vo2Max', 'ExerciseSession', 'Steps'] as const;
 
 export type HealthConnectRecordType = (typeof READ_RECORD_TYPES)[number];
+
+/**
+ * N569/#1130 — `Steps` is in `READ_RECORD_TYPES`, because every type this app
+ * reads is (and `check:health-permissions-parity` holds the manifest to that
+ * list), but it is NOT asked for by a sync pass until the athlete has asked for
+ * it. Same reason as `lib/healthkit.ts`'s `STEPS_READ_TYPE`: a pass re-requests
+ * access on every foreground return, and a new type in that request opens the
+ * Health Connect permission screen with nothing on screen saying why.
+ *
+ * Pure and exported because it is the guard: `includeSteps: false` must never
+ * contain `Steps`.
+ */
+export function healthConnectReadRecordTypes(includeSteps: boolean): readonly HealthConnectRecordType[] {
+  return includeSteps ? READ_RECORD_TYPES : READ_RECORD_TYPES.filter((t) => t !== 'Steps');
+}
 
 /**
  * W15/#944 — a read that Health Connect REFUSED, as opposed to one that
@@ -244,17 +271,85 @@ async function ensureInitialized(): Promise<boolean> {
  * read time regardless of what this returned. The read site is the ground
  * truth, and `HealthConnectPermissionError` is how it reports.
  */
-export async function requestHealthConnectReadAuthorization(): Promise<boolean> {
+export async function requestHealthConnectReadAuthorization(
+  options: { includeSteps?: boolean } = {},
+): Promise<boolean> {
+  if (!(await ensureInitialized())) return false;
+  const types = healthConnectReadRecordTypes(options.includeSteps ?? false);
+  try {
+    const granted = await hc!.requestPermission(
+      types.map((recordType) => ({ accessType: 'read' as const, recordType })),
+    );
+    return types.every((rt) => granted.some((g) => g.recordType === rt && g.accessType === 'read'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * N569/#1130 — the deliberate ask, from the "Allow steps" action only. Returns
+ * whether `Steps` was granted, which the UI does not rely on either: the next
+ * read is the ground truth, for the reasons `requestHealthConnectReadAuthorization`
+ * gives.
+ */
+export async function requestHealthConnectStepsAuthorization(): Promise<boolean> {
   if (!(await ensureInitialized())) return false;
   try {
     const granted = await hc!.requestPermission(
       READ_RECORD_TYPES.map((recordType) => ({ accessType: 'read' as const, recordType })),
     );
-    return READ_RECORD_TYPES.every((rt) =>
-      granted.some((g) => g.recordType === rt && g.accessType === 'read'),
-    );
+    return granted.some((g) => g.recordType === 'Steps' && g.accessType === 'read');
   } catch {
     return false;
+  }
+}
+
+/**
+ * Today's step count from Health Connect — N569/#1130.
+ *
+ * An AGGREGATE, not a sum of `readRecords`: a phone and a watch app often both
+ * write steps for the same minutes, and Health Connect's aggregate is what
+ * de-duplicates them by the athlete's data-source priority, the same number the
+ * Health Connect app shows. Summing records would double-count.
+ *
+ * - A refused grant throws `HealthConnectPermissionError('Steps')` (W15/#944),
+ *   the same posture as every read in this file.
+ * - **Any other failure also throws**, unlike the `query*` functions above: an
+ *   empty list is harmless to their callers, a swallowed failure here would be a
+ *   step count. `lib/steps.ts`'s `runStepsRead` catches and records nothing.
+ * - `COUNT_TOTAL: 0` is resolved by `stepsFromHealthConnect`: a zero only when
+ *   some app has recorded a `Steps` record in the lookback, `no_data` otherwise.
+ */
+export async function queryHealthConnectSteps(window: {
+  dayStart: Date;
+  lookbackStart: Date;
+  now: Date;
+}): Promise<StepsOutcome> {
+  if (!(await ensureInitialized())) throw new Error('Health Connect is not available');
+  try {
+    const total = (
+      await hc!.aggregateRecord({
+        recordType: 'Steps',
+        timeRangeFilter: {
+          operator: 'between',
+          startTime: window.dayStart.toISOString(),
+          endTime: window.now.toISOString(),
+        },
+      })
+    ).COUNT_TOTAL;
+    if (total != null && Number.isFinite(total) && total > 0) return stepsFromHealthConnect(total, true);
+    const recent = await hc!.readRecords('Steps', {
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: window.lookbackStart.toISOString(),
+        endTime: window.now.toISOString(),
+      },
+      pageSize: 1,
+    });
+    return stepsFromHealthConnect(total, recent.records.length > 0);
+  } catch (err) {
+    rethrowIfNotPermitted(err, 'Steps');
+    throw err;
   }
 }
 

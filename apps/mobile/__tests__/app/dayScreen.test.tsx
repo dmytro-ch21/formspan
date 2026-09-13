@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 
 import DayScreen from '../../app/day';
 import { DayNarrationSlot } from '@/components/day/DayNarrationSlot';
@@ -13,6 +13,7 @@ import type { Module } from '@/lib/modules';
 import { planSession } from '@/lib/plan';
 import { startLocalSession } from '@/lib/sessionStore';
 import { startSessionHref } from '@/lib/startSession';
+import { recordStepsOutcome, recordStepsState, setStepsRefresher } from '@/lib/steps';
 import type { Tracker } from '@/lib/trackerModel';
 import { cacheTrackers, logTap } from '@/lib/trackers';
 import { readDayPanel, unbackedFacts } from '@/lib/__tests__/support/dayFacts';
@@ -242,6 +243,8 @@ async function seedDay() {
   const fetched = new Date(`${today()}T08:00:00`).toISOString();
   await cacheCheckins(USER, shiftDate(today(), -30), today(), [checkinRow(USER, today(), 82.4)], fetched);
   await cachePhases(USER, [phaseRow(USER, 'cut-1')], fetched);
+  // N569: what this morning's Health read left in the steps store.
+  await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 8412 }, new Date(`${today()}T09:30:00`));
   return { plan, bjj };
 }
 
@@ -265,6 +268,7 @@ describe('offline, the whole day renders from rows', () => {
     expect(screen.getByTestId(`day-fact-nutrition-target:${today()}`)).toBeTruthy();
     expect(await screen.findByTestId(`day-fact-last-checkin:${today()}`)).toBeTruthy();
     expect(screen.getByTestId('day-fact-phase-goal:cut-1')).toBeTruthy();
+    expect(await screen.findByTestId(`day-fact-steps:${today()}`)).toBeTruthy();
 
     // The copy states the rows' own numbers, and nothing else.
     expect(screen.getByText('1 of 8 cups')).toBeTruthy();
@@ -272,6 +276,7 @@ describe('offline, the whole day renders from rows', () => {
     expect(screen.getByText('2,700 kcal a day')).toBeTruthy();
     expect(screen.getByText('82.4kg')).toBeTruthy();
     expect(screen.getByText('Target 78kg by 1 Nov')).toBeTruthy();
+    expect(screen.getByText('8,412 steps')).toBeTruthy();
 
     // No absence is drawn beside the facts that contradict it.
     expect(screen.queryByTestId('day-absent-plan')).toBeNull();
@@ -287,13 +292,15 @@ describe('offline, the whole day renders from rows', () => {
     await waitFor(() => expect(screen.getByTestId('day-fact-tracker:water')).toBeTruthy());
     await screen.findByTestId('day-fact-phase-goal:cut-1');
     await screen.findByTestId(`day-fact-last-checkin:${today()}`);
+    await screen.findByTestId(`day-fact-steps:${today()}`);
 
     const panel = await readDayPanel(USER, mockModules, new Date());
     const asserted = panelFacts(panel);
 
     // Something to compare — a comparison of two empty lists passes on a
-    // screen that renders nothing. Five from tranche 1, two cached (N568).
-    expect(asserted.length).toBe(7);
+    // screen that renders nothing. Five from tranche 1, two cached (N568), and
+    // today's steps (N569).
+    expect(asserted.length).toBe(8);
     expect(renderedFactKeys()).toEqual(asserted.map((f) => f.key).sort());
     expect(await unbackedFacts(mockFixture, USER, asserted)).toEqual([]);
   });
@@ -428,5 +435,102 @@ describe('the narration seam', () => {
   it('renders nothing while there is no narration', async () => {
     await render(<DayNarrationSlot narration={NO_NARRATION} />);
     expect(screen.toJSON()).toBeNull();
+  });
+});
+
+describe("today's steps, from the phone's own store (N569, #1130)", () => {
+  it('a count renders offline, saying when it was read and where from', async () => {
+    await recordStepsOutcome(USER, 'health_connect', { kind: 'steps', steps: 8412 }, new Date(`${today()}T09:30:00`));
+
+    await render(<DayScreen />);
+
+    const row = await screen.findByTestId(`day-fact-steps:${today()}`);
+    expect(within(row).getByText('8,412 steps')).toBeTruthy();
+    expect(within(row).getByText('As of 09:30, from Health Connect')).toBeTruthy();
+    expect(mockApi).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a genuine zero-step day says 0 steps', async () => {
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 0 }, new Date(`${today()}T09:30:00`));
+
+    await render(<DayScreen />);
+
+    const row = await screen.findByTestId(`day-fact-steps:${today()}`);
+    expect(within(row).getByText('0 steps')).toBeTruthy();
+  });
+
+  it('a refusal says so — never a number, never "no steps"', async () => {
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'refused' }, new Date());
+
+    await render(<DayScreen />);
+
+    expect(await screen.findByTestId('day-steps-refused')).toBeTruthy();
+    expect(screen.getByText("Apple Health isn't sharing steps with VOLA.")).toBeTruthy();
+    expect(screen.queryByText(/\d[\d,]* steps?$/)).toBeNull();
+    expect(screen.queryByTestId(`day-fact-steps:${today()}`)).toBeNull();
+    expect(screen.queryByTestId('day-absent-steps')).toBeNull();
+  });
+
+  it('a phone with no step source says that, and nothing else', async () => {
+    await recordStepsState(USER, 'no_source', null, new Date());
+
+    await render(<DayScreen />);
+
+    expect(await screen.findByTestId('day-steps-no-source')).toBeTruthy();
+    expect(screen.queryByText(/\d[\d,]* steps?$/)).toBeNull();
+  });
+
+  it('never read on this phone: "not available yet" — not zero', async () => {
+    await render(<DayScreen />);
+
+    expect(await screen.findByTestId('day-unavailable-steps')).toBeTruthy();
+    expect(screen.queryByText(/\d[\d,]* steps?$/)).toBeNull();
+  });
+
+  it('not connected yet: offers the way in, and it opens Settings', async () => {
+    await recordStepsState(USER, 'not_asked', 'healthkit', new Date());
+
+    await render(<DayScreen />);
+
+    const row = await screen.findByTestId('day-steps-not-connected');
+    await fireEvent.press(row);
+    expect(mockPush).toHaveBeenCalledWith('/settings');
+  });
+
+  it("another account's steps never render for the signed-in athlete", async () => {
+    await recordStepsOutcome('u2', 'healthkit', { kind: 'steps', steps: 7777 }, new Date(`${today()}T09:30:00`));
+
+    await render(<DayScreen />);
+
+    expect(await screen.findByTestId('day-unavailable-steps')).toBeTruthy();
+    expect(screen.queryByText('7,777 steps')).toBeNull();
+  });
+
+  it('a read that lands while VOLA is open shows up without leaving the screen', async () => {
+    await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 1200 }, new Date(`${today()}T09:30:00`));
+
+    await render(<DayScreen />);
+    expect(await screen.findByText('1,200 steps')).toBeTruthy();
+
+    // A foreground pass writes a newer count while the screen stays mounted.
+    await act(async () => {
+      await recordStepsOutcome(USER, 'healthkit', { kind: 'steps', steps: 4800 }, new Date(`${today()}T11:00:00`));
+    });
+
+    expect(await screen.findByText('4,800 steps')).toBeTruthy();
+    expect(screen.queryByText('1,200 steps')).toBeNull();
+  });
+
+  it('opening VOLA asks for a fresh steps read — so it stays current without passing through Today', async () => {
+    const refresh = jest.fn();
+    setStepsRefresher(refresh);
+    try {
+      await render(<DayScreen />);
+      expect(await screen.findByTestId('day-unavailable-steps')).toBeTruthy();
+      expect(refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      setStepsRefresher(null);
+    }
   });
 });

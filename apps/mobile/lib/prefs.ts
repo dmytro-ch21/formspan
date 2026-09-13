@@ -471,6 +471,19 @@ export const PREF_BIOMETRIC_SYNC_FAILURE_COUNT = 'biometric_sync_failure_count';
 export const PREF_HEALTH_CONNECT_IMPORT = 'health_connect_import_enabled';
 
 /**
+ * N569/#1130: `'1'` once the athlete has tapped "Allow steps" on this phone, so
+ * the Health read passes may include steps in the access they request. Absent
+ * means never asked — and then the passes leave steps OUT, because a type the
+ * athlete has never decided on makes the system sheet appear, and a sheet that
+ * pops up on a foreground return is widening the ask silently. See
+ * `lib/steps.ts`'s `readStepsAsked`.
+ *
+ * Device-local and never `owed`, same reasoning as {@link PREF_HEALTHKIT_IMPORT}:
+ * a permission prompt is shown by this phone's OS, not by the account.
+ */
+export const PREF_STEPS_ASKED = 'steps_permission_asked';
+
+/**
  * N528/#958: the remembered heart-rate monitor, as JSON
  * `{ id, name, rememberedAt }` — see `lib/hrMonitor/hrMonitorStore.ts`. Absent
  * means none paired; the live-HR machinery does nothing at all then.

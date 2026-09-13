@@ -891,6 +891,46 @@ const CREATE_DETECTED_ACTIVITIES = `
 `;
 
 /**
+ * N569/#1130 — today's step count, as Apple Health or Health Connect last
+ * reported it to this phone. One row per athlete per local day, overwritten by
+ * each later read that day (a step count is a counter, not a list of events).
+ *
+ * **A row is only ever a reading.** `steps = 0` means a read answered zero. A
+ * refusal, a phone with no step source, or a read that never ran writes NO row
+ * — those live in `steps_read_state` below — so nothing that is not a count can
+ * be drawn as one. See `lib/steps.ts`.
+ *
+ * Local only: no `dirty`, no `remote`. Why steps do not sync is recorded in the
+ * N569 history entry.
+ */
+const CREATE_DAILY_STEPS = `
+  CREATE TABLE IF NOT EXISTS daily_steps (
+    user_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    steps INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    read_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, day)
+  );
+`;
+
+/**
+ * N569/#1130 — what the most recent steps read concluded for this athlete on
+ * this phone: `read`, `refused`, `no_data`, `no_source`, `off` or `not_asked`.
+ * One row per athlete. Kept apart from `daily_steps` so a refusal can replace a
+ * reading as the current answer without deleting the reading or pretending it
+ * is zero.
+ */
+const CREATE_STEPS_READ_STATE = `
+  CREATE TABLE IF NOT EXISTS steps_read_state (
+    user_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    source TEXT,
+    checked_at TEXT NOT NULL
+  );
+`;
+
+/**
  * Current local schema version. Bump this and add a matching `if` in
  * `migrate()` whenever the local table shape changes.
  *
@@ -919,7 +959,7 @@ const CREATE_DETECTED_ACTIVITIES = `
  * make it independently idempotent or freeze the `CREATE` statements at their
  * historical shapes from that version onward.
  */
-const SCHEMA_VERSION = 43;
+const SCHEMA_VERSION = 44;
 
 /** Tables this file owns. Typed so a guard can't be pointed at a typo. */
 type LocalTable =
@@ -942,7 +982,9 @@ type LocalTable =
   | 'detected_activities'
   | 'body_checkins_cache'
   | 'body_phases_cache'
-  | 'body_cache_fetches';
+  | 'body_cache_fetches'
+  | 'daily_steps'
+  | 'steps_read_state';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -1033,6 +1075,8 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_BODY_CHECKINS_CACHE);
   await db.execAsync(CREATE_BODY_PHASES_CACHE);
   await db.execAsync(CREATE_BODY_CACHE_FETCHES);
+  await db.execAsync(CREATE_DAILY_STEPS);
+  await db.execAsync(CREATE_STEPS_READ_STATE);
   await db.execAsync(
     `CREATE INDEX IF NOT EXISTS activities_user_id_idx ON activities (user_id);`,
   );
@@ -1768,6 +1812,17 @@ export async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(CREATE_BODY_CHECKINS_CACHE);
     await db.execAsync(CREATE_BODY_PHASES_CACHE);
     await db.execAsync(CREATE_BODY_CACHE_FETCHES);
+  }
+
+  if (current < 44) {
+    // N569/#1130: steps — see CREATE_DAILY_STEPS. Two new tables and no ALTER,
+    // the same shape as v43: the unconditional CREATEs above already cover a
+    // stamped-43 device, and this branch states the version that introduced
+    // them. What it cannot do without the SCHEMA_VERSION bump is run at all —
+    // `migrate()` returns early at `current >= SCHEMA_VERSION`, which is what
+    // `schema.test.ts`'s stamped-43 case catches.
+    await db.execAsync(CREATE_DAILY_STEPS);
+    await db.execAsync(CREATE_STEPS_READ_STATE);
   }
 
   // The day query the card runs on every render of Today.

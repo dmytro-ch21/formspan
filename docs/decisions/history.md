@@ -75913,6 +75913,170 @@ The scratch copy sets `configure({ asyncUtilTimeout })` and runs three arms:
 - **No code changed.** This entry is the whole diff. The three-arm harness ran from the session scratchpad and left `git status` empty.
 - **Not user-facing**, so no functional scenarios.
 
+## 2026-09-12 — N569 (#1130): today's steps, read from Apple Health and Health Connect, stored on the phone, shown on VOLA
+
+**What landed.** A daily step count, new end to end.
+- **The read.** HealthKit's statistics query on iOS and Health Connect's aggregate on Android, both de-duplicated by source the way each Health app totals its own day.
+- **The store.** Local SQLite: `daily_steps` and `steps_read_state`, schema v43 to v44.
+- **The screen.** A **Steps** block on VOLA (`app/day.tsx`), and a **Steps** row in Settings that asks for the permission deliberately.
+
+**Re-verified on `main` (`b59e842f`) before building, and both claims still held.**
+- `READ_TYPES` in `lib/healthkit.ts` listed four types, none of them steps.
+- Nothing in `apps/mobile/lib` or `apps/mobile/app` read a step count. The broad `step` matches are wizard steps.
+- `main` did not move during the build.
+
+### The permissions
+
+- **iOS.** `HKQuantityTypeIdentifierStepCount` joins `READ_TYPES`, as `STEPS_READ_TYPE`. `NSHealthShareUsageDescription` in `app.config.js` now mentions the daily step count.
+- **Android.** `Steps` joins `READ_RECORD_TYPES`, and `android.permission.health.READ_STEPS` joins the manifest. The permission string was read off `HealthPermission` in the resolved `connect-client` 1.1.0 AAR, not derived from the type name.
+- **The #951 parity check needed one table row** (`Steps` → `READ_STEPS`) and no second check. It was proven able to fail: remove the manifest line, and it exits 1 naming `Steps`. Restored, it passes on re-run.
+- **A native rebuild is required on both platforms.** The usage string and the manifest permission never reach an installed binary through Metro.
+
+### A granted permission does not cover a new type, so steps are asked for separately
+
+Every Health pass re-requests access on every foreground return (`importHealthKitRuns`, `syncHealthConnectBiometrics`). A type the athlete has never decided on reopens the system permission screen. Adding steps to that request would have **popped a Health sheet at an athlete who opened the app to log a set**, with nothing on screen saying why. That is widening the ask silently.
+
+So the passes request steps only once `PREF_STEPS_ASKED` says the athlete has asked for them:
+- `healthKitReadTypes(false)` never contains steps;
+- `healthConnectReadRecordTypes(false)` never contains `Steps`.
+
+Both are pure, tested and mutation-killed.
+
+The ask itself is a **Steps** row under the Health toggle in Settings (`components/settings/StepsPermissionRow.tsx`). VOLA points to it with **Connect steps**. The row's copy before asking:
+
+> Show today's step count on VOLA. VOLA reads it from Apple Health, keeps it on this phone, and never writes anything back. Steps is a separate permission from workouts and heart rate, so Apple Health will ask you once.
+
+On Android the source name is Health Connect. After asking, the row reports what the latest read found. **On iOS a refusal cannot be re-asked from inside the app**, because HealthKit never shows its sheet twice. So the row names where the switch is (Settings → Privacy & Security → Health → VOLA) instead of showing a button that would do nothing. Android offers **Ask again**.
+
+### Three states, and why each is its own row in the code
+
+| State | Stored as | VOLA says |
+|---|---|---|
+| no Apple Health / Health Connect on the phone | `no_source` | "This phone has no Apple Health or Health Connect to read steps from." |
+| refused | `refused` | "Apple Health isn't sharing steps with VOLA." / "Health Connect isn't giving VOLA access to steps." |
+| a genuine zero-step day | a `daily_steps` row with `steps = 0` | "0 steps" |
+
+Four more states exist so none of the three has to absorb them:
+- `no_data`: Android only. Permitted, but no app has written a single step.
+- `off`: Health sync is off.
+- `not_asked`: steps have never been asked for.
+- `unknown`: no read has ever run, which reads "Not available on this phone yet".
+
+A count on an earlier day reads "No step reading yet today", never yesterday's number.
+
+**A refusal is never written as a row, so it cannot be drawn as a number.** A read that fails for any other reason writes nothing at all, so a transient native error can never become a zero or a refusal. That is W15's (#954) posture carried to a new read.
+
+**Refusal is observable differently per platform, and that is the one place judgement was needed.**
+- **Android says no out loud.** `aggregateRecord` rejects through the same `rejectWithException` as `readRecords` (verified in the package's Kotlin), so a refusal arrives as `PERMISSION_ERROR`. `queryHealthConnectSteps` calls `rethrowIfNotPermitted(err, 'Steps')`, and the sync adapter turns `HealthConnectPermissionError` into the `refused` state. It also reports `Steps` in the pass's `notPermitted`.
+- **iOS never says no.** HealthKit answers a denied read with an empty result, and the package resolves an empty statistics query rather than rejecting (verified in its Swift: `errorNoData` maps to `emptyStatisticsResponse`). So an empty sum for today is either a real zero or a refusal. `stepsFromHealthKit` separates them the only way available: **zero only if HealthKit shared at least one step sample in the last 7 days**, `refused` otherwise. An iPhone records steps whenever it is carried, so a week of nothing is a refusal, or motion tracking switched off, which is fixed in the same place. The copy says "isn't sharing", which is true in both cases.
+- **Health Connect has the same ambiguity for an empty aggregate.** The package maps an empty aggregate to `COUNT_TOTAL: 0`. It is resolved the same way, with `no_data` instead of `refused`, since a refusal has already thrown.
+
+**Both native step reads THROW on any failure**, unlike every other query in those files, which return `[]`. An empty list is harmless to their callers; a swallowed failure here would be a step count. `runStepsRead` catches it and records nothing.
+
+### Where the read runs, and how often
+
+**Inside the existing Health passes, not in Today and not in the panel.**
+- iOS: `readHealthKitSteps`, run first in `importHealthKitRuns`.
+- Android: `readHealthConnectSteps`, run first in `syncHealthConnectBiometrics`.
+
+The read runs before those passes' early returns, because "sync off" and "no source" are answers it records.
+
+It runs on:
+- sign-in;
+- every foreground return;
+- the Health toggle;
+- **Allow steps**;
+- VOLA gaining focus: `useDayPanel` calls `requestStepsRefresh`, throttled to once a minute and fire-and-forget. A steps-only read with its own in-flight flag is registered by whichever orchestrator owns steps on the platform.
+
+The panel still renders only SQLite, and re-reads the store when a read lands (`onStepsChanged`). So VOLA opened directly, without Today, gets its own fresh count. That is the #1128 comment's dependency class closed for steps.
+
+**Offline:** a Health read is on-device, so a foreground return in airplane mode still reads and stores a fresh count.
+
+**One trap found while wiring it, and pinned by a test.** All three Health orchestrators start on both platforms (`app/_layout.tsx`), so the Health Connect pass runs on an iPhone. Ungated, it would record `no_source` over the count HealthKit had just written. `platformStepSource()` gates each platform's read.
+
+### Sync decision: steps stay on the phone, for now
+
+Steps do **not** sync to the backend, so there is no migration, no OpenAPI entry and no backend review. The reasons:
+1. The phone is the only place the count can be read, and the only consumer today is VOLA's panel, which needs today's number.
+2. No web surface consumes steps, so a server copy would be storage waiting for a feature.
+3. Steps are health data, and "privacy by default" is a core principle. Keeping them on-device until a feature needs them off-device is the conservative default.
+4. Two phones signed into one account read their own Health stores, so syncing needs a real merge rule, not a last-write-wins accident.
+
+The mobile-first test holds: an athlete with only a phone gets the whole feature. **Revisit when** a web screen needs steps, such as a steps trend correlated with training load (web's analytical job), or N570/N571's server-side generation needs them. `daily_steps` is keyed `(user_id, day)` with `source` and `read_at`, so a push can be added without reshaping it.
+
+### VOLA and N570
+
+- **The fact.** `panelFacts()` now includes a `steps` fact (`steps:<day>`), with a ref naming `daily_steps`, the day, the read time **and the count**.
+- **The provenance check.** `unbackedFacts` refuses a steps fact unless a row for this athlete and day has that exact count and read time, **and** the athlete's latest read state is still `read`. A number from before a refusal is no longer assertable.
+- **N570's files were not edited.** `narrationGuard`'s `backedNumbers` does not list the steps count, so a narrated "8,412 steps" is dropped as an unbacked number: it fails safe. N570 should add `case 'steps'` with a test when it wants steps narrated.
+- **No overlap with N570's in-flight work.** Its worktree held only backend and eval files, and no N570 PR was open against the panel files.
+
+### Tests
+
+**Everything runs against real SQLite via `migratedFixture()`.**
+- `lib/__tests__/steps.test.ts` (new): the pure decisions, `runStepsRead`'s order and its three states, a failed read writing nothing, per-athlete scoping, the refresh throttle.
+- The two sync suites: the pass never requests steps unasked; a refusal is recorded and reported while heart-rate enrichment still runs; the iPhone gate.
+- `healthConnectReads.test.ts`: `PERMISSION_ERROR` on the aggregate and on the lookback read throws `HealthConnectPermissionError('Steps')`; other failures throw without being mistaken for a refusal; zero versus `no_data`.
+- `dayPanel.test.ts` and `dayScreen.test.tsx`: every state rendered offline with the network failing, a two-account fixture, the provenance check refusing a different count, a fresher read, another athlete or a later refusal, a live update while VOLA is open, and the focus refresh.
+- `schema.test.ts`: fresh install, a device stamped 43 gains the tables, re-running is not an error.
+- `lib/__tests__/healthkitSteps.test.ts` (new): the iOS read with the HealthKit package faked, so the statistics-then-lookback composition actually runs under Jest. `healthkit.test.ts` cannot reach past "no module linked", and that gap is what let M29 survive the first run.
+- `__tests__/app/stepsPermissionRow.test.tsx` (new): the re-ask copy, Allow steps before asking, no dead button after an iOS refusal, Ask again on Android.
+
+### Mutation results
+
+**32 mutations, all killed.** Each was confirmed on disk before its run and restored byte-for-byte after it, with a green baseline in the same session. The restores were confirmed by re-running the suites (285 of 285, then 97 of 97), not by grepping.
+
+- **Deciding a count:**
+  - M01, M02: an empty iOS sum or Android aggregate counted as zero without evidence.
+  - M03: a failed read writes a zero.
+  - M22: a refusal deletes the earlier reading.
+  - M25: the HealthKit read with no module resolves to zero.
+  - M28, M29: the lookback evidence ignored, on Android and iOS.
+- **The ask:**
+  - M04: the platform is read before steps were asked for.
+  - M05, M07, M32: the read-type guards and the native request include steps unasked.
+  - M06, M08: a pass requests steps unasked, on iOS and Android.
+  - M30: the Settings row hides Allow steps before asking.
+  - M31: the row offers a dead Ask again on iOS.
+- **Refusal:**
+  - M09: `rethrowIfNotPermitted` dropped from the Android read.
+  - M10: `Steps` no longer reported in `notPermitted`.
+  - M11: the Android adapter treats a refusal as transient.
+  - M17: the panel renders a refusal as 0 steps.
+- **Scoping and gating:**
+  - M12, M13: each platform's read ungated on the other platform.
+  - M18: the store unscoped by athlete.
+  - M19, M20: the day filter dropped in the store, and in the store and the panel together.
+- **The panel:**
+  - M14, M15, M16: `unbackedFacts` always backs a steps fact, ignores a later refusal, or ignores the count.
+  - M23: VOLA does not re-read when a steps read lands.
+  - M24: VOLA does not ask for a fresh read on focus.
+  - M26: `panelFacts` omits the steps fact.
+  - M27: a never-read state shown as no source.
+- **Schema:** M21, `SCHEMA_VERSION` left at 43.
+
+**Three apparatus faults, recorded because each would have produced a wrong verdict:**
+1. **M27 first measured nothing.** Its anchor matched twice, because the target section maps `unknown` to `unavailable` with identical text. The script refused to apply it, and it was re-run with an anchor unique to the steps section.
+2. **M29 first SURVIVED.** The mutated line is unreachable under Jest, and `healthkitSteps.test.ts` exists because of it.
+3. **The first M32 run aborted between mutating and restoring.** Its replacement text already existed in `requestHealthKitStepsAuthorization`, so the on-disk check counted two. `lib/healthkit.ts` was restored with a context-unique anchor, the restore was confirmed by a green re-run, and M32 was then run properly.
+
+**The #951 parity check** was proven separately. Removing `READ_STEPS` from `app.config.js` made it exit 1 naming `Steps`; restored, it exited 0 on re-run.
+
+### Gaps this leaves
+
+- **No steps on web**, and no history or trend. Only today's row is kept current; an earlier day's row keeps its last read.
+- **The iOS refusal inference** reads "nothing shared in 7 days" as refused. A phone with motion tracking off, or left in a drawer for a week, lands there too. The copy ("isn't sharing") is true in every case, but its fix instruction points only at the Health permission.
+- **The Health store belongs to the phone, not the account.** Two VOLA accounts on one phone that both allow steps read the same count. Each account's store is still separate, and both are tested.
+- **N570's `backedNumbers` has no `steps` case**, so narration cannot state a count until N570 adds one.
+- **N570 part 2a (#1183) rejects a steps fact server-side.** It merged underneath this branch during the build.
+  - **What happens.** `knownKinds` in `backend/internal/modules/narration/narration.go`, and the `kind` enum in `contracts/public.openapi.yaml`, list only the ten kinds that existed before N569. So once part 2b sends `panelFacts()`, a day with a step count would be refused WHOLE as "unknown kind" and narrate nothing.
+  - **Why it is not fixed here.** Those are N570's files, and this ticket was fenced off from them.
+  - **What part 2b needs.** Either add `steps` to both lists, with its number in `backedNumbers`, or drop the kinds the server does not know before sending.
+  - **The phone side is fine.** The mobile `backedFactOf` compiles against the new kind and sends it with no numbers, so the phone fails safe.
+- **Not reviewed:** the Android Health Connect permission-rationale screen's content, which the package's config plugin provides.
+- **The Settings screen is not render-tested with the row mounted.** The row component is tested on its own.
+
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

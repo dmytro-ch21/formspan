@@ -28,6 +28,9 @@ import {
   queryHeartRateSamples,
   queryOtherWorkouts,
   queryVO2MaxSamples,
+  healthKitReadTypes,
+  queryHealthKitSteps,
+  STEPS_READ_TYPE,
   type HealthKitRunningWorkout,
 } from '../healthkit';
 
@@ -191,5 +194,32 @@ describe('queryHeartRateSamples / queryVO2MaxSamples', () => {
 describe('queryOtherWorkouts', () => {
   it('resolves to an empty array when no HealthKit module is linked', async () => {
     await expect(queryOtherWorkouts(new Date('2026-08-29T00:00:00Z'))).resolves.toEqual([]);
+  });
+});
+
+/**
+ * N569/#1130 — steps. The native read is device evidence; what is pinned here is
+ * the two guards around it that need no device.
+ */
+describe('steps', () => {
+  it('a pass not yet asked for steps never requests them — the guard against widening the ask silently', () => {
+    expect(healthKitReadTypes(false)).toEqual([
+      'HKWorkoutTypeIdentifier',
+      'HKWorkoutRouteTypeIdentifier',
+      'HKQuantityTypeIdentifierHeartRate',
+      'HKQuantityTypeIdentifierVO2Max',
+    ]);
+    expect(healthKitReadTypes(true)).toEqual([...healthKitReadTypes(false), STEPS_READ_TYPE]);
+    expect(STEPS_READ_TYPE).toBe('HKQuantityTypeIdentifierStepCount');
+  });
+
+  it('with no HealthKit module linked, the steps read THROWS — it never resolves to a count', async () => {
+    await expect(
+      queryHealthKitSteps({
+        dayStart: new Date('2026-09-10T07:00:00Z'),
+        lookbackStart: new Date('2026-09-03T07:00:00Z'),
+        now: new Date('2026-09-10T21:00:00Z'),
+      }),
+    ).rejects.toThrow('HealthKit is not linked');
   });
 });

@@ -776,6 +776,66 @@ itself, whether HealthKit actually hands back a workout's route, and whether
 a real Apple Watch run round-trips through the whole pipeline into something
 an athlete recognizes as the run they did.
 
+
+### D30 — Today's steps from Apple Health and Health Connect (N569)
+
+**A NATIVE REBUILD IS REQUIRED ON BOTH PLATFORMS FIRST.** N569 changes the iOS
+Health usage string (`NSHealthShareUsageDescription`) and adds
+`android.permission.health.READ_STEPS` to the Android manifest. Neither reaches
+an installed binary through Metro. On iPhone, `ios/` must be regenerated
+(`npx expo prebuild --platform ios --clean`), then a Release device build; on
+Android, a fresh native build. A reload of an old binary shows the old sheet
+copy and, on Android, refuses Steps at read time.
+
+**Do (both an iPhone and an Android phone, each with Health sync already on and
+some steps recorded today):**
+
+1. Open Settings. Under the Health toggle, read the **Steps** row. Confirm no
+   Health prompt appeared on its own when the app opened.
+2. Tap **Allow steps**. Read the system sheet (iOS) / Health Connect permission
+   screen (Android) before answering. Allow Steps.
+3. Open Today → **Your day**. Note the Steps count and its *As of* time. Open
+   the Health app (iOS) or Health Connect (Android) and compare with its count
+   for today.
+4. Walk a few hundred steps, background VOLA, return, reopen **Your day**.
+5. Turn on airplane mode, force-quit and reopen VOLA, open **Your day**.
+6. Revoke Steps (iOS: Settings → Privacy & Security → Health → VOLA → Steps
+   off; Android: Health Connect → App permissions → VOLA → Steps off).
+   Background and return to VOLA, open **Your day**.
+
+**Should:**
+
+- Step 1: the row explains steps are shown on VOLA, read from Apple Health /
+  Health Connect, kept on this phone, never written back, and asked for once.
+  No prompt before tapping.
+- Step 2: the sheet lists **Steps** (on an existing install, Steps alone), and
+  the iOS usage text mentions the daily step count.
+- Step 3: *N steps* with *As of HH:MM, from Apple Health / Health Connect*,
+  roughly matching the Health app's own number (a few minutes of lag is fine;
+  a doubled number is not).
+- Step 4: the count and the *As of* time move forward.
+- Step 5: the last count still shows, with the same *As of* time — not *Not
+  available*, not zero.
+- Step 6: a refusal message (*Apple Health isn't sharing steps with VOLA.* /
+  *Health Connect isn't giving VOLA access to steps.*), **never "0 steps"** and
+  never "no steps".
+
+**Failure looks like:** a Health sheet appearing on a plain foreground return
+(the pass widened the ask — see `healthKitReadTypes` / `healthConnectReadRecordTypes`);
+roughly **double** the Health app's count (samples summed instead of the
+de-duplicated statistics/aggregate query); "0 steps" after revoking (a refusal
+collapsed into zero); an Android Steps block that always says refused even after
+allowing (the binary predates `READ_STEPS` — rebuild); an iPhone that shows *no
+step source* (the Health Connect pass writing on iOS — `platformStepSource`).
+
+**Why no test reaches it:** the permission sheets, HealthKit's source
+de-duplication, Health Connect's aggregate, and whether a real refusal on iOS
+really comes back empty are all native behaviour on a real Health store.
+`lib/__tests__/steps.test.ts`, `healthkitSync.test.ts`,
+`healthConnectSync.test.ts`, `healthConnectReads.test.ts`, `dayPanel.test.ts`
+and `__tests__/app/dayScreen.test.tsx` cover every decision downstream of the
+native answer against real SQLite; this check covers the answer itself.
+
 ---
 
 ## What is deliberately not here

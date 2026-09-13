@@ -5,6 +5,7 @@ import { localEntries as localFoodEntries, localTargetView } from '../../foodLog
 import type { Module } from '../../modules';
 import { listPlannedBetween } from '../../plan';
 import { cachedWorkouts, listLocalSessions } from '../../sessionStore';
+import { localStepsView } from '../../steps';
 import { buildTodayBoard, todayPlanWindow } from '../../todayBoard';
 import { localEntries as localTrackerEntries, localTrackers } from '../../trackers';
 import type { Source } from '../../trainBoard';
@@ -27,6 +28,10 @@ import type { FixtureDb } from './sqlite';
  *   its ref names that `fetched_at` and must match the row. A cached row the
  *   server no longer has is DELETED by the next fetch that covers it, and a
  *   phase that ended is no longer a phase goal — both then report here.
+ * - **A steps fact the store does not back (N569).** The row must exist for this
+ *   athlete and day with the SAME count and read time the fact states, and the
+ *   latest read must still be a count: once a later read is refused, yesterday's
+ *   number is no longer something the panel may assert.
  *
  * **This is the invariant tranche 2's fabricated-fact guard extends**, not a
  * test detail. Narration that cites a key outside `panelFacts`, or a fact whose
@@ -95,6 +100,7 @@ export async function readDayPanel(
     target: await dated(localTargetView(userId, day)),
     checkins: await dated(localCheckinView(userId, day)),
     phases: await settle(localPhaseView(userId)),
+    steps: await dated(localStepsView(userId, day)),
     modules,
   });
 }
@@ -107,6 +113,8 @@ function describe(ref: RowRef): string {
       return `body_checkins_cache@${ref.measuredOn} fetched ${ref.fetchedAt}`;
     case 'body_phases_cache':
       return `body_phases_cache#${ref.id} fetched ${ref.fetchedAt}`;
+    case 'daily_steps':
+      return `daily_steps@${ref.day} ${ref.steps} read ${ref.readAt}`;
     default:
       return `${ref.table}#${ref.id}`;
   }
@@ -168,6 +176,16 @@ async function rowExists(db: FixtureDb, userId: string, ref: RowRef): Promise<bo
         userId,
         ref.id,
         ref.fetchedAt,
+      );
+    case 'daily_steps':
+      return one(
+        `SELECT 1 AS one FROM daily_steps d
+           JOIN steps_read_state s ON s.user_id = d.user_id
+          WHERE d.user_id = ? AND d.day = ? AND d.read_at = ? AND d.steps = ? AND s.state = 'read'`,
+        userId,
+        ref.day,
+        ref.readAt,
+        ref.steps,
       );
   }
 }

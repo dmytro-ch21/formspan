@@ -71,6 +71,10 @@ PERMISSION_FOR = {
     "HeartRate": "READ_HEART_RATE",
     "Vo2Max": "READ_VO2_MAX",
     "ExerciseSession": "READ_EXERCISE",
+    # N569/#1130. Read off `HealthPermission`'s own constant in
+    # androidx.health.connect:connect-client 1.1.0 (the version the package
+    # resolves), not derived from the type name.
+    "Steps": "READ_STEPS",
 }
 
 TS_RE = re.compile(

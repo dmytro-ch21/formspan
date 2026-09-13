@@ -72,11 +72,15 @@ module.exports = () => ({
       // `queryOtherExerciseSessions` caught and returned as "no records". The
       // feature was dead, Settings said it worked, and no check in the repo
       // could see it — a manifest missing a permission prebuilds and builds
-      // cleanly. Health Connect's own naming for the three, one per record type:
+      // cleanly. Health Connect's own naming, one per record type. `READ_STEPS`
+      // joined for N569 (#1130), with `Steps` in READ_RECORD_TYPES in the same
+      // commit. Like every entry here it reaches a phone only through a NATIVE
+      // REBUILD; a Metro reload leaves the installed manifest without it:
       permissions: [
         "android.permission.health.READ_HEART_RATE",
         "android.permission.health.READ_VO2_MAX",
         "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_STEPS",
       ],
     },
     web: {
@@ -238,7 +242,7 @@ module.exports = () => ({
         "@kingstinct/react-native-healthkit",
         {
           NSHealthShareUsageDescription:
-            "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. It can also read heart rate for any finished session and your VO2max trend. All of this is off until you turn it on in Settings, and VOLA never writes anything to Health.",
+            "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. It can also read heart rate for any finished session and your VO2max trend, and, if you allow it, your daily step count to show on VOLA. All of this is off until you turn it on in Settings, and VOLA never writes anything to Health.",
           NSHealthUpdateUsageDescription: false,
           background: false,
         },
