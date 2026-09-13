@@ -24058,3 +24058,45 @@ signal, exactly as before. Reachable on a phone: Today → **Your day** → Body
   it needs its own `refreshBody` call.
 - The weight trend, Progress and Goals screens are still online-only for
   check-ins.
+
+## N570 part 2a — the day narration endpoint (`POST /v1/day/narration`, `backend/internal/modules/narration`, #1131)
+
+Backend only; the screen that calls it is part 2b. A request here is the phone's facts: `{facts: [{key, kind, label, numbers, names}]}`.
+
+### Happy path
+
+- **Two facts in, guarded sentences out.** Send `food-eaten:…` labelled "Eaten today: 1,840 kcal across 3 entries" with numbers `["1840","3"]`, and `logged:…` labelled "5x5 Day logged" with names `["5x5 Day"]`. The 200 carries at most 3 sentences, each citing sent keys, plus `dropped` and the quota (`used: 1, limit: 5`).
+- **A name with digits is not a number.** A returned "5x5 Day logged." citing that session is kept.
+
+### The server-side guard
+
+- **Stub or force a model answer containing an invented session** ("You also finished a 45-minute run.") or an invented figure ("That leaves 860 kcal"). It is absent from `sentences`, `dropped` counts it, and **its text appears nowhere in the response or the logs**.
+- **A true number under the wrong citation is dropped:** "Sessions done: 2, on 1,840 kcal" citing only the plan fact.
+
+### Refused before anything is spent (400, `invalid_input`, quota unchanged)
+
+- An empty `facts` array, or more than 60.
+- An unknown `kind`, or a duplicate key.
+- A label stating a number missing from its `numbers`: "9 kcal" with `numbers: []`.
+- A number that is not whole or one decimal: `"1,840"` or `"82.43"`.
+- **A `user_id` field in the body.** Refused as an unknown field. Whose day it is comes from the token alone.
+- A malformed body. **Exactly one JSON error object comes back**, not two (the bug this endpoint's tests caught).
+
+### Auth and quota
+
+- **Signed out:** 401, and nothing is metered.
+- **The 6th call within a rolling 24 hours:** 429 `rate_limited` with `Retry-After` in whole seconds (rounded up, never 0). The model is not called.
+- **Cross-athlete:** athlete A at 5/5 does not block athlete B, and B's calls count only against B.
+
+### Provider failure and configuration
+
+- **Provider unreachable:** 503 with code `unavailable`. **No metering row is written**, and the quota is unchanged.
+- **Model refusal:** 422, and **a metering row is written with the tokens the refusal cost**.
+- **No API key for `NARRATION_PROVIDER`:** 503 with code `internal` from this route. Every other route works, and the boot log says narration is disabled.
+- **A misspelled `NARRATION_PROVIDER`:** the API refuses to start.
+- **A client that disconnects mid-call is still metered.**
+
+### What is stored
+
+- **`day_narration_generations` holds one row per metered call:** user, succeeded, model, `sentences_kept`, and tokens. **Never the facts or the sentences.**
+- **Token columns are NULL for a call that produced no usage,** and numbers for a billed one, including a refusal.

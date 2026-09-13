@@ -75541,6 +75541,142 @@ A sentence survives only if all three hold:
 - **For part 2:** whether a summary a model already produced should be re-guarded against the day's facts on every render. Facts change after generation, so a sentence true at 13:00 can be stale by 15:00 without being invented. The same question covers a fact going away, which this part deliberately does not narrate.
 - The guard's remaining fail-safe drops (dates, sets, pounds) are listed above. Each needs a real model output and a test before it is loosened.
 
+## 2026-09-13 — N570 (#1131), part 2a: the narration endpoint, which narrates only the facts the phone sends and guards every sentence server-side
+
+**Backend and contract only. Nothing on a screen changes.** Part 1 (#1181) landed the phone's pure core: when to regenerate, when a model earns the call, and the fabricated-fact guard. This part adds the server the model call goes through. It is `part of #1131`, not `closes`.
+
+**Part 2 was split again,** into this PR (2a) and a mobile PR (2b):
+- **2b:** the `ready` narration on screen, the client call, the aged cached summary, and the disclosure that the facts leave the device.
+- **Why the split:** the backend can be reviewed and tested completely without a device, and the screen cannot.
+
+### The design: the phone sends facts, and the server reads no athlete table
+
+`POST /v1/day/narration` takes `{facts: [{key, kind, label, numbers, names}]}`:
+- the day panel's facts, each with a label in words;
+- the numbers the fact states (the phone's `backedNumbers`);
+- the names it quotes (`namesOf`).
+
+The server asks the model to narrate exactly those. It never queries an athlete's rows to build a prompt.
+
+**This makes "only the caller's data reaches the prompt" structural, not a filter.** There is no query here that could read somebody else's rows. It also keeps the offline-sync rule that a feature narrates the phone's own data (`vola-offline-sync`, invariant 7).
+
+**The cost of that choice, stated:** the server cannot know the facts are true. The phone's `unbackedFacts` proves them against SQLite, and the server proves every sentence rests on the facts it was given. Truth of the facts is the phone's job; truth of the sentences is both sides' job.
+
+### Every sentence is guarded server-side, by the same rules as the phone
+
+`guard.go` is `lib/narrationGuard.ts`'s three rules in Go:
+1. A sentence cites at least one fact.
+2. Every citation is a key that was sent.
+3. Every number in the sentence, once the cited facts' own names are removed, is a number a cited fact states.
+
+A failing sentence is dropped whole. `dropped` counts the refused sentences, but neither returns nor logs their text, because that text is model output about the athlete's day.
+
+It runs on the server because this is where model output first exists. Nothing the model wrote leaves unguarded, even for a client that forgot to run its own copy.
+
+**The two guards are held together by shared cases, not by review.** `evals/day-narration/guard_vectors.json` has 16 cases, read by `guard_test.go` and by a new `apps/mobile/lib/__tests__/narrationGuardVectors.test.ts`. To make the phone side answer them, `lib/narrationGuard.ts` gained a core, `guardSentences(sentences, BackedFact[])`, and `guardNarration` is now that core over the day's facts. This is the same pattern F29 used for spoken numbers.
+
+Two details were made identical rather than merely close:
+- **Tie-breaking:** names are sorted longest-first by **code points** on both sides. JavaScript's `.length` counts UTF-16 units and Go's rune count does not, so a tracker name with an emoji could otherwise have tied differently.
+- **Number spelling:** `normalise` gives the same string for every number a fact can state. That is at most 12 characters, which `Validate` enforces.
+
+**Two known divergences, both in `detail` only.** A number of 1e21 or more, or below 1e-6, is spelled in exponent form by JavaScript (`1.2e+21`, `1e-7`) and in full by Go. Neither can be a number a fact states, so either is dropped as unbacked on both sides; the verdict is identical, and only the logged `detail` differs. `frontend-reviewer` found the second.
+
+**The sort is now pinned by cases that fail under the wrong order**, which `frontend-reviewer` found missing. The mechanism this refactor changed had no test on either side. The new cases:
+- **two cited names, one inside the other** ("5x5 Day" and "5x5 Day 2"): stripped shortest-first, a "2" survives and the sentence is dropped;
+- **an emoji name** whose length ranks differently by code points than by UTF-16 units: sorted by UTF-16 on the phone, or by bytes in Go, a "2" survives;
+- **a repeated unbacked number**, reported as "6, 6" on both sides.
+
+### Validation, before the quota
+
+A request that cannot succeed is refused before any quota or token is spent:
+- no facts, or more than 60;
+- a missing, duplicate or over-long key;
+- an unknown kind;
+- an empty or over-long label;
+- a malformed number (anything but whole or one decimal, up to 12 characters);
+- an empty name;
+- **a label stating a number its own `numbers` do not back.** Such a label would hand the model a figure the guard then drops from every sentence quoting it, a disagreement that can only be a client bug.
+- **an unknown field, including a `user_id`.** Whose day it is comes from the verified token alone. The strict decoder (N521's `DecodeJSONStrict`) refuses anything the request type does not declare.
+
+### Metering, in `bjj/reflect_quota.go`'s shape and for its reasons
+
+**The cap:** `DailyNarrations = 5` over a rolling 24 hours, checked **before** the model is called. A 429 carries `Retry-After` in whole seconds, rounded up.
+
+**Every call writes one row to `day_narration_generations`,** failures included, because a refusal is billed. Three rules govern the row:
+- **A call the provider never answered writes no row** (F16, #367). Nothing was spent, and charging for an outage locks an athlete out after service returns.
+- **The write uses `context.WithoutCancel`,** so a client that disconnects mid-call cannot escape the meter.
+- **Token columns are NULL when no call produced usage,** and real numbers otherwise, including on a refusal. That is `nutrition`'s rule: a 0 would claim a call was metered and cost nothing.
+
+**What is stored:** the table holds the athlete, whether the call succeeded, the model, how many sentences survived, and tokens. **It never holds the facts or the sentences**, so it carries no retention question.
+
+### Wiring and contract
+
+- **Provider:** `NARRATION_PROVIDER` / `NARRATION_MODEL`, in the same nil-safe shape as `REFLECT_*`. No key gives a nil `Narrator` and a 503 from this one route; a misspelled provider fails the boot. Documented in `backend/.env.example`, including that the facts leave the device.
+- **Contract:** `/day/narration` in `contracts/public.openapi.yaml`, with `DayNarrationFact`, `DayNarrationSentence` and `DayNarrationQuota`. The description states the three rules this entry does: the phone sends the facts, only metering is stored, and every sentence is guarded. `numbers` and `names` are optional in the contract because the server accepts them missing.
+- **The model tier is not measured on this task.** `DefaultModels` matches bjj's measured choice, which had a 0.0% invention rate on dictation, the closest measured task here. N570's last part measures narration itself and changes the map if the numbers say to.
+
+### A bug the tests caught before review
+
+The first handler wrote its own 400 after `DecodeJSONStrict` failed. That decoder writes the 400 itself on every error path, so a malformed body or an unknown field got **two JSON error bodies in one response**.
+- **Why a status check missed it:** the status was still 400, because the first write wins.
+- **What caught it:** `TestNarrateRefusesBadInputBeforeTheQuotaOrTheModel` parses the body, not just the status. It went red on exactly the two cases that reach the decoder's error path.
+- **The fix:** return without writing.
+
+### Tests, and the one thing that did not run locally
+
+- **What ran locally, and passed:**
+  - handler tests on in-memory fakes, the same approach as `bjj/reflect_handler_test.go`: sign-in, the no-key 503, every bad-input case costing nothing, the quota before the model, the server guard stripping an invented sentence, the sentence cap, an outage not metered, a refusal metered with its tokens, a disconnect still metered, and **cross-athlete**;
+  - narrator tests against a fake completer;
+  - validation, quota and number-spelling tests;
+  - the shared guard cases on both sides.
+- **The cross-athlete test checks three things:** another athlete's used-up quota does not block the caller; the quota is read only for the token's user; the row is metered under the token's user.
+- **The Postgres usage test did not run here, and that is deliberate.**
+  - **Why:** `TEST_DATABASE_URL` is unset on this host. This repo's compose Postgres publishes no host port, and changing that would mean editing `docker-compose.yml`, which is shared config. The Postgres on 5432 belongs to another session's compose project.
+  - **What that means:** `TestQuotaCountsOnlyTheCaller` (two athletes) and `TestRecordStoresNullTokensForNoUsageAndNumbersForABilledCall` are written to run in CI's `Backend (Go)` job, which sets a throwaway database. **Their first real run is CI.** The `main_test.go` lock test skips locally for the same reason.
+
+**Mutation checks.** 13 mutations, one per property that matters. Each was applied with a count-asserted replace and run against its own suite. It was then restored, confirmed byte-identical, and **re-run** green. The Go baseline was `ok`; the phone baseline was 31/31.
+
+| # | mutation | result |
+|---|---|---|
+| G1 | the server guard's unknown-key check removed | shared cases red: *an invented session*, *one citation real and one invented* |
+| G2 | a cited fact's names not stripped before reading numbers | shared cases red: *a name with digits in it*, *a number added beside the name*; also *TestNarrateReturnsOnlyWhatTheServerGuardKeeps* |
+| G3 | numbers backed by every fact sent, not only the cited ones | shared cases red: *a true number under the wrong citation*, *a name's digits when that fact is not cited* |
+| H1 | the quota read but never enforced | *TestNarrateChecksTheQuotaBeforeTheModel* **red** |
+| H2 | an outage metered | *TestNarrateDoesNotMeterAnOutage* **red** |
+| H3 | the meter written with the cancellable request context | **First attempt: a build failure, which proves nothing.** Removing `context.WithoutCancel` left the `context` import unused. **Re-run as `context.Context(r.Context())`, which compiles:** *TestNarrateMetersEvenWhenTheClientDisconnects* **red**, `ctxErr=context canceled` |
+| H4 | the server guard skipped | *TestNarrateReturnsOnlyWhatTheServerGuardKeeps* **red** |
+| H5 | no validation before the quota | *TestNarrateRefusesBadInputBeforeTheQuotaOrTheModel* red, for no facts, an unknown kind, and an unbacked label number |
+| H6 | metered under another athlete's id | **cross-athlete:** *TestNarrateMetersAndChecksOnlyTheCaller* red, plus *TestNarrateReturnsOnlyWhatTheServerGuardKeeps* |
+| N1 | an outage mapped like any other error | *TestNarratorMapsTransportErrors* **red** |
+| N2 | a refusal's bill dropped | *TestNarratorKeepsTheBillOnARefusal* **red** |
+| V1 | a label allowed to state an unbacked number | *TestValidateRefusesWhatCannotSucceed* and the handler's matching bad-input case, both red |
+| TS1 | the phone guard switched off | 19 of 31 phone guard tests red, including the shared cases |
+
+**Verified alongside:** gofmt and `go vet` are clean on the package and on `cmd/api`, and `go build ./cmd/api` succeeds. `lint:openapi` reports the contract valid. `check:migration-versions` passes: 198 files, 99 migrations, and the new version is above the merge base. The mobile narration suites pass 58/58, with `tsc` and eslint clean. The evidence of record is the full `pnpm run verify` on this PR's final commit.
+
+### What review changed
+
+- **`frontend-reviewer` found one blocking gap: the name-sort order had no test on either side,** even though it is the one mechanism this refactor changed. The three shared cases described above now fail under the wrong order. Four mutations prove it: shortest-first and UTF-16 length on the phone, shortest-first and byte length in Go. It also found the second number-spelling divergence, below 1e-6, now noted beside both `normalise` functions.
+- **`backend-reviewer` found nothing blocking and made six suggestions.** Taken:
+  - **`Retry-After` rounding was untested.** The only test used an exact hour, which rounds the same either way. `TestNarrateRoundsRetryAfterUp` sends 23 hours minus half a second and expects 82800. `math.Ceil` → `math.Floor` turns exactly that test red.
+  - **The 64KB body limit fit only ASCII.** The field caps count runes, so the largest legitimate request (60 facts at every cap, in 4-byte characters) is about 190KB, and it got a 413 before validation. The limit is now 256KB, and `TestNarrateAcceptsTheLargestLegitimateRequest` sends that request. Lowering the limit back to 64KB turns it red.
+  - **`decode.go`'s comment still said only two endpoints use `DecodeJSONStrict`.** It now names this one and why it needed no compatibility audit: it had no client in the wild, so strictness was its contract from its first request. That is a deliberate difference from `bjj`'s draft handler, which decodes leniently.
+  - **The system prompt's rule 4 is not the defence against prompt injection; the guard is.** The code now says so.
+- **Recorded, not changed:**
+  - The model tier is unmeasured. This merges ahead of part 3 because nothing calls the endpoint until part 2b.
+  - The `Day` tag is new on purpose.
+
+### What is not here
+
+- **Part 2b:** `DayNarration`'s `ready` member, the slot, the client call through `lib/session.ts`'s token broker, the aged cached summary, the "the facts leave your phone" disclosure, the functional scenarios for the screen, and the device criterion.
+- **Part 3:** the live token measurement, the monthly per-athlete projection, and the owner's cost-ceiling question.
+
+### Open questions
+
+- **Prompt injection through names.** A session or tracker name is athlete-authored text inside a label, and the system prompt tells the model to treat names as data. The guard bounds what an injection could achieve: any returned sentence must still cite sent facts and state only their numbers. So the worst outcome is odd wording, not an invented fact. N571 (chat) carries an explicit injection test; narration has none beyond the guard.
+- **For 2b:** whether a summary cached on the phone is re-guarded against the day's facts on every render, since facts change after generation.
+- **For the owner, after part 3's measurement:** the monthly AI cost ceiling per athlete.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -69,6 +69,10 @@ export type GuardVerdict = { kept: NarrationSentence[]; dropped: DroppedSentence
 const NUMBER = /\d[\d,]*(?:\.\d+)?/g;
 
 /** `1,840` → `1840`, `82.40` → `82.4`, `09` → `9`: one spelling per value. */
+// JavaScript spells a magnitude of 1e21 or more, or below 1e-6, in exponent form
+// (`1.2e+21`, `1e-7`); the server's Go `normalise` never does. Neither can be a
+// number a fact states, so both are dropped as unbacked on both sides: the verdict
+// is identical and only the `detail` string differs. Raised in review.
 function normalise(raw: string): string {
   return String(Number(raw.replace(/,/g, '')));
 }
@@ -138,9 +142,26 @@ export function namesOf(fact: DayFact): string[] {
   }
 }
 
-export function guardNarration(
+/**
+ * A fact as the guard reads it, and as the phone sends it to the server in N570
+ * part 2: its key, every number it states and every name it quotes.
+ * `backend/internal/modules/narration`'s `Fact` carries the same three fields,
+ * and both guards answer the cases in `evals/day-narration/guard_vectors.json`.
+ */
+export type BackedFact = { key: string; numbers: string[]; names: string[] };
+
+/** A day fact reduced to what the guard reads. */
+export function backedFactOf(fact: DayFact): BackedFact {
+  return { key: fact.key, numbers: [...backedNumbers(fact)], names: namesOf(fact) };
+}
+
+/**
+ * The guard's core, over {@link BackedFact}s. {@link guardNarration} is this over
+ * the day's facts, and the server runs the same rules over the facts it was sent.
+ */
+export function guardSentences(
   sentences: readonly NarrationSentence[],
-  facts: readonly DayFact[],
+  facts: readonly BackedFact[],
 ): GuardVerdict {
   const byKey = new Map(facts.map((f) => [f.key, f]));
   const kept: NarrationSentence[] = [];
@@ -161,12 +182,16 @@ export function guardNarration(
     for (const key of sentence.cites) {
       const fact = byKey.get(key);
       if (!fact) continue;
-      for (const n of backedNumbers(fact)) backed.add(n);
-      names.push(...namesOf(fact));
+      for (const n of fact.numbers) backed.add(normalise(n));
+      names.push(...fact.names);
     }
-    // Longest first, so "5x5 Day 2" is removed whole before "5x5 Day" could split it.
+    // Longest first, so "5x5 Day 2" is removed whole before "5x5 Day" could split
+    // it. Counted in code points, not `.length`'s UTF-16 units, so ties sort the
+    // way the server's rune count sorts them.
     let prose = sentence.text;
-    for (const name of [...names].sort((a, b) => b.length - a.length)) prose = prose.split(name).join(' ');
+    for (const name of [...names].sort((a, b) => [...b].length - [...a].length)) {
+      if (name) prose = prose.split(name).join(' ');
+    }
     const unbacked = (prose.match(NUMBER) ?? []).map(normalise).filter((n) => !backed.has(n));
     if (unbacked.length > 0) {
       dropped.push({ sentence, reason: 'unbacked-number', detail: unbacked.join(', ') });
@@ -175,4 +200,11 @@ export function guardNarration(
     kept.push(sentence);
   }
   return { kept, dropped };
+}
+
+export function guardNarration(
+  sentences: readonly NarrationSentence[],
+  facts: readonly DayFact[],
+): GuardVerdict {
+  return guardSentences(sentences, facts.map(backedFactOf));
 }
