@@ -24926,3 +24926,35 @@ No native rebuild is needed.
   - the app really leaving.
 
   Those need an Android device.
+## N578 — correcting a caffeine dose, and a bar-style tracker's taps (`components/CaffeineBanner.tsx`, `components/TrackerTapList.tsx`, `app/trackers/entry/[id].tsx`)
+
+N437's long press needs a glyph, and two surfaces draw none: the caffeine banner and a bar-style card. Each now reaches the same correction screen from a row. No new API; the `PATCH` above carries it.
+
+### Happy path
+
+1. **A manual dose.** On Today, tap Log caffeine (80 mg). The banner lists "80 mg  Change  ×". Tap the row, change 80 to 150, Save: the banner reads 150 mg today, and the row reads 150 mg.
+2. **A coffee-caused dose.** Tap Coffee → Drip (95 mg). Tap its 95 mg row on the caffeine banner. The screen says the cups are untouched. Change it to 150 and Save: caffeine reads 150 mg, and the coffee card still reads 1 cup. Long-press that coffee cup, change 1 to 2: caffeine reads 300 mg. Tap the cup to remove it: the coffee and its caffeine both go.
+3. **A bar-style tracker.** Log fifteen glasses of water (target 8), so the card draws a bar. Under the bar, "Show all 15 cups" opens the list, oldest first, each row with its time. Tap the fourth row, change 250 to 500, Save: the amount line reads 250 ml more. Tap the fifth row's ×: the value line reads 14 of 8.
+4. **Food.** Steps 1 and 3 work the same on the Food screen, and on a past day chosen with its day stepper.
+5. **Offline.** In airplane mode, correct a manual dose and remove a bar-style tap. Both show at once, survive a pull-to-refresh while offline, and reach another signed-in device after reconnecting.
+
+### Edge cases & errors
+
+6. **A food-caused dose.** Log a Latte in Food, so the banner shows "95 mg · from a logged food". The row offers no "Change". Tapping its lock explains that the dose came from a logged food and must be changed in Food, and nothing changes. Edit the latte to 2 servings in Food: the dose becomes 190 mg.
+7. **A food-caused dose reached another way.** If the correction screen is opened for a food-caused dose, it shows the same explanation and no amount field.
+8. **A coffee tracker drawn as a bar** (render style set to bar). Removing a coffee row from its list also removes the caffeine it posted.
+9. **Few enough taps for glyphs.** A water card at 3 of 8 shows no "Show all" line. A bar-style card with nothing logged shows none either.
+10. **A backfilled tap.** On Food, step back to a past day and add a glass there. Its row in that day's list shows the amount and no time, because its clock time belongs to today.
+11. **Imperial.** With fluid ounces set, the list's rows read 8.5 fl oz.
+12. **Collapse on a day switch.** Open the list, step to another day and back: the list is closed again.
+
+### Accessibility
+
+13. **VoiceOver on the disclosure** reads "Show all 15 cups, button, collapsed", then "Hide the cups … expanded".
+14. **VoiceOver on a row** reads "Water, 250 ml at 09:05 … Double tap to change the amount", and its × reads "Remove 250 ml at 09:05 from Water". A manual dose row on the banner reads "Change 80 mg".
+
+### What a test can and cannot reach
+
+- **Reachable:** a food-caused dose refused by `editTap` against real SQLite, a coffee-caused correction keeping its pairing, and a manual dose owing a PATCH (`lib/__tests__/trackers.test.ts`); the row labels and the backfilled-time rule (`trackerTapLabels.test.ts`); the banner's three kinds (`caffeineBanner.test.tsx`); the list's wiring and its unit gate (`trackerTapList.test.tsx`); the list-to-hook wiring, including coffee removal (`trackerList.test.tsx`); the screen's refusal and hint (`trackerEntryScreen.test.tsx`).
+- **NOT reachable:** whether "Change" reads as tappable at a glance, whether a thirty-row list on Today is comfortable to scroll one-handed, and how VoiceOver speaks the expanded state. Those are device checks.
+

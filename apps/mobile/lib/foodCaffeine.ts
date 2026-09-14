@@ -292,3 +292,17 @@ export function pairedFoodCaffeineEntryId(foodEntryId: string, tail: string): st
 export function isFoodCaffeineEntryId(entryId: string): boolean {
   return entryId.includes(FOOD_CAFFEINE_ID_INFIX);
 }
+
+/**
+ * What an athlete is told when they try to change a food-caused caffeine entry
+ * directly, whether by removing it (N468) or by correcting its amount (N578).
+ *
+ * One message for both, because the reason is the same. The food log owns that
+ * number, and `syncFoodCaffeineEntry` re-derives it from the food on the next
+ * edit of that food. So a correction made on the tracker would stand only until
+ * then, and would then be replaced without a word.
+ */
+export const FOOD_CAFFEINE_REDIRECT_TITLE = 'This came from a logged food';
+export const FOOD_CAFFEINE_REDIRECT_MESSAGE =
+  'Edit or remove that food entry in Food to change this. A change made here would leave your ' +
+  'food log and your caffeine total disagreeing.';

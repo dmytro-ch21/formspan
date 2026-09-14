@@ -30,6 +30,7 @@ import {
 } from '@/lib/trackerModel';
 import type { UnitSystem } from '@/lib/units';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { TrackerTapList } from '@/components/TrackerTapList';
 
 /**
  * ONE card for every daily tracker.
@@ -246,6 +247,19 @@ export function TrackerCard({
           />
         )}
       </RNView>
+
+      {/* N578: a bar has no tap to point at, so its taps are listed on request.
+          Glyph and dose cards need no list — every tap already has a glyph. */}
+      {style === 'bar' ? (
+        <TrackerTapList
+          tracker={tracker}
+          entries={entries}
+          units={units}
+          unitsReady={unitsReady}
+          onRemove={onRemove}
+          onEditEntry={onEditEntry}
+        />
+      ) : null}
 
       {/* N432: the drink-type (or other add-time) choice, shown only while
           picking. A compact chip row rather than a sheet or a full-screen
@@ -580,8 +594,13 @@ function Glyph({
  * The bar, for a tracker whose row would not be countable.
  *
  * Deliberately not tappable per-unit: at this scale there is nothing to point
- * at. The `+` adds and the card's own screen removes, which is the honest
- * affordance rather than thirty invisible hit targets.
+ * at, and thirty invisible hit targets would not be an honest affordance. The
+ * `+` adds, and `TrackerTapList` below the row lists each tap to correct or
+ * remove (N578).
+ *
+ * This comment used to say "the card's own screen removes". It did not:
+ * `app/trackers/[id].tsx` has no remove control, so until N578 a single tap on
+ * a bar-style card could be neither removed nor corrected on the phone.
  */
 function Bar({
   tracker,

@@ -184,6 +184,9 @@ export function TrackerList({
               onAdd={() => void day.addTap(t, dayAtTap())}
               onRemove={(entryID) => void day.removeEntry(entryID, dayAtTap())}
               onEdit={() => day.openSettings(t)}
+              // N578: the same correction screen a long-pressed glyph opens. The
+              // banner refuses a food-caused dose before this is called.
+              onEditEntry={(entryID) => day.openEntry(entryID)}
             />
           );
         }

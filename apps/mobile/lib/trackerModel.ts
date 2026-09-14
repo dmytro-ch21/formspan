@@ -608,6 +608,57 @@ export function addLabel(t: Tracker): string {
   return `Add a ${noun} of ${t.name}`;
 }
 
+/**
+ * One tap's amount, for a row that lists a day's taps — N578.
+ *
+ * `amountLine` states the day's TOTAL. A row that opens one tap's correction
+ * has to name that tap. Volumes follow the unit preference, and grams and
+ * milligrams are shown as stored, exactly as `amountLine` does. A cup, a dose
+ * or a plain count gets the athlete's noun, because a bare "1" does not say
+ * what was logged.
+ */
+export function tapAmountLabel(t: Tracker, entry: TrackerEntry, units: UnitSystem): string {
+  if (isFluidUnit(t.unit)) return formatFluid(entry.amount, units);
+  if (isMeasuredUnit(t.unit)) return `${trimNumber(entry.amount)} ${t.unit}`;
+  const noun = pluralise(unitNoun(t), entry.amount);
+  return noun ? `${trimNumber(entry.amount)} ${noun}` : trimNumber(entry.amount);
+}
+
+/**
+ * When one tap was logged, as "14:05" — or `null` for a BACKFILLED tap.
+ *
+ * The same rule `lastLoggedAtOnItsOwnDay` applies to the cutoff line: a tap
+ * filed under Tuesday from Thursday carries Thursday's clock in `logged_at`, so
+ * printing it beside Tuesday's taps would state a time that never happened on
+ * that day. Such a row shows its amount and no time.
+ */
+export function tapTimeLabel(entry: TrackerEntry): string | null {
+  const at = new Date(entry.logged_at);
+  if (Number.isNaN(at.getTime()) || dayString(at) !== entry.logged_on) return null;
+  return formatClock(at);
+}
+
+/** "Water, 250 ml at 14:05" — what a listed tap is called, spoken and tested. */
+export function tapLabel(t: Tracker, entry: TrackerEntry, units: UnitSystem): string {
+  const time = tapTimeLabel(entry);
+  return `${t.name}, ${tapAmountLabel(t, entry, units)}${time ? ` at ${time}` : ''}`;
+}
+
+/** "Remove 250 ml at 14:05 from Water" — the listed tap's remove control. */
+export function tapRemoveLabel(t: Tracker, entry: TrackerEntry, units: UnitSystem): string {
+  const time = tapTimeLabel(entry);
+  return `Remove ${tapAmountLabel(t, entry, units)}${time ? ` at ${time}` : ''} from ${t.name}`;
+}
+
+/**
+ * The disclosure that lists a bar-style card's taps — N578. "Show all 15 cups",
+ * then "Hide the cups". States the count and stops, like every other line here.
+ */
+export function tapListToggleLabel(t: Tracker, count: number, open: boolean): string {
+  const noun = unitNoun(t) || 'entry';
+  return open ? `Hide the ${pluralise(noun, 2)}` : `Show all ${count} ${pluralise(noun, count)}`;
+}
+
 /*
  * There was a `rowLabel` here — "Water, 4 of 8 cups" — for the glyph row's
  * container. It is GONE, and the reason is worth keeping so nobody re-adds it.

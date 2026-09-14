@@ -43,6 +43,22 @@
  * remove it — it explains why, and says where to go instead — while a
  * manual tap or a coffee-tap-caused entry (N431/N432, unaffected by this
  * ticket) removes exactly as it always has.
+ *
+ * ## Correcting a dose (N578)
+ *
+ * The banner draws no glyphs, so N437's long press had nothing to land on here,
+ * and a manual 80 mg dose that was really 150 mg could only be removed and
+ * re-added. Each dose row now opens the same correction screen a glyph does,
+ * through `onEditEntry`. What the row does depends on which kind of dose it is:
+ *
+ * - **manual**: it opens the correction.
+ * - **coffee-caused** (`-caf`): it opens the correction too. That is the only
+ *   way to say a cup held more caffeine than its drink's reference figure.
+ *   Correcting the coffee's cups still scales this dose, now from the corrected
+ *   mg, and removing the coffee still removes it.
+ * - **food-caused** (`-fcaf-`): it offers no correction. Its lock explains, as
+ *   it always did for removal, that the food owns this number and re-derives it
+ *   on its next edit. The correction screen and `editTap` refuse it as well.
  */
 
 import { Alert, StyleSheet, View as RNView } from 'react-native';
@@ -50,7 +66,11 @@ import { Alert, StyleSheet, View as RNView } from 'react-native';
 import { Text } from '@/components/Themed';
 import { Icon } from '@/components/ui/Icon';
 import { trackerFill, vola } from '@/constants/Colors';
-import { isFoodCaffeineEntryId } from '@/lib/foodCaffeine';
+import {
+  FOOD_CAFFEINE_REDIRECT_MESSAGE,
+  FOOD_CAFFEINE_REDIRECT_TITLE,
+  isFoodCaffeineEntryId,
+} from '@/lib/foodCaffeine';
 import { cutoffLine, formatClock, lastLoggedAt, loggedAmount, type Tracker, type TrackerEntry } from '@/lib/trackerModel';
 import { PressableScale } from '@/components/ui/PressableScale';
 
@@ -61,6 +81,7 @@ export function CaffeineBanner({
   onAdd,
   onRemove,
   onEdit,
+  onEditEntry,
   testID,
 }: {
   tracker: Tracker;
@@ -69,6 +90,11 @@ export function CaffeineBanner({
   onAdd: () => void;
   onRemove: (entryID: string) => void;
   onEdit: () => void;
+  /**
+   * Open the correction for one dose — N578. Absent means the rows offer no
+   * correction and read exactly as they did before.
+   */
+  onEditEntry?: (entryID: string) => void;
   testID?: string;
 }) {
   const fill = trackerFill(tracker.color_key);
@@ -86,17 +112,16 @@ export function CaffeineBanner({
   const last = lastLoggedAt(entries);
   const foot = cutoff ?? (last ? `last at ${formatClock(last)}` : null);
 
+  // The redirect this ticket's own AC asks for: refuse the direct change and
+  // say where the real control is, rather than letting the tracker and the
+  // food log silently disagree about whether that coffee was eaten.
+  function redirectToFood() {
+    Alert.alert(FOOD_CAFFEINE_REDIRECT_TITLE, FOOD_CAFFEINE_REDIRECT_MESSAGE);
+  }
+
   function handleRemove(entryID: string) {
     if (isFoodCaffeineEntryId(entryID)) {
-      // The redirect this ticket's own AC asks for: refuse the direct
-      // remove and say where the real control is, rather than letting the
-      // tracker and the food log silently disagree about whether that
-      // coffee was eaten.
-      Alert.alert(
-        'This came from a logged food',
-        'Edit or remove that food entry in Food to change this — removing it here would leave ' +
-          'your food log and your caffeine total disagreeing.',
-      );
+      redirectToFood();
       return;
     }
     onRemove(entryID);
@@ -161,20 +186,50 @@ export function CaffeineBanner({
         <RNView style={styles.entries} testID={`caffeine-entries-${tracker.id}`}>
           {entries.map((e) => {
             const fromFood = isFoodCaffeineEntryId(e.id);
+            const mg = Math.round(e.amount);
+            const said = (
+              <Text style={styles.entryText}>
+                {mg} mg
+                {fromFood ? ' · from a logged food' : ''}
+              </Text>
+            );
             return (
               <RNView key={e.id} style={styles.entryRow}>
-                <Text style={styles.entryText}>
-                  {Math.round(e.amount)} mg
-                  {fromFood ? ' · from a logged food' : ''}
-                </Text>
+                {/* A food-caused row gets no correction of its own. Its lock
+                    already says where to change it, and a second button
+                    saying the same thing would be a tap target with nothing
+                    drawn to show it, and a repeated VoiceOver stop
+                    (frontend-reviewer, N578). */}
+                {onEditEntry && !fromFood ? (
+                  <PressableScale
+                    onPress={() => onEditEntry(e.id)}
+                    style={styles.entryBody}
+                    // The row is 8pt of padding around 12pt text. The vertical
+                    // slop brings the target to 44pt without drawing a taller
+                    // row. There is no horizontal slop, because the remove
+                    // control sits right beside it.
+                    hitSlop={{ top: 8, bottom: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Change ${mg} mg`}
+                    testID={`caffeine-entry-edit-${e.id}`}
+                  >
+                    {said}
+                    {/* A visible word, not a hidden gesture: the glyph's long
+                        press was the part of N437 a device check had to
+                        answer, and a row can just say what it does. */}
+                    <Text style={styles.entryChange}>Change</Text>
+                  </PressableScale>
+                ) : (
+                  said
+                )}
                 <PressableScale
                   onPress={() => handleRemove(e.id)}
                   hitSlop={12}
                   accessibilityRole="button"
                   accessibilityLabel={
                     fromFood
-                      ? `${Math.round(e.amount)} mg, from a logged food — edit or remove it in Food instead`
-                      : `Remove ${Math.round(e.amount)} mg`
+                      ? `${mg} mg, from a logged food — edit or remove it in Food instead`
+                      : `Remove ${mg} mg`
                   }
                   testID={`caffeine-entry-remove-${e.id}`}
                 >
@@ -225,12 +280,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
     backgroundColor: vola.surfaceRaised,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  entryBody: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   entryText: { fontSize: 12, color: vola.textMuted },
+  entryChange: { fontSize: 12, fontWeight: '700', color: vola.textDim },
   entryX: { fontSize: 15, fontWeight: '700', color: vola.textMuted },
   // Locked, not danger — a food-caused entry is not an error state, it is a
   // control that points somewhere else. See the no-shame-messaging stance.

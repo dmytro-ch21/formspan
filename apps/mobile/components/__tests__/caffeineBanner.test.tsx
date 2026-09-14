@@ -151,3 +151,77 @@ describe('adding', () => {
     expect(onAdd).toHaveBeenCalled();
   });
 });
+
+/**
+ * N578 — the banner draws no glyphs, so a dose row is where N437's correction
+ * is reached. Three kinds of dose, three answers.
+ */
+describe('correcting a dose', () => {
+  async function renderWith(entries: TrackerEntry[], onEditEntry?: jest.Mock) {
+    const onRemove = jest.fn();
+    await render(
+      <CaffeineBanner
+        tracker={tracker}
+        entries={entries}
+        onAdd={() => {}}
+        onRemove={onRemove}
+        onEdit={() => {}}
+        onEditEntry={onEditEntry}
+      />,
+    );
+    return { onRemove };
+  }
+
+  it('opens the correction for a manual dose, and removes nothing', async () => {
+    const onEditEntry = jest.fn();
+    const { onRemove } = await renderWith([entry({ id: 'manual-1', amount: 80 })], onEditEntry);
+
+    const row = screen.getByTestId('caffeine-entry-edit-manual-1');
+    expect(row.props.accessibilityLabel).toBe('Change 80 mg');
+    await fireEvent.press(row);
+
+    expect(onEditEntry).toHaveBeenCalledWith('manual-1');
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('opens the correction for a coffee-caused dose too — its mg is a reference figure, not a measurement', async () => {
+    const onEditEntry = jest.fn();
+    await renderWith([entry({ id: 'coffee-entry-1-caf', amount: 95 })], onEditEntry);
+
+    await fireEvent.press(screen.getByTestId('caffeine-entry-edit-coffee-entry-1-caf'));
+
+    expect(onEditEntry).toHaveBeenCalledWith('coffee-entry-1-caf');
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('offers no correction on a food-caused dose; its lock is the one control, and it redirects', async () => {
+    const onEditEntry = jest.fn();
+    const foodCaffeineId = pairedFoodCaffeineEntryId('food-1', 'tail');
+    const { onRemove } = await renderWith(
+      [entry({ id: 'manual-1', amount: 80 }), entry({ id: foodCaffeineId, amount: 95 })],
+      onEditEntry,
+    );
+
+    // The apparatus: corrections ARE wired in this render, so the food row's
+    // missing one is a decision, not a banner that offers none at all.
+    expect(screen.getByTestId('caffeine-entry-edit-manual-1')).toBeTruthy();
+    expect(screen.queryByTestId(`caffeine-entry-edit-${foodCaffeineId}`)).toBeNull();
+
+    await fireEvent.press(screen.getByTestId(`caffeine-entry-remove-${foodCaffeineId}`));
+
+    expect(onEditEntry).not.toHaveBeenCalled();
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      expect.stringContaining('logged food'),
+      expect.stringContaining('Food'),
+    );
+  });
+
+  it('offers no correction at all when none is wired, and still removes', async () => {
+    const { onRemove } = await renderWith([entry({ id: 'manual-1', amount: 80 })]);
+    expect(screen.queryByTestId('caffeine-entry-edit-manual-1')).toBeNull();
+    await fireEvent.press(screen.getByTestId('caffeine-entry-remove-manual-1'));
+    expect(onRemove).toHaveBeenCalledWith('manual-1');
+  });
+});

@@ -8,7 +8,13 @@ import { Text } from '@/components/Themed';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
+import { isCoffeeCaffeineEntryId } from '@/lib/coffeeCaffeine';
 import { displayAmount, readAmount } from '@/lib/entryEdit';
+import {
+  FOOD_CAFFEINE_REDIRECT_MESSAGE,
+  FOOD_CAFFEINE_REDIRECT_TITLE,
+  isFoodCaffeineEntryId,
+} from '@/lib/foodCaffeine';
 import { request as requestSync } from '@/lib/sync';
 import { inputUnitLabel, isMeasuredUnit, type Tracker, type TrackerEntry } from '@/lib/trackerModel';
 import { editCoffeeTap, editTap, localEntry, localTrackers } from '@/lib/trackers';
@@ -19,9 +25,12 @@ import { useAuth } from '@clerk/clerk-expo';
  * Correct one logged tap's amount, on the phone — N437.
  *
  * Opened by a long press on a filled glyph, or by that glyph's "Change amount"
- * accessibility action. Before this, a mistaken tap could only be removed and
- * re-added, and re-adding logs the tracker's increment again: a 500 ml bottle
- * tapped as a 250 ml glass had no way to be recorded as what it was.
+ * accessibility action. Since N578 it is also opened from a dose row on the
+ * caffeine banner and from a row in a bar-style card's list of taps. Those are
+ * the surfaces that draw no glyph to long-press. Before N437, a mistaken tap
+ * could only be removed and re-added, and re-adding logs the tracker's increment
+ * again: a 500 ml bottle tapped as a 250 ml glass had no way to be recorded as
+ * what it was.
  *
  * **It changes the amount and nothing else.** The day and the moment are when
  * the tap happened, and removing a tap stays where it was, on the glyph's own
@@ -32,6 +41,15 @@ import { useAuth } from '@clerk/clerk-expo';
  * caused by the same ratio. That is the one preset-aware line here, for the
  * reason `TrackerList` keeps its own: the card, and this screen's field, stay
  * generic.
+ *
+ * **The three kinds of caffeine entry (N578).**
+ *
+ * - A manual dose is an ordinary tap and corrects like one.
+ * - A dose a coffee tap caused (`-caf`) corrects directly too. That is the only
+ *   way to say a cup held more caffeine than its drink's reference figure, and
+ *   the pairing survives because the id does.
+ * - A dose a logged food caused (`-fcaf-`) is refused here, and `editTap` refuses
+ *   it again. The food owns that number and re-derives it on its next edit.
  */
 export default function TrackerEntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -119,6 +137,20 @@ export default function TrackerEntryScreen() {
     );
   }
 
+  if (isFoodCaffeineEntryId(entry.id)) {
+    // The banner already says this before navigating here. This screen says it
+    // again because a screen is reachable by more than one route, and no field
+    // is offered, so there is nothing to type and then lose.
+    return (
+      <ScreenShell title={tracker.name}>
+        <Text style={styles.redirectTitle}>{FOOD_CAFFEINE_REDIRECT_TITLE}</Text>
+        <Text style={styles.note} testID="tracker-entry-food-caffeine">
+          {FOOD_CAFFEINE_REDIRECT_MESSAGE}
+        </Text>
+      </ScreenShell>
+    );
+  }
+
   // A measured unit is named; a cup, a dose or a count is the number itself.
   const measured = isMeasuredUnit(tracker.unit);
   const label = measured ? `Amount, in ${inputUnitLabel(tracker, units)}` : 'Amount';
@@ -143,6 +175,11 @@ export default function TrackerEntryScreen() {
         {tracker.preset === 'coffee' ? (
           <Text style={styles.hint} testID="tracker-entry-caffeine-hint">
             If this cup logged caffeine, that changes by the same ratio.
+          </Text>
+        ) : null}
+        {isCoffeeCaffeineEntryId(entry.id) ? (
+          <Text style={styles.hint} testID="tracker-entry-coffee-caffeine-hint">
+            Logged with a coffee. This changes the caffeine only, not the cups.
           </Text>
         ) : null}
       </View>
@@ -186,6 +223,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vola.bg },
   container: { padding: 20, paddingBottom: 60 },
   note: { fontSize: 14, color: vola.textMuted },
+  redirectTitle: { fontSize: 15, fontWeight: '700', color: vola.text, marginBottom: 6 },
   error: { fontSize: 13, color: vola.danger, fontWeight: '600', marginTop: 12 },
   save: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
   saveText: { fontSize: 15, fontWeight: '800' },
