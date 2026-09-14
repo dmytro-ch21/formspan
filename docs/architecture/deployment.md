@@ -1,6 +1,6 @@
 # Environments & deployment
 
-Status as of this doc: the pieces below marked **built** exist in this repo and are checked into git. Everything marked **planned** is the agreed direction (see the Railway proposal this was derived from) but hasn't been created on Railway yet — no live staging/production services exist yet.
+**Last verified against the live Railway project: 2026-09-14**, read-only — `railway status --json` and one HTTP request to each public domain (the recipe is under *Re-verifying this section*, below). In this file, **built** means the code and config exist in this repo, **live** means it is running on Railway and answering requests, and **planned** means the agreed direction, not created anywhere yet. Nothing re-checks this automatically, so if that date is old, re-verify before acting on anything in the next section.
 
 ## Development — built
 
@@ -11,39 +11,63 @@ docker compose up -d   # local Postgres on :5432
 cd backend && go run ./cmd/migrate up
 pnpm run dev:api        # Go API on :8080
 pnpm run dev:web        # Next.js on :3000
+pnpm run dev:admin      # admin console on :3001 (or the next free port)
+pnpm run dev:mobile     # Metro on :8081, for the development build
 ```
 
 Config comes from real env vars / `.env.local` (see `backend/.env.example` and `apps/web/.env.example`), not baked into images. `apps/web/.env.local` is gitignored and points `NEXT_PUBLIC_API_URL` at `http://localhost:8080`. Local Docker runs via Colima (CLI-only, no Docker Desktop) — see `docker-compose.yml` at the repo root for the Postgres service definition.
 
-## Staging & production — Postgres is real now, application services still not provisioned
+## Staging & production — staging is live, production is empty
 
-Railway project `formspan` exists — still under its pre-rename name; the VOLA rename covered the repo and code, not the external service accounts (`staging` and `production` environments — no permanent Railway environment for local dev, that's the section above). Current service topology:
+Railway project `formspan` exists — still under its pre-rename name; the VOLA rename covered the repo and code, not the external service accounts. It has two environments, `staging` and `production` (no permanent Railway environment for local dev, that's the section above). **`staging` runs every service that has code behind it. `production` has no services at all** — it holds one volume, `postgres-volume-mMgH`, with no service instance attached, so there is no production Postgres and no production API.
 
-| Service | Public? | Config |
+Topology as measured on 2026-09-14:
+
+| Service (Railway name) | Public? | State |
 |---|---:|---|
-| `api` | Yes | `railway/api.toml` — config built, **service created on Railway `staging` (api live; web/admin in progress)** |
-| `web` | Yes | `railway/web.toml` — config built, **service created on Railway `staging` (api live; web/admin in progress)** |
-| `admin-web` | Yes, authenticated | not built — no admin app exists yet |
-| `admin-api` | No | not built — no admin-api binary exists yet |
-| `worker` | No | not built — no worker binary exists yet |
-| `scheduler` | No, cron | not built — no scheduler binary exists yet |
-| `postgres` | No | **real**, in the `staging` environment — migrations applied (`profiles` table exists there too, not just locally). Shared for dev/staging testing purposes for now; no separate `production` Postgres yet. |
-| `redis` | No | not built — not needed yet |
-| `files` | No | not built — no object storage usage yet |
+| `api` (`api.vola-fitness-platform`) | Yes | **live on `staging`** — `railway/api.toml`, Dockerfile build. `https://apivola-fitness-platform-staging.up.railway.app/v1/readyz` answers 200 |
+| `web` (`web.vola-fitness-platform`) | Yes | **live on `staging`** — `railway/web.toml`, Nixpacks build. `https://webvola-fitness-platform-staging.up.railway.app/` answers 200 |
+| `admin` (`admin.vola-fitness-platform`) | Yes, authenticated | **live on `staging`** — `railway/admin.toml`, Nixpacks build. `https://adminvola-fitness-platform-staging.up.railway.app/` answers 200 |
+| `postgres` (`Postgres`) | No | **live on `staging`** — Railway's `postgres-ssl:18` template image on a volume, migrated by `api`'s pre-deploy (see *Migrations* below). Shared for dev/staging testing purposes for now; no separate `production` Postgres yet. |
+| `admin-api` | No | planned — no `admin-api` binary exists. The console's `/v1/admin/*` endpoints are served by `api` today. |
+| `worker` | No | planned — no worker binary exists yet |
+| `scheduler` | No, cron | planned — no scheduler binary exists yet |
+| `redis` | No | planned — not needed yet |
+| object storage | — | **not on Railway: Cloudflare R2.** A public-read bucket serves the exercise catalog's media (`MEDIA_BASE_URL`, see *Exercise media* below); a private bucket holds check-in photos and avatars (`R2_*`, presigned by `backend/internal/platform/objectstore`). Whether `staging` has these variables set was not checked on 2026-09-14 — the verification deliberately reads no service variables. |
+
+(`backend/cmd` builds `api`, `migrate`, `seed`, `exportcontent` and `shadowreplay` — none of the planned binaries. `engine/`'s dev engine is not deployed either.)
+
+**`api`, `web` and `admin` deploy automatically on every push to `main`.** Measured: `1a4abb47` landed on `main` at 08:26:25Z on 2026-09-13, and all three services' deployments of that commit were created at 08:26:27Z, recording branch `main`. Each deployment reads its config from the repo — Railway records `/railway/api.toml`, `/railway/web.toml` and `/railway/admin.toml` — so a change to those files ships with the merge that contains it. There is no staging branch between a merge and `staging`.
 
 The `staging` environment's Postgres credentials live in `backend/.env.staging.local` (gitignored, never commit). `DATABASE_URL_PUBLIC` works from anywhere (Railway's TCP proxy) — useful for manually running `migrate` against staging from local dev. `DATABASE_URL_INTERNAL` only resolves from inside Railway's network, for when the `api` service itself is deployed there.
 
-Add each service's `railway/*.toml` and wire it into the Railway dashboard only once the corresponding code exists (`admin-api`, `worker`, `scheduler` binaries, the admin Next.js app) — no point configuring a deploy target for a binary that doesn't exist.
+Add each service's `railway/*.toml` and wire it into the Railway dashboard only once the corresponding code exists (`admin-api`, `worker`, `scheduler` binaries) — no point configuring a deploy target for a binary that doesn't exist.
 
-### How `api` and `web` deploy (once actually connected to Railway)
+### How `api`, `web` and `admin` build
 
-Both are services on the same repo, but with different root directories:
+All three are services on the same repo, with different root directories:
 - `api` — root directory `backend/`, builds via `backend/Dockerfile` (Docker builder). One image; `go build -o /app/bin/ ./cmd/...` picks up every `cmd/*` binary automatically as more get added (`admin-api`, `worker`, `scheduler`, `migrate`), so the same Dockerfile will serve those services later without changes — only their `railway/*.toml` start command differs. Root directory is scoped to `backend/` (not the repo root) so the build context is just the Go module, not the whole monorepo.
 - `web` — root directory repo root (a pnpm workspace member can't build standalone without the root lockfile), builds via Nixpacks (auto-detected Node/Next.js), running `pnpm run build:web` / `pnpm --filter web start`.
+- `admin` — the same shape as `web`: repo root, Nixpacks, `build:admin` / `pnpm --filter admin start`, healthcheck on `/`. Both Nixpacks services need `NIXPACKS_INSTALL_CMD` set on the service to get past corepack — `railway/web.toml` carries the detail.
 
 ### Domains (planned)
 
-Public: `web.yourdomain.com`, `api.yourdomain.com`, `admin.yourdomain.com` (none registered yet — placeholders in `.env.example` files). Everything else (`admin-api`, `worker`, `scheduler`, `postgres`, `redis`) stays on Railway's private internal networking, never public.
+Today every public service answers on its Railway-generated `*.up.railway.app` domain (the three URLs in the table), and no custom domain is attached to any of them (2026-09-14). The planned public names are `web.yourdomain.com`, `api.yourdomain.com` and `admin.yourdomain.com` (none registered yet — placeholders in `.env.example` files). `admin-api`, `worker`, `scheduler` and `redis` are planned to stay on Railway's private internal networking. **Postgres is not private in that sense today**: it has no HTTP domain, but `DATABASE_URL_PUBLIC` above reaches it through Railway's TCP proxy (not re-measured on 2026-09-14).
+
+### Re-verifying this section
+
+Read-only, from a checkout linked to `formspan`. Run `railway status` first: it names the project, and that name must be `formspan` — the same account also holds the unrelated `dynamic-trust`, which is never ours to touch.
+
+```bash
+railway status --json   # each environment's services, latest deployment status, deployed branch and commit, domains
+curl -sS -o /dev/null -w '%{http_code}\n' https://apivola-fitness-platform-staging.up.railway.app/v1/readyz   # 200: up, migrated, DB reachable
+curl -sS -o /dev/null -w '%{http_code}\n' https://webvola-fitness-platform-staging.up.railway.app/
+curl -sS -o /dev/null -w '%{http_code}\n' https://adminvola-fitness-platform-staging.up.railway.app/
+```
+
+None of these reads a service variable, so none of them prints a secret. **This is a recipe, not a check**: nothing runs it, so the date at the top of this file is the only signal of how stale the rest is. Update that date when you re-run it, and the table whenever the two disagree.
+
+**When to re-run it:** in the same pull request as any change to a `railway/*.toml`; after a service or environment is added to or removed from Railway; and before any change that acts on what this section says is deployed. Nothing enforces those triggers yet — they are a stated cadence, not a gate.
 
 ### Migrations — tooling built, applied everywhere that currently has a database
 
