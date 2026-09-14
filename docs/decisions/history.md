@@ -77653,6 +77653,26 @@ Where each component went:
 - **The guard reads `GIT_TRACE`'s text,** the same caveat H28 recorded. If a later git rewords the trace line, the control is what would fail.
 - **Nothing makes a fourth script do this.** Three scripts now carry the same tuple and the same check. A new script that builds a throwaway repository would start without either, and no repo-wide check was added. Searching `scripts/` for `git init` is how these three were found.
 
+## 2026-09-13 — F67 (#1201): a refused food entry stops counting as refused once a pull brings back the server's copy
+
+**What.** `cacheEntries` in `apps/mobile/lib/foodLog.ts` — the pull that merges the server's food entries into the phone — now clears `last_error` when it overwrites a row. One line in the upsert's `DO UPDATE SET`, plus two tests in `lib/__tests__/foodLog.test.ts`.
+
+**The defect.** A food entry refused permanently on push keeps `dirty = 0` with `last_error` set, which is `REFUSED_ROW`. When a pull brings back the server's row for that id, the upsert's guard (`dirty = 0 AND deleted_at IS NULL`) lets it through: every data column took the server's values and `remote` became 1, but `last_error` was never touched. So the row went on matching `REFUSED_ROW` — counted by `countRejectedRows` (the phone's "needs attention") and, since N565 (#1108), in the daily stuck-row report with a `stuck_since` never cleared — while showing values the refusal did not describe. Run against the unfixed code, the test differed in exactly `last_error`, `last_error_code` and `stuck_since`.
+
+**Which case is actually reachable — corrected in review.** The ticket described a refused entry that the server "later has a row for (reconciled on another device or on the web)", and the first version of the test refused an entry's CREATE. `frontend-reviewer` pointed out that state cannot happen: a refused create was never stored under that id, so no pull can return it, and nothing on web writes a food entry. The reachable case is a refused EDIT: an entry the server already holds (`remote = 1`) is corrected on the phone, the server refuses the correction permanently, and the rejected values stay in the row. The tests now build exactly that — log, mark as held by the server, edit, refuse the edit's PUT through `syncFood` — and assert the precondition, including that the stuck-row report lists it, before pulling.
+
+**The trade-off, chosen and recorded rather than implied.** In that reachable case, the copy the pull brings back is the server's version from BEFORE the refused edit. With this fix the server's copy wins and the refusal goes with it, so **the refused correction is replaced and nothing tells the athlete**. That is the same rule `cacheFoods` already ships and documents for foods ("after a permanent rejection the server's copy IS the truth, because the local values are the ones it refused"), applied to entries for consistency. Before the fix the values were overwritten too, but the flag stayed, naming a correction no longer visible. The alternative is to exclude refused rows from the pull (`AND last_error IS NULL` in the upsert's guard), so the rejected correction and its reason stay until the athlete edits or discards it through the existing repair flow. That is a reversible one-line change. **The owner chose the server-copy rule on 2026-09-13**, asked with both options side by side after review surfaced the trade-off.
+
+**Why one line is enough.** N565's triggers in `db.ts` watch the state: `food_entries_error_code_cleared` nulls `last_error_code` when `last_error` becomes NULL, and `food_entries_stuck_since` clears `stuck_since` when a row leaves the stuck state. `frontend-reviewer` confirmed they are installed on both fresh installs and devices migrated through v45, and the test shows they fire on an upsert's update branch.
+
+**Which side wins, in each case.** A refused local row loses to the server's copy (above). A further edit made after the refusal wins over the pull: every path that changes an entry locally (`editEntry`, `moveEntry`, `reorderEntries`, `removeEntry`) sets `dirty = 1`, and the upsert skips a row still owed. A refused DELETE has `deleted_at` set and is excluded outright.
+
+**Mutation-checked, each restored byte-identical and re-run green.** Removing `last_error = NULL` turns the first test red; removing the upsert's `dirty = 0` guard turns the second red (the athlete's new correction reverts to the server's copy). `ac-verifier` and `frontend-reviewer` each re-ran both mutations independently. `foodLog`, `rejectedRows` and `stuckRows` pass: 142 tests.
+
+**Reach.** `cacheEntries` has one caller today: `push()`'s fresh-install backfill (N428), at most once per account per device — so a device carrying a refused edit when that backfill first runs, typically one upgraded from before N428. It is also the path every future web writer of food entries will take.
+
+**Not verified.** No device run: a refused edit followed by the backfill is not something to produce on purpose on a phone, and the only visible change is the attention count.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -687,7 +687,20 @@ export async function cacheEntries(
            -- position is the only thing in this row that still knows what the
            -- athlete arranged. (No backticks in here: this is inside a
            -- template literal.)
-           position = excluded.position, remote = 1
+           position = excluded.position, remote = 1,
+           -- F67 (#1201): the row now holds the server's copy, so a refusal
+           -- that described the local one is no longer about anything in it.
+           -- Same rule "cacheFoods" applies: after a permanent rejection the
+           -- server's copy is the truth. The reachable case is a refused EDIT
+           -- on an entry the server holds, and the copy that wins is the one
+           -- from BEFORE that edit, so the refused correction is replaced and
+           -- nothing tells the athlete. The owner chose that on 2026-09-13
+           -- (see the F67 history entry). Only "last_error" is cleared
+           -- here: db.ts's N565 triggers clear "last_error_code" with it and
+           -- "stuck_since" when the row leaves the refused state. A row still
+           -- owed ("dirty = 1", a further edit after the refusal) never
+           -- reaches this branch.
+           last_error = NULL
          WHERE food_entries.dirty = 0 AND food_entries.deleted_at IS NULL`,
         e.id, userId, e.eaten_on, e.meal, e.name, e.servings, e.serving_label,
         e.kcal, e.protein_g, e.carb_g, e.fat_g, e.fibre_g,
