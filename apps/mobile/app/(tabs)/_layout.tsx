@@ -1,11 +1,13 @@
+import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { useNavigation, useRoute, useSegments } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { PlatformTopInsetContext } from '@/lib/headerInset';
 import { useModules } from '@/lib/ModulesProvider';
-import { TABS } from '@/lib/tabs';
+import { HOME_TAB, TABS, tabWasChosen } from '@/lib/tabs';
 import { useRasterizedIcons } from '@/lib/tabIconRaster';
 import { tabIconRequests, tabIconRenderingMode, tabIconSource } from '@/lib/tabIconPlan';
 
@@ -68,6 +70,40 @@ export default function TabLayout() {
   // below without breaking React's hook-order contract the moment `ready`
   // flips from false to true.
   const { host, sources } = useRasterizedIcons(tabIconRequests(Platform.OS));
+
+  // **Today is the tab the app opens on, by name, not by being first (N580).**
+  //
+  // Today sits in the centre of the bar now, so `TABS[0]` is Food. For most
+  // ways into the tabs that makes no difference: a cold start, the post-sign-in
+  // `router.replace('/')` and a deep link to a tab all name their tab through
+  // the URL. One way in names none. The root layout's `unstable_settings`
+  // anchor puts `(tabs)` under a cold-started deep link to a pushed screen,
+  // and going back from that screen reveals whatever NativeTabs picked on its
+  // own, which is its first route.
+  //
+  // `unstable_settings.initialRouteName` in this file would not change that,
+  // and it was measured rather than assumed: `NativeTabsNavigator` (expo-router
+  // 57.0.21, `build/native-tabs/NativeBottomTabsNavigator.js`) never hands
+  // `initialRouteName` to its router, so the pin was loaded into the route tree
+  // and NativeTabs behaved identically with or without it. What the router does
+  // honour is a `screen` param on the route that holds it (React Navigation's
+  // nested-navigation params), so that is what this sets, ONCE, and only when
+  // nothing chose a tab. See `lib/tabs.ts` and
+  // `__tests__/app/tabDefault.test.tsx`, which holds both directions.
+  //
+  // Above the frame-holds below for the same hook-order reason as the three
+  // hooks above it.
+  // Typed to the one call made on it. The default type resolves `setParams`
+  // against an untyped root param list and accepts only `undefined`.
+  const navigation = useNavigation<{ setParams: (params: { screen: string }) => void }>();
+  const route = useRoute();
+  const segments = useSegments();
+  const homeTabDecided = useRef(false);
+  useEffect(() => {
+    if (homeTabDecided.current) return;
+    homeTabDecided.current = true;
+    if (!tabWasChosen(segments, route.params)) navigation.setParams({ screen: HOME_TAB });
+  }, [navigation, route.params, segments]);
 
   // Hold the frame until the cached module set has been read.
   //

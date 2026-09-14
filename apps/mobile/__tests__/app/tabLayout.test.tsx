@@ -72,6 +72,21 @@ jest.mock('expo-router/unstable-native-tabs', () => {
   return { NativeTabs };
 });
 
+/*
+ * N580: the layout names Today itself when nothing chose a tab. These three
+ * hooks are all it reads for that. The global `expo-router` mock in
+ * `jest.setup.js` does not carry them, so this file supplies them. The
+ * behaviour against the real router is `tabDefault.test.tsx`'s job; this only
+ * pins that the layout asks, and when.
+ */
+const mockSetParams = jest.fn();
+const mockNav: { segments: string[]; params: object | undefined } = { segments: ['(tabs)'], params: undefined };
+jest.mock('expo-router', () => ({
+  useNavigation: () => ({ setParams: mockSetParams }),
+  useRoute: () => ({ params: mockNav.params }),
+  useSegments: () => mockNav.segments,
+}));
+
 jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => mockModuleState }));
 // The purple theme, not the brand one: its `accent` and `ink` differ, so the
 // assertions below can tell which of the two the tab bar was given. The brand
@@ -95,14 +110,45 @@ async function declare(state: {
   modules: Module[];
   ready: boolean;
   raster: { host: React.ReactNode; sources: Record<string, unknown> | null };
+  segments?: string[];
+  params?: object;
 }) {
   mockTriggers.length = 0;
   mockNativeTabsProps.current = null;
   mockModuleState.modules = state.modules;
   mockModuleState.ready = state.ready;
   mockRaster.current = state.raster;
+  mockNav.segments = state.segments ?? ['(tabs)'];
+  mockNav.params = state.params;
+  mockSetParams.mockClear();
   await render(<TabLayout />);
 }
+
+describe('which tab the navigator opens on (N580)', () => {
+  it('asks for Today when nothing chose a tab, even while the module set is still loading', async () => {
+    // The anchor under a cold-started deep link to a pushed screen: the URL is
+    // that screen, and the tab route carries no `screen` param.
+    await declare({ modules: [], ready: false, raster: { host: null, sources: null }, segments: ['goals'] });
+    expect(mockSetParams).toHaveBeenCalledTimes(1);
+    expect(mockSetParams).toHaveBeenCalledWith({ screen: 'index' });
+  });
+
+  it('leaves the tab alone when the URL chose one', async () => {
+    await declare({ modules: [], ready: true, raster: { host: null, sources: {} }, segments: ['(tabs)', 'food'] });
+    expect(mockSetParams).not.toHaveBeenCalled();
+  });
+
+  it('leaves the tab alone when the navigation that created it named one', async () => {
+    await declare({
+      modules: [],
+      ready: true,
+      raster: { host: null, sources: {} },
+      segments: ['sign-in'],
+      params: { screen: 'food', params: {} },
+    });
+    expect(mockSetParams).not.toHaveBeenCalled();
+  });
+});
 
 describe('before the module set has been read', () => {
   it('renders nothing at all — not even the icon rig', async () => {
@@ -127,10 +173,10 @@ describe('once ready and every icon has landed', () => {
     await declare({ modules: [], ready: true, raster: { host: null, sources: resolvedIosSources() } });
   }
 
-  it('gives NativeTabs Today, Food, Progress, Plan, You, in that order', async () => {
+  it('gives NativeTabs Food, Progress, Today, Plan, You, in that order', async () => {
     await declareReady();
-    expect(mockTriggers.map((t) => t.name)).toEqual(['index', 'food', 'progress', 'workouts', 'you']);
-    expect(mockTriggers.map((t) => t.labelText)).toEqual(['Today', 'Food', 'Progress', 'Plan', 'You']);
+    expect(mockTriggers.map((t) => t.name)).toEqual(['food', 'progress', 'index', 'workouts', 'you']);
+    expect(mockTriggers.map((t) => t.labelText)).toEqual(['Food', 'Progress', 'Today', 'Plan', 'You']);
   });
 
   it('gives every tab an icon source', async () => {
