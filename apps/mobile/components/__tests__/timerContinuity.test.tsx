@@ -8,7 +8,8 @@ import * as Reanimated from 'react-native-reanimated';
 import { useCountdown } from '../Countdown';
 import { TIMER_BAR_SPACE, TimerSurface, timerSpaceFor } from '../Timer';
 import { MS, SWAP_SCALE } from '@/constants/Motion';
-import { findAllByType, type TreeNode } from '@/lib/__tests__/support/tree';
+import { collectNodes, findAllByType, type TreeNode } from '@/lib/__tests__/support/tree';
+import type { RunStep } from '@/lib/intervalRun';
 
 /**
  * N558/#1047 — starting a rest timer, twenty times a session, on the screen an
@@ -229,6 +230,9 @@ describe('defect 3 — the drain is one UI-thread animation per change, not a st
     const [drainTo, drain] = timing.mock.calls[1];
     expect(drainTo).toBe(0);
     expect(drain!.duration).toBeCloseTo(75_000 - MS.control, -2);
+    // F57: the card's ring re-arms with it, from the same value — it IS that value.
+    const arc = ringArc();
+    expect(arc.offset).toBeCloseTo(arc.circumference * (1 - drainScale()), 5);
   });
 
   it('holds its width while paused, and arms nothing further until resumed', async () => {
@@ -245,6 +249,9 @@ describe('defect 3 — the drain is one UI-thread animation per change, not a st
     await advance(10_000);
     expect(timing.mock.calls.length).toBe(1);
     expect(drainScale()).toBeCloseTo(60 / 90, 2);
+    // F57: the card's ring holds exactly where the bar holds.
+    const arc = ringArc();
+    expect(arc.offset).toBeCloseTo(arc.circumference * (1 - 60 / 90), 2);
   });
 
   it('with Reduce Motion ON, animates nothing and steps with the digits', async () => {
@@ -438,6 +445,149 @@ describe('F55 — the surface arrives, leaves and swaps without a flash, and Red
       expect(formStyle('bar').transform[0].scale).toBeCloseTo(answer === false ? SWAP_SCALE : 1, 10);
     },
   );
+});
+
+/*
+  F57/#1140 — the expanded ring and the run bar move on the UI thread.
+
+  N558 made the collapsed bar drain continuously, and F55 kept both forms
+  mounted; the card's ring still stepped at 4Hz from `remaining`, so expanding a
+  smooth bar revealed a stepping clock. The ring now reads the SAME armed drain
+  the bar does. The assertions that matter are the ones that would move if it
+  didn't: the arc sits where the one drain comes to rest (a ring still computed
+  from `remaining` would be two-thirds wound after 30s), and the withTiming
+  count does not grow (a ring arming its own copy would double it).
+*/
+const ringArc = () => {
+  const card = screen.getByTestId('countdown-form-card', { includeHiddenElements: true });
+  const arcs = collectNodes(card as TreeNode).filter(
+    (n) => n.props.strokeDashoffset != null && n.props.strokeDasharray != null,
+  );
+  expect(arcs.length).toBeGreaterThan(0);
+  // react-native-svg normalises `strokeDasharray` to an array on the host node.
+  const dash = arcs[0].props.strokeDasharray as number | number[];
+  return {
+    offset: arcs[0].props.strokeDashoffset as number,
+    circumference: Array.isArray(dash) ? dash[0] : dash,
+  };
+};
+
+const runFillScale = () => {
+  const style = StyleSheet.flatten(screen.getByTestId('countdown-run-fill').props.style) as {
+    transform: { scaleX: number }[];
+    width?: unknown;
+    transformOrigin?: string;
+  };
+  return { scaleX: style.transform[0].scaleX, width: style.width, origin: style.transformOrigin };
+};
+
+/** A two-step run: 30s of work, then 60s of rest — 90s in all. */
+const RUN: RunStep[] = [
+  { kind: 'work', seconds: 30, label: 'Burpee', exerciseID: 'ex-1', setIndex: 0, ordinal: 1, total: 2 },
+  { kind: 'rest', seconds: 60, label: 'Burpee', exerciseID: 'ex-1', ordinal: 1, total: 2 },
+];
+
+async function startRunOf(steps: RunStep[]) {
+  await render(<SessionStandIn />);
+  await act(async () => {
+    countdown().startRun(steps, 'exercise');
+  });
+  await act(async () => {});
+}
+
+describe('F57 — the expanded ring and the run bar move on the UI thread', () => {
+  it("reads the bar's one armed drain: the ring adds no animation, and a tick arms nothing", async () => {
+    answerReduceMotion(false);
+    const timing = jest.spyOn(Reanimated, 'withTiming');
+    await startRest(90);
+    // The drain's jump and its linear leg — and nothing for the ring.
+    expect(timing.mock.calls.length).toBe(2);
+
+    await advance(30_000);
+    expect(timing.mock.calls.length).toBe(2);
+    // Where the one drain comes to rest (empty) is where the arc is: fully unwound.
+    // A ring still computed from `remaining` would sit a third unwound here.
+    const { offset, circumference } = ringArc();
+    expect(offset).toBeCloseTo(circumference, 5);
+    expect(drainScale()).toBe(0);
+  });
+
+  it.each([
+    ['on', true],
+    ['not yet answered', 'pending'],
+  ] as const)('with Reduce Motion %s, the ring steps with the digits', async (_label, answer) => {
+    answerReduceMotion(answer);
+    await startRest(90);
+    await advance(30_000);
+    const { offset, circumference } = ringArc();
+    expect(offset).toBeCloseTo(circumference * (1 - 60 / 90), 1);
+  });
+
+  it('fills the run bar on the UI thread, armed once toward the end of THIS step', async () => {
+    answerReduceMotion(false);
+    const timing = jest.spyOn(Reanimated, 'withTiming');
+    await startRunOf(RUN);
+
+    // Drain and run bar, two legs each. The run bar's linear leg heads for where
+    // the run will be when this 30s step ends: 30 of 90 seconds.
+    expect(timing.mock.calls.length).toBe(4);
+    const linearTargets = timing.mock.calls
+      .filter(([, config]) => (config as { easing?: unknown } | undefined)?.easing === Reanimated.Easing.linear)
+      .map(([toValue]) => toValue as number);
+    expect(linearTargets).toHaveLength(2);
+    expect(linearTargets[0]).toBe(0);
+    expect(linearTargets[1]).toBeCloseTo(30 / 90, 5);
+
+    await advance(10_000);
+    expect(timing.mock.calls.length).toBe(4);
+    // A scaleX fill at full width, not an animated width.
+    const fill = runFillScale();
+    expect(fill.width).toBe('100%');
+    // Grows rightward from the left edge, the way the width did.
+    expect(fill.origin).toBe('left');
+    expect(fill.scaleX).toBeCloseTo(30 / 90, 5);
+  });
+
+  it('with Reduce Motion on, the run bar steps with the digits and arms nothing', async () => {
+    answerReduceMotion(true);
+    const timing = jest.spyOn(Reanimated, 'withTiming');
+    await startRunOf(RUN);
+    await advance(10_000);
+    expect(timing).not.toHaveBeenCalled();
+    // 10s into the 30s work step: 10 of 90 seconds of the run.
+    expect(runFillScale().scaleX).toBeCloseTo(10 / 90, 2);
+  });
+
+  it('a run bar that comes back after its run ended jumps to its start, never glides from the old fill', async () => {
+    answerReduceMotion(false);
+    await startRunOf(RUN);
+    await advance(20_000);
+    // What a set tick does with auto-rest on: the run ends, the timer does not,
+    // so the surface — and the run bar's shared value — stay mounted.
+    await act(async () => {
+      countdown().startRest(60, 'Back squat', 'ex-1');
+    });
+    await act(async () => {});
+
+    const timing = jest.spyOn(Reanimated, 'withTiming');
+    await act(async () => {
+      countdown().startRun(RUN, 'exercise');
+    });
+    const jumps = timing.mock.calls
+      .map(([toValue, config]) => ({ toValue: toValue as number, ...(config as { duration?: number }) }))
+      .filter((c) => c.duration === 0);
+    // Exactly one arm jumps — the run bar's, onto the new run's start. The drain
+    // bridges as before, because its bar never stopped being on screen.
+    expect(jumps).toHaveLength(1);
+    expect(jumps[0].toValue).toBe(0);
+  });
+
+  it('a lone rest has no run bar, so it arms none', async () => {
+    answerReduceMotion(false);
+    await startRest(90);
+    await fireEvent.press(screen.getByTestId('countdown-expand'));
+    expect(screen.queryByTestId('countdown-run-fill')).toBeNull();
+  });
 });
 
 describe('defect 1 — the log is not moved by the timer', () => {
