@@ -62,11 +62,20 @@ import { tabIconRequests, tabIconRenderingMode, tabIconSource } from '@/lib/tabI
  *    than an oversight.
  */
 
+type JumpToHome = { type: 'JUMP_TO'; target: string; payload: { name: string } };
+
+/**
+ * Today, for the tab navigator keyed `tabsKey`: the same action a tap on Today's
+ * own tab dispatches (`NativeBottomTabsNavigator.js`, `onTabChange`).
+ */
+function jumpToHome(tabsKey: string): JumpToHome {
+  return { type: 'JUMP_TO', target: tabsKey, payload: { name: HOME_TAB } };
+}
+
 /** The `(tabs)` route's navigation in the root stack, typed to the calls made on it. */
 type TabRouteNavigation = {
-  setParams: (params: { screen: string }) => void;
   isFocused: () => boolean;
-  dispatch: (action: { type: 'JUMP_TO'; target: string; payload: { name: string } }) => void;
+  dispatch: (action: JumpToHome) => void;
 };
 
 export default function TabLayout() {
@@ -91,27 +100,48 @@ export default function TabLayout() {
   // `unstable_settings.initialRouteName` in this file would not change that,
   // and it was measured rather than assumed: `NativeTabsNavigator` (expo-router
   // 57.0.21, `build/native-tabs/NativeBottomTabsNavigator.js`) never hands
-  // `initialRouteName` to its router, so the pin was loaded into the route tree
-  // and NativeTabs behaved identically with or without it. What the router does
-  // honour is a `screen` param on the route that holds it (React Navigation's
-  // nested-navigation params), so that is what this sets, ONCE, and only when
-  // nothing chose a tab. See `lib/tabs.ts` and
-  // `__tests__/app/tabDefault.test.tsx`, which holds both directions.
+  // `initialRouteName` to its router, and `getStateFromPath` puts `(tabs)` under
+  // `/goals` with no nested state (F70). So the layout names Today itself, ONCE,
+  // and only when nothing chose a tab.
+  //
+  // **How, and when (F70).** It dispatches the `JUMP_TO` a tap on Today
+  // dispatches, targeted at the tab navigator's key. A targeted jump does not
+  // focus the tabs, so the athlete still sees the screen they opened until they
+  // go back. An untargeted navigate to Today popped that screen at once.
+  //
+  // It waits for the navigation container's `state` event, because this effect
+  // is too early on a phone. N580 set a `screen` param here, and the param only
+  // survived when the root stack mounted in the container's own commit. The
+  // real root layout returns null until fonts load, so the stack mounts a
+  // commit later and publishes the state it rendered with after this effect,
+  // and the param was gone. A jump from this effect has nothing to target yet:
+  // the tab navigator is not in the container's state in either order. By the
+  // `state` event it is, including when the icons rasterise a commit later.
+  // `__tests__/app/tabDefault.test.tsx` runs every cold start under both orders
+  // and under the real root layout; F70's history entry has the options not
+  // taken.
   //
   // Above the frame-holds below for the same hook-order reason as the three
   // hooks above it.
-  // Typed to the calls made on it. The default type resolves `setParams`
-  // against an untyped root param list and accepts only `undefined`.
+  // Typed to the calls made on it.
   const navigation = useNavigation<TabRouteNavigation>();
   const navigationContainer = useNavigationContainerRef();
   const route = useRoute();
   const segments = useSegments();
-  const homeTabDecided = useRef(false);
+  const homeTab = useRef<'undecided' | 'pending' | 'done'>('undecided');
   useEffect(() => {
-    if (homeTabDecided.current) return;
-    homeTabDecided.current = true;
-    if (!tabWasChosen(segments, route.params)) navigation.setParams({ screen: HOME_TAB });
-  }, [navigation, route.params, segments]);
+    if (homeTab.current === 'undecided') {
+      homeTab.current = tabWasChosen(segments, route.params) ? 'done' : 'pending';
+    }
+    if (homeTab.current !== 'pending') return;
+    return navigationContainer.addListener('state', () => {
+      if (homeTab.current !== 'pending') return;
+      const tabs = nestedStateOf(navigationContainer.getRootState(), route.key);
+      if (!tabs?.key) return;
+      homeTab.current = 'done';
+      navigation.dispatch(jumpToHome(tabs.key));
+    });
+  }, [navigation, navigationContainer, route.key, route.params, segments]);
 
   // **On Android, back from any other tab goes to Today (F68).**
   //

@@ -78170,6 +78170,109 @@ Nothing new on the server. Both surfaces reuse N437's path: `openEntry`, then `a
 - **A food-caused dose's own figure** is still a name-matched estimate (N468's heuristic). Correcting it means editing the food; a per-food `caffeine_mg` field remains N468's named follow-up, not this one.
 - **Two devices correcting the same tap** before either syncs: last arrival wins, unchanged from N437.
 
+## 2026-09-14 — F70 (#1240): a cold start at a pushed screen goes back to Today, whatever order the stack mounts in
+
+**The bug.** Cold-start the app at a pushed screen, such as a deep link to `/goals`, then go back. The app landed on Food, not Today, on both platforms. N580's pin set a `screen` param on the `(tabs)` route from the tab layout's first effect. That write survived only when the root stack mounted in the navigation container's own commit. The real `app/_layout.tsx` returns null until its fonts load, so on a phone the stack mounts a commit later, and the param was gone before the tab navigator read it. F68 found this and recorded it.
+
+**The trap: a harness that mounts differently from the app.** The root in N580's `tabDefault.test.tsx` was a bare `<Stack>` rendered in the container's commit. On that path the pin worked, so the test written for this exact case passed. It could not fail on the path the app takes.
+
+### Reproduction
+
+- **The existing cases, under a late root.** N580's `/goals` case and F68's Android one ran under a root that mounts the stack a microtask later. Against F68's commit `5c65d28b`, before any fix, the run gave 3 failed and 34 passed:
+  - N580's case on iOS and on Android: "Expected: "/", Received: "/food"".
+  - F68's case with the tab layout asked first: the same.
+  - The same-commit variants stayed green.
+- **The real root layout reproduces it too.** `app/_layout.tsx` itself renders under `renderRouter`, with Clerk, the providers and the orchestrators stubbed, and `useFonts` resolving a macrotask after mount. `useFonts` returned `false`, then `true`, `/goals` showed, and back landed on `/food`.
+
+### Mechanisms, measured
+
+All against expo-router 57.0.21, paths under `apps/mobile/node_modules/expo-router/build/`.
+
+A throwaway probe ran each option through a probe-local tab layout: 72 cases.
+- Mount orders: the stack in the container's commit, and a commit later.
+- The tab navigator mounting in the layout's commit, or a commit later, as it does when the icons rasterise.
+- URLs: `/goals` then back, `/food` and `/progress`.
+
+1. **(a) `unstable_settings.initialRouteName = 'index'` in `app/(tabs)/_layout.tsx`: not honoured.**
+   - `store.linking.getStateFromPath('/goals', config)` returned `{routes:[{name:"__root",state:{index:1,routes:[{name:"(tabs)"},{name:"goals",path:"/goals"}]}}]}`, with the setting and without it.
+   - In `fork/getStateFromPath.js`, `createStateObject` inserts a level's initial route as `{ name, params }` only. `findInitialRoute` applies an `initialRouteName` only at a level the URL walks through, and `/goals` walks through nothing under `(tabs)`.
+   - So root's `initialRouteName: '(tabs)'` inserts `(tabs)` with no nested state and no params.
+   - Back from `/goals` was the same with and without it: Today with the stack in the container's commit (N580's param still did that), `/food` with the stack later.
+2. **Why N580's param was lost.**
+   - **Traced:** with a container `state` listener in place, under the late order the layout's effect called `setParams` (segments `["goals"]`, no params). The next published state had `(tabs)` with no params.
+   - **Read in the source:** `react-navigation/core/useNavigationBuilder.js`. A navigator that mounts after its container's first commit publishes the state it rendered with from its own mount effect: `if (!getIsInitial() && lastNotifiedStateRef.current !== state) setState(state)`. The stack's mount effect runs after the tab layout's, so it replaces the param. When the stack mounts in the container's commit, `getIsInitial()` is true and nothing is republished.
+3. **(b) An action, and when to dispatch it.** `/goals`, then back:
+
+   | Variant | Stack in the container's commit | Stack a commit later |
+   |---|---|---|
+   | Nothing | `/food` | `/food` |
+   | `setParams` in the layout's effect (N580) | Today | `/food` |
+   | Targeted `JUMP_TO` in the layout's effect | `/food` | `/food` |
+   | Targeted `JUMP_TO` on the container's `state` event | Today | Today |
+   | Untargeted `navigate('(tabs)', { screen: 'index' })` on the `state` event | `/goals` popped at once (`/`), then back `/food` | the same |
+   | `setParams` on the `state` event | Today | Today |
+
+   - **A jump from the effect had nothing to target.** At that point, `nestedStateOf(getRootState(), route.key)` found no tab navigator in any case.
+   - **The late tab navigator changed nothing.** Every row was the same with it mounting a commit later.
+   - **`/food` and `/progress` were untouched** by every variant, because each acts only when `tabWasChosen` is false.
+   - **A targeted `JUMP_TO` does not focus the tabs.** `core/useOnAction.js` calls `onRouteFocusParent` only when `shouldActionChangeFocus` is true, and `routers/BaseRouter.js` returns true only for `NAVIGATE`. The untargeted navigate focused `(tabs)` and popped the pushed screen.
+4. **(c) Anything else that sets the tab navigator's state before its first render.** `useNavigationBuilder.js` builds that state from one of four sources:
+   - `route.params.state`, or `route.params.screen` with `initial !== false`. Both are params on `(tabs)`, so they are (b).
+   - The state the parent holds for the route. That is (a).
+   - `router.getInitialState` with the router's `initialRouteName`, which `native-tabs/NativeBottomTabsNavigator.js` never passes. That is F68's finding.
+   - N580 already measured `initialParams` on the root `(tabs)` screen, and rejected it because it sent `/food` and `/progress` to Today.
+   - No dependency patch was needed.
+
+**Chosen: a targeted `JUMP_TO` on the container's `state` event.** `setParams` on the event also worked. The jump was preferred for three reasons:
+- it is the action a tap on Today already dispatches, which F68's back handler uses too;
+- it names the navigator it acts on;
+- it leaves no `screen` param on `(tabs)` for a later params merge to set off again.
+
+### What was built
+
+- **`apps/mobile/app/(tabs)/_layout.tsx`:**
+  - The pin decides once, at the layout's first effect, with `tabWasChosen` as before.
+  - When nothing chose a tab, it listens for the container's `state` event.
+  - On the first event whose state holds the tab navigator, it dispatches `JUMP_TO` for `HOME_TAB` at that navigator's key, once.
+  - `setParams` is gone.
+- **`apps/mobile/lib/tabs.ts`:** the N580 comment states the fix.
+- **Reachable on a phone:** open a deep link from a killed app, then go back. Nothing on web.
+
+### Checks
+
+- **`__tests__/app/tabDefault.test.tsx`, 67 tests:**
+  - **A third root, the real `app/_layout.tsx`.** A precondition asserts its font gate was closed on the first render.
+  - **Cold starts, under all three roots on both platforms:**
+    - `/`;
+    - `/goals`, still shown before back, then back;
+    - a tab chosen afterwards staying chosen;
+    - `/food` and `/progress`.
+  - **F68's Android cases, under all three roots.** The real root asks the tab layout first.
+- **`__tests__/app/tabLayout.test.tsx`:** the wiring tests publish container state and check when the layout dispatches:
+  - nothing from the effect itself;
+  - nothing before the tab navigator exists;
+  - one targeted `JUMP_TO` after it does;
+  - nothing on a later event;
+  - nothing when the URL or the navigation named a tab.
+- **The tab suites, green before and after the mutations:** `tabDefault`, `tabBar`, `tabBarChrome`, `tabLayout`, `tabIconPlan`, `trainScreen`, `youScreen` and `foodTargetRow`. 8 suites, 165 tests.
+- **Mutation checks,** after that baseline, on `tabDefault` and `tabLayout` (78 tests):
+  - Each anchor matched exactly once.
+  - No suite failed to load.
+  - Each restore was byte-identical by sha256.
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | The pin never dispatches | Killed, 16 failed. `/goals` then back under all three roots on both platforms, and F68's `/goals` case under all three: "Expected: "/", Received: "/food"". The tab-chosen-afterwards cases. The wiring test: "Expected number of calls: 1, Received number of calls: 0". |
+| M2 | The pin acts even when a tab was chosen | Killed, 17 failed. `/food` and `/progress` under all three roots on both platforms ("Expected: "/food", Received: "/""), F68's cold-started `/progress` under all three, and both leave-alone wiring tests. |
+| M3 | An untargeted `NAVIGATE` to `(tabs)` instead of the targeted jump | Killed, 17 failed. `/goals` was popped before back ("Expected: "/goals", Received: "/"") under all three roots, plus the real-root precondition and the wiring test. |
+
+- `typecheck:mobile` exits 0. `lint:mobile` has 0 errors and no warning in a touched file. `check:lint-ratchet` has every rule within its cap, with `react-hooks/refs` at 24/24. `check:rntl-awaits` finds 0 unawaited calls. `check:doc-merge` passes.
+
+### Not done
+
+- **Device evidence, the ticket's NEEDS HUMAN EVIDENCE criterion.** From a killed app, open a deep link to a pushed screen, press back, and land on Today. The JS router cannot show real font loading, real icon rasterising, or what the native bar selects under the pushed screen.
+- **F68's entry above records this gap as not fixed.** This entry supersedes that bullet.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

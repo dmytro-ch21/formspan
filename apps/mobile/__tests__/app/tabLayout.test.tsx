@@ -73,22 +73,80 @@ jest.mock('expo-router/unstable-native-tabs', () => {
 });
 
 /*
- * N580: the layout names Today itself when nothing chose a tab. These three
+ * N580, F70: the layout names Today itself when nothing chose a tab. These four
  * hooks are all it reads for that. The global `expo-router` mock in
  * `jest.setup.js` does not carry them, so this file supplies them. The
- * behaviour against the real router is `tabDefault.test.tsx`'s job; this only
- * pins that the layout asks, and when.
+ * behaviour against the real router, under every mount order, is
+ * `tabDefault.test.tsx`'s job; this only pins that the layout asks, when, and
+ * with which action.
+ *
+ * The container stand-in holds the layout's `state` listeners, and `publish`
+ * plays the container publishing its state. The Android back handler (F68)
+ * reads the same container, and this iOS-only file never subscribes it.
  */
-const mockSetParams = jest.fn();
-const mockNav: { segments: string[]; params: object | undefined } = { segments: ['(tabs)'], params: undefined };
-jest.mock('expo-router', () => ({
-  useNavigation: () => ({ setParams: mockSetParams }),
-  useRoute: () => ({ params: mockNav.params }),
-  useSegments: () => mockNav.segments,
-  // Read only by the Android back handler (F68), which this iOS-only file never
-  // subscribes. `tabDefault.test.tsx` runs that handler against the real router.
-  useNavigationContainerRef: () => ({ getRootState: () => undefined }),
-}));
+const mockDispatch = jest.fn();
+const mockStateListeners: (() => void)[] = [];
+const mockNav: { segments: string[]; params: object | undefined; rootState: object | undefined } = {
+  segments: ['(tabs)'],
+  params: undefined,
+  rootState: undefined,
+};
+jest.mock('expo-router', () => {
+  const navigation = { dispatch: (action: unknown) => mockDispatch(action), isFocused: () => false };
+  const container = {
+    addListener: (_event: string, listener: () => void) => {
+      mockStateListeners.push(listener);
+      return () => {
+        const i = mockStateListeners.indexOf(listener);
+        if (i !== -1) mockStateListeners.splice(i, 1);
+      };
+    },
+    getRootState: () => mockNav.rootState,
+  };
+  return {
+    useNavigation: () => navigation,
+    useRoute: () => ({ key: 'tabs-route', params: mockNav.params }),
+    useSegments: () => mockNav.segments,
+    useNavigationContainerRef: () => container,
+  };
+});
+
+/** The container publishing its state, as it does after a commit that changed it. */
+function publish(rootState: object) {
+  mockNav.rootState = rootState;
+  for (const listener of [...mockStateListeners]) listener();
+}
+
+/** A cold start at `/goals`: the stack has published, the tab navigator does not exist yet. */
+const TABS_NOT_BUILT = {
+  routes: [
+    {
+      key: 'root-route',
+      name: '__root',
+      state: { routes: [{ key: 'tabs-route', name: '(tabs)' }, { key: 'goals-route', name: 'goals' }] },
+    },
+  ],
+};
+
+/** The same, once the tab navigator has built its state on its first route. */
+const TABS_BUILT = {
+  routes: [
+    {
+      key: 'root-route',
+      name: '__root',
+      state: {
+        routes: [
+          {
+            key: 'tabs-route',
+            name: '(tabs)',
+            state: { key: 'tab-navigator', index: 0, routes: TABS.map(({ name }) => ({ key: name, name })) },
+          },
+          { key: 'goals-route', name: 'goals' },
+        ],
+      },
+    },
+  ],
+};
 
 jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => mockModuleState }));
 // The purple theme, not the brand one: its `accent` and `ink` differ, so the
@@ -123,22 +181,36 @@ async function declare(state: {
   mockRaster.current = state.raster;
   mockNav.segments = state.segments ?? ['(tabs)'];
   mockNav.params = state.params;
-  mockSetParams.mockClear();
+  mockNav.rootState = undefined;
+  mockStateListeners.length = 0;
+  mockDispatch.mockClear();
   await render(<TabLayout />);
 }
 
-describe('which tab the navigator opens on (N580)', () => {
-  it('asks for Today when nothing chose a tab, even while the module set is still loading', async () => {
+describe('which tab the navigator opens on (N580, F70)', () => {
+  it('jumps the tab navigator to Today when nothing chose a tab, once it exists, even while the module set is still loading', async () => {
     // The anchor under a cold-started deep link to a pushed screen: the URL is
     // that screen, and the tab route carries no `screen` param.
     await declare({ modules: [], ready: false, raster: { host: null, sources: null }, segments: ['goals'] });
-    expect(mockSetParams).toHaveBeenCalledTimes(1);
-    expect(mockSetParams).toHaveBeenCalledWith({ screen: 'index' });
+    // Not from the layout's own effect: on a phone that is too early (F70).
+    expect(mockDispatch).not.toHaveBeenCalled();
+
+    publish(TABS_NOT_BUILT);
+    expect(mockDispatch).not.toHaveBeenCalled();
+
+    publish(TABS_BUILT);
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith({ type: 'JUMP_TO', target: 'tab-navigator', payload: { name: 'index' } });
+
+    // Once. A later state event is the athlete's own navigation.
+    publish(TABS_BUILT);
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the tab alone when the URL chose one', async () => {
     await declare({ modules: [], ready: true, raster: { host: null, sources: {} }, segments: ['(tabs)', 'food'] });
-    expect(mockSetParams).not.toHaveBeenCalled();
+    publish(TABS_BUILT);
+    expect(mockDispatch).not.toHaveBeenCalled();
   });
 
   it('leaves the tab alone when the navigation that created it named one', async () => {
@@ -149,7 +221,8 @@ describe('which tab the navigator opens on (N580)', () => {
       segments: ['sign-in'],
       params: { screen: 'food', params: {} },
     });
-    expect(mockSetParams).not.toHaveBeenCalled();
+    publish(TABS_BUILT);
+    expect(mockDispatch).not.toHaveBeenCalled();
   });
 });
 
