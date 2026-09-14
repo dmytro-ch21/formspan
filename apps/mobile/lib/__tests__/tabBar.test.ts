@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { HOME_TAB, TABS, tabWasChosen } from '../tabs';
+import { backGoesHome, HOME_TAB, nestedStateOf, TABS, tabWasChosen, type NavStateNode } from '../tabs';
 
 /**
  * The bottom bar's membership and order — N176, as revised by N180.
@@ -119,6 +119,78 @@ describe('the tab the app opens on (N580)', () => {
       expect(tabWasChosen([], null)).toBe(false);
       expect(tabWasChosen(['goals'], { screen: 42 })).toBe(false);
     });
+  });
+});
+
+// The decision behind Android's back button (F68). The real-router half, with
+// the handler and the router's own back handling, is in
+// `__tests__/app/tabDefault.test.tsx`.
+describe('backGoesHome (F68)', () => {
+  /** The tab navigator's state with `name` focused, and optionally a nested state in it. */
+  function tabsOn(name: string, nested?: NavStateNode): NavStateNode {
+    return {
+      index: TABS.findIndex((t) => t.name === name),
+      routes: TABS.map((t) => (t.name === name && nested ? { name: t.name, state: nested } : { name: t.name })),
+    };
+  }
+
+  it('sends every tab but Today home, when the tab bar is what is showing', () => {
+    const home = TABS.filter((t) => backGoesHome(true, tabsOn(t.name))).map((t) => t.name);
+    expect(home).toEqual(['food', 'progress', 'workouts', 'you']);
+  });
+
+  // The owner's call: back on Today keeps the platform default.
+  it('leaves Today to the platform, which leaves the app', () => {
+    expect(backGoesHome(true, tabsOn(HOME_TAB))).toBe(false);
+  });
+
+  it('leaves a screen pushed over the tabs to be popped first', () => {
+    expect(backGoesHome(false, tabsOn('progress'))).toBe(false);
+  });
+
+  it('leaves a nested navigator in the tab to pop its own screen first', () => {
+    const stack = (index?: number): NavStateNode => ({ index, routes: [{ name: 'a' }, { name: 'b' }] });
+    expect(backGoesHome(true, tabsOn('progress', stack(1)))).toBe(false);
+    expect(backGoesHome(true, tabsOn('progress', stack(0)))).toBe(true);
+    expect(backGoesHome(true, tabsOn('progress', stack(undefined)))).toBe(true);
+  });
+
+  it('does nothing when no route is focused', () => {
+    expect(backGoesHome(true, { index: 7, routes: [] })).toBe(false);
+  });
+});
+
+describe('nestedStateOf (F68)', () => {
+  // The shape `getRootState()` returns for the real app: the root navigator,
+  // the root stack under it, `(tabs)` in the stack with a screen pushed over it.
+  const tabs: NavStateNode = { key: 'tab-1', index: 1, routes: [{ key: 'food-1', name: 'food' }, { key: 'progress-1', name: 'progress' }] };
+  const root: NavStateNode = {
+    key: 'root-0',
+    index: 0,
+    routes: [
+      {
+        key: '__root-0',
+        name: '__root',
+        state: {
+          key: 'stack-0',
+          index: 1,
+          routes: [
+            { key: 'tabs-0', name: '(tabs)', state: tabs },
+            { key: 'goals-0', name: 'goals' },
+          ],
+        },
+      },
+    ],
+  };
+
+  it('finds the state held by a route at any depth', () => {
+    expect(nestedStateOf(root, 'tabs-0')).toBe(tabs);
+  });
+
+  it('is undefined for a key nowhere in the tree, a route with no state, or no tree', () => {
+    expect(nestedStateOf(root, 'tabs-1')).toBeUndefined();
+    expect(nestedStateOf(root, 'goals-0')).toBeUndefined();
+    expect(nestedStateOf(undefined, 'tabs-0')).toBeUndefined();
   });
 });
 

@@ -77955,6 +77955,94 @@ The food log's existing `ListEntries` can: it is scoped to `user_id` inside its 
 - **At a known-exhausted quota the phone still disables Work it out** (F17), so the free phrase path, which the server answers at the cap, is not reachable from the phone once the screen knows the count is spent.
 - **Two meals in one reference** ("breakfast and lunch as yesterday") are not supported: the grammar declines, and the model's schema carries one meal.
 
+## 2026-09-14 — F68 (#1235): on Android, back from a tab returns to Today again
+
+**The owner's decision, 2026-09-14:** *"make back go to Today on Android"*. Back from Food, Progress, Plan or You returns to Today. A screen pushed over a tab still pops first. Back on Today keeps the platform default and leaves the app. iOS has no system back between tabs and is unchanged.
+
+### The cause
+
+N580 moved Today off route 0. NativeTabs defaults `backBehavior` to `'initialRoute'`, and `NativeTabsNavigator` (`build/native-tabs/NativeBottomTabsNavigator.js`, expo-router 57.0.21) calls `useNavigationBuilder` with `children`, `backBehavior`, `screenListeners` and `screenOptions` only. So `getRouteHistory` in `build/react-navigation/routers/TabRouter.js` falls back to route 0, Food.
+
+**It was worse than the ticket said.** Measured with the real router and Android's back dispatch, a cold start at `/` holds the tab history `["food","index"]`. Back on Today went to Food too, rather than leaving the app. Only a second press left.
+
+### How back was driven in the tests
+
+- `react-native/Libraries/Utilities/BackHandler` is replaced with a copy of `BackHandler.android.js`'s dispatch: newest subscriber first, the first to return true stops it, otherwise `exitApp`. jest-expo resolves `BackHandler.ios.js`, which is a no-op, so the real one cannot be pressed.
+- The router's own handler, `build/react-navigation/native/useBackButton.native.js` (`canGoBack() ? goBack()`), subscribes through the copy, so a press asks what a phone asks.
+- `Platform` is replaced with a getter so one file runs both platforms, as `healthConnectRefusalLine.test.tsx` does.
+- Native tabs on Android do not intercept back in JS or, as far as a search shows, natively: `NativeTabsView.android.js` has no back handling, and react-native-screens 4.26.2's `gamma/tabs` has no `OnBackPressedCallback`. The stack classes do. A device is still the only proof.
+
+### The mechanisms, measured in the brief's order
+
+1. **An `initialRouteName` prop on `<NativeTabs>`: not honoured.** `NativeTabsNavigator` destructures `backBehavior` and passes `...rest` to `NativeTabsView`, not to the router. Measured with a harness tab layout rendering the real `NativeTabs`: `initialRouteName="index"`, and the same with `backBehavior="initialRoute"`, gave results identical to no props. From `/` the history was `["food","index"]`; `/`, then `/progress`, then back landed on `/food`, with a second back calling `exitApp`.
+2. **An app-level handler: chosen, with `backBehavior="none"` beside it.** A handler alone is not enough. After it jumps to Today, `'initialRoute'` rebuilds the history as `["food","index"]`, so back on Today still went to Food. `backBehavior="none"` (the `default` branch of `getRouteHistory`) records only the current tab. Measured with it and no handler: back on Today called `exitApp`, and so did back on Progress, which is what the handler then fixes.
+3. **A dependency patch:** not needed, and not reached.
+
+### What was built
+
+- **`apps/mobile/app/(tabs)/_layout.tsx`, Android only:**
+  - `backBehavior="none"` on `<NativeTabs>` (`undefined` on iOS, the library default).
+  - A `hardwareBackPress` subscription for the layout's lifetime. When `backGoesHome` agrees, it dispatches `JUMP_TO` for `HOME_TAB` at the tab navigator's key, the same action a tap on Today dispatches (`onTabChange` in `NativeBottomTabsNavigator.js`), and returns true. Otherwise it returns false.
+- **`apps/mobile/lib/tabs.ts`:**
+  - `backGoesHome(tabsFocused, tabs)`: false when a screen is pushed over the tabs, when Today is showing, or when a nested navigator in the tab has a screen to pop. No tab has a nested navigator today.
+  - `nestedStateOf(root, routeKey)`, and a `NavStateNode` type.
+  - The N580 comment that recorded the Android consequence now states the fix.
+- **Reachable on a phone:** it is the phone's own back button. Nothing on web.
+
+### Two things the tests found
+
+- **The root stack's copy of the tab state is not the tab state.** The first handler read `navigation.getState()`. After a cold start at `/progress`, the `(tabs)` route there still held the state parsed from the URL: one tab and no Today. The jump was refused ("The action 'JUMP_TO' with payload {"name":"index"} was not handled by any navigator"). The handler now reads the container's live state (`useNavigationContainerRef()`, which is `store.navigationRef`) through `nestedStateOf`.
+- **Both handler orders happen, and the design has to hold in each.**
+  - Android asks the newest subscriber first. When the stack mounts in the navigation container's commit, the layout's effect runs first, so the router is asked first.
+  - The real `app/_layout.tsx` returns null until fonts load, so on a phone the tab layout mounts later and is asked first.
+  - With `backBehavior="none"` both orders give the same result. The router has nothing to go back to at a tab root, and `backGoesHome` refuses when a screen is pushed.
+  - The F68 tests run under both, using a `LateRootStack` that mounts the stack a microtask later. Each asserts which order it got, read from the subscribing call stack.
+
+### A gap in N580, found here and not fixed
+
+**With the real root layout's mount order, a cold start at a pushed screen, then back, lands on Food, on both platforms.** Measured by rendering HEAD's own `(tabs)/_layout.tsx` (before F68) under a late-mounting root: `/goals`, then `router.back()` or the back button, gave `/food` on iOS and on Android.
+
+- `tabWasChosen(["goals"], undefined)` is false, and the layout still calls `setParams({ screen: 'index' })`.
+- By then the tab navigator has already built its state at index 0, and the param does not move it.
+- N580's test passes because its root mounts in the container's commit, where the param lands first.
+
+On Android after F68, a second back from Food reaches Today. This belongs to N580's cold-start path, not to F68. N580's case in `tabDefault.test.tsx` now says it holds only for the plain root.
+
+### Checks
+
+- **`__tests__/app/tabDefault.test.tsx`:** N580's cases on iOS and on Android. F68's cases on Android, under both handler orders:
+  - back from `/food`, `/progress`, `/workouts` and `/you`, opened from Today, lands on Today;
+  - back from a tab the app was cold-started on lands on Today;
+  - back on Today calls `exitApp`, before and after a round trip;
+  - a pushed screen pops first, then back lands on Today;
+  - `/goals` cold start, then back, lands on Today and then leaves (plain root only);
+  - on iOS, the layout subscribes no handler under either order, and the tab history keeps the library default, `["food","progress"]`.
+- **`lib/__tests__/tabBar.test.ts`:** `backGoesHome` (which tabs go home, Today, pushed, nested, no focused route) and `nestedStateOf`.
+- **`__tests__/app/tabLayout.test.tsx`:** its `expo-router` mock gains `useNavigationContainerRef`, which that iOS-only file never reads.
+- **Tab suites:** `tabDefault`, `tabBar`, `tabLayout`, `tabIconPlan`, `trainScreen`, `youScreen` and `foodTargetRow` all pass: 7 suites, 124 tests.
+
+- **Mutation checks,** after a green baseline in the same session: 53 tests across `tabDefault` and `tabBar`.
+  - Every anchor matched exactly once.
+  - Every kill was a test failure in a suite that loaded.
+  - Every restore was confirmed byte-identical by sha256, and the re-run afterwards was green: 53 of 53.
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | Both halves removed: no handler, library `backBehavior` | Killed, 17 failed. Back from each tab: "Expected: "/", Received: "/food"". Back on Today: `exitApp` "Expected number of calls: 1, Received number of calls: 0". |
+| M1a | Handler removed, `backBehavior="none"` kept | Killed, 16 failed. Back leaves the athlete on the tab, e.g. "Expected: "/", Received: "/progress"". |
+| M1b | `backBehavior="none"` removed, handler kept | Killed, 8 failed. Under both orders, back on Today goes to Food instead of calling `exitApp` (0 calls). With the router asked first, back from Progress, Plan and You lands on "/food". |
+| M2 | `backGoesHome` ignores a pushed screen | Killed, 2 failed: the unit test ("Expected: false, Received: true") and the pop-first test **with the tab layout asked first** ("Expected: "/progress", Received: "/goals""). With the router asked first it survives, because the router pops before the handler is asked. That is why both orders run. |
+| M3a | Android gate on the handler dropped | Killed, 2 failed: iOS subscribes no handler, under both orders. |
+| M3b | Android gate on `backBehavior` dropped | Killed, 1 failed: iOS keeps the default back history. |
+| M4 | Tab state read from `navigation.getState()` instead of the container | Killed, 2 failed: back from a cold-started `/progress`, under both orders ("Expected: "/", Received: "/progress""). |
+
+- `typecheck:mobile` exits 0. `lint:mobile` has 0 errors and no warning in a touched file. `check:lint-ratchet` has every mobile rule within its cap, with `react-hooks/refs` at 24/24. `check:rntl-awaits` finds 0 unawaited calls. `check:doc-merge` passes.
+
+### Not done
+
+- **Android device evidence (the ticket's NEEDS HUMAN EVIDENCE criterion).** Nobody on the owner's test team has an Android device, so it stays open. The JS router cannot show whether a native layer takes back first, or what the gesture does.
+- **N580's deferred-mount gap above** is recorded, not fixed.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

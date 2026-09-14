@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
-import { useNavigation, useRoute, useSegments } from 'expo-router';
+import { BackHandler, Platform } from 'react-native';
+import { useNavigation, useNavigationContainerRef, useRoute, useSegments } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { vola } from '@/constants/Colors';
 import { useAccent } from '@/lib/AccentProvider';
 import { PlatformTopInsetContext } from '@/lib/headerInset';
 import { useModules } from '@/lib/ModulesProvider';
-import { HOME_TAB, TABS, tabWasChosen } from '@/lib/tabs';
+import { backGoesHome, HOME_TAB, nestedStateOf, TABS, tabWasChosen } from '@/lib/tabs';
 import { useRasterizedIcons } from '@/lib/tabIconRaster';
 import { tabIconRequests, tabIconRenderingMode, tabIconSource } from '@/lib/tabIconPlan';
 
@@ -62,6 +62,13 @@ import { tabIconRequests, tabIconRenderingMode, tabIconSource } from '@/lib/tabI
  *    than an oversight.
  */
 
+/** The `(tabs)` route's navigation in the root stack, typed to the calls made on it. */
+type TabRouteNavigation = {
+  setParams: (params: { screen: string }) => void;
+  isFocused: () => boolean;
+  dispatch: (action: { type: 'JUMP_TO'; target: string; payload: { name: string } }) => void;
+};
+
 export default function TabLayout() {
   const { ready } = useModules();
   const accent = useAccent();
@@ -93,9 +100,10 @@ export default function TabLayout() {
   //
   // Above the frame-holds below for the same hook-order reason as the three
   // hooks above it.
-  // Typed to the one call made on it. The default type resolves `setParams`
+  // Typed to the calls made on it. The default type resolves `setParams`
   // against an untyped root param list and accepts only `undefined`.
-  const navigation = useNavigation<{ setParams: (params: { screen: string }) => void }>();
+  const navigation = useNavigation<TabRouteNavigation>();
+  const navigationContainer = useNavigationContainerRef();
   const route = useRoute();
   const segments = useSegments();
   const homeTabDecided = useRef(false);
@@ -104,6 +112,45 @@ export default function TabLayout() {
     homeTabDecided.current = true;
     if (!tabWasChosen(segments, route.params)) navigation.setParams({ screen: HOME_TAB });
   }, [navigation, route.params, segments]);
+
+  // **On Android, back from any other tab goes to Today (F68).**
+  //
+  // Paired with `backBehavior="none"` on the bar below. The pair has to work in
+  // either listener order, because both happen. Android calls the newest
+  // `hardwareBackPress` subscriber first, and React Navigation's own handler is
+  // subscribed by the navigation container. On a phone, the root layout returns
+  // null until fonts load, so this layout mounts later and its handler is called
+  // first. When both mount in one commit, the container's effect runs after this
+  // one and the router's handler is called first. Both orders are measured in
+  // `__tests__/app/tabDefault.test.tsx`.
+  //
+  // - This handler first: a pushed screen, or Today, makes `backGoesHome`
+  //   refuse, and the router pops the screen or has nothing to do.
+  // - The router first: with `"none"` it has nothing to do at a tab root and
+  //   returns false, so this handler gets the press. A pushed screen is popped
+  //   before this handler is asked.
+  //
+  // On Today both return false, and Android's default leaves the app.
+  //
+  // Subscribed for the layout's lifetime, not per focus. Re-subscribing on
+  // focus would move this handler above any a tab screen registers itself.
+  // Everything it decides on is read at press time, so nothing goes stale.
+  //
+  // The tab state comes from the container, not `navigation.getState()`: after
+  // a cold start at a tab's URL, the root stack's copy is still the state parsed
+  // from that URL, with no Today in it (`nestedStateOf` in `lib/tabs.ts`).
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const tabs = nestedStateOf(navigationContainer.getRootState(), route.key);
+      if (!tabs?.key || !backGoesHome(navigation.isFocused(), tabs)) return false;
+      // The same action a tap on Today's own tab dispatches
+      // (`NativeBottomTabsNavigator.js`, `onTabChange`).
+      navigation.dispatch({ type: 'JUMP_TO', target: tabs.key, payload: { name: HOME_TAB } });
+      return true;
+    });
+    return () => subscription.remove();
+  }, [navigation, navigationContainer, route.key]);
 
   // Hold the frame until the cached module set has been read.
   //
@@ -146,6 +193,12 @@ export default function TabLayout() {
     // this is declared once here rather than passed by each screen.
     <PlatformTopInsetContext.Provider value={Platform.OS === 'ios'}>
       <NativeTabs
+        // Android only (F68). The default, `'initialRoute'`, falls back to
+        // route 0, which is Food since N580, because NativeTabs never gives
+        // its router an `initialRouteName`. `"none"` records no tab to go back
+        // to, and the `hardwareBackPress` handler above sends other tabs to
+        // Today. `undefined` leaves iOS on the library default.
+        backBehavior={Platform.OS === 'android' ? 'none' : undefined}
         minimizeBehavior="onScrollDown"
         backgroundColor={vola.bg}
         tintColor={accent.accent}
