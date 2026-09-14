@@ -74,7 +74,7 @@
     "vet:engine": "cd engine && go vet ./..."
   },
   "devDependencies": {
-    "@redocly/cli": "^2.51.2",
+    "@redocly/cli": "^2.52.0",
     "sharp": "0.35.4"
   }
 }
