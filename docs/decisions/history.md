@@ -77589,6 +77589,75 @@ Where each component went:
 
 - **The leak was not reproduced against a real Docker daemon.** On CI it was intermittent and depended on contention. The fake reproduces the ordering deterministically, but only time on CI will show that the real failure has stopped.
 
+## 2026-09-12 — F65 (#1182): admin's error page named the cause by reading a message production never delivers
+
+Found while working N159 (#576). `apps/admin/src/app/error.tsx` is the error boundary for every admin screen. It chose its explanation with `error.message.includes("403")` and `includes("401")`, and fell back to "The API didn't respond as expected. Confirm it's running and reachable at `NEXT_PUBLIC_API_URL`". `ApiError`'s constructor kept the status in its message precisely so this would work. It worked in `next dev` and nowhere else.
+
+### Measured before anything changed
+
+A production build (`next build`, then `next start` on :3011, through a temporary `.claude/launch.json` entry, since removed) with a temporary, uncommitted probe route. The probe sat outside the sign-in matcher and threw from a Server Component:
+- the real `ApiError(403, "/admin/users", "forbidden", "admin access required")`, the backend `RequireAdmin`'s exact code and message;
+- the real `TimeoutError(30000)`;
+- a plain `Error`, standing in for a render bug;
+- a real `listUsers()` with no session, which makes `adminFetch` throw a genuine `ApiError(401)`.
+
+**All four rendered the same "Confirm it's running" copy.** The browser's console shows what the boundary received: `message` was `Minified React error #441` (React's "the specific message is omitted in production builds"), and `digest` was a number such as `3834971595`. The server log printed the full `ApiError: API responded 403 for /admin/users: admin access required` beside that same digest. The message crossed to nobody, and the digest was the only field that did.
+
+A probe, rather than a signed-in session against a backend with drifted `ADMIN_USER_IDS`, for one reason: no browser with a Clerk session was connected to this session, and signing in is not something a session does on its own. So the 403 and timeout were real classes thrown directly, not produced by a live backend. That gap is closed below as far as code can close it, and listed at the end as the check still owed.
+
+### The decision: classify where the failure is created, carry it in `digest`
+
+Next generates a digest (a hash) unless the thrown error **already has one, and then keeps it**. `next/dist/server/app-render/create-error-handler.js` says "respect the original digest". Called directly from `node_modules`, both its RSC and HTML handlers returned a preset `VOLA_ADMIN;forbidden;abc123` unchanged, and gave an untagged error a hash.
+
+So `apps/admin/src/lib/adminFailure.ts` defines a digest format, `VOLA_ADMIN;<kind>;<ref>`, plus `VOLA_ADMIN;api;<status>;<ref>` for any other status:
+- **`ApiError` stamps its own digest** in its constructor: 403 is `forbidden`, 401 is `unauthorized`, anything else is `api` with the status.
+- **`adminFetch` stamps the two failures whose classes are not its own.** A `TimeoutError` is `timeout`. deadline.ts is a copy of web's, so the stamp is not added there. A `fetch` rejection that is not our own abort is `unreachable`: refused, DNS or TLS.
+- **`error.tsx` reads only `failureFromDigest(error.digest)`**, never `message`.
+  - `unreachable` is now the only case that says to check the API is running.
+  - An unclassified failure says it was not an API response the console recognises. Before, a render bug sent the operator to check a healthy API.
+  - Every page shows the reference, which is our `ref` or Next's own hash, so the operator can find the log line.
+- The 403 copy points at "the API's own `ADMIN_USER_IDS` (`backend/.env` locally)". It used to say only `backend/.env`, which is wrong on a deploy.
+
+**Why this and not the alternatives:**
+- **Catching `ApiError` in each Server Component and rendering an explicit error state.** This is Next's documented contract, and it was the strongest alternative. Rejected because coverage becomes a convention: nine pages read through `@/lib/api` today, and each would need the catch, as would every page added later. A page that forgot would fall back to `error.tsx`, which is exactly where this bug lived. The digest is stamped at the one door every read goes through, so coverage comes by construction.
+- **Mapping a Next-generated digest to a cause server-side.** The hash is computed after the fact, and the browser has no way to look it up without an extra server round trip and a store shared across instances. Not worth it for a classification the thrower already knows.
+- **Showing the raw message in development.** It is not a fix, because the defect is the production behaviour.
+
+**The cost, stated rather than hidden:** "respect the original digest" is this Next's behaviour, not a documented promise. So the test calls Next's real handlers. An upgrade that starts overwriting preset digests goes red instead of silently turning every production failure into "wasn't an API response". Nothing sensitive crosses: a kind, a status and a random 8-character reference. A `NEXT_` prefix is avoided because Next routes its own digests by prefix, and a collision would turn a failure into a navigation.
+
+### Measured after, same harness
+
+On the rebuilt production server, the browser still received `Minified React error #441` in every case, and now:
+
+| Case | Digest the browser received | What the page said |
+|---|---|---|
+| `ApiError(403)` | `VOLA_ADMIN;forbidden;91c0b3cd` | "The API rejected this account as not-an-admin…" |
+| `TimeoutError` (stamped as `adminFetch` stamps it) | `VOLA_ADMIN;timeout;96b36c62` | "The API took too long to answer…" |
+| real `listUsers()`, no session, through `adminFetch` | `VOLA_ADMIN;unauthorized;ba346a0e` | "The API rejected the session token…" |
+| plain render error | `516069242` (Next's hash) | "…wasn't an API response this console recognises" |
+
+Each on-screen reference was found in the server log beside the full original error. `curl` against the same four URLs confirmed that the stamped digests are in the HTML the server sends, independently of the browser. The browser pane's batched and background-tab navigations hung, so the rendered copy was read with one foreground navigation at a time.
+
+### Mutation checks (`apps/admin/src/app/__tests__/errorBoundary.test.tsx`, 13 tests)
+
+The tests take real failures from `listUsers()` against a stubbed `fetch`, and hand `error.tsx` only what production delivers: React's replacement message and the stamped digest.
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | `error.tsx` back to classifying by `message` | **6 red**: 403, 401, timeout, unreachable, HTTP 500, and *never classifies by message* |
+| M2 | `ApiError` stamps no digest | **5 red**: 403, 401, HTTP 500, and both Next-handler tests |
+| M3 | `adminFetch` does not stamp a timeout | **1 red**: *a read that outlives the deadline says it took too long* |
+| M4 | `adminFetch` does not stamp a refused connection | **1 red**: *a refused connection is the one case that says to check the API is running* |
+
+**M2 found a test that could not fail, and it is fixed.** The first HTML-handler test compared the handler's result with `err.digest` read *after* the handler ran. Next writes its own hash onto an error without one, so the test compared that hash with itself and passed with no stamp at all. M2 turned 4 tests red, not 5, until both handler tests captured the digest before calling Next. Every failure above is an assertion failure, not a compile error. Each mutation was restored, and the suite was re-run green.
+
+### What is not here
+
+- **A signed-in operator against a real backend with drifted `ADMIN_USER_IDS`, on a production build.** The 403 and timeout were thrown as real classes by a probe, not produced by a live backend and a live deadline. The `adminFetch` stamping of both is held by the tests, and the transport by the measurement above. The end-to-end path under a real session is still the one check owed.
+- **`unreachable` and "HTTP 500" were not measured live.** They use the same transport as the three that were, and each is held by a test.
+- **The Flight transport itself is not automated.** That a digest reaches the browser is measured, not tested. It is worth re-measuring after a Next upgrade; `functional-scenarios.md` says so.
+- **Observed, not ours:** the admin `.env.local` copied from the primary checkout logs Clerk's "infinite redirect loop, keys do not match" warning on every request. It did not affect the unprotected probe route, but it would matter to anyone repeating the signed-in check with that file.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
