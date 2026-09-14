@@ -67,6 +67,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://adminvola-fitness-platform-sta
 
 None of these reads a service variable, so none of them prints a secret. **This is a recipe, not a check**: nothing runs it, so the date at the top of this file is the only signal of how stale the rest is. Update that date when you re-run it, and the table whenever the two disagree.
 
+**When to re-run it:** in the same pull request as any change to a `railway/*.toml`; after a service or environment is added to or removed from Railway; and before any change that acts on what this section says is deployed. Nothing enforces those triggers yet — they are a stated cadence, not a gate.
+
 ### Migrations — tooling built, applied everywhere that currently has a database
 
 `cmd/migrate` (golang-migrate, plain versioned SQL in `backend/migrations/`) runs today against: local docker-compose Postgres, CI's ephemeral Postgres service container, and the real Railway `staging` Postgres. On Railway it runs exactly once per deploy, as the `api` service's pre-deploy command — never independently from `worker`/`admin-api`, to avoid concurrent-migration conflicts.
