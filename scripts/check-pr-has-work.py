@@ -127,6 +127,18 @@ ROOT = Path(__file__).resolve().parent.parent
 PASS = 0
 FAIL = 1
 
+# Every git call in this file passes these (H35, the fix H28 made in
+# append-only-merge.py). `git commit` and `git merge` end by starting
+# `git maintenance run --auto --detach`, and since git 2.54 its default
+# strategy repacks once two loose objects share `objects/17/`. The repack runs
+# in a detached child after git has returned, so in the self-test's throwaway
+# repository it can still be writing while `TemporaryDirectory` deletes it, and
+# cleanup fails with "Directory not empty" after every case has passed. The
+# real check runs only read-only plumbing, where these settings change nothing.
+# They are on every call anyway, so no call into a throwaway repository can go
+# without them. `gc.auto=0` covers a git old enough to run `gc --auto` instead.
+NO_MAINTENANCE = ("-c", "maintenance.auto=false", "-c", "gc.auto=0")
+
 
 class CheckError(Exception):
     """Something could not be determined. Always terminal — never a skip."""
@@ -135,7 +147,7 @@ class CheckError(Exception):
 def git(repo: Path, *args: str) -> str:
     """Run git, or raise. A non-zero git is never treated as 'no differences'."""
     proc = subprocess.run(
-        ["git", *args],
+        ["git", *NO_MAINTENANCE, *args],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -150,7 +162,7 @@ def git(repo: Path, *args: str) -> str:
 
 def commit_exists(repo: Path, sha: str) -> bool:
     proc = subprocess.run(
-        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        ["git", *NO_MAINTENANCE, "cat-file", "-e", f"{sha}^{{commit}}"],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -184,7 +196,7 @@ def changed_files(repo: Path, base_sha: str, head_sha: str) -> list[str]:
     # ancestry rather than trusting that it is.
     for label, sha in (("base", base_sha), ("head", head_sha)):
         proc = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", merge_base, sha],
+            ["git", *NO_MAINTENANCE, "merge-base", "--is-ancestor", merge_base, sha],
             cwd=repo,
             capture_output=True,
             text=True,
@@ -298,8 +310,10 @@ def check(repo: Path, payload: dict, out=None) -> int:
 # Self-test: the part that proves this can fail.
 # --------------------------------------------------------------------------
 
-def _run(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+def _run(repo: Path, *args: str,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *NO_MAINTENANCE, *args], cwd=repo, check=True,
+                          capture_output=True, text=True, env=env)
 
 
 def _build_repo(root: Path) -> tuple[Path, str, str, str]:
@@ -331,6 +345,48 @@ def _build_repo(root: Path) -> tuple[Path, str, str, str]:
 
     _run(repo, "checkout", "-q", "main")
     return repo, base_sha, empty_head, work_head
+
+
+def _no_background_maintenance() -> list[str]:
+    """A traced commit in a throwaway repository starts no maintenance (H35).
+
+    The same check as `_no_background_maintenance` in append-only-merge.py
+    (H28). The race it prevents is too rare for the cases above to notice the
+    settings gone, so this holds them.
+    """
+    failures: list[str] = []
+    traced = {**os.environ, "GIT_TRACE": "1"}
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        _run(repo, "init", "-q", "-b", "main")
+        _run(repo, "config", "user.email", "selftest@example.invalid")
+        _run(repo, "config", "user.name", "self test")
+        (repo / "README.md").write_text("base\n")
+        _run(repo, "add", "README.md")
+        trace = _run(repo, "commit", "-q", "-m", "traced", env=traced).stderr
+        if "maintenance run" in trace or "gc --auto" in trace:
+            failures.append(
+                "throwaway repos: a commit started background maintenance, whose "
+                "detached repack can still be writing when the temp directory is deleted"
+            )
+
+        # The control, so the check above cannot pass by reading a trace that
+        # never shows maintenance: the same commit with it switched back on.
+        # `maintenance.autoDetach=false` keeps it in the foreground, so the
+        # control cannot cause the race it is checking for.
+        (repo / "README.md").write_text("changed\n")
+        _run(repo, "add", "README.md")
+        control = subprocess.run(
+            ["git", "-c", "maintenance.auto=true", "-c", "gc.auto=6700",
+             "-c", "maintenance.autoDetach=false", "commit", "-q", "-m", "control"],
+            cwd=repo, capture_output=True, text=True, env=traced,
+        ).stderr
+        if "maintenance run" not in control:
+            failures.append(
+                "throwaway repos: with maintenance switched on, the trace does not "
+                "show it, so the check above cannot see maintenance here"
+            )
+    return failures
 
 
 def _unparseable(directory: Path) -> Path:
@@ -536,6 +592,12 @@ def self_test() -> int:
             failures.append("fixture broken: the claim branch has a non-empty diff")
         if not changed_files(repo, base, work_head):
             failures.append("fixture broken: the work branch has an empty diff")
+
+    # The throwaway repositories start no background maintenance (H35). A
+    # detached repack writing into one while `TemporaryDirectory` deletes it
+    # fails this test after every case has passed. The fix is a setting, so a
+    # check holds it.
+    failures += _no_background_maintenance()
 
     if failures:
         print("self-test FAILED:\n", file=sys.stderr)
