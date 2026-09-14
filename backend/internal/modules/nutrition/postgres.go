@@ -70,6 +70,17 @@ func scanEntry(row pgx.Row) (Entry, error) {
 	return e, err
 }
 
+// listEntriesSQL is ListEntries' statement, named so a test can EXPLAIN the
+// query that actually runs rather than a copy of it — the copy is what let a
+// drifted expression pass N114's index test until `normalizedNameSQL` became a
+// function. N194 reads the recent log through this same statement.
+const listEntriesSQL = `
+		SELECT ` + entryCols + `
+		FROM nutrition_entries
+		WHERE user_id = $1 AND eaten_on BETWEEN $2::date AND $3::date
+		ORDER BY eaten_on DESC, position, created_at, id
+		LIMIT $4`
+
 func (r *PostgresRepository) ListEntries(ctx context.Context, userID, from, to string, limit int) ([]Entry, error) {
 	// The LIMIT is not optional. apihttp.Stack buffers every response to
 	// compute an ETag and to gzip it, so an unbounded list is a memory bug that
@@ -86,12 +97,7 @@ func (r *PostgresRepository) ListEntries(ctx context.Context, userID, from, to s
 	// one actually reads off this list is the order WITHIN one meal, which
 	// position alone decides. created_at and id still follow, so the total
 	// order — the thing pagination depends on — is unchanged.
-	rows, err := r.pool.Query(ctx, `
-		SELECT `+entryCols+`
-		FROM nutrition_entries
-		WHERE user_id = $1 AND eaten_on BETWEEN $2::date AND $3::date
-		ORDER BY eaten_on DESC, position, created_at, id
-		LIMIT $4`, userID, from, to, limit)
+	rows, err := r.pool.Query(ctx, listEntriesSQL, userID, from, to, limit)
 	if err != nil {
 		return nil, translate(err)
 	}

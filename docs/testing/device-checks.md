@@ -221,6 +221,29 @@ log by `request_id`. Note that a **504** is the new answer for "we stopped
 waiting", and unlike the 503 it *does* spend one of the day's 25 — so check the
 remaining count before concluding a quota was burned by something else (#367).
 
+**Also: point at something you logged, instead of describing it (N194, #611).**
+This is the ticket's own device criterion, and no test reaches it because it
+needs a real day of logging behind it and a real keyboard in front of it.
+
+**Do:** Log something distinctive — a food you do not usually eat — and wait a
+day. Then open **Food → add → describe**, type *the same as yesterday* and tap
+**Work it out**. Try it once with the iOS keyboard's own apostrophe:
+*yesterday’s lunch again*. Then describe something you have **not** logged in
+the last two weeks the same way (*the same pizza as Tuesday*).
+
+**Should:** The first comes back headed **From your recent log**, naming the
+logged meal ("Yesterday’s lunch, from your log. No estimate used.") with that
+entry's own amounts in editable fields — and the estimates-left count does not
+move. If you logged more than one meal yesterday you get a short list to pick
+from instead, and nothing can be logged until you pick. The never-logged one
+says **"Nothing in the last 14 days matches …"** and shows nothing to log. After
+logging the first, check **Saved foods** has not grown a duplicate.
+
+**Failure looks like:** A fresh estimate of the words ("Check these before
+logging", a different calorie figure) — the reference was not recognised. Or
+worse, a draft of a food you did not log: that is the invented match the ticket
+forbids. Note the exact phrase and whether the count moved.
+
 ---
 
 ## D5 — Scan a barcode on a real packet

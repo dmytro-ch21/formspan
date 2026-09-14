@@ -83,6 +83,24 @@ List each component once, under the name someone would call it. Do not add items
 
 If you cannot make out anything edible, return an empty items list and explain why in the note. An empty list is a good answer when it is the true one.`
 
+// referenceSystemPrompt is APPENDED to estimateSystemPrompt when a request may
+// point at a past log (N194), and only then — so every other request is sent
+// exactly the prompt it was before, and the shared prefix stays cacheable.
+//
+// It tells the model the one thing it must not do, which is the whole privacy
+// design: it has no access to the athlete's log and must not guess what it
+// held. Its job is to say WHAT THE WORDS POINT AT; the server looks the answer
+// up afterwards, and nothing from the log is ever put in front of it.
+const referenceSystemPrompt = `
+
+## When they point at something they already logged
+
+Sometimes the athlete does not describe food at all but points at something they logged before: "the same as yesterday", "my usual post-workout shake", "the same lunch as Monday". You cannot see their log, and you must never guess what it contained.
+
+When that is what they wrote, set reference.refers_to_logged_food to true, return an empty items list, an empty note and an empty meal_name, and fill in only what their words say: which day (today, yesterday, a number of days ago, a weekday, or a month and day), which meal if they named one, and the words they used for the food itself. Leave everything they did not say as unstated. If they also ask for a change ("but with two eggs"), still return the reference — they will adjust the amounts themselves.
+
+When they describe food — even food they eat every day, like "two eggs and toast" — set refers_to_logged_food to false, fill the rest of reference with unstated values, and estimate the food as normal.`
+
 // userPrompt is the athlete's own words, plus the slot as portion context.
 func userPrompt(in EstimateInput) string {
 	var b strings.Builder

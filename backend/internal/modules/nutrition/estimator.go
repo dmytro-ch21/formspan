@@ -80,10 +80,22 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, C
 		return Estimate{}, CallMeta{}, err
 	}
 
+	// The reference question is asked only of a request that can act on the
+	// answer (N194) — see ReferencesAllowed. Everything else gets the prompt
+	// and schema it always did.
+	//
+	// **Nothing from the athlete's log is in this request, and nothing COULD
+	// be**: this function is handed an EstimateInput, which carries the
+	// athlete's words, a slot and a date string it never forwards. The entries
+	// are read by the handler, after this returns.
+	system, schema := estimateSystemPrompt, EstimateSchema()
+	if in.ReferencesAllowed() {
+		system, schema = estimateSystemPrompt+referenceSystemPrompt, EstimateSchemaWithReference()
+	}
 	res, err := e.c.Complete(ctx, llm.Request{
-		System:         estimateSystemPrompt,
+		System:         system,
 		Prompt:         userPrompt(in),
-		Schema:         EstimateSchema(),
+		Schema:         schema,
 		SchemaName:     "meal_estimate",
 		Image:          in.Image,
 		ImageMediaType: in.ImageMediaType,
@@ -108,13 +120,32 @@ func (e *estimator) Estimate(ctx context.Context, in EstimateInput) (Estimate, C
 		return Estimate{}, meta, fmt.Errorf("%w: empty response", ErrEstimateUnavailable)
 	}
 
-	var out Estimate
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+	var parsed struct {
+		Items     []EstimatedItem `json:"items"`
+		Note      string          `json:"note"`
+		MealName  string          `json:"meal_name"`
+		Reference *modelReference `json:"reference"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		// Structured outputs make this close to impossible on either provider;
 		// the usual cause is truncation, which means the token budget is too
 		// small rather than that the model misbehaved.
 		return Estimate{}, meta, fmt.Errorf("%w: could not read the response", ErrEstimateUnavailable)
 	}
+
+	// A POINTER, not a meal (N194). Returned without items and without the
+	// item validation below, which would otherwise read the empty list as a
+	// refusal. Honoured only when the question was asked: a reference smuggled
+	// into an answer to the ordinary schema is ignored, and the empty items it
+	// came with are refused exactly as before.
+	if in.ReferencesAllowed() && parsed.Reference != nil && parsed.Reference.RefersToLoggedFood {
+		ref := parsed.Reference.toReference()
+		return Estimate{
+			Items: []EstimatedItem{}, Model: model, Source: in.Source(), reference: &ref,
+		}, meta, nil
+	}
+
+	out := Estimate{Items: parsed.Items, Note: parsed.Note, MealName: parsed.MealName}
 	out.Model = model
 	out.Source = in.Source()
 	// Trimmed, and forced empty for a single-item draft, rather than trusting
