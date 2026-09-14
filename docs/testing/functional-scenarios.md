@@ -24726,3 +24726,76 @@ The bar reads **Food · Progress · Today · Plan · You**. Today moved from the
   - Android's hardware back button.
 
   Those need a device.
+
+## N527 — Settings names a grant Health Connect refused (`apps/mobile/lib/healthConnectRefusals.ts`, `apps/mobile/components/settings/HealthConnectRefusalLine.tsx`, #949)
+
+Android only. Every Health Connect pass reports which record types Health Connect
+refused (`notPermitted`, W15/#944). A pass that reaches its reads now stores that
+list per user on the phone. Settings shows one line under **Sync with Health
+Connect** naming the refused types in the athlete's words, with an **Open Health
+Connect** button. Reachable on a phone: Settings → Integrations → Sync with
+Health Connect.
+
+No native rebuild is needed: no permission or native module was added.
+
+### Happy path
+
+- **One refusal.** Sync on, Exercise turned off for VOLA in Health Connect. Return
+  to VOLA and open Settings. Under the toggle: *Health Connect isn't sharing
+  exercise sessions with VOLA, so walks and hikes won't appear on Today. To
+  change it, open Health Connect, then App permissions, then VOLA.* and an
+  **Open Health Connect** button.
+- **The button.** Tap **Open Health Connect**: Health Connect's settings open.
+- **Fixing it clears it.** Allow Exercise for VOLA in Health Connect and return to
+  VOLA. After the foreground pass, the line is gone. It reflects the last pass,
+  not a flag that sticks.
+- **Several refusals.** Exercise, heart rate and VO2max all refused, with a recent
+  finished session to enrich: one sentence, *Health Connect isn't sharing
+  exercise sessions, heart rate or VO2max with VOLA, so walks and hikes won't
+  appear on Today, sessions won't get heart-rate zones or load, and your VO2max
+  trend won't update.* followed by the same route.
+
+### Edge cases and errors
+
+- **Everything allowed.** No line.
+- **Only Steps refused.** No line here. The refusal shows in the **Steps** row
+  below, with its own **Ask again**. One refusal is never reported twice.
+- **Toggle off.** The line disappears with the toggle. Turning it back on shows
+  the last recorded answer until the pass the toggle starts finishes.
+- **A pass that never reaches the reads** (toggle off, Health Connect not
+  installed, or the account changing mid-pass): the last answer stays as it was.
+  Nothing is cleared by a pass that asked nothing.
+- **Heart rate refused, but no finished session in the last 30 days.** Heart rate
+  is only read when there is a session to enrich, so the line can't name it.
+  Once a session exists, the next pass does.
+- **No Health Connect on the phone.** The toggle reads *Not available on this
+  device.* and there is no line.
+- **iPhone.** Nothing from this feature renders. HealthKit cannot report a denied
+  read, so there is nothing to say.
+- **No automatic prompt.** Opening Settings never opens a Health Connect
+  permission screen on its own.
+
+### Auth / security
+
+- **Two accounts, one phone.** A has a refusal line. Sign out, sign in as B, open
+  Settings: no line for B. The stored answer is keyed by the signed-in user.
+- **Nothing leaves the device.** The refused types are stored in local
+  preferences only, never sent to the API.
+
+### What a test can and cannot reach
+
+- **Reachable (jest, real SQLite):**
+  - which types the line names, including the Steps filter;
+  - the copy for one, two and three types;
+  - overwrite versus keep for each pass outcome;
+  - per-user storage;
+  - the line clearing when a pass records nothing refused;
+  - the Settings gate (Android, Health Connect available, toggle on);
+  - the line never rendering on iOS;
+  - the native open call being swallowed when it throws.
+- **Not reachable:**
+  - whether a revoked grant really rejects with `PERMISSION_ERROR`;
+  - what `ACTION_HEALTH_CONNECT_SETTINGS` opens, and its labels;
+  - the pass after returning from Health Connect.
+
+  Those are `docs/testing/device-checks.md` D31.

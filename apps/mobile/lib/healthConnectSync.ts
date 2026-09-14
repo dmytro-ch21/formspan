@@ -29,6 +29,7 @@ import {
 } from './healthConnect';
 import type { EnrichableSession, SyncNowOutcome } from './hrAbsence';
 import { fetchHRMax, type HRMaxResolution } from './hrMax';
+import { recordHealthConnectPassRefusals } from './healthConnectRefusals';
 import { fitHRWindow } from './hrWindowFit';
 import { paddedHRSearchWindow, selectWorkoutWindow, workoutSearchWindow } from './hrWorkoutWindow';
 import { PREF_HEALTH_CONNECT_IMPORT, readPref, writePref } from './prefs';
@@ -264,9 +265,10 @@ async function detectOtherHealthConnectActivity(userID: string, now: Date): Prom
  * (heart-rate enrichment must survive a refused VO2max, and vice versa) —
  * it is CAUGHT, but it is caught into this list rather than into silence,
  * so the answer to "is walk detection actually working on this phone" is
- * one value rather than a debugger session. Nothing in the UI reads it yet;
- * that is a separate ticket, and a value that exists is what makes that
- * ticket small.
+ * one value rather than a debugging session. N527/#949 is what reads it: a pass
+ * that reaches its reads records the list per user
+ * (`lib/healthConnectRefusals.ts`), and Settings names the refused types under
+ * the toggle.
  */
 export async function syncHealthConnectBiometrics(
   userID: string,
@@ -397,6 +399,20 @@ export async function syncHealthConnectBiometrics(
       // failing must never block heart-rate enrichment, and there is no
       // ledger for it to leave inconsistent. A refused grant is recorded.
       noteIfRefused(err);
+    }
+
+    // N527/#949: this pass reached every read it makes, so its answer is the
+    // one Settings shows — written even when EMPTY, which is what clears the
+    // line after the athlete allows the grant. Inside this block on purpose:
+    // a pass the identity check cut short never read VO2max, and writing its
+    // partial list would clear a VO2max refusal it never asked about. Every
+    // early return above (toggle off, no Health Connect) likewise leaves the
+    // previous answer standing. A failed local write does the same — this
+    // function never throws.
+    try {
+      await recordHealthConnectPassRefusals(userID, notPermitted);
+    } catch {
+      // The previous pass's line stands until the next pass writes.
     }
   }
 
