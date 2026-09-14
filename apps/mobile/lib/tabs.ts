@@ -9,10 +9,38 @@ import type { IconName } from '@/components/ui/Icon';
  * predicate that used to sit inline in that layout was inline, untested and
  * wrong, which are not three unrelated facts.
  *
+ * ## Today in the centre, and still the screen the app opens on (N580)
+ *
+ * The bar reads **Food · Progress · Today · Plan · You**. The owner decided it
+ * on 2026-09-14: *"lets move the Today in the middle in the pannel and be the
+ * default screen"*. Today takes the centre slot and the other four keep their
+ * relative order. Food is now first, two slots from Today rather than beside
+ * it, and it keeps a permanent slot, which is the part of N180's reasoning
+ * below that still holds.
+ *
+ * **Moving Today out of slot one could have moved the default with it, and on
+ * one path it did.** What picks the opening tab was measured against the
+ * installed expo-router (57.0.21), not assumed:
+ *
+ * - A cold start, the post-sign-in `router.replace('/')` in `app/_layout.tsx`
+ *   and `/(tabs)` all resolve through the URL to `(tabs)/index`. Position plays
+ *   no part, so all three land on Today with Food first.
+ * - When the tab navigator is created with NO tab named, NativeTabs falls back
+ *   to the first route here. That is the `(tabs)` anchor the root layout puts
+ *   under a cold-started deep link to a pushed screen, which the athlete lands
+ *   on by going back. `unstable_settings.initialRouteName` in
+ *   `app/(tabs)/_layout.tsx` does not change it: `NativeTabsNavigator` never
+ *   hands `initialRouteName` to its router (`build/native-tabs/
+ *   NativeBottomTabsNavigator.js`). So the tab layout names Today itself when
+ *   nothing else chose a tab. `HOME_TAB` and `tabWasChosen` below are that pin.
+ * - **Not covered: back WITHIN the bar.** NativeTabs' default `backBehavior` is
+ *   `'initialRoute'`, which falls back to the first route for the same reason,
+ *   so back from a tab now goes to Food. Recorded in N580's history entry.
+ *
  * ## What N180 changed, and why it partly reverses N176
  *
- * The bar reads **Today · Food · Progress · Plan · You**. Food is back in slot
- * two and **Train's slot is retired** — decided by the user on 2026-08-26,
+ * N180's bar read **Today · Food · Progress · Plan · You**. Food came back to
+ * slot two and **Train's slot is retired** — decided by the user on 2026-08-26,
  * after carrying the N176 bar on their own phone:
  *
  * > "I agree its a little too deep and right now the only way to get there is
@@ -114,28 +142,66 @@ export type TabSpec = {
  * product name, which it has carried since long before any of this.
  *
  * **Order is load-bearing rather than cosmetic, and what it is ordered BY
- * changed with N180.** N176 ordered it as a loop to be read left to right;
- * ordering it by frequency is what put Food back in slot two, beside Today,
- * where a thumb reaches it without looking. Either way it is a product decision
- * rather than a layout detail, so `lib/__tests__/tabBar.test.ts` asserts it and
- * a reordering fails there instead of being noticed on a device.
+ * has changed twice.** N176 ordered it as a loop to be read left to right. N180
+ * ordered it by frequency, which put Food beside Today, where a thumb reaches it
+ * without looking. N580 puts Today in the centre by owner decision; Food keeps
+ * its slot, now the first. Each time it was a product decision rather than a layout
+ * detail, so `lib/__tests__/tabBar.test.ts` asserts it and a reordering fails
+ * there instead of being noticed on a device.
  *
  * The icons come from the brand kit by name; `food` is the kit's own glyph and
  * is the one Food carried before N176 took its slot, so this restores the
  * arrangement rather than inventing a new one.
  */
 export const TABS = [
-  { name: 'index', title: 'Today', icon: 'dashboard' },
-  // Second, not last, and this is the sentence N176 removed and N180 restores.
+  // Still on the bar: N180's point, which N580 does not undo. N580 put Today in
+  // the centre, so Food is first and no longer beside it, but its slot is
+  // permanent, and that was the finding.
   // Food is logged three to six times a day against once for a session, and the
   // tab bar is the only fixed-position affordance the phone has. A card on
   // Today costs an extra tap every time, on a screen whose contents move — and
   // measured with Food off the bar, that card was the ONLY way in at all.
   { name: 'food', title: 'Food', icon: 'food' },
   { name: 'progress', title: 'Progress', icon: 'progress' },
+  // The centre slot (N580). Not first, and deliberately NOT the default by
+  // being first — see this file's top-of-file comment for what actually makes
+  // Today the screen the app opens on.
+  { name: 'index', title: 'Today', icon: 'dashboard' },
   { name: 'workouts', title: 'Plan', icon: 'calendar' },
   { name: 'you', title: 'You', icon: 'profile' },
 ] as const satisfies readonly TabSpec[];
+
+/**
+ * The tab the app opens on, named rather than inherited from `TABS[0]` (N580).
+ *
+ * Today is in the centre, so the first slot and the default are no longer the
+ * same tab. See this file's top-of-file comment for what reads this and why an
+ * `unstable_settings` pin could not do the job.
+ */
+export const HOME_TAB = 'index' satisfies (typeof TABS)[number]['name'];
+
+/**
+ * Whether something already chose which tab the tab navigator should show.
+ *
+ * `true` when the URL is inside the tab group (`segments[0] === '(tabs)'`, as on
+ * a cold start at `/` or a deep link to `/food`), or when the navigation that
+ * created the tab route named a tab (`params.screen`) or carried nested state
+ * (`params.state`), as `router.replace('/')` after sign-in does. Anything else
+ * is the root layout's `(tabs)` anchor sitting under a pushed screen, and there
+ * NativeTabs would pick `TABS[0]`.
+ *
+ * Measured in `__tests__/app/tabDefault.test.tsx` against the real router, which
+ * is also where the cases that must NOT be overridden are held: a deep link to
+ * another tab still lands on that tab.
+ */
+export function tabWasChosen(segments: readonly string[], params: unknown): boolean {
+  if (segments[0] === '(tabs)') return true;
+  if (params !== null && typeof params === 'object') {
+    const { screen, state } = params as { screen?: unknown; state?: unknown };
+    if (typeof screen === 'string' || state != null) return true;
+  }
+  return false;
+}
 
 /**
  * Android's fixed, non-personalised active-tab-icon colour (N504).

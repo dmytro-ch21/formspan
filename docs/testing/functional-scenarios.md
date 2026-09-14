@@ -24690,3 +24690,39 @@ Today's Progress card now has two buttons. The body (weight, delta, phase, 7-day
 - On a phone, one tap from Today opens today's check-in, and saving it updates the Today card on return.
 - VoiceOver reads the two buttons separately, with their own labels.
 - At the largest Dynamic Type size, "Record weight" is not clipped and the row grows rather than overlapping the body.
+
+## N580 — Today in the centre of the tab bar, and still the screen the app opens on (#1231)
+
+The bar reads **Food · Progress · Today · Plan · You**. Today moved from the first slot to the centre, and the app still opens on it. Nothing was added to or removed from the bar.
+
+### Happy path (iOS and Android)
+
+- **The bar:** five tabs, left to right Food, Progress, Today, Plan, You. Today is in the middle, and each tab still carries its own icon and label.
+- **Cold start, signed in:** kill the app and open it from the home screen. It opens on Today, not on Food, even though Food is first on the bar.
+- **After sign-in:** sign out, then sign back in. The app lands on Today. Do the same with sign-up, including a sign-up resumed after email verification.
+- **Each tab is reachable:** tap each of the five in turn. Each opens its own screen and highlights in the bar.
+- **Home links still go to Today:** an old `vola://train` link, finishing a run ("Done" on the run summary), and "Go to home screen!" on the not-found screen all land on Today.
+
+### Deep links
+
+- **A link to another tab lands on that tab:** open `vola://food` and `vola://progress` from a cold start. Each opens that tab, not Today.
+- **Back from a deep-linked screen goes to Today:** from a cold start, open a link to a pushed screen, such as `vola://goals`. Go back (swipe on iOS, the back button on Android). The app shows Today, not Food.
+- **A link that doesn't resolve** shows the not-found screen, and "Go to home screen!" lands on Today.
+
+### Known consequence, to confirm on Android
+
+- **Hardware back from a tab:** on Android, from Progress or Plan, press back. The JS router measured this as going to Food, the bar's first route, where it used to go to Today. Record what the device actually does: native tabs can handle back themselves.
+
+### What a test can and cannot reach
+
+- **Reachable:**
+  - the bar's order and Today in the centre;
+  - that the default is `HOME_TAB` and not the first slot;
+  - against the real router with Food first: a cold start at `/`, sign-in's `router.replace('/')`, `/(tabs)`, and back from a cold-started deep link to a pushed screen, all landing on Today;
+  - deep links to `/food` and `/progress` still landing on their own tab.
+- **Not reachable:**
+  - how the native bar looks, with Today in the middle;
+  - a real cold start from the home screen or from a link;
+  - Android's hardware back button.
+
+  Those need a device.

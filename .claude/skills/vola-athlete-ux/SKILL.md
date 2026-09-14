@@ -18,17 +18,25 @@ canonical failure this forbids: a target's derivation visible on the phone
 with no way to disagree with it, because manual entry existed only on web.
 Full statement and history: CLAUDE.md "Which platform gets a feature".
 
-## Navigation: the bar spells the athlete's loop
+## Navigation: the bar
 
-**Today · Train · Progress · Plan · You** — approved primary navigation
-(N176). `apps/mobile/lib/tabs.ts` is the source of truth, and its doc comment
-carries the full reasoning, including what the old bar got right. Two rules
-travel with it:
+**Food · Progress · Today · Plan · You**. Today sits in the centre and is the
+screen the app opens on, both by owner decision on 2026-09-14 (N580). It
+replaces N180's order, which had replaced N176's loop and retired Train's slot.
+`apps/mobile/lib/tabs.ts` is the source of truth, and its doc comment carries
+the full reasoning. Three rules travel with it:
 
-- **Nothing hides.** A route may lose its button, never its reachability —
-  off-bar routes stay declared with `href: null`. A conditional tab is a
-  decision to re-argue, not a convenience: hiding tabs on module state once
-  made an athlete report present features as "not there".
+- **The default is named, never positional.** Today is not first on the bar,
+  so nothing may assume `TABS[0]` is where the app opens. `HOME_TAB` in
+  `lib/tabs.ts` names it, and `app/(tabs)/_layout.tsx` applies it where
+  NativeTabs would otherwise take its first route.
+  `__tests__/app/tabDefault.test.tsx` holds this against the real router.
+- **Nothing hides.** A route may lose its button, never its reachability. Under
+  `NativeTabs` a tab with no button cannot be navigated to, so an off-bar
+  destination is a pushed screen at the app root instead (`app/goals.tsx`,
+  `app/train.tsx`; N504). A conditional tab is a decision to re-argue, not a
+  convenience: hiding tabs on module state once made an athlete report present
+  features as "not there".
 - **Don't add a sixth tab to settle a placement argument.** Where nutrition
   lives is N180's question; splitting the difference with an extra slot is
   the specific thing that ticket exists to prevent.

@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { TABS } from '../tabs';
+import { HOME_TAB, TABS, tabWasChosen } from '../tabs';
 
 /**
  * The bottom bar's membership and order — N176, as revised by N180.
@@ -45,23 +45,33 @@ function routeFilesInTabFolder(): string[] {
 }
 
 describe('the visible bar', () => {
-  it('reads Today, Food, Progress, Plan, You, in that order', () => {
-    expect(TABS.map((t) => t.title)).toEqual(['Today', 'Food', 'Progress', 'Plan', 'You']);
+  it('reads Food, Progress, Today, Plan, You, in that order', () => {
+    expect(TABS.map((t) => t.title)).toEqual(['Food', 'Progress', 'Today', 'Plan', 'You']);
   });
 
   it('maps those titles onto the routes that actually implement them', () => {
     // Titles alone would pass with every tab pointing at the same file. Plan is
     // the interesting row: it is the long-standing `workouts` route under its
     // product name, and renaming the file is not part of this change.
-    expect(TABS.map((t) => t.name)).toEqual(['index', 'food', 'progress', 'workouts', 'you']);
+    expect(TABS.map((t) => t.name)).toEqual(['food', 'progress', 'index', 'workouts', 'you']);
   });
 
-  // **Slot two specifically, because that is the whole of N180's bar change.**
-  // The two assertions above are satisfied by any bar holding those five names;
-  // this one fails if Food drifts to the end, which is the shape the next
-  // reorder is most likely to take — appending is always the smaller diff.
-  it('puts Food in slot two, beside Today', () => {
-    expect(TABS[1]).toEqual({ name: 'food', title: 'Food', icon: 'food' });
+  // **The centre slot specifically, because that is the whole of N580's bar
+  // change** (owner, 2026-09-14). The two assertions above are satisfied by any
+  // bar holding those five names in that order; this one states the property
+  // the owner asked for — Today in the MIDDLE — so it still fails if the bar
+  // ever grows or shrinks around a Today that stays at index 2.
+  it('puts Today in the centre slot', () => {
+    expect(TABS.length % 2).toBe(1);
+    expect(TABS[(TABS.length - 1) / 2]).toEqual({ name: 'index', title: 'Today', icon: 'dashboard' });
+  });
+
+  // N180's half, kept: Food has a permanent slot, because it is logged several
+  // times a day and the bar is the phone's only fixed-position affordance.
+  // N580 moved Today into the centre, which put Food first and two slots from
+  // Today. It did not take Food off the bar.
+  it('keeps Food on the bar', () => {
+    expect(TABS.map((t) => t.name)).toContain('food');
   });
 
   it('gives every tab an icon, and no two the same', () => {
@@ -79,6 +89,36 @@ describe('the visible bar', () => {
   it('holds exactly five, with nothing conditional in the list', () => {
     expect(TABS).toHaveLength(5);
     expect(Object.keys(TABS[0]).sort()).toEqual(['icon', 'name', 'title']);
+  });
+});
+
+describe('the tab the app opens on (N580)', () => {
+  // Named, and not the first slot: if these two ever agree again, the default
+  // is being carried by position and nothing would notice it moving.
+  it('is Today, which is no longer first on the bar', () => {
+    expect(HOME_TAB).toBe('index');
+    expect(TABS.find((t) => t.name === HOME_TAB)?.title).toBe('Today');
+    expect(TABS[0].name).not.toBe(HOME_TAB);
+  });
+
+  describe('tabWasChosen', () => {
+    it('is true inside the tab group, whichever tab the URL named', () => {
+      expect(tabWasChosen(['(tabs)'], undefined)).toBe(true);
+      expect(tabWasChosen(['(tabs)', 'food'], undefined)).toBe(true);
+    });
+
+    it('is true when the navigation named a tab or carried nested state', () => {
+      expect(tabWasChosen(['sign-in'], { screen: 'index', params: {} })).toBe(true);
+      expect(tabWasChosen(['sign-in'], { state: { routes: [{ name: 'food' }] } })).toBe(true);
+    });
+
+    // The anchor under a pushed screen: the only case the layout acts on.
+    it('is false under a pushed screen with nothing naming a tab', () => {
+      expect(tabWasChosen(['goals'], undefined)).toBe(false);
+      expect(tabWasChosen(['goals'], {})).toBe(false);
+      expect(tabWasChosen([], null)).toBe(false);
+      expect(tabWasChosen(['goals'], { screen: 42 })).toBe(false);
+    });
   });
 });
 

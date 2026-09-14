@@ -77752,6 +77752,68 @@ The last one first survived, because no test read the origin, so an assertion wa
 - **No device run.** One tap from Today opening today's check-in, and the card updating after a save, is the ticket's device-evidence criterion. VoiceOver's two stops and the row at the largest Dynamic Type size need a device too.
 - **The ticket's alternative, restoring `CheckinCard` in place, was not built.** The action went onto `ProgressCard` instead. Either is reversible.
 
+## 2026-09-14 — N580 (#1231): Today moves to the centre of the tab bar, and is pinned as the screen the app opens on
+
+**The owner's decision, 2026-09-14:** *"lets move the Today in the middle in the pannel and be the default screen."*
+
+### What changed
+
+- **The bar** (`apps/mobile/lib/tabs.ts`, `TABS`) was Today · Food · Progress · Plan · You (N180). It is now **Food · Progress · Today · Plan · You**.
+  - Today takes the centre. The other four keep their relative order, so Food is first and two slots from Today.
+  - This replaces N180's order, which had replaced N176's. `lib/tabs.ts` is still the only place the order is stated.
+- **Today is the default by name, not by being first.** `HOME_TAB` and `tabWasChosen` are in `lib/tabs.ts`. `app/(tabs)/_layout.tsx` sets `screen: 'index'` on its own route once, and only when nothing else chose a tab.
+- **Nothing hides.** All five tabs stay on the bar. No `href: null` routes have existed since N504 (off-bar destinations are pushed screens at the app root), and none changed.
+
+### How NativeTabs picks its first tab: read in expo-router 57.0.21, then measured
+
+**The obvious pin, `unstable_settings = { initialRouteName: 'index' }` in `app/(tabs)/_layout.tsx`, gets loaded and changes nothing about NativeTabs.** So it was not added.
+
+- **Where the setting goes.** `build/getRoutesCore.js` reads `unstable_settings.anchor ?? initialRouteName` into the layout node. `build/getReactNavigationConfig.js` copies it into the linking config, and `build/fork/getStateFromPath.js` (`findInitialRoute`) uses it to insert a route into state parsed from a URL.
+- **It never reaches the tab router.**
+  - `build/native-tabs/NativeBottomTabsNavigator.js` calls `useNavigationBuilder(NativeBottomTabsRouter, { children, backBehavior, screenListeners, screenOptions })`, with no `initialRouteName`. `build/layouts/withLayoutContext.js` passes none either.
+  - So `getInitialState` in `build/react-navigation/routers/TabRouter.js` falls back to route 0.
+  - Route order is trigger order: `useSortedScreens` in `build/useScreens.js` walks the `NativeTabs.Trigger`s, and `sortRoutesWithInitial` only reorders routes left over after that.
+- **Measured.** A throwaway harness used `expo-router/testing-library`'s `renderRouter`, the real NativeTabs and the real tab layout, with Food first. It ran with the pin and without; the route node confirmed the pin was loaded. Results were identical either way:
+  - a cold start at `/`, `router.replace('/')` after sign-in, and `router.replace('/(tabs)')` all landed on Today. The URL resolves to `(tabs)/index`, so position plays no part.
+  - deep links to `/food` and `/progress` landed on that tab.
+  - **a cold start at `/goals`, then back, landed on Food.** The root layout's `unstable_settings.initialRouteName: '(tabs)'` puts `(tabs)` under the pushed screen with no tab named, and NativeTabs takes route 0.
+- **What the router does honour** is React Navigation's nested `screen` param on the route that holds the tabs (`getStateFromParams` and the nested-params handling in `build/react-navigation/core/useNavigationBuilder.js`). The same harness rejected two ways of applying it:
+  - `initialParams={{ screen: 'index' }}` on the root `(tabs)` screen fixed `/goals` → back, but sent cold starts at `/food` and `/progress` to Today.
+  - Setting it when `useRoute().state` was empty did the same. The route's `state` is empty at the layout's first effect on every path, deep links included.
+  - **Kept:** set it once when `useSegments()[0]` is not `(tabs)` and the route carries no `screen` or `state` param. With that, `/goals` → back lands on Today, and `/food` and `/progress` are untouched.
+
+### Every "home" call site, checked
+
+- **`app/_layout.tsx`, the post-auth `router.replace('/')`:** lands on Today. Measured, replaying the same call.
+- **`/(tabs)`, measured:** lands on Today. That covers `app/train.tsx`'s `<Redirect href="/(tabs)" />` and the Done button in `app/running/[id].tsx`, `router.replace('/(tabs)')`.
+- **`/`:** lands on Today. That covers the `<Link href="/">` in `app/+not-found.tsx`, and the `canGoBack() ? back() : replace('/')` fallback in `curriculum/[id].tsx`, `day.tsx`, `goals.tsx`, `library.tsx` and `phase/index.tsx`.
+
+### N567 (#1128)
+
+The centre slot now holds Today by owner decision. N567's open question is not decided here: which tab VOLA replaces, or whether it gets a custom bar. Whatever it decides now has to fit around a bar with Today in the centre.
+
+### Checks
+
+- **`__tests__/app/tabDefault.test.tsx` (new):** runs the real router, the real NativeTabs, the real `(tabs)/_layout.tsx` and the real `TABS`.
+  - A precondition asserts that the router's own first route is `food`.
+  - Today is where the athlete lands on a cold start, after sign-in, from `/(tabs)`, and on going back from a cold-started deep link.
+  - `/food` and `/progress` still land on their own tab.
+  - It reads the navigator's live state. `getRouterState()` returns the state parsed from the URL, which holds only the one tab the URL named. The first run caught that.
+- **`lib/__tests__/tabBar.test.ts`:** the new order, Today in the centre slot, Food still on the bar, `HOME_TAB` not in the first slot, and `tabWasChosen` in both directions.
+- **`__tests__/app/tabLayout.test.tsx`:** the new trigger order, plus three wiring tests: the layout asks for Today when nothing chose a tab, and leaves the tab alone when the URL or the navigation named one.
+- **Mutation checks,** run after a green baseline (30/30), each restored byte-identical by sha256 and re-run green:
+  - **M1, the layout's `setParams` removed:** 2 tests failed. `asks for Today when nothing chose a tab`: "Expected number of calls: 1, Received number of calls: 0". `when it goes back from a screen the app was cold-started on by a deep link`: "Expected: "/", Received: "/food"".
+  - **M2, Today back in the first slot:** 6 tests failed across all three suites. Among them: the order tests, `puts Today in the centre slot`, `is Today, which is no longer first on the bar` ("Expected: not "index""), and the router precondition ("Expected: "food", Received: "index"").
+- `typecheck:mobile` exit 0. `lint:mobile` shows no new warnings, and `check:lint-ratchet` has every mobile rule within its cap. `check:rntl-awaits` found 0 unawaited calls.
+
+### Not done
+
+- **Device evidence.** Today in the middle of the bar, and the app opening on Today from a cold start and after sign-in, on a phone.
+- **Android back within the bar now goes to Food.** This was measured in the JS router: at `/`, navigating to `/progress` and going back landed on `/food`, with or without the pin.
+  - The cause is the same one as above. NativeTabs' default `backBehavior` is `'initialRoute'`, and `getRouteHistory` in `TabRouter.js` falls back to route 0 because NativeTabs never gives its router an `initialRouteName`. Before N580, route 0 was Today.
+  - It is not fixed here. The options are `backBehavior="history"`, which changes Android back and is a product call, or forwarding `initialRouteName` inside expo-router, which is a dependency patch, and this repo has none.
+  - A device may differ, because native tabs can handle back themselves.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
