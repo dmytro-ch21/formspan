@@ -77710,6 +77710,42 @@ The last one first survived, because no test read the origin, so an assertion wa
 
 **Reachability on a phone**: this is the phone — the rest timer on the strength session screen.
 
+## 2026-09-14 — N148 (#552), in part: deployment.md stops saying staging and the admin app do not exist, and says when it was last checked
+
+**What was wrong, all of it on `main` the day this started.** `docs/architecture/deployment.md` contradicted itself and the live project in six places:
+
+- its first paragraph said "no live staging/production services exist yet";
+- its section heading said application services were "still not provisioned";
+- its table said `web` and `admin` were "in progress", and that `admin-web` was "not built — no admin app exists yet", beside a `railway/admin.toml` that has been on `main` since the admin shell landed on 2026-07-28 (`f3f36dc5`);
+- its `files` row said "no object storage usage yet", while the same file's *Exercise media* section describes the R2 bucket the API reads;
+- its *Domains* paragraph put `postgres` on private networking, "never public", a few paragraphs after describing `DATABASE_URL_PUBLIC` through Railway's TCP proxy.
+
+The same stale claim sat in two more places: CLAUDE.md's Railway gotcha ("`web`/`admin` are in progress"), and the trailing *Open items* list in this file, whose bullet "No Railway `api` or `web` services exist yet, only Postgres" had not been edited since the file's first commit (`6cc17f6b`, 2026-07-28).
+
+**Why it was worth a ticket rather than a shrug.** The brief's risk — "an autonomous agent may execute it literally" — is not hypothetical here. The dev engine hands `docs/architecture/deployment.md` to a run as one of its two default documents whenever the run's diff matches no context-map entry (`DefaultDocs`, `engine/internal/devengine/contextbuild.go:30-33`) — and the same file refuses CLAUDE.md and this history outright. So in exactly the runs with the least other guidance, this file is read cold, without the history that lets a human read around it.
+
+**Measured, 2026-09-14, read-only.** Nothing was changed on Railway, and no service variable was read.
+
+- `railway status --json` on `formspan`: `staging` has four service instances — `api.vola-fitness-platform`, `web.vola-fitness-platform`, `admin.vola-fitness-platform` and `Postgres` (the `postgres-ssl:18` template image, on `postgres-volume`). The three app services' latest deployments are all `SUCCESS`, all of commit `1a4abb47` from branch `main`, all created at 08:26:27Z on 2026-09-13 — two seconds after that commit landed on `main` at 08:26:25Z. That is the evidence for "auto-deploys on every push to `main`". Each deployment records its config file as `/railway/<service>.toml`. `production` has **zero** service instances and one volume, `postgres-volume-mMgH`. No service has a custom domain, and the project has no Railway buckets.
+- HTTP: `api`'s `/v1/healthz` and `/v1/readyz` both 200, readyz body `{"status":"ok","service":"api"}`; `web`'s root 200, title `VOLA`; `admin`'s root 200, title `VOLA Admin`.
+- `backend/cmd` builds `api`, `migrate`, `seed`, `exportcontent` and `shadowreplay`. None of the planned `admin-api`, `worker` or `scheduler` binaries exists, so those rows stay "planned".
+
+**What changed.**
+
+- `deployment.md` opens with the date it was last verified and what *built*, *live* and *planned* mean in it. The staging section is rewritten from the measurement: a table naming each Railway service and its public URL, the auto-deploy fact with its timestamps, an `admin` build line beside `api` and `web`, R2 recorded as off-Railway object storage, and the Postgres-is-reachable correction. A new *Re-verifying this section* gives the read-only commands, with the `formspan`-not-`dynamic-trust` check first. The local-dev block also gained `dev:admin` and `dev:mobile`, which it had never listed.
+- CLAUDE.md's Railway line now says what `staging` and `production` hold, with the date, and points at the table.
+- The trailing *Open items* bullet is **replaced in place**, not answered by a new bullet. Editing an existing bullet there is unusual — none of the last 60 commits to this file did — but the alternative leaves the list asserting the opposite of this entry to the next reader, which is the exact failure this ticket is about.
+
+**Not measured, and said so in the doc.** Whether `staging` has the `R2_*` and `MEDIA_BASE_URL` variables set: reading them would put credentials into a session transcript, and a photo endpoint's 503 would need an authenticated request. The TCP proxy behind `DATABASE_URL_PUBLIC` was not re-tested either.
+
+**Noticed, not touched.** `production`'s `postgres-volume-mMgH` has no service attached. It is either left over from a deleted Postgres or created ahead of one; which, and whether it should stay, is the project owner's call. Nothing here changed it.
+
+**Not done — which is why the PR says `part of #552` and the ticket stays open.**
+
+- **The `docs/architecture/current/` layer, `docs/adr/`, `docs/runbooks/`, and the per-doc `Status`/`Owner`/`Last verified` metadata** (criteria 1 and 2). This is a restructure of where every current-state doc lives, not a correction, and nothing about it is decided yet.
+- **`history.md` becoming archival, "no longer mandatory full-context input"** (criterion 3, and the brief's second test step). That runs straight into two things already recorded: CLAUDE.md's first line sends every reader here for full context, and H18 (#983) weighed and rejected splitting this narrative because a single greppable file "is how the traps in it are actually found". Reversing either is the project owner's decision, not a session's.
+- **A process that stops `current/` rotting** (criterion 5). What shipped is a dated recipe, which the doc itself calls "a recipe, not a check". A real check against deployed state would need Railway credentials in CI, which is a credential decision of the same kind as the Projects-v2 PAT CLAUDE.md already leaves to the board owner.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
@@ -77780,7 +77816,7 @@ The last one first survived, because no test read the origin, so an assertion wa
 - **`assets/brand/logos/` still holds four placeholder lockups** built from Arial text and a hand-drawn checkmark, dating from before the real artwork existed. The genuine Corel exports now sit one level down in `logos/source/`, so the top-level directory is the stale one — anything that reads from it (the web app has not been re-pointed) silently gets the stand-in logo.
 - **`secrets.txt`** — an untracked file sitting in the repo root containing what looks like a live Anthropic API key in plaintext. Flagged to the user repeatedly; never staged or committed; not yet deleted or rotated as far as this log knows.
 - Functional test suite not yet passing — blocked on applying the `--hostname` fix to `tests/functional/support/start-stack.mjs` (the user's own in-progress file — not something to edit unilaterally).
-- No Railway `api` or `web` services exist yet, only Postgres — `railway/*.toml` configs are ready but unconnected.
+- Railway `production` has no services yet — `staging` runs `api`, `web`, `admin` and Postgres, and the three app services auto-deploy from `main` (N148, #552; verified 2026-09-14, see `docs/architecture/deployment.md`).
 - No production Postgres — `staging` is currently doing double duty for dev/staging/testing.
 - JWT verification doesn't check the `azp` claim (fine for one frontend origin; revisit if that changes).
 - Mobile app shell exists (`apps/mobile`) and is now fully Simulator-verified (screenshot-confirmed on a real iPhone 15 Pro Simulator). Still has no auth, no other tabs (Plan/Log/Progress/Profile), and no dev client (Expo Go only) — all deliberately deferred to future increments.
