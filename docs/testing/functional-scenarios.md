@@ -24781,9 +24781,9 @@ The bar reads **Food · Progress · Today · Plan · You**. Today moved from the
 - **Back from a deep-linked screen goes to Today:** from a cold start, open a link to a pushed screen, such as `vola://goals`. Go back (swipe on iOS, the back button on Android). The app shows Today, not Food.
 - **A link that doesn't resolve** shows the not-found screen, and "Go to home screen!" lands on Today.
 
-### Known consequence, to confirm on Android
+### Android back from a tab (resolved by F68)
 
-- **Hardware back from a tab:** on Android, from Progress or Plan, press back. The JS router measured this as going to Food, the bar's first route, where it used to go to Today. Record what the device actually does: native tabs can handle back themselves.
+- **Hardware back from a tab:** N580 left this going to Food, the bar's first route. F68 (#1235) makes it go to Today again. Its scenarios are under F68 below.
 
 ### What a test can and cannot reach
 
@@ -24871,3 +24871,58 @@ No native rebuild is needed: no permission or native module was added.
   - the pass after returning from Health Connect.
 
   Those are `docs/testing/device-checks.md` D31.
+
+## F68 — on Android, back from a tab returns to Today (#1235)
+
+Android only. The owner decided it on 2026-09-14: back from any tab other than
+Today goes to Today. A screen pushed over a tab is popped first. Back on Today
+leaves the app. iOS has no back button between tabs and is unchanged.
+
+No native rebuild is needed.
+
+### Happy path (Android)
+
+- **Back from each tab.** Open the app on Today. Tap Food and press back: Today.
+  Repeat for Progress, Plan and You.
+- **Back on Today leaves the app.** On Today, press back. The app goes to the
+  background. It does not show Food.
+- **A round trip.** Today, then Progress, then back: Today. Back again: the app
+  leaves.
+- **The gesture too.** Repeat the first case with the system back swipe instead
+  of the button.
+
+### Edge cases
+
+- **A screen pushed over a tab.** On Food, tap the daily target at the top, which
+  opens Your target. Press back: Food. Press back again: Today.
+- **Several tabs in a row.** Today, Food, Plan, You, then back. The app shows
+  Today, not the tab before You. Back again: the app leaves.
+- **A deep link to a tab.** From a cold start, open `vola://progress`. Press
+  back: Today. Back again: the app leaves.
+- **A deep link to a pushed screen.** From a cold start, open `vola://goals` and
+  press back. Record which tab shows. N580 expects Today; a test in the real root
+  layout's mount order landed on Food, on both platforms (see F68's history
+  entry). If it is not Today, a second back goes to Today.
+
+### iOS
+
+- **Nothing changes.** There is no back button between tabs. Swiping back from a
+  pushed screen still returns to the tab it was opened from.
+
+### What a test can and cannot reach
+
+- **Reachable (jest, the real expo-router and NativeTabs, with Android's back
+  dispatch copied into a `BackHandler` stand-in):**
+  - back from Food, Progress, Plan and You landing on Today, both after opening
+    them from Today and after a cold-started deep link;
+  - back on Today falling through to Android's default, before and after
+    visiting another tab;
+  - a pushed screen popped before the tab is left;
+  - both orders in which the router's handler and the tab layout's are asked;
+  - iOS subscribing no handler and keeping the tab router's default history.
+- **Not reachable:**
+  - whether Android's native tab bar handles back before JS sees it;
+  - the back gesture as opposed to the button;
+  - the app really leaving.
+
+  Those need an Android device.

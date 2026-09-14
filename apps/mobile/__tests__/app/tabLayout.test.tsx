@@ -85,6 +85,9 @@ jest.mock('expo-router', () => ({
   useNavigation: () => ({ setParams: mockSetParams }),
   useRoute: () => ({ params: mockNav.params }),
   useSegments: () => mockNav.segments,
+  // Read only by the Android back handler (F68), which this iOS-only file never
+  // subscribes. `tabDefault.test.tsx` runs that handler against the real router.
+  useNavigationContainerRef: () => ({ getRootState: () => undefined }),
 }));
 
 jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => mockModuleState }));

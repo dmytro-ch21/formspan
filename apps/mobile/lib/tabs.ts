@@ -33,9 +33,16 @@ import type { IconName } from '@/components/ui/Icon';
  *   hands `initialRouteName` to its router (`build/native-tabs/
  *   NativeBottomTabsNavigator.js`). So the tab layout names Today itself when
  *   nothing else chose a tab. `HOME_TAB` and `tabWasChosen` below are that pin.
- * - **Not covered: back WITHIN the bar.** NativeTabs' default `backBehavior` is
- *   `'initialRoute'`, which falls back to the first route for the same reason,
- *   so back from a tab now goes to Food. Recorded in N580's history entry.
+ * - **Back WITHIN the bar, on Android (F68).** NativeTabs' default
+ *   `backBehavior` is `'initialRoute'`, which falls back to the first route for
+ *   the same reason. So after N580, back from a tab went to Food, and back on
+ *   Today itself went to Food instead of leaving the app. An `initialRouteName`
+ *   prop on `<NativeTabs>` does not reach the router either: it lands in the
+ *   view's props. So on Android the tab layout sets `backBehavior="none"`,
+ *   which leaves the tab router nothing to go back to, and its
+ *   `hardwareBackPress` handler sends any other tab to Today. `backGoesHome`
+ *   below is that handler's decision. iOS has no system back between tabs and
+ *   keeps the library default.
  *
  * ## What N180 changed, and why it partly reverses N176
  *
@@ -201,6 +208,55 @@ export function tabWasChosen(segments: readonly string[], params: unknown): bool
     if (typeof screen === 'string' || state != null) return true;
   }
   return false;
+}
+
+/** A navigator's state, as far as the tab layout's back handler reads it. */
+export type NavStateNode = {
+  key?: string;
+  index?: number;
+  routes: readonly { key?: string; name: string; state?: NavStateNode }[];
+};
+
+/**
+ * The state of the navigator nested in the route keyed `routeKey`, found
+ * anywhere in `root` (F68).
+ *
+ * The tab layout's handler reads it from the container's root state. The root
+ * stack's own copy (`navigation.getState()`) is not enough: after a cold start
+ * at `/progress` the `(tabs)` route there still holds the state parsed from the
+ * URL, one tab and no Today, and a jump to Today dispatched against it is
+ * refused. Measured in `__tests__/app/tabDefault.test.tsx`.
+ */
+export function nestedStateOf(root: NavStateNode | undefined, routeKey: string): NavStateNode | undefined {
+  for (const route of root?.routes ?? []) {
+    if (route.key === routeKey) return route.state;
+    const found = nestedStateOf(route.state, routeKey);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Whether Android's back button should take the athlete to Today (F68).
+ *
+ * The owner's decision, 2026-09-14: *"make back go to Today on Android"*. True
+ * only when the tab bar is what the athlete is looking at and a tab other than
+ * `HOME_TAB` is showing:
+ *
+ * - `tabsFocused` is false when a screen is pushed over the tabs. Back pops that
+ *   screen first, so this leaves it to React Navigation.
+ * - On Today, back keeps the platform default and leaves the app.
+ * - A focused tab holding a nested navigator with a screen to pop pops first.
+ *   No tab has one today. This stops a future nested stack from jumping home
+ *   past its own screens.
+ *
+ * Measured against the real router in `__tests__/app/tabDefault.test.tsx`.
+ */
+export function backGoesHome(tabsFocused: boolean, tabs: NavStateNode): boolean {
+  if (!tabsFocused) return false;
+  const focused = tabs.routes[tabs.index ?? 0];
+  if (!focused || focused.name === HOME_TAB) return false;
+  return (focused.state?.index ?? 0) === 0;
 }
 
 /**
