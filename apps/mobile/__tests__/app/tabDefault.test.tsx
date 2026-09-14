@@ -25,16 +25,29 @@ import * as TabsLayoutModule from '../../app/(tabs)/_layout';
  * never gives `initialRouteName` to its router. The layout now names Today
  * itself when nothing chose a tab: `lib/tabs.ts`, `tabWasChosen`.
  *
- * ## What the harness stands in for
+ * ## What the root stands in for, and why there are three (F70)
  *
- * The root layout here is a bare `<Stack>` with the one root setting that
- * matters, `unstable_settings.initialRouteName: '(tabs)'`, copied from
- * `app/_layout.tsx`. That setting is what puts the tab navigator under a
- * cold-started deep link. The real root layout cannot be rendered in a test
- * (Clerk, five orchestrators), so its post-sign-in redirect is replayed as the
- * same call it makes, `router.replace('/')`. The screens are stubs: which tab
- * is focused is the router's answer, read from its state, not from what
- * rendered.
+ * **When the root stack mounts decides whether the pin works, so every
+ * cold-start case runs under each order.** N580's version of this file had one
+ * root, a bare `<Stack>` mounted in the navigation container's own commit, and
+ * its `/goals` case passed. The real `app/_layout.tsx` returns null until its
+ * fonts load, so on a phone the stack mounts a commit later, and there N580's
+ * pin was lost and back landed on Food. The test could not fail on the path
+ * the app takes.
+ *
+ * - `plainRoot`: a bare `<Stack>` in the container's commit, with the one root
+ *   setting that matters, `unstable_settings.initialRouteName: '(tabs)'`.
+ * - `lateRoot`: the same, mounted a microtask later.
+ * - `realRoot`: `app/_layout.tsx` itself. Clerk, the orchestrators and the
+ *   providers are stubbed below, and `useFonts` loads a macrotask after mount,
+ *   so the file's own `if (!loaded) return null` is what delays the stack. A
+ *   precondition asserts the gate really was closed on the first render.
+ *
+ * Sign-in is replayed on `plainRoot` only, as the call the root layout makes,
+ * `router.replace('/')`: the real layout's auth guard would redirect on its own
+ * and the test would no longer be about the replace. The screens are stubs:
+ * which tab is focused is the router's answer, read from its state, not from
+ * what rendered.
  *
  * ## Android's back button (F68)
  *
@@ -52,10 +65,10 @@ import * as TabsLayoutModule from '../../app/(tabs)/_layout';
  *   router's own handler (`useBackButton.native.js`) subscribes through it too,
  *   so a press here asks the same handlers a phone asks.
  * - **Both handler orders.** Which of those two is asked first depends on when
- *   the tab layout mounts. The real root layout returns null until fonts load,
- *   so on a phone the tab layout mounts later and is asked first. A plain root
- *   mounts both in one commit, and the router is asked first. The F68 cases run
- *   under both, and assert which order they got.
+ *   the tab layout mounts. With the stack mounted later, as on a phone, the tab
+ *   layout is asked first. With the stack in the container's commit, the router
+ *   is asked first. The F68 cases run under every root, and assert which order
+ *   they got.
  */
 
 jest.unmock('expo-router');
@@ -131,9 +144,15 @@ jest.mock('react-native-safe-area-context', () => {
 // The tab layout's own frame-holds, satisfied immediately — the same three
 // stand-ins `tabLayout.test.tsx` uses, for the same reasons. The icon rasters
 // cover both platforms' colours, since the layout asks for Android's pair there.
-jest.mock('@/lib/ModulesProvider', () => ({ useModules: () => ({ modules: [], ready: true }) }));
+// The two providers are for the real root layout, which wraps the navigator in
+// them.
+jest.mock('@/lib/ModulesProvider', () => ({
+  useModules: () => ({ modules: [], ready: true }),
+  ModulesProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 jest.mock('@/lib/AccentProvider', () => ({
   useAccent: () => jest.requireActual('@/constants/Colors').accents.purple,
+  AccentProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 jest.mock('@/lib/tabIconRaster', () => {
   const { tabIconRequestKey, IOS_ICON_RASTER_COLOR } = jest.requireActual('@/lib/tabIconPlan');
@@ -147,6 +166,67 @@ jest.mock('@/lib/tabIconRaster', () => {
   return { useRasterizedIcons: () => ({ host: null, sources }) };
 });
 
+// Everything else `app/_layout.tsx` imports (F70). A signed-in athlete whose
+// session needs no resume check, and five orchestrators that do nothing. None
+// of these touches navigation, which is what is under test.
+jest.mock('@clerk/clerk-expo', () => ({
+  ClerkProvider: ({ children }: { children: React.ReactNode }) => children,
+  useAuth: () => ({ userId: 'u1', isLoaded: true, isSignedIn: true, getToken: async () => 'tok' }),
+  useSignUp: () => ({ signUp: undefined }),
+}));
+jest.mock('@/lib/authResume', () => ({ useResumeSignOutGuard: () => false }));
+jest.mock('@/lib/useReducedMotion', () => ({ useReducedMotion: () => false }));
+jest.mock('@/lib/TrackEffortProvider', () => ({
+  TrackEffortProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+jest.mock('@/lib/UnitsProvider', () => ({ UnitsProvider: ({ children }: { children: React.ReactNode }) => children }));
+jest.mock('@/lib/telemetryClient', () => ({ clearTelemetryForSignOut: () => {}, installTelemetry: () => {} }));
+jest.mock('@/lib/sounds', () => ({ initSounds: async () => {} }));
+jest.mock('@/lib/voice', () => ({ initVoice: async () => {} }));
+jest.mock('@/lib/session', () => ({ clearSessionToken: async () => {} }));
+jest.mock('@/lib/seed', () => ({ seedIfNeeded: async () => {} }));
+jest.mock('@/lib/sessionStore', () => ({ syncSessions: async () => {} }));
+jest.mock('@/lib/tokenCache', () => ({ tokenCache: {} }));
+jest.mock('@/lib/sync', () => ({ setSyncIdentity: () => {}, startSyncOrchestrator: () => () => {} }));
+jest.mock('@/lib/healthkitSync', () => ({
+  setHealthKitSyncIdentity: () => {},
+  startHealthKitImportOrchestrator: () => () => {},
+}));
+jest.mock('@/lib/biometricSync', () => ({
+  setBiometricSyncIdentity: () => {},
+  startBiometricSyncOrchestrator: () => () => {},
+}));
+jest.mock('@/lib/hrMonitor/orchestrator', () => ({
+  setHRMonitorIdentity: () => {},
+  startHRMonitorOrchestrator: () => () => {},
+}));
+jest.mock('@/lib/healthConnectSync', () => ({
+  setHealthConnectSyncIdentity: () => {},
+  startHealthConnectSyncOrchestrator: () => () => {},
+}));
+jest.mock('@/lib/shareInbox', () => ({ setShareInboxIdentity: () => {}, startShareInboxOrchestrator: () => () => {} }));
+jest.mock('@/components/AnimatedSplash', () => ({ AnimatedSplash: () => null }));
+jest.mock('expo-splash-screen', () => ({
+  preventAutoHideAsync: async () => {},
+  setOptions: () => {},
+  hideAsync: async () => {},
+}));
+/** Every value `useFonts` returned for `loaded`, in render order. */
+const mockFontsLoaded: boolean[] = [];
+jest.mock('expo-font', () => ({
+  // Loads a macrotask after mount, as a real font load does.
+  useFonts: () => {
+    const react = jest.requireActual<typeof import('react')>('react');
+    const [loaded, setLoaded] = react.useState(false);
+    react.useEffect(() => {
+      const timer = setTimeout(() => setLoaded(true), 0);
+      return () => clearTimeout(timer);
+    }, []);
+    mockFontsLoaded.push(loaded);
+    return [loaded, null];
+  },
+}));
+
 type BackButton = { exitApp: jest.Mock; press: () => void; askOrder: () => string[] };
 
 function backButton(): BackButton {
@@ -159,32 +239,82 @@ function stub(id: string) {
   };
 }
 
+type RootLayout = { default: () => React.ReactElement | null; unstable_settings?: object };
+
+/** Copied from `app/_layout.tsx`: what puts the tabs under a cold-started deep link. */
+const ROOT_SETTINGS = { initialRouteName: '(tabs)' };
+
 /** Mounts the stack in the same commit as the navigation container. */
-function RootStack() {
-  return <Stack />;
-}
+const plainRoot: RootLayout = {
+  default: function RootStack() {
+    return <Stack />;
+  },
+  unstable_settings: ROOT_SETTINGS,
+};
+
+/** Mounts the stack a commit later, the shape of `app/_layout.tsx`. */
+const lateRoot: RootLayout = {
+  default: function LateRootStack() {
+    const [ready, setReady] = useState(false);
+    useEffect(() => {
+      let live = true;
+      void Promise.resolve().then(() => {
+        if (live) setReady(true);
+      });
+      return () => {
+        live = false;
+      };
+    }, []);
+    return ready ? <Stack /> : null;
+  },
+  unstable_settings: ROOT_SETTINGS,
+};
 
 /**
- * Mounts the stack a commit later, the way `app/_layout.tsx` does by returning
- * null until its fonts load. The tab layout then subscribes after the router.
+ * `app/_layout.tsx` itself. Loaded after the Clerk key is set, because the file
+ * reads it at module scope and throws at render without one.
  */
-function LateRootStack() {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void Promise.resolve().then(() => {
-      if (live) setReady(true);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-  return ready ? <Stack /> : null;
-}
+const realRoot: RootLayout = (() => {
+  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ??= 'pk_test_tabDefault';
+  return jest.requireActual<RootLayout>('../../app/_layout');
+})();
 
-function app(root: () => React.ReactElement | null) {
+/** The three mount orders, for the cold-start cases. */
+const MOUNT_ORDERS = [
+  ['with the stack mounted in the container’s commit', plainRoot],
+  ['with the stack mounted a commit later', lateRoot],
+  ['under the real app/_layout.tsx', realRoot],
+] as const;
+
+/** Every other route `app/_layout.tsx` declares, so its `Stack.Screen`s all resolve. */
+const DECLARED_ROUTES = [
+  'sign-up',
+  'forgot-password',
+  'workout/[id]',
+  'settings',
+  'settings/units',
+  'profile/edit',
+  'checkin/[date]',
+  'library',
+  'train',
+  'day',
+  'curriculum/index',
+  'curriculum/new',
+  'curriculum/edit/[id]',
+  'exercise/[id]',
+  'technique/[id]',
+  'run-type/[id]',
+  'hr-zones',
+  'position/[id]',
+  'session/start',
+  'session/[id]',
+  'session/[id]/add',
+];
+
+function app(root: RootLayout) {
   return {
-    _layout: { default: root, unstable_settings: { initialRouteName: '(tabs)' } },
+    ...Object.fromEntries(DECLARED_ROUTES.map((name) => [name, stub(name)])),
+    _layout: root,
     '(tabs)/_layout': TabsLayoutModule,
     '(tabs)/index': stub('Today'),
     '(tabs)/food': stub('Food'),
@@ -241,7 +371,7 @@ function focusedTabNavigator(): NavState {
   throw new Error('no tab navigator on the focused chain');
 }
 
-async function open(initialUrl: string, root: () => React.ReactElement | null = RootStack) {
+async function open(initialUrl: string, root: RootLayout = plainRoot) {
   const result = renderRouter(app(root), { initialUrl });
   await result;
   await settle();
@@ -280,6 +410,19 @@ beforeEach(() => {
   backButton().exitApp.mockClear();
 });
 
+describe('the real root layout, as this file renders it (F70)', () => {
+  // If the stubbed font load resolved before the first render, `realRoot` would
+  // mount the stack in the container's commit and be `plainRoot` by another
+  // name, and the late-mount cases below would prove nothing about the app.
+  it('renders nothing until its fonts load, then the deep-linked screen', async () => {
+    mockFontsLoaded.length = 0;
+    const app = await open('/goals', realRoot);
+    expect(mockFontsLoaded[0]).toBe(false);
+    expect(mockFontsLoaded).toContain(true);
+    expect(app.pathname()).toBe('/goals');
+  });
+});
+
 describe.each(['ios', 'android'] as const)('on %s', (os) => {
   beforeEach(() => {
     mockOS = os;
@@ -297,8 +440,8 @@ describe.each(['ios', 'android'] as const)('on %s', (os) => {
   });
 
   describe('Today is where the app sends the athlete', () => {
-    it('on a cold start', async () => {
-      const app = await open('/');
+    it.each(MOUNT_ORDERS)('on a cold start, %s', async (_order, root) => {
+      const app = await open('/', root);
       expect(app.pathname()).toBe('/');
       expect(app.focusedTab()).toBe('index');
     });
@@ -322,29 +465,43 @@ describe.each(['ios', 'android'] as const)('on %s', (os) => {
 
     // **The one path where position decides, and the reason the layout carries
     // a pin.** The root layout's anchor puts the tabs under the deep-linked
-    // screen with no tab named, and NativeTabs picks its first route. Remove the
-    // layout's `setParams` and this lands on Food.
+    // screen with no tab named, and NativeTabs picks its first route.
     //
-    // Plain root only. With `LateRootStack`, the shape of the real root layout,
-    // this lands on Food on both platforms, with or without F68: measured while
-    // building F68, and reported there rather than fixed in passing.
-    it('when it goes back from a screen the app was cold-started on by a deep link', async () => {
-      const app = await open('/goals');
-      expect(app.pathname()).toBe('/goals');
+    // N580 ran this with the stack in the container's commit only, and it
+    // passed. With the stack mounted later, as the real root layout mounts it,
+    // it landed on Food (F70).
+    it.each(MOUNT_ORDERS)(
+      'when it goes back from a screen the app was cold-started on by a deep link, %s',
+      async (_order, root) => {
+        const app = await open('/goals', root);
+        // The pin moves the tab under the pushed screen. It must not pop that
+        // screen, or the athlete never sees the link they opened.
+        expect(app.pathname()).toBe('/goals');
+        await go(() => router.back());
+        expect(app.pathname()).toBe('/');
+        expect(app.focusedTab()).toBe('index');
+      },
+    );
+
+    // The pin happens once. A tab chosen after it is the athlete's.
+    it.each(MOUNT_ORDERS)('and a tab chosen after that stays chosen, %s', async (_order, root) => {
+      const app = await open('/goals', root);
       await go(() => router.back());
-      expect(app.pathname()).toBe('/');
       expect(app.focusedTab()).toBe('index');
+      await go(() => router.navigate('/progress'));
+      expect(app.pathname()).toBe('/progress');
+      expect(app.focusedTab()).toBe('progress');
     });
   });
 
-  describe('a deep link to another tab still lands on that tab', () => {
-    // The other direction, and the one a heavier pin breaks: forcing `screen:
-    // 'index'` onto the tab route unconditionally sent both of these to Today.
+  // The other direction, and the one a heavier pin breaks: forcing Today onto
+  // the tab navigator unconditionally sent both of these to Today.
+  describe.each(MOUNT_ORDERS)('a deep link to another tab still lands on that tab, %s', (_order, root) => {
     it.each([
       ['/food', 'food'],
       ['/progress', 'progress'],
     ] as const)('%s', async (url, tab) => {
-      const app = await open(url);
+      const app = await open(url, root);
       expect(app.pathname()).toBe(url);
       expect(app.focusedTab()).toBe(tab);
     });
@@ -357,8 +514,9 @@ describe('on Android, back goes to Today (F68)', () => {
   });
 
   describe.each([
-    ['the router is asked first', RootStack, ['router', 'tab layout']],
-    ['the tab layout is asked first', LateRootStack, ['tab layout', 'router']],
+    ['the router is asked first', plainRoot, ['router', 'tab layout']],
+    ['the tab layout is asked first', lateRoot, ['tab layout', 'router']],
+    ['the real root layout mounts the stack', realRoot, ['tab layout', 'router']],
   ] as const)('when %s', (_order, root, askOrder) => {
     // Guards the describe's own name: if the order silently flipped, both
     // blocks would test the same thing.
@@ -390,6 +548,17 @@ describe('on Android, back goes to Today (F68)', () => {
       expect(app.pathname()).toBe('/');
       expect(app.focusedTab()).toBe('index');
       expect(backButton().exitApp).not.toHaveBeenCalled();
+    });
+
+    // N580's pin and F68's handler on the one path both touch.
+    it('from a screen the app was cold-started on by a deep link, to Today, then out', async () => {
+      const app = await open('/goals', root);
+      expect(app.pathname()).toBe('/goals');
+      await pressBack();
+      expect(app.pathname()).toBe('/');
+      expect(app.focusedTab()).toBe('index');
+      await pressBack();
+      expect(backButton().exitApp).toHaveBeenCalledTimes(1);
     });
 
     // Before F68, back on Today went to Food too: the tab router kept Food
@@ -425,17 +594,6 @@ describe('on Android, back goes to Today (F68)', () => {
       expect(backButton().exitApp).not.toHaveBeenCalled();
     });
   });
-
-  // N580's pin and F68's handler on the one path both touch. Plain root only,
-  // for the reason given on N580's own case above.
-  it('from a screen the app was cold-started on by a deep link, to Today, then out', async () => {
-    const app = await open('/goals');
-    await pressBack();
-    expect(app.pathname()).toBe('/');
-    expect(app.focusedTab()).toBe('index');
-    await pressBack();
-    expect(backButton().exitApp).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe('on iOS, nothing about back changes (F68)', () => {
@@ -447,8 +605,8 @@ describe('on iOS, nothing about back changes (F68)', () => {
   // this one's positive control: the same harness does see the tab layout's
   // handler when there is one.
   it.each([
-    ['the router is asked first', RootStack],
-    ['the tab layout would be asked first', LateRootStack],
+    ['the router is asked first', plainRoot],
+    ['the tab layout would be asked first', lateRoot],
   ] as const)('subscribes no back handler of its own, when %s', async (_order, root) => {
     await open('/', root);
     expect(backButton().askOrder()).toEqual(['router']);

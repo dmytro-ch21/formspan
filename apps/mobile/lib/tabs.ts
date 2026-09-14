@@ -33,6 +33,11 @@ import type { IconName } from '@/components/ui/Icon';
  *   hands `initialRouteName` to its router (`build/native-tabs/
  *   NativeBottomTabsNavigator.js`). So the tab layout names Today itself when
  *   nothing else chose a tab. `HOME_TAB` and `tabWasChosen` below are that pin.
+ *   **It jumps the tab navigator to Today on the navigation container's first
+ *   `state` event after that navigator exists (F70).** N580 set a `screen`
+ *   param from the layout's effect instead, and that write was lost whenever
+ *   the root stack mounted after the container, which the real root layout
+ *   does by returning null until fonts load. Back then landed on Food.
  * - **Back WITHIN the bar, on Android (F68).** NativeTabs' default
  *   `backBehavior` is `'initialRoute'`, which falls back to the first route for
  *   the same reason. So after N580, back from a tab went to Food, and back on

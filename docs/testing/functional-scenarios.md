@@ -24790,7 +24790,7 @@ The bar reads **Food · Progress · Today · Plan · You**. Today moved from the
 - **Reachable:**
   - the bar's order and Today in the centre;
   - that the default is `HOME_TAB` and not the first slot;
-  - against the real router with Food first: a cold start at `/`, sign-in's `router.replace('/')`, `/(tabs)`, and back from a cold-started deep link to a pushed screen, all landing on Today;
+  - against the real router with Food first: a cold start at `/`, sign-in's `router.replace('/')`, `/(tabs)`, and back from a cold-started deep link to a pushed screen, all landing on Today. The last one held only with the stack mounted in the container's commit until F70 (#1240), which runs it under the real root layout's mount order too;
   - deep links to `/food` and `/progress` still landing on their own tab.
 - **Not reachable:**
   - how the native bar looks, with Today in the middle;
@@ -24900,9 +24900,8 @@ No native rebuild is needed.
 - **A deep link to a tab.** From a cold start, open `vola://progress`. Press
   back: Today. Back again: the app leaves.
 - **A deep link to a pushed screen.** From a cold start, open `vola://goals` and
-  press back. Record which tab shows. N580 expects Today; a test in the real root
-  layout's mount order landed on Food, on both platforms (see F68's history
-  entry). If it is not Today, a second back goes to Today.
+  press back: Today. Back again: the app leaves. Before F70 (#1240) the first
+  back landed on Food, on both platforms. Its scenarios are under F70 below.
 
 ### iOS
 
@@ -24958,3 +24957,54 @@ N437's long press needs a glyph, and two surfaces draw none: the caffeine banner
 - **Reachable:** a food-caused dose refused by `editTap` against real SQLite, a coffee-caused correction keeping its pairing, and a manual dose owing a PATCH (`lib/__tests__/trackers.test.ts`); the row labels and the backfilled-time rule (`trackerTapLabels.test.ts`); the banner's three kinds (`caffeineBanner.test.tsx`); the list's wiring and its unit gate (`trackerTapList.test.tsx`); the list-to-hook wiring, including coffee removal (`trackerList.test.tsx`); the screen's refusal and hint (`trackerEntryScreen.test.tsx`).
 - **NOT reachable:** whether "Change" reads as tappable at a glance, whether a thirty-row list on Today is comfortable to scroll one-handed, and how VoiceOver speaks the expanded state. Those are device checks.
 
+
+## F70 — a cold start at a pushed screen goes back to Today, whatever order the stack mounts in (#1240)
+
+Both platforms. N580 pinned Today under a cold-started deep link to a pushed
+screen, but the pin was lost when the root stack mounted after the navigation
+container. The real app mounts it that way while its fonts load, so back showed
+Food. The tab layout now jumps the tab navigator to Today once that navigator
+exists, without taking the athlete off the screen they opened.
+
+No native rebuild is needed.
+
+### Happy path (iOS and Android)
+
+- **A deep link to a pushed screen, from a killed app.** Kill the app and open
+  `vola://goals`. Your target shows, not Today. Go back (swipe on iOS, the back
+  button on Android): Today.
+- **Another pushed screen.** Repeat with `vola://library` and `vola://hr-zones`.
+  Each screen shows, and back lands on Today.
+- **Then out, on Android.** On Today after that back, press back again: the app
+  leaves.
+
+### Edge cases
+
+- **The linked screen stays put.** After opening `vola://goals` from a killed
+  app, wait a few seconds without touching anything. Your target is still
+  showing; nothing moves the athlete to Today on its own.
+- **A tab chosen afterwards stays chosen.** From that cold start, go back to
+  Today, then tap Progress. Progress stays selected.
+- **A deep link to a tab is untouched.** From a killed app, open `vola://food`
+  and `vola://progress`. Each opens that tab, not Today.
+- **The slowest start.** The first launch after installing or updating, when
+  fonts and tab icons take longest. Repeat the first case: back still lands on
+  Today.
+- **Signed out.** From a killed app while signed out, open `vola://goals`. The
+  app goes to sign-in as before, and signing in lands on Today.
+
+### What a test can and cannot reach
+
+- **Reachable (jest, the real expo-router and NativeTabs):**
+  - back from a cold-started `/goals` landing on Today with the stack mounted in
+    the container's commit, a commit later, and under the real `app/_layout.tsx`
+    with its font gate closed on the first render;
+  - `/goals` still showing until back, under all three;
+  - `/food` and `/progress` deep links untouched, under all three;
+  - a tab chosen after going back staying chosen;
+  - F68's Android back cases, under all three.
+- **Not reachable:**
+  - a real cold start from a link, with real font loading and icon rasterising;
+  - what the native tab bar selects under the pushed screen.
+
+  Those need a device.
