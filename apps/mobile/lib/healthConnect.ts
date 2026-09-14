@@ -91,6 +91,8 @@ type HealthConnectModule = {
     recordType: 'Steps';
     timeRangeFilter: ReadRecordsOptions['timeRangeFilter'];
   }) => Promise<{ COUNT_TOTAL?: number | null }>;
+  /** N527. Synchronous and void in v4.1.3 — see `openHealthConnectSettingsScreen`. */
+  openHealthConnectSettings: () => void;
 };
 
 /** `SdkAvailabilityStatus.SDK_AVAILABLE` — a numeric literal for the same
@@ -299,6 +301,35 @@ export async function requestHealthConnectStepsAuthorization(): Promise<boolean>
       READ_RECORD_TYPES.map((recordType) => ({ accessType: 'read' as const, recordType })),
     );
     return granted.some((g) => g.recordType === 'Steps' && g.accessType === 'read');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * N527/#949 — open Health Connect, so an athlete whose grant was refused can
+ * allow it. Returns whether the call was made; never throws.
+ *
+ * **It opens Health Connect's settings home, not VOLA's own permission page,
+ * because that is all the installed package can open.** Verified against
+ * `react-native-health-connect` v4.1.3's `HealthConnectManager.kt`:
+ * `openHealthConnectSettings` starts
+ * `Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)`, and the only
+ * other screen it exposes, `openHealthConnectDataManagement`, is data
+ * management rather than permissions. So the Settings copy names the path
+ * inside it — App permissions, then VOLA.
+ *
+ * **Why not `requestPermission` ("Ask again") instead**, the way N569's Steps
+ * row does: every foreground pass already calls it with exactly the toggle's
+ * types (`requestHealthConnectReadAuthorization`). A type still refused after
+ * that is one Health Connect is no longer asking about, and a button making
+ * the same call again would do nothing visible.
+ */
+export function openHealthConnectSettingsScreen(): boolean {
+  if (!hc) return false;
+  try {
+    hc.openHealthConnectSettings();
+    return true;
   } catch {
     return false;
   }

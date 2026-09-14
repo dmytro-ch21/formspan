@@ -77814,6 +77814,96 @@ The centre slot now holds Today by owner decision. N567's open question is not d
   - It is not fixed here. The options are `backBehavior="history"`, which changes Android back and is a product call, or forwarding `initialRouteName` inside expo-router, which is a dependency patch, and this repo has none.
   - A device may differ, because native tabs can handle back themselves.
 
+## 2026-09-14 — N527 (#949): Settings says when Health Connect refused a grant
+
+**The gap.** W15 (#944) made `syncHealthConnectBiometrics` report a refused Health Connect read by name — `notPermitted` — and nothing read it. `runSyncPass` discarded the return, and the Settings hint was the same sentence whether every grant was given or exercise sessions were denied. An athlete who denied that grant saw "a walk or hike appears on Today" and no walks, with no way to find out why.
+
+### What changed
+
+- **`apps/mobile/lib/healthConnectRefusals.ts` (new):**
+  - the per-user store;
+  - which refused types the line may name;
+  - the copy.
+- **`lib/healthConnectSync.ts`:** a pass that reaches its reads records its `notPermitted` there, inside the pass rather than in `runSyncPass`. The pass is where "did it reach the reads" is known.
+- **`components/settings/HealthConnectRefusalLine.tsx` (new):** the line under **Sync with Health Connect**, with an **Open Health Connect** button. It re-reads on focus and whenever a pass records.
+- **`lib/healthConnect.ts`:** `openHealthConnectSettingsScreen`, a never-throwing wrapper around the package's `openHealthConnectSettings`.
+- **`lib/prefs.ts`:** `PREF_HEALTH_CONNECT_REFUSED`.
+- **How to reach it:**
+  - **On a phone:** Settings → Integrations → Sync with Health Connect. Android only.
+  - **On web:** nothing, because the fact is about this phone's Health Connect.
+
+### The coordinator's decisions, as built (all reversible)
+
+1. **Where the value lives.** The last completed pass's list is stored in the per-user `prefs` store, under the signed-in user. Another account on the phone reads nothing. No SQLite change: the `prefs` table already existed, and `SCHEMA_VERSION` is untouched.
+2. **"Last pass" means a pass that reached the Health Connect reads.**
+   - It overwrites the stored value, including with `[]`, which is what clears the line after the athlete allows the grant.
+   - A pass that returns early (toggle off, no Health Connect) writes nothing, so the previous answer stands.
+   - Turning the toggle off hides the line: Settings mounts it behind the same gate as the Steps row.
+3. **Steps are out of this line.**
+   - The pass's list is stored as returned, `Steps` included, and filtered on the way out in exactly one place (`refusalsForToggleLine`).
+   - The types the line can name are a `Record` over `Exclude<HealthConnectRecordType, 'Steps'>`, so a new read type fails typecheck until it has words.
+   - A parity test pins them to what the toggle actually requests, `healthConnectReadRecordTypes(false)`. Today that is exercise sessions, heart rate and VO2max.
+4. **Copy.**
+   - One type: *Health Connect isn't sharing exercise sessions with VOLA, so walks and hikes won't appear on Today. To change it, open Health Connect, then App permissions, then VOLA.*
+   - Several types make one sentence: *…isn't sharing exercise sessions, heart rate or VO2max with VOLA, so walks and hikes won't appear on Today, sessions won't get heart-rate zones or load, and your VO2max trend won't update.*
+   - Health Connect is the subject, not the athlete, so it reads as information rather than a reminder that they said no.
+5. **The fix route: Health Connect's settings home, because that is all the installed package can open.**
+   - Checked against `react-native-health-connect` v4.1.3's `HealthConnectManager.kt`. `openHealthConnectSettings` starts `Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)`. `openHealthConnectDataManagement` opens data management, not permissions. Nothing opens VOLA's own permission page.
+   - So the copy names the path inside Health Connect.
+   - **There is no "Ask again" (`requestPermission`) button.** Every foreground pass already calls `requestPermission` with exactly the toggle's types, so a type still refused is one Health Connect has stopped asking about, and the button would do nothing visible.
+   - Settings never requests anything on mount.
+6. **iOS.** `HealthConnectRefusalLine` returns `null` before its inner row mounts, so nothing is rendered and nothing is read. Settings also only mounts it on Android. No HealthKit call.
+7. **No motion.** The line appears and disappears.
+8. **No schema change.**
+
+### Calls the brief did not cover (the more conservative option each time)
+
+- **A pass cut short by the identity check does not count as reaching the reads.** It stops before VO2max, and its partial list would clear a VO2max refusal it never asked about.
+- **Heart rate is only read when there is a finished session from the last 30 days to enrich.**
+  - A pass with no such session cannot see a HeartRate refusal, so the list it records leaves heart rate out, and the line drops it until a session exists.
+  - The option not taken was merging per type. It would show more than decision 2's "overwrite" allows.
+- **Re-enabling the toggle shows the last recorded answer** until the pass the toggle starts has finished. Decision 2 keeps the answer through toggle-off.
+- **The line is muted text** (`vola.textMuted`), like the Steps row's refused hint: information, not a warning colour.
+- **A failed prefs write leaves the previous line standing,** and the pass still never throws.
+
+### Checks
+
+- **New tests:**
+  - `lib/__tests__/healthConnectRefusals.test.ts`, 15 tests. Pure logic plus the real-SQLite store: the Steps filter, order and dedupe, malformed values, copy for one to three types, per user, the change listener.
+  - `lib/__tests__/healthConnectSync.test.ts`, 8 new tests. Overwrite versus keep for each pass outcome, per user, a Steps refusal stored but not named, a failed write not throwing.
+  - `lib/__tests__/healthConnectReads.test.ts`, 2 new tests. The native open call, and a thrown native error swallowed.
+  - `__tests__/app/healthConnectRefusalLine.test.tsx`, 5 tests, real SQLite. Shown, cleared after a clean pass, Steps-only says nothing, per user, absent on iOS.
+  - `__tests__/app/settingsHealthConnectRefusal.test.tsx`, 5 tests, line stubbed. Settings' gate: Android plus Health Connect plus toggle on, toggle off at once, unsupported, iOS.
+- **Mutation table.** Every anchor was checked to match exactly once. Every red was a test failure in a suite that loaded. Every restore was confirmed by re-running the covering suites green.
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | Steps filter: stored list passed straight through | Killed. Four assertion failures in the pure suite; the component's Steps-only test also failed, as a render `TypeError` (no copy for Steps). |
+| M2 | A clean pass does not overwrite (only non-empty lists written) | Killed: "a clean pass overwrites with an empty list". |
+| M3 | A pass cut short by the identity check still writes | Killed: "a pass the identity check cut short records nothing". |
+| M4 | A toggle-off pass overwrites with `[]` | Killed: "toggle off … the previous answer stands". |
+| M5 | A no-Health-Connect pass overwrites with `[]` | Killed: "no Health Connect on the phone". |
+| M6 | Write failure escapes the pass (try/catch removed) | Killed: "a failed write still never throws". |
+| M7 | Store keyed by device, not user | Killed: six assertions across the store, pass and component suites. |
+| M8 | Component iOS guard removed | Killed: "renders nothing on iOS". |
+| M9 | Component does not re-read when a pass records | Killed: "goes away when the next pass is refused nothing". |
+| M10a | Settings gate's `Platform.OS` check removed alone | **Survived**, as expected. The availability effect's own Android check keeps `healthConnectSupported` false on iOS. |
+| M10b | Settings' availability effect runs on iOS, alone | **Survived**, as expected. The gate's `Platform.OS` check still holds. |
+| M10 | Both Settings iOS checks removed | Killed: "iOS: never mounted". |
+| M11 | Settings gate ignores the toggle | Killed: "turning the toggle off hides it at once" and "toggle off: not mounted". |
+| M12 | Settings gate ignores Health Connect availability | Killed: "no Health Connect on this phone". |
+| M13 | Several types comma-joined, not a natural list | Killed: the two- and three-type copy assertions, plus the component's `findByText`. |
+| M14 | Native open failure not swallowed | Killed: `not.toThrow`. |
+| M15 | Settings wires the line's button to nothing | Killed: `mockOpen` not called. |
+| M16 | Component button does not call `onOpen` | Killed: `onOpen` not called. |
+
+- **Not separately mutated:** the adapter's `if (!hc) return false`. It is the TypeScript narrowing for `hc`, and removing it produces the same `false` through the catch, so no test can tell the two apart.
+
+### Not done
+
+- **The ticket's NEEDS HUMAN EVIDENCE criterion is still owed:** deny exercise sessions on a real Android phone, see the line, grant it in Health Connect, see it clear. The walkable script is `docs/testing/device-checks.md` D31.
+- **The Health Connect labels the copy names — App permissions, then VOLA — were not seen on a device.** They are the labels N569's device check D30 already uses. D31 asks whoever runs it to write down the real ones if they differ.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

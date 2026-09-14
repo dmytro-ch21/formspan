@@ -23,6 +23,7 @@
 import {
   HealthConnectPermissionError,
   isHealthConnectPermissionError,
+  openHealthConnectSettingsScreen,
   queryHeartRateSamples,
   queryOtherExerciseSessions,
   queryVo2MaxReadings,
@@ -73,8 +74,11 @@ const mockAggregate = jest.fn((_request: unknown) =>
   mockAggregateRejectsWith ? Promise.reject(mockAggregateRejectsWith) : Promise.resolve({ COUNT_TOTAL: mockCountTotal }),
 );
 const mockRequestPermission = jest.fn((perms: { recordType: string }[]) => Promise.resolve(perms));
+/** N527: the package's synchronous `openHealthConnectSettings`. */
+const mockOpenSettings = jest.fn((): void => {});
 
 jest.mock('react-native-health-connect', () => ({
+  openHealthConnectSettings: () => mockOpenSettings(),
   // `SDK_AVAILABLE` — the literal `lib/healthConnect.ts` compares against.
   getSdkStatus: () => Promise.resolve(3),
   initialize: () => Promise.resolve(true),
@@ -99,6 +103,7 @@ beforeEach(() => {
   mockAggregateRejectsWith = null;
   mockAggregate.mockClear();
   mockRequestPermission.mockClear();
+  mockOpenSettings.mockReset();
 });
 
 describe('isHealthConnectPermissionError — the classification, pinned exactly', () => {
@@ -280,5 +285,25 @@ describe('asking for Steps (N569/#1130)', () => {
       ['HeartRate', 'Vo2Max', 'ExerciseSession', 'Steps'],
       ['HeartRate', 'Vo2Max', 'ExerciseSession', 'Steps'],
     ]);
+  });
+});
+
+describe('opening Health Connect for a refused grant (N527/#949)', () => {
+  it("opens Health Connect's settings, and says it did", () => {
+    expect(openHealthConnectSettingsScreen()).toBe(true);
+    expect(mockOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('a native failure is swallowed rather than thrown into the Settings screen', () => {
+    mockOpenSettings.mockImplementationOnce(() => {
+      throw new Error('ActivityNotFoundException');
+    });
+
+    let opened: boolean | undefined;
+    expect(() => {
+      opened = openHealthConnectSettingsScreen();
+    }).not.toThrow();
+    expect(opened).toBe(false);
+    expect(mockOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

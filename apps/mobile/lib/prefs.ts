@@ -494,6 +494,18 @@ export const PREF_HEALTH_CONNECT_IMPORT = 'health_connect_import_enabled';
 export const PREF_STEPS_ASKED = 'steps_permission_asked';
 
 /**
+ * N527/#949: the record types Health Connect REFUSED on the last pass that
+ * actually reached its reads, as the JSON array `syncHealthConnectBiometrics`
+ * returned in `notPermitted` — see `lib/healthConnectRefusals.ts`, which owns
+ * both what gets written and what Settings may show from it.
+ *
+ * Per user, like every key here, so a second account on the same phone never
+ * sees this athlete's line. Device-local and never `owed`: which grants THIS
+ * phone's Health Connect refused is a fact about the phone, not the account.
+ */
+export const PREF_HEALTH_CONNECT_REFUSED = 'health_connect_refused_types';
+
+/**
  * N528/#958: the remembered heart-rate monitor, as JSON
  * `{ id, name, rememberedAt }` — see `lib/hrMonitor/hrMonitorStore.ts`. Absent
  * means none paired; the live-HR machinery does nothing at all then.

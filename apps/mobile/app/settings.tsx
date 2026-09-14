@@ -18,7 +18,7 @@ import {
   writeHealthKitImportEnabled,
 } from '@/lib/healthkitSync';
 import { readBiometricSyncFailureCount, triggerBiometricSyncNow } from '@/lib/biometricSync';
-import { isHealthConnectSupported } from '@/lib/healthConnect';
+import { isHealthConnectSupported, openHealthConnectSettingsScreen } from '@/lib/healthConnect';
 import {
   askHealthConnectSteps,
   readHealthConnectImportEnabled,
@@ -37,6 +37,7 @@ import { rejectionTrackingActive } from '@/lib/telemetryClient';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { healthSourceFor } from '@/lib/vo2MaxSource';
 import { HRMonitorPairing } from '@/components/settings/HRMonitorPairing';
+import { HealthConnectRefusalLine } from '@/components/settings/HealthConnectRefusalLine';
 import { StepsPermissionRow } from '@/components/settings/StepsPermissionRow';
 import { PressableScale } from '@/components/ui/PressableScale';
 
@@ -440,11 +441,19 @@ export default function SettingsScreen() {
           />
         )}
         {Platform.OS === 'android' && healthConnectSupported && healthConnectImport && userId && (
-          <StepsPermissionRow
-            userId={userId}
-            source="health_connect"
-            onAsk={() => askHealthConnectSteps(userId, getToken)}
-          />
+          <>
+            {/* N527/#949: which grant Health Connect refused on the last pass,
+                named in the athlete's words, with the way to Health Connect.
+                Behind the same gate as the Steps row, so turning the toggle off
+                hides it and an iPhone never mounts it. Steps refusals stay in
+                the Steps row below — see lib/healthConnectRefusals.ts. */}
+            <HealthConnectRefusalLine userId={userId} onOpen={openHealthConnectSettingsScreen} />
+            <StepsPermissionRow
+              userId={userId}
+              source="health_connect"
+              onAsk={() => askHealthConnectSteps(userId, getToken)}
+            />
+          </>
         )}
         {/* N552/#1021: the pairing block also names the two heart-rate
             paths and says which one this athlete is on, so it needs the

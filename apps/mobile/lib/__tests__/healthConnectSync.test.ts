@@ -27,6 +27,8 @@ import {
   writeHealthConnectImportEnabled,
 } from '../healthConnectSync';
 import { dayString } from '../calendar';
+import { readHealthConnectRefusals, recordHealthConnectPassRefusals } from '../healthConnectRefusals';
+import { PREF_HEALTH_CONNECT_REFUSED, readPref } from '../prefs';
 import {
   localStepsView,
   recordStepsOutcome,
@@ -97,6 +99,18 @@ jest.mock('../steps', () => ({
   ...jest.requireActual('../steps'),
   platformStepSource: () => mockStepPlatform,
 }));
+/** N527: makes the pass's refusal write fail, to prove the pass still never throws. */
+let mockRecordRefusalsRejects = false;
+jest.mock('../healthConnectRefusals', () => {
+  const real = jest.requireActual('../healthConnectRefusals');
+  return {
+    ...real,
+    recordHealthConnectPassRefusals: (...args: unknown[]) =>
+      mockRecordRefusalsRejects
+        ? Promise.reject(new Error('simulated prefs write failure'))
+        : real.recordHealthConnectPassRefusals(...args),
+  };
+});
 jest.mock('../healthConnect', () => {
   const real = jest.requireActual('../healthConnect');
   return {
@@ -238,6 +252,7 @@ beforeEach(async () => {
   mockStepsOutcome = { kind: 'steps', steps: 0 };
   mockStepPlatform = 'health_connect';
   mockQuerySteps.mockClear();
+  mockRecordRefusalsRejects = false;
 });
 
 /**
@@ -915,6 +930,102 @@ describe('steps ride the Health Connect pass (N569/#1130)', () => {
     expect(await localStepsView(USER, today())).toMatchObject({
       state: 'read',
       today: { steps: 8412, source: 'healthkit' },
+    });
+  });
+});
+
+/**
+ * N527/#949 — the pass's `notPermitted` is what Settings names under the
+ * toggle, so WHEN the pass writes it is the rule: a pass that reached its reads
+ * overwrites (an empty list included, which clears the line), and a pass that
+ * never got there leaves the last real answer standing. Every "keeps" test
+ * carries a positive control proving the reads really did not run, so the
+ * stored value surviving is not the stored value merely never being touched
+ * by a pass that failed some other way.
+ */
+describe('the pass records its answer for Settings (N527/#949)', () => {
+  it('a pass that reached its reads records what Health Connect refused', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    mockExerciseRejectsWith = new HealthConnectPermissionError('ExerciseSession');
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(await readHealthConnectRefusals(USER)).toEqual(['ExerciseSession']);
+  });
+
+  it('a clean pass overwrites with an empty list — granting the permission clears the line', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await recordHealthConnectPassRefusals(USER, ['ExerciseSession', 'Vo2Max']);
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(await readPref(USER, PREF_HEALTH_CONNECT_REFUSED)).toBe('[]');
+    expect(await readHealthConnectRefusals(USER)).toEqual([]);
+  });
+
+  it('toggle off: the pass never reaches the reads, and the previous answer stands', async () => {
+    await recordHealthConnectPassRefusals(USER, ['ExerciseSession']);
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockQueryExercise).not.toHaveBeenCalled();
+    expect(await readHealthConnectRefusals(USER)).toEqual(['ExerciseSession']);
+  });
+
+  it('no Health Connect on the phone: same — nothing asked, nothing overwritten', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    mockSupported = false;
+    await recordHealthConnectPassRefusals(USER, ['HeartRate']);
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(mockQueryExercise).not.toHaveBeenCalled();
+    expect(await readHealthConnectRefusals(USER)).toEqual(['HeartRate']);
+  });
+
+  it('a pass the identity check cut short records nothing — it never asked about VO2max', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await seedFinishedRemoteSession('s1', '2026-09-01T07:00:00.000Z', '2026-09-01T08:00:00.000Z');
+    await recordHealthConnectPassRefusals(USER, ['Vo2Max']);
+
+    await syncHealthConnectBiometrics(USER, getToken, { stillCurrent: () => false });
+
+    // It did reach SOME reads (the walk read runs before the loop)...
+    expect(mockQueryExercise).toHaveBeenCalledTimes(1);
+    // ...but not VO2max, so a clean-looking partial list must not clear it.
+    expect(mockQueryVo2Max).not.toHaveBeenCalled();
+    expect(await readHealthConnectRefusals(USER)).toEqual(['Vo2Max']);
+  });
+
+  it('a Steps refusal is stored with the pass but never named on this line', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    await writeStepsAsked(USER);
+    mockStepsOutcome = new HealthConnectPermissionError('Steps');
+
+    const result = await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(result.notPermitted).toEqual(['Steps']);
+    expect(JSON.parse((await readPref(USER, PREF_HEALTH_CONNECT_REFUSED)) ?? 'null')).toEqual(['Steps']);
+    expect(await readHealthConnectRefusals(USER)).toEqual([]);
+  });
+
+  it('is per user: another account on the same phone reads nothing from this pass', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    mockExerciseRejectsWith = new HealthConnectPermissionError('ExerciseSession');
+
+    await syncHealthConnectBiometrics(USER, getToken);
+
+    expect(await readHealthConnectRefusals(USER)).toEqual(['ExerciseSession']);
+    expect(await readHealthConnectRefusals('somebody_else')).toEqual([]);
+  });
+
+  it('a failed write still never throws out of the pass', async () => {
+    await writeHealthConnectImportEnabled(USER, true);
+    mockExerciseRejectsWith = new HealthConnectPermissionError('ExerciseSession');
+    mockRecordRefusalsRejects = true;
+
+    await expect(syncHealthConnectBiometrics(USER, getToken)).resolves.toMatchObject({
+      notPermitted: ['ExerciseSession'],
     });
   });
 });

@@ -836,6 +836,67 @@ really comes back empty are all native behaviour on a real Health store.
 and `__tests__/app/dayScreen.test.tsx` cover every decision downstream of the
 native answer against real SQLite; this check covers the answer itself.
 
+
+### D31 — Settings names a grant Health Connect refused (N527)
+
+**No native rebuild needed.** N527 adds no permission, manifest entry or native
+module: `openHealthConnectSettings` is already in the linked
+`react-native-health-connect`. A dev build picks it up through Metro. A Release
+build has to be rebuilt to carry the new JS.
+
+**Do (an Android phone with Health Connect, VOLA signed in, Settings → Sync with
+Health Connect ON, and at least one finished, synced VOLA session from the last
+30 days — heart rate is only read when there is a session to enrich):**
+
+1. In Health Connect → App permissions → VOLA, turn **Exercise** off. (Or deny
+   exercise on the consent screen when turning the toggle on.)
+2. Background VOLA and return to it, so a foreground pass runs. Open Settings.
+3. Read the line under the Health Connect toggle. Tap **Open Health Connect**.
+4. In Health Connect, follow the path the line names — App permissions, then
+   VOLA — and turn Exercise back on.
+5. Return to VOLA, so another pass runs. Look at Settings again.
+6. Turn off Heart rate and VO2 max as well as Exercise. Repeat steps 2–3.
+7. Turn Sync with Health Connect off in VOLA's Settings.
+8. Sign out, and sign in as a second account with sync on and every grant
+   allowed. Open Settings.
+
+**Should:**
+
+- Step 3: *Health Connect isn't sharing exercise sessions with VOLA, so walks and
+  hikes won't appear on Today. To change it, open Health Connect, then App
+  permissions, then VOLA.* The button opens Health Connect's own settings. It
+  does not open VOLA's page directly, because the library cannot.
+- Step 4: the labels the line names exist in this Health Connect version, in
+  that order. **Write down the real labels if they differ** — that is the copy
+  to fix.
+- Step 5: the line is gone, with no animation. Allow a second or two after
+  returning, while the pass runs.
+- Step 6: one sentence naming all three as one list (*exercise sessions, heart
+  rate or VO2max*), not three lines.
+- Step 7: the line disappears with the toggle.
+- Step 8: no line for the second account.
+- Throughout: nothing about Steps in this line (a Steps refusal shows only in
+  the Steps row), and no Health Connect permission screen opens by itself while
+  Settings is on screen.
+
+**Failure looks like:** no line after revoking (the read did not reject with
+`PERMISSION_ERROR`, or the pass did not run on return); the line still there
+after allowing and returning (no foreground pass, or it did not record `[]`);
+**Open Health Connect** doing nothing (no current activity, or no handler for
+`ACTION_HEALTH_CONNECT_SETTINGS` — `openHealthConnectSettingsScreen` swallows
+both); a path in the copy that Health Connect does not have; heart rate missing
+from step 6 although a recent session exists; the second account seeing the
+first's line.
+
+**Why no test reaches it:** whether a revoked grant really rejects with
+`PERMISSION_ERROR`, what `ACTION_HEALTH_CONNECT_SETTINGS` opens and what its
+labels say on this phone's Health Connect, and whether a pass lands after
+returning from another app are all device behaviour.
+`lib/__tests__/healthConnectRefusals.test.ts`, `healthConnectSync.test.ts`,
+`healthConnectReads.test.ts`, `__tests__/app/healthConnectRefusalLine.test.tsx`
+and `settingsHealthConnectRefusal.test.tsx` cover every decision downstream of
+the native answer; this check covers the answer itself.
+
 ---
 
 ## What is deliberately not here
