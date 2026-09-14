@@ -423,6 +423,9 @@ func main() {
 		// over through a one-method port so this handler cannot write anything
 		// — see `nutrition.SavedFoodFinder`.
 		nutritionRepo,
+		// N194's recent-log read: the food log's own ListEntries, again
+		// through a one-method port — see `nutrition.RecentEntryReader`.
+		nutritionRepo,
 	)
 
 	// Machine identification (N7). Same nil-safe shape as the estimator above:

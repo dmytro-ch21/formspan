@@ -170,6 +170,19 @@ type EstimateInput struct {
 	// way to ask for a fresh reading — the feature would have replaced one
 	// complaint with a worse one.
 	ReuseSaved bool
+	// Today is the athlete's LOCAL calendar day, "YYYY-MM-DD", as their phone
+	// reads it (N194). Empty when the client did not send one — every client
+	// written before N194 — and then nothing on this request may point at a
+	// past log: the window is fourteen days of the athlete's own calendar, and
+	// the server does not know their timezone.
+	Today string
+	// ResolveRecent allows this request to be answered from the athlete's
+	// recent log. Set by `parseEstimateRequest`, which defaults it to TRUE the
+	// way it defaults ReuseSaved; `recent: false` is the "estimate it as a new
+	// meal instead" escape hatch. The zero value is false for ReuseSaved's
+	// reason: a value built in Go rather than parsed generates, which is the
+	// recoverable side.
+	ResolveRecent bool
 }
 
 // Source reports which quota this input draws on.
@@ -178,6 +191,19 @@ func (in EstimateInput) Source() EstimateSource {
 		return SourcePhoto
 	}
 	return SourceText
+}
+
+// ReferencesAllowed reports whether this request may be read as pointing at a
+// past log (N194), which decides both whether the free phrase recogniser runs
+// and whether the model is asked the question at all.
+//
+// When it is false the model receives EXACTLY the schema and system prompt it
+// did before N194 — the reference section is additive and only present when it
+// can be acted on. A photo never qualifies, for N114's reason: the athlete is
+// asking what is on this plate, and a caption is context for the picture.
+func (in EstimateInput) ReferencesAllowed() bool {
+	return in.ResolveRecent && in.Today != "" && len(in.Image) == 0 &&
+		strings.TrimSpace(in.Description) != ""
 }
 
 // Validate checks the input before any token is spent.
@@ -206,6 +232,9 @@ func (in EstimateInput) Validate() error {
 	}
 	if in.Meal != "" && !in.Meal.valid() {
 		return fmt.Errorf("%w: unknown meal %q", ErrInvalidInput, in.Meal)
+	}
+	if in.Today != "" && !isDate(in.Today) {
+		return fmt.Errorf("%w: today must be a date as YYYY-MM-DD", ErrInvalidInput)
 	}
 	return nil
 }
@@ -269,6 +298,20 @@ type Estimate struct {
 	// The presence of this field is the whole discriminator, and it carries its
 	// own explanation rather than a bare flag: see SavedMatch in savedmatch.go.
 	Match *SavedMatch `json:"match,omitempty"`
+	// Recent is set when the description POINTED AT something already logged
+	// rather than describing a food (N194) — "the same as yesterday". Its
+	// candidates are the drafts: none, one, or a short list to pick from.
+	// `items` is always empty beside it, so there is one place the drafts live.
+	//
+	// When `recent.recognized_by` is `phrase` no model was called and nothing
+	// was spent; when it is `model`, one estimate was spent reading the words,
+	// and the numbers still came from the athlete's own log. See recent.go.
+	Recent *RecentLogMatch `json:"recent,omitempty"`
+
+	// reference is the model's reading of a pointer, carried from the estimator
+	// to the handler, which resolves it. Unexported, so it can never reach the
+	// wire: what the athlete sees is the resolution, not the raw reading.
+	reference *RecentReference
 }
 
 // MaxEstimatedItems bounds a single draft.
@@ -594,4 +637,20 @@ func EstimateSchema() map[string]any {
 		"required":             []any{"items", "note", "meal_name"},
 		"additionalProperties": false,
 	}
+}
+
+// EstimateSchemaWithReference is EstimateSchema plus the `reference` object a
+// request that may point at a past log asks for (N194).
+//
+// A separate schema rather than a field added to the only one, so a request
+// that cannot be a reference — a photo, a client that sent no `today`, the
+// "estimate it as new" escape hatch — sends the provider byte-for-byte what it
+// sent before. Built FROM EstimateSchema, so the two cannot drift apart on the
+// fields they share.
+func EstimateSchemaWithReference() map[string]any {
+	s := EstimateSchema()
+	props := s["properties"].(map[string]any)
+	props["reference"] = referenceSchema()
+	s["required"] = append(s["required"].([]any), "reference")
+	return s
 }

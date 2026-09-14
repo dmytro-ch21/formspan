@@ -22,6 +22,10 @@ import {
   itemToEntry,
   photographMeal,
   quotaResetMessage,
+  recentCandidateLabel,
+  recentItemsSummary,
+  recentMoreMessage,
+  recentNoneMessage,
   type EstimatedItem,
   type EstimateQuota,
 } from '../estimateApi';
@@ -99,6 +103,53 @@ describe('describeMeal', () => {
     const [, init] = mockFetch.mock.calls[0];
     expect(init.headers['Content-Type']).toBe('application/json');
     expect(JSON.parse(init.body)).toEqual({ description: 'two eggs', meal: 'breakfast' });
+  });
+
+  // N194. `today` is what lets the server resolve "the same as yesterday" at
+  // all; `recent` follows `reuse`'s rule — the default is the server's, and
+  // this client says it only to turn it off.
+  it('sends today when it has one, and recent only when turning it off', async () => {
+    await describeMeal(token, { description: 'the same as yesterday', today: '2026-09-14', recent: true });
+    const first = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(first.today).toBe('2026-09-14');
+    expect(first).not.toHaveProperty('recent');
+
+    await describeMeal(token, { description: 'the same as yesterday', today: '2026-09-14', recent: false });
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body).recent).toBe(false);
+
+    await describeMeal(token, { description: 'two eggs' });
+    expect(JSON.parse(mockFetch.mock.calls[2][1].body)).not.toHaveProperty('today');
+  });
+});
+
+// N194. The suite runs under TZ=America/Los_Angeles, which is what makes these
+// mean something: a label computed from LOCAL dates renames every candidate to
+// the day before here.
+describe('recent-log copy', () => {
+  const today = '2026-09-14'; // a Monday
+
+  it('names a candidate the way somebody would say it', () => {
+    expect(recentCandidateLabel({ eaten_on: '2026-09-14', meal: 'lunch' }, today)).toBe('Today’s lunch');
+    expect(recentCandidateLabel({ eaten_on: '2026-09-13', meal: 'snack' }, today)).toBe('Yesterday’s snacks');
+    expect(recentCandidateLabel({ eaten_on: '2026-09-10', meal: 'breakfast' }, today)).toBe('Thursday’s breakfast');
+    expect(recentCandidateLabel({ eaten_on: '2026-09-08', meal: 'dinner' }, today)).toBe('Tuesday’s dinner');
+    // A week or more back is a date, because a bare weekday would be ambiguous.
+    expect(recentCandidateLabel({ eaten_on: '2026-09-07', meal: 'dinner' }, today)).toBe('Dinner on 7 Sep');
+    expect(recentCandidateLabel({ eaten_on: '2026-09-01', meal: 'lunch' }, today)).toBe('Lunch on 1 Sep');
+  });
+
+  it('says nothing matched in the athlete’s own words, and nothing more', () => {
+    expect(recentNoneMessage('  yesterday’s breakfast  ', 14)).toBe('Nothing in the last 14 days matches “yesterday’s breakfast”.');
+    const long = 'the same big bowl of oats I had with the berries and the honey on the day before';
+    expect(recentNoneMessage(long, 14)).toMatch(/^Nothing in the last 14 days matches “.{1,60}…”\.$/u);
+  });
+
+  it('summarises a candidate enough to tell two apart', () => {
+    expect(recentItemsSummary([{ name: 'Oatmeal' }])).toBe('Oatmeal');
+    expect(recentItemsSummary([{ name: 'Oatmeal' }, { name: 'Banana' }])).toBe('Oatmeal, Banana');
+    expect(recentItemsSummary([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])).toBe('A, B + 2 more');
+    expect(recentMoreMessage(1)).toContain('1 more match ');
+    expect(recentMoreMessage(3)).toContain('3 more matches');
   });
 });
 

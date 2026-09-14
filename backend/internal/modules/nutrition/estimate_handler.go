@@ -34,6 +34,12 @@ type EstimateHandler struct {
 	// legitimately has no food store, and a nil check is cheaper than a null
 	// object nobody would remember to use.
 	saved SavedFoodFinder
+	// recent is N194's read: the athlete's own entries over the fourteen days a
+	// reference may reach, through the food log's existing ListEntries query.
+	// Positional for the same reason `saved` is. Nil turns the feature OFF for
+	// the whole request — the model is not even asked — rather than letting a
+	// reference be recognised that nothing could resolve.
+	recent RecentEntryReader
 	// now is injectable so the quota window is testable without waiting a day.
 	now func() time.Time
 	// timeout is injectable for the same reason `now` is: the deadline it
@@ -44,8 +50,8 @@ type EstimateHandler struct {
 	timeout time.Duration
 }
 
-func NewEstimateHandler(est Estimator, usage EstimateUsageRepository, saved SavedFoodFinder) *EstimateHandler {
-	return &EstimateHandler{estimator: est, usage: usage, saved: saved, now: time.Now, timeout: estimateTimeout}
+func NewEstimateHandler(est Estimator, usage EstimateUsageRepository, saved SavedFoodFinder, recent RecentEntryReader) *EstimateHandler {
+	return &EstimateHandler{estimator: est, usage: usage, saved: saved, recent: recent, now: time.Now, timeout: estimateTimeout}
 }
 
 // maxEstimateBody bounds the whole request.
@@ -136,6 +142,25 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 	src := in.Source()
 	now := h.now()
 
+	// N194's two preconditions, settled BEFORE anything reads the input, so
+	// the phrase path, the estimator and the resolver all see one answer.
+	//
+	// A `today` more than a day from UTC's is not a timezone. It is dropped —
+	// the request still estimates normally — rather than refused, because a
+	// phone with a wrong clock should lose this feature, not the whole
+	// endpoint. See TodayIsPlausible for what it would otherwise let through.
+	if in.Today != "" && !TodayIsPlausible(in.Today, now) {
+		httplog.FromContext(r.Context()).Warn("nutrition: implausible local date, recent-log references off",
+			"user_id", userID, "today", in.Today)
+		in.Today = ""
+	}
+	// No reader wired means nothing could resolve a reference, so the model is
+	// not asked to recognise one — otherwise a recognised pointer would have
+	// been paid for and could only end in an error.
+	if h.recent == nil {
+		in.ResolveRecent = false
+	}
+
 	// REUSE, BEFORE THE GATE — and the order is the measurable half of N114.
 	//
 	// Answering from storage above the quota check is what makes "log the same
@@ -166,6 +191,34 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		}
 		apihttp.WriteJSON(w, http.StatusOK, estimateResponse{Estimate: est, Quota: quota})
 		return
+	}
+
+	// A POINTER THE WORDS ALONE MAKE PLAIN, resolved for free (N194) — and
+	// above the gate for exactly N114's reason: an athlete at their cap who
+	// types "the same as yesterday" is asking for a lookup, and a lookup spends
+	// nothing. No model is called, no usage row is written, and the quota is
+	// only READ, so the counter can still render.
+	//
+	// Whatever the grammar declines goes on down this function unchanged, and
+	// the model gets the same chance to recognise it — at the ordinary price.
+	if in.ReferencesAllowed() {
+		if ref, ok := RecognizeReference(in.Description); ok {
+			match, err := h.resolveRecent(r.Context(), userID, in.Today, ref, RecognizedByPhrase)
+			if err != nil {
+				httplog.FromContext(r.Context()).Error("nutrition: recent-log lookup failed",
+					"user_id", userID, "err", err)
+				apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal,
+					"could not read your recent log — try again")
+				return
+			}
+			quota, err := h.usage.Quota(r.Context(), userID, now)
+			if err != nil {
+				httplog.FromContext(r.Context()).Warn("nutrition: quota read failed on a recent-log lookup",
+					"user_id", userID, "err", err)
+			}
+			apihttp.WriteJSON(w, http.StatusOK, estimateResponse{Estimate: recentEstimate(in, match, ""), Quota: quota})
+			return
+		}
 	}
 
 	// The no-key case, checked AFTER the reuse branch and not before it.
@@ -350,6 +403,24 @@ func (h *EstimateHandler) Estimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// THE MODEL SAID THIS POINTS AT THE LOG (N194). It has already been metered
+	// above — the call was made and billed like any other — and the numbers
+	// come from the athlete's own entries, read only now, after the model has
+	// answered and can see nothing more. A failed read here is an error rather
+	// than an empty result: "nothing matched" is a claim, and a lookup that did
+	// not happen cannot make it.
+	if est.reference != nil {
+		match, err := h.resolveRecent(r.Context(), userID, in.Today, *est.reference, RecognizedByModel)
+		if err != nil {
+			httplog.FromContext(r.Context()).Error("nutrition: recent-log lookup failed after a metered reference",
+				"user_id", userID, "err", err)
+			apihttp.WriteError(w, http.StatusInternalServerError, apihttp.CodeInternal,
+				"could not read your recent log — try again")
+			return
+		}
+		est = recentEstimate(in, match, est.Model)
+	}
+
 	// Re-read rather than decrementing the number in hand: the athlete may be
 	// logging from two devices, and a client-side subtraction would disagree
 	// with the server the moment they are.
@@ -403,6 +474,46 @@ func (h *EstimateHandler) reuseSaved(r *http.Request, userID string, in Estimate
 		return Estimate{}, false
 	}
 	return DraftFromSavedFood(f, in, norm), true
+}
+
+// resolveRecent reads the caller's own entries across the window ending on
+// their `today` and resolves a reference against them.
+//
+// `userID` is the token's, and it reaches the query as the WHERE clause's user
+// predicate — the same one every food-log read carries. ResolveRecent then
+// drops anything that is not that user's anyway, so a reader that ever
+// broadened could not put another athlete's lunch on this screen.
+func (h *EstimateHandler) resolveRecent(ctx context.Context, userID, today string, ref RecentReference, by RecognizedBy) (RecentLogMatch, error) {
+	if h.recent == nil {
+		return RecentLogMatch{}, errors.New("nutrition: no recent-entry reader")
+	}
+	win, err := RecentWindowEndingOn(today)
+	if err != nil {
+		return RecentLogMatch{}, err
+	}
+	entries, err := h.recent.ListEntries(ctx, userID, win.From, win.To, recentEntryLimit)
+	if err != nil {
+		return RecentLogMatch{}, err
+	}
+	if len(entries) >= recentEntryLimit {
+		// The oldest days were cut. Worth knowing, not worth failing: the
+		// newest are what a reference usually means.
+		httplog.FromContext(ctx).Warn("nutrition: recent-log window hit its row limit",
+			"user_id", userID, "limit", recentEntryLimit)
+	}
+	cands, more := ResolveRecent(userID, entries, ref, win)
+	return RecentLogMatch{RecognizedBy: by, Window: win, Reference: ref, Candidates: cands, More: more}, nil
+}
+
+// recentEstimate is the response shape for a resolved reference. `items` is
+// empty and the drafts are the candidates', so there is one place they live.
+// `note` and `meal_name` are empty because nothing was estimated; `model` names
+// the model only when one was called to read the words.
+func recentEstimate(in EstimateInput, match RecentLogMatch, model string) Estimate {
+	return Estimate{
+		Items: []EstimatedItem{}, Note: "", MealName: "", Model: model,
+		Source: in.Source(), Recent: &match,
+	}
 }
 
 // writeEstimateError maps the domain errors to status codes.
@@ -517,6 +628,12 @@ type estimateBody struct {
 	// `false` is a deliberate "generate this again, I know what I saved".
 	// A plain bool would make every client that predates N114 opt out of it.
 	Reuse *bool `json:"reuse"`
+	// Today is the athlete's local date (N194). Without it nothing on this
+	// request is read as pointing at a past log.
+	Today string `json:"today"`
+	// Recent is a pointer for Reuse's reason: absent means yes, `false` is the
+	// "estimate it as a new meal instead" escape hatch.
+	Recent *bool `json:"recent"`
 }
 
 func parseJSONEstimate(r *http.Request) (EstimateInput, error) {
@@ -526,7 +643,9 @@ func parseJSONEstimate(r *http.Request) (EstimateInput, error) {
 	}
 	return EstimateInput{
 		Description: body.Description, Meal: body.Meal,
-		ReuseSaved: body.Reuse == nil || *body.Reuse,
+		ReuseSaved:    body.Reuse == nil || *body.Reuse,
+		Today:         strings.TrimSpace(body.Today),
+		ResolveRecent: body.Recent == nil || *body.Recent,
 	}, nil
 }
 

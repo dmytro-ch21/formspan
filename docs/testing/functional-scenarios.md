@@ -9470,6 +9470,78 @@ history entry for results.
   does reuse. **#504** is where a meal becomes reusable as a unit; a scenario
   asserting a four-item shake matches is asserting that ticket, not this one.
 
+### Pointing at something already logged — "the same as yesterday" (N194)
+
+`POST /v1/nutrition/estimate` with `today`, mobile `/food/describe`. The
+athlete's own entries over the fourteen days ending on their local `today`;
+the model is never shown them.
+
+**Happy path**
+
+- **"The same as yesterday" with one meal logged yesterday is ONE draft** on the
+  ordinary confirm screen, headed "From your recent log", carrying that entry's
+  name, serving label, servings and macros — including the label macros
+  (sodium, sugar) the original had. Editable; nothing is logged until Log.
+- **Logging it writes ONE entry on the screen's own day and slot and saves NO
+  food.** Its `source_food_id` is the original's saved food when the phone
+  still has that food, and null when it does not. A scenario that counts
+  `nutrition_foods` rows after the log is the one that sees a duplicate pile.
+- **A meal reference is every entry in that meal**: "yesterday's breakfast
+  again" with oatmeal and a banana logged at breakfast yesterday drafts both
+  rows, in their original order.
+- **The plain phrasings cost nothing**: "the same as yesterday",
+  "yesterday's breakfast again", "oatmeal again" return
+  `recent.recognized_by: phrase`, make no model call and leave the quota where
+  it was — **including at the daily cap**, where a generated estimate is 429.
+- **A phrasing the grammar declines is read by the model and IS charged** — "that
+  granola from the other morning" returns `recognized_by: model` and moves the
+  quota by one, while the numbers still come from the log.
+
+**The rules that must not break**
+
+- **Never a silent guess.** Two different smoothies logged as breakfast this
+  week, then "my usual breakfast smoothie": a list of both, no draft, no Log
+  button, until one is picked. The same smoothie logged identically on five days
+  is ONE candidate — the newest.
+- **At most five candidates**, with `more` counting the rest and the screen
+  saying how to narrow it.
+- **Nothing matching says so and invents nothing**: "Nothing in the last 14 days
+  matches “…”." — no draft, no generic "nothing recognisable" copy, and a
+  "estimate it as a new meal" button that sends `recent: false` and costs one.
+- **The window is fourteen days ending today, inclusive**: an entry 13 days back
+  resolves, 14 days back does not, and one dated tomorrow does not. A weekday
+  resolves to EVERY such day in the window (so on a Monday, "the same as Monday"
+  lists today and last Monday when both differ).
+- **No `today`, no pointer.** An older client sending no date gets exactly the
+  pre-N194 behaviour; so does `recent: false`, and so does a photo.
+- **A `today` more than a day from UTC's date is ignored, not refused** — the
+  request estimates normally. A `today` that is not a date is a 400.
+- **The model request carries nothing from the log** — no entry name, amount,
+  label, note, id, or the date. Assert on the outbound provider request, not on
+  the response.
+
+**Edge cases and errors**
+
+- **A log read that fails is a 500, never "nothing matched"**, and on the free
+  path it does not fall through to a paid estimate.
+- **A day the model returns in an unreadable shape matches nothing** rather than
+  widening to the whole window.
+- **A pointer that names nothing matches nothing.** If the model reads "log my
+  usual" as a reference with no day, meal or food, the answer is "nothing
+  matches", not the athlete's five most recent meals offered as candidates.
+- **The saved food an old entry named was deleted on this phone** (not yet
+  synced): the re-log still succeeds and syncs, with null provenance, rather
+  than being refused on the foreign key and stranded on the device.
+- **Changing an amount on a resolved draft changes only the new entry**; the
+  original entry is untouched.
+
+**Auth**
+
+- **Another athlete's entries never resolve.** Two accounts, the same food name
+  logged yesterday by the other one only: the caller gets zero candidates and
+  the other name appears nowhere in the response; the owner, asking the same
+  thing, gets it.
+
 ### The weekly target adjustment (N27)
 
 `GET /v1/nutrition/targets/adjustment` — a proposal, never a write, never a

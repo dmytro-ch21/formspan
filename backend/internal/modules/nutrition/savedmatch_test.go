@@ -219,7 +219,7 @@ func TestLoggingTheSameFoodThreeTimesGeneratesOnceAndMetersOnce(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
 	usage := &memUsage{}
 	saved := &memFoods{byNormalized: map[string]Food{}}
-	h := NewEstimateHandler(est, usage, saved)
+	h := NewEstimateHandler(est, usage, saved, nil)
 
 	// First time: nothing saved yet, so it generates and is metered.
 	if w := call(t, h, `{"description":"Pork Shashlik"}`); w.Code != http.StatusOK {
@@ -258,7 +258,7 @@ func TestLoggingTheSameFoodThreeTimesGeneratesOnceAndMetersOnce(t *testing.T) {
 func TestAReusedDraftDoesNotTouchTheAllowanceEvenWhenItIsExhausted(t *testing.T) {
 	usage := &memUsage{quotaFn: func() Quota { return NewQuota(DailyEstimates, nil) }}
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, usage, withFood("Pork Shashlik"))
+	h := NewEstimateHandler(est, usage, withFood("Pork Shashlik"), nil)
 
 	w := call(t, h, `{"description":"Pork Shashlik"}`)
 	if w.Code != http.StatusOK {
@@ -280,7 +280,7 @@ func TestAReusedDraftDoesNotTouchTheAllowanceEvenWhenItIsExhausted(t *testing.T)
 
 func TestAnUnmatchedDescriptionStillGenerates(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, &memUsage{}, withFood("Pork Shashlik"))
+	h := NewEstimateHandler(est, &memUsage{}, withFood("Pork Shashlik"), nil)
 
 	w := call(t, h, `{"description":"Pork Shashlik (spicy)"}`)
 	if w.Code != http.StatusOK {
@@ -301,7 +301,7 @@ func TestAnUnmatchedDescriptionStillGenerates(t *testing.T) {
 func TestAskingForAFreshReadingSkipsTheSavedFood(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
 	saved := withFood("Pork Shashlik")
-	h := NewEstimateHandler(est, &memUsage{}, saved)
+	h := NewEstimateHandler(est, &memUsage{}, saved, nil)
 
 	w := call(t, h, `{"description":"Pork Shashlik","reuse":false}`)
 	if w.Code != http.StatusOK {
@@ -320,7 +320,7 @@ func TestAskingForAFreshReadingSkipsTheSavedFood(t *testing.T) {
 // for everybody who already has the app.
 func TestAClientThatSaysNothingAboutReuseGetsIt(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, &memUsage{}, withFood("Pork Shashlik"))
+	h := NewEstimateHandler(est, &memUsage{}, withFood("Pork Shashlik"), nil)
 	if w := call(t, h, `{"description":"Pork Shashlik"}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
@@ -332,7 +332,7 @@ func TestAClientThatSaysNothingAboutReuseGetsIt(t *testing.T) {
 func TestAPhotoIsNeverAnsweredFromASavedFood(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
 	saved := withFood("Pork Shashlik")
-	h := NewEstimateHandler(est, &memUsage{}, saved)
+	h := NewEstimateHandler(est, &memUsage{}, saved, nil)
 
 	w := callMultipart(t, h, "Pork Shashlik", pngBytes())
 	if w.Code != http.StatusOK {
@@ -350,7 +350,7 @@ func TestAPhotoIsNeverAnsweredFromASavedFood(t *testing.T) {
 // existed, not to a failed request. The athlete's meal is still loggable.
 func TestALookupFailureFallsBackToGenerating(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, &memUsage{}, &memFoods{err: errNotAvailable})
+	h := NewEstimateHandler(est, &memUsage{}, &memFoods{err: errNotAvailable}, nil)
 
 	w := call(t, h, `{"description":"Pork Shashlik"}`)
 	if w.Code != http.StatusOK {
@@ -366,7 +366,7 @@ func TestALookupFailureFallsBackToGenerating(t *testing.T) {
 // authenticated id rather than anything from the request.
 func TestTheLookupIsScopedToTheCaller(t *testing.T) {
 	saved := &memFoods{byNormalized: map[string]Food{}}
-	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, &memUsage{}, saved)
+	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, &memUsage{}, saved, nil)
 	callAs(t, h, "athlete-b", `{"description":"Pork Shashlik"}`)
 	if len(saved.asked) != 1 || saved.asked[0] != "athlete-b|pork shashlik" {
 		t.Fatalf("want a lookup scoped to athlete-b, got %v", saved.asked)
@@ -378,7 +378,7 @@ func TestTheLookupIsScopedToTheCaller(t *testing.T) {
 // rather than leaving it as an accident of the fixtures.
 func TestAHandlerWithNoFoodStoreJustGenerates(t *testing.T) {
 	est := &fakeEstimator{out: goodEstimate()}
-	h := NewEstimateHandler(est, &memUsage{}, nil)
+	h := NewEstimateHandler(est, &memUsage{}, nil, nil)
 	if w := call(t, h, `{"description":"Pork Shashlik"}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
@@ -392,7 +392,7 @@ func TestAHandlerWithNoFoodStoreJustGenerates(t *testing.T) {
 // checked against each other here rather than left to agree by accident —
 // which they did NOT, before review moved the nil check below the lookup.
 func TestAReuseIsServedOnADeployWithNoProviderKey(t *testing.T) {
-	h := NewEstimateHandler(nil, &memUsage{}, withFood("Pork Shashlik"))
+	h := NewEstimateHandler(nil, &memUsage{}, withFood("Pork Shashlik"), nil)
 
 	w := call(t, h, `{"description":"Pork Shashlik"}`)
 	if w.Code != http.StatusOK {
@@ -416,7 +416,7 @@ func TestAReuseIsServedOnADeployWithNoProviderKey(t *testing.T) {
 // look like a spent allowance either. `limit: 0` is the contract's "unknown".
 func TestAReuseIsStillServedWhenTheUsageReadFails(t *testing.T) {
 	usage := &memUsage{quotaErr: errNotAvailable}
-	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage, withFood("Pork Shashlik"))
+	h := NewEstimateHandler(&fakeEstimator{out: goodEstimate()}, usage, withFood("Pork Shashlik"), nil)
 
 	w := call(t, h, `{"description":"Pork Shashlik"}`)
 	if w.Code != http.StatusOK {

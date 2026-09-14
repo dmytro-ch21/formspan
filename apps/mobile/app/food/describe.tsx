@@ -48,12 +48,17 @@ import {
   itemToEntry,
   photographMeal,
   quotaResetMessage,
+  recentCandidateLabel,
+  recentItemsSummary,
+  recentMoreMessage,
+  recentNoneMessage,
   savedFoodFrom,
   type EstimateQuota,
   type EstimatedItem,
   type MealEstimate,
+  type RecentItem,
 } from '@/lib/estimateApi';
-import { logFood, saveFoodLocally } from '@/lib/foodLog';
+import { localFood, logFood, saveFoodLocally } from '@/lib/foodLog';
 import { prepareImageForUpload, type UploadableImage } from '@/lib/imageUpload';
 import {
   fmtAmount,
@@ -116,6 +121,18 @@ export default function DescribeMealScreen() {
    * just done, which is what they reported.
    */
   const [askedBy, setAskedBy] = useState<'text' | 'photo'>('text');
+  /**
+   * The words the last description was asked with (N194), so "nothing in the
+   * last 14 days matches …" repeats what was actually sent — not whatever the
+   * box holds now, which the athlete may already be retyping.
+   */
+  const [askedText, setAskedText] = useState('');
+  /**
+   * Which of `estimate.recent.candidates` the rows came from (N194). Null
+   * while a list is waiting to be picked from, and for every draft that was
+   * not a reference at all.
+   */
+  const [chosen, setChosen] = useState<number | null>(null);
   const [quota, setQuota] = useState<EstimateQuota | null>(null);
   // Drafted rows the athlete can edit before logging. Held separately from the
   // estimate so the original stays readable — the assumption beside a number
@@ -191,8 +208,17 @@ export default function DescribeMealScreen() {
     ) => {
       setAskedBy(from);
       setEstimate(res.estimate);
-      setRows(res.estimate.items.map(toDraft));
-      setSingleFood(res.estimate.items.length === 1);
+      // N194: a reference's drafts are its CANDIDATES', never `items`. Exactly
+      // one is the draft. Several wait for the athlete to pick — nothing is
+      // chosen for them, because two different "usual" breakfasts are two
+      // different meals.
+      const recent = res.estimate.recent;
+      const only = recent && recent.candidates.length === 1 ? recent.candidates[0] : null;
+      setRows(recent ? (only ? only.items.map(draftFromLog) : []) : res.estimate.items.map(toDraft));
+      setChosen(only ? 0 : null);
+      // Never a barcode lesson from a log reference: those numbers belong to
+      // whatever was logged that day, not to the packet that was scanned.
+      setSingleFood(!recent && res.estimate.items.length === 1);
       setQuota(res.quota);
       // A fresh draft starts uncompiled — carrying the PREVIOUS draft's choice
       // forward would silently combine a description the athlete never asked
@@ -241,19 +267,32 @@ export default function DescribeMealScreen() {
    * The default is left UNSENT rather than passed as `true`, so the decision
    * lives on the server and this screen cannot drift from it.
    */
-  const describe = useCallback(async (reuse = true) => {
+  const describe = useCallback(async ({ reuse = true, recent = true }: { reuse?: boolean; recent?: boolean } = {}) => {
     if (!description.trim() || locked || quotaExhausted) return;
     // Read BEFORE the await: `estimate` is replaced by `receive`, and this is
     // the food the request is being made against.
     const replaces = reuse ? null : (estimate?.match?.food_id ?? null);
+    const asked = description.trim();
     setBusy(true);
     setError(null);
     try {
       receive(
-        await describeMeal(getToken, { description: description.trim(), meal, reuse }),
+        await describeMeal(getToken, {
+          description: asked,
+          meal,
+          reuse,
+          // N194: THIS PHONE'S calendar day, read at the moment of asking.
+          // "Yesterday" is relative to where the athlete is standing, and the
+          // server does not know their timezone — without this, no reference
+          // to the log is resolved at all.
+          today: todayString(),
+          // `false` only from "estimate it as a new meal instead".
+          recent,
+        }),
         'text',
         replaces,
       );
+      setAskedText(asked);
     } catch (err) {
       setError(messageFor(err));
     } finally {
@@ -472,18 +511,26 @@ export default function DescribeMealScreen() {
           estimate?.match && NORMALIZE(estimate.match.name) === NORMALIZE(item.name)
             ? estimate.match.food_id
             : null;
-        const savedId =
-          reusedId ??
-          (await saveFoodLocally(userId, {
-            ...savedFoodFrom(item),
-            // Present only on a regenerate, where it makes the save an
-            // OVERWRITE of the food this draft was asked to replace.
-            ...(replacing ? { id: replacing } : {}),
-          }));
+        // N194: a row from the athlete's OWN LOG saves nothing. It already
+        // names the food it was logged from, or none, and minting a new food
+        // per re-log would grow exactly the duplicate pile N114 exists to
+        // prevent. See `stillSavedHere` for why the id is checked first.
+        const savedId = row.fromLog
+          ? await stillSavedHere(userId, row.fromLog.source_food_id)
+          : (reusedId ??
+            (await saveFoodLocally(userId, {
+              ...savedFoodFrom(item),
+              // Present only on a regenerate, where it makes the save an
+              // OVERWRITE of the food this draft was asked to replace.
+              ...(replacing ? { id: replacing } : {}),
+            })));
         await logFood(userId, {
           eaten_on: date,
           meal,
           ...itemToEntry(item),
+          // The logged entry's category is a copy taken from the catalog, and
+          // a re-log of it is the same food — so it keeps it.
+          ...(row.fromLog?.category ? { category: row.fromLog.category } : {}),
           // The saved food this came from. Provenance ONLY — nothing ever reads
           // an entry's nutrition back through it, which is what keeps
           // correcting a food from silently rewriting what you ate last month.
@@ -664,6 +711,27 @@ export default function DescribeMealScreen() {
    */
   const firstUncertain = rows.findIndex((r) => r.portion_confidence === 'low');
 
+  /**
+   * N194's escape hatch: the athlete did not mean their log, they meant a new
+   * meal. Spends an estimate, and says so — same contract as "estimate it
+   * again" — so it is gated on the quota like every other control that asks.
+   * Without it, a reference read wrongly is a dead end.
+   */
+  const estimateInstead = (
+    <PressableScale
+      onPress={() => void describe({ recent: false })}
+      accessibilityRole="button"
+      accessibilityLabel="Estimate this as a new meal instead of using your log"
+      disabled={locked || quotaExhausted}
+      accessibilityState={{ disabled: locked || quotaExhausted }}
+      testID="describe-recent-estimate"
+    >
+      <Text style={[styles.regenerate, (locked || quotaExhausted) && styles.off]}>
+        Not what you meant? Estimate it as a new meal — uses one estimate
+      </Text>
+    </PressableScale>
+  );
+
   return (
     <KeyboardAwareScrollView
       contentContainerStyle={styles.scroll}
@@ -782,10 +850,56 @@ export default function DescribeMealScreen() {
           say something. Rendering nothing would look like a screen that
           ignored the tap. The note is where the model says what it could not
           see, which is the useful half. */}
-      {estimate && rows.length === 0 ? (
+      {estimate && !estimate.recent && rows.length === 0 ? (
         <Text style={styles.note} testID="describe-empty">
           {emptyEstimateMessage(estimate.note, askedBy)}
         </Text>
+      ) : null}
+
+      {/* N194 — the athlete pointed at something already logged, and there is
+          nothing on screen to log yet: either nothing matched, which is said
+          plainly with nothing invented in its place, or several things did and
+          the athlete picks. Nothing is ever chosen for them. */}
+      {estimate?.recent && rows.length === 0 ? (
+        <>
+          {estimate.recent.candidates.length === 0 ? (
+            <Text style={styles.saved} testID="describe-recent-none">
+              {recentNoneMessage(askedText, estimate.recent.window.days)}
+            </Text>
+          ) : (
+            <>
+              <SectionHeader label="Which one did you mean?" />
+              {estimate.recent.candidates.map((c, i) => {
+                const label = recentCandidateLabel(c, estimate.recent!.window.to);
+                const summary = recentItemsSummary(c.items);
+                return (
+                  <PressableScale
+                    key={`${c.eaten_on}-${c.meal}-${i}`}
+                    onPress={() => {
+                      setRows(c.items.map(draftFromLog));
+                      setChosen(i);
+                    }}
+                    style={styles.row}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${label}: ${summary}`}
+                    disabled={locked}
+                    accessibilityState={{ disabled: locked }}
+                    testID={`describe-recent-candidate-${i}`}
+                  >
+                    <Text style={styles.rowName}>{label}</Text>
+                    <Text style={styles.rowServing}>{summary}</Text>
+                  </PressableScale>
+                );
+              })}
+              {estimate.recent.more > 0 ? (
+                <Text style={styles.note} testID="describe-recent-more">
+                  {recentMoreMessage(estimate.recent.more)}
+                </Text>
+              ) : null}
+            </>
+          )}
+          {estimateInstead}
+        </>
       ) : null}
 
       {estimate && rows.length > 0 ? (
@@ -800,7 +914,13 @@ export default function DescribeMealScreen() {
               "Check these" is the right instruction for a guess and the wrong
               one for numbers the athlete themselves saved and corrected. */}
           <SectionHeader
-            label={estimate.match ? 'From your saved foods' : 'Check these before logging'}
+            label={
+              estimate.match
+                ? 'From your saved foods'
+                : estimate.recent
+                  ? 'From your recent log'
+                  : 'Check these before logging'
+            }
           />
           {estimate.match ? (
             <>
@@ -830,7 +950,7 @@ export default function DescribeMealScreen() {
                   read again — the feature would have replaced one complaint
                   with a worse one. Says what it costs, because it does cost. */}
               <PressableScale
-                onPress={() => void describe(false)}
+                onPress={() => void describe({ reuse: false })}
                 accessibilityRole="button"
                 accessibilityLabel="Estimate this again instead of reusing the saved food"
                 // Spends a quota unit exactly like the primary submit button
@@ -867,6 +987,39 @@ export default function DescribeMealScreen() {
                   Fix these numbers for next time
                 </Text>
               </PressableScale>
+            </>
+          ) : null}
+          {/* N194: a draft from the log says WHICH logged meal it is, and that
+              the numbers are the athlete's own — "check these" would be the
+              wrong instruction for them. It stays fully editable below. */}
+          {estimate.recent && chosen !== null && estimate.recent.candidates[chosen] ? (
+            <>
+              <Text style={styles.saved} testID="describe-recent-source">
+                {recentCandidateLabel(estimate.recent.candidates[chosen], estimate.recent.window.to)}
+                , from your log.
+                {estimate.recent.recognized_by === 'phrase'
+                  ? ' No estimate used.'
+                  : ' One estimate was used to read what you typed; the numbers are your own.'}
+              </Text>
+              <Text style={styles.note} testID="describe-recent-scope">
+                Change anything that was different this time — only this new entry changes.
+              </Text>
+              {estimate.recent.candidates.length > 1 ? (
+                <PressableScale
+                  onPress={() => {
+                    setRows([]);
+                    setChosen(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose a different logged meal"
+                  disabled={locked}
+                  accessibilityState={{ disabled: locked }}
+                  testID="describe-recent-back"
+                >
+                  <Text style={[styles.regenerate, locked && styles.off]}>Not this one? Choose again</Text>
+                </PressableScale>
+              ) : null}
+              {estimateInstead}
             </>
           ) : null}
           {estimate.note ? <Text style={styles.note}>{estimate.note}</Text> : null}
@@ -1175,7 +1328,37 @@ type DraftRow = EstimatedItem & {
   servingsText: string;
   kcalText: string;
   proteinText: string;
+  /**
+   * Set when this row came from the athlete's own log (N194). Logging it saves
+   * no new food: the entry names the saved food the original named, if this
+   * phone still has it, and keeps the original's category.
+   */
+  fromLog?: { source_food_id: string | null; category: string | null };
 };
+
+/** A prior entry as an editable row — see `DraftRow.fromLog`. */
+function draftFromLog(it: RecentItem): DraftRow {
+  return {
+    ...toDraft(it),
+    fromLog: { source_food_id: it.source_food_id ?? null, category: it.category ?? null },
+  };
+}
+
+/**
+ * The saved food a logged row named — if this phone STILL has it (N194).
+ *
+ * The id came from the server's copy of an old entry, and the athlete may have
+ * deleted that food on this phone since, with the deletion not yet pushed. The
+ * outbox pushes foods ahead of entries, so an entry naming it would reach the
+ * server after the food's tombstone, be refused on the foreign key with a 400,
+ * and be classified a permanent rejection — a meal on this phone and nowhere
+ * else. Null provenance is the safe loss: the entry's numbers are its own
+ * either way, and it simply stops appearing under that food in the recents.
+ */
+async function stillSavedHere(userId: string, foodId: string | null): Promise<string | null> {
+  if (!foodId) return null;
+  return (await localFood(userId, foodId)) ? foodId : null;
+}
 
 /**
  * Case- and whitespace-insensitive name identity, for comparing a `match.name`

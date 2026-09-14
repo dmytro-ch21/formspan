@@ -77904,6 +77904,57 @@ The centre slot now holds Today by owner decision. N567's open question is not d
 - **The ticket's NEEDS HUMAN EVIDENCE criterion is still owed:** deny exercise sessions on a real Android phone, see the line, grant it in Health Connect, see it clear. The walkable script is `docs/testing/device-checks.md` D31.
 - **The Health Connect labels the copy names — App permissions, then VOLA — were not seen on a device.** They are the labels N569's device check D30 already uses. D31 asks whoever runs it to write down the real ones if they differ.
 
+## 2026-09-14 — N194 (#611): "the same as yesterday" resolves against the athlete's own recent log
+
+**The request, from a device:** the AI text input should look into past logs, "but only recent", and add those foods again. N114 already reused a food whose *saved* name the description matched exactly. This is different: the athlete points at something they *logged* ("the same as yesterday", "my usual shake", "the same lunch as Monday") and expects that entry back on the confirm screen.
+
+### N114's lookup was the wrong tool, and no new query was needed
+
+The ticket asked for this to be confirmed before building. `FindFoodByNormalizedName` answers "which saved food is named exactly this" on `nutrition_foods`, through `nutrition_foods_user_normalized_name_idx`. A reference needs "which entries, on which days and in which slot, do these words point at" on `nutrition_entries`. Many entries name no saved food at all, the key is a date range rather than one name, and the answer can be several things. So that index cannot serve it.
+
+The food log's existing `ListEntries` can: it is scoped to `user_id` inside its WHERE, bounded, ordered, and served by `nutrition_entries_user_day_idx (user_id, eaten_on)` from migration 000059. The estimate handler reads through it via a one-method port, `RecentEntryReader`, shaped like N114's `SavedFoodFinder` so the handler still cannot write the log. **No migration.** `TestTheRecentReadUsesTheEntriesIndex` asserts both `user_id` and `eaten_on` appear in the `Index Cond`. `ListEntries`' SQL became the named const `listEntriesSQL`, so that test EXPLAINs the real statement rather than a copy. The confirm and log path is the existing describe screen, unchanged in shape.
+
+### Decisions (the coordinator's, all reversible)
+
+1. **Window: today and the 13 days before it, in the athlete's local calendar.** The phone sends `today`. A `today` more than one calendar day from UTC's date cannot be a timezone. It is **ignored, not refused**: the request estimates normally and simply cannot point at the log, so a phone with a wrong clock loses this feature, not the endpoint. A `today` that is not a date is a 400.
+2. **Privacy: the model never receives log contents.** The first-choice option held, and the fallback (sending candidate names) was not needed. Recognising a reference and resolving it are separate steps, and only recognising ever involves a model. The model returns a `reference` object with a day, a meal and the words for the food, and is told it cannot see the log. The handler reads the entries only **after** the model has answered. `TestTheModelRequestCarriesNothingFromTheLog` asserts on the request actually built: no entry name, amount, label, note or id, and not the date, with positive controls that the log did resolve and that the athlete's words are visible in the request. It also asserts the call order: model first, then log.
+3. **Outcomes: one match is a draft, several are a list of at most 5, none says so.** The same food logged the same way on several days is one candidate, the newest. Two different amounts or foods are two candidates, never a silent pick. Nothing matching renders "Nothing in the last 14 days matches “…”." with nothing to log, plus an "estimate it as a new meal" escape hatch (`recent: false`, costs one estimate).
+4. **A meal reference is every entry in that meal slot on that day.** N472 compiles a draft into one entry, and N115 turns logged entries into one recipe entry. Neither is a grouping a past log can be addressed by, so the slot is used, and the screen says which ("Yesterday’s breakfast, from your log").
+5. **The confirm screen is unchanged.** Resolved rows carry the prior entry's name, label, servings, macros and label macros. They stay editable, and nothing is logged before Log.
+6. **Quota.** The plain phrasings are read by a narrow deterministic grammar (`RecognizeReference`) **above the quota gate**, like N114's reuse. No model call, no usage row, and still answered at the cap. Everything the grammar declines goes to the model at the ordinary price, and is metered before the log is read. Both are pinned.
+7. **Offline:** unchanged. The describe flow already needs the network.
+8. **Tone:** plain, no-shame copy. A missing log is never framed as a lapse.
+9. **Motion:** none. Candidates use the screen's existing `PressableScale`.
+
+### Conservative calls made beyond those decisions (flagged for the owner)
+
+- **A model request that cannot be a reference sends exactly the pre-N194 prompt and schema.** That covers no `today`, `recent: false`, a photo, or no reader wired. The reference section and `reference` property are added only when the answer can be acted on. `TestOnlyAReferenceRequestAsksTheQuestion` pins the byte-identity with `reflect.DeepEqual`.
+- **A weekday matches every such day in the window**, not only the latest. On a Monday, "the same lunch as Monday" can mean today or a week ago.
+- **A day the model returns in an unusable shape matches nothing** rather than widening to the whole window. Likewise a `days_ago` outside the window.
+- **Food words must all appear as whole words** of an entry's name, allowing a trailing s or es either way. There is no partial-word or any-word matching: what is offered is a claim about what the athlete meant.
+- **Re-logging saves no new food.** The entry names the saved food the original named, but only if this phone still has it. A food deleted locally and not yet synced would otherwise get an entry refused on the foreign key and stranded on the device. The original's `category` is kept, and its **notes are never carried**.
+- **A failed log read is a 500**, never an empty list: "nothing matched" is a claim a lookup that did not happen cannot make. On the free path it does not fall through to a paid estimate.
+- **On the model path, a log read that fails AFTER the call is still charged.** The provider answered and billed, so F16's "nothing was spent" exemption does not apply. Review suggested waiving it because the failure is ours; the choice was left as the metering rule stands, and is recorded here as a product call to revisit.
+- **A pointer that names nothing matches nothing** (no day, no meal, no food: "log my usual" as the model reads it). Review found that without this rule it resolved to the whole window, five arbitrary recent meals for a charged call. Both recognisers now resolve that shape alike.
+- **The model is not told the date.** A named date comes back as `MM-DD`, with no year to invent.
+- **The grammar is English only** and declines on any quantity, modifier ("but", "with"), second day, second meal, more than four food words, or a bare "the same". Declining is safe: the model still reads it.
+
+### Checks
+
+- **Backend:** 49 new tests (recogniser, window, resolver, estimator, handler, and Postgres isolation, window and index). `test:api:all` was run against a per-branch `vola_test_n194`.
+- **Mobile:** `describeRecent.test.tsx` covers one, several, none, the escape hatch, the log write and the provenance check. `estimateApi.test.ts` covers the request body and the copy under `TZ=America/Los_Angeles`.
+- **31 mutations (22 backend, 9 mobile): 30 went red as assertion failures, and each restore was re-run green.** The one survivor is by design: with only the query's user scope removed, the resolver's own user filter still holds. Removing both goes red on the Postgres isolation test.
+- **A review-apparatus miss worth keeping.** One reviewer reported the resolver's user filter as a surviving mutation. Its `-run Recent` filter matched none of the isolation tests (their names do not contain "Recent"). Re-run with the tests named, the same mutation is red. This is the `-run` trap CLAUDE.md already names.
+- **A reviewer destroyed the mobile screen change mid-review.** It ran `git checkout` on `describe.tsx` to undo its own mutation, which reverted the whole unstaged N194 diff for that file to `origin/main`. The edits were re-applied from the session. Restoration was proven by behaviour, not by reading: the mobile mutation harness was re-run against the restored file and all 9 went red again, then 115 of 115 describe and estimate tests passed. **The lesson is the one CLAUDE.md states for staging during review, from the other direction:** a reviewer restoring with `git checkout` on an unstaged tree is as destructive as `git add -A` under one. Committing before launching reviewers would have made the damage recoverable.
+- **One mutation survived at first, and it was a real gap.** Deleting the grammar's modifier check left the decline test green, because every modifier vector was already declined by some other rule. Two vectors only that rule can decline were added, and it now goes red.
+
+### Not done / open
+
+- **The extended schema was not verified against the live provider.** `TestTheReferenceSchemaMeetsWhatStructuredOutputsRequire` checks the strict-mode shape rules locally (closed objects, everything required, no numeric bounds), but no real call was made. Before relying on the model path, run one reference request on staging and confirm the provider accepts the schema; a rejection would only affect requests that send `today`. The reference fields also add output tokens to those calls, and that cost was not measured.
+- **Device evidence is owed** (`NEEDS HUMAN EVIDENCE` on #611): `docs/testing/device-checks.md` D4 now carries the script.
+- **At a known-exhausted quota the phone still disables Work it out** (F17), so the free phrase path, which the server answers at the cap, is not reachable from the phone once the screen knows the count is spent.
+- **Two meals in one reference** ("breakfast and lunch as yesterday") are not supported: the grammar declines, and the model's schema carries one meal.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

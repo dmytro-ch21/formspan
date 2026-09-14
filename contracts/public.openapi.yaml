@@ -154,6 +154,186 @@ components:
 
             **No estimate allowance was spent.** `quota` is the live figure,
             unchanged by this call.
+        recent:
+          allOf:
+            - $ref: "#/components/schemas/RecentLogMatch"
+          description: >
+            Present ONLY when the description pointed at something already
+            logged rather than describing a food (N194). When it is present
+            `items` is empty, `note` and `meal_name` are empty, and the drafts
+            are `recent.candidates`. `model` is empty when `recognized_by` is
+            `phrase`, and names the model that read the words when it is
+            `model`. A client must render these as coming from the athlete's
+            log, not as a guess.
+
+    RecentLogMatch:
+      type: object
+      description: >
+        How a description that POINTED AT the athlete's own log was resolved
+        (N194), in enough detail to check from the response alone.
+
+
+        **Recognising and resolving are separate steps, and only the first ever
+        involves a model.** A narrow phrase grammar reads the plainest pointers
+        ("the same as yesterday", "yesterday's breakfast again", "oatmeal
+        again") for free; anything it declines goes to the model, which is
+        asked only what the words point at — a day, a meal, the words for the
+        food — and is never shown the log. The server then resolves that
+        against the caller's own entries across the window, deterministically.
+
+
+        **The number of candidates is the outcome.** None: nothing in the
+        window matched, and the client says so and invents nothing. One: the
+        draft. Several, at most five: the athlete picks — two different "usual"
+        breakfasts are never chosen between silently.
+      required: [recognized_by, window, reference, candidates, more]
+      properties:
+        recognized_by:
+          type: string
+          enum: [phrase, model]
+          description: >
+            `phrase` spent nothing and moved no allowance. `model` spent one
+            estimate reading the words. A client must treat an unseen value as
+            "recognised somehow" rather than as either of these.
+        window:
+          type: object
+          required: [from, to, days]
+          properties:
+            from:
+              type: string
+              format: date
+              description: The first day searched — `to` minus 13 days.
+            to:
+              type: string
+              format: date
+              description: The request's `today`.
+            days:
+              type: integer
+              example: 14
+        reference:
+          $ref: "#/components/schemas/RecentReference"
+        candidates:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/RecentCandidate"
+          description: >
+            Newest day first, then the day's own meal order. The same food
+            logged the same way on several days is ONE candidate — the newest
+            stands for it.
+        more:
+          type: integer
+          minimum: 0
+          description: How many further candidates matched beyond the ones listed.
+
+    RecentReference:
+      type: object
+      description: What the athlete's words pointed at — never what the log contained.
+      required: [day, days_ago, weekday, month_day, meal, food_words]
+      properties:
+        day:
+          type: string
+          enum: [unstated, today, yesterday, days_ago, weekday, date, unrecognised]
+          description: >
+            `unstated` searches the whole window. A weekday matches EVERY such
+            day inside the window, not only the latest. `unrecognised` is a day
+            the model returned in a shape the server could not read; it matches
+            nothing rather than widening to the whole window.
+        days_ago:
+          type: integer
+          nullable: true
+          description: Set when `day` is `days_ago`; 0 is today. A value outside the window matches nothing.
+        weekday:
+          type: string
+          nullable: true
+          enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+        month_day:
+          type: string
+          nullable: true
+          example: "09-12"
+          description: Set when `day` is `date`, as MM-DD. No year — the model is never told the date.
+        meal:
+          type: string
+          nullable: true
+          enum: [breakfast, lunch, dinner, snack]
+          description: Null when no meal was named.
+        food_words:
+          type: array
+          items:
+            type: string
+          description: >
+            The words naming the food itself, lowercased, with occasion words
+            ("usual", "post-workout") removed. Empty means a whole meal, which
+            resolves to every entry in that slot. Otherwise EVERY word must
+            appear as a word of an entry's name, allowing a trailing "s" or
+            "es" either way.
+
+    RecentCandidate:
+      type: object
+      description: >
+        One thing a pointer could mean — a whole meal slot on one day when no
+        food was named, or one entry when one was.
+      required: [eaten_on, meal, items]
+      properties:
+        eaten_on:
+          type: string
+          format: date
+        meal:
+          type: string
+          enum: [breakfast, lunch, dinner, snack]
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/RecentItem"
+
+    RecentItem:
+      type: object
+      description: >
+        A prior entry shaped as a draft row: its own food and amount, with
+        `portion_confidence` `high` and an empty `assumption`, because nothing
+        was estimated. Carries the label macros and the saved food the entry
+        named, so a re-log is as complete as the original and mints no duplicate
+        food. **Never the entry's notes.** Editable like any draft; nothing is
+        logged until the client PUTs an entry. The amounts are the entry's own,
+        so they carry `NutritionEntryInput`'s bounds rather than
+        `EstimatedItem`'s stricter ones.
+      required:
+        [name, serving_label, servings, kcal, protein_g, carb_g, fat_g, fibre_g,
+         portion_confidence, assumption, saturated_fat_g, sugar_g, added_sugar_g,
+         sodium_mg, cholesterol_mg, source_food_id, category, entry_id]
+      properties:
+        name: { type: string }
+        serving_label: { type: string }
+        servings: { type: number }
+        kcal: { type: number }
+        protein_g: { type: number }
+        carb_g: { type: number }
+        fat_g: { type: number }
+        fibre_g: { type: number, nullable: true }
+        portion_confidence:
+          type: string
+          enum: [high]
+        assumption:
+          type: string
+          description: Always empty — nothing was assumed.
+        saturated_fat_g: { type: number, nullable: true }
+        sugar_g: { type: number, nullable: true }
+        added_sugar_g: { type: number, nullable: true }
+        sodium_mg: { type: number, nullable: true }
+        cholesterol_mg: { type: number, nullable: true }
+        source_food_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The saved food the prior entry named. Log the re-entry with it when the client still has that food.
+        category:
+          type: string
+          nullable: true
+        entry_id:
+          type: string
+          format: uuid
+          description: The prior entry this was resolved from.
 
     SavedFoodMatch:
       type: object
@@ -13230,6 +13410,34 @@ paths:
                     the athlete could never ask for the food to be estimated
                     again. A forced generation costs an estimate; a reuse does
                     not.
+                today:
+                  type: string
+                  format: date
+                  example: "2026-09-14"
+                  description: >
+                    The athlete's LOCAL calendar day, as their phone reads it
+                    (N194). Sending it is what lets a description that POINTS AT
+                    something already logged — "the same as yesterday", "my
+                    usual shake" — be answered from the athlete's own entries
+                    over the fourteen days ending on it. Omit it and nothing is
+                    read as a pointer: the request estimates exactly as it did
+                    before this field existed, with the same prompt and schema.
+
+
+                    Must be a `YYYY-MM-DD` date, or the request is `400`. A date
+                    more than one calendar day from the server's UTC date is not
+                    a timezone, and is IGNORED rather than refused — the request
+                    still estimates normally, it simply cannot point at the log.
+                recent:
+                  type: boolean
+                  default: true
+                  description: >
+                    Whether this description may be answered from the athlete's
+                    recent log. **Omitting it means yes.** Send `false` for
+                    "estimate it as a new meal instead" — the escape hatch from
+                    a pointer the athlete did not mean, which costs an estimate.
+                    Only meaningful with `today`; a photo never points at the
+                    log.
           multipart/form-data:
             schema:
               type: object
@@ -13264,6 +13472,18 @@ paths:
             spent — or REUSED from a food the athlete had already saved, in
             which case no model was called, no allowance moved, and
             `estimate.match` explains which stored row answered it and why.
+
+
+            Or the description POINTED AT the athlete's recent log (N194), in
+            which case `estimate.recent` is set, `estimate.items` is empty, and
+            the drafts are `recent.candidates` — none, one, or a short list to
+            pick from. When `recent.recognized_by` is `phrase` no model was
+            called and no allowance moved, exactly as for a reuse — including at
+            the cap. When it is `model`, one estimate was spent reading the
+            words, and the numbers still come from the athlete's own entries.
+            **The athlete's log is never sent to a model**: the model is only
+            asked what the words point at, and the entries are read after it
+            has answered.
           content:
             application/json:
               schema:
@@ -13312,6 +13532,18 @@ paths:
                 would land a client back inside it and earn a second 429 for
                 obeying the header. Never zero.
               schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: >
+            Something on this side failed: the usage meter could not be read
+            before a call, or the athlete's recent log could not be read while
+            resolving a description that pointed at it (N194). The second is
+            deliberately NOT a `200` with no candidates — "nothing in the last
+            14 days matches" is a claim, and a lookup that did not happen cannot
+            make it. A pointer the phrase grammar recognised spent nothing; one
+            the model recognised was metered like any call.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

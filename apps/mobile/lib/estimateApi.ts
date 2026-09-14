@@ -96,6 +96,59 @@ export type MealEstimate = {
    * the quantity is the athlete's own serving definition, not a guess.
    */
   match?: SavedFoodMatch | null;
+  /**
+   * Set ONLY when the description POINTED AT something already logged —
+   * "the same as yesterday" — rather than describing a food (N194). When it
+   * is present `items` is empty and the drafts are the candidates': none (say
+   * nothing matched, invent nothing), one (a draft), or several (a list the
+   * athlete picks from — never a silent choice between two different meals).
+   */
+  recent?: RecentLogMatch | null;
+};
+
+/**
+ * What the athlete's words pointed at (N194) — never what the log contained.
+ * The server owns this vocabulary; an unseen `day` must render as "a day"
+ * rather than be assumed to be one of these.
+ */
+export type RecentReference = {
+  day: 'unstated' | 'today' | 'yesterday' | 'days_ago' | 'weekday' | 'date' | 'unrecognised' | (string & {});
+  days_ago: number | null;
+  weekday: string | null;
+  month_day: string | null;
+  meal: Meal | null;
+  food_words: string[];
+};
+
+/**
+ * A prior entry, shaped as a draft row: its own food and amount, the label
+ * macros it carried, and the saved food it named — so re-logging it mints no
+ * duplicate food. `portion_confidence` is `high` and `assumption` empty,
+ * because nothing was estimated.
+ */
+export type RecentItem = EstimatedItem & {
+  source_food_id: string | null;
+  category: string | null;
+  entry_id: string;
+};
+
+/** One thing a reference could mean: a meal slot on a day, or one entry. */
+export type RecentCandidate = {
+  eaten_on: string;
+  meal: Meal;
+  items: RecentItem[];
+};
+
+export type RecentLogMatch = {
+  /** `phrase` spent nothing; `model` spent one estimate reading the words. */
+  recognized_by: 'phrase' | 'model' | (string & {});
+  /** The span searched, inclusive. `to` is the `today` this phone sent. */
+  window: { from: string; to: string; days: number };
+  reference: RecentReference;
+  /** At most five. The length is the outcome. */
+  candidates: RecentCandidate[];
+  /** How many more matched beyond the ones listed. */
+  more: number;
 };
 
 export type EstimateQuota = {
@@ -143,7 +196,24 @@ export type EstimateResponse = {
  */
 export function describeMeal(
   getToken: TokenGetter,
-  input: { description: string; meal?: Meal; reuse?: boolean },
+  input: {
+    description: string;
+    meal?: Meal;
+    reuse?: boolean;
+    /**
+     * This phone's LOCAL calendar day (N194). Sending it is what lets the
+     * server read "the same as yesterday" against the last fourteen days of
+     * the athlete's own log — the server does not know their timezone, and
+     * without it no reference is resolved at all.
+     */
+    today?: string;
+    /**
+     * `false` is "estimate it as a new meal instead" — the escape hatch from a
+     * reference the athlete did not mean. Sent only when false, for `reuse`'s
+     * reason: the default lives on the server.
+     */
+    recent?: boolean;
+  },
 ): Promise<EstimateResponse> {
   return apiRequest<EstimateResponse>(
     getToken,
@@ -154,6 +224,8 @@ export function describeMeal(
         description: input.description,
         meal: input.meal ?? null,
         ...(input.reuse === false ? { reuse: false } : {}),
+        ...(input.today ? { today: input.today } : {}),
+        ...(input.recent === false ? { recent: false } : {}),
       }),
     },
     // No photo, and it still gets the slow budget: this waits on the same
@@ -489,4 +561,66 @@ export function emptyEstimateMessage(note: string | undefined, askedBy: 'text' |
   const advice = emptyEstimateAdvice(askedBy);
   const said = note?.trim();
   return said ? `${said} ${advice}` : advice;
+}
+
+const DAY_MS = 86_400_000;
+
+/** `YYYY-MM-DD` as a UTC midnight, so day arithmetic never crosses a timezone. */
+function utcDay(on: string): number {
+  const [y, m, d] = on.split('-').map(Number);
+  return Date.UTC(y, (m ?? 1) - 1, d ?? 1);
+}
+
+function mealWord(meal: Meal): string {
+  return meal === 'snack' ? 'snacks' : meal;
+}
+
+/**
+ * Which logged meal a candidate is, the way somebody would say it (N194):
+ * "Yesterday’s lunch", "Monday’s dinner", "Lunch on 3 Sep".
+ *
+ * `today` is the window's own `to` — the date this phone SENT — rather than a
+ * fresh read of the clock, so a list rendered a second after midnight still
+ * agrees with the question that produced it.
+ *
+ * **Both dates are parsed as UTC days**, which is how a `YYYY-MM-DD` is stored
+ * and how `shortDate` reads one. Parsing them as local dates renames every
+ * candidate to the day before for anyone west of Greenwich — the bug the suite
+ * runs under `TZ=America/Los_Angeles` to catch.
+ */
+export function recentCandidateLabel(c: { eaten_on: string; meal: Meal }, today: string): string {
+  const ago = Math.round((utcDay(today) - utcDay(c.eaten_on)) / DAY_MS);
+  const meal = mealWord(c.meal);
+  if (ago === 0) return `Today’s ${meal}`;
+  if (ago === 1) return `Yesterday’s ${meal}`;
+  const when = new Date(utcDay(c.eaten_on));
+  if (ago > 1 && ago < 7) {
+    const weekday = when.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
+    return `${weekday}’s ${meal}`;
+  }
+  const date = `${when.getUTCDate()} ${when.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
+  return `${meal[0].toUpperCase()}${meal.slice(1)} on ${date}`;
+}
+
+/** "Oatmeal, Banana + 2 more" — enough to tell two candidates apart. */
+export function recentItemsSummary(items: { name: string }[]): string {
+  const names = items.map((i) => i.name.trim()).filter(Boolean);
+  if (names.length <= 2) return names.join(', ');
+  return `${names.slice(0, 2).join(', ')} + ${names.length - 2} more`;
+}
+
+/**
+ * Said when a reference matched nothing (N194). Plain, and it invents nothing:
+ * it repeats the athlete's own words and the window searched, and stops. No
+ * suggestion that they should have logged it — a missing log is not a lapse.
+ */
+export function recentNoneMessage(description: string, days: number): string {
+  const said = Array.from(description.trim());
+  const phrase = said.length > 60 ? `${said.slice(0, 60).join('').trim()}…` : said.join('');
+  return `Nothing in the last ${days} days matches “${phrase}”.`;
+}
+
+/** Said under a capped list, so the athlete knows how to narrow it. */
+export function recentMoreMessage(more: number): string {
+  return `${more} more ${more === 1 ? 'match' : 'matches'} not shown — name the meal or the food to narrow it down.`;
 }
