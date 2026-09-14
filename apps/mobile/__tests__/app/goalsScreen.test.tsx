@@ -152,8 +152,9 @@ const mockPushLevel = setActivityLevel as jest.MockedFunction<typeof setActivity
 
 /**
  * The focus effect is the subject, so it is driven by hand rather than mocked
- * away: `refocus()` runs every registered callback the way returning to a tab
- * does.
+ * away: `refocus()` runs every registered callback the way coming back to this
+ * screen does — from a screen it pushed, since Goals is a pushed stack screen
+ * (N504) rather than a tab.
  *
  * **An ARRAY, not one callback, and that is not tidiness.** The screen has two
  * focus effects now — the derivation, which the activity pills change, and the
@@ -313,7 +314,7 @@ beforeEach(() => {
   mockListWorkingCurricula.mockResolvedValue([]);
 });
 
-describe('the Goals tab refetches when it is focused again', () => {
+describe('the Goals screen refetches when it is focused again', () => {
   // The screen stays mounted underneath what it pushes (and, while it was a
   // tab, for the life of the process). Without a focus refetch the ladder keeps
   // describing the weight, training load and phase it read on arrival —
@@ -358,9 +359,9 @@ describe('the saved receipt', () => {
     await waitFor(() => expect(screen.queryByTestId('target-saved')).toBeNull());
   });
 
-  // The same rule through the other door: coming back to the tab re-asks, so
-  // whatever is on screen is unsaved again.
-  it('goes away when the tab is focused again', async () => {
+  // The same rule through the other door: coming back to the screen re-asks,
+  // so whatever is on screen is unsaved again.
+  it('goes away when the screen is focused again', async () => {
     await render(<GoalsScreen />);
     await fireEvent.press(await screen.findByTestId('target-accept'));
     expect(await screen.findByTestId('target-saved')).toBeTruthy();
@@ -1130,8 +1131,10 @@ describe('an assumed level is not shown as a chosen one', () => {
 });
 
 /**
- * N61 / #423 — the tab now reaches this screen with nutrition off, so the
- * screen has to say so.
+ * N61 / #423 — this screen is reachable with nutrition off, so it has to say
+ * so. N61 wrote that when Goals was a tab kept in the bar; N176 took it off the
+ * bar, and since N504 it is a pushed screen that Progress's Nutrition row still
+ * links to in every module state.
  *
  * The tab bar used to hide Food and Goals outright, which is the defect: 40% of
  * the primary navigation vanishing with nothing to say why. Restoring the tab

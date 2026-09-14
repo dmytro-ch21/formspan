@@ -738,14 +738,16 @@ export default function YouScreen() {
  * is not.
  *
  * Exists for exactly two callers — What you train and Phase — and the argument for
- * each is N61 and N181 respectively. Every module-gated surface in this app
- * disappears silently when its discipline is off: the belt roadmaps, the Plan
- * tab's curricula strip, BJJ in the session picker, and the Food and Goals
- * TABS. The destination screens explain themselves properly ("BJJ tracking is
- * off, turn it back on under What you train" — N471/#471 corrected this row's
- * own quoted copy, which had drifted to naming a "Sports" section that never
- * existed) — but nothing links to them while they are off, so the athlete
- * never reaches the screen that would say so.
+ * each is N61 and N181 respectively. N61's finding was that every module-gated
+ * surface disappeared silently when its discipline was off: the belt roadmaps,
+ * the Plan tab's curricula strip, BJJ in the session picker, and the Food and
+ * Goals TABS. (Those two have since changed: Food is in the bar in every module
+ * state since N180, and Goals is a pushed screen since N504, and both screens
+ * now say when nutrition is off.) The destination screens explain themselves
+ * properly ("BJJ tracking is off, turn it back on under What you train" —
+ * N471/#471 corrected this row's own quoted copy, which had drifted to naming a
+ * "Sports" section that never existed) — but nothing linked to them while they
+ * were off, so the athlete never reached the screen that would say so.
  *
  * W17/#737 then fixed this pill's OWN label and hint, which still said
  * "Sports" over a value listing every enabled module, nutrition included. The

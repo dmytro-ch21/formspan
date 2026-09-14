@@ -306,10 +306,11 @@ export function ScreenHeader({
    * N484 — an optional control BEFORE the title, inside the same measured
    * `titleWrap` the wordmark's fit arithmetic already reads `left` from.
    * The original caller was `library.tsx`'s own back button: that screen is
-   * pushed (not a tab), so unlike every other `ScreenHeader` caller it has no
-   * native header supplying one. F32 (#844) gave `phase/index.tsx` — the
-   * other pushed, no-native-header route — the same back button through
-   * this same prop, so there are now two consumers, both back buttons.
+   * pushed (not a tab), so unlike the tab screens it has no native header
+   * supplying one. F32 (#844) gave `phase/index.tsx` the same back button
+   * through this same prop. `goals.tsx` (a pushed screen since N504) and
+   * `day.tsx` are pushed, no-native-header routes too, so there are now
+   * four consumers, all back buttons.
    * Deliberately part of `titleWrap` rather than a sibling absolutely
    * positioned against `insets.top` — that was the first version of this
    * fix, and it overlaid the title text rather than making room for it,

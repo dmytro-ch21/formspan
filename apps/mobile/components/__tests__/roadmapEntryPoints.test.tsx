@@ -77,7 +77,7 @@ jest.mock('@/lib/useAuthToken', () => ({
 const mockUseCallback = useCallback;
 const mockUseEffect = useEffect;
 const mockUseRef = useRef;
-/** Fires the focus effect again, as returning to the tab would. */
+/** Fires the focus effect again, as coming back to Goals from a screen it pushed would. */
 let refocus: () => void = () => {};
 const mockHrefs: string[] = [];
 
