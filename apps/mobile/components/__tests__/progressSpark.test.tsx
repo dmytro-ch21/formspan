@@ -68,6 +68,7 @@ async function draw(checkins: Checkin[]) {
       unitsReady
       loaded
       onOpen={() => {}}
+      onRecordWeight={() => {}}
       testID="today-progress"
     />,
   );
@@ -212,7 +213,11 @@ test('two readings are enough for a line', async () => {
 // `react-native-svg` renders a `<Polyline>` as a host `RNSVGPath` — there is
 // no `RNSVGPolyline`. Asserted by type rather than by testID so an extra
 // stroke slipped in later has to be accounted for here.
-const polylines = () => findAllByType(screen.root, 'RNSVGPath');
+//
+// Scoped to the chart's own `Svg`, not the whole card: every `Icon` is an
+// `RNSVGPath` too, and W26's "Record weight" row draws a plus beside its
+// label. The claim here is about the LINE, so the count is taken inside it.
+const polylines = () => findAllByType(get('today-spark'), 'RNSVGPath');
 
 test('the line is drawn once crisp and twice as a glow, all on the same points', async () => {
   await draw(everyDay);

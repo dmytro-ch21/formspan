@@ -77710,6 +77710,48 @@ The last one first survived, because no test read the origin, so an assertion wa
 
 **Reachability on a phone**: this is the phone — the rest timer on the strength session screen.
 
+## 2026-09-14 — W26 (#1230): Today's Progress card gets its one-tap Record weight back
+
+**What was seen.** On 2026-09-14 the owner reported the weight check-in gone from Today. N108 (#487, PR #515, 2026-08-21) rebuilt Today from a reference image. It swapped `CheckinCard`, which had a one-tap **Check in** button, for `ProgressCard`, which reports weight, delta, phase and a 7-day line, and is one `Pressable` onto `/goals/trend`. Logging a weight became two taps, via **Record Weight** on the trend screen. The empty state still read "Weigh in for a few days and the trend appears here" and offered no way to do it.
+
+- The reference showed no check-in button, and the session read that as a decision to remove one. **A reference image not showing an action is not a decision to remove it.** The same PR kept the quick-add food chips on exactly that reasoning, and did not apply it here.
+
+### What changed
+
+- **`apps/mobile/components/today/ProgressCard.tsx`:** the card is now two sibling buttons inside one bordered view.
+  - The body (weight, delta, phase, line) is a `Pressable` onto the trend. Its label ("Progress. …") and `testID` are unchanged.
+  - Beneath it, a full-width **Record weight** row: a plus, the label "Record weight", the hint "Opens today's check-in", `testID` `today-progress-record`.
+  - **Siblings, not nested.** A `Pressable` is one accessibility element, so a button inside it is grouped away and VoiceOver cannot reach it.
+  - Rendered in all three states: `Checking…`, empty and populated. Recording today's weight does not depend on having read the old ones.
+  - `minHeight: TOUCH_MIN` at the card's full width, so it clears 44pt by its own size. No `hitSlop`, which would reach into the body's target.
+  - Press feedback is the card's existing pressed tint, with no duration. There is no motion in this change.
+  - Each button rounds its own outer corners. `overflow: 'hidden'` on the card would do the same, and would break the "nothing clips" guarantee the axis letters rely on.
+- **`apps/mobile/app/(tabs)/index.tsx`:** `onRecordWeight` pushes `` `/checkin/${dayString(new Date())}` ``, dated at tap time. This tab stays mounted, so the `today` prop can be yesterday's after midnight. `dayString`, not a UTC slice.
+- **How it is reachable on a phone:** it is the phone. Today, Record weight, today's check-in: one tap. Save returns to Today, whose focus refresh redraws the card.
+- **`progressSpark.test.tsx`** counts the line's paths inside the chart's own `Svg` now. The row's plus icon is an `RNSVGPath` too, and made the card-wide count 4.
+
+### Checks
+
+- **New `components/today/__tests__/progressCard.test.tsx`, 11 tests:**
+  - the action in each state, with each test also asserting the state it names;
+  - the two presses not reaching each other;
+  - exactly two buttons with distinct labels, and the action not inside the body;
+  - the 44pt floor.
+- **`todayScreen.test.tsx`, three new tests:**
+  - Record weight pushes `/checkin/<today>`, exactly once;
+  - the body still pushes `/goals/trend`, exactly once;
+  - with the clock at 23:30 on 14 September (00:30 east of UTC), the push is `/checkin/2026-09-14`. The test first asserts the UTC date really is another day, so it cannot pass without telling the two apart.
+- **Baseline green in the same session**, 103 tests across the three files. Then three mutations, each red as a test failure, restored from saved bytes (sha checked) and re-run green:
+  - **M1**, the action pointed at `/goals/trend`: "keeps today's weigh-in one tap from Today" and the local-day test failed, expected `/checkin/2026-09-14`, received `/goals/trend`.
+  - **M2**, the row rendered only when populated: 5 of 11 failed with "Unable to find an element with role: button, name: Record weight", in both `Checking…` states and the empty state. The populated test still passed.
+  - **M3**, a `toISOString().slice(0, 10)` date: the local-day test failed, received `/checkin/2026-09-15`.
+- `typecheck:mobile`, `check:lint-ratchet`, `check:rntl-awaits` and `check:unit-literals` pass.
+
+### Not done
+
+- **No device run.** One tap from Today opening today's check-in, and the card updating after a save, is the ticket's device-evidence criterion. VoiceOver's two stops and the row at the largest Dynamic Type size need a device too.
+- **The ticket's alternative, restoring `CheckinCard` in place, was not built.** The action went onto `ProgressCard` instead. Either is reversible.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

@@ -24655,3 +24655,38 @@ Typography only; nothing moves, animates or behaves differently. What an athlete
 
 - **Reachable, and covered** (`lib/__tests__/foodLog.test.ts`, "a pull that brings back a refused entry"): both cases above against real SQLite, starting from a real permanent rejection of an edit; two mutations, each red.
 - **NOT reachable:** producing a refused edit and then a backfill on a device.
+
+## W26 — Today's Progress card gets its one-tap Record weight back (`apps/mobile/components/today/ProgressCard.tsx`, `apps/mobile/app/(tabs)/index.tsx`, #1230)
+
+Today's Progress card now has two buttons. The body (weight, delta, phase, 7-day line) opens the weight trend, as before. A full-width **Record weight** row beneath it opens today's check-in in one tap.
+
+### Happy path
+
+- **Tap Record weight** on Today's Progress card: today's check-in opens (`/checkin/<today>`). No trend screen in between.
+- **Tap anywhere else on the card:** the weight trend (`/goals/trend`) opens, as before.
+- **Enter a weight, Save, and land back on Today:** the card shows the new reading, in the figure and on the 7-day line, without pulling to refresh.
+
+### Each card state
+
+- **Checking…** (a cold launch, or the unit preference still loading): Record weight is there and opens today's check-in.
+- **Empty** ("Weigh in for a few days and the trend appears here"): Record weight is there. This is how an athlete with no readings gets their first one in.
+- **Populated:** Record weight sits under the weight, delta, phase and line, the full width of the card.
+
+### Edge cases
+
+- **Already weighed in today:** Record weight opens today's check-in with the saved reading in it, to correct, not a blank second one.
+- **Late evening west of UTC** (23:30 in New York, say): it opens today's check-in, not tomorrow's.
+- **Today left open across midnight,** then Record weight tapped with no other interaction: the new day's check-in opens, not yesterday's.
+- **Offline:** Record weight still opens the check-in screen. What the check-in screen does offline is its own behaviour, unchanged here.
+- **A browsed day** (Today stepped back to yesterday with the day switcher): the Progress card, and Record weight, still mean today.
+
+### Accessibility
+
+- **VoiceOver, swiping through the card:** two stops. First "Progress, …" with the weight, direction and phase, then "Record weight, button" with the hint "Opens today's check-in". Neither stop is skipped, and the first does not also say "Record weight".
+- **Touch target:** the row is the card's full width and at least 44pt tall. A tap on it never opens the trend, and a tap on the body above never opens the check-in.
+
+### Needs a device
+
+- On a phone, one tap from Today opens today's check-in, and saving it updates the Today card on return.
+- VoiceOver reads the two buttons separately, with their own labels.
+- At the largest Dynamic Type size, "Record weight" is not clipped and the row grows rather than overlapping the body.

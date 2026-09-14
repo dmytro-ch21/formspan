@@ -910,6 +910,51 @@ describe('the six blocks', () => {
     expect(mockPush).toHaveBeenCalledWith(`/food/add?date=${todayKey()}`);
   });
 
+  // W26 (#1230): N108 rebuilt the Progress card as one button opening the
+  // trend, and a weigh-in became two taps via `/goals/trend`. The check-in is
+  // the daily action on this card, so it is one tap again.
+  it("keeps today's weigh-in one tap from Today", async () => {
+    await render(<TodayScreen />);
+    await fireEvent.press(await screen.findByTestId('today-progress-record'));
+    expect(mockPush).toHaveBeenCalledWith(`/checkin/${todayKey()}`);
+    // Exactly one push: a press that also reached the card body would push
+    // `/goals/trend` too, which is the nested-button failure in another form.
+    expect(mockPush).toHaveBeenCalledTimes(1);
+  });
+
+  it('still opens the weight trend from the rest of the Progress card', async () => {
+    await render(<TodayScreen />);
+    await fireEvent.press(await screen.findByTestId('today-progress'));
+    expect(mockPush).toHaveBeenCalledWith('/goals/trend');
+    expect(mockPush).toHaveBeenCalledTimes(1);
+  });
+
+  describe("the weigh-in is dated by the phone's own day, not UTC's", () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('opens the local day when UTC has already moved to another', async () => {
+      // A wall time on 14 September whose UTC date is NOT the 14th: late
+      // evening west of Greenwich, just after midnight east of it. The suite
+      // runs in America/Los_Angeles, but a direct `jest` run takes the host's
+      // zone, so the time is chosen from the offset rather than assumed.
+      const west = new Date(2026, 8, 14, 12).getTimezoneOffset() > 0;
+      jest.useFakeTimers({
+        now: new Date(2026, 8, 14, west ? 23 : 0, 30),
+        advanceTimers: true,
+      });
+      // Positive control: the two computations really disagree at this
+      // instant. In a UTC zone they cannot, and this says so rather than
+      // letting the assertion below pass without telling them apart.
+      expect(new Date().toISOString().slice(0, 10)).not.toBe('2026-09-14');
+
+      await render(<TodayScreen />);
+      await fireEvent.press(await screen.findByTestId('today-progress-record'));
+      expect(mockPush).toHaveBeenCalledWith('/checkin/2026-09-14');
+    });
+  });
+
   it('renders the daily-progress and this-week blocks', async () => {
     await render(<TodayScreen />);
     expect(await screen.findByTestId('today-momentum')).toBeTruthy();

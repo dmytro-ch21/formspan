@@ -2,8 +2,9 @@ import { Pressable, StyleSheet, View as RNView } from 'react-native';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import { Text } from '@/components/Themed';
+import { Icon } from '@/components/ui/Icon';
 import { vola } from '@/constants/Colors';
-import { Radius, Spacing } from '@/constants/Spacing';
+import { Radius, Spacing, TOUCH_MIN } from '@/constants/Spacing';
 import { Typography } from '@/constants/Typography';
 import { shiftDate, trendWeight, type Measured } from '@/lib/anthropometry';
 import { PHASE_LABELS, type Checkin, type Phase } from '@/lib/body';
@@ -39,6 +40,15 @@ import { formatWeight, weightUnitName, toDisplayWeight, type UnitSystem } from '
  * the smoothing prevents. So the figure is {@link trendWeight} today minus
  * {@link trendWeight} a week ago, and it is **absent rather than approximated**
  * when either end lacks the readings to smooth.
+ *
+ * ## Two buttons, not one (W26, #1230)
+ *
+ * The body opens `/goals/trend`; a "Record weight" row beneath it opens
+ * today's check-in. N108 rebuilt Today from a reference image with no
+ * check-in button and dropped the one-tap weigh-in, so a daily action took
+ * two taps through the trend screen. A reference that does not show an action
+ * is not a decision to remove it. The row is a sibling of the body, never
+ * nested in it — see the comment at the row.
  */
 export type ProgressCardProps = {
   checkins: Checkin[];
@@ -48,7 +58,14 @@ export type ProgressCardProps = {
   unitsReady: boolean;
   /** False until the check-in read settles. Absence is not zero. */
   loaded: boolean;
+  /** The card's body: opens the readable trend. */
   onOpen: () => void;
+  /**
+   * The "Record weight" row: opens today's check-in. Offered in every state,
+   * including `Checking…` — logging a weight does not depend on having read
+   * the old ones.
+   */
+  onRecordWeight: () => void;
   testID?: string;
 };
 
@@ -69,11 +86,13 @@ const SPARK_AXIS_H = 17;
  *
  * Each box is centred on its slot (`left: x - SPARK_SLOT / 2`), so the outer
  * two reach 2pt past the nominal 132pt width at each end. Nothing clips — no
- * ancestor sets `overflow: 'hidden'`, and the card has 14pt of padding and a
- * 12pt column gap for it to sit in — but a future change to `SPARK_INSET` or
- * `SPARK_W` has to be made against the step above, not against this constant.
+ * ancestor sets `overflow: 'hidden'`, and the card's body has 14pt of padding
+ * and a 12pt column gap for it to sit in — but a future change to `SPARK_INSET`
+ * or `SPARK_W` has to be made against the step above, not against this constant.
  */
 const SPARK_SLOT = 18;
+/** The Record weight row's plus. 14, the size MomentumCard's link rows use for their glyphs. */
+const RECORD_ICON = 14;
 
 export function ProgressCard({
   checkins,
@@ -83,6 +102,7 @@ export function ProgressCard({
   unitsReady,
   loaded,
   onOpen,
+  onRecordWeight,
   testID,
 }: ProgressCardProps) {
   const now = trendWeight(checkins, today);
@@ -92,60 +112,90 @@ export function ProgressCard({
   const ready = loaded && unitsReady;
 
   return (
-    <Pressable
-      onPress={onOpen}
-      accessibilityRole="button"
-      accessibilityLabel={progressLabel(now, delta, phase, units, ready)}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-      testID={testID}
-    >
-      <RNView style={styles.left}>
-        <Text style={styles.eyebrow}>PROGRESS</Text>
+    <RNView style={styles.card}>
+      <Pressable
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={progressLabel(now, delta, phase, units, ready)}
+        style={({ pressed }) => [styles.body, pressed && styles.pressed]}
+        testID={testID}
+      >
+        <RNView style={styles.left}>
+          <Text style={styles.eyebrow}>PROGRESS</Text>
 
-        {!ready ? (
-          <Text style={styles.absent}>Checking…</Text>
-        ) : now == null ? (
-          // Not a zero and not a dash pretending to be a number. Three
-          // readings inside a week is what a trend needs; saying so is more
-          // use than an em dash.
-          <Text style={styles.absent} testID="progress-empty">
-            Weigh in for a few days and the trend appears here
-          </Text>
-        ) : (
-          <>
-            <Text style={styles.weight}>{formatWeight(now, units)}</Text>
-            {delta == null ? (
-              <Text style={styles.deltaAbsent}>Not enough readings to compare</Text>
-            ) : (
-              <RNView style={styles.deltaRow}>
-                {/*
-                  A TEXT arrow, not an icon, and that is the fix rather than a
-                  style choice. The icon set has `chevron-down` and no
-                  `chevron-up`, so a weight GAIN was rendering with the
-                  right-pointing disclosure chevron — direction-free, and read
-                  as a navigation affordance — while a loss got a real
-                  down-arrow. The direction of a measured number existed only
-                  in the accessibility label, for exactly one of the two
-                  directions.
+          {!ready ? (
+            <Text style={styles.absent}>Checking…</Text>
+          ) : now == null ? (
+            // Not a zero and not a dash pretending to be a number. Three
+            // readings inside a week is what a trend needs; saying so is more
+            // use than an em dash.
+            <Text style={styles.absent} testID="progress-empty">
+              Weigh in for a few days and the trend appears here
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.weight}>{formatWeight(now, units)}</Text>
+              {delta == null ? (
+                <Text style={styles.deltaAbsent}>Not enough readings to compare</Text>
+              ) : (
+                <RNView style={styles.deltaRow}>
+                  {/*
+                    A TEXT arrow, not an icon, and that is the fix rather than a
+                    style choice. The icon set has `chevron-down` and no
+                    `chevron-up`, so a weight GAIN was rendering with the
+                    right-pointing disclosure chevron — direction-free, and read
+                    as a navigation affordance — while a loss got a real
+                    down-arrow. The direction of a measured number existed only
+                    in the accessibility label, for exactly one of the two
+                    directions.
 
-                  Deliberately uncoloured: up is not failure and down is not
-                  success, and which one an athlete wants depends on the phase
-                  sitting directly underneath this line.
-                */}
-                <Text style={styles.deltaArrow}>{delta < 0 ? '↓' : '↑'}</Text>
-                <Text style={styles.delta}>
-                  {formatWeight(Math.abs(delta), units)} this week
-                </Text>
-              </RNView>
-            )}
-          </>
-        )}
+                    Deliberately uncoloured: up is not failure and down is not
+                    success, and which one an athlete wants depends on the phase
+                    sitting directly underneath this line.
+                  */}
+                  <Text style={styles.deltaArrow}>{delta < 0 ? '↓' : '↑'}</Text>
+                  <Text style={styles.delta}>
+                    {formatWeight(Math.abs(delta), units)} this week
+                  </Text>
+                </RNView>
+              )}
+            </>
+          )}
 
-        {phase ? <PhasePill phase={phase} checkins={checkins} today={today} ready={ready} /> : null}
-      </RNView>
+          {phase ? (
+            <PhasePill phase={phase} checkins={checkins} today={today} ready={ready} />
+          ) : null}
+        </RNView>
 
-      <Spark checkins={checkins} today={today} ready={ready} />
-    </Pressable>
+        <Spark checkins={checkins} today={today} ready={ready} />
+      </Pressable>
+
+      {/*
+        W26 (#1230): the weigh-in, one tap from Today. N108 rebuilt this card
+        as a single button onto the trend, and a daily action became two taps
+        through another screen.
+
+        A SIBLING of the body, never a child of it. A Pressable is one
+        accessibility element, so a button nested inside it is grouped away:
+        VoiceOver reads the outer label and the inner control cannot be
+        focused. Side by side, they are two buttons with two labels.
+
+        Rendered in every state, `Checking…` included: recording today's
+        weight does not depend on having read the old ones, and the empty
+        state's own copy tells the athlete to weigh in.
+      */}
+      <Pressable
+        onPress={onRecordWeight}
+        accessibilityRole="button"
+        accessibilityLabel="Record weight"
+        accessibilityHint="Opens today's check-in"
+        style={({ pressed }) => [styles.record, pressed && styles.pressed]}
+        testID={testID ? `${testID}-record` : undefined}
+      >
+        <Icon name="plus" size={RECORD_ICON} color={vola.lime} />
+        <Text style={styles.recordLabel}>Record weight</Text>
+      </Pressable>
+    </RNView>
   );
 }
 
@@ -435,18 +485,43 @@ function progressLabel(
 }
 
 const styles = StyleSheet.create({
+  // The visual card. Not pressable itself: it holds the two buttons.
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
     backgroundColor: vola.surface,
     borderWidth: 1,
     borderColor: vola.line,
     borderRadius: Radius.card,
+  },
+  // Each button rounds its own outer corners to the card's radius, so a
+  // press tint follows the card's shape. `overflow: 'hidden'` on the card
+  // would do the same, and would break the "nothing clips" guarantee
+  // SPARK_SLOT's comment gives the axis letters.
+  body: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
     paddingHorizontal: Spacing.cardPadding,
     paddingVertical: Spacing.cardPadding,
+    borderTopLeftRadius: Radius.card,
+    borderTopRightRadius: Radius.card,
   },
   pressed: { backgroundColor: vola.surfaceHover },
+  // Full card width and at least TOUCH_MIN tall, so it clears the 44pt floor
+  // by its own size. No hitSlop, which would reach up into the body's target.
+  record: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xsPlus,
+    minHeight: TOUCH_MIN,
+    paddingHorizontal: Spacing.cardPadding,
+    borderTopWidth: 1,
+    borderTopColor: vola.line,
+    borderBottomLeftRadius: Radius.card,
+    borderBottomRightRadius: Radius.card,
+  },
+  // `vola.lime`, as elsewhere on this card (the phase pill, the trend line).
+  recordLabel: { ...Typography.emphasis, color: vola.lime },
   left: { flex: 1, gap: 3 },
   eyebrow: { ...Typography.eyebrow, color: vola.textMuted },
   // 32, not `display`: the card's one hero figure, with its own tight leading.
