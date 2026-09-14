@@ -1370,7 +1370,10 @@ export default function TodayScreen() {
                 the one block on this screen that ASKS rather than reports —
                 the check-in is a daily action. The trend it draws is the
                 three-second version; the readable, exportable one is
-                `/goals/trend`, which this card opens. */}
+                `/goals/trend`, which the card's body opens. Its "Record
+                weight" row opens today's check-in in one tap — N108 rebuilt
+                this card without it, and that was the daily action (W26,
+                #1230). */}
             <ProgressCard
               checkins={checkins}
               phase={phase}
@@ -1379,6 +1382,13 @@ export default function TodayScreen() {
               loaded={checkinsLoaded}
               unitsReady={unitsReady}
               onOpen={() => router.push('/goals/trend')}
+              // Dated at TAP time, not from the `today` prop above: this tab
+              // stays mounted, so a card rendered before midnight and tapped
+              // after it would otherwise file the weigh-in under yesterday.
+              // `dayString`, never `toISOString().slice(0, 10)` — that is the
+              // UTC day, and west of Greenwich an evening weigh-in would open
+              // tomorrow's check-in.
+              onRecordWeight={() => router.push(`/checkin/${dayString(new Date())}`)}
               testID="today-progress"
             />
           </View>
