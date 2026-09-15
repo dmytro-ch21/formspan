@@ -420,6 +420,9 @@ func (f *suggestionsFakeRepo) SetPinnedExercises(context.Context, string, []stri
 func (f *suggestionsFakeRepo) MostTrainedExercises(context.Context, string, int) ([]string, error) {
 	panic("not used by Suggestions")
 }
+func (f *suggestionsFakeRepo) GetDetail(context.Context, string, string, string) (*Session, *Bodyweight, error) {
+	panic("not used by Suggestions")
+}
 func (f *suggestionsFakeRepo) Get(context.Context, string, string) (*Session, error) {
 	panic("not used by Suggestions")
 }

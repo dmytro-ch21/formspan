@@ -742,17 +742,52 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
-	s, err := h.repo.Get(r.Context(), claims.UserID, r.PathValue("sessionID"))
+
+	// `tz` decides which calendar day the session started on, and so which
+	// check-in counts as "on or before" it (N453). The contract is History's:
+	// an IANA name, UTC when absent, 400 when unusable.
+	tz := r.URL.Query().Get("tz")
+	if tz == "" {
+		tz = "UTC"
+	}
+	if _, ok := parseZone(tz); !ok {
+		apihttp.WriteError(w, http.StatusBadRequest, apihttp.CodeInvalidInput,
+			"tz must be an IANA timezone name, e.g. Europe/Berlin")
+		return
+	}
+
+	s, bw, err := h.repo.GetDetail(r.Context(), claims.UserID, r.PathValue("sessionID"), tz)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	// The volume summary travels with the session so both clients report
-	// identical numbers rather than each rolling their own arithmetic.
-	apihttp.WriteJSON(w, http.StatusOK, map[string]any{
-		"session": s,
-		"volume":  Summarise(s.Sets),
-	})
+
+	// The bodyweight sits BESIDE the session, as `volume` does, and is never
+	// written into a set.
+	//
+	// Beside rather than inside, because every write endpoint also returns a
+	// `session` and none of them derives this. A `bodyweight_kg: null` on those
+	// responses would claim "no check-in" about a session nobody looked up.
+	// Never folded into `weight_kg`, because `Summarise` below reads that for
+	// tonnage: bodyweight is DISPLAY ONLY until the open decision on tonnage,
+	// 1RM and records is taken.
+	//
+	// Both keys are always present. Null is "no weigh-in on or before that
+	// day", and a client must be able to tell that from an older server that
+	// never sent the field.
+	resp := map[string]any{
+		// The volume summary travels with the session so both clients report
+		// identical numbers rather than each rolling their own arithmetic.
+		"session":                s,
+		"volume":                 Summarise(s.Sets),
+		"bodyweight_kg":          nil,
+		"bodyweight_measured_on": nil,
+	}
+	if bw != nil {
+		resp["bodyweight_kg"] = bw.WeightKg
+		resp["bodyweight_measured_on"] = bw.MeasuredOn
+	}
+	apihttp.WriteJSON(w, http.StatusOK, resp)
 }
 
 type createRequest struct {

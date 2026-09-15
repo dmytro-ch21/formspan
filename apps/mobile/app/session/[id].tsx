@@ -16,6 +16,7 @@ import { useCountdown } from '@/components/Countdown';
 import { TimerSurface, timerSpaceFor } from '@/components/Timer';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { HRSessionReport } from '@/components/HRSessionReport';
+import { SessionBodyweight } from '@/components/SessionBodyweight';
 import { SessionCelebration } from '@/components/SessionCelebration';
 import { ShareCardHost, ShareSessionButton, useSessionShare } from '@/components/SessionShare';
 import { getSessionMetrics, listExerciseHR, type ExerciseHR, type SessionMetrics } from '@/lib/biometric';
@@ -1754,6 +1755,18 @@ export default function SessionScreen() {
             )}
           </StatRow>
         )}
+
+        {/* N453 (#756): what the athlete weighed, on a FINISHED session with
+            reps-only sets. It renders nothing unless `finished`, so it never
+            touches the live logging path. Its fetch and copy live in the
+            component, so this screen carries only the element. */}
+        <SessionBodyweight
+          sessionID={session.id}
+          startedAt={session.started_at}
+          finished={finished}
+          sets={sets}
+          catalog={catalog}
+        />
 
         {/* N495/#865 (phase 3 of #753) — the advisory fatigue prompt.
             NEVER a modal: it renders inline, in the normal scroll flow, so

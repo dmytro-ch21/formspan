@@ -78539,6 +78539,78 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **A member that stays unpublished for a day fails the check**, as before H39. It sits at `now`, not beside its batch.
 - **One threshold for every release.** If Expo's lags grow past 60 min, the hour comes back, loudly. Re-measure then.
 
+## 2026-09-15 — N453 (#756): a finished session shows the bodyweight its reps-only sets were done at
+
+**The gap.** A reps-only exercise (pull-ups, dips, push-ups) logs reps and no weight. So ten pull-ups at 68 kg and ten at 136 kg were recorded identically. The athlete's words: *"if i weight 300 lbs and do 10 pull ups is a big difference between doing 10 when your 150."* `body_checkins` already held the weight, but nothing connected it to a session.
+
+**What shipped.**
+
+- **The API.** `GET /v1/sessions/{sessionID}` now returns `bodyweight_kg` and `bodyweight_measured_on` beside `session` and `volume`. The value is the owner's most recent check-in with a recorded weight, on or before the calendar day the session started. The endpoint takes an optional `tz`: UTC when absent, 400 when unusable, the same contract as `GET /v1/sessions/history`.
+- **The phone.** A finished session with at least one completed reps-only set shows "Bodyweight 82.4kg, from your 12 Sep check-in" in the athlete's unit. Under it: "Bodyweight exercises: Pull-up, Dip". The component is `apps/mobile/components/SessionBodyweight.tsx`, and the logic and fetch are in `lib/sessionBodyweight.ts`.
+- **One rule, written once.** `body.SQLLatestWeightOnOrBefore` is now the only definition of "latest weigh-in on or before a day". sessioncard's calorie estimate and nutrition's target inputs each carried a hand-typed copy. Both now embed the fragment, and their packages pass unchanged (384 tests, 0 skips).
+
+### Decisions (made by the coordinator, reversible)
+
+1. **Derive at read time; store nothing.** There is no column and no migration.
+   - A check-in backfilled later for that day shows on the next read, and the body-hash ETag (`apihttp/conditional.go`) changes with it.
+   - An offline-logged session needs no sync change.
+   - `weight_kg` is NOT reused. Tonnage, estimated 1RM and records all read it, so filling it would silently change every figure for every reps-only set ever logged.
+2. **On the wire.** Two nullable fields on the detail response, read in ONE statement (`GetDetail`'s `LEFT JOIN LATERAL`), never a per-session lookup.
+3. **Display only, for now.** The value feeds no tonnage, no 1RM and no record. That is the open decision below. Nothing was filed; the coordinator files it.
+4. **Display.** The weight is shown in the athlete's unit, always with the check-in's date. With no check-in on or before the day, the screen is exactly what it was: reps, and no load figure. It never shows a number the server did not send, never a later check-in, and never a profile default.
+5. **Authorization.** Only the session owner's check-ins are read. The fragment is bound to `s.user_id`, and the session row to `s.user_id = $2`. A test puts another athlete's check-in on the session's very day and asserts it never appears. The same test asserts that athlete gets `ErrNotFound` for the session.
+6. **Nothing new to type.** No new input and no new required field.
+
+### Decisions made inside those, and why
+
+- **The day is `started_at` in the caller's zone, not the UTC date of `ended_at` that sessioncard uses.** A 19:00 session in Los Angeles is 02:00 UTC the next day. The UTC date would pick up the following morning's weigh-in, a LATER reading and exactly what decision 4 forbids. The local start day is also the day History files the session under. The phone sends `localZone()`.
+- **Beside `session`, not inside it.** Every write endpoint also returns a `session`, and none of them derives this. A `bodyweight_kg: null` there would claim "no check-in" about a session nobody looked up. `volume` already sits beside `session` for the same reason.
+- **Both keys are always present.**
+  - Null means no weigh-in on or before that day.
+  - An absent key means a server from before N453.
+  - The phone treats both as absent, and treats a half answer (a weight with no date) as absent too.
+- **"Bodyweight exercise" means `load_type: 'reps'`.** On the seed catalog there are 132 reps-only exercises, and every one moves the athlete's body:
+  - 94 bodyweight, and 6 bodyweight on a stability ball;
+  - 19 suspension trainer;
+  - 8 specialty (rings, ab wheel, rope climb, captain's chair);
+  - 3 plyo box, 1 floor space, and 1 band-assisted pull-up.
+- **Not on `GET /v1/sessions`, the list.** Neither client shows it there. A per-session value in a list also needs a different shape from two top-level keys. Adding it later is one more LATERAL in `List`, and the fragment already fits.
+- **Where it shows on the phone.** A finished strength session is reviewed on `app/session/[id].tsx`, which is also the live logging screen. There is no other per-exercise review surface on the phone: the celebration shows once, at finish, and the share card is an image.
+  - So that screen gains one import and one element, placed after the summary tiles.
+  - The component renders nothing unless the session is finished, so the set-logging path gets no fetch and no layout.
+  - N195 (#612) and N207 (#661) work in that file. Neither insertion is in their areas.
+- **Online only, and silent offline.** A finished session is read from the phone's own store, and that store does not carry this value. Offline, the line does not appear, which looks the same as "no check-in". It never says "no check-in", because offline it cannot tell. The session card's calorie figure takes the same stance.
+- **Not on web yet.** Mobile-first means the phone had to have it. The web session page reads the same response and can show it later.
+
+**How it is reachable on a phone:** finish a session that has a completed reps-only set, or open a finished one (from `/session/history`, for example). The line sits under the Time / Sets / Reps / Volume tiles.
+
+### Verification
+
+- **Backend: 11 new tests.**
+  - 6 are Postgres-backed, in `session/bodyweight_postgres_test.go`: latest on or before the day, a later check-in ignored, none is nil, girths-only is not a weigh-in, cross-user isolation, the zone, and no effect on sets, volume or History tonnage.
+  - 5 are handler tests, in `bodyweight_handler_test.go`.
+  - `test:api:all` ran against this branch's own freshly migrated database.
+- **Mobile: 25 new tests.** 17 pure-logic tests in `lib/__tests__/sessionBodyweight.test.ts`, and 8 component tests in `components/__tests__/sessionBodyweight.test.tsx`.
+- **Contract: 1 new spec test, and what that validator can and cannot see.**
+  - `internal/contract`'s `TestSessionGet_MatchesSpec` now reads through `GetDetail`, and `TestSessionGet_WithBodyweight_MatchesSpec` adds the non-null shape.
+  - That validator checks only that the keys a schema's `required` list names are present, resolving `allOf` to get the list. By its own doc comment it does not check types, formats or nulls.
+  - Measured, not assumed. Typing `bodyweight_measured_on` as an integer in the spec SURVIVED, and so did dropping `nullable` from `bodyweight_kg`. Removing the key from the handler's response went RED: `$.bodyweight_measured_on: required by contracts/public.openapi.yaml but missing from the response`.
+  - So the spec's field TYPES rest on `pnpm run lint:openapi` and on the handler tests, not on the contract test.
+- **Every guard was mutation-checked.** Each red was an assertion failure against a green baseline, and each restore was confirmed by re-running green.
+  - **13 backend mutations.** The fragment's `IS NOT NULL`, its `<=` (removed, and turned into `<`), its `DESC`, and its `user_id`. `GetDetail`'s zone, its owner scoping, and a write into sets. The handler's fold into sets, its UTC default, its zone validation, its explicit null, and its owner id.
+  - **11 mobile mutations.** Parsing a zero weight and a malformed date, completed-only, reps-only, the stored-date label, units, the `tz` query, the finished gate, an invented reading offline, a stale answer from another session, and the unit-preference wait.
+  - The full table is in the PR.
+
+### Open decisions and gaps
+
+- **Should bodyweight feed tonnage, estimated 1RM or records?** Open, deliberately.
+  - If it does, it changes history for every reps-only set, so it needs its own ticket.
+  - For an assisted exercise, such as a band-assisted pull-up, bodyweight is an upper bound on the load, not the load.
+- **sessioncard's calorie estimate still uses the UTC date of `ended_at`.** A session that crosses UTC midnight can have its calories priced at a later check-in than the one this line shows. Both use the same fragment in a different frame. Not changed here.
+- **Neither the session list nor the web session page shows it.**
+- **The line is session-level, not per exercise.** The rows still read "10 reps". Putting a figure on each row would touch the logging screen's row rendering, which N195 and N207 are working in.
+- **Device evidence is outstanding** for the ticket's NEEDS HUMAN EVIDENCE criterion. It is device check D32.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
