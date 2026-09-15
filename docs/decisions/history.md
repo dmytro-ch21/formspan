@@ -78609,7 +78609,7 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **sessioncard's calorie estimate still uses the UTC date of `ended_at`.** A session that crosses UTC midnight can have its calories priced at a later check-in than the one this line shows. Both use the same fragment in a different frame. Not changed here.
 - **Neither the session list nor the web session page shows it.**
 - **The line is session-level, not per exercise.** The rows still read "10 reps". Putting a figure on each row would touch the logging screen's row rendering, which N195 and N207 are working in.
-- **Device evidence is outstanding** for the ticket's NEEDS HUMAN EVIDENCE criterion. It is device check D32.
+- **Device evidence is outstanding** for the ticket's NEEDS HUMAN EVIDENCE criterion. It is device check D33.
 
 ## Open items / known gaps as of this entry
 

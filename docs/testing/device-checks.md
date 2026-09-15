@@ -920,7 +920,7 @@ returning from another app are all device behaviour.
 and `settingsHealthConnectRefusal.test.tsx` cover every decision downstream of
 the native answer; this check covers the answer itself.
 
-### D32 — Bodyweight on a finished bodyweight session (N453)
+### D33 — Bodyweight on a finished bodyweight session (N453)
 
 **Do:** Record a check-in with a weight, today or on an earlier day. Start a session, log two sets of Pull-up (reps only), and finish it. Read the area under the Time / Sets / Reps / Volume tiles. Switch units in Settings and reopen the session. Then open two more finished bodyweight sessions: one from before your first-ever check-in, and one with airplane mode on.
 
