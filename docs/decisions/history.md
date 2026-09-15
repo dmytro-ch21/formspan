@@ -78273,6 +78273,44 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **Device evidence, the ticket's NEEDS HUMAN EVIDENCE criterion.** From a killed app, open a deep link to a pushed screen, press back, and land on Today. The JS router cannot show real font loading, real icon rasterising, or what the native bar selects under the pushed screen.
 - **F68's entry above records this gap as not fixed.** This entry supersedes that bullet.
 
+## 2026-09-15 — F69 (#1238): at the AI allowance cap, "the same as yesterday" can still be sent
+
+**The bug.** N194 answers a plain pointer to the log ("the same as yesterday") above the estimate quota gate, so it costs nothing and still works at the cap. N114's saved-food reuse sits above the gate too. The describe screen never let either request out. Once a response had reported `remaining: 0`, F17's `quotaExhausted` disabled **Work it out**, so an athlete at the cap who typed "the same as yesterday" saw the same blocked state as for a new meal. N194's own entry recorded this as open.
+
+**The constraint: the server decides what was free.** The phone does not look at the words. Recognising a pointer on the phone would be a second copy of `RecognizeReference`, and two rules for "was this free" can disagree. So nothing about the allowance is inferred on the phone.
+
+### What changed (`apps/mobile/app/food/describe.tsx`)
+
+- **Work it out is no longer gated on the quota.** At the cap it stays enabled and the request goes out. Whatever the server answers is handled by the paths that already existed:
+  - **A 200** (a phrase pointer or a saved food) is `receive`d like any other draft. Yesterday's entries arrive as drafts with "No estimate used.", and the counter still reads 0 left because the server only read the quota.
+  - **A 429 `rate_limited`** (`CheckQuota`'s `ErrQuotaExhausted` arm in `estimate_handler.go`) lands in `estimateErrorMessage`, which shows the server's own message with its own wait. No draft is made for that description. A draft already on screen from an earlier, paid estimate is left alone, as it is for every other error.
+- **No special 429 branch, on purpose.** `ratelimit/middleware.go` also answers `429 rate_limited` on every authenticated route, and its body "never names which limit was hit" (`api-conventions.md`). So the code cannot tell the allowance from the request-rate limit, and a phone-written "that needs an estimate" could be false. The server's message is true for whichever limit fired.
+- **Still gated at the cap:** the photo buttons, "estimate it again" (`reuse: false`) and "estimate it as a new meal" (`recent: false`). Each switches off the free path it names, so the server could only refuse it. `describe()`'s own guard keeps refusing those two at the cap as the backstop.
+- **The cap line gained one sentence.** Under F17's "You've used all 25 estimates for today. More at …" it now says a saved food, or a meal already logged such as "the same as yesterday", doesn't use one. Without it, an enabled button beside "used all" reads as a bug. The sentence states what the server does and decides nothing.
+- **Offline at the cap:** a dead request is a `TransportError`, so the error names the connection ("Can't reach VOLA."), never the cap. The cap line above it is the last count the server reported, not a claim about this request. The free path still needs the network: the log is read on the server, as in N194.
+
+### Checks
+
+- **`describeQuota.test.tsx`, reworked.** F17's two tests asserting a disabled Work it out at the cap now assert the reverse. Three cases were added, mocked at `describeMeal` with the handler's real shapes (`Estimate`, `RecentLogMatch`, `Quota` JSON tags; `ApiError` built exactly as `apiRequest` builds it):
+  1. At the cap, "the same as yesterday" is sent and a free 200 renders yesterday's drafts. The counter still reads 0, and "Estimate it as a new meal" stays disabled.
+  2. At the cap, a new meal gets a 429 `rate_limited`: the server's message shows and no draft is made.
+  3. Offline at the cap, the error is the transport diagnosis.
+  - 10 of 10 pass. All 7 describe suites: 74 of 74.
+- **Server side needs no change; it is already pinned.** `TestAPlainPointerIsAnsweredEvenAtTheCap` (`recent_handler_test.go`) covers the free answer at the cap. `TestTheQuotaIsCheckedBEFORETheModelIsCalled` (`estimate_handler_test.go`) covers the 429, and `TestAnOutageAndAnExhaustedAllowanceAreDistinguishableByCode` (`estimate_outage_test.go`) covers `rate_limited`.
+- **Mutations: 5 of 5 went red as assertion failures.** The baseline was green in the same session. Every anchor matched exactly once, every restore was byte-identical by sha256, and the restored tree was re-run green.
+  - M1, the disable-at-cap restored (prop, a11y state, guard): case 1 failed, plus three others.
+  - M1b, only the guard restored: case 1 failed (0 calls).
+  - M2, any response at the cap treated as refused: case 1 failed.
+  - M3, an estimate rendered on the 429: case 2 failed.
+  - M4, the cap message shown for a transport failure: case 3 failed, and case 2 too.
+- `typecheck:mobile`, `lint:mobile` plus `check:lint-ratchet` (mobile budgets unchanged), `check:rntl-awaits` and `check:unit-literals` all passed. No motion was added.
+
+### Not done
+
+- **Device evidence is owed** (`NEEDS HUMAN EVIDENCE` on #1238). With the allowance spent, type "the same as yesterday" and see yesterday's entries offered as drafts.
+- **On a fresh screen the phone does not know the cap** until a response reports it, so the cap line cannot show before the first request. That is unchanged from F17.
+- **A refusal at a known cap shows two lines that say nearly the same thing:** the cap line (a clock time) and the server's message (a relative wait). It was left that way rather than inventing phone copy for a 429 whose cause the code cannot name.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
