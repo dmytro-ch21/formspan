@@ -78311,6 +78311,55 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **On a fresh screen the phone does not know the cap** until a response reports it, so the cap line cannot show before the first request. That is unchanged from F17.
 - **A refusal at a known cap shows two lines that say nearly the same thing:** the cap line (a clock time) and the server's message (a relative wait). It was left that way rather than inventing phone copy for a 429 whose cause the code cannot name.
 
+## 2026-09-15 — H38 (#1243): check:expo-compat tolerates a version Expo asks for but npm never published
+
+**What broke.** `expo install --check` asked for `expo-image-manipulator@~57.0.18` with 57.0.17 installed, and npm had no 57.0.18. `resolve_target` could not resolve the range, so it returned no publish time. `classify` then called it "registry reports no publish time; treated as installable". `check:expo-compat` exited 1 in `verify` and in CI's Mobile job, for a bump `expo install --fix` could not make. The rest of the day's drift was correctly tolerated: `expo` 57.0.23 and five more, published 15:56–16:03Z, inside the 24h window.
+
+**Measured with npm 10.9.2, `npm view <name>@<range> version --json`:**
+- **Unpublished range**, 16:52:18Z: exit 1, stdout `{"error":{"code":"E404","summary":"No match found for version ~57.0.18",…}}`.
+- **Whole package missing**: exit 1, also `E404`, summary `Not Found - GET https://registry.npmjs.org/<name> - Not found`.
+- **Registry on a closed port** (`--registry http://127.0.0.1:9`, and the same with `npm_config_registry`): exit 1 after ~70s of retries, stdout `{"error":{"code":"ECONNREFUSED","summary":"FetchError: request to http://127.0.0.1:9/expo-image-manipulator failed, reason: connect ECONNREFUSED 127.0.0.1:9",…}}`. 70s is past the script's 60s bound, so on the real path this case fails as a timeout.
+- Both failures exit 1. Only the stdout object tells them apart.
+
+**The rule: only a definite "no such version" is tolerated.** `Target` gains a `resolution`: `RESOLVED`, `UNPUBLISHED` or `UNRESOLVED`.
+- `is_unpublished_range` is pure. It is true only for a non-zero exit whose stdout JSON has `code` `E404` and a `summary` of exactly `No match found for version <the range asked about>`.
+- Everything else is `UNRESOLVED` and keeps the old path and message: a whole-package 404, `ECONNREFUSED` or any other code, empty or non-JSON output, a timeout.
+- A resolved version with no readable publish time is unchanged: installable.
+- `classify` stays pure. Unpublished targets are listed as `<name>@<range> (have X) — unpublished: no version satisfies <range> on the registry yet, nothing to install`. The check passes only if every other target is inside the window. One installable-now target still fails it.
+- `VOLA_MINIMUM_RELEASE_AGE_MINUTES=0` turns off only the release-age tolerance. An unpublished-only drift still passes, because a version that does not exist cannot be installed with the guard off either.
+- The script's docstring carries the new case.
+
+### Checks
+
+- **`--self-test`, 17 groups (was 10).** New groups:
+  - unpublished only: tolerated;
+  - unpublished plus inside the window: tolerated;
+  - unpublished plus installable now: fails;
+  - network error: `UNRESOLVED`, fails with the existing message;
+  - resolved without a time: still installable;
+  - window 0 with an unpublished target;
+  - the parser against npm's output captured verbatim (E404 no-match, whole-package 404, `ECONNREFUSED`), plus one synthetic E500, labelled as such.
+- **Mutations.** The baseline was green first. Every restore was sha256-identical, and the suite was green after.
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | Unpublished treated as installable again | Killed, 7 assertions |
+| M2 | Any resolution failure treated as unpublished | Killed, 4 assertions, all on the `ECONNREFUSED` fixture |
+| M3 | Parser accepts a non-E404 code | Killed, 1 assertion. Only the synthetic E500 fixture reaches this guard. |
+| M3b | Parser accepts any E404 | Killed, 2 assertions: the whole-package 404, and a no-match for a different range |
+
+- **Live probe of `resolve_target`:**
+  - `expo-image-manipulator@~57.0.99`: `UNPUBLISHED`.
+  - `~57.0.18`: `RESOLVED` 57.0.18.
+  - A closed-port registry with `npm_config_fetch_retries=0`: `UNRESOLVED` in 0.2s.
+- `check:python` passes.
+
+**The real run could not reproduce the bug.** `expo-image-manipulator@57.0.18` was published at 16:52:20Z, two seconds after the 404 was measured. `pnpm run check:expo-compat` on this branch exits 0 with the WARNING and names seven packages inside the window, `expo-image-manipulator@57.0.18` among them (installable after 2026-09-16T16:52:20Z). The unpublished path is proven by the fixtures and the live `~57.0.99` probe, not by that run.
+
+### Not done
+
+- **Tomorrow's real drift.** A separate ticket. The check goes red at 15:56:18Z on 2026-09-16, when `expo-task-manager@57.0.18` leaves the window, because one installable target fails it. The whole bump (`expo install --fix`, the H17 `minimumReleaseAgeExclude` check, a native rebuild) only becomes installable at 16:52:20Z. Between the two the check is red and the full bump is still refused, which is H15's existing any-installable rule, not this change.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
