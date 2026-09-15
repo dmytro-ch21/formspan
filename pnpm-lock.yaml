@@ -11,8 +11,8 @@ importers:
   .:
     devDependencies:
       '@redocly/cli':
-        specifier: ^2.51.2
-        version: 2.51.2
+        specifier: ^2.52.0
+        version: 2.52.0
       sharp:
         specifier: 0.35.4
         version: 0.35.4(@types/node@22.20.1)
@@ -1964,8 +1964,8 @@ packages:
       '@types/react':
         optional: true
 
-  '@redocly/cli@2.51.2':
-    resolution: {integrity: sha512-pviW1gfsjCAuIVutmQcihlhlgoivfNzisBIR61EwSSREHGZ08Sbtjp/h/HPDkVavWwdzR/gs2wgHrdXLd6qU1A==}
+  '@redocly/cli@2.52.0':
+    resolution: {integrity: sha512-VUZFUwVu2vteAgUOX04QbgGZ9+QMP6UoonaSHQ7asAfaKbYBcw6QFrqA6FrDXg1ycN73Ou07Hb8RQWTnRndxtg==}
     engines: {node: '>=22.12.0 || >=20.19.0 <21.0.0', npm: '>=10'}
     hasBin: true
 
@@ -9546,7 +9546,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  '@redocly/cli@2.51.2': {}
+  '@redocly/cli@2.52.0': {}
 
   '@rolldown/binding-android-arm64@1.2.2':
     optional: true
