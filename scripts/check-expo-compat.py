@@ -122,8 +122,11 @@ to 2026-09-15 (356 publishes), read 2026-09-15:
 
 `--self-test` groups 18-24 pin this against the real batch's timestamps.
 Disabling batching, flipping to "fail only when every target is
-installable", `<=` becoming `<` at the threshold, doubling the threshold, and
-letting an unresolved target join a batch each fail it.
+installable", `<=` becoming `<` at the threshold, doubling the gap inside
+`release_batches`, and letting an unresolved target join a batch each fail it.
+Group 25 pins the constant itself against the measured intervals (above
+53.1 min, below 83.0 min), because groups 21 and 24 derive their fixtures from
+it and would move with it.
 
 ## The window, and why it is a documented constant rather than a query
 
@@ -642,7 +645,7 @@ FIXTURE_NPM_E404_NO_PACKAGE = """{
 # exists only so the E404 code check is exercised by an input it must reject.
 FIXTURE_SYNTHETIC_E500_NO_MATCH = FIXTURE_NPM_E404_NO_MATCH.replace('"E404"', '"E500"')
 
-SELF_TEST_GROUPS = 24
+SELF_TEST_GROUPS = 25
 
 
 def self_test() -> int:
@@ -930,6 +933,29 @@ def self_test() -> int:
     check("...members 50 min apart chain into one batch spanning 100 min", len(release_batches(chain, mid_crossing)) == 1)
     check("...a four-day gap splits batches", len(release_batches([stale] + batch_0915, mid_crossing)) == 2)
     check("...targets with no anchor are in no batch", release_batches([unresolved_last, no_time_last], batch_day) == [])
+
+    # 25. The threshold itself, pinned against the MEASURED intervals rather
+    #     than against itself (groups 21 and 24 derive their fixtures from
+    #     RELEASE_BATCH_GAP_MINUTES, so they move with it — the H39 review set
+    #     the constant to 120 and the suite stayed green). 53.1 min is the widest
+    #     lag measured inside one SDK-57 release (2026-08-14); 83.0 min is the
+    #     2026-07-07 gap between two separate releases (`expo@57.0.3` → 57.0.4).
+    check("H39: the threshold covers the widest measured in-release lag, 53.1 min",
+          RELEASE_BATCH_GAP_MINUTES > 53.1)
+    check("H39: the threshold stays below the 83.0 min between two separate releases",
+          RELEASE_BATCH_GAP_MINUTES < 83.0)
+    r0 = at("2026-07-07T09:00:00Z")
+    in_release = [Target(Outdated("expo-lag-a", "0.0.0", "~1.0.0"), "1.0.0", r0),
+                  Target(Outdated("expo-lag-b", "0.0.0", "~1.0.0"), "1.0.0", r0 + timedelta(minutes=53, seconds=6))]
+    check("...members 53.1 min apart (one real release) are one batch", len(release_batches(in_release, r0)) == 1)
+    two_releases = [Target(Outdated("expo-rel-a", "0.0.0", "~1.0.0"), "1.0.0", r0),
+                    Target(Outdated("expo-rel-b", "0.0.0", "~1.0.0"), "1.0.0", r0 + timedelta(minutes=83))]
+    check("...targets 83 min apart (two real releases) are two batches", len(release_batches(two_releases, r0)) == 2)
+    older = member("expo-release-x", "57.0.2", "57.0.3", _stamp(r0))
+    newer = member("expo-release-y", "57.0.3", "57.0.4", _stamp(r0 + timedelta(minutes=83)))
+    later_now = r0 + timedelta(hours=24, minutes=10)
+    v = classify([older, newer], window, later_now)
+    check("...an installable release is not tolerated because an unrelated one 83 min later is still maturing", not v.tolerated)
 
     if failures:
         print("check-expo-compat self-test FAILED:", file=sys.stderr)

@@ -78520,9 +78520,12 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
   | M1 | Batching disabled (per-target again) | Killed, 13 assertions |
   | M2 | Fail only when every target is installable | Killed, 13, including group 3 |
   | M3a | `<=` becomes `<` at the threshold | Killed, 2 |
-  | M3b | Threshold doubled | Killed, 3 |
+  | M3b | The gap doubled inside `release_batches` (the constant left at 60) | Killed, 3 |
+  | M3c | `RELEASE_BATCH_GAP_MINUTES` itself set to 120 (added after review) | Killed, 3 |
+  | M3d | `RELEASE_BATCH_GAP_MINUTES` itself set to 45 (added after review) | Killed, 14 |
   | M4 | Unresolved or no-time target anchored at `now` | Killed, 4 |
 
+- **Review found the constant was unpinned.** Groups 21 and 24 build their boundary fixtures FROM `RELEASE_BATCH_GAP_MINUTES`, so setting the constant itself to 120 left all 24 groups green. The original M3b doubled the gap inside `release_batches`, which the fixtures do catch, and its old row ('Threshold doubled') read as if it covered the constant. Group 25 now pins the threshold against the measured intervals, independently of the constant: above the 53.1 min widest in-release lag, and below the 83.0 min between two real releases. It includes a `classify` case where an installable release isn't tolerated because of an unrelated release 83 min later. M3c and M3d set the constant itself and are killed, and the file was restored byte-identical and green.
 - **Real run, 17:41Z.** `pnpm run check:expo-compat` exits 0 with all seven inside the window. The batch line reads `last member expo-image-manipulator@57.0.18 installable after 2026-09-16T16:52:20Z`.
 - **The real `main()` with only the clock replaced:**
   - 2026-09-16T16:10:00Z: exit 0. Six lines read "installable now, but tolerated with its release batch".
