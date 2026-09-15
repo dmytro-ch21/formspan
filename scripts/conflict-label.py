@@ -205,6 +205,29 @@ def both_sides(pr_files, base_files) -> list[str]:
     return sorted(_file_names(pr_files) & _file_names(base_files))
 
 
+def code_span(text: str) -> str:
+    """Render untrusted text (a file name, a branch name) as ONE inline code span.
+
+    The text comes from the pull request's author, and this comment is posted
+    by the repository's own bot on a public repository, so it must not be able
+    to break out of its span and inject markdown: links, images, @mentions.
+    CommonMark closes a code span at the first backtick run of the SAME length
+    as the opener, so the fence is one backtick longer than the longest run
+    inside the text, padded with a space when the text starts or ends with a
+    backtick. A line break (legal in a git path) would end the list item, so it
+    is shown as a literal `\\n`. Found in N199's review; not reachable today only
+    because a file is listed when `main` changed it too.
+    """
+    flat = text.replace("\r", "\\r").replace("\n", "\\n")
+    longest = run = 0
+    for ch in flat:
+        run = run + 1 if ch == "`" else 0
+        longest = max(longest, run)
+    fence = "`" * (longest + 1)
+    pad = " " if flat.startswith("`") or flat.endswith("`") or not flat.strip() else ""
+    return f"{fence}{pad}{flat}{pad}{fence}"
+
+
 def render_comment(
     *,
     head_sha: str,
@@ -216,7 +239,7 @@ def render_comment(
     base = base_ref or "main"
     lines = [
         sentinel(head_sha),
-        f"**This pull request conflicts with `{base}`, so CI is not running on it.**",
+        f"**This pull request conflicts with {code_span(base)}, so CI is not running on it.**",
         "",
         "A `pull_request` check runs on the merge of this branch into its base, and GitHub "
         "cannot build that merge while the two conflict — so **no new check runs are "
@@ -248,7 +271,7 @@ def render_comment(
         ]
     elif not files:
         lines += [
-            f"GitHub's API shows no file changed on both this branch and `{base}` since they "
+            f"GitHub's API shows no file changed on both this branch and {code_span(base)} since they "
             "diverged, so the conflicting file(s) cannot be named from here. `git rebase` "
             "names them when it stops.",
             "",
@@ -256,11 +279,11 @@ def render_comment(
     else:
         shown = files[:FILE_LIST_CAP]
         lines += [
-            f"Changed on **both** this branch and `{base}` since they diverged — the conflict "
+            f"Changed on **both** this branch and {code_span(base)} since they diverged — the conflict "
             "is in one or more of these (GitHub's API does not say which):",
             "",
         ]
-        lines += [f"- `{name}`" for name in shown]
+        lines += [f"- {code_span(name)}" for name in shown]
         if len(files) > len(shown):
             lines.append(f"- …and {len(files) - len(shown)} more")
         if not files_complete:
@@ -702,6 +725,20 @@ def self_test() -> int:
     check("a stacked base is rebased onto its own base",
           "git rebase origin/feature/x &&" in render_comment(
               head_sha="h", base_ref="feature/x", files=None, files_complete=False), True)
+    # Untrusted names cannot break out of their code span (N199 review hardening).
+    check("code_span: plain", code_span("a/b.ts"), "`a/b.ts`")
+    check("code_span: an inner backtick gets a longer fence", code_span("a`b"), "``a`b``")
+    check("code_span: a leading backtick is padded", code_span("`x"), "`` `x ``")
+    check("code_span: a line break is shown, not obeyed", code_span("a\nb"), "`a\\nb`")
+    evil = "x`) [click](https://evil.example) ![i](https://evil.example/i.png) @someone (`"
+    hostile = render_comment(head_sha="h", base_ref="main", files=[evil, "ok.ts"], files_complete=True)
+    item = next(l for l in hostile.splitlines() if "evil.example" in l)
+    check("a hostile file name renders as one code span", item, "- " + code_span(evil))
+    check("a hostile file name's line opens with a fence longer than its inner run", item.startswith("- ``"), True)
+    nl = render_comment(head_sha="h", base_ref="main", files=["a\nb.ts"], files_complete=True)
+    check("a file name with a line break stays on one list item", any(l == "- `a\\nb.ts`" for l in nl.splitlines()), True)
+    tick_base = render_comment(head_sha="h", base_ref="rel`x", files=["f"], files_complete=True)
+    check("a backtick in the base branch name cannot open a span", "conflicts with ``rel`x``" in tick_base, True)
     capped = render_comment(head_sha="h", base_ref="main", files=[f"f{i}" for i in range(25)], files_complete=True)
     check("a long list is capped and counts the rest", "…and 5 more" in capped, True)
     bot = render_comment(head_sha="h", base_ref="main", files=None, files_complete=False, dependabot=True)

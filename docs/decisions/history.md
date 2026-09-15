@@ -78449,6 +78449,8 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
   - A PR that goes conflict, clean, conflict at the same head (its base reverted) gets the label but no second comment.
   - Anyone can post the sentinel on a PR and so suppress the comment. The label is still applied.
 
+**Hardened after review:** file names and the base branch name are rendered through `code_span()`. The fence is one backtick longer than the longest run inside the text, and line breaks are shown as `\n`. So an author-controlled name cannot break out of its code span and inject links, images or @mentions into a bot comment on a public repository. Today that is blocked only because a file is listed when `main` changed it too. The self-test adds a hostile name, a name with a line break and a backtick in the base name. Reverting names to single backticks fails 3 of those checks. The file was restored byte-identical and re-ran green.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
