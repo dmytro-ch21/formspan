@@ -216,6 +216,14 @@ def workflow_permissions(text: str) -> dict[str, str]:
     """
     out: dict[str, str] = {}
     lines = text.splitlines()
+    # More than one top-level block is refused, never guessed: a YAML loader takes
+    # the LAST duplicate key, so reading the first would let a later read-only block
+    # pass the write assertions (the false PASS the N199 follow-up review found).
+    # A scalar such as `permissions: write-all` is not a block and reads as empty,
+    # which fails those assertions -- a false FAIL, the safe direction.
+    top_level = [l for l in lines if l.rstrip() == "permissions:"]
+    if len(top_level) > 1:
+        raise ValueError(f"{len(top_level)} top-level `permissions:` blocks; a workflow must have one")
     for i, line in enumerate(lines):
         if line.rstrip() != "permissions:":
             continue
@@ -897,9 +905,20 @@ def self_test() -> int:
     check("workflow_permissions: reads the top-level block, skipping comments and blanks",
           workflow_permissions(sample), {"contents": "read", "pull-requests": "write"})
     check("workflow_permissions: no top-level block reads as empty", workflow_permissions("jobs:\n  a:\n    permissions:\n      x: write\n"), {})
+    check("workflow_permissions: a scalar `write-all` is not a block, so it reads as empty (a false FAIL, safe)",
+          workflow_permissions("permissions: write-all\njobs:\n"), {})
+    try:
+        workflow_permissions("permissions:\n  pull-requests: write\n  issues: write\non:\n  push:\npermissions:\n  pull-requests: read\n")
+        failures.append("workflow_permissions: a second top-level block was read, not refused (a later read-only block would pass)")
+    except ValueError:
+        pass
     wf = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "conflict-label.yml"
     if wf.is_file():
-        perms = workflow_permissions(wf.read_text())
+        try:
+            perms = workflow_permissions(wf.read_text())
+        except ValueError as e:
+            failures.append(f"conflict-label.yml: {e}")
+            perms = {}
         check("conflict-label.yml grants pull-requests: write (a PR comment 403s without it)", perms.get("pull-requests"), "write")
         check("conflict-label.yml grants issues: write (creating the label)", perms.get("issues"), "write")
         check("conflict-label.yml grants no write beyond pull-requests and issues",

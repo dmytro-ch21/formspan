@@ -78467,6 +78467,7 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 ### Checks
 
 - **Self-test green.** **M1**, setting `pull-requests` back to `read`, fails the new assertion, and the file was restored byte-identical and re-ran green.
+- **Review found a false PASS in the parser itself.** A second top-level `permissions:` block would have been ignored, while a YAML loader takes the last duplicate key. The parser now refuses more than one top-level block with a `ValueError`, and a `write-all` scalar reads as empty, which is a false FAIL. **M2**, removing the duplicate check, fails the new fixture, and the file was restored byte-identical and re-ran green.
 - **Other checks:** `check:python`, `check:conflict-label` and `check:verify-chain` pass.
 
 ### Not done
