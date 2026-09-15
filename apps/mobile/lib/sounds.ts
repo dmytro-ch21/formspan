@@ -42,6 +42,12 @@ import { PREF_SOUNDS, readPref, writePref } from './prefs';
  * point the silent switch is being overridden for something the user has no
  * part in and cannot see.
  *
+ * **N195 (#612) looked at this and did not reopen it.** The rest timer's
+ * lock-screen alert does sound while the app is backgrounded, but it is not
+ * this audio session: it is a system notification, which follows the ringer
+ * switch like every other notification, and the athlete turned it on in
+ * Settings for a countdown they started. See `lib/restLockAlert.ts`.
+ *
  * **`interruptionMode: 'duckOthers'` — it ducks music, never stops it.** People
  * train to their own music. `doNotMix` would kill the track on every rest and
  * leave the athlete restarting Spotify between sets; `mixWithOthers` would let

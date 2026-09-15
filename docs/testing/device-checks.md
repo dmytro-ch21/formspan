@@ -370,8 +370,9 @@ once.
 set, or skipping the next step of an interval run. This is a known and
 specifically-guarded race, and the realistic trigger is precisely this: a
 suspended timer and a wake-up handler arriving in the same batch. Also note
-there is **no background alarm** — nothing fires while the app is buried. If
-you expect a notification during a long rest, there isn't one, by design.
+that with **"Rest timer alert when the phone is locked" off** (the default)
+there is still **no background alarm**: nothing fires while the app is buried.
+With it on, a notification does, and that is D32.
 
 ### D10 — Spoken countdown cues
 
@@ -919,6 +920,67 @@ returning from another app are all device behaviour.
 `healthConnectReads.test.ts`, `__tests__/app/healthConnectRefusalLine.test.tsx`
 and `settingsHealthConnectRefusal.test.tsx` cover every decision downstream of
 the native answer; this check covers the answer itself.
+
+### D32 — The rest timer's lock-screen alert (N195, #612)
+
+**Where:** a real iPhone AND a real Android phone, both. A Simulator or emulator
+does not lock like a phone, has no ringer switch, and does not doze, and dozing
+is exactly what makes Android late.
+
+**Needs a native rebuild first.** `expo-notifications` is a new native module.
+A Metro reload onto an existing dev client crashes the session screen and
+Settings on load; see the `vola-mobile-build` skill. From the primary checkout:
+`pnpm install`, then `pnpm --dir apps/mobile run ios:device` (Release) or
+`pnpm --dir apps/mobile run android`. On iOS, if `ios/` already exists, run
+`pnpm --dir apps/mobile run prebuild` first. Then confirm the build carries no
+push capability: `grep -c aps-environment apps/mobile/ios/VOLA/VOLA.entitlements`
+must print `0`. A free-Apple-ID signing error naming Push Notifications means it
+does not.
+
+**Do, on the iPhone:**
+
+1. Settings → turn on **Rest timer alert when the phone is locked**. **Should:**
+   the system prompt appears then, and not before. Allow.
+2. Ringer on. Start a session and a 60-second rest, then press the side button
+   so the **screen is off and the phone genuinely locked**, not just in the app
+   switcher. Put it face down and note the rest bar's end time.
+3. **Should:** at the rest's end the alert sound plays and the lock screen
+   shows "Rest's up" with the exercise named. Note how many seconds late it was.
+4. **Skip early, no stale alert:** start a 90-second rest, lock, unlock after
+   about 20 seconds, tap **Skip**, lock again, and wait two minutes. **Should:**
+   nothing arrives.
+5. **Foreground unchanged:** watch a 30-second rest run out on screen.
+   **Should:** the in-app chime once, no banner, no second sound.
+6. Ringer switch to silent, and repeat step 2. **Expected, not a bug:** it
+   vibrates without sound. A notification follows the ringer; record it.
+
+**Do, on the Android phone (13 or later):**
+
+1. Steps 1 to 5 as above. The prompt in step 1 is "Allow VOLA to send you
+   notifications?".
+2. **How late did it fire:** run three 60-second rests, each locked with the
+   screen off for the whole rest. For each, record how many seconds after the
+   rest bar's end the notification arrived. Android 12+ delivers it inexactly,
+   because VOLA deliberately asks for no exact-alarm permission. A few seconds
+   is expected; post the three numbers on #612. Tens of seconds is a finding.
+3. Long-press the notification, then open its settings. **Should:** a channel
+   named "Rest timer", with sound on and content shown on the lock screen.
+
+**Refused, on either phone:** deny the prompt in step 1. **Should:** the row
+stays off, a line names where notifications are turned on, and no prompt ever
+appears while logging a session.
+
+**Failure looks like:** silence on a locked phone with the row on and
+notifications allowed; a notification after skipping the rest; two sounds for
+one rest in the foreground; any permission prompt inside a session; a build that
+fails to sign naming Push Notifications.
+
+**Why no test reaches it:** whether the OS delivers the notification to a
+locked phone, how late Android delivers it, what it sounds like, and whether
+the build signs are all device behaviour. `lib/__tests__/restLockAlert.test.ts`,
+`useRestLockAlert.test.tsx` and `__tests__/app/settingsRestLockAlert.test.tsx`
+cover every decision up to the native call; `check-expo-native-config.py`
+covers the entitlement.
 
 ---
 

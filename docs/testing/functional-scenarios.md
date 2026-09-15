@@ -1166,6 +1166,49 @@ Domain: the countdown between sets. **Mobile only, permanently** — an in-progr
 - Leaving the session screen ends the rest — it belongs to the session on screen, not to the app.
 - The bar sits outside the scroll view, so scrolling the set list never hides it.
 
+### Lock-screen alert (N195, #612)
+
+Domain: a rest that ends while the phone is locked, or while VOLA is in the background, sounds one local notification. **Off by default.** It is turned on in Settings → "Rest timer alert when the phone is locked". Pinned in `lib/__tests__/restLockAlert.test.ts`, `lib/__tests__/useRestLockAlert.test.tsx` and `__tests__/app/settingsRestLockAlert.test.tsx`. What only a phone can show is D32 in `device-checks.md`.
+
+**The Settings row**
+- Fresh install: the row is off, and opening Settings shows no permission prompt.
+- Turning it on the first time shows the system notification prompt, once. Allow: the row is on, and still on after leaving and reopening Settings.
+- Don't Allow: the row is off, and a line says notifications are off for VOLA and where to change it (iOS: Settings app → Notifications → VOLA; Android: Settings app → Apps → VOLA → Notifications). The line says nothing about the athlete.
+- Notifications already allowed: turning it on shows no prompt.
+- On, then notifications turned off in the system Settings app: back in VOLA, the row reads off with the same line, and nothing prompts.
+- Turning it off never prompts.
+- Android 13+: refused once, turning it on again asks again; refused twice, the line names the system path and tapping it on no longer prompts.
+
+**Happy path**
+- With it on, start a rest and lock the phone. When the rest ends, a notification arrives with the phone's alert sound. Title "Rest's up"; body "Rest after Bench Press is over. Your next set is ready when you are."
+- A rest with no exercise name: body "Your next set is ready when you are." Never "Rest after Rest".
+- Switching to another app instead of locking behaves the same.
+
+**Foreground is unchanged**
+- With it on and VOLA on screen, a rest ending plays the in-app chime only: no banner, no second sound.
+- The set-logging path gains no tap, no prompt and no animation.
+
+**No stale alert**
+- Lock during a rest, unlock before it ends, Skip: no notification arrives later.
+- Lock, unlock, Stop, start a different rest, lock again: one notification, at the end of the NEW rest.
+- Lock, unlock, +15s, lock again: the notification arrives at the adjusted end.
+- A paused rest, locked: no notification.
+- Leave the session screen with a rest running, then lock: no notification.
+- Finish the session with a rest running, then lock: no notification.
+- Force-quit VOLA during a locked rest and reopen it before the rest would have ended: no notification.
+
+**Not a rest**
+- A timed work set, or the three-second count-in, running when the phone locks: no notification.
+
+**Off or refused**
+- Row off: locking during a rest produces nothing.
+- Row on, notifications refused in the OS: nothing, and no prompt appears during the session.
+
+**Known limits (expected, not bugs)**
+- iOS: the notification sound follows the ringer switch. On silent it vibrates only. The in-app chime's silent-mode override does not apply to a notification.
+- Android 12+: delivery is inexact and can be late. D32 records how late.
+- The sound is the system default, not VOLA's rest chime.
+
 ### Continuity and cost (N558, #1047)
 
 **The log does not move (reserved space)**

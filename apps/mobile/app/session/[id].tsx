@@ -13,6 +13,7 @@ import {
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 
 import { useCountdown } from '@/components/Countdown';
+import { useRestLockAlert } from '@/lib/useRestLockAlert';
 import { TimerSurface, timerSpaceFor } from '@/components/Timer';
 import { HoldToConfirm } from '@/components/HoldToConfirm';
 import { HRSessionReport } from '@/components/HRSessionReport';
@@ -350,6 +351,8 @@ export default function SessionScreen() {
   useEffect(() => {
     if (session?.ended_at) stopTimer();
   }, [session?.ended_at, stopTimer]);
+  // N195/#612: a rest that ends with the phone locked sounds a notification.
+  useRestLockAlert(timerState.timer, userId);
 
   const { units, unitsReady } = useUnits();
   // Per-exercise overrides: a lifter who thinks in kilograms still faces a

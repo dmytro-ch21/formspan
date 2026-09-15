@@ -511,3 +511,14 @@ export const PREF_HEALTH_CONNECT_REFUSED = 'health_connect_refused_types';
  * means none paired; the live-HR machinery does nothing at all then.
  */
 export const PREF_HR_MONITOR = 'hr_monitor';
+
+/**
+ * N195/#612: `'1'` while the athlete wants a rest that ends with the phone
+ * locked to sound a notification. Absent (or anything else) means off, which
+ * is the default — see `lib/restLockAlert.ts` for why it is opt-in.
+ *
+ * Device-local and never `owed`, same reasoning as {@link PREF_STEPS_ASKED}:
+ * notification permission is granted to THIS phone by its OS, and a second
+ * device inheriting "on" would claim an alert it has no permission to send.
+ */
+export const PREF_REST_LOCK_ALERT = 'rest_lock_alert';

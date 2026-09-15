@@ -35,6 +35,35 @@
 // do in Google Cloud Console (issue + restrict a Maps SDK for Android key)
 // and in EAS (`eas env:create`, same pattern this repo already uses for
 // `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`) to supply a real value.
+const { withEntitlementsPlist } = require("expo/config-plugins");
+
+/**
+ * N195/#612: keep the APNs (push) entitlement OUT of the iOS binary.
+ *
+ * `expo-notifications` is here for a LOCAL notification — the rest timer's
+ * lock-screen alert, scheduled on the phone — which needs no entitlement at
+ * all. Its config plugin writes `aps-environment` unconditionally anyway
+ * (`plugin/build/withNotificationsIOS.js`), and prebuild auto-applies that
+ * plugin for any installed `expo-notifications` whether or not it is listed
+ * (`@expo/prebuild-config`'s `versionedExpoSDKPackages`). Measured with
+ * `expo config --type introspect` before this plugin existed:
+ * `"aps-environment": "development"`.
+ *
+ * Why that matters here: device builds are signed with a free Apple ID, and a
+ * personal team cannot provision the Push Notifications capability — so the
+ * entitlement would break every device build for a capability VOLA does not
+ * use. `check-expo-native-config.py` fails if it comes back.
+ *
+ * ORDER IS LOAD-BEARING: this entry sits ABOVE `"expo-notifications"` in
+ * `plugins`. A mod registered later runs earlier, so this one runs after the
+ * plugin that adds the key. Swapping the two leaves the key in place.
+ */
+const withoutPushEntitlement = (config) =>
+  withEntitlementsPlist(config, (c) => {
+    delete c.modResults["aps-environment"];
+    return c;
+  });
+
 module.exports = () => ({
   expo: {
     name: "VOLA",
@@ -248,6 +277,17 @@ module.exports = () => ({
         },
       ],
       "react-native-health-connect",
+      // N195/#612: the rest timer's lock-screen alert, a LOCAL notification.
+      // No props: no custom sound (see lib/restLockAlert.ts for why the system
+      // default is used), no push. `withoutPushEntitlement` MUST stay above
+      // it — see that function at the top of this file.
+      //
+      // Android: the library's own manifest adds POST_NOTIFICATIONS (the
+      // Android 13+ runtime permission the Settings row asks for) and
+      // RECEIVE_BOOT_COMPLETED (so a scheduled alert survives a reboot). It
+      // declares no SCHEDULE_EXACT_ALARM, and nothing here adds one.
+      withoutPushEntitlement,
+      "expo-notifications",
       [
         "expo-build-properties",
         {
