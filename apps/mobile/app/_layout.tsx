@@ -2,6 +2,7 @@ import { ClerkProvider, useAuth, useSignUp } from '@clerk/clerk-expo';
 import { useAuthToken } from '@/lib/useAuthToken';
 import { clearTelemetryForSignOut, installTelemetry } from '@/lib/telemetryClient';
 import { initSounds } from '@/lib/sounds';
+import { cancelRestLockAlert } from '@/lib/restLockAlert';
 import { initVoice } from '@/lib/voice';
 import { clearSessionToken } from '@/lib/session';
 import { useResumeSignOutGuard } from '@/lib/authResume';
@@ -286,6 +287,16 @@ function RootLayoutNav() {
     // rather than at the moment a countdown needs to say something.
     void initVoice(userId);
   }, [userId]);
+
+  /*
+    N195/#612: a rest-timer notification belongs to a countdown in a process,
+    and a countdown does not survive its process. If the OS killed the app
+    during a locked rest, that alert is still armed; clear it at launch so it
+    cannot fire over whatever the athlete opened instead.
+  */
+  useEffect(() => {
+    void cancelRestLockAlert();
+  }, []);
 
   useEffect(() => {
     if (!isLoaded) return;

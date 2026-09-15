@@ -78539,6 +78539,133 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **A member that stays unpublished for a day fails the check**, as before H39. It sits at `now`, not beside its batch.
 - **One threshold for every release.** If Expo's lags grow past 60 min, the hour comes back, loudly. Re-measure then.
 
+## 2026-09-15 — N195 (#612): a rest that ends with the phone locked sounds a notification
+
+**The report.** An athlete asked for the rest timer to reach them on a locked phone, so it cannot be missed. It could not. The countdown's chime runs on JS timers, iOS suspends JS when the app leaves the screen, and `lib/sounds.ts` already said so: a countdown that fires with the app closed is a scheduled local notification, "a different mechanism and a different feature". This is that feature.
+
+**The choice: a scheduled local notification, not a Live Activity.** A notification answers "don't let me miss it". A Live Activity would also show the countdown on the lock screen, but it needs a widget extension, a second native target, plus ActivityKit code. That is too much for a first version. It is the option not taken and a natural follow-up.
+
+### What was built
+
+- **`apps/mobile/lib/restLockAlert.ts`.**
+  - `lockAlertPlan` is pure: given the app state, the countdown, whether the athlete enabled the alert, and `now`, it says schedule for N seconds or clear, and why.
+  - `lockAlertCopy`, `permissionOf` and `refusedLineFor` are pure.
+  - A thin adapter over `expo-notifications`: one fixed identifier `vola-rest-timer`, so a reschedule replaces and a cancel needs no memory; the Android channel; a permission read that never prompts; and an ask called only from Settings.
+- **`apps/mobile/lib/useRestLockAlert.ts`.** It acts on AppState changes, on a countdown that changes while away, and on unmount. Its work runs through a promise chain, so a lock followed at once by an unlock cannot land the cancel before the schedule.
+- **`apps/mobile/app/session/[id].tsx`: one import and one call**, `useRestLockAlert(timerState.timer, userId)`. Nothing else in the file changed, deliberately: N207 (#661) is queued to change its set rows.
+- **`apps/mobile/app/_layout.tsx`:** cancels any alert at launch. A countdown does not survive its process, so an alert armed before the OS killed the app is stale by definition.
+- **`apps/mobile/lib/useRestLockAlertSetting.ts` and a Settings row**, "Rest timer alert when the phone is locked", directly under Sounds.
+- **`PREF_REST_LOCK_ALERT`** in `lib/prefs.ts`: `'1'` on, absent or anything else off. It is device-local and never owed, because the permission belongs to this phone. **No SQLite change**, so `SCHEMA_VERSION` stays 45.
+- **`apps/mobile/app.config.js`:** `"expo-notifications"` with no props, plus `withoutPushEntitlement`. See "The push entitlement" below.
+- **`apps/mobile/jest.setup.js`:** an inert default mock of `expo-notifications`. It says nothing is granted and nothing is scheduled, which also silences an import-time "removed from Expo Go" warning that every suite reaching the root layout, the session screen or Settings had started printing.
+- **`scripts/check-expo-native-config.py`:** fails if the generated iOS entitlements declare `aps-environment`, or if there is no `.entitlements` file to read.
+- **Comments corrected:** `lib/sounds.ts`'s header, and D9 in `docs/testing/device-checks.md`, which said "no background alarm, by design". That is still true with the row off, and no longer true with it on.
+- **Reachable on a phone:** Settings, turn the row on, then any rest in a session. Nothing on web. A rest countdown is mobile-only.
+
+### Decisions
+
+Made by the coordinator, all reversible:
+
+1. **Mechanism:** `expo-notifications`, a local notification. Live Activity out of scope, as above.
+2. **When it exists:** only while the app is not active and a rest is running.
+   - Scheduled on `background` or `inactive`, for the countdown's remaining time.
+   - Cancelled on `active`.
+   - Skip, Stop, starting another rest and ±15 are all taps, so the app is active and the alert is already cancelled.
+   - A countdown that changes while away is re-planned.
+   - A rest that runs out needs no cancel: the alert is scheduled for that same instant.
+   - Result: foreground behaviour is unchanged, the sound never plays twice, and no stale alert can fire.
+3. **Permission:** asked only when the athlete turns the Settings row on, and never during a session.
+   - A refusal leaves the row off, with a line naming where to change it: iOS Settings → Notifications → VOLA; Android Settings → Apps → VOLA → Notifications. Nothing about the athlete.
+   - **Discoverability trade-off, accepted:** off by default means an athlete who never opens Settings never finds it. That is the cost of never prompting.
+4. **The notification:**
+   - Title "Rest's up", body "Rest after <exercise> is over. Your next set is ready when you are.", or "Your next set is ready when you are." with no name.
+   - **System default sound on both platforms, not the bundled rest chime.** `rest-done.m4a` is AAC in MPEG-4, and iOS plays a notification sound only from Linear PCM, MA4, µ-law or a-law in aiff, wav or caf. Transcoding it by hand would put a second binary outside `scripts/generate_sounds.py`, the source of truth for every sound, where its `--check` could never see it. The honest path is a caf target in that script's `BUNDLE`, which needs a numpy and ffmpeg render. That is a follow-up, not filed here.
+   - **Android channel:** id `rest-timer`, name "Rest timer", importance HIGH, vibration `[0, 250, 150, 250]`, lock-screen visibility PUBLIC, no badge, no Do Not Disturb bypass. The **`sound` key is deliberately absent**. Read in `AndroidXNotificationsChannelManager.createSoundUriFromArguments`: an absent key means the system default, a null means silence, and any string is looked up as a `res/raw` file, so `'default'` would ask for a resource that does not exist.
+   - **No `SCHEDULE_EXACT_ALARM`.** Read in `ExpoSchedulingDelegate.kt`: the exact path runs only below Android 12 or when `canScheduleExactAlarms()` holds, which needs that permission. Elsewhere it uses `setAndAllowWhileIdle`, which is inexact. How late it arrives is a device measurement, D32 step 2.
+   - The library's own manifest adds `POST_NOTIFICATIONS` and `RECEIVE_BOOT_COMPLETED`. It adds no exact-alarm permission.
+5. **No motion and no new taps** on the set-logging path. The session screen gained one hook call, no render output and no duration.
+6. **Schema:** none needed.
+
+Calls made on this branch, the conservative side each time:
+
+- **The copy names what the athlete rested FROM, not "next set of X".** In a guided session run, the rest between exercises carries the exercise just finished (`intervalRun.ts`, `buildSessionRun`). So "next set of Bench Press" would be false when the next set is a squat.
+- **Independent of the Sounds switch.** The row is its own explicit opt-in, and its hint says it uses the phone's alert sound. Flagged for a product read.
+- **Placed beside Sounds, not in Integrations.** A comment in `settings.tsx` says permission-triggering switches belong in their own section. This one sits where an athlete asking about the rest timer looks, and it asks nothing until turned on.
+- **It does not break through the iOS silent switch.** A notification sound follows the ringer, unlike the in-app chime's `playsInSilentMode`. Critical alerts need an Apple-granted entitlement. `timeSensitive` was not used either: it needs an entitlement this project has not added.
+- **No alert with under one second left**, because the in-app completion owns that. **No alert for a work countdown or a count-in**, because "Rest's up" over a plank would be wrong.
+- **No foreground presentation handler is set**, so an alert that coincides with an `inactive` in-app completion is not shown over it.
+- **`sounds.ts`'s audio-session decision was not reopened.** This sound is a system notification, not that session, and the athlete turned it on.
+
+### The push entitlement, found and removed
+
+`expo-notifications`' config plugin writes `aps-environment` unconditionally (`plugin/build/withNotificationsIOS.js`), and prebuild auto-applies that plugin for any installed `expo-notifications` (`@expo/prebuild-config`, `versionedExpoSDKPackages`). Measured with `expo config --type introspect`, with the package installed and not listed: `"aps-environment": "development"`. Local notifications need no entitlement, and device builds are signed with a free Apple ID, which cannot provision Push Notifications. So this would have broken every device build for a capability VOLA does not use.
+
+- **`withoutPushEntitlement` in `app.config.js`** deletes the key.
+- **Order is load-bearing.** It sits above `"expo-notifications"`, because a mod registered later runs earlier. Measured, not assumed: introspect shows only the HealthKit entitlement with it in place.
+- **The check's self-test** runs a real scratch prebuild for each of the two ways to lose it, removed and moved below. Both are reported, and both prebuilds still exit 0, which is why no existing check could have seen this.
+
+### A dependency trap, avoided
+
+`npx expo install expo-notifications` chose 57.0.19, published 0.9 hours earlier, and silently wrote a `minimumReleaseAgeExclude` block into `pnpm-workspace.yaml`. That is the H15/H17 trap. It was reverted, and `pnpm add expo-notifications@~57.0.18` installed 57.0.18, 101 hours old. `check:expo-compat` warns and exits 0 until 57.0.19 ages out, the tolerance H15 built. `pnpm-workspace.yaml` is unchanged.
+
+### Checks
+
+- **The three N195 suites, 58 tests:** `lib/__tests__/restLockAlert.test.ts`, `lib/__tests__/useRestLockAlert.test.tsx` and `__tests__/app/settingsRestLockAlert.test.tsx`.
+  - Every "nothing scheduled" assertion in the hook suite has a positive control in the same test.
+  - `expo-notifications` is mocked at the module boundary; preferences are real SQLite.
+- **Neighbours green with the new import in their graph:** `settingsSwitch`, `settingsEnvironment`, `settingsHealthConnectRefusal`, `sessionElapsedTick`, `timerContinuity` and `tabDefault`, which renders the real root layout.
+- **Other checks:**
+  - `tsc --noEmit` exits 0.
+  - eslint reports no warning introduced in a touched file. The duplicate Clerk import in `settings.tsx` and the ref-in-render in `[id].tsx`'s `NumberField` predate this branch.
+  - `check:rntl-awaits` finds 0 unawaited calls.
+  - `check-expo-native-config.py --self-test` passes 14/14 cases, and the real check passes.
+- **Mutation checks, against a green baseline in the same session:**
+  - Each anchor matched exactly once, and the runner refuses otherwise.
+  - A kill counted only when named tests failed an assertion and no suite failed to load.
+  - Each restore was byte-identical by sha256, and the suites re-ran green afterwards.
+  - M19 and M24's first runs went red on a query timeout, not an assertion, because the Settings test gave `requestPermissionsAsync` no value and asserted with `findByText`. The test was fixed, and the whole Settings group, M19–M24, was re-run.
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | Plan: foreground guard deleted | Killed, 2 failed: the foreground, and an unknown app state |
+| M2 | Plan: off guard deleted | Killed, 4 failed: plan off; hook preference off, permission not granted, no user |
+| M3 | Plan: no-countdown guard returns the not-rest reason | Killed, 1 failed |
+| M4 | Plan: not-rest guard deleted | Killed, 3 failed: work, count-in, hook work backgrounded |
+| M5 | Plan: paused guard deleted | Killed, 1 failed |
+| M6 | Plan: minimum lead weakened to `<= 0` | Killed, 1 failed |
+| M7 | Copy: `'Rest'` not excluded as a name | Killed, 1 failed: "Received: Rest after Rest is over…" |
+| M8 | Channel: `sound: 'default'` added | Killed, 1 failed |
+| M9 | Schedule: channel not created first | Killed, 1 failed |
+| M10 | Preference defaults to on | Killed, 2 failed |
+| M11 | Hook: foreground falls through to the reads | Killed, 2 failed: permission read "Expected 0, Received 4" |
+| M12 | Hook: foreground cancels without being armed | Killed, 5 failed |
+| M13 | Hook: return to active does not cancel | Killed, 4 failed |
+| M14 | Hook: work not serialised | Killed, 1 failed: the lock-then-unlock race ends with no cancel |
+| M15 | Hook: permission need only be not-denied | Killed, 1 failed |
+| M16 | Hook: a countdown changing while away is not re-planned | Killed, 1 failed |
+| M17 | Hook: unmount does not cancel | Killed, 1 failed |
+| M18 | Hook: a cleared plan while away does not cancel | Killed, 1 failed |
+| M19 | Setting: asks whenever not granted | Killed, 1 failed: request "Expected 0, Received 1" |
+| M20 | Setting: switch shows on without permission | Killed, 1 failed |
+| M21 | Setting: refused line shown when never wanted | Killed, 1 failed |
+| M22 | Setting: turning off does not cancel | Killed, 1 failed |
+| M23 | Setting: asks on render | Killed, 6 failed |
+| M24 | Settings screen: the row ignores a tap | Killed, 5 failed |
+| M25 | Wiring: the session screen does not call the hook | Killed, 1 failed |
+| M26 | Wiring: the root layout does not cancel at launch | Killed, 1 failed |
+| C1 | Config: `withoutPushEntitlement` removed | Reported by the self-test; prebuild still exits 0 |
+| C2 | Config: `withoutPushEntitlement` moved below `"expo-notifications"` | Reported by the self-test; prebuild still exits 0 |
+
+### Not done
+
+- **Device evidence, the ticket's NEEDS HUMAN EVIDENCE criterion:** D32 in `docs/testing/device-checks.md`.
+  - A genuinely locked iPhone, and a genuinely locked Android phone.
+  - Skip early and confirm nothing arrives.
+  - How late Android delivered, over three rests.
+  - **A native rebuild is required first:** `expo-notifications` is a new native module, so a Metro reload onto an existing dev client fails.
+- **The rest chime as the notification sound:** needs a caf target in `generate_sounds.py`. Not filed.
+- **A Live Activity countdown on the lock screen:** the option not taken. Not filed.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

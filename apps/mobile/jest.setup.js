@@ -188,6 +188,30 @@ jest.mock('expo-haptics', () => ({
 }));
 
 /*
+  `expo-notifications` (N195, #612): the rest timer's lock-screen alert.
+
+  The real module loads under jest-expo, but prints a multi-line "removed
+  from Expo Go" warning on import. The app imports it from `lib/restLockAlert.ts`,
+  which the root layout, the session screen and Settings all reach, so every
+  suite that renders one of those printed it: noise on unrelated suites.
+
+  The default is INERT and says "never asked": nothing scheduled, and nothing
+  granted. So a suite that does not care can never schedule by accident.
+  Plain arrows, not `jest.fn()`, for the reason given for `expo-haptics` above.
+  The three suites that DO assert on it re-mock it per file.
+*/
+jest.mock('expo-notifications', () => ({
+  scheduleNotificationAsync: () => Promise.resolve('mock-notification'),
+  cancelScheduledNotificationAsync: () => Promise.resolve(),
+  setNotificationChannelAsync: () => Promise.resolve(null),
+  getPermissionsAsync: () => Promise.resolve({ granted: false, canAskAgain: true, status: 'undetermined' }),
+  requestPermissionsAsync: () => Promise.resolve({ granted: false, canAskAgain: true, status: 'undetermined' }),
+  AndroidImportance: { HIGH: 6 },
+  AndroidNotificationVisibility: { PUBLIC: 1 },
+  SchedulableTriggerInputTypes: { TIME_INTERVAL: 'timeInterval' },
+}));
+
+/*
   `react-native-maps` cannot be loaded under jest at all.
 
   Its JS reads a native module (`RNMapsAirModule`) via

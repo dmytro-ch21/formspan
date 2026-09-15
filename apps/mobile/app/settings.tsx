@@ -27,6 +27,7 @@ import {
 } from '@/lib/healthConnectSync';
 import { readAutoRest, writeAutoRest } from '@/lib/rest';
 import { playSound, readSoundsEnabled, writeSoundsEnabled } from '@/lib/sounds';
+import { useRestLockAlertSetting } from '@/lib/useRestLockAlertSetting';
 import { MONO_ACCENT, monoNeedsRelaunch } from '@/lib/palette';
 import { readVoiceEnabled, speak, writeVoiceEnabled } from '@/lib/voice';
 import { useTrackEffort } from '@/lib/useTrackEffort';
@@ -71,6 +72,8 @@ export default function SettingsScreen() {
     if (userId) readSoundsEnabled(userId).then(setSounds).catch(() => {});
     if (userId) readVoiceEnabled(userId).then(setVoice).catch(() => {});
   }, [userId]);
+  // N195/#612: off by default; turning it on is the only thing that asks.
+  const restLockAlert = useRestLockAlertSetting(userId);
 
   const { trackEffort, setTrackEffort, unsynced: effortUnsynced } = useTrackEffort();
 
@@ -288,6 +291,23 @@ export default function SettingsScreen() {
           }}
           testID="settings-sounds"
         />
+        {/* N195/#612. Beside Sounds rather than in Integrations, although it
+            asks for a permission: an athlete looking for "can the rest timer
+            reach me when the phone is locked" looks here, and the row is off
+            until they turn it on, so it asks nothing by being seen. */}
+        <Toggle
+          label="Rest timer alert when the phone is locked"
+          hint="A notification with your phone's alert sound when a rest ends and VOLA isn't on screen. Turning it on asks to send you notifications."
+          value={restLockAlert.value}
+          disabled={restLockAlert.busy}
+          onChange={(on) => void restLockAlert.setOn(on)}
+          testID="settings-rest-lock-alert"
+        />
+        {restLockAlert.refusedLine && (
+          <Text style={[styles.muted, styles.rowNote]} testID="settings-rest-lock-alert-refused">
+            {restLockAlert.refusedLine}
+          </Text>
+        )}
         <Toggle
           label="Spoken cues"
           hint="A guided workout says what's next — get ready, start, rest — and a tracked run announces each kilometer split. The timer's chimes are the Sounds switch above."
@@ -818,6 +838,14 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 16, fontWeight: '600' },
   danger: { color: vola.danger },
   muted: { color: vola.textMuted, fontSize: 13 },
+  /** A line under a row that belongs to it — N195's refusal line. Row padding, and the row's divider. */
+  rowNote: {
+    lineHeight: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: vola.lineSoft,
+  },
   chevron: { color: vola.textDim, fontSize: 22 },
   note: { color: vola.textDim, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
 });

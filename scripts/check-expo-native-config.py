@@ -176,6 +176,8 @@ def run_check() -> int:
         scratch = Path(tmp) / "project"
         _build_scratch_project(scratch)
         result = _run_prebuild(scratch)
+        # Read before the scratch directory is deleted at the end of this block.
+        entitlement_problem = _push_entitlement_problem(scratch) if result.returncode == 0 else None
 
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
@@ -192,8 +194,53 @@ def run_check() -> int:
         )
         return result.returncode
 
+    if entitlement_problem:
+        print(f"\ncheck-expo-native-config: {entitlement_problem}", file=sys.stderr)
+        return 1
+
     print("check-expo-native-config: ok — native project generates cleanly from the checked-in config")
     return 0
+
+
+# --------------------------------------------------------------------------
+# The push entitlement (N195, #612)
+# --------------------------------------------------------------------------
+
+PUSH_ENTITLEMENT = "aps-environment"
+
+
+def _push_entitlement_problem(scratch: Path) -> str | None:
+    """Why the generated iOS project carries the APNs entitlement, or None.
+
+    `expo-notifications` is installed for a LOCAL notification (the rest
+    timer's lock-screen alert), which needs no entitlement. Its config plugin
+    writes `aps-environment` anyway, and prebuild auto-applies that plugin for
+    any installed `expo-notifications`. `app.config.js`'s
+    `withoutPushEntitlement` removes it, and only while it sits ABOVE
+    `"expo-notifications"` in `plugins`. A free Apple ID cannot sign a build
+    that declares Push Notifications, so its return breaks every device build,
+    and nothing else in the pipeline would notice: the prebuild succeeds.
+
+    A missing .entitlements file is reported too, rather than read as "absent":
+    a check that passes because it found nothing to read is the failure this
+    repo's "absence is not evidence" rule is about.
+    """
+    files = sorted((scratch / "ios").glob("*/*.entitlements"))
+    if not files:
+        return (
+            "no .entitlements file was generated under ios/, so the absence of "
+            f"`{PUSH_ENTITLEMENT}` cannot be confirmed."
+        )
+    for path in files:
+        if f"<key>{PUSH_ENTITLEMENT}</key>" in path.read_text():
+            return (
+                f"{path.relative_to(scratch)} declares `{PUSH_ENTITLEMENT}` (Push "
+                "Notifications). VOLA sends no push, and a free Apple ID cannot sign "
+                "this capability, so every device build would fail to provision. "
+                "`withoutPushEntitlement` must stay in app.config.js's plugins, ABOVE "
+                '"expo-notifications" — see N195 (#612) in docs/decisions/history.md.'
+            )
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -207,12 +254,15 @@ def self_test() -> int:
 
     real_config = (MOBILE / "app.config.js").read_text()
     failures: list[str] = []
+    ran: list[str] = []
 
     def check(label: str, condition: bool) -> None:
+        ran.append(label)
         if not condition:
             failures.append(label)
 
-    # 1. An unmodified copy of the real config must still generate cleanly.
+    # 1. An unmodified copy of the real config must still generate cleanly,
+    #    and without the push entitlement (N195, #612).
     with tempfile.TemporaryDirectory(prefix="expo-native-config-selftest-good-") as tmp:
         good_config = Path(tmp) / "app.config.js"
         good_config.write_text(real_config)
@@ -220,6 +270,45 @@ def self_test() -> int:
         _build_scratch_project(scratch, app_config_override=good_config)
         result = _run_prebuild(scratch)
         check("an unmodified config generates cleanly", result.returncode == 0)
+        check(
+            f"an unmodified config generates no `{PUSH_ENTITLEMENT}`",
+            _push_entitlement_problem(scratch) is None,
+        )
+
+    # 1b. N195 (#612): both ways of losing the push-entitlement guard must be
+    #     REPORTED, while prebuild itself still succeeds — which is exactly why
+    #     the plain returncode check above could never see it. The strip plugin
+    #     removed, and the strip plugin moved below "expo-notifications" (a mod
+    #     registered later runs earlier, so below means it runs first and strips
+    #     nothing). Each anchor must match exactly once, or the mutation is not
+    #     the one this claims to test.
+    strip_line = "      withoutPushEntitlement,\n"
+    notif_line = '      "expo-notifications",\n'
+    check("the real config lists withoutPushEntitlement exactly once", real_config.count(strip_line) == 1)
+    check(
+        "the strip plugin sits directly above expo-notifications, exactly once",
+        real_config.count(strip_line + notif_line) == 1,
+    )
+    for label, mutated in (
+        ("the strip plugin removed", real_config.replace(strip_line, "", 1)),
+        (
+            "the strip plugin moved below expo-notifications",
+            real_config.replace(strip_line + notif_line, notif_line + strip_line, 1),
+        ),
+    ):
+        check(f"the fixture for {label} actually changed the config", mutated != real_config)
+        with tempfile.TemporaryDirectory(prefix="expo-native-config-selftest-aps-") as tmp:
+            aps_config = Path(tmp) / "app.config.js"
+            aps_config.write_text(mutated)
+            scratch = Path(tmp) / "project"
+            _build_scratch_project(scratch, app_config_override=aps_config)
+            result = _run_prebuild(scratch)
+            check(f"{label}: prebuild still succeeds", result.returncode == 0)
+            problem = _push_entitlement_problem(scratch)
+            check(
+                f"{label}: reported as declaring `{PUSH_ENTITLEMENT}`",
+                problem is not None and "declares" in problem,
+            )
 
     # 2. The same config with one plugin name corrupted must fail with a
     #    PluginError — reproducing the vola-mobile-build skill's known
@@ -247,7 +336,9 @@ def self_test() -> int:
             print(f"  - {label}", file=sys.stderr)
         return 1
 
-    print("check-expo-native-config self-test ok — 4/4 cases correct")
+    # Counted, not written down: the old "4/4" was a literal, so adding the
+    # N195 cases left it saying 4 whether or not they ran.
+    print(f"check-expo-native-config self-test ok — {len(ran)}/{len(ran)} cases correct")
     return 0
 
 
