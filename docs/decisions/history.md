@@ -78360,6 +78360,95 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 
 - **Tomorrow's real drift.** A separate ticket. The check goes red at 15:56:18Z on 2026-09-16, when `expo-task-manager@57.0.18` leaves the window, because one installable target fails it. The whole bump (`expo install --fix`, the H17 `minimumReleaseAgeExclude` check, a native rebuild) only becomes installable at 16:52:20Z. Between the two the check is red and the full bump is still refused, which is H15's existing any-installable rule, not this change.
 
+## 2026-09-15 — N199 (#635): a PR that goes CONFLICTING is labelled and told how to fix it, without anyone looking
+
+**Why.** A PR that conflicts with its base gets zero new check runs, and nothing on its page says so. `pnpm run ci:checks` (N65, #368) detects that, but only for whoever runs it, against the PR they chose. #624's merge driver fixes the local rebase, not GitHub's merge ref (H18). #631 sat `CONFLICTING` with zero runs while its agent reported local `verify` results as if CI had run.
+
+### What was built
+
+- **`.github/workflows/conflict-label.yml`**
+  - **Triggers:**
+    - `push` to `main`, where most conflicts are born.
+    - `schedule` at `7,37 * * * *`, the backstop. It covers mergeability still `null` when the push run read it, a PR's own conflicting push, and a stacked PR whose base moved. The delay is bounded to one cycle at about 48 short runs a day, and minutes 7 and 37 keep it off the top of the hour.
+    - `workflow_dispatch`.
+    - **No `pull_request` trigger**, so `check-ci-checks.py`'s derived set and `EXPECTED_CHECK_RUNS` (8) are unchanged. `triggers_on_pull_request` is False for the file, and `check:ci-detector` is green.
+  - **Permissions:** `contents: read`, `pull-requests: read`, `issues: write`.
+    - GitHub's fine-grained permission table puts adding and removing a label, creating a comment and creating a label under Issues (write).
+    - Reading pulls and their files needs Pull requests (read). `compare` needs Contents (read).
+    - Not `pull-requests: write`: nothing here writes to a PR itself.
+  - **`concurrency`**, with `cancel-in-progress: false`. This is the opposite of `evidence-latch.yml`, on purpose. Every run re-reads all open PRs, so a replaced pending run loses nothing, and one sweep at a time stops two runs from both commenting.
+  - **The self-test runs first and gates the sweep.** The checkout is the default branch with `persist-credentials: false`. No PR code is checked out, run, rebased or pushed.
+- **`scripts/conflict-label.py`**, stdlib-only. It is REST-only, through one `gh api` call site that refuses GraphQL.
+
+  | state | mergeable | labelled | told at this head | actions |
+  |---|---|---|---|---|
+  | open | CONFLICTING | no | no | comment, then label |
+  | open | CONFLICTING | no | yes | label only |
+  | open | CONFLICTING | yes | either | nothing |
+  | open | MERGEABLE | yes | - | remove label |
+  | open | MERGEABLE | no | - | nothing |
+  | open | UNKNOWN / null | either | - | nothing |
+  | closed | any | yes | - | remove label |
+  | closed | any | no | - | nothing |
+
+  - **It keys on `mergeable` only.** `decide` takes the head's check summary and never reads it. That lets the self-test hand it #395's green-and-conflicting case in both directions.
+  - **`null` is re-read** after 3, 5 and 10 seconds. If it is still `null`, nothing happens until the next run.
+  - **One comment per episode, and the label is the episode.**
+    - While the label stands, nothing is re-posted, even if a person deleted the comment. That is their decision, and the label still carries the state.
+    - The comment carries a hidden sentinel naming the head it was written at, and it is posted **before** the label. A run that dies between the two writes therefore restores only the label next time.
+    - A sentinel from an older head is an older episode, so a PR that conflicts again after a rebase is told again.
+  - **The conflicting files are not in any API.** The comment lists files changed on both sides since the branch diverged (`pulls/N/files` intersected with `compare/HEAD...BASE`, renames under both names). It says the list is a superset, and says so when the list is incomplete (`compare` caps at 300 files) or could not be read.
+  - **Drafts are labelled too.** A conflicting draft gets zero runs the same way, and a draft is where an author iterates believing CI is running.
+  - **Dependabot PRs are told to comment `@dependabot rebase`.** The command is inline, never at column 0, and they are never told to force-push.
+  - **A closed PR still labelled loses the label.** This deliberately departs from "closed does nothing". A PR rebased and merged within one cycle is never seen open and mergeable, and the push run for its own merge no longer lists it, so the label would stay for good.
+  - **No default mode.** `--dry-run` or `--execute` is required, so a bare run by hand cannot write.
+- **Wiring:**
+  - `check:conflict-label` (`--self-test`) is in `verify` after `check:evidence-latch`.
+  - A `Scripts (Python)` CI step runs the same self-test.
+  - CLAUDE.md's "CI can run ZERO checks" section gains one paragraph: the label name, and that `ci:checks` is still the gate.
+
+### Checks
+
+- **`--self-test`** covers:
+  - the decision table and #395 in both directions;
+  - REST's tri-state (0 and 1 are not booleans);
+  - episodes across a rebase, the file intersection, the comment text and repo resolution;
+  - REST-only;
+  - a whole sweep against a fake transport: the exact writes in order, `null` re-reads, an idempotent second run, and a dry run that exits 0 with no write reaching the transport.
+- **Mutations**, after a green baseline. Each anchor matched once, each mutation failed as a self-test assertion rather than a crash, and each restore was byte-identical by sha256:
+
+  | # | Mutation | Result |
+  |---|---|---|
+  | M1 | `UNKNOWN` treated as conflicting | Killed, 3 failed |
+  | M2 | Re-comment when already told at this head | Killed, 2 failed |
+  | M2b | Re-comment while the label stands | Killed, 5 failed |
+  | M3 | Label not removed on `MERGEABLE` | Killed, 5 failed |
+  | M4 | A green check set means fine | Killed: the #395 vector |
+  | M5 | The dry-run `_do` falls through to the write | Killed: the dry sweep exits 1 |
+  | M5b | The transport-level dry-run guard is removed | Killed: the direct refusal vector |
+  | M6 | Label before comment | Killed, 4 failed |
+
+- **Other checks:** `check:python`, `check:verify-chain`, `check:ci-detector` and `check:evidence-latch` are green. The YAML parses under PyYAML and Ruby. `actionlint` is not installed.
+
+### Dry run against the live repo (read-only)
+
+- **10 open PRs.** 3 were `CONFLICTING`: #1149, #1185 and #1233. **Each showed 8 green checks, which is the #395 state, live.** The sweep would comment on and label all three, and create the label once.
+- **Files changed on both sides:**
+  - `docs/decisions/history.md` on all three;
+  - `docs/testing/functional-scenarios.md` on #1149 and #1185;
+  - #1149's list is marked incomplete.
+- **The other 7 were `MERGEABLE`**, so nothing. None read `null`.
+- **Can it pass?** The label comes off when the PR is rebased and pushed. That is the only way a conflicting PR gets CI back. `.git/vola-conflict-cycles.log` holds 27 conflicting heads across 14 PRs, so pushing a new head after a conflict is something authors here do routinely.
+
+### Not done
+
+- **The first live run and creating the label** are for the coordinator after merge. The workflow creates `needs-rebase` itself the first time it needs it.
+- **The permissions come from the docs table, not a live write.** A 403 on the first run means the table does not hold for `GITHUB_TOKEN`.
+- **If #1149, #1185 and #1233 still conflict, the first run comments on them.**
+- **Known limits:**
+  - A PR that goes conflict, clean, conflict at the same head (its base reverted) gets the label but no second comment.
+  - Anyone can post the sentinel on a PR and so suppress the comment. The label is still applied.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

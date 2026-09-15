@@ -1,0 +1,82 @@
+name: Conflicting PR label
+
+# N199 (#635). A pull request that conflicts with its base gets ZERO new check
+# runs, and nothing on its page says so. `pnpm run ci:checks` detects that, but
+# only for whoever runs it. This labels such a pull request `needs-rebase` and
+# comments the fix once, without anyone choosing to look, and takes the label
+# off again once it merges cleanly.
+#
+# Three things worth knowing at THIS level; the full policy is the decision
+# table in `scripts/conflict-label.py`:
+#
+# 1. **This adds no check to any PR.** It never triggers on `pull_request`, so
+#    `scripts/check-ci-checks.py`'s derived expected set, and
+#    EXPECTED_CHECK_RUNS, are unchanged. Nothing here can block a merge.
+#
+# 2. **It never checks out, runs, rebases or pushes pull request code.** The
+#    checkout below is the default branch, for the script. Everything about a
+#    pull request is read over REST.
+#
+# 3. **It keys on `mergeable` only.** A conflicting PR can show a full set of
+#    GREEN checks (#395); `mergeable: null` means "ask again", never conflicting.
+
+on:
+  # Most conflicts are born here: `main` moves underneath an open PR.
+  push:
+    branches: [main]
+  # The backstop for everything a push to `main` does not cover: mergeability
+  # still null when the push-triggered run read it, a PR's own push that
+  # conflicts, a stacked PR whose base branch moved. Every 30 minutes bounds the
+  # delay to one cycle at ~48 short runs a day. Minutes 7 and 37, not 0 and 30,
+  # to stay off the top of the hour, when scheduled runs queue longest.
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+# Least privilege, from GitHub's fine-grained permission table for the exact
+# endpoints the script calls: labels and comments go through the ISSUES API
+# ("Issues" write), reading pull requests and their files needs "Pull requests"
+# read, and `compare` needs "Contents" read. Nothing here writes to a PR itself.
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+# One sweep at a time. Unlike `evidence-latch.yml` (whose runs each carry one
+# event's payload, so a cancelled pending run loses that event), every run here
+# re-reads ALL open PRs from scratch — so a pending run replaced by a newer one
+# loses nothing, and serialising is what stops two overlapping runs from both
+# seeing "unlabelled" and commenting twice.
+concurrency:
+  group: conflict-label
+  cancel-in-progress: false
+
+jobs:
+  label:
+    name: Label conflicting pull requests
+    runs-on: ubuntu-latest
+    # Every job in this repo is bounded. A sweep is a few REST calls per open PR
+    # plus at most ~18s of null re-read delays.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Nothing here pushes; do not leave the token in git config.
+          persist-credentials: false
+
+      # FIRST, and gating: if the decision logic is broken, not writing is the
+      # safe direction — the worst outcome is today's silence, not a wrong label
+      # or a comment on every PR. Stdlib-only; no setup-python, like its siblings.
+      - name: The decision still decides (self-test)
+        run: python3 scripts/conflict-label.py --self-test
+
+      # No pipe, no grep: the script's exit status IS the step's. A failed write
+      # exits 1 rather than printing as a success.
+      #
+      # Loop defence, invisible here: writes made with GITHUB_TOKEN trigger no
+      # workflow runs, and no trigger above reacts to labels or comments anyway.
+      - name: Label conflicting pull requests, unlabel mergeable ones
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/conflict-label.py --execute

@@ -485,6 +485,15 @@ wolf on healthy PRs. **If you see that note, run it again** — the second call 
 when GitHub has an answer. Observed on #395: `UNKNOWN` then `CONFLICTING`,
 seconds apart.
 
+**A conflicting PR is also labelled on its own page now (N199, #635).**
+`.github/workflows/conflict-label.yml` runs on every push to `main` and every 30
+minutes. It labels any open PR that GitHub reads as `CONFLICTING` with
+**`needs-rebase`**, comments the rebase command once, and removes the label once
+the PR merges cleanly. It reads `mergeable` only, never checks, and leaves
+`UNKNOWN` alone. **The label is a prompt, not a check:** `pnpm run ci:checks` is
+still the gate. A missing label does not show a PR is mergeable, because the
+label can be up to one cycle behind.
+
 **Marking a PR ready for review is gated.** `.github/workflows/pr-has-work.yml`
 fails a PR that is **ready** while its three-dot diff against its base is
 **empty** — the state #355 reached at 5/5 green and `MERGEABLE` with one
