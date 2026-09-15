@@ -500,6 +500,29 @@ func Summarise(sets []Set) Volume {
 	return v
 }
 
+// Bodyweight is what the athlete weighed for a session. It is DERIVED WHEN THE
+// SESSION IS READ and never stored (N453).
+//
+// It is not a Set field, and it is never written into `WeightKg`. `WeightKg`
+// is external load, and tonnage, estimated 1RM and records all read it. Filling
+// it with bodyweight would silently change every one of those figures for every
+// reps-only set ever logged, and a pull-up would suddenly "weigh" 82 kg in a
+// volume total the athlete has been comparing week to week. Whether bodyweight
+// should feed those figures is an OPEN decision (see docs/decisions/history.md),
+// so for now it is shown, never summed.
+//
+// It is read time, not a snapshot taken at completion, for three reasons:
+//   - a check-in backfilled later for that date is reflected;
+//   - a session logged offline needs no sync change, because nothing about it
+//     is stored;
+//   - there is no migration.
+type Bodyweight struct {
+	WeightKg float64
+	// MeasuredOn is the check-in's own day, YYYY-MM-DD. The athlete is shown it,
+	// so an old reading is labelled as old rather than passed off as current.
+	MeasuredOn string
+}
+
 // NewSession is the input to Create.
 type NewSession struct {
 	ID        string
@@ -660,6 +683,13 @@ type Repository interface {
 	// says something useful before anyone configures it.
 	MostTrainedExercises(ctx context.Context, userID string, limit int) ([]string, error)
 	Get(ctx context.Context, userID, id string) (*Session, error)
+	// GetDetail is Get plus the athlete's bodyweight for the detail view (N453):
+	// the owner's most recent weigh-in on or before the calendar day the
+	// session STARTED, with that day resolved in `tz` (an IANA name the handler
+	// has validated). A nil *Bodyweight means no such check-in exists. Absent
+	// and not-yours are the same ErrNotFound as Get. The session row and the
+	// bodyweight come from ONE statement.
+	GetDetail(ctx context.Context, userID, id, tz string) (*Session, *Bodyweight, error)
 	// Create is idempotent on the client-supplied ID for the same user; a
 	// different user's ID collides with ErrAlreadyExists.
 	Create(ctx context.Context, in NewSession) (*Session, error)

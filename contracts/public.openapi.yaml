@@ -5274,6 +5274,43 @@ components:
         session: { $ref: "#/components/schemas/Session" }
         volume: { $ref: "#/components/schemas/Volume" }
 
+    SessionDetail:
+      description: >
+        What `GET /v1/sessions/{sessionID}` returns: `SessionWithVolume` plus
+        the bodyweight the session was performed at (N453). The two fields sit
+        BESIDE `session`, as `volume` does, rather than inside it, because
+        every write endpoint also returns a `session` and none of them derives
+        this. A null there would claim "no check-in" about a session nobody
+        looked up.
+      allOf:
+        - $ref: "#/components/schemas/SessionWithVolume"
+        - type: object
+          required: [bodyweight_kg, bodyweight_measured_on]
+          properties:
+            bodyweight_kg:
+              type: number
+              format: double
+              nullable: true
+              description: >
+                The owner's most recent recorded weight, in kilograms, on or
+                before the calendar day the session started (resolved in
+                `tz`). Only the owner's own check-ins are ever read. Null when
+                there is no such check-in: never zero, never a LATER check-in,
+                never a profile default.
+
+
+                Display only. It is not written into any set's `weight_kg`,
+                and it does not feed `volume.tonnage_kg`, estimated 1RM or
+                records.
+            bodyweight_measured_on:
+              type: string
+              format: date
+              nullable: true
+              description: >
+                The day of the check-in `bodyweight_kg` came from. Clients show
+                it, so an old reading is labelled as old. Null exactly when
+                `bodyweight_kg` is.
+
     Media:
       type: object
       description: >
@@ -11717,6 +11754,17 @@ paths:
   /sessions/{sessionID}:
     get:
       summary: Get one session with its volume summary
+      description: >
+        The session, its derived volume, and the bodyweight it was performed at
+        (N453). The bodyweight is DERIVED WHEN READ: it is the owner's most
+        recent check-in with a recorded weight, on or before the calendar day
+        the session started in `tz`. It is never stored, so a check-in
+        backfilled later for that day is reflected on the next read, and the
+        body-hash `ETag` changes with it.
+
+
+        Display only. It is not written into any set's `weight_kg`, and it does
+        not feed `volume.tonnage_kg`, estimated 1RM or records.
       operationId: getSession
       parameters:
         - $ref: "#/components/parameters/IfNoneMatch"
@@ -11724,17 +11772,33 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: tz
+          in: query
+          required: false
+          schema: { type: string }
+          description: >
+            The caller's IANA timezone, e.g. `America/Los_Angeles`. Absent
+            means UTC. It decides which calendar day the session started on,
+            and so which check-in counts as "on or before" it: a 19:00 session
+            in Los Angeles is the next day in UTC, where it would pick up the
+            following morning's weigh-in. `Local` is refused, because the
+            server's local zone is not the caller's.
       responses:
         "200":
-          description: The session and its derived volume.
+          description: The session, its derived volume and its bodyweight.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/SessionWithVolume" }
+              schema: { $ref: "#/components/schemas/SessionDetail" }
           headers:
             ETag:
               $ref: "#/components/headers/ETag"
         "304":
           $ref: "#/components/responses/NotModified"
+        "400":
+          description: "`tz` is not an IANA timezone name both the API and Postgres accept."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           description: >

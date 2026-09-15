@@ -63,6 +63,43 @@ func scanCheckin(row pgx.Row) (Checkin, error) {
 	return c, err
 }
 
+// SQLLatestWeightOnOrBefore is THE rule for "what did this athlete weigh on a
+// given day": their most recent check-in that recorded a weight, ON OR BEFORE
+// that day. It yields one row (`weight_kg`, `measured_on`) or none.
+//
+// It is exported, and it is a function of two SQL expressions rather than a
+// finished query, because three modules need it inside their own statements:
+// sessioncard's calorie estimate, nutrition's target inputs, and session's
+// bodyweight on the detail view (N453). It used to be two hand-typed copies,
+// and a third was about to be written. A module that re-types a rule from
+// memory is how one copy drifts; that is `session.SQLWorkingSet`'s story (#238).
+//
+// **`userExpr` and `dayExpr` are concatenated, NOT bound.** They are SQL
+// written in Go source by the caller, either a column (`p.user_id`) or a
+// placeholder (`$2::date`). Never pass anything derived from a request through
+// them; bind the value and pass the placeholder.
+//
+// Every caller depends on three properties, and each is a line below:
+//
+//   - `weight_kg IS NOT NULL`: a girths-only check-in is not a weigh-in, and
+//     letting it win would turn "82.4 kg on the 10th" into "nothing on the 12th".
+//   - `measured_on <=` the day: never a LATER check-in. A session reviewed next
+//     month is priced at the body it was performed with, not today's.
+//   - `user_id =` the caller's expression: only the owner's own check-ins, ever.
+//     Nothing here can see another athlete, provided the expression is the
+//     owner's id and not a free parameter.
+//
+// The primary key is (user_id, measured_on), so this is an index range scan
+// ending at the first row, not a sort over an athlete's whole history.
+func SQLLatestWeightOnOrBefore(userExpr, dayExpr string) string {
+	return `SELECT weight_kg, measured_on FROM body_checkins
+		WHERE user_id = ` + userExpr + `
+		  AND weight_kg IS NOT NULL
+		  AND measured_on <= ` + dayExpr + `
+		ORDER BY measured_on DESC
+		LIMIT 1`
+}
+
 // ListCheckins returns the caller's check-ins in [from, to], newest first.
 //
 // Both bounds are required by the handler. An unbounded list grows for the life

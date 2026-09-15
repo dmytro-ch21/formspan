@@ -229,11 +229,27 @@ func (f *sessionFakeRepo) Get(_ context.Context, _, _ string) (*session.Session,
 	return f.s, nil
 }
 
-func TestSessionGet_MatchesSpec(t *testing.T) {
-	spec := loadRealSpec(t)
+// GetDetail is what `GET /v1/sessions/{sessionID}` reads since N453. With no
+// bodyweight it returns nil, which the handler writes as two explicit nulls.
+func (f *sessionFakeRepo) GetDetail(_ context.Context, _, _, _ string) (*session.Session, *session.Bodyweight, error) {
+	return f.s, nil, nil
+}
 
+// sessionWithBodyweightFakeRepo answers with a bodyweight, so the NON-null
+// shape of `bodyweight_kg` / `bodyweight_measured_on` (a number and a `date`)
+// is validated against the spec too, not only the nulls.
+type sessionWithBodyweightFakeRepo struct {
+	sessionFakeRepo
+	bw *session.Bodyweight
+}
+
+func (f *sessionWithBodyweightFakeRepo) GetDetail(_ context.Context, _, _, _ string) (*session.Session, *session.Bodyweight, error) {
+	return f.s, f.bw, nil
+}
+
+func contractSession() *session.Session {
 	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
-	repo := &sessionFakeRepo{s: &session.Session{
+	return &session.Session{
 		ID:        "s1",
 		UserID:    "user_1",
 		Sport:     "strength",
@@ -244,18 +260,35 @@ func TestSessionGet_MatchesSpec(t *testing.T) {
 		Sets:      []session.Set{},
 		CreatedAt: now,
 		UpdatedAt: now,
-	}}
-	h := session.NewHandler(repo, nil, nil)
+	}
+}
 
+func serveSessionGet(t *testing.T, repo session.Repository) *httptest.ResponseRecorder {
+	t.Helper()
+	h := session.NewHandler(repo, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/v1/sessions/s1", nil)
 	req.SetPathValue("sessionID", "s1")
 	req = signedIn(req, "user_1")
 	rec := httptest.NewRecorder()
 	h.Get(rec, req)
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
+	return rec
+}
+
+func TestSessionGet_MatchesSpec(t *testing.T) {
+	spec := loadRealSpec(t)
+	rec := serveSessionGet(t, &sessionFakeRepo{s: contractSession()})
+	checkAgainstSpec(t, spec, "GET", "/sessions/{sessionID}", "200", rec)
+}
+
+func TestSessionGet_WithBodyweight_MatchesSpec(t *testing.T) {
+	spec := loadRealSpec(t)
+	rec := serveSessionGet(t, &sessionWithBodyweightFakeRepo{
+		sessionFakeRepo: sessionFakeRepo{s: contractSession()},
+		bw:              &session.Bodyweight{WeightKg: 82.4, MeasuredOn: "2026-08-30"},
+	})
 	checkAgainstSpec(t, spec, "GET", "/sessions/{sessionID}", "200", rec)
 }
 

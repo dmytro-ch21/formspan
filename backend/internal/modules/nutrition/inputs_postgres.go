@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/energy"
 	"github.com/jackc/pgx/v5"
 )
@@ -15,10 +16,15 @@ import (
 //
 // nutrition needs the profile, the latest weight, the live phase and the last
 // four weeks of training. Three of those belong to `profile` and `body`, and a
-// module in this codebase never imports a sibling — sessioncard set the
-// precedent by reading `profiles` and `body_checkins` by SQL for exactly the
-// same reason. The coupling is to the SCHEMA, which migrations version, rather
-// than to another package's Go API, which nothing does.
+// module in this codebase does not call a sibling's repository. sessioncard set
+// the precedent by reading `profiles` and `body_checkins` by SQL for exactly
+// the same reason. The coupling is to the SCHEMA, which migrations version,
+// rather than to another package's Go API, which nothing does.
+//
+// The one import from `body` is a SQL FRAGMENT, not an API:
+// `body.SQLLatestWeightOnOrBefore` is the latest-weigh-in rule, written once
+// because sessioncard, session (N453) and this query all embed it. That is the
+// same arrangement as `feed` embedding `session.SQLWorkingSet`.
 func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string) (Inputs, error) {
 	in := Inputs{On: on}
 
@@ -43,11 +49,7 @@ func (r *PostgresRepository) TargetInputs(ctx context.Context, userID, on string
 		       c.weight_kg,
 		       c.measured_on::text
 		FROM profiles p
-		LEFT JOIN LATERAL (
-			SELECT weight_kg, measured_on FROM body_checkins
-			WHERE user_id = p.user_id AND weight_kg IS NOT NULL AND measured_on <= $2::date
-			ORDER BY measured_on DESC LIMIT 1
-		) c ON true
+		LEFT JOIN LATERAL (`+body.SQLLatestWeightOnOrBefore("p.user_id", "$2::date")+`) c ON true
 		WHERE p.user_id = $1`, userID, on).
 		Scan(&in.HeightCM, &in.DateOfBirth, &in.Sex, &activityLevel, &in.WeightKG, &measuredOn)
 	if errors.Is(err, pgx.ErrNoRows) {

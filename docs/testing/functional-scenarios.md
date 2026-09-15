@@ -25074,3 +25074,43 @@ No native rebuild is needed.
   `TestAnOutageAndAnExhaustedAllowanceAreDistinguishableByCode`.
 - **Not reachable:** the real endpoint at a real cap, and how the cap line and
   the refusal read together on a phone. Those need a device.
+
+## Bodyweight on a finished session (N453, `GET /v1/sessions/{sessionID}`, mobile `app/session/[id].tsx`)
+
+A reps-only exercise logs no weight. A finished session shows the athlete's most recent weigh-in on or before the day it started. The value is derived when the session is read and never stored. It is display only: no tonnage, 1RM or record changes.
+
+**Happy path: with check-in history**
+
+- Record a check-in of 82.4 kg on 10 Sep. On 12 Sep, log and finish a session with two completed sets of Pull-up (reps only). Under the summary tiles the screen reads "Bodyweight 82.4kg, from your 10 Sep check-in", with "Bodyweight exercises: Pull-up" beneath it.
+- Switch units to imperial and reopen. The line reads "Bodyweight 181.7lb, from your 10 Sep check-in".
+- With check-ins on 10 Sep (82.4) and 12 Sep (81.9), the 12 Sep session shows 81.9 from 12 Sep. The session's own day counts.
+- Add Dip to the same session. The second line reads "Bodyweight exercises: Pull-up, Dip", in the order performed.
+- The Volume tile, the set rows ("10 reps"), records and estimated 1RM are identical to how they were before the check-in existed.
+
+**Without check-in history**
+
+- An athlete who has never checked in finishes the same session. There is no bodyweight line, and the rows read "10 reps" exactly as before. There is no "0 kg", no profile weight and no "no check-in" copy.
+- The only check-in is dated after the session (13 Sep, for a 12 Sep session). There is no line.
+- A girths-only check-in (a waist, no weight) on 11 Sep and a weight on 1 Sep: the line uses 1 Sep.
+
+**Edge cases**
+
+- **Backfill.** With no line showing, add a check-in dated before the session, then reopen the session. The line appears.
+- **Deleted check-in.** Delete that check-in and reopen. The line falls back to the next older weigh-in, or disappears.
+- **Evening session in a western zone.** In Los Angeles, finish a session at 19:30 on 12 Sep, then record a check-in on the morning of 13 Sep. The session still shows the 12 Sep or an earlier reading, never 13 Sep.
+- **Corrected date.** If the session's date is corrected to an earlier day, the line follows the new day.
+- **Only weighted exercises.** No line.
+- **Still logging.** No line, and no request, while the session is being logged. The line appears after Finish.
+- **Offline.** Open a finished bodyweight session in airplane mode. There is no line and no error. Restore signal and reopen, and the line appears.
+
+**API**
+
+- `GET /v1/sessions/{id}` returns `bodyweight_kg` and `bodyweight_measured_on` beside `session` and `volume`. Both are present, and both are `null` when there is no weigh-in.
+- `?tz=America/Los_Angeles` resolves the session's day in that zone. An absent `tz` means UTC. `?tz=Local` and an unknown zone return 400 `invalid_input`.
+- No set in `session.sets` gains a `weight_kg` from the check-in, and `volume.tonnage_kg` is unchanged.
+- Write responses (create, replace sets, finish, rename, intent, reschedule) do not carry the two fields.
+
+**Auth / security**
+
+- Another athlete's check-in dated on the session's own day never appears on my session.
+- Another athlete requesting my session id gets 404, the same as a missing id, so they never see my bodyweight.

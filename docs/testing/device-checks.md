@@ -920,6 +920,23 @@ returning from another app are all device behaviour.
 and `settingsHealthConnectRefusal.test.tsx` cover every decision downstream of
 the native answer; this check covers the answer itself.
 
+### D33 — Bodyweight on a finished bodyweight session (N453)
+
+**Do:** Record a check-in with a weight, today or on an earlier day. Start a session, log two sets of Pull-up (reps only), and finish it. Read the area under the Time / Sets / Reps / Volume tiles. Switch units in Settings and reopen the session. Then open two more finished bodyweight sessions: one from before your first-ever check-in, and one with airplane mode on.
+
+**Should:** Under the tiles there is one line, "Bodyweight 82.4kg, from your 12 Sep check-in", in your unit and with the right day, and "Bodyweight exercises: Pull-up" beneath it. The set rows still read "10 reps", and the Volume tile is unchanged. The pre-check-in session and the offline one show no line at all, and no error.
+
+**Failure looks like:**
+
+- No line on a session that has a check-in before it. The request did not carry the phone's zone, or the catalog never resolved the exercise.
+- The date off by one day, because a stored date was read as local time.
+- A line appearing while the session is still being logged.
+- The set list jumping when the line arrives on a small phone.
+- Any weight on the pre-check-in or offline session.
+- The Volume tile changing.
+
+**Why no test reaches it:** the component and the server query are both tested. What is not tested is what the real screen renders with the real catalog, the real network and the real unit preference, and how a line that arrives late sits in the layout on a small screen.
+
 ---
 
 ## What is deliberately not here

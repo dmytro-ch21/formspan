@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/energy"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/score"
 )
@@ -140,12 +141,7 @@ func (r *PostgresRepository) calories(
 		SELECT p.height_cm,
 		       to_char(p.date_of_birth, 'YYYY-MM-DD'),
 		       p.sex,
-		       (SELECT c.weight_kg FROM body_checkins c
-		         WHERE c.user_id = p.user_id
-		           AND c.weight_kg IS NOT NULL
-		           AND c.measured_on <= $2::date
-		         ORDER BY c.measured_on DESC
-		         LIMIT 1)
+		       (SELECT w.weight_kg FROM (`+body.SQLLatestWeightOnOrBefore("p.user_id", "$2::date")+`) w)
 		FROM profiles p
 		WHERE p.user_id = $1`,
 		callerID, day).Scan(&p.HeightCM, &p.DateOfBirth, &p.Sex, &p.WeightKG)

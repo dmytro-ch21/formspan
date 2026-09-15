@@ -13,6 +13,7 @@ import (
 	// a second binary, or these tests in a slim image, would break silently.
 	_ "time/tzdata"
 
+	"github.com/dmytro-ch21/vola/backend/internal/modules/body"
 	"github.com/dmytro-ch21/vola/backend/internal/platform/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -87,10 +88,14 @@ const sessionColumns = `
 
 type scannable interface{ Scan(dest ...any) error }
 
-func scanSession(row scannable) (*Session, error) {
+// scanSession reads `sessionColumns`, in order, followed by whatever `extra`
+// destinations the query selected after them. That lets GetDetail add its
+// LATERAL columns without restating the session column list.
+func scanSession(row scannable, extra ...any) (*Session, error) {
 	var s Session
-	err := row.Scan(&s.ID, &s.UserID, &s.WorkoutID, &s.Sport, &s.Name, &s.Intent,
-		&s.StartedAt, &s.EndedAt, &s.Notes, &s.CreatedAt, &s.UpdatedAt)
+	dest := append([]any{&s.ID, &s.UserID, &s.WorkoutID, &s.Sport, &s.Name, &s.Intent,
+		&s.StartedAt, &s.EndedAt, &s.Notes, &s.CreatedAt, &s.UpdatedAt}, extra...)
+	err := row.Scan(dest...)
 	if err != nil {
 		return nil, err
 	}
@@ -776,6 +781,57 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, id string) (*Sessi
 		return nil, err
 	}
 	return &one[0], nil
+}
+
+// GetDetail reads a session together with the bodyweight it was performed at.
+//
+// The bodyweight rides the SAME statement as the session row, as a LATERAL
+// join. It is not a second lookup, so there is no per-session query to
+// multiply if this ever backs a list.
+//
+// The rule itself is `body.SQLLatestWeightOnOrBefore`, the one sessioncard's
+// calorie estimate and nutrition's target inputs also embed. Two arguments
+// pin it to this session:
+//
+//   - `s.user_id`: the SESSION's owner, never a parameter. Together with
+//     `s.user_id = $2` that means only the caller's own check-ins can appear,
+//     and only on the caller's own session.
+//   - the day `started_at` falls on in the caller's zone. A session begun at
+//     19:00 in Los Angeles is 02:00 UTC the next day, and the UTC date would
+//     pick up the check-in from the following morning, which is a LATER reading
+//     than the session. The calendar already buckets a session on its local
+//     start day (History's `AT TIME ZONE`), so this agrees with the day the
+//     athlete sees it listed under.
+func (r *PostgresRepository) GetDetail(ctx context.Context, userID, id, tz string) (*Session, *Bodyweight, error) {
+	var (
+		weightKg   *float64
+		measuredOn *string
+	)
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+sessionColumns+`, bw.weight_kg::float8, bw.measured_on::text
+		FROM sessions s
+		LEFT JOIN LATERAL (`+body.SQLLatestWeightOnOrBefore(
+		"s.user_id", "(s.started_at AT TIME ZONE $3::text)::date")+`) bw ON true
+		WHERE s.id = $1 AND s.user_id = $2`, id, userID, tz)
+	s, err := scanSession(row, &weightKg, &measuredOn)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Same answer whether it doesn't exist or isn't yours.
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, fmt.Errorf("session: get detail: %w", err)
+	}
+	one := []Session{*s}
+	if err := r.attachSets(ctx, one, []string{s.ID}); err != nil {
+		return nil, nil, err
+	}
+	var bw *Bodyweight
+	// Both or neither: the LATERAL either found a row or it did not. A row with
+	// a NULL weight cannot reach here, because the fragment filters those out.
+	if weightKg != nil && measuredOn != nil {
+		bw = &Bodyweight{WeightKg: *weightKg, MeasuredOn: *measuredOn}
+	}
+	return &one[0], bw, nil
 }
 
 // assertSportsMatch rejects sets whose exercise belongs to another
