@@ -80,6 +80,7 @@ every session in this fleet shares one GraphQL budget (H27, #1099).
 
 from __future__ import annotations
 
+from pathlib import Path
 import argparse
 import json
 import os
@@ -203,6 +204,40 @@ def both_sides(pr_files, base_files) -> list[str]:
     is a conflict on the old name.
     """
     return sorted(_file_names(pr_files) & _file_names(base_files))
+
+
+def workflow_permissions(text: str) -> dict[str, str]:
+    """The top-level `permissions:` block of a workflow file, as {scope: access}.
+
+    Stdlib only, so `verify` and the Scripts CI job need no YAML parser. It reads
+    the first column-0 `permissions:` line and the indented `scope: access` lines
+    under it, skipping comments and blank lines, and stops at the next column-0
+    line. A job-level block is indented, so it is never mistaken for this one.
+    """
+    out: dict[str, str] = {}
+    lines = text.splitlines()
+    # More than one top-level block is refused, never guessed: a YAML loader takes
+    # the LAST duplicate key, so reading the first would let a later read-only block
+    # pass the write assertions (the false PASS the N199 follow-up review found).
+    # A scalar such as `permissions: write-all` is not a block and reads as empty,
+    # which fails those assertions -- a false FAIL, the safe direction.
+    top_level = [l for l in lines if l.rstrip() == "permissions:"]
+    if len(top_level) > 1:
+        raise ValueError(f"{len(top_level)} top-level `permissions:` blocks; a workflow must have one")
+    for i, line in enumerate(lines):
+        if line.rstrip() != "permissions:":
+            continue
+        for nxt in lines[i + 1:]:
+            stripped = nxt.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not nxt.startswith((" ", "\t")):
+                break
+            key, sep, value = stripped.partition(":")
+            if sep:
+                out[key.strip()] = value.split("#", 1)[0].strip()
+        break
+    return out
 
 
 def code_span(text: str) -> str:
@@ -862,6 +897,34 @@ def self_test() -> int:
         failures.append("DRY RUN: Client.write did not refuse")
     except RuntimeError as err:
         check("DRY RUN: the transport-level guard refuses on its own", "dry run: refusing" in str(err), True)
+
+    # The token must be able to WRITE to pull requests (N199 follow-up). Measured on
+    # the first live run, 35001451760: with `issues: write` and `pull-requests:
+    # read`, POST /issues/{pr}/comments on a pull request returned 403.
+    sample = "on:\n  push:\npermissions:\n  # c\n  contents: read\n\n  pull-requests: write  # x\njobs:\n  a:\n    permissions:\n      issues: none\n"
+    check("workflow_permissions: reads the top-level block, skipping comments and blanks",
+          workflow_permissions(sample), {"contents": "read", "pull-requests": "write"})
+    check("workflow_permissions: no top-level block reads as empty", workflow_permissions("jobs:\n  a:\n    permissions:\n      x: write\n"), {})
+    check("workflow_permissions: a scalar `write-all` is not a block, so it reads as empty (a false FAIL, safe)",
+          workflow_permissions("permissions: write-all\njobs:\n"), {})
+    try:
+        workflow_permissions("permissions:\n  pull-requests: write\n  issues: write\non:\n  push:\npermissions:\n  pull-requests: read\n")
+        failures.append("workflow_permissions: a second top-level block was read, not refused (a later read-only block would pass)")
+    except ValueError:
+        pass
+    wf = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "conflict-label.yml"
+    if wf.is_file():
+        try:
+            perms = workflow_permissions(wf.read_text())
+        except ValueError as e:
+            failures.append(f"conflict-label.yml: {e}")
+            perms = {}
+        check("conflict-label.yml grants pull-requests: write (a PR comment 403s without it)", perms.get("pull-requests"), "write")
+        check("conflict-label.yml grants issues: write (creating the label)", perms.get("issues"), "write")
+        check("conflict-label.yml grants no write beyond pull-requests and issues",
+              sorted(k for k, v in perms.items() if v == "write"), ["issues", "pull-requests"])
+    else:
+        failures.append(f"conflict-label.yml not found at {wf}")
 
     if failures:
         print(f"conflict-label self-test: {len(failures)} FAILED", file=sys.stderr)

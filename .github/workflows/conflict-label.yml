@@ -33,13 +33,20 @@ on:
     - cron: "7,37 * * * *"
   workflow_dispatch:
 
-# Least privilege, from GitHub's fine-grained permission table for the exact
-# endpoints the script calls: labels and comments go through the ISSUES API
-# ("Issues" write), reading pull requests and their files needs "Pull requests"
-# read, and `compare` needs "Contents" read. Nothing here writes to a PR itself.
+# Least privilege, MEASURED rather than read off the docs. GitHub's fine-grained
+# permission table lists the issues comment and label endpoints under both
+# "Issues" and "Pull requests", which reads as if either were enough. The first
+# live run (35001451760, 2026-09-15) had `issues: write` and
+# `pull-requests: read`, and every POST /issues/{pr}/comments on a PULL REQUEST
+# returned 403 "Resource not accessible by integration". `evidence-latch.yml`
+# never showed this because it skips pull requests. So:
+#   pull-requests: write  — comment on, and label, a pull request;
+#   issues: write         — create the `needs-rebase` label itself;
+#   contents: read        — `compare`, and the checkout.
+# `scripts/conflict-label.py --self-test` asserts both writes are here.
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
   issues: write
 
 # One sweep at a time. Unlike `evidence-latch.yml` (whose runs each carry one

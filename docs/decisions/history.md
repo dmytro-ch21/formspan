@@ -78451,6 +78451,29 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 
 **Hardened after review:** file names and the base branch name are rendered through `code_span()`. The fence is one backtick longer than the longest run inside the text, and line breaks are shown as `\n`. So an author-controlled name cannot break out of its code span and inject links, images or @mentions into a bot comment on a public repository. Today that is blocked only because a file is listed when `main` changed it too. The self-test adds a hostile name, a name with a line break and a backtick in the base name. Reverting names to single backticks fails 3 of those checks. The file was restored byte-identical and re-ran green.
 
+## 2026-09-15 — N199 follow-up (#635): commenting on a pull request needs `pull-requests: write`, which the docs table did not say
+
+**What happened.** The first live run of `conflict-label.yml` (run 35001451760, on the N199 merge `917891d8`) read every open pull request correctly and found #1149, #1185 and #1233 `CONFLICTING`. Then every `POST /repos/{owner}/{repo}/issues/{n}/comments` returned **403 "Resource not accessible by integration"**. The run wrote nothing ("wrote: 0; errors: 3") and exited 1. Comment-before-label held: no pull request was left labelled without an explanation.
+
+**Why.** The run's own log shows the token it had: `Contents: read, Issues: write, Metadata: read, PullRequests: read`. GitHub's fine-grained permission table lists the issue-comment and issue-label endpoints under **both** "Issues" and "Pull requests", which N199 read as "Issues write is enough". For `GITHUB_TOKEN` on an issue number that is a **pull request**, it is not. `evidence-latch.yml` could never have shown this, because it skips pull requests (`if: github.event.issue.pull_request == null`).
+
+**The measurement is exactly what #635's held criteria were for.** They carry `NEEDS HUMAN EVIDENCE` because the permissions came from a table, not a live write. The latch kept the ticket open, and it stays open until a live run labels a pull request.
+
+### Change
+
+- **`conflict-label.yml`:** `pull-requests: write` (was `read`), with `issues: write` kept for creating the label. The comment above the block records the measurement, not the table.
+- **`scripts/conflict-label.py`:** a stdlib `workflow_permissions()` reads the workflow's top-level `permissions:` block. The self-test asserts `pull-requests: write`, `issues: write`, and no other write. The parser has its own fixtures, one skipping comments and blank lines and one ignoring a job-level block.
+
+### Checks
+
+- **Self-test green.** **M1**, setting `pull-requests` back to `read`, fails the new assertion, and the file was restored byte-identical and re-ran green.
+- **Review found a false PASS in the parser itself.** A second top-level `permissions:` block would have been ignored, while a YAML loader takes the last duplicate key. The parser now refuses more than one top-level block with a `ValueError`, and a `write-all` scalar reads as empty, which is a false FAIL. **M2**, removing the duplicate check, fails the new fixture, and the file was restored byte-identical and re-ran green.
+- **Other checks:** `check:python`, `check:conflict-label` and `check:verify-chain` pass.
+
+### Not done
+
+- **The next live run** is the proof. It is triggered by this merge's push, or at the next `:07`/`:37`.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
