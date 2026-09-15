@@ -256,8 +256,23 @@ export default function DescribeMealScreen() {
    * none of which asks the server for a new estimate, so folding this in
    * would freeze an athlete's ALREADY-DRAFTED rows because a LATER request
    * would be refused — a quota unit is spent on asking, not on logging what
-   * was already asked for. This only gates the three actions that spend one:
-   * describing, photographing, and "estimate it again".
+   * was already asked for.
+   *
+   * **It gates only the requests that can NEVER be answered for free** (F69,
+   * #1238): photographing, "estimate it again" (`reuse: false`) and "estimate
+   * it as a new meal" (`recent: false`). It used to gate Work it out as well,
+   * and that made N194's free path unreachable from the phone. The server
+   * answers a saved food's name (N114) and a plain pointer such as "the same
+   * as yesterday" (N194) ABOVE its quota gate, so at the cap those still come
+   * back as drafts, and everything else comes back 429 `rate_limited`.
+   *
+   * **Which of the two a description is, is the server's call and never this
+   * screen's.** The phone does not look at the words: recognising a pointer
+   * here would be a second copy of `RecognizeReference`, and two rules for
+   * "was this free" are two rules that can disagree. So Work it out stays
+   * enabled at the cap, the request goes out, and the response decides: a
+   * 200 is `receive`d like any other draft, and a refusal arrives through
+   * `messageFor` carrying the server's own words.
    */
   const quotaExhausted = isQuotaExhausted(quota);
 
@@ -268,7 +283,12 @@ export default function DescribeMealScreen() {
    * lives on the server and this screen cannot drift from it.
    */
   const describe = useCallback(async ({ reuse = true, recent = true }: { reuse?: boolean; recent?: boolean } = {}) => {
-    if (!description.trim() || locked || quotaExhausted) return;
+    if (!description.trim() || locked) return;
+    // F69: only the two escape hatches are refused here at the cap. Each one
+    // switches off the free path it names (`reuse: false` the saved food,
+    // `recent: false` the log pointer), so the server could only refuse it.
+    // A plain description goes out, and the server says whether it was free.
+    if (quotaExhausted && (!reuse || !recent)) return;
     // Read BEFORE the await: `estimate` is replaced by `receive`, and this is
     // the food the request is being made against.
     const replaces = reuse ? null : (estimate?.match?.food_id ?? null);
@@ -772,17 +792,17 @@ export default function DescribeMealScreen() {
 
       <PressableScale
         onPress={() => void describe()}
-        style={[
-          styles.primary,
-          { backgroundColor: accent.accent },
-          (busy || quotaExhausted) && styles.off,
-        ]}
+        style={[styles.primary, { backgroundColor: accent.accent }, busy && styles.off]}
         accessibilityRole="button"
         accessibilityLabel="Work it out"
         // Dimming is a sighted-only signal. Without the state, a screen reader
         // announces an ordinary button that then does nothing.
-        disabled={locked || !description.trim() || quotaExhausted}
-        accessibilityState={{ disabled: busy || !description.trim() || quotaExhausted }}
+        //
+        // NOT gated on `quotaExhausted` (F69, #1238): at the cap a saved food or
+        // "the same as yesterday" is still answered for free, and only the
+        // server can tell which a description is. See `quotaExhausted`.
+        disabled={locked || !description.trim()}
+        accessibilityState={{ disabled: busy || !description.trim() }}
         testID="describe-submit"
       >
         <Text style={[styles.primaryText, { color: accent.on }]}>
@@ -795,9 +815,17 @@ export default function DescribeMealScreen() {
           athlete has not used yet today — it can only appear once a request
           this session has already reported the count. */}
       {quotaExhausted && quota ? (
-        <Text style={styles.error} testID="describe-quota-exhausted">
-          {quotaResetMessage(quota)}
-        </Text>
+        <>
+          <Text style={styles.error} testID="describe-quota-exhausted">
+            {quotaResetMessage(quota)}
+          </Text>
+          {/* F69: says why Work it out is still enabled. It states what the
+              server does and decides nothing: the button sends, and the
+              response says whether the request was free. */}
+          <Text style={styles.note} testID="describe-quota-free">
+            A food you’ve saved, or a meal you’ve already logged such as “the same as yesterday”, doesn’t use one.
+          </Text>
+        </>
       ) : null}
 
       <SectionHeader label="Or photograph it" />

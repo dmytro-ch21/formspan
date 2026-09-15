@@ -25008,3 +25008,69 @@ No native rebuild is needed.
   - what the native tab bar selects under the pushed screen.
 
   Those need a device.
+
+
+## F69 — at the AI allowance cap, "the same as yesterday" can still be sent (#1238)
+
+Mobile, the describe-a-meal screen. Once a response has reported the day's
+estimates as spent, **Work it out** stays enabled and the cap is stated. The
+phone sends the description, and the server's answer decides what happens. A
+saved food or a plain pointer to the log comes back as drafts. Anything that
+needs the model is refused with the server's own message. The photo buttons and
+"Estimate it as a new meal" stay disabled at the cap.
+
+No native rebuild is needed.
+
+### Happy path
+
+- **The cap is stated, and Work it out is still enabled.** Spend the allowance
+  (25 estimates). The screen shows "You've used all 25 estimates for today. More
+  at …", the line saying a saved food or an already-logged meal doesn't use one,
+  and "0 of 25 estimates left". Work it out is enabled. Take a photo and Choose
+  one are dimmed.
+- **"The same as yesterday" at the cap.** With yesterday's breakfast logged, type
+  "the same as yesterday" and tap Work it out. Yesterday's entries appear as
+  drafts under "From your recent log", with "No estimate used." The counter
+  still reads 0 of 25. Tap Log: the entries land on today's food log.
+- **A saved food at the cap.** Type the exact name of a food you've saved and tap
+  Work it out. It is reused, with "No estimate used."
+
+### Edge cases & errors
+
+- **A new meal at the cap.** Type "a burrito with extra rice" and tap Work it
+  out. The server's refusal appears with its own wait ("one more in …"). No draft
+  appears for the burrito. A draft already on screen from an earlier estimate
+  stays, and can still be logged.
+- **A pointer only the model can read.** At the cap, "that oatmeal thing from the
+  other morning" is refused like a new meal, because reading it needs an
+  estimate.
+- **Nothing matches at the cap.** With nothing logged in 14 days, "the same as
+  yesterday" says "Nothing in the last 14 days matches …". "Estimate it as a new
+  meal" is disabled.
+- **Several matches at the cap.** "My usual breakfast" with two different
+  breakfasts logged shows the list. Picking one gives a draft, and the counter
+  does not move.
+- **Offline at the cap.** Turn on airplane mode, type "the same as yesterday" and
+  tap Work it out. The error names the connection ("Can't reach VOLA…"), not the
+  cap. Turn the network back on and tap again: the drafts appear.
+- **A fresh screen at the cap.** Open the screen without having asked anything
+  on this visit. No cap line shows, because the phone only learns the count from
+  a response. A new meal gets the server's refusal. "The same as yesterday"
+  still gives drafts.
+- **VoiceOver at the cap.** Work it out is announced as a button, not dimmed.
+  Take a photo is announced as dimmed.
+
+### What a test can and cannot reach
+
+- **Reachable (jest, `describeQuota.test.tsx`, mocked at `describeMeal` with
+  the handler's real response shapes):**
+  - Work it out enabled at the cap;
+  - a free 200 rendering yesterday's drafts, with the counter still at zero;
+  - a 429 `rate_limited` rendering the server's message and no draft;
+  - an offline failure named as the connection;
+  - the photo buttons and "Estimate it as a new meal" still disabled.
+- **Already pinned server-side:** `TestAPlainPointerIsAnsweredEvenAtTheCap`,
+  `TestTheQuotaIsCheckedBEFORETheModelIsCalled` and
+  `TestAnOutageAndAnExhaustedAllowanceAreDistinguishableByCode`.
+- **Not reachable:** the real endpoint at a real cap, and how the cap line and
+  the refusal read together on a phone. Those need a device.
