@@ -2188,6 +2188,7 @@ export default function SessionScreen() {
                 >
                   <SetRow
                     index={i}
+                    slotKey={`${sets[i].exercise_id}:${sets[i].set_type}:${sets.length}`}
                     ordinal={ordinal}
                     isDrop={isDrop}
                     set={sets[i]}
@@ -2899,6 +2900,7 @@ function SetRow({
   onChange,
   onRemove,
   onToggleDone,
+  slotKey,
   onStartTimer,
   canArmTimer = false,
   units,
@@ -2920,6 +2922,8 @@ function SetRow({
   onChange: (next: LoggedSet) => void;
   onRemove: () => void;
   onToggleDone: () => void;
+  /** What lives at this row's index — see `foldedByTick`. */
+  slotKey: string;
   /** Undefined when this set isn't timed — see `workSecondsFor`. */
   onStartTimer?: () => void;
   /**
@@ -2941,6 +2945,34 @@ function SetRow({
 }) {
   const accent = useAccent();
   const [open, setOpen] = useState(false);
+  /*
+    Whether the editor is shut because the TICK shut it (N207/#661).
+
+    Ticking a set closes its editor in the same tap. The athlete opened the row
+    to type the numbers, the tick says typing is over, and a finished set left
+    standing open pushes the next one down the screen. Un-ticking is a
+    correction, so it puts back what the tick took away and nothing more: a row
+    that was never open stays closed, and once the athlete has opened or closed
+    the row by hand the fold is theirs, not the tick's, and is forgotten.
+
+    Driven by the tap, not by an effect on `set.completed`. The timer ticks a
+    set too — a countdown running out, or "Done early" on the floating timer
+    during a guided run — and in neither is the athlete's thumb on this row, so
+    the rows do not move for them. Rows are also keyed by index, so an effect
+    would read a set shifting into this slot as a tick.
+
+    For the same reason the ref holds `slotKey` rather than `true`: what lives
+    at this index, built the way `SwipeToDelete`'s `closeOn` is. Swipe away the
+    set above between a tick and its un-tick, or add one, and the key no longer
+    matches — so the un-tick opens nothing, rather than the editor of whichever
+    set moved into the slot.
+
+    Instant, deliberately — nothing on the set-logging path grows a duration
+    (docs/design/motion-audit-2026-09, "Do NOT do these"). And closing
+    mid-entry loses nothing: every keystroke in `Field` is already a commit,
+    so unmounting the fields drops their focus and nothing else.
+  */
+  const foldedByTick = useRef<string | null>(null);
   /*
     Whether the Timed field is SHOWING, which is not quite the same question as
     whether the set carries a duration — and conflating them made a real target
@@ -3020,7 +3052,11 @@ function SetRow({
     >
       <PressableScale
         style={styles.setHead}
-        onPress={() => editable && setOpen((v) => !v)}
+        onPress={() => {
+          if (!editable) return;
+          foldedByTick.current = null;
+          setOpen((v) => !v);
+        }}
         accessibilityRole={editable ? 'button' : undefined}
         accessibilityLabel={
           isDrop
@@ -3100,7 +3136,16 @@ function SetRow({
         {editable && (
           // Records the set; starts rest only if "Auto rest timer" is on.
           <PressableScale
-            onPress={onToggleDone}
+            onPress={() => {
+              if (!set.completed) {
+                foldedByTick.current = open ? slotKey : null;
+                setOpen(false);
+              } else {
+                if (foldedByTick.current === slotKey) setOpen(true);
+                foldedByTick.current = null;
+              }
+              onToggleDone();
+            }}
             hitSlop={10}
             style={[styles.tick, set.completed && styles.tickDone]}
             accessibilityRole="checkbox"

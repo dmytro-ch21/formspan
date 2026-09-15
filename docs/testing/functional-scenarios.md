@@ -25074,3 +25074,46 @@ No native rebuild is needed.
   `TestAnOutageAndAnExhaustedAllowanceAreDistinguishableByCode`.
 - **Not reachable:** the real endpoint at a real cap, and how the cap line and
   the refusal read together on a phone. Those need a device.
+
+## N207 — ticking a set closes the editor the athlete opened (`apps/mobile/app/session/[id].tsx`, #661)
+
+A set row on the Strength session screen is one summary line ("8 × 100 kg") with a tick and a chevron; tapping the row opens its editor. Ticking a set now also closes that editor, in the same tap. Un-ticking puts back an editor the tick closed. Nothing animates.
+
+### Happy path
+
+- **Open a set, type the numbers, tick it:** the set is marked done and the editor closes. The row shows its summary line with the numbers just typed, and the next set sits directly below it.
+- **Tick a set whose editor was never opened:** it is marked done and looks as it did, one line.
+- **Un-tick a set the tick closed:** the set is no longer done and its editor is open again, with the numbers still in the fields.
+- **One tap does both.** Completing a set still costs exactly the one tap on the tick.
+
+### Edge cases & errors
+
+- **Tick while the keyboard is up** (a field focused mid-entry): the set is marked done, the editor closes and the keyboard goes away. The value typed last is kept; check the summary line.
+- **Un-tick a set that was ticked from its closed row:** it stays closed. The un-tick opens nothing the tick did not close.
+- **Tick a set, open it again by hand to correct a number, un-tick it:** it stays open.
+- **Tick a set (editor closes), open it by hand, close it by hand, un-tick it:** it stays closed. The athlete's own last choice wins.
+- **Another set's editor is open when a set is ticked:** only the ticked row closes.
+- **A timed set whose countdown finishes, or "Done early" on the floating timer during a run,** ticks the set without closing its editor. That is deliberate: the athlete's thumb is not on the row, and rows do not move under it.
+- **Swipe away the set above, or add a set, between a tick and an un-tick:** the un-tick leaves the row closed. It never opens the editor of a set that moved into that row; one tap on the row opens it.
+- **Per-exercise Done (N530)** is unaffected. It still folds the whole exercise to one line and ticks nothing.
+- **A finished session opened with "Correct this session"** has ticks again, and they behave the same way.
+
+### What a test can and cannot reach
+
+- **Reachable** (`__tests__/app/strengthSetTickFolds.test.tsx`, the real screen rendered with its boundaries mocked):
+  - a tick closes an open editor and marks the set done;
+  - numbers typed just before the tick survive, and the folded row's accessible name carries them;
+  - a never-opened row is left alone, and no other row is touched;
+  - an un-tick restores only what the tick closed;
+  - an open or close by hand makes the fold forgotten;
+  - adding a set between a tick and its un-tick makes the fold forgotten;
+  - a countdown that ticks a set leaves its editor open.
+- **NOT reachable:** whether the jump of the rows below feels right mid-set, where the thumb lands afterwards, the keyboard dismissing, and VoiceOver focus after the editor closes.
+
+### Needs a device
+
+- A real strength session, one-handed: open a set, type weight and reps, tick it. The editor closes at once, the tick stays under the thumb, and the next set's row is right there.
+- Un-tick it: the editor comes back with the numbers.
+- Do the same with the keyboard up.
+- **Keyboard up, last set of the last exercise.** Scroll to the bottom, open the last set, tap into weight so the keyboard is up, and tick. The list must not slide down under the thumb as the keyboard goes. This is the likeliest jump, and no test can see it.
+- **VoiceOver.** First check VoiceOver can reach the tick at all: it is nested inside the row's own button, which W26 found hides a button from VoiceOver. Then tick a set: focus stays on the tick and the row announces its summary.
