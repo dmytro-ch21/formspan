@@ -78474,6 +78474,68 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 
 - **The next live run** is the proof. It is triggered by this merge's push, or at the next `:07`/`:37`.
 
+## 2026-09-15 — H39 (#1245): check:expo-compat tolerates an Expo release batch until its last member can be installed
+
+**The hour it prevents.** Expo published one SDK-57 batch over 56 minutes on 2026-09-15: `expo-task-manager@57.0.18` at 15:56:18Z, five more by 16:02:58Z, `expo-image-manipulator@57.0.18` at 16:52:20Z. Each leaves pnpm's 24h window 24h after its own publish. From 2026-09-16T15:56:18Z to 16:52:20Z, H15's rule (any installable target fails) would have failed every `verify` and CI Mobile job. It would have asked for a bump `expo install --fix` cannot land while pnpm still refuses the last member.
+
+**Why not flip the quantifier.** "Fail only when every target is installable" would let any same-day release shield a dependency that has been installable for weeks. Self-test group 3 exists to stop that, and it still passes.
+
+**The rule.**
+- `release_batches()` is pure. Targets are sorted by publish time, then name and version. A target joins the batch of the one before it when it is at most `RELEASE_BATCH_GAP_MINUTES` (60) later, inclusive. That is single-linkage, and the result does not depend on input order.
+- `_batch_anchor()` is the one place that decides membership. A resolved target sits at its publish time. An unpublished one (H38) sits at `now`, the earliest it can be published. A resolved target with no publish time, or an unresolved one, joins no batch and keeps failing.
+- `classify()` tolerates an installable target only if its batch still has a member inside the window or unpublished. Any other installable target fails, with the existing messages. Window 0 still turns the release-age tolerance off, batches included.
+- The WARNING header names the batch case. Each maturing batch of two or more gets a line naming its members, its publish span, and when its last member becomes installable.
+
+**The threshold, measured.** `npm view <pkg> time --json` for `expo` and 27 `expo-*` packages: every SDK-57 stable publish from 2026-06-25 to 2026-09-15, 356 publishes.
+
+| Case | min |
+|---|---|
+| Widest lag inside one release: 2026-08-14, `expo-file-system` after the `expo@57.0.13` batch | 53.1 |
+| 2026-09-15, `expo-image-manipulator` after `expo-location` | 49.4 |
+| Widest internal gap of every other release | ≤ 16.5 |
+| Widest spread of one release (2026-09-15) | 56.0 |
+| Closest separate releases: 2026-06-25, a two-package 57.0.1 follow-up | 31.1 |
+| 2026-07-15, the `expo@57.0.5` release then `expo@57.0.6` | 38.6 |
+| 2026-07-07, `expo@57.0.3` then `57.0.4` | 83.0 |
+| 2026-09-01, a two-package follow-up | 104.3 |
+
+- **The data does not separate cleanly.** Two pairs of separate releases were closer than the widest lag.
+- **60 is the smallest round value above 53.1.** Anything under 49.4 reopens the hour this is for. At 60 the 31.1 and 38.6 pairs merge, and every pair 83 min or more apart stays separate.
+- **What a merge costs is bounded.** Across n outdated targets, an installable target is held at most (n − 1) × 60 min past the moment it became installable. A dependency published days before a batch is never in it.
+
+### Checks
+
+- **`--self-test`, 24 groups (was 17)**, on the real batch's timestamps:
+  - 16:10Z is tolerated, naming the batch and 16:52:20Z. So are the first second (15:56:18Z) and the last (16:52:19Z).
+  - At 16:52:20Z all seven are installable now, and it fails.
+  - `expo-camera@57.0.5`, published 2026-09-11, beside the batch fails. So does a months-old target.
+  - The threshold on both sides, at both ends of the batch: exactly 60 min joins, 60 min 1 s does not.
+  - An unpublished member holds its batch: the H38 moment, 16:52:18Z, with a 30-minute window. It does not reach back a day.
+  - An unresolved target, and a resolved one with no time, still fail beside a maturing batch.
+  - `release_batches` is order-independent and chains.
+- **Mutations**, after a green baseline. Each anchor matched once. Each failed as a self-test assertion, including the intended one. Each restore was sha256-identical, and the suite was green after.
+
+  | # | Mutation | Result |
+  |---|---|---|
+  | M1 | Batching disabled (per-target again) | Killed, 13 assertions |
+  | M2 | Fail only when every target is installable | Killed, 13, including group 3 |
+  | M3a | `<=` becomes `<` at the threshold | Killed, 2 |
+  | M3b | Threshold doubled | Killed, 3 |
+  | M4 | Unresolved or no-time target anchored at `now` | Killed, 4 |
+
+- **Real run, 17:41Z.** `pnpm run check:expo-compat` exits 0 with all seven inside the window. The batch line reads `last member expo-image-manipulator@57.0.18 installable after 2026-09-16T16:52:20Z`.
+- **The real `main()` with only the clock replaced:**
+  - 2026-09-16T16:10:00Z: exit 0. Six lines read "installable now, but tolerated with its release batch".
+  - 16:52:20Z: still exit 0. The registry's time is 16:52:20.897Z, and the printed stamp drops the milliseconds.
+  - 16:52:21Z: exit 1, all seven installable now.
+- `check:python` passes.
+
+### Not done
+
+- **The bump itself.** From 2026-09-16T16:52:21Z the check fails, correctly. The bump (`expo install --fix`, the H17 `minimumReleaseAgeExclude` check, a native rebuild) is a separate ticket.
+- **A member that stays unpublished for a day fails the check**, as before H39. It sits at `now`, not beside its batch.
+- **One threshold for every release.** If Expo's lags grow past 60 min, the hour comes back, loudly. Re-measure then.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
