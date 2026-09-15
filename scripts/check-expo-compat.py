@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fail when an installed `expo-*`/`react-native` version has drifted from
 what the pinned Expo SDK expects (N133, #537) — UNLESS the version it wants
-is one pnpm will not let this repo install yet (H15, #950), or one npm has
-never published at all (H38, #1243).
+is one pnpm will not let this repo install yet (H15, #950), one npm has
+never published at all (H38, #1243), or one released in the same Expo batch
+as a version in either state (H39, #1245).
 
 ## The incident this closes
 
@@ -52,9 +53,21 @@ next day. So:
   reading below and fails.
 - A range that resolves to a version whose publish time cannot be read is
   treated as installable, i.e. a real drift — the conservative reading.
-- If ANY outdated package's target is installable now, that is a real drift
-  and this fails exactly as it always did. A same-day Expo release must not
-  become cover for an older, genuinely stale dependency.
+- A target that IS installable now, but belongs to an Expo release batch with
+  a member still inside the window or unpublished, is tolerated with that
+  batch (H39, #1245): WARN, name the batch and when its LAST member becomes
+  installable, exit 0. A batch is `release_batches()`: single-linkage on
+  publish time — sorted, a target joins when it is at most
+  `RELEASE_BATCH_GAP_MINUTES` (60, measured below) after the one before it.
+  An unpublished target sits at `now`, the earliest it can be published. A
+  target with no publish time, or whose range could not be resolved, joins
+  no batch.
+- If ANY outdated package's target is installable now and is NOT in such a
+  batch, that is a real drift and this fails exactly as it always did. A
+  same-day Expo release must not become cover for an older, genuinely stale
+  dependency — which is why H39 is batch-aware rather than "fail only when
+  every target is installable": that flip would let any fresh release shield
+  a dependency that has been installable for weeks.
 
 ## The third incident: a version Expo asks for that npm never had
 
@@ -69,6 +82,51 @@ not resolve the range, so this script recorded no publish time and called it
 that is tolerated, and the `ECONNREFUSED` object that is not. (57.0.18 was in
 fact published two seconds after the 404 was measured — the gap is real but
 can be short.)
+
+## The fourth incident: one release batch crossing the window a member at a time
+
+2026-09-15 (H39, #1245). Expo published one SDK-57 patch batch over 56
+minutes: `expo-task-manager@57.0.18` at 15:56:18Z, five more by 16:02:58Z,
+and `expo-image-manipulator@57.0.18` (the one H38 met unpublished) at
+16:52:20Z. Each leaves pnpm's window 24h after its own publish, so from
+2026-09-16T15:56:18Z to 16:52:20Z some targets are installable and the last
+is not. Under the any-installable rule that is an hour of red `verify` and CI
+asking for a bump `expo install --fix` cannot land: pnpm still refuses the
+batch's newest member.
+
+The threshold is measured, not guessed. `npm view <pkg> time --json` for
+`expo` and 27 `expo-*` packages, every SDK-57 stable publish from 2026-06-25
+to 2026-09-15 (356 publishes), read 2026-09-15:
+
+- Widest lag inside one release: 53.1 min (2026-08-14, `expo-file-system`
+  after the `expo@57.0.13` batch; not a dependency here) and 49.4 min
+  (2026-09-15, above). Every other release's internal gaps were at most
+  16.5 min. Widest spread of one release: 56.0 min (2026-09-15).
+- Closest SEPARATE releases: 31.1 min (2026-06-25, a two-package 57.0.1
+  follow-up), 38.6 min (2026-07-15, the `expo@57.0.5` release then the
+  `expo@57.0.6` one), 83.0 min (2026-07-07), 104.3 min (2026-09-01), then
+  172.7 min and days.
+- So the data does NOT separate cleanly: two pairs of separate releases were
+  closer than the widest lag. 60 min is the smallest round value above 53.1.
+  At 60, those two close pairs merge and every pair 83 min or more apart stays
+  separate. Smaller would fail more often, which is the safe direction, but
+  anything under 49.4 reopens the very hour this exists for.
+- What a merge costs is bounded. A batch is tolerated only until its newest
+  member leaves the window, and single-linkage chains at most (n - 1) x 60 min
+  across n outdated targets. So an installable target is never held more than
+  that past the moment it became installable, and a dependency published days
+  before a batch is never in it.
+- An unpublished member sits at `now`, so it cannot reach back a day to hold a
+  batch whose published members have all aged out. If a member stays
+  unpublished that long, the check fails loudly, as it did before H39.
+
+`--self-test` groups 18-24 pin this against the real batch's timestamps.
+Disabling batching, flipping to "fail only when every target is
+installable", `<=` becoming `<` at the threshold, doubling the gap inside
+`release_batches`, and letting an unresolved target join a batch each fail it.
+Group 25 pins the constant itself against the measured intervals (above
+53.1 min, below 83.0 min), because groups 21 and 24 derive their fixtures from
+it and would move with it.
 
 ## The window, and why it is a documented constant rather than a query
 
@@ -154,6 +212,14 @@ NETWORK_TIMEOUT_SECONDS = 60
 PNPM_DEFAULT_MINIMUM_RELEASE_AGE_MINUTES = 24 * 60
 OVERRIDE_ENV = "VOLA_MINIMUM_RELEASE_AGE_MINUTES"
 
+# H39 (#1245): two outdated targets published at most this far apart are one
+# Expo release batch. Measured from the registry, not guessed — see the
+# docstring's "fourth incident" section for the data: the widest lag inside one
+# release was 53.1 min, and the closest separate releases that did NOT merge at
+# this value were 83.0 min apart. Smaller fails more often, which is the safe
+# direction.
+RELEASE_BATCH_GAP_MINUTES = 60
+
 # npm 10.9.2's `error.summary` when the package exists but no published
 # version satisfies the requested range (measured 2026-09-15). A 404 for a
 # package that does not exist at all reads `Not Found - GET <url> - Not found`
@@ -209,12 +275,88 @@ def _tolerated_as_unpublished(t: Target) -> bool:
     return t.resolution is Resolution.UNPUBLISHED
 
 
+def _stamp(d: datetime) -> str:
+    # `2026-09-08T13:50:37Z`, not `…37.144000+00:00` — this line is read by
+    # a human in CI output, and the microseconds say nothing they need.
+    return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _batch_anchor(t: Target, now: datetime) -> datetime | None:
+    """Where a target sits on the publish timeline, for batching (H39).
+
+    - RESOLVED with a publish time: at that time.
+    - UNPUBLISHED: it has not been published yet, so the earliest it can sit
+      is `now`.
+    - Anything else — resolved with no readable time, or UNRESOLVED — has no
+      place on the timeline and joins NO batch, so it keeps the conservative
+      "installable" reading. This is the only place that decides it."""
+    if t.resolution is Resolution.UNPUBLISHED:
+        return now
+    if t.resolution is Resolution.RESOLVED and t.published is not None:
+        return t.published
+    return None
+
+
+def release_batches(
+    targets: list[Target], now: datetime, gap_minutes: int = RELEASE_BATCH_GAP_MINUTES
+) -> list[tuple[Target, ...]]:
+    """Pure: group the targets that have a batch anchor into release batches.
+
+    Single-linkage on the publish timeline: sorted by (anchor, name, version),
+    a target joins the batch of the target before it when its anchor is AT
+    MOST `gap_minutes` later (inclusive), and starts a new batch otherwise.
+    Equivalently, a target is in a batch when it is within `gap_minutes` of
+    any member. The result does not depend on the order of `targets`.
+    Targets with no anchor (see `_batch_anchor`) are in no batch."""
+    anchored = sorted(
+        ((a, t) for t in targets if (a := _batch_anchor(t, now)) is not None),
+        key=lambda pair: (pair[0], pair[1].outdated.name, pair[1].version),
+    )
+    gap = timedelta(minutes=gap_minutes)
+    batches: list[list[Target]] = []
+    previous: datetime | None = None
+    for anchor, t in anchored:
+        if previous is not None and anchor - previous <= gap:
+            batches[-1].append(t)
+        else:
+            batches.append([t])
+        previous = anchor
+    return [tuple(b) for b in batches]
+
+
+def _batch_line(batch: tuple[Target, ...], window_minutes: int, now: datetime) -> str:
+    """Names the batch and the moment its LAST member becomes installable."""
+    members = ", ".join(f"{t.outdated.name}@{t.version}" for t in batch)
+    published = [t for t in batch if t.published is not None]
+    unpublished = [t for t in batch if t.resolution is Resolution.UNPUBLISHED]
+    window = timedelta(minutes=window_minutes)
+    span = ""
+    if published:
+        span = f", published {_stamp(published[0].published)} to {_stamp(published[-1].published)}"
+    if unpublished:
+        names = ", ".join(f"{t.outdated.name}@{t.outdated.expected_range}" for t in unpublished)
+        last = f"{names} not published yet, so its last member is installable no earlier than {_stamp(now + window)}"
+    else:
+        newest = max(published, key=lambda t: t.published)
+        last = (
+            f"last member {newest.outdated.name}@{newest.version} "
+            f"installable after {_stamp(newest.published + window)}"
+        )
+    return (
+        f"release batch of {len(batch)} ({members}){span}: {last}. "
+        "Its members that are installable now are tolerated until then (H39)"
+    )
+
+
 def classify(targets: list[Target], window_minutes: int, now: datetime) -> Verdict:
-    """The pure decision. Tolerated ONLY when EVERY target is either inside
-    the window (and the window is on) or definitely unpublished; a target with
-    no publish time — including one whose range could not be resolved for any
-    other reason — is treated as installable (i.e. a real drift), the
-    conservative reading."""
+    """The pure decision. Tolerated ONLY when EVERY target is inside the
+    window (and the window is on), definitely unpublished, or installable but
+    in a release batch (`release_batches`) that still has a member inside the
+    window or unpublished. A target with no publish time — including one whose
+    range could not be resolved for any other reason — joins no batch and is
+    treated as installable (i.e. a real drift), the conservative reading. So is
+    an installable target whose batch has fully aged out, or that is in no
+    batch with anything still maturing."""
     if not targets:
         return Verdict(tolerated=False, lines=())
 
@@ -236,28 +378,38 @@ def classify(targets: list[Target], window_minutes: int, now: datetime) -> Verdi
         )
     cutoff = now - timedelta(minutes=window_minutes)
 
-    def stamp(d: datetime) -> str:
-        # `2026-09-08T13:50:37Z`, not `…37.144000+00:00` — this line is read by
-        # a human in CI output, and the microseconds say nothing they need.
-        return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def still_maturing(t: Target) -> bool:
+        # Not installable yet: unpublished, or published inside the window.
+        return t.resolution is Resolution.UNPUBLISHED or (t.published is not None and t.published > cutoff)
+
+    batches = release_batches(targets, now)
+    maturing = [b for b in batches if any(still_maturing(m) for m in b)]
+    in_maturing_batch = {id(m) for b in maturing for m in b}
 
     inside: list[str] = []
     outside: list[str] = []
+    batched: list[str] = []
     for t in rest:
         label = f"{t.outdated.name}@{t.version} (have {t.outdated.actual}, want {t.outdated.expected_range})"
-        if t.published is None:
-            outside.append(f"{label} — registry reports no publish time; treated as installable")
-        elif t.published > cutoff:
+        if t.published is not None and t.published > cutoff:
             installable_at = t.published + timedelta(minutes=window_minutes)
             inside.append(
-                f"{label} — published {stamp(t.published)}, "
-                f"installable after {stamp(installable_at)}"
+                f"{label} — published {_stamp(t.published)}, "
+                f"installable after {_stamp(installable_at)}"
             )
+            continue
+        if t.published is None:
+            reason = "registry reports no publish time; treated as installable"
         else:
-            outside.append(f"{label} — published {stamp(t.published)}, installable now")
+            reason = f"published {_stamp(t.published)}, installable now"
+        if id(t) in in_maturing_batch:
+            batched.append(f"{label} — {reason}, but tolerated with its release batch (below)")
+        else:
+            outside.append(f"{label} — {reason}")
+    batch_lines = [_batch_line(b, window_minutes, now) for b in maturing if len(b) > 1]
     if outside:
-        return Verdict(tolerated=False, lines=tuple(outside + inside + unpublished))
-    return Verdict(tolerated=True, lines=tuple(inside + unpublished))
+        return Verdict(tolerated=False, lines=tuple(outside + batched + inside + batch_lines + unpublished))
+    return Verdict(tolerated=True, lines=tuple(batched + inside + batch_lines + unpublished))
 
 
 # --- reading npm's answer, pure so the self-test can pin it -----------------
@@ -424,12 +576,13 @@ def main() -> int:
     if verdict.tolerated:
         print(
             "\ncheck-expo-compat: WARNING — apps/mobile is behind the Expo SDK's "
-            "compatibility matrix, but every newer version is either still inside "
-            f"pnpm's {release_age_window_minutes()}-minute minimumReleaseAge window "
-            "or not published at all, so none can be installed yet (H15/#950, "
-            "H38/#1243). Not failing. Land the bump once the last of these is "
-            "installable, and check pnpm-workspace.yaml for a tool-written "
-            "`minimumReleaseAgeExclude` block before committing:",
+            "compatibility matrix, but every newer version is still inside "
+            f"pnpm's {release_age_window_minutes()}-minute minimumReleaseAge window, "
+            "not published at all, or part of an Expo release batch whose last "
+            "member is one of those, so the bump cannot be landed whole yet "
+            "(H15/#950, H38/#1243, H39/#1245). Not failing. Land the bump once "
+            "the last of these is installable, and check pnpm-workspace.yaml for "
+            "a tool-written `minimumReleaseAgeExclude` block before committing:",
             file=sys.stderr,
         )
         for line in verdict.lines:
@@ -492,7 +645,7 @@ FIXTURE_NPM_E404_NO_PACKAGE = """{
 # exists only so the E404 code check is exercised by an input it must reject.
 FIXTURE_SYNTHETIC_E500_NO_MATCH = FIXTURE_NPM_E404_NO_MATCH.replace('"E404"', '"E500"')
 
-SELF_TEST_GROUPS = 17
+SELF_TEST_GROUPS = 25
 
 
 def self_test() -> int:
@@ -653,6 +806,156 @@ def self_test() -> int:
     check("parser: empty output is not", not is_unpublished_range(1, "", "~57.0.18"))
     check("parser: non-JSON output is not", not is_unpublished_range(1, "npm error code E404\n", "~57.0.18"))
     check("parser: a JSON array is not", not is_unpublished_range(1, "[]", "~57.0.18"))
+
+    # --- H39 (#1245): release batches, against the real 2026-09-15 batch ---
+    # Every publish time below is the registry's, read with `npm view <name>
+    # time --json` on 2026-09-15; `have` is what apps/mobile had installed.
+    def at(s: str) -> datetime:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+    def member(name: str, have: str, version: str, published: str) -> Target:
+        return Target(Outdated(name, have, f"~{version}"), version, at(published))
+
+    batch_0915 = [
+        member("expo-task-manager", "57.0.17", "57.0.18", "2026-09-15T15:56:18Z"),
+        member("expo-sharing", "57.0.19", "57.0.20", "2026-09-15T15:58:42Z"),
+        member("expo-image-picker", "57.0.17", "57.0.18", "2026-09-15T15:59:01Z"),
+        member("expo", "57.0.22", "57.0.23", "2026-09-15T15:59:52Z"),
+        member("expo-build-properties", "57.0.17", "57.0.18", "2026-09-15T16:00:34Z"),
+        member("expo-location", "57.0.17", "57.0.18", "2026-09-15T16:02:58Z"),
+        member("expo-image-manipulator", "57.0.17", "57.0.18", "2026-09-15T16:52:20Z"),
+    ]
+    published_six = batch_0915[:-1]
+    first_member, last_member = batch_0915[0], batch_0915[-1]
+    mid_crossing = at("2026-09-16T16:10:00Z")
+    gap = timedelta(minutes=RELEASE_BATCH_GAP_MINUTES)
+    # Real: expo-camera@57.0.5 was published four days before the batch.
+    stale = member("expo-camera", "57.0.4", "57.0.5", "2026-09-11T11:43:10Z")
+
+    # 18. The hour this exists for: part of the batch installable, the last
+    #     member not → tolerated, naming the batch and 16:52:20Z.
+    v = classify(batch_0915, window, mid_crossing)
+    check("H39: the 15:56–16:52 crossing of one batch is tolerated", v.tolerated)
+    check(
+        "...the warning names the batch",
+        any(l.startswith("release batch of 7 (") and "expo-task-manager@57.0.18" in l and "expo-image-manipulator@57.0.18" in l for l in v.lines),
+    )
+    check(
+        "...and when its last member becomes installable",
+        any(l.startswith("release batch of 7 ") and "last member expo-image-manipulator@57.0.18 installable after 2026-09-16T16:52:20Z" in l for l in v.lines),
+    )
+    check("...the six installable members are named as tolerated with the batch", sum("tolerated with its release batch" in l for l in v.lines) == 6)
+    check(
+        "...and the last member is still named as inside the window",
+        any(l.startswith("expo-image-manipulator@57.0.18 ") and l.endswith("installable after 2026-09-16T16:52:20Z") for l in v.lines),
+    )
+    check("the first second of the crossing is tolerated", classify(batch_0915, window, at("2026-09-16T15:56:18Z")).tolerated)
+    check("the last second of the crossing is tolerated", classify(batch_0915, window, at("2026-09-16T16:52:19Z")).tolerated)
+    check("a zero window turns the batch tolerance off too", not classify(batch_0915, 0, mid_crossing).tolerated)
+
+    # 19. From 16:52:20Z every member is installable → a real drift, land it.
+    v = classify(batch_0915, window, at("2026-09-16T16:52:20Z"))
+    check("H39: once the last member is installable the whole batch is a real drift", not v.tolerated)
+    check("...every member is listed as installable now", sum(l.endswith("installable now") for l in v.lines) == 7)
+    check("...and nothing is called tolerated", not any("tolerated" in l or l.startswith("release batch") for l in v.lines))
+
+    # 20. Group 3's intent, kept: a stale, long-installable target beside a
+    #     still-maturing batch fails the check. (Flipping to "fail only when
+    #     every target is installable" passes this wrongly.)
+    v = classify(batch_0915 + [stale], window, mid_crossing)
+    check("H39: a stale target beside a still-maturing batch still fails", not v.tolerated)
+    check(
+        "...and the stale one is what fails, not the batch",
+        any(l.startswith("expo-camera@57.0.5 ") and l.endswith("installable now") for l in v.lines)
+        and not any(l.startswith("expo-camera@57.0.5 ") and "tolerated" in l for l in v.lines),
+    )
+    ancient = member("expo-font", "57.0.0", "57.0.1", "2026-07-15T10:00:56Z")
+    check("...and so does a months-old one", not classify([ancient] + batch_0915, window, mid_crossing).tolerated)
+
+    # 21. The threshold, on both sides of it and on both ends of the batch.
+    #     Before the first member: exactly the threshold joins, one second
+    #     more does not and, being installable, fails.
+    joins = member("expo-crypto", "57.0.2", "57.0.3", _stamp(first_member.published - gap))
+    apart = member("expo-crypto", "57.0.2", "57.0.3", _stamp(first_member.published - gap - timedelta(seconds=1)))
+    v = classify([joins] + batch_0915, window, mid_crossing)
+    check(f"H39: a target exactly {RELEASE_BATCH_GAP_MINUTES} min before the batch joins it and is tolerated", v.tolerated)
+    v = classify([apart] + batch_0915, window, mid_crossing)
+    check("...one second further out does not join, and being installable, fails", not v.tolerated)
+    check("...naming it as installable now", any(l.startswith("expo-crypto@57.0.3 ") and l.endswith("installable now") for l in v.lines))
+    #     After the last member, once the batch itself has aged out: a
+    #     late target at exactly the threshold still holds it; one second
+    #     later it is its own batch and the aged-out batch fails.
+    aged_out = at("2026-09-16T16:55:00Z")
+    late_joins = member("expo-font", "57.0.4", "57.0.5", _stamp(last_member.published + gap))
+    late_apart = member("expo-font", "57.0.4", "57.0.5", _stamp(last_member.published + gap + timedelta(seconds=1)))
+    check("...a late member exactly the threshold after the batch keeps it tolerated", classify(batch_0915 + [late_joins], window, aged_out).tolerated)
+    check("...one second later it does not", not classify(batch_0915 + [late_apart], window, aged_out).tolerated)
+
+    # 22. An unpublished member (H38) is a not-yet-installable member,
+    #     anchored at `now`. The real H38 moment, 16:52:18Z, with a 30-minute
+    #     window so the six published members are all installable: only the
+    #     unpublished one, 49m20s after expo-location, holds the batch.
+    unpublished_last = from_view("expo-image-manipulator", "57.0.17", "~57.0.18", 1, FIXTURE_NPM_E404_NO_MATCH)
+    h38_moment = at("2026-09-15T16:52:18Z")
+    v = classify(published_six + [unpublished_last], 30, h38_moment)
+    check("H39: an unpublished member keeps its batch tolerated", v.tolerated)
+    check(
+        "...and the batch line says it is not published yet",
+        any(l.startswith("release batch of 7 ") and "expo-image-manipulator@~57.0.18 not published yet" in l for l in v.lines),
+    )
+    check("...without it, the same six are a real drift", not classify(published_six, 30, h38_moment).tolerated)
+    check("...with pnpm's real 24h window that moment is tolerated too", classify(published_six + [unpublished_last], window, h38_moment).tolerated)
+    check(
+        "...but it does not reach back a day to hold a batch that has aged out",
+        not classify(published_six + [unpublished_last], window, mid_crossing).tolerated,
+    )
+
+    # 23. An unresolved target, or a resolved one with no publish time, joins
+    #     no batch and still fails — here `now` is 57 min after expo-location,
+    #     so anchoring it at `now` would wrongly pull it into the batch.
+    unresolved_last = from_view("expo-image-manipulator", "57.0.17", "~57.0.18", 1, FIXTURE_NPM_ECONNREFUSED)
+    no_time_last = from_view("expo-image-manipulator", "57.0.17", "~57.0.18", 0, '"57.0.18"\n')
+    batch_day = at("2026-09-15T17:00:00Z")
+    v = classify(published_six + [unresolved_last], window, batch_day)
+    check("H39: an unresolved target still fails beside a maturing batch", not v.tolerated)
+    check(
+        "...with the existing no-publish-time message, not a batch one",
+        any(l.startswith("expo-image-manipulator@~57.0.18 ") and l.endswith("registry reports no publish time; treated as installable") for l in v.lines),
+    )
+    check("...so does a resolved target with no publish time", not classify(published_six + [no_time_last], window, batch_day).tolerated)
+
+    # 24. release_batches itself: pure, order-independent, single-linkage.
+    b = release_batches(batch_0915, mid_crossing)
+    check("H39: the real 2026-09-15 batch is one batch of 7", len(b) == 1 and len(b[0]) == 7)
+    check("...whatever order the targets arrive in", release_batches(list(reversed(batch_0915)), mid_crossing) == b)
+    t0 = at("2026-09-15T10:00:00Z")
+    chain = [Target(Outdated(f"expo-chain-{i}", "0.0.0", "~1.0.0"), "1.0.0", t0 + timedelta(minutes=50 * i)) for i in range(3)]
+    check("...members 50 min apart chain into one batch spanning 100 min", len(release_batches(chain, mid_crossing)) == 1)
+    check("...a four-day gap splits batches", len(release_batches([stale] + batch_0915, mid_crossing)) == 2)
+    check("...targets with no anchor are in no batch", release_batches([unresolved_last, no_time_last], batch_day) == [])
+
+    # 25. The threshold itself, pinned against the MEASURED intervals rather
+    #     than against itself (groups 21 and 24 derive their fixtures from
+    #     RELEASE_BATCH_GAP_MINUTES, so they move with it — the H39 review set
+    #     the constant to 120 and the suite stayed green). 53.1 min is the widest
+    #     lag measured inside one SDK-57 release (2026-08-14); 83.0 min is the
+    #     2026-07-07 gap between two separate releases (`expo@57.0.3` → 57.0.4).
+    check("H39: the threshold covers the widest measured in-release lag, 53.1 min",
+          RELEASE_BATCH_GAP_MINUTES > 53.1)
+    check("H39: the threshold stays below the 83.0 min between two separate releases",
+          RELEASE_BATCH_GAP_MINUTES < 83.0)
+    r0 = at("2026-07-07T09:00:00Z")
+    in_release = [Target(Outdated("expo-lag-a", "0.0.0", "~1.0.0"), "1.0.0", r0),
+                  Target(Outdated("expo-lag-b", "0.0.0", "~1.0.0"), "1.0.0", r0 + timedelta(minutes=53, seconds=6))]
+    check("...members 53.1 min apart (one real release) are one batch", len(release_batches(in_release, r0)) == 1)
+    two_releases = [Target(Outdated("expo-rel-a", "0.0.0", "~1.0.0"), "1.0.0", r0),
+                    Target(Outdated("expo-rel-b", "0.0.0", "~1.0.0"), "1.0.0", r0 + timedelta(minutes=83))]
+    check("...targets 83 min apart (two real releases) are two batches", len(release_batches(two_releases, r0)) == 2)
+    older = member("expo-release-x", "57.0.2", "57.0.3", _stamp(r0))
+    newer = member("expo-release-y", "57.0.3", "57.0.4", _stamp(r0 + timedelta(minutes=83)))
+    later_now = r0 + timedelta(hours=24, minutes=10)
+    v = classify([older, newer], window, later_now)
+    check("...an installable release is not tolerated because an unrelated one 83 min later is still maturing", not v.tolerated)
 
     if failures:
         print("check-expo-compat self-test FAILED:", file=sys.stderr)
