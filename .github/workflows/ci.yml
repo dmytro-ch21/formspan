@@ -537,6 +537,16 @@ jobs:
       - name: Evidence latch decides correctly
         run: python3 scripts/evidence-latch.py --self-test
 
+      # N199 (#635). `conflict-label.yml` labels a CONFLICTING pull request and
+      # runs on `push` and `schedule`, where nobody is watching. Its own
+      # workflow self-tests before every sweep; this step puts the same guard
+      # on the PR that CHANGES it. What it holds: the decision keys on
+      # `mergeable` only (a green set on a conflicting PR is still flagged),
+      # `null` is never conflicting, the comment is posted once per episode,
+      # the label comes off when it merges cleanly, and `--dry-run` cannot write.
+      - name: Conflicting-PR label decides correctly
+        run: python3 scripts/conflict-label.py --self-test
+
       # The `.vola-agent/` policy contract is what the AI-SDLC dev engine reads
       # before touching a ticket: human-gated paths, raise-only risk rules, the
       # context map, the ticket schema. A typo'd path in human_gate.paths gates
