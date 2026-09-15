@@ -78311,6 +78311,126 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **On a fresh screen the phone does not know the cap** until a response reports it, so the cap line cannot show before the first request. That is unchanged from F17.
 - **A refusal at a known cap shows two lines that say nearly the same thing:** the cap line (a clock time) and the server's message (a relative wait). It was left that way rather than inventing phone copy for a 429 whose cause the code cannot name.
 
+## 2026-09-15 — N207 (#661): ticking a set closes the editor the athlete opened
+
+**The request** (a side note from the user, 2026-08-26): a completed set's row
+should minimise itself on the Strength session screen, so the remaining work is
+what dominates it.
+
+**What was already true, and why the ticket is smaller than it reads.** A set
+row has been one summary line — ordinal, `8 × 100 kg`, the timer glyph, the tick
+and a chevron — since the screen was built (`2c4bfd0a`, 2026-07-29). The editor
+with the fields opens only when the row is tapped. So a row nobody opened was
+already "collapsed", ticked or not. What the athlete saw was the other row: the
+one they had OPENED to type the numbers into, which stayed open after the tick,
+so a finished set kept its full editor and pushed the next set down the screen.
+That is the whole of the change.
+
+**What was built.** `SetRow` in `apps/mobile/app/session/[id].tsx`:
+
+- **The tick closes the editor, in the same tap.** No second gesture, so N184's
+  "no additional taps for common set completion" holds by construction — the
+  one tap on the tick does both.
+- **An un-tick puts back what the tick took away, and nothing more.** A row that
+  was never open stays closed when un-ticked; one the tick closed opens again,
+  with the numbers still in it. The criterion said "restores it to the expanded
+  state", and read literally that would open every un-ticked row. An un-tick is
+  often a fat-thumbed tick being taken back, and opening an editor the athlete
+  never had there moves every row below it — so it restores rather than expands.
+- **An open or close by hand makes the fold the athlete's.** Once they have
+  touched the row themselves after the tick, the un-tick leaves it alone. The
+  most recent choice wins.
+- **Instant.** Nothing on the set-logging path may grow a duration
+  (`docs/design/motion-audit-2026-09/00-merged.md`, "Do NOT do these"). The rows
+  below move up in one frame; the tick itself does not move, because it sits in
+  the row's head, above the editor that disappears. **One case where it can,
+  found in review:** with the keyboard up near the bottom of the list, the fold
+  unmounts the focused field, the keyboard dismisses, and iOS removes the
+  keyboard inset with its own native animation. If the scroll offset was
+  inside that inset, iOS clamps it and the whole list slides down under the
+  thumb. Before this change a tick with the keyboard up kept the field mounted,
+  so this is newly reachable. No test can see it; it is the first thing the
+  device run checks.
+
+**Two things it deliberately does not do.**
+
+- **It is driven by the tap, not by an effect on `set.completed`.** The timer
+  ticks sets too (`recordTimedSet(…, true)`): a countdown running out, and
+  "Done early" on the floating timer during a guided run. In neither is the
+  athlete's thumb on the row — in the first it is nowhere, in the second it is
+  on the timer — and folding there would move rows under a thumb that is not
+  on them, which is the property the session screen defends. The first draft
+  of this sentence said "nobody's thumb on the screen", which missed "Done
+  early"; review corrected it. Rows are also keyed by index
+  (`SwipeToDelete key={i}`), so an effect would read a different set shifting
+  into the slot as a tick.
+- **It is not persisted.** The per-exercise Done fold (N530) is view state in
+  `local_sessions.collapsed_json` so that it survives an app kill. This is a
+  row's own `useState`, and needs nothing like that: every row starts closed, so
+  after a kill a ticked set is already one line.
+
+**Nothing typed is lost by closing mid-entry.** Every keystroke in `Field` is
+already a commit (`onChangeText` → `onChange` → `update`). `Field`'s `onBlur`
+only re-derives the text it displays from the stored value. So unmounting the
+fields drops their focus and nothing else. A test types `10` into reps, ticks,
+and reads `Set 1. 10 × …` off the folded row's accessible name. That name is
+also criterion 2 ("the collapsed row still shows enough to identify it"): it
+is the same `describeSet` line the row always showed.
+
+**How it is reachable on a phone.** It is the phone: the live strength session
+screen, the only place sets are ticked. The web app has no in-workout ticks. A
+finished session opened with "Correct this session" shows ticks again and gets
+the same behaviour.
+
+**Tests.** `apps/mobile/__tests__/app/strengthSetTickFolds.test.tsx` renders the
+real screen with its boundaries mocked in the shape of `strengthSetHints`, eight
+cases at first. **Those eight, run against the unpatched screen first: 5 failed, 3 passed.** The three
+that passed are the "nothing changes" cases (a never-opened row, an un-tick of
+it, a re-opened row), which is what they should do on `main`. Each guard was then
+mutation-checked, and each is killed by a distinct test:
+
+- M1, the tick does not close: 5 red (6 once the list-shape test below was added);
+- M2, the un-tick does not restore: 1 red ("puts back the editor the tick closed");
+- M3, the tick remembers a fold for a row that was already closed: 1 red ("does not open a row the tick never closed");
+- M4, a hand toggle does not forget the fold: 1 red ("forgets the fold once the athlete has opened and closed the row by hand");
+- M5, added with review's slot guard — the un-tick ignores which set the fold belongs to: 1 red ("forgets the fold when the list changes shape between the tick and the un-tick");
+- M6, added because review found nothing pinned the countdown path — the fold moved into an effect on `set.completed`: 1 red ("leaves the editor open, because nobody tapped the row"). That test runs a one-second timer target out on a squat, so the timer's own completion path does the ticking, not a tap.
+
+The file was restored after the mutations and the restore confirmed by
+re-running the suite (10/10 with review's two additions), not by reading it. `strengthSetHints`,
+`strengthSessionCollapse`, `strengthSessionFinishPlacement` and
+`sessionElapsedTick` still pass (33/33).
+
+**Not done / open.**
+
+- **NEEDS HUMAN EVIDENCE, and it is the criterion that matters:** on a device,
+  mid-session, the fold on tick feels right and nothing jumps under the thumb.
+  The rows below the ticked one DO move up — that is the point of the ticket —
+  and whether that reads as "the next set is right there" or as a jump is a
+  judgement only a hand on a phone can make. Also unmeasured: the keyboard
+  dismissing when a focused field unmounts, and VoiceOver focus staying on the
+  tick.
+- **Closed in review, at a small cost: which set the fold belongs to.** Rows are
+  keyed by index and a set has no stable id, so the first draft remembered the
+  fold per row SLOT — swipe away the set above between a tick and its un-tick,
+  and the un-tick could open the editor of the set that moved up. The frontend
+  reviewer pointed at the key the same render already builds for
+  `SwipeToDelete`'s `closeOn`, `exercise_id:set_type:sets.length`. The ref now
+  holds that key (`slotKey`), and the un-tick restores only while it still
+  matches. The cost: adding a set between a tick and its un-tick changes the key
+  too, so that un-tick leaves the row closed. One tap reopens it, and a closed
+  row is never wrong.
+- **A timer-ticked set keeps its editor open** — a countdown running out, or
+  "Done early" during a run. That is deliberate (above). If the device run says
+  it should fold too, it is one call in the completion path, and the reason
+  against it should be argued rather than forgotten.
+- **VoiceOver may not be able to reach the tick at all, and that is older than
+  this change.** The tick and the timer glyph are pressables nested inside the
+  row head's pressable. W26 (#1230) recorded that a `Pressable` is one
+  accessibility element, so a button inside it is grouped away. If that holds
+  here, the device check "focus stays on the tick" cannot even start. Raised in
+  review; offered as its own task rather than folded into this ticket.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
