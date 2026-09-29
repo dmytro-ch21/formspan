@@ -61,6 +61,13 @@ const target = (effective_on: string, kcal: number) => ({
 beforeEach(() => {
   jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
   jest.setSystemTime(new Date('2026-08-27T12:00:00'));
+  // The canary: unlike the six `doNotFake` siblings, this file fakes
+  // `setTimeout` too. A test added here that awaits a real timer would hang to
+  // the 15s timeout with no explanation, and a future jest that changes the
+  // fakeable-API list would silently alter that. Asserted, not assumed —
+  // `weekPlanner.test.tsx` asserts the opposite for the opposite reason.
+  expect('clock' in Date).toBe(true);
+  expect('clock' in setTimeout).toBe(true);
   mockListDays.mockReset().mockResolvedValue([]);
   mockListTargets.mockReset().mockResolvedValue([]);
 });

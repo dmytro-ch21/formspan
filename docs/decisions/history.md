@@ -78566,9 +78566,19 @@ itself; a test that goes vacuous does not, and the two happened together in one
 file from one cause.
 
 Both files now freeze the clock with the suite's existing idiom
-(`jest.useFakeTimers({ doNotFake: [...] })` + `jest.setSystemTime(...)`,
-already used in 8 files), at a date chosen to put the fixtures inside the
-window and otherwise arbitrary.
+(`jest.useFakeTimers(...)` + `jest.setSystemTime(...)`), at a date chosen to
+put the fixtures inside the window and otherwise arbitrary.
+
+**The precedent is real but narrower than it first looked, and review corrected
+an overstatement here.** 23 files in this suite already freeze the clock and
+six already pass `doNotFake` — but those six keep `setTimeout` REAL and exempt
+only the microtask queue, while these two fake `setTimeout` as well. That is a
+third variant, not the house idiom, and it is a deliberate trade: RNTL advances
+jest's fake timers itself and the SQLite fixture needs only real microtasks, so
+faking `setTimeout` costs these two files nothing — while a future test here
+that awaits a real `setTimeout` would hang to the 15s timeout. Hence the canary
+now asserted in each file, which pins that difference rather than copying
+`weekPlanner.test.tsx`'s opposite assertion blindly.
 
 **Verified by mutation, three ways, each restored byte-identical (sha256) and
 re-run green:**
@@ -78589,10 +78599,16 @@ it is written and fails months later is invisible to review, to CI and to
 `verify` — all three ran green the day it was written, and the commit that
 "breaks" it does not exist. `check:expo-compat`'s release-batch tolerance has
 the same shape and is explicitly time-based, but it is the only thing here that
-knows it depends on the date. The audit performed for this ticket — running the
-whole mobile suite under a clock pushed 400 days forward, with a `+0` control
-run first — is the cheap version of a standing check, and is recorded here
-rather than automated because nobody has decided where it would live.
+knows it depends on the date. **A dynamic audit was attempted for this
+ticket and FAILED AS AN APPARATUS**, which is why #1262's candidate list came
+from a static scan instead. Running the whole suite under a clock pushed 400
+days forward looks like the obvious check; it was run with a `+0` control arm
+first, and **the CONTROL failed 9 files** — so the harness perturbed the suite
+rather than measuring it (installing fake timers globally in a `beforeEach`
+changes behaviour for tests that expect time to advance, even when only `Date`
+is faked). The +400 result was discarded unread rather than reported. The
+control arm is the only reason a bad harness was caught instead of believed,
+and #1262 records the method so the next attempt keeps it.
 
 ## 2026-09-29 — H41 (#1254): the 2026-09-15 Expo patch batch lands, and it is also the iOS 27 launch-crash fix
 
