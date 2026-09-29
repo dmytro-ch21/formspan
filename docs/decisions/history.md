@@ -78539,6 +78539,61 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **A member that stays unpublished for a day fails the check**, as before H39. It sits at `now`, not beside its batch.
 - **One threshold for every release.** If Expo's lags grow past 60 min, the hour comes back, loudly. Re-measure then.
 
+## 2026-09-29 — H42 (#1261): two mobile tests were pinned to absolute dates, aged out, and turned `main` red with no commit near them
+
+`main` at `7a9c1eb5` failed `pnpm run verify` — 2 failed, 32 passed in the two
+affected files — and nothing had changed. Both tests pin fixtures to absolute
+dates and assert against logic scoped to **today**, so the calendar alone
+decided the result.
+
+- `__tests__/app/nutritionTrendScreen.test.tsx` seeds `2026-08-25`/`2026-08-26`
+  and expects `'2 of'`. The screen's range is the last 30 days ending today, so
+  the fixtures fell out of it and the readout became
+  `0 of 30 days logged in this range`.
+- `lib/__tests__/planSync.test.ts` creates a plan on `2026-08-05` and expects a
+  pull that omits it to sweep it. `pullWindow` spans today−45..today+120
+  (`PULL_BEFORE_DAYS = 45`, `PULL_AFTER_DAYS = 120`), so the row stopped being
+  in scope. **Detonation date, computed rather than guessed: 2026-09-20** —
+  `2026-08-05 + 45 days`.
+
+**The silent half is the worse half, and it is why the fix freezes the clock
+for the whole file rather than patching the red test.** The sibling test
+`a never-pushed local plan survives a pull that does not mention it` uses the
+same out-of-window date and **still passed** — because an out-of-window row
+survives whatever the sweep's tombstone logic does. It had stopped
+discriminating entirely and reported success. A test that goes red announces
+itself; a test that goes vacuous does not, and the two happened together in one
+file from one cause.
+
+Both files now freeze the clock with the suite's existing idiom
+(`jest.useFakeTimers({ doNotFake: [...] })` + `jest.setSystemTime(...)`,
+already used in 8 files), at a date chosen to put the fixtures inside the
+window and otherwise arbitrary.
+
+**Verified by mutation, three ways, each restored byte-identical (sha256) and
+re-run green:**
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | delete the sweep's `DELETE FROM planned_sessions` | `✕ a plan deleted elsewhere disappears locally` — 1 failed / 29 |
+| M2 | `shiftDate(today, -(windowDays - 1))` → `shiftDate(today, 0)` | `✕ renders adherence and a delta from real fetched days` — 1 failed / 5 |
+| M3 | frozen date +1 year | **2 failed, 32 passed — the original failure signature exactly** |
+
+M3 is the one that matters and it is deliberately the apparatus pointed at
+itself: it proves the result is driven by the *frozen* clock, so the real
+system date can no longer reach these assertions. Every failure was a TEST
+failure, never a compile error.
+
+**The class, which no gate in this repo catches.** A test that passes the day
+it is written and fails months later is invisible to review, to CI and to
+`verify` — all three ran green the day it was written, and the commit that
+"breaks" it does not exist. `check:expo-compat`'s release-batch tolerance has
+the same shape and is explicitly time-based, but it is the only thing here that
+knows it depends on the date. The audit performed for this ticket — running the
+whole mobile suite under a clock pushed 400 days forward, with a `+0` control
+run first — is the cheap version of a standing check, and is recorded here
+rather than automated because nobody has decided where it would live.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
