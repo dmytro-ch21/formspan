@@ -78594,6 +78594,61 @@ whole mobile suite under a clock pushed 400 days forward, with a `+0` control
 run first — is the cheap version of a standing check, and is recorded here
 rather than automated because nobody has decided where it would live.
 
+## 2026-09-29 — H41 (#1254): the 2026-09-15 Expo patch batch lands, and it is also the iOS 27 launch-crash fix
+
+`check:expo-compat` had been failing on `main` since **2026-09-16T16:52:21Z**,
+when H39's release-batch tolerance expired — so `verify` and CI's Mobile job
+were red for the whole fleet, for thirteen days, on a check that was working
+exactly as designed. Measured at pickup: **11 packages drifted**, all of them
+installable, `react-native` not among them.
+
+| Package | had | now |
+|---|---|---|
+| `expo` | 57.0.22 | 57.0.25 |
+| `expo-auth-session` | 57.0.12 | 57.0.13 |
+| `expo-constants` | 57.0.18 | 57.0.19 |
+| `expo-image-manipulator` | 57.0.17 | 57.0.20 |
+| `expo-image-picker` | 57.0.17 | 57.0.20 |
+| `expo-linking` | 57.0.10 | 57.0.11 |
+| `expo-location` | 57.0.17 | 57.0.20 |
+| `expo-router` | 57.0.21 | 57.0.23 |
+| `expo-sharing` | 57.0.19 | 57.0.22 |
+| `expo-task-manager` | 57.0.17 | 57.0.20 |
+| `expo-build-properties` | 57.0.17 | 57.0.22 |
+
+**The bump is worth more than the green check, and that was not why the ticket
+was filed.** On 2026-09-15 an Xcode 27 update turned every locally-built
+binary into one that dies instantly on launch — `EXC_BREAKPOINT`/`SIGTRAP`,
+frame 0 `___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke`,
+on iOS 27.0 *and* on iOS 26.6.2. The diagnosis then was "missing UIScene
+life-cycle adoption", and the attempted fix was to hand-write a
+`UIApplicationSceneManifest` into the app config. **That would not have
+worked**, and measuring why is the useful part of this entry:
+
+- `expo@57.0.22`'s iOS sources contain **zero** occurrences of
+  `UIWindowSceneDelegate`, `UISceneDelegate`, `configurationForConnecting` or
+  `sceneDidBecomeActive` (positive control: `ExpoAppDelegate` appears in 7
+  files, so the search works).
+- `react-native@0.86.3` likewise: zero (control: `UIApplicationDelegate`
+  found).
+- No pod in `ios/Pods` implements a scene delegate.
+
+A manifest naming a scene delegate class that does not exist declares scene
+support the binary cannot honour. The adoption had to come from upstream, and
+it did: **`expo@57.0.23`, published 2026-09-15T15:59:52Z — four days after the
+57.0.22 this repo was pinned to.** It is opt-in by design, via
+`expo-build-properties`' `ios.enableSceneSupport`, because it changes how the
+native app starts.
+
+**This PR does the bump only.** Turning the flag on is N581, separately, so
+that a native-behaviour change is not buried inside a dependency bump and gets
+its own device evidence.
+
+**One thing this does not change: TestFlight was never blocked by the crash.**
+EAS Build's default image for SDK 57 is `macos-tahoe-26.5-xcode-26.6` — Xcode
+26.6, which does not trap. The crash is a property of *this Mac's* Xcode 27,
+not of the app, so a cloud build has been shippable throughout.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
