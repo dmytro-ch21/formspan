@@ -46,12 +46,14 @@
   "submit": {
     "production": {
       "ios": {
-        "appleTeamId": "T5A46UDR5Y"
+        "appleTeamId": "T5A46UDR5Y",
+        "ascAppId": "6817299413"
       }
     },
     "beta": {
       "ios": {
-        "appleTeamId": "T5A46UDR5Y"
+        "appleTeamId": "T5A46UDR5Y",
+        "ascAppId": "6817299413"
       }
     }
   }
