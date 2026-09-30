@@ -62,7 +62,11 @@ module.exports = () => ({
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.vola.fitness",
-      buildNumber: "1",
+      // No `buildNumber` here on purpose: eas.json sets
+      // `appVersionSource: "remote"`, so EAS owns the build number and a
+      // literal here is IGNORED for builds while still being served to
+      // expo-constants — i.e. a value that looks authoritative, is not, and
+      // silently disagrees with the binary. EAS itself warns about this.
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
       },
