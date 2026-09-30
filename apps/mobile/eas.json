@@ -36,10 +36,20 @@
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production"
       }
+    },
+    "beta": {
+      "extends": "preview",
+      "distribution": "store",
+      "autoIncrement": true
     }
   },
   "submit": {
     "production": {
+      "ios": {
+        "appleTeamId": "T5A46UDR5Y"
+      }
+    },
+    "beta": {
       "ios": {
         "appleTeamId": "T5A46UDR5Y"
       }
