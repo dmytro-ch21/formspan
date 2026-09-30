@@ -78539,6 +78539,132 @@ A throwaway probe ran each option through a probe-local tab layout: 72 cases.
 - **A member that stays unpublished for a day fails the check**, as before H39. It sits at `now`, not beside its batch.
 - **One threshold for every release.** If Expo's lags grow past 60 min, the hour comes back, loudly. Re-measure then.
 
+## 2026-09-29 — H42 (#1261): two mobile tests were pinned to absolute dates, aged out, and turned `main` red with no commit near them
+
+`main` at `7a9c1eb5` failed `pnpm run verify` — 2 failed, 32 passed in the two
+affected files — and nothing had changed. Both tests pin fixtures to absolute
+dates and assert against logic scoped to **today**, so the calendar alone
+decided the result.
+
+- `__tests__/app/nutritionTrendScreen.test.tsx` seeds `2026-08-25`/`2026-08-26`
+  and expects `'2 of'`. The screen's range is the last 30 days ending today, so
+  the fixtures fell out of it and the readout became
+  `0 of 30 days logged in this range`.
+- `lib/__tests__/planSync.test.ts` creates a plan on `2026-08-05` and expects a
+  pull that omits it to sweep it. `pullWindow` spans today−45..today+120
+  (`PULL_BEFORE_DAYS = 45`, `PULL_AFTER_DAYS = 120`), so the row stopped being
+  in scope. **Detonation date, computed rather than guessed: 2026-09-20** —
+  `2026-08-05 + 45 days`.
+
+**The silent half is the worse half, and it is why the fix freezes the clock
+for the whole file rather than patching the red test.** The sibling test
+`a never-pushed local plan survives a pull that does not mention it` uses the
+same out-of-window date and **still passed** — because an out-of-window row
+survives whatever the sweep's tombstone logic does. It had stopped
+discriminating entirely and reported success. A test that goes red announces
+itself; a test that goes vacuous does not, and the two happened together in one
+file from one cause.
+
+Both files now freeze the clock with the suite's existing idiom
+(`jest.useFakeTimers(...)` + `jest.setSystemTime(...)`), at a date chosen to
+put the fixtures inside the window and otherwise arbitrary.
+
+**The precedent is real but narrower than it first looked, and review corrected
+an overstatement here.** 23 files in this suite already freeze the clock and
+six already pass `doNotFake` — but those six keep `setTimeout` REAL and exempt
+only the microtask queue, while these two fake `setTimeout` as well. That is a
+third variant, not the house idiom, and it is a deliberate trade: RNTL advances
+jest's fake timers itself and the SQLite fixture needs only real microtasks, so
+faking `setTimeout` costs these two files nothing — while a future test here
+that awaits a real `setTimeout` would hang to the 15s timeout. Hence the canary
+now asserted in each file, which pins that difference rather than copying
+`weekPlanner.test.tsx`'s opposite assertion blindly.
+
+**Verified by mutation, three ways, each restored byte-identical (sha256) and
+re-run green:**
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | delete the sweep's `DELETE FROM planned_sessions` | `✕ a plan deleted elsewhere disappears locally` — 1 failed / 29 |
+| M2 | `shiftDate(today, -(windowDays - 1))` → `shiftDate(today, 0)` | `✕ renders adherence and a delta from real fetched days` — 1 failed / 5 |
+| M3 | frozen date +1 year | **2 failed, 32 passed — the original failure signature exactly** |
+
+M3 is the one that matters and it is deliberately the apparatus pointed at
+itself: it proves the result is driven by the *frozen* clock, so the real
+system date can no longer reach these assertions. Every failure was a TEST
+failure, never a compile error.
+
+**The class, which no gate in this repo catches.** A test that passes the day
+it is written and fails months later is invisible to review, to CI and to
+`verify` — all three ran green the day it was written, and the commit that
+"breaks" it does not exist. `check:expo-compat`'s release-batch tolerance has
+the same shape and is explicitly time-based, but it is the only thing here that
+knows it depends on the date. **A dynamic audit was attempted for this
+ticket and FAILED AS AN APPARATUS**, which is why #1262's candidate list came
+from a static scan instead. Running the whole suite under a clock pushed 400
+days forward looks like the obvious check; it was run with a `+0` control arm
+first, and **the CONTROL failed 9 files** — so the harness perturbed the suite
+rather than measuring it (installing fake timers globally in a `beforeEach`
+changes behaviour for tests that expect time to advance, even when only `Date`
+is faked). The +400 result was discarded unread rather than reported. The
+control arm is the only reason a bad harness was caught instead of believed,
+and #1262 records the method so the next attempt keeps it.
+
+## 2026-09-29 — H41 (#1254): the 2026-09-15 Expo patch batch lands, and it is also the iOS 27 launch-crash fix
+
+`check:expo-compat` had been failing on `main` since **2026-09-16T16:52:21Z**,
+when H39's release-batch tolerance expired — so `verify` and CI's Mobile job
+were red for the whole fleet, for thirteen days, on a check that was working
+exactly as designed. Measured at pickup: **11 packages drifted**, all of them
+installable, `react-native` not among them.
+
+| Package | had | now |
+|---|---|---|
+| `expo` | 57.0.22 | 57.0.25 |
+| `expo-auth-session` | 57.0.12 | 57.0.13 |
+| `expo-constants` | 57.0.18 | 57.0.19 |
+| `expo-image-manipulator` | 57.0.17 | 57.0.20 |
+| `expo-image-picker` | 57.0.17 | 57.0.20 |
+| `expo-linking` | 57.0.10 | 57.0.11 |
+| `expo-location` | 57.0.17 | 57.0.20 |
+| `expo-router` | 57.0.21 | 57.0.23 |
+| `expo-sharing` | 57.0.19 | 57.0.22 |
+| `expo-task-manager` | 57.0.17 | 57.0.20 |
+| `expo-build-properties` | 57.0.17 | 57.0.22 |
+
+**The bump is worth more than the green check, and that was not why the ticket
+was filed.** On 2026-09-15 an Xcode 27 update turned every locally-built
+binary into one that dies instantly on launch — `EXC_BREAKPOINT`/`SIGTRAP`,
+frame 0 `___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke`,
+on iOS 27.0 *and* on iOS 26.6.2. The diagnosis then was "missing UIScene
+life-cycle adoption", and the attempted fix was to hand-write a
+`UIApplicationSceneManifest` into the app config. **That would not have
+worked**, and measuring why is the useful part of this entry:
+
+- `expo@57.0.22`'s iOS sources contain **zero** occurrences of
+  `UIWindowSceneDelegate`, `UISceneDelegate`, `configurationForConnecting` or
+  `sceneDidBecomeActive` (positive control: `ExpoAppDelegate` appears in 7
+  files, so the search works).
+- `react-native@0.86.3` likewise: zero (control: `UIApplicationDelegate`
+  found).
+- No pod in `ios/Pods` implements a scene delegate.
+
+A manifest naming a scene delegate class that does not exist declares scene
+support the binary cannot honour. The adoption had to come from upstream, and
+it did: **`expo@57.0.23`, published 2026-09-15T15:59:52Z — four days after the
+57.0.22 this repo was pinned to.** It is opt-in by design, via
+`expo-build-properties`' `ios.enableSceneSupport`, because it changes how the
+native app starts.
+
+**This PR does the bump only.** Turning the flag on is N581, separately, so
+that a native-behaviour change is not buried inside a dependency bump and gets
+its own device evidence.
+
+**One thing this does not change: TestFlight was never blocked by the crash.**
+EAS Build's default image for SDK 57 is `macos-tahoe-26.5-xcode-26.6` — Xcode
+26.6, which does not trap. The crash is a property of *this Mac's* Xcode 27,
+not of the app, so a cloud build has been shippable throughout.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

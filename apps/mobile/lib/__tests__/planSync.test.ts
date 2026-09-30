@@ -11,6 +11,33 @@ import {
 import { migratedFixture, type FixtureDb } from './support/sqlite';
 
 /**
+ * H42 — this file's fixtures sit on 2026-08-05/06, and `pullWindow` spans
+ * today-45..today+120. That made every assertion here a function of the day it
+ * ran: on 2026-09-20 the fixtures fell out of the window, `a plan deleted
+ * elsewhere disappears locally` started failing, and — worse, because it is
+ * silent — `a never-pushed local plan survives a pull that does not mention
+ * it` started passing for the wrong reason, since an out-of-window row
+ * survives whatever the sweep's tombstone logic does.
+ *
+ * Freezing the clock is what makes the fixtures mean what they say. The date
+ * is inside the window for these fixtures and is otherwise arbitrary.
+ */
+beforeEach(() => {
+  jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
+  jest.setSystemTime(new Date('2026-08-10T12:00:00'));
+  // The canary: unlike the six `doNotFake` siblings, this file fakes
+  // `setTimeout` too. A test added here that awaits a real timer would hang to
+  // the 15s timeout with no explanation, and a future jest that changes the
+  // fakeable-API list would silently alter that. Asserted, not assumed —
+  // `weekPlanner.test.tsx` asserts the opposite for the opposite reason.
+  expect('clock' in Date).toBe(true);
+  expect('clock' in setTimeout).toBe(true);
+});
+afterEach(() => {
+  jest.useRealTimers();
+});
+
+/**
  * The plan outbox, against a real database.
  *
  * The pure-logic decisions (which day, which order) are covered in

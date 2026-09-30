@@ -52,9 +52,27 @@ const target = (effective_on: string, kcal: number) => ({
   fibre_g: 30,
 });
 
+/**
+ * H42 — the fixtures below are dated 2026-08-25/26 and the screen's range is
+ * the last 30 days ending TODAY, so this file stopped discriminating once the
+ * calendar moved past them (`0 of 30 days logged in this range`). The frozen
+ * date puts the fixtures inside the 1M range; it is otherwise arbitrary.
+ */
 beforeEach(() => {
+  jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
+  jest.setSystemTime(new Date('2026-08-27T12:00:00'));
+  // The canary: unlike the six `doNotFake` siblings, this file fakes
+  // `setTimeout` too. A test added here that awaits a real timer would hang to
+  // the 15s timeout with no explanation, and a future jest that changes the
+  // fakeable-API list would silently alter that. Asserted, not assumed —
+  // `weekPlanner.test.tsx` asserts the opposite for the opposite reason.
+  expect('clock' in Date).toBe(true);
+  expect('clock' in setTimeout).toBe(true);
   mockListDays.mockReset().mockResolvedValue([]);
   mockListTargets.mockReset().mockResolvedValue([]);
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 it('shows the unavailable message when the day totals fail to load', async () => {
