@@ -166,6 +166,76 @@ Two things worth knowing before relying on it:
 
 Not set up yet. When added, they must use separate database/bucket instances from staging and production — never production data.
 
+## Mobile distribution — EAS Build, and why TestFlight ships from `beta` not `production`
+
+**The Expo project is `@dchobotar/vola`** (`owner` + `extra.eas.projectId` in
+`apps/mobile/app.config.js`). `eas init` creates it server-side but cannot
+write back into a dynamic config, so the id is committed by hand; without it
+every build re-prompts and can silently create a second project.
+
+**Build profiles** (`apps/mobile/eas.json`):
+
+| Profile | Distribution | Environment | Used for |
+|---|---|---|---|
+| `development` | internal | development | the dev client, simulator included |
+| `preview` | internal | preview | ad-hoc internal installs |
+| `beta` | **store** | preview | **TestFlight** — extends `preview`, overrides distribution only |
+| `production` | store | production | the App Store. **Currently unbuildable, on purpose** |
+
+**Why `production` is unbuildable, and why that is correct.**
+`apps/mobile/package.json`'s `eas-build-pre-install` hook runs
+`validate-production-config.mjs --build-hook`, which fails a production build
+whose resolved `EXPO_PUBLIC_API_URL` is missing, a placeholder, or a staging
+host (N132/#536). There is no production Postgres and no production API, so
+the only real backend is the Railway `staging` one — which holds the actual
+athletes' data. A production build therefore cannot honestly be produced yet,
+and the guard says so rather than shipping a binary pointed somewhere wrong.
+
+Measured 2026-09-30, on EAS's own machine: build `dfd18fd1` on the
+`production` profile errored in the pre-install hook 44s in, with
+`Application Archive URL: null` — it failed before producing an archive.
+
+**`beta` is not an evasion of that guard.** The hook is gated on
+`EAS_BUILD_PROFILE === 'production'` by its own design, so `beta` skips it;
+and `beta` targets the existing API deliberately, because the alternative —
+a fresh backend, or a production Clerk instance — gives every existing athlete
+a **new user id and an empty account**. Clerk's development and production
+instances are separate user directories; moving to `pk_live_` needs a planned
+export/import plus a backend user-id remap, not a config edit.
+
+**Consequence worth stating plainly: TestFlight testers read and write the
+same database the existing users do.** That is intended while the testers are
+the same handful of people, and it is the thing to revisit before the tester
+list grows.
+
+**Runtime values live in EAS environments, never in `eas.json`.** The
+validator refuses any real value baked into the committed production profile.
+`EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and
+`EXPO_PUBLIC_CLERK_JWT_TEMPLATE` are registered per environment with
+`eas env:create` (now `eas env:set`). A build that is missing them does not
+fail — it ships a bundle with empty strings, which is the
+`EXPO_PUBLIC_*`-at-build-time trap in CLAUDE.md, relocated to the cloud.
+
+**Credentials** are managed by EAS (distribution certificate + provisioning
+profile, Apple team `T5A46UDR5Y`). Creating them is interactive once; after
+that builds run non-interactively. **Submitting** uses an App Store Connect
+API key, deliberately **not** committed — an absolute machine-local `.p8`
+path in a shared repo is a trap — so it comes from the environment:
+
+```bash
+export EXPO_ASC_API_KEY_PATH=/path/to/AuthKey_XXXXXXXX.p8
+export EXPO_ASC_KEY_ID=XXXXXXXXXX
+export EXPO_ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+pnpm exec eas build  --platform ios --profile beta --non-interactive
+pnpm exec eas submit --platform ios --profile beta --latest
+```
+
+`pnpm --dir apps/mobile run submit:ios` is the **production** path and runs
+`--check-submit` first, which requires a numeric
+`submit.production.ios.ascAppId`. It is not the beta path and will refuse to
+run until a real App Store release is being made.
+
 ## Why this split
 
 Solo-developer constraint: local dev needs zero cloud dependency so iteration stays fast and free; staging/production need to exist to catch integration issues before users hit them, but only for services that actually have code behind them — provisioning a Railway service for `worker` before a worker binary exists would just be an empty box to maintain.

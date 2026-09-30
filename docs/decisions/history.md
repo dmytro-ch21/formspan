@@ -78665,6 +78665,71 @@ EAS Build's default image for SDK 57 is `macos-tahoe-26.5-xcode-26.6` — Xcode
 26.6, which does not trap. The crash is a property of *this Mac's* Xcode 27,
 not of the app, so a cloud build has been shippable throughout.
 
+## 2026-09-30 — N582 (#1260): VOLA reaches TestFlight, and the production guard wins an argument with the plan
+
+The Apple Developer Program enrolment landed, so the mobile app moved off the
+free-team 7-day sideload — a cable, a Trust tap and a per-phone rebuild every
+week — onto EAS Build and TestFlight.
+
+**What was wired.** Expo project `@dchobotar/vola` (`owner` +
+`extra.eas.projectId` in `app.config.js`, pasted by hand because `eas init`
+cannot write to a dynamic config). Apple team `T5A46UDR5Y`, bundle id
+`com.vola.fitness` registered, distribution certificate and provisioning
+profile created and held by EAS. `eas-cli` pinned at 24.8.0 rather than
+invoked through `npx`. The three `EXPO_PUBLIC_*` runtime values registered as
+EAS environment variables rather than committed — which `validate-production-
+config` demands, and is right.
+
+**The interesting part is that the plan was wrong and a check said so.**
+
+The decision going in was: point the TestFlight build at the existing API and
+the existing Clerk key, because anything else costs every athlete their
+history. Clerk's development and production instances are separate user
+directories with different user ids, so a `pk_live_` key does not migrate
+anyone — it mints new, empty accounts and orphans the old rows.
+
+The first production build then **failed on EAS's own machine**, 44 seconds in,
+in the pre-install hook: `validate-production-config --build-hook` (N132/#536,
+priority critical) refuses a production build whose resolved
+`EXPO_PUBLIC_API_URL` points at a staging host. The plan and the guard were in
+direct contradiction, and the guard was correct — there is no production
+backend, so a production build could not honestly be produced at all.
+
+Reproduced locally before deciding anything, rather than reasoning about it:
+
+    EAS_BUILD_PROFILE=production  -> FAILED, "points at a staging host", exit 1
+    EAS_BUILD_PROFILE=preview     -> skipped, exit 0
+
+**The resolution was the user's call, and it was not to relax the guard.** A
+`beta` profile extends `preview` — same environment, same API — and overrides
+`distribution` to `store` so it can reach TestFlight. The hook is gated on
+`EAS_BUILD_PROFILE === 'production'` by its own design, so `beta` skips it
+without the guard being touched, and `production` stays honestly unbuildable
+until #536 is actually done.
+
+**A side effect worth recording: #536's `NEEDS HUMAN EVIDENCE` criterion was
+satisfied incidentally.** It asks for "an actual EAS production build attempted
+with a staging URL … confirmed to fail before it produces an archive", and the
+script's own doc comment says this is "the one entry point this session cannot
+verify end to end". Build `dfd18fd1` errored with `Application Archive URL:
+null`. It was recorded on #536 as a plain comment rather than through the
+attestation gesture, because the other five criteria are unmet and the ticket
+is not finished — closing a critical ticket on one incidental observation is
+exactly what the latch exists to prevent.
+
+**The honest residual risk, stated rather than buried: TestFlight testers read
+and write the same database the existing users do.** That is intended while the
+testers are the same three people, and it is the thing to revisit before the
+tester list grows. An automated security review flagged the `beta` profile for
+exactly this; its suggested fix — point at a real production host — would have
+caused the data loss the arrangement exists to avoid, which is a good example
+of a generic rule being locally inverted.
+
+**Open, and deliberately so**: no production backend, no production Clerk
+instance, and therefore no App Store path. `production` remains a profile that
+cannot build. The Clerk dev-to-prod migration needs an export/import plus a
+backend user-id remap designed before anything ships.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
