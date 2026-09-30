@@ -39,6 +39,21 @@ module.exports = () => ({
   expo: {
     name: "VOLA",
     slug: "vola",
+    // N582 (#1260) — the EAS account that owns this project. Required before
+    // `eas init` will run non-interactively when the signed-in user has access
+    // to more than one account (here: `dchobotar` and `dchobotars-team`), and
+    // it pins which account's builds and credentials this app uses rather than
+    // leaving it to whoever happens to be logged in.
+    owner: "dchobotar",
+    // The EAS project this app builds under. `eas init` creates it server-side
+    // but CANNOT write it back into a dynamic config (app.config.js), so it is
+    // pasted here by hand — without it every `eas build` would re-prompt to
+    // create a project and could silently make a second one.
+    extra: {
+      eas: {
+        projectId: "45733def-bc3b-455e-97ab-7674e86a2313",
+      },
+    },
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",

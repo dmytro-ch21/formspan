@@ -13,6 +13,14 @@ allowBuilds:
   bufferutil: false
   core-js: false
   utf-8-validate: false
+  #   dtrace-provider, protobufjs — pulled in transitively by eas-cli (N582).
+  #   dtrace-provider builds a native DTrace binding used only for bunyan
+  #   logging on Solaris/macOS dtrace; protobufjs's postinstall only prints a
+  #   funding/CLI notice. Neither is needed to run `eas build`/`eas submit`,
+  #   and leaving them merely "ignored" makes every install print a warning
+  #   that trains people to ignore install warnings.
+  dtrace-provider: false
+  protobufjs: false
   sharp: true
   unrs-resolver: true
 packageExtensions:
