@@ -262,7 +262,23 @@ module.exports = () => ({
         {
           NSHealthShareUsageDescription:
             "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. It can also read heart rate for any finished session and your VO2max trend, and, if you allow it, your daily step count to show on VOLA. All of this is off until you turn it on in Settings, and VOLA never writes anything to Health.",
-          NSHealthUpdateUsageDescription: false,
+          // Was `false` — deliberately, because VOLA never writes to Health
+          // and this repo does not declare capabilities it does not use (see
+          // the microphone-permission trap in CLAUDE.md, where declaring an
+          // unused capability was called indefensible).
+          //
+          // Apple refuses the upload without it. Measured 2026-09-30 against
+          // the real App Store Connect uploader, error 90683: "The Info.plist
+          // file for the VOLA.app bundle should contain a
+          // NSHealthUpdateUsageDescription key". The HealthKit ENTITLEMENT
+          // covers reading and writing together — there is no read-only
+          // variant — so the string is demanded by the capability, not by
+          // anything VOLA actually does.
+          //
+          // The wording therefore keeps the promise the share string above
+          // makes, rather than inventing a reason to write.
+          NSHealthUpdateUsageDescription:
+            "VOLA does not write anything to Apple Health. It only reads the data you explicitly allow, and never adds, changes or deletes anything there. iOS requires this text because the Health capability covers reading and writing together; VOLA never asks for permission to write.",
           background: false,
         },
       ],
