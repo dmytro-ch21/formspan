@@ -69,6 +69,14 @@ module.exports = () => ({
       // silently disagrees with the binary. EAS itself warns about this.
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        // Kept, but NOT the fix it was added as. It was added on the
+        // hypothesis that a missing top-level CFBundleIconName was why build 4
+        // vanished during processing. Apple's actual rejection email named
+        // ITMS-90683 / NSMotionUsageDescription instead, so that hypothesis was
+        // wrong. A top-level key is still the conventional shape for an
+        // asset-catalog icon and is harmless, so it stays — but nobody should
+        // read it as load-bearing.
+        CFBundleIconName: "AppIcon",
       },
     },
     android: {
@@ -245,7 +253,27 @@ module.exports = () => ({
           isIosBackgroundLocationEnabled: true,
           locationAlwaysAndWhenInUsePermission: false,
           locationAlwaysPermission: false,
-          motionUsagePermission: false,
+          // Was `false`, which REMOVED NSMotionUsageDescription — and that is
+          // what Apple rejected build 4 for: "ITMS-90683: Missing purpose
+          // string in Info.plist … should contain a NSMotionUsageDescription
+          // key" (2026-10-15).
+          //
+          // Nothing in this app calls a motion API directly. The HealthKit
+          // library references CMPedometer to read step counts, which is
+          // exactly the case Apple's message names: "If you're using external
+          // libraries or SDKs, they may reference APIs that require a purpose
+          // string. While your app might not use these APIs, a purpose string
+          // is still required."
+          //
+          // IT MUST BE SET HERE, NOT IN `ios.infoPlist`. expo-location's plugin
+          // OWNS this key via createPermissionsPlugin, so it runs last and wins
+          // — setting it in `ios.infoPlist` is silently discarded. Measured:
+          // with the key in `ios.infoPlist`, an arbitrary probe key survived
+          // `expo config --type introspect` and this one did not, and the built
+          // IPA shipped without it. Same ownership trap CLAUDE.md records for
+          // the camera and microphone strings.
+          motionUsagePermission:
+            "VOLA can show your daily step count alongside your training. iOS counts steps using motion data, so this permission is what lets VOLA read them. It is read-only and off until you turn on Health syncing in Settings.",
         },
       ],
       [
@@ -290,6 +318,17 @@ module.exports = () => ({
             compileSdkVersion: 36,
             targetSdkVersion: 36,
             minSdkVersion: 26,
+          },
+          ios: {
+            // N581 (#1259). The iOS 27 SDK refuses to launch a UIKit app that
+            // has not adopted the UIScene life cycle: EXC_BREAKPOINT in
+            // __UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption,
+            // instantly, before any JS runs. Every build made here since Xcode
+            // 27 landed has died that way.
+            //
+            // Expo added the adoption in 57.0.23 and made it opt-in, because it
+            // changes how the native app starts. This repo is on 57.0.25.
+            enableSceneSupport: true,
           },
         },
       ],
