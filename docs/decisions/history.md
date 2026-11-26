@@ -78730,6 +78730,81 @@ instance, and therefore no App Store path. `production` remains a profile that
 cannot build. The Clerk dev-to-prod migration needs an export/import plus a
 backend user-id remap designed before anything ships.
 
+## 2026-11-26 — N581 (#1259) + N582 (#1260): the iOS 27 launch crash is fixed on device, and a plugin-owned permission string cost two silent App Store rejections
+
+Two tickets land together because shipping the first build through TestFlight
+is what exercised the second.
+
+**N581 — UIScene adoption, and it works.** `enableSceneSupport: true` on
+`expo-build-properties`, which H41's entry deferred to this ticket on purpose.
+Since Xcode 27 arrived every locally-built binary died instantly at launch —
+`EXC_BREAKPOINT`, frame 0
+`___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke`
+— and hand-writing a `UIApplicationSceneManifest` could never have fixed it,
+because at 57.0.22 there was no scene delegate anywhere to name.
+
+With the flag on, `expo prebuild` generates the manifest pointing at
+`EXExpoAppSceneDelegate`, Expo's own. **Verified on two physical devices rather
+than on a plist**: a 16 Pro Max on iOS 27.0 and a 14 Pro Max on iOS 26.6.2 both
+installed, launched, and kept their processes alive. Two different iOS versions
+is deliberately better evidence than one, because the trap was introduced by an
+SDK change rather than by an OS version.
+
+**N582 — TestFlight, and what it cost to get there.** The route is a `beta`
+profile (extends `preview`, `distribution: store`) rather than `production`,
+because the production build hook refuses a staging host and there is no
+production backend; the full reasoning is in the 2026-09-30 entry and is
+unchanged.
+
+**The expensive part was a class of failure nothing in this repo can see.**
+Two builds uploaded successfully and then VANISHED — `UPLOAD SUCCEEDED with no
+errors`, a delivery UUID, and then `/v1/builds` stayed empty for days. Apple
+reports a processing-stage rejection by EMAIL ONLY, and the App Store Connect
+API only ever lists builds that SUCCEEDED, so every query answered "zero" and
+looked identical to "still processing".
+
+Two separate purpose strings were missing, found one at a time:
+
+- `NSHealthUpdateUsageDescription` (error 90683). Deliberately `false`, because
+  VOLA never writes to Health. Apple requires it anyway: the HealthKit
+  ENTITLEMENT covers reading and writing together, with no read-only variant.
+  The wording keeps the promise the share string makes rather than inventing a
+  reason to write.
+- `NSMotionUsageDescription` (ITMS-90683). Nothing in this app calls a motion
+  API; the HealthKit library references `CMPedometer` for step counts.
+
+**The second one is a trap worth naming, and it is the third instance.**
+Setting it in `ios.infoPlist` DID NOTHING — silently. `expo-location`'s config
+plugin OWNS that key through `createPermissionsPlugin`
+(`withLocation.js` maps its `motionUsagePermission` option onto it), the repo
+had `motionUsagePermission: false`, and a plugin-owned permission runs last and
+wins. CLAUDE.md already records the same ownership trap for the camera and
+microphone strings; motion is the third key, and the first where the symptom
+was a silent App Store rejection rather than an over-declared capability.
+
+Measured rather than reasoned, which is how it was found: with the key in
+`ios.infoPlist`, an arbitrary probe key survived `expo config --type
+introspect` and `NSMotionUsageDescription` did not — proving a plugin was
+targeting that key specifically rather than the edit being ineffective.
+
+**A guess that was wrong, recorded because the diff still carries it.** Before
+the rejection email arrived, a missing top-level `CFBundleIconName` was
+hypothesised as the cause and added. It was not the cause — build 5 carried it
+and would have been rejected identically. The key stays (it is the
+conventional shape for an asset-catalog icon and is harmless) and its comment
+says plainly that it is not load-bearing.
+
+**What finally shipped**: build 7, `processingState=VALID`. A pre-upload gate
+now refuses to upload an IPA whose BINARY lacks the required string — it caught
+build 6, whose config was right and whose binary was not, before it cost
+another cycle and another day of ambiguity.
+
+**The gap this leaves open, filed rather than fixed**: no check compares the
+protected APIs a built binary can reach against the purpose strings the
+resolved config declares. `verify`, CI, the device installs and both reviewers
+all passed on binaries Apple rejected. Three instances now, and the only
+feedback channel is an email to one person.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or
