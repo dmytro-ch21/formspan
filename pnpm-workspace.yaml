@@ -40,6 +40,14 @@ overrides:
   # the 17.x line is patched at 17.13.7 for the isoDate issue and 17.13.9 for
   # the email one, so ^17.13.9 is the first version clear of BOTH.
   joi: ^17.13.9
+  # Same root cause: all of these arrive transitively with eas-cli, which adds
+  # 181 packages to this lockfile. Each was already vulnerable at the version
+  # eas-cli's tree resolves, and `dependency-review.yml` fails on high severity.
+  # Version-scoped where a major line must be preserved (minimatch 9.x is also
+  # in the tree and is not the vulnerable one).
+  minimatch@5: ^5.1.8
+  tar: ^7.5.21
+  nanoid@3: ^3.3.18
 packageExtensions:
   # react-native-maps' Expo config plugin requires() @expo/config-plugins at
   # prebuild time, but the package only declares it as a devDependency. Under

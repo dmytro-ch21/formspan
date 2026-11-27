@@ -6,6 +6,9 @@ settings:
 
 overrides:
   joi: ^17.13.9
+  minimatch@5: ^5.1.8
+  tar: ^7.5.21
+  nanoid@3: ^3.3.18
 
 packageExtensionsChecksum: sha256-gwdY5vtcKDBzpLuwaJzvnEyUUHn1/HGNZ9A/Ni94Cwg=
 
@@ -6309,8 +6312,8 @@ packages:
   minimatch@3.1.5:
     resolution: {integrity: sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==}
 
-  minimatch@5.1.2:
-    resolution: {integrity: sha512-bNH9mmM9qsJ2X4r2Nat1B//1dJVcn3+iBLa3IgqJ7EbGaDNepL9QSHOxN4ng33s52VMMhhIfgCYDk3C4ZmlDAg==}
+  minimatch@5.1.9:
+    resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
     engines: {node: '>=10'}
 
   minimatch@9.0.9:
@@ -6365,18 +6368,8 @@ packages:
   nan@2.29.0:
     resolution: {integrity: sha512-GlGk3HIvitbvs+LT3g6XUP1kpirKNvmDFwF/bmo6XNWSb/eYEs/O4bfgIEIXCZ+lIOTS5xNwDvSGMw6FJdAhtA==}
 
-  nanoid@3.3.16:
-    resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
   nanoid@3.3.19:
     resolution: {integrity: sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
-  nanoid@3.3.8:
-    resolution: {integrity: sha512-WNLf5Sd8oZxOm+TzppcYk8gVOgP+l58xNy58D0nbUnOxOWRWvlcCV4kUF7ltmI6PsrLl/BgKEyS4mqsGChFN0w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -7577,8 +7570,8 @@ packages:
   tar-stream@3.1.7:
     resolution: {integrity: sha512-qJj60CXt7IU1Ffyc3NJMjh6EkuCFej46zUqJ4J7pqYlThyd9bO0XBTmcOIhSzZJVWfsLks0+nle/j538YAW9RQ==}
 
-  tar@7.5.19:
-    resolution: {integrity: sha512-4LeEWl96twnS2Q7Bz4MGqgazLqO+hJN63GZxXoIqh1T3VweYD997gbU1ItNsQafqqXTXd5WFyFdReLtwvRBNiw==}
+  tar@7.5.23:
+    resolution: {integrity: sha512-lkukzdoGngZHJZXxW4S/E4Fp9ghTDlyZXrQGRNoJ/LXvDKcXUTq2sg5yQe74po7Voea6n/IN09+wE/QvJMiifA==}
     engines: {node: '>=18'}
 
   temp-dir@2.0.0:
@@ -13345,9 +13338,9 @@ snapshots:
       keychain: 1.5.0
       log-symbols: 4.1.0
       mime: 3.0.0
-      minimatch: 5.1.2
+      minimatch: 5.1.9
       minizlib: 3.1.0
-      nanoid: 3.3.8
+      nanoid: 3.3.19
       node-fetch: 2.6.7
       node-forge: 1.4.0
       node-stream-zip: 1.15.0
@@ -13365,7 +13358,7 @@ snapshots:
       semver: 7.5.4
       set-interval-async: 3.0.3
       slash: 3.0.0
-      tar: 7.5.19
+      tar: 7.5.23
       tar-stream: 3.1.7
       terminal-link: 2.1.1
       ts-deepmerge: 6.2.0
@@ -14345,7 +14338,7 @@ snapshots:
 
   filelist@1.0.6:
     dependencies:
-      minimatch: 5.1.2
+      minimatch: 5.1.9
 
   fill-range@7.1.1:
     dependencies:
@@ -15932,7 +15925,7 @@ snapshots:
     dependencies:
       brace-expansion: 1.1.16
 
-  minimatch@5.1.2:
+  minimatch@5.1.9:
     dependencies:
       brace-expansion: 2.1.7
 
@@ -15984,11 +15977,7 @@ snapshots:
   nan@2.29.0:
     optional: true
 
-  nanoid@3.3.16: {}
-
   nanoid@3.3.19: {}
-
-  nanoid@3.3.8: {}
 
   napi-postinstall@0.3.4: {}
 
@@ -16337,7 +16326,7 @@ snapshots:
 
   postcss@8.5.23:
     dependencies:
-      nanoid: 3.3.16
+      nanoid: 3.3.19
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -17346,7 +17335,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  tar@7.5.19:
+  tar@7.5.23:
     dependencies:
       '@isaacs/fs-minipass': 4.0.1
       chownr: 3.0.0
