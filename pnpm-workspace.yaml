@@ -33,10 +33,13 @@ overrides:
   # link can see it, because dependency review is a CI-only workflow and
   # `check:verify-chain` only asserts that package.json gates are in `verify`.
   #
-  # 17.13.8 is already resolved in this tree for another dependent, so this
-  # pins the vulnerable copy up to a version already proven to install here
-  # rather than introducing a new one.
-  joi: ^17.13.8
+  # 17.13.9, NOT 17.13.8. The first override here was ^17.13.8, chosen because
+  # that version was already resolved in this tree for another dependent — an
+  # assumption that it was therefore safe, which was WRONG and which CI caught:
+  # 17.13.8 still carries GHSA-4528-x5fx-h6hg. Per GitHub's advisory database,
+  # the 17.x line is patched at 17.13.7 for the isoDate issue and 17.13.9 for
+  # the email one, so ^17.13.9 is the first version clear of BOTH.
+  joi: ^17.13.9
 packageExtensions:
   # react-native-maps' Expo config plugin requires() @expo/config-plugins at
   # prebuild time, but the package only declares it as a devDependency. Under
