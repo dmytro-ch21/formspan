@@ -1,14 +1,18 @@
 {
   "cli": {
-    "version": ">= 12.0.0",
+    "version": ">= 24.8.0",
     "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true },
-      "android": { "buildType": "apk" },
+      "ios": {
+        "simulator": true
+      },
+      "android": {
+        "buildType": "apk"
+      },
       "environment": "development",
       "env": {
         "EXPO_PUBLIC_API_URL": "http://localhost:8080",
@@ -17,7 +21,9 @@
     },
     "preview": {
       "distribution": "internal",
-      "ios": { "simulator": false },
+      "ios": {
+        "simulator": false
+      },
       "environment": "preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://apivola-fitness-platform-staging.up.railway.app",
@@ -30,11 +36,25 @@
       "env": {
         "EXPO_PUBLIC_APP_ENV": "production"
       }
+    },
+    "beta": {
+      "extends": "preview",
+      "distribution": "store",
+      "autoIncrement": true
     }
   },
   "submit": {
     "production": {
-      "ios": {}
+      "ios": {
+        "appleTeamId": "T5A46UDR5Y",
+        "ascAppId": "6817299413"
+      }
+    },
+    "beta": {
+      "ios": {
+        "appleTeamId": "T5A46UDR5Y",
+        "ascAppId": "6817299413"
+      }
     }
   }
 }

@@ -99,6 +99,28 @@ in N482 (#829) — `app.config.js` wires `ANDROID_GOOGLE_MAPS_API_KEY` into
 which an agent can create), so the map still renders blank/grey tiles on
 Android until a human does that one-time setup.
 
+**iOS ships to TestFlight from the `beta` profile**, not `production` (N582,
+#1260). The Expo project is `@dchobotar/vola`, on a paid Apple Developer
+account; EAS holds the distribution certificate and provisioning profile, so
+builds run non-interactively once created:
+
+```bash
+export EXPO_ASC_API_KEY_PATH=/path/to/AuthKey_XXXXXXXX.p8   # never committed
+export EXPO_ASC_KEY_ID=XXXXXXXXXX
+export EXPO_ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+pnpm exec eas build --platform ios --profile beta --non-interactive
+pnpm --dir apps/mobile run submit:ios:beta
+```
+
+**`production` is deliberately unbuildable** until a real production backend
+exists: its pre-install hook refuses a build whose API URL is a staging host
+or missing (N132/#536). `beta` targets the existing API on purpose, because a
+different backend — or a production Clerk instance, which is a separate user
+directory with different user ids — would give every existing athlete an empty
+account. Full detail, including what that means for tester data:
+[docs/architecture/deployment.md](docs/architecture/deployment.md).
+
 Then open http://localhost:3000 (web) or http://localhost:3001 (admin). Each app needs its own `.env.local` (copy from `.env.example`) — the admin console additionally needs `ADMIN_USER_IDS` set to your Clerk user ID, matching the same var in `backend/.env`, before `/users` will let you in (find your ID via `GET /v1/me` or the Clerk dashboard).
 
 ### Run the backend tests

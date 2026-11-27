@@ -39,6 +39,21 @@ module.exports = () => ({
   expo: {
     name: "VOLA",
     slug: "vola",
+    // N582 (#1260) — the EAS account that owns this project. Required before
+    // `eas init` will run non-interactively when the signed-in user has access
+    // to more than one account (here: `dchobotar` and `dchobotars-team`), and
+    // it pins which account's builds and credentials this app uses rather than
+    // leaving it to whoever happens to be logged in.
+    owner: "dchobotar",
+    // The EAS project this app builds under. `eas init` creates it server-side
+    // but CANNOT write it back into a dynamic config (app.config.js), so it is
+    // pasted here by hand — without it every `eas build` would re-prompt to
+    // create a project and could silently make a second one.
+    extra: {
+      eas: {
+        projectId: "45733def-bc3b-455e-97ab-7674e86a2313",
+      },
+    },
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
@@ -47,9 +62,21 @@ module.exports = () => ({
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.vola.fitness",
-      buildNumber: "1",
+      // No `buildNumber` here on purpose: eas.json sets
+      // `appVersionSource: "remote"`, so EAS owns the build number and a
+      // literal here is IGNORED for builds while still being served to
+      // expo-constants — i.e. a value that looks authoritative, is not, and
+      // silently disagrees with the binary. EAS itself warns about this.
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        // Kept, but NOT the fix it was added as. It was added on the
+        // hypothesis that a missing top-level CFBundleIconName was why build 4
+        // vanished during processing. Apple's actual rejection email named
+        // ITMS-90683 / NSMotionUsageDescription instead, so that hypothesis was
+        // wrong. A top-level key is still the conventional shape for an
+        // asset-catalog icon and is harmless, so it stays — but nobody should
+        // read it as load-bearing.
+        CFBundleIconName: "AppIcon",
       },
     },
     android: {
@@ -226,7 +253,27 @@ module.exports = () => ({
           isIosBackgroundLocationEnabled: true,
           locationAlwaysAndWhenInUsePermission: false,
           locationAlwaysPermission: false,
-          motionUsagePermission: false,
+          // Was `false`, which REMOVED NSMotionUsageDescription — and that is
+          // what Apple rejected build 4 for: "ITMS-90683: Missing purpose
+          // string in Info.plist … should contain a NSMotionUsageDescription
+          // key" (2026-10-15).
+          //
+          // Nothing in this app calls a motion API directly. The HealthKit
+          // library references CMPedometer to read step counts, which is
+          // exactly the case Apple's message names: "If you're using external
+          // libraries or SDKs, they may reference APIs that require a purpose
+          // string. While your app might not use these APIs, a purpose string
+          // is still required."
+          //
+          // IT MUST BE SET HERE, NOT IN `ios.infoPlist`. expo-location's plugin
+          // OWNS this key via createPermissionsPlugin, so it runs last and wins
+          // — setting it in `ios.infoPlist` is silently discarded. Measured:
+          // with the key in `ios.infoPlist`, an arbitrary probe key survived
+          // `expo config --type introspect` and this one did not, and the built
+          // IPA shipped without it. Same ownership trap CLAUDE.md records for
+          // the camera and microphone strings.
+          motionUsagePermission:
+            "VOLA can show your daily step count alongside your training. iOS counts steps using motion data, so this permission is what lets VOLA read them. It is read-only and off until you turn on Health syncing in Settings.",
         },
       ],
       [
@@ -243,7 +290,24 @@ module.exports = () => ({
         {
           NSHealthShareUsageDescription:
             "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. It can also read heart rate for any finished session and your VO2max trend, and, if you allow it, your daily step count to show on VOLA. All of this is off until you turn it on in Settings, and VOLA never writes anything to Health.",
-          NSHealthUpdateUsageDescription: false,
+          // Was `false` — deliberately, because VOLA never writes to Health
+          // and this repo does not declare capabilities it does not use (see
+          // the permission traps in the `vola-mobile-build` skill, where
+          // declaring an unused capability was called indefensible — that text
+          // moved out of CLAUDE.md, so do not go looking for it there).
+          //
+          // Apple refuses the upload without it. Measured 2026-09-30 against
+          // the real App Store Connect uploader, error 90683: "The Info.plist
+          // file for the VOLA.app bundle should contain a
+          // NSHealthUpdateUsageDescription key". The HealthKit ENTITLEMENT
+          // covers reading and writing together — there is no read-only
+          // variant — so the string is demanded by the capability, not by
+          // anything VOLA actually does.
+          //
+          // The wording therefore keeps the promise the share string above
+          // makes, rather than inventing a reason to write.
+          NSHealthUpdateUsageDescription:
+            "VOLA does not write anything to Apple Health. It only reads the data you explicitly allow, and never adds, changes or deletes anything there. iOS requires this text because the Health capability covers reading and writing together; VOLA never asks for permission to write.",
           background: false,
         },
       ],
@@ -255,6 +319,17 @@ module.exports = () => ({
             compileSdkVersion: 36,
             targetSdkVersion: 36,
             minSdkVersion: 26,
+          },
+          ios: {
+            // N581 (#1259). The iOS 27 SDK refuses to launch a UIKit app that
+            // has not adopted the UIScene life cycle: EXC_BREAKPOINT in
+            // __UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption,
+            // instantly, before any JS runs. Every build made here since Xcode
+            // 27 landed has died that way.
+            //
+            // Expo added the adoption in 57.0.23 and made it opt-in, because it
+            // changes how the native app starts. This repo is on 57.0.25.
+            enableSceneSupport: true,
           },
         },
       ],

@@ -78665,6 +78665,172 @@ EAS Build's default image for SDK 57 is `macos-tahoe-26.5-xcode-26.6` — Xcode
 26.6, which does not trap. The crash is a property of *this Mac's* Xcode 27,
 not of the app, so a cloud build has been shippable throughout.
 
+## 2026-09-30 — N582 (#1260): VOLA reaches TestFlight, and the production guard wins an argument with the plan
+
+The Apple Developer Program enrolment landed, so the mobile app moved off the
+free-team 7-day sideload — a cable, a Trust tap and a per-phone rebuild every
+week — onto EAS Build and TestFlight.
+
+**What was wired.** Expo project `@dchobotar/vola` (`owner` +
+`extra.eas.projectId` in `app.config.js`, pasted by hand because `eas init`
+cannot write to a dynamic config). Apple team `T5A46UDR5Y`, bundle id
+`com.vola.fitness` registered, distribution certificate and provisioning
+profile created and held by EAS. `eas-cli` pinned at 24.8.0 rather than
+invoked through `npx`. The three `EXPO_PUBLIC_*` runtime values registered as
+EAS environment variables rather than committed — which `validate-production-
+config` demands, and is right.
+
+**The interesting part is that the plan was wrong and a check said so.**
+
+The decision going in was: point the TestFlight build at the existing API and
+the existing Clerk key, because anything else costs every athlete their
+history. Clerk's development and production instances are separate user
+directories with different user ids, so a `pk_live_` key does not migrate
+anyone — it mints new, empty accounts and orphans the old rows.
+
+The first production build then **failed on EAS's own machine**, 44 seconds in,
+in the pre-install hook: `validate-production-config --build-hook` (N132/#536,
+priority critical) refuses a production build whose resolved
+`EXPO_PUBLIC_API_URL` points at a staging host. The plan and the guard were in
+direct contradiction, and the guard was correct — there is no production
+backend, so a production build could not honestly be produced at all.
+
+Reproduced locally before deciding anything, rather than reasoning about it:
+
+    EAS_BUILD_PROFILE=production  -> FAILED, "points at a staging host", exit 1
+    EAS_BUILD_PROFILE=preview     -> skipped, exit 0
+
+**The resolution was the user's call, and it was not to relax the guard.** A
+`beta` profile extends `preview` — same environment, same API — and overrides
+`distribution` to `store` so it can reach TestFlight. The hook is gated on
+`EAS_BUILD_PROFILE === 'production'` by its own design, so `beta` skips it
+without the guard being touched, and `production` stays honestly unbuildable
+until #536 is actually done.
+
+**A side effect worth recording: #536's `NEEDS HUMAN EVIDENCE` criterion was
+satisfied incidentally.** It asks for "an actual EAS production build attempted
+with a staging URL … confirmed to fail before it produces an archive", and the
+script's own doc comment says this is "the one entry point this session cannot
+verify end to end". Build `dfd18fd1` errored with `Application Archive URL:
+null`. It was recorded on #536 as a plain comment rather than through the
+attestation gesture, because the other five criteria are unmet and the ticket
+is not finished — closing a critical ticket on one incidental observation is
+exactly what the latch exists to prevent.
+
+**The honest residual risk, stated rather than buried: TestFlight testers read
+and write the same database the existing users do.** That is intended while the
+testers are the same three people, and it is the thing to revisit before the
+tester list grows. An automated security review flagged the `beta` profile for
+exactly this; its suggested fix — point at a real production host — would have
+caused the data loss the arrangement exists to avoid, which is a good example
+of a generic rule being locally inverted.
+
+**Open, and deliberately so**: no production backend, no production Clerk
+instance, and therefore no App Store path. `production` remains a profile that
+cannot build. The Clerk dev-to-prod migration needs an export/import plus a
+backend user-id remap designed before anything ships.
+
+## 2026-11-26 — N581 (#1259) + N582 (#1260): the iOS 27 launch crash is fixed on device, and a plugin-owned permission string cost two silent App Store rejections
+
+Two tickets land together because shipping the first build through TestFlight
+is what exercised the second.
+
+**N581 — UIScene adoption, and it works.** `enableSceneSupport: true` on
+`expo-build-properties`, which H41's entry deferred to this ticket on purpose.
+Since Xcode 27 arrived every locally-built binary died instantly at launch —
+`EXC_BREAKPOINT`, frame 0
+`___UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption_block_invoke`
+— and hand-writing a `UIApplicationSceneManifest` could never have fixed it,
+because at 57.0.22 there was no scene delegate anywhere to name.
+
+With the flag on, `expo prebuild` generates the manifest pointing at
+`EXExpoAppSceneDelegate`, Expo's own. **Verified on two physical devices rather
+than on a plist**: a 16 Pro Max on iOS 27.0 and a 14 Pro Max on iOS 26.6.2 both
+installed, launched, and kept their processes alive. Two different iOS versions
+is deliberately better evidence than one, because the trap was introduced by an
+SDK change rather than by an OS version.
+
+**N582 — TestFlight, and what it cost to get there.** The route is a `beta`
+profile (extends `preview`, `distribution: store`) rather than `production`,
+because the production build hook refuses a staging host and there is no
+production backend; the full reasoning is in the 2026-09-30 entry and is
+unchanged.
+
+**The expensive part was a class of failure nothing in this repo can see.**
+Two builds uploaded successfully and then VANISHED — `UPLOAD SUCCEEDED with no
+errors`, a delivery UUID, and then `/v1/builds` stayed empty for days. Apple
+reports a processing-stage rejection by EMAIL ONLY, and the App Store Connect
+API only ever lists builds that SUCCEEDED, so every query answered "zero" and
+looked identical to "still processing".
+
+Two separate purpose strings were missing, found one at a time:
+
+- `NSHealthUpdateUsageDescription` (error 90683). Deliberately `false`, because
+  VOLA never writes to Health. Apple requires it anyway: the HealthKit
+  ENTITLEMENT covers reading and writing together, with no read-only variant.
+  The wording keeps the promise the share string makes rather than inventing a
+  reason to write.
+- `NSMotionUsageDescription` (ITMS-90683). Nothing in this app calls a motion
+  API; the HealthKit library references `CMPedometer` for step counts.
+
+**The second one is a trap worth naming, and it is the third instance.**
+Setting it in `ios.infoPlist` DID NOTHING — silently. `expo-location`'s config
+plugin OWNS that key through `createPermissionsPlugin`
+(`withLocation.js` maps its `motionUsagePermission` option onto it), the repo
+had `motionUsagePermission: false`, and a plugin-owned permission runs last and
+wins. CLAUDE.md already records the same ownership trap for the camera and
+microphone strings; motion is the third key, and the first where the symptom
+was a silent App Store rejection rather than an over-declared capability.
+
+Measured rather than reasoned, which is how it was found: with the key in
+`ios.infoPlist`, an arbitrary probe key survived `expo config --type
+introspect` and `NSMotionUsageDescription` did not — proving a plugin was
+targeting that key specifically rather than the edit being ineffective.
+
+**A guess that was wrong, recorded because the diff still carries it.** Before
+the rejection email arrived, a missing top-level `CFBundleIconName` was
+hypothesised as the cause and added. It was not the cause — build 5 carried it
+and would have been rejected identically. The key stays (it is the
+conventional shape for an asset-catalog icon and is harmless) and its comment
+says plainly that it is not load-bearing.
+
+**What finally shipped**: build 7, `processingState=VALID`. A pre-upload gate
+now refuses to upload an IPA whose BINARY lacks the required string — it caught
+build 6, whose config was right and whose binary was not, before it cost
+another cycle and another day of ambiguity.
+
+**What the device evidence does and does NOT cover, because review caught the
+overclaim.** Both binaries were built from THIS Mac's Xcode 27 with
+`xcodebuild`, not by EAS — which matters, because EAS builds on Xcode 26.6 and
+would not have trapped at all, so an EAS build could never have been evidence
+here. What was observed is a process alive seconds after launch on each phone.
+**Deep links and background-resume were NOT tested**: scene adoption changes
+who owns the window and how URLs are delivered, so `vola://` cold and warm, and
+foregrounding after a lock against `lib/authResume.ts`'s grace window, are
+exactly the paths most likely to have moved. They remain outstanding evidence
+on #1259 rather than being quietly assumed.
+
+**And the dependency gate caught something no local check could.** Pinning
+`eas-cli` pulled in `joi@17.11.0` transitively, which carries two HIGH-severity
+advisories (GHSA-6h2x-m376-mqjq, GHSA-4528-x5fx-h6hg), turning
+`.github/workflows/dependency-review.yml` red. `joi` is absent from `main`
+entirely, so this was unambiguously introduced here. Resolved with a
+`pnpm-workspace.yaml` override to `^17.13.8` — a version already resolved in
+this tree for another dependent, so nothing new was introduced to fix it.
+
+**The uncomfortable part is why `verify` was green on it.** Dependency review
+is a PR-triggered workflow, not a `package.json` gate, and `check:verify-chain`
+only asserts that package.json gates appear in `verify`. So the repo's own
+"is every CI check also in verify" guard is structurally blind to
+`dependency-review.yml`, `gitleaks.yml`, `pr-has-work.yml` and `codeql.yml`.
+A locally-green `verify` would have declared this branch clean.
+
+**The gap this leaves open, filed rather than fixed**: no check compares the
+protected APIs a built binary can reach against the purpose strings the
+resolved config declares. `verify`, CI, the device installs and both reviewers
+all passed on binaries Apple rejected. Three instances now, and the only
+feedback channel is an email to one person.
+
 ## Open items / known gaps as of this entry
 
 - **N167: stuck sync rows report nothing off the device.** No count, age or

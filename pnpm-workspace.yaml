@@ -13,8 +13,41 @@ allowBuilds:
   bufferutil: false
   core-js: false
   utf-8-validate: false
+  #   dtrace-provider, protobufjs — pulled in transitively by eas-cli (N582).
+  #   dtrace-provider builds a native DTrace binding used only for bunyan
+  #   logging on Solaris/macOS dtrace; protobufjs's postinstall only prints a
+  #   funding/CLI notice. Neither is needed to run `eas build`/`eas submit`,
+  #   and leaving them merely "ignored" makes every install print a warning
+  #   that trains people to ignore install warnings.
+  dtrace-provider: false
+  protobufjs: false
   sharp: true
   unrs-resolver: true
+overrides:
+  # N582 (#1260). `eas-cli@24.8.0` pulls in `joi@17.11.0` transitively (via
+  # @expo/eas-json), and that version carries two HIGH-severity advisories:
+  #   GHSA-6h2x-m376-mqjq — quadratic backtracking in Joi.string().isoDate()
+  #   GHSA-4528-x5fx-h6hg — quadratic-time split in string().email({multiple:true})
+  # `.github/workflows/dependency-review.yml` has fail-on-severity: high, so
+  # adding eas-cli turned that gate red. Found by pre-merge-checker; NO `verify`
+  # link can see it, because dependency review is a CI-only workflow and
+  # `check:verify-chain` only asserts that package.json gates are in `verify`.
+  #
+  # 17.13.9, NOT 17.13.8. The first override here was ^17.13.8, chosen because
+  # that version was already resolved in this tree for another dependent — an
+  # assumption that it was therefore safe, which was WRONG and which CI caught:
+  # 17.13.8 still carries GHSA-4528-x5fx-h6hg. Per GitHub's advisory database,
+  # the 17.x line is patched at 17.13.7 for the isoDate issue and 17.13.9 for
+  # the email one, so ^17.13.9 is the first version clear of BOTH.
+  joi: ^17.13.9
+  # Same root cause: all of these arrive transitively with eas-cli, which adds
+  # 181 packages to this lockfile. Each was already vulnerable at the version
+  # eas-cli's tree resolves, and `dependency-review.yml` fails on high severity.
+  # Version-scoped where a major line must be preserved (minimatch 9.x is also
+  # in the tree and is not the vulnerable one).
+  minimatch@5: ^5.1.8
+  tar: ^7.5.21
+  nanoid@3: ^3.3.18
 packageExtensions:
   # react-native-maps' Expo config plugin requires() @expo/config-plugins at
   # prebuild time, but the package only declares it as a devDependency. Under
