@@ -78799,6 +78799,32 @@ now refuses to upload an IPA whose BINARY lacks the required string — it caugh
 build 6, whose config was right and whose binary was not, before it cost
 another cycle and another day of ambiguity.
 
+**What the device evidence does and does NOT cover, because review caught the
+overclaim.** Both binaries were built from THIS Mac's Xcode 27 with
+`xcodebuild`, not by EAS — which matters, because EAS builds on Xcode 26.6 and
+would not have trapped at all, so an EAS build could never have been evidence
+here. What was observed is a process alive seconds after launch on each phone.
+**Deep links and background-resume were NOT tested**: scene adoption changes
+who owns the window and how URLs are delivered, so `vola://` cold and warm, and
+foregrounding after a lock against `lib/authResume.ts`'s grace window, are
+exactly the paths most likely to have moved. They remain outstanding evidence
+on #1259 rather than being quietly assumed.
+
+**And the dependency gate caught something no local check could.** Pinning
+`eas-cli` pulled in `joi@17.11.0` transitively, which carries two HIGH-severity
+advisories (GHSA-6h2x-m376-mqjq, GHSA-4528-x5fx-h6hg), turning
+`.github/workflows/dependency-review.yml` red. `joi` is absent from `main`
+entirely, so this was unambiguously introduced here. Resolved with a
+`pnpm-workspace.yaml` override to `^17.13.8` — a version already resolved in
+this tree for another dependent, so nothing new was introduced to fix it.
+
+**The uncomfortable part is why `verify` was green on it.** Dependency review
+is a PR-triggered workflow, not a `package.json` gate, and `check:verify-chain`
+only asserts that package.json gates appear in `verify`. So the repo's own
+"is every CI check also in verify" guard is structurally blind to
+`dependency-review.yml`, `gitleaks.yml`, `pr-has-work.yml` and `codeql.yml`.
+A locally-green `verify` would have declared this branch clean.
+
 **The gap this leaves open, filed rather than fixed**: no check compares the
 protected APIs a built binary can reach against the purpose strings the
 resolved config declares. `verify`, CI, the device installs and both reviewers

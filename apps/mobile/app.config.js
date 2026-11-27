@@ -292,8 +292,9 @@ module.exports = () => ({
             "VOLA can import runs you've already recorded elsewhere — on an Apple Watch, or logged directly in the Health app — so they appear in your training history without re-entering them. It can also read heart rate for any finished session and your VO2max trend, and, if you allow it, your daily step count to show on VOLA. All of this is off until you turn it on in Settings, and VOLA never writes anything to Health.",
           // Was `false` — deliberately, because VOLA never writes to Health
           // and this repo does not declare capabilities it does not use (see
-          // the microphone-permission trap in CLAUDE.md, where declaring an
-          // unused capability was called indefensible).
+          // the permission traps in the `vola-mobile-build` skill, where
+          // declaring an unused capability was called indefensible — that text
+          // moved out of CLAUDE.md, so do not go looking for it there).
           //
           // Apple refuses the upload without it. Measured 2026-09-30 against
           // the real App Store Connect uploader, error 90683: "The Info.plist

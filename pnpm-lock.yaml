@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  joi: ^17.13.8
+
 packageExtensionsChecksum: sha256-gwdY5vtcKDBzpLuwaJzvnEyUUHn1/HGNZ9A/Ni94Cwg=
 
 importers:
@@ -5822,9 +5825,6 @@ packages:
   jks-js@1.1.0:
     resolution: {integrity: sha512-irWi8S2V029Vic63w0/TYa8NIZwXu9oeMtHQsX51JDIVBo0lrEaOoyM8ALEEh5PVKD6TrA26FixQK6TzT7dHqA==}
 
-  joi@17.11.0:
-    resolution: {integrity: sha512-NgB+lZLNoqISVy1rZocE9PZI36bL/77ie924Ri43yEvi9GUUMPeyVIr8KdFTMUlby1p0PBYMk9spIxEUQYqrJQ==}
-
   joi@17.13.8:
     resolution: {integrity: sha512-iPKOGmiRw1jxf/JOPwxmCcUQAOdF359mdzYiP2DJ+TMX0YK2zjK3D+zYOaGjpumWxOFF/l2xVWjRVK5bGSLdEw==}
 
@@ -9554,7 +9554,7 @@ snapshots:
       env-string: 1.0.1
       fs-extra: 11.2.0
       golden-fleece: 1.0.9
-      joi: 17.11.0
+      joi: 17.13.8
       log-symbols: 4.1.0
       semver: 7.5.2
       terminal-link: 2.1.1
@@ -13341,7 +13341,7 @@ snapshots:
       indent-string: 4.0.0
       invariant: 2.2.4
       jks-js: 1.1.0
-      joi: 17.11.0
+      joi: 17.13.8
       keychain: 1.5.0
       log-symbols: 4.1.0
       mime: 3.0.0
@@ -15382,14 +15382,6 @@ snapshots:
       node-forge: 1.4.0
       node-int64: 0.4.0
       node-rsa: 1.1.1
-
-  joi@17.11.0:
-    dependencies:
-      '@hapi/hoek': 9.3.0
-      '@hapi/topo': 5.1.0
-      '@sideway/address': 4.1.5
-      '@sideway/formula': 3.0.1
-      '@sideway/pinpoint': 2.0.0
 
   joi@17.13.8:
     dependencies:

@@ -23,6 +23,20 @@ allowBuilds:
   protobufjs: false
   sharp: true
   unrs-resolver: true
+overrides:
+  # N582 (#1260). `eas-cli@24.8.0` pulls in `joi@17.11.0` transitively (via
+  # @expo/eas-json), and that version carries two HIGH-severity advisories:
+  #   GHSA-6h2x-m376-mqjq — quadratic backtracking in Joi.string().isoDate()
+  #   GHSA-4528-x5fx-h6hg — quadratic-time split in string().email({multiple:true})
+  # `.github/workflows/dependency-review.yml` has fail-on-severity: high, so
+  # adding eas-cli turned that gate red. Found by pre-merge-checker; NO `verify`
+  # link can see it, because dependency review is a CI-only workflow and
+  # `check:verify-chain` only asserts that package.json gates are in `verify`.
+  #
+  # 17.13.8 is already resolved in this tree for another dependent, so this
+  # pins the vulnerable copy up to a version already proven to install here
+  # rather than introducing a new one.
+  joi: ^17.13.8
 packageExtensions:
   # react-native-maps' Expo config plugin requires() @expo/config-plugins at
   # prebuild time, but the package only declares it as a devDependency. Under
